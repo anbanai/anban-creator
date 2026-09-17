@@ -231,19 +231,19 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
-	artifactPaths := make(map[string]struct{}, len(manifest.Artifacts))
-	for _, artifact := range manifest.Artifacts {
-		if strings.TrimSpace(artifact.Role) == "" || validateOutputArtifactPath(artifact.Path) != nil {
-			return fmt.Errorf("invalid artifact contract for %q", artifact.Path)
+	if err := validateArtifactContract(manifest.Artifacts); err != nil {
+		return err
+	}
+	for taskType, artifacts := range manifest.ArtifactsByTaskType {
+		if !taskTypes[taskType] {
+			return fmt.Errorf("artifact override references unbound task type %q", taskType)
 		}
-		if err := validateContractMIMEType(artifact.MIMEType); err != nil {
-			return fmt.Errorf("invalid artifact contract for %q: %w", artifact.Path, err)
+		if len(artifacts) == 0 {
+			return fmt.Errorf("artifact override for task type %q must not be empty", taskType)
 		}
-		artifactPath := strings.TrimSpace(strings.ReplaceAll(artifact.Path, "\\", "/"))
-		if _, exists := artifactPaths[artifactPath]; exists {
-			return fmt.Errorf("duplicate artifact path %q", artifactPath)
+		if err := validateArtifactContract(artifacts); err != nil {
+			return fmt.Errorf("artifact override for task type %q: %w", taskType, err)
 		}
-		artifactPaths[artifactPath] = struct{}{}
 	}
 	if err := validateDeliveryContract(manifest.Delivery); err != nil {
 		return err
@@ -259,29 +259,6 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			return fmt.Errorf("delivery override for task type %q: %w", taskType, err)
 		}
 	}
-	if len(manifest.ProgressByTaskType) > 0 && len(manifest.Progress) == 0 {
-		return fmt.Errorf("progress_by_task_type requires non-empty progress")
-	}
-	if err := validateProgressContract(manifest.Progress, manifest.Progress != nil); err != nil {
-		return err
-	}
-	overrideTaskTypes := make([]string, 0, len(manifest.ProgressByTaskType))
-	for taskType := range manifest.ProgressByTaskType {
-		overrideTaskTypes = append(overrideTaskTypes, taskType)
-	}
-	sort.Strings(overrideTaskTypes)
-	for _, taskType := range overrideTaskTypes {
-		if !taskTypes[taskType] {
-			return fmt.Errorf("progress override references unbound task type %q", taskType)
-		}
-		progress := manifest.ProgressByTaskType[taskType]
-		if len(progress) == 0 {
-			return fmt.Errorf("progress override for task type %q must not be empty", taskType)
-		}
-		if err := validateProgressContract(progress, true); err != nil {
-			return fmt.Errorf("progress override for task type %q: %w", taskType, err)
-		}
-	}
 	if manifest.Kind == KindManaged {
 		for _, taskType := range manifest.Bindings.TaskTypes {
 			if len(manifest.DeliveryForTaskType(taskType)) == 0 {
@@ -295,6 +272,24 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 				return fmt.Errorf("managed Pack task type %q requires at least one required artifact", taskType)
 			}
 		}
+	}
+	return nil
+}
+
+func validateArtifactContract(artifacts []ArtifactSpec) error {
+	paths := make(map[string]struct{}, len(artifacts))
+	for _, artifact := range artifacts {
+		if strings.TrimSpace(artifact.Role) == "" || validateOutputArtifactPath(artifact.Path) != nil {
+			return fmt.Errorf("invalid artifact contract for %q", artifact.Path)
+		}
+		if err := validateContractMIMEType(artifact.MIMEType); err != nil {
+			return fmt.Errorf("invalid artifact contract for %q: %w", artifact.Path, err)
+		}
+		artifactPath := strings.TrimSpace(strings.ReplaceAll(artifact.Path, "\\", "/"))
+		if _, exists := paths[artifactPath]; exists {
+			return fmt.Errorf("duplicate artifact path %q", artifactPath)
+		}
+		paths[artifactPath] = struct{}{}
 	}
 	return nil
 }
@@ -381,48 +376,6 @@ func validateContractMIMEType(value string) error {
 	}
 	if strings.Contains(mediaType, "*") {
 		return fmt.Errorf("invalid MIME type %q: wildcards are not allowed", value)
-	}
-	return nil
-}
-
-func validateProgressContract(progress []ProgressStage, declared bool) error {
-	if declared && len(progress) == 0 {
-		return fmt.Errorf("progress must not be empty")
-	}
-	seenProgress := make(map[string]struct{}, len(progress))
-	previousComplete := -1
-	for _, stage := range progress {
-		if strings.TrimSpace(stage.ID) == "" || strings.TrimSpace(stage.Title) == "" {
-			return fmt.Errorf("progress stage id and title must not be empty")
-		}
-		if _, exists := seenProgress[stage.ID]; exists {
-			return fmt.Errorf("duplicate progress stage id %q", stage.ID)
-		}
-		seenProgress[stage.ID] = struct{}{}
-		if stage.ActivePercent < 0 || stage.ActivePercent > 100 {
-			return fmt.Errorf("progress stage %q active_percent must be between 0 and 100", stage.ID)
-		}
-		if stage.CompletePercent < 0 || stage.CompletePercent > 100 {
-			return fmt.Errorf("progress stage %q complete_percent must be between 0 and 100", stage.ID)
-		}
-		if stage.ActivePercent > stage.CompletePercent {
-			return fmt.Errorf("progress stage %q active_percent must be <= complete_percent", stage.ID)
-		}
-		if stage.CompletePercent < previousComplete {
-			return fmt.Errorf("progress stage %q complete_percent must be non-decreasing", stage.ID)
-		}
-		if stage.ActivePercent < previousComplete {
-			return fmt.Errorf("progress stage %q active_percent must be >= previous complete_percent", stage.ID)
-		}
-		previousComplete = stage.CompletePercent
-		for _, artifact := range stage.RequiredArtifacts {
-			if err := validateOutputArtifactPath(artifact); err != nil {
-				return fmt.Errorf("progress stage %q required artifact %q: %w", stage.ID, artifact, err)
-			}
-		}
-	}
-	if len(progress) > 0 && progress[len(progress)-1].CompletePercent != 100 {
-		return fmt.Errorf("progress final complete_percent must be 100")
 	}
 	return nil
 }

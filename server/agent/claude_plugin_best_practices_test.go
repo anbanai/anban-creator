@@ -659,35 +659,36 @@ func TestClaudeCodePluginChangelogMentionsManifestVersion(t *testing.T) {
 	}
 }
 
-func TestCodexProgressCompatibilityBoundary(t *testing.T) {
+func TestCodexDynamicLifecycleBoundary(t *testing.T) {
 	root := filepath.Join(repoRoot(t), "harness")
 	doc := readRepoFile(t, filepath.Join(root, "CODEX.md"))
 	normalizedDoc := strings.Join(strings.Fields(doc), " ")
 	for _, want := range []string{
-		"Managed Claude execution derives progress from Task metadata and Agent SDK Hooks",
+		"top-level Agent declares the task's real work plan",
+		"set_task_progress_plan",
+		"2-7 stable `snake_case` stage IDs",
+		"system_",
+		"metadata.anban_stage_id",
 		"PostToolUse",
 		"SubagentStop",
 		"Stop",
-		"tool_name",
-		"tool_input",
-		"tool_response",
-		"no stable Agent Pack stage identifier",
-		"not an App Server host",
-		"turn/plan/updated",
-		"step",
-		"status",
-		"authenticated reporter adapter",
+		"TaskCreate",
+		"TaskUpdate",
+		"active",
+		"complete",
 		"update_task_progress",
-		"/btw",
-		"model prompts are not telemetry",
+		"The Server owns stage titles, ordering, timestamps, revision, validation",
+		"Required file-backed artifacts are validated once at finalization",
 	} {
 		if !strings.Contains(normalizedDoc, want) {
-			t.Errorf("CODEX.md progress compatibility boundary missing %q", want)
+			t.Errorf("CODEX.md dynamic lifecycle boundary missing %q", want)
 		}
 	}
 	for _, obsolete := range []string{
 		"Codex plugins cannot bundle Hooks",
 		"Codex plugin manifest does not accept bundled Hooks",
+		"anban_progress_stage",
+		"temporary compatibility path",
 	} {
 		if strings.Contains(doc, obsolete) {
 			t.Errorf("CODEX.md retains obsolete Hooks limitation %q", obsolete)
@@ -703,8 +704,8 @@ func TestCodexProgressCompatibilityBoundary(t *testing.T) {
 	}
 	for name, deliveryAnchor := range deliveryAnchors {
 		body := readRepoFile(t, filepath.Join(root, "agents", name+".toml"))
-		if !strings.Contains(body, "update_task_progress") {
-			t.Errorf("Codex %s agent must retain explicit progress compatibility", name)
+		if !strings.Contains(body, "set_task_progress_plan") || !strings.Contains(body, "update_task_progress") {
+			t.Errorf("Codex %s agent must own its dynamic lifecycle reporting", name)
 		}
 		if !strings.Contains(body, deliveryAnchor) || !strings.Contains(body, "submit_agent_feedback") {
 			t.Errorf("Codex %s agent must retain file-backed delivery validation and feedback", name)

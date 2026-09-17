@@ -37,7 +37,7 @@ struct LogLine {
 }
 
 /// Emit one local-run log line. Best-effort: a failed emit (e.g. no listener)
-/// is silently dropped — the agent owns the authoritative progress stream.
+/// is silently dropped — the agent owns the authoritative lifecycle and log streams.
 fn emit(app: &AppHandle, task_id: &str, level: &'static str, message: impl Into<String>) {
     let _ = app.emit(
         "local-run://event",
@@ -52,7 +52,7 @@ fn emit(app: &AppHandle, task_id: &str, level: &'static str, message: impl Into<
 
 /// Spawn the bundled TypeScript Agent for a claimed task and stream its output
 /// to the frontend via `local-run://event` until it exits. The agent reports
-/// progress + results back to the cloud using its execution-scoped credential.
+/// lifecycle, logs, and results back to the cloud using its execution-scoped credential.
 ///
 /// If `env.cancel` fires while the agent is running we kill the subprocess so a
 /// stopped executor doesn't leave Claude Code running (and burning quota) in the

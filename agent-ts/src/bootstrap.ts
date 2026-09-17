@@ -124,12 +124,11 @@ export interface BootstrapResponse {
   artifact_transport: { mode: "direct" | "stream" };
 }
 
-export interface AgentPackProgressStage {
-  id: string;
-  title: string;
-  active_percent: number;
-  complete_percent: number;
-  required_artifacts?: string[];
+export interface AgentPackArtifact {
+  role: string;
+  path: string;
+  mime_type?: string;
+  required: boolean;
 }
 
 export interface AgentPack {
@@ -139,8 +138,8 @@ export interface AgentPack {
   agent: { name: string };
   bindings: { task_types?: string[] };
   runtime: { profile?: string; adapter?: string; max_turns?: number };
-  progress: AgentPackProgressStage[];
-  progress_by_task_type?: Record<string, AgentPackProgressStage[]>;
+  artifacts: AgentPackArtifact[];
+  artifacts_by_task_type?: Record<string, AgentPackArtifact[]>;
 }
 
 export interface ResolvedBootstrapResponse extends BootstrapResponse {
@@ -153,14 +152,10 @@ export interface AgentPackCatalog {
 }
 
 export function resolveAgentPackForTaskType(pack: AgentPack, taskType: string): AgentPack {
-  const selected = pack.progress_by_task_type?.[taskType] ?? pack.progress;
-  const progress = selected.map((stage) => {
-    const cloned = { ...stage };
-    if (stage.required_artifacts) cloned.required_artifacts = [...stage.required_artifacts];
-    return cloned;
-  });
-  const { progress_by_task_type: _overrides, ...resolved } = pack;
-  return { ...resolved, progress };
+  const selected = pack.artifacts_by_task_type?.[taskType] ?? pack.artifacts;
+  const artifacts = selected.map((artifact) => ({ ...artifact }));
+  const { artifacts_by_task_type: _overrides, ...resolved } = pack;
+  return { ...resolved, artifacts };
 }
 
 export interface BootstrapIdentity {
@@ -313,52 +308,38 @@ export function validateAgentPackCatalog(data: BootstrapResponse, catalog: Agent
 function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPackCatalog {
   if (!isRecord(input) || !Array.isArray(input.packs)) throw new Error("Agent Pack Catalog is invalid");
   for (const rawPack of input.packs) {
-    if (!isRecord(rawPack) || !Array.isArray(rawPack.progress) || rawPack.progress.length === 0) {
-      throw new Error("Agent Pack Catalog progress is invalid");
+    if (!isRecord(rawPack) || !Array.isArray(rawPack.artifacts)) {
+      throw new Error("Agent Pack Catalog artifacts are invalid");
     }
-    validateProgressContract(rawPack.progress);
-    if (rawPack.progress_by_task_type === undefined) continue;
-    if (!isRecord(rawPack.progress_by_task_type) || !isRecord(rawPack.bindings) || !Array.isArray(rawPack.bindings.task_types)) {
-      throw new Error("Agent Pack Catalog progress overrides are invalid");
+    validateArtifactContract(rawPack.artifacts);
+    if (rawPack.artifacts_by_task_type === undefined) continue;
+    if (!isRecord(rawPack.artifacts_by_task_type) || !isRecord(rawPack.bindings) || !Array.isArray(rawPack.bindings.task_types)) {
+      throw new Error("Agent Pack Catalog artifact overrides are invalid");
     }
     const taskTypes = new Set(rawPack.bindings.task_types.filter((value): value is string => typeof value === "string"));
-    for (const [taskType, progress] of Object.entries(rawPack.progress_by_task_type)) {
-      if (!taskTypes.has(taskType) || !Array.isArray(progress) || progress.length === 0) {
-        throw new Error("Agent Pack Catalog progress override is invalid");
+    for (const [taskType, artifacts] of Object.entries(rawPack.artifacts_by_task_type)) {
+      if (!taskTypes.has(taskType) || !Array.isArray(artifacts) || artifacts.length === 0) {
+        throw new Error("Agent Pack Catalog artifact override is invalid");
       }
-      validateProgressContract(progress);
+      validateArtifactContract(artifacts);
     }
   }
 }
 
-function validateProgressContract(progress: unknown[]): void {
-  const stageIDs = new Set<string>();
-  let previousComplete = -1;
-  for (const rawStage of progress) {
-    if (!isRecord(rawStage)
-      || !cleanString(rawStage.id)
-      || !cleanString(rawStage.title)
-      || !validProgressPercent(rawStage.active_percent)
-      || !validProgressPercent(rawStage.complete_percent)
-      || rawStage.active_percent > rawStage.complete_percent
-      || (rawStage.required_artifacts !== undefined
-        && (!Array.isArray(rawStage.required_artifacts)
-          || !rawStage.required_artifacts.every((artifact) => cleanString(artifact) && validRequiredArtifactPath(artifact))))) {
-      throw new Error("Agent Pack Catalog progress stage is invalid");
+function validateArtifactContract(artifacts: unknown[]): void {
+  const paths = new Set<string>();
+  for (const rawArtifact of artifacts) {
+    if (!isRecord(rawArtifact)
+      || !cleanString(rawArtifact.role)
+      || !cleanString(rawArtifact.path)
+      || typeof rawArtifact.required !== "boolean"
+      || !validRequiredArtifactPath(rawArtifact.path)
+      || (rawArtifact.mime_type !== undefined && !cleanString(rawArtifact.mime_type))) {
+      throw new Error("Agent Pack Catalog artifact is invalid");
     }
-    if (stageIDs.has(rawStage.id)) throw new Error("Agent Pack Catalog progress stage is duplicated");
-    if (rawStage.complete_percent < previousComplete) throw new Error("Agent Pack Catalog progress complete_percent is decreasing");
-    if (rawStage.active_percent < previousComplete) throw new Error("Agent Pack Catalog progress active_percent is decreasing");
-    stageIDs.add(rawStage.id);
-    previousComplete = rawStage.complete_percent;
+    if (paths.has(rawArtifact.path)) throw new Error("Agent Pack Catalog artifact path is duplicated");
+    paths.add(rawArtifact.path);
   }
-  if ((progress.at(-1) as Record<string, unknown>).complete_percent !== 100) {
-    throw new Error("Agent Pack Catalog progress final complete_percent must be 100");
-  }
-}
-
-function validProgressPercent(value: unknown): value is number {
-  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 100;
 }
 
 function validRequiredArtifactPath(artifact: string): boolean {

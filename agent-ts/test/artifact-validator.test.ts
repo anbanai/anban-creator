@@ -4,9 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  validateAllStageArtifacts,
+  validateFinalArtifacts,
   validateRequiredArtifact,
-  validateStageArtifacts,
 } from "../src/artifact-validator.js";
 import { defaultArtifactValidatorDependencies, validateRequiredArtifactInternal } from "../src/artifact-validator-internal.js";
 import type { AgentPack } from "../src/bootstrap.js";
@@ -24,21 +23,10 @@ const pack: AgentPack = {
   agent: { name: "article" },
   bindings: { task_types: ["article"] },
   runtime: { profile: "article", adapter: "standard" },
-  progress: [
-    {
-      id: "research",
-      title: "Research",
-      active_percent: 10,
-      complete_percent: 20,
-      required_artifacts: ["output/topic-analysis.md"],
-    },
-    {
-      id: "delivery",
-      title: "Delivery",
-      active_percent: 80,
-      complete_percent: 100,
-      required_artifacts: ["output/topic-analysis.md", "output/final.md"],
-    },
+  artifacts: [
+    { role: "analysis", path: "output/topic-analysis.md", required: true },
+    { role: "final", path: "output/final.md", required: true },
+    { role: "optional", path: "output/review.md", required: false },
   ],
 };
 
@@ -48,15 +36,9 @@ const viralAnalysisPack: AgentPack = {
   agent: { name: "seednote" },
   bindings: { task_types: ["seednote", "viral_analysis"] },
   runtime: { profile: "seednote", adapter: "standard" },
-  progress: [
-    { id: "research", title: "Research", active_percent: 5, complete_percent: 40 },
-    {
-      id: "delivery",
-      title: "Delivery",
-      active_percent: 90,
-      complete_percent: 100,
-      required_artifacts: ["output/source-analysis.md", "output/viral-template.json"],
-    },
+  artifacts: [
+    { role: "analysis", path: "output/source-analysis.md", required: true },
+    { role: "template", path: "output/viral-template.json", required: true },
   ],
 };
 
@@ -70,8 +52,9 @@ async function workspace(): Promise<string> {
 describe("artifact validation", () => {
   test("reports a required artifact that is missing", async () => {
     const root = await workspace();
+    await writeFile(join(root, "output", "final.md"), "ready");
 
-    expect(await validateStageArtifacts(pack, "research", root)).toEqual({
+    expect(await validateFinalArtifacts(pack, root)).toEqual({
       ok: false,
       reason: "missing_artifacts",
       missing: ["output/topic-analysis.md"],
@@ -83,7 +66,7 @@ describe("artifact validation", () => {
     await writeFile(join(root, "output", "topic-analysis.md"), "");
     await mkdir(join(root, "output", "final.md"));
 
-    expect(await validateAllStageArtifacts(pack, root)).toEqual({
+    expect(await validateFinalArtifacts(pack, root)).toEqual({
       ok: false,
       reason: "missing_artifacts",
       missing: ["output/topic-analysis.md", "output/final.md"],
@@ -107,7 +90,7 @@ describe("artifact validation", () => {
     expect(await validateRequiredArtifact(root, "output/linked/secret.md")).toBe(false);
   });
 
-  test("treats any existing failure-state path as a global stage and final failure", async () => {
+  test("treats any existing failure-state path as a final failure", async () => {
     for (const kind of ["empty", "directory", "symlink", "malformed", "valid"] as const) {
       const root = await workspace();
       await writeFile(join(root, "output", "topic-analysis.md"), "research");
@@ -120,8 +103,7 @@ describe("artifact validation", () => {
       else await writeFile(failureState, "{\"error\":\"quality gate\"}");
 
       const expected = { ok: false, reason: "failure_state", path: "output/failure-state.json" };
-      expect(await validateStageArtifacts(pack, "research", root)).toEqual(expected);
-      expect(await validateAllStageArtifacts(pack, root)).toEqual(expected);
+      expect(await validateFinalArtifacts(pack, root)).toEqual(expected);
     }
   });
 
@@ -138,13 +120,12 @@ describe("artifact validation", () => {
     })).toBe(false);
   });
 
-  test("accepts non-empty regular files for a stage and across the pack", async () => {
+  test("accepts non-empty regular files across the pack", async () => {
     const root = await workspace();
     await writeFile(join(root, "output", "topic-analysis.md"), "research");
     await writeFile(join(root, "output", "final.md"), "delivery");
 
-    expect(await validateStageArtifacts(pack, "research", root)).toEqual({ ok: true });
-    expect(await validateAllStageArtifacts(pack, root)).toEqual({ ok: true });
+    expect(await validateFinalArtifacts(pack, root)).toEqual({ ok: true });
   });
 
   test("validates only the artifacts in the resolved viral analysis contract", async () => {
@@ -152,8 +133,8 @@ describe("artifact validation", () => {
     await writeFile(join(root, "output", "source-analysis.md"), "analysis");
     await writeFile(join(root, "output", "viral-template.json"), "{}");
 
-    expect(await validateAllStageArtifacts(viralAnalysisPack, root)).toEqual({ ok: true });
-    expect(await validateAllStageArtifacts(pack, root)).toEqual({
+    expect(await validateFinalArtifacts(viralAnalysisPack, root)).toEqual({ ok: true });
+    expect(await validateFinalArtifacts(pack, root)).toEqual({
       ok: false,
       reason: "missing_artifacts",
       missing: ["output/topic-analysis.md", "output/final.md"],

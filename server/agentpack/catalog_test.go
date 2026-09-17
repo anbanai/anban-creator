@@ -51,11 +51,6 @@ runtime:
 surfaces: [project, task, plan]
 billing_operations:
   demo-task: task.demo
-progress:
-  - id: prepare
-    title: Prepare
-    active_percent: 90
-    complete_percent: 100
 artifacts:
   - role: final
     path: output/final.md
@@ -94,7 +89,7 @@ delivery:
 	}
 }
 
-func TestRequiredArtifactsForTaskTypeResolvesTaskSpecificProgressContract(t *testing.T) {
+func TestRequiredArtifactsForTaskTypeResolvesTaskSpecificArtifactContract(t *testing.T) {
 	pack, ok := Default().Pack("seednote")
 	if !ok {
 		t.Fatal("embedded seednote Pack missing")
@@ -123,12 +118,6 @@ func TestRequiredArtifactsForTaskTypeFallsBackToRequiredArtifactSpecs(t *testing
 			{Role: "final", Path: "output/final.md", MIMEType: "text/markdown", Required: true},
 			{Role: "review", Path: "output/review.md", MIMEType: "text/markdown", Required: false},
 		},
-		Progress: []ProgressStage{{
-			ID:              "delivery",
-			Title:           "Delivery",
-			ActivePercent:   90,
-			CompletePercent: 100,
-		}},
 	}
 
 	required, err := pack.RequiredArtifactsForTaskType("demo-task")
@@ -140,7 +129,7 @@ func TestRequiredArtifactsForTaskTypeFallsBackToRequiredArtifactSpecs(t *testing
 	}
 }
 
-func TestRequiredArtifactsForTaskTypeDoesNotLetBaseProgressWeakenArtifacts(t *testing.T) {
+func TestRequiredArtifactsForTaskTypeIgnoresDeliveryContract(t *testing.T) {
 	pack := Manifest{
 		Artifacts: []ArtifactSpec{
 			{Role: "final", Path: "output/final.md", MIMEType: "text/markdown", Required: true},
@@ -148,21 +137,14 @@ func TestRequiredArtifactsForTaskTypeDoesNotLetBaseProgressWeakenArtifacts(t *te
 		Delivery: []DeliverySpec{
 			{Role: "report", Path: "output/report.json", MIMEType: "application/json"},
 		},
-		Progress: []ProgressStage{{
-			ID:                "delivery",
-			Title:             "Delivery",
-			ActivePercent:     90,
-			CompletePercent:   100,
-			RequiredArtifacts: []string{"output/report.json"},
-		}},
 	}
 
 	required, err := pack.RequiredArtifactsForTaskType("demo-task")
 	if err != nil {
 		t.Fatalf("RequiredArtifactsForTaskType: %v", err)
 	}
-	if got := artifactPaths(required); !slices.Equal(got, []string{"output/final.md", "output/report.json"}) {
-		t.Fatalf("required artifacts = %v, want artifacts.required plus progress requirements", got)
+	if got := artifactPaths(required); !slices.Equal(got, []string{"output/final.md"}) {
+		t.Fatalf("required artifacts = %v, want only artifacts marked required", got)
 	}
 }
 
@@ -284,121 +266,13 @@ func TestLoadCatalogRejectsDuplicateArtifactPaths(t *testing.T) {
 	}
 }
 
-func TestLoadCatalogValidatesProgressContracts(t *testing.T) {
-	tests := []struct {
-		name     string
-		progress string
-		want     string
-	}{
-		{
-			name: "rejects duplicate progress ids",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 20}
-  - {id: research, title: Duplicate, active_percent: 30, complete_percent: 40}`,
-			want: "duplicate progress stage id",
-		},
-		{
-			name: "rejects empty progress stage",
-			progress: `progress:
-  - {id: "", title: Research, active_percent: 10, complete_percent: 20}`,
-			want: "progress stage id and title must not be empty",
-		},
-		{
-			name: "rejects active percentage after completion",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 80, complete_percent: 20}`,
-			want: "active_percent must be <= complete_percent",
-		},
-		{
-			name: "rejects out of range percentage",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 101, complete_percent: 101}`,
-			want: "active_percent must be between 0 and 100",
-		},
-		{
-			name: "rejects decreasing completion percentage",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 40}
-  - {id: writing, title: Writing, active_percent: 25, complete_percent: 30}
-  - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100}`,
-			want: "complete_percent must be non-decreasing",
-		},
-		{
-			name: "rejects progress contract that does not finish at 100",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 20}
-  - {id: writing, title: Writing, active_percent: 30, complete_percent: 60}`,
-			want: "final complete_percent must be 100",
-		},
-		{
-			name: "rejects unsafe required artifact",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [../secret.txt]}`,
-			want: "required artifact must be under output/",
-		},
-		{
-			name: "rejects cleaned traversal component",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output/tmp/../topic-analysis.md]}`,
-			want: "required artifact must be under output/",
-		},
-		{
-			name: "rejects required artifact with backslash",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output\topic-analysis.md]}`,
-			want: "required artifact must be under output/",
-		},
-		{
-			name: "rejects non canonical required artifact",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output//topic-analysis.md]}`,
-			want: "required artifact must be under output/",
-		},
-		{
-			name:     "rejects empty progress",
-			progress: "progress: []",
-			want:     "progress must not be empty",
-		},
-		{
-			name: "accepts ordered stage contract",
-			progress: `progress:
-  - {id: research, title: Research, active_percent: 10, complete_percent: 20, required_artifacts: [output/final.md]}
-  - {id: writing, title: Writing, active_percent: 30, complete_percent: 100}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100", tt.progress, 1)
-			root := writePackFixture(t, manifest)
-			catalog, err := LoadCatalog(root)
-			if tt.want != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.want) {
-					t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("LoadCatalog: %v", err)
-			}
-			stage, ok := catalog.Packs[0].ProgressStage("research")
-			if !ok || stage.CompletePercent != 20 || len(stage.RequiredArtifacts) != 1 {
-				t.Fatalf("ProgressStage(research) = %#v, %v", stage, ok)
-			}
-			if _, ok := catalog.Packs[0].ProgressStage("missing"); ok {
-				t.Fatal("ProgressStage(missing) unexpectedly resolved")
-			}
-		})
-	}
-}
-
-func TestLoadCatalogResolvesProgressContractByTaskType(t *testing.T) {
+func TestLoadCatalogResolvesArtifactContractByTaskType(t *testing.T) {
 	manifest := strings.Replace(validFixtureManifest, "task_types: [demo-task]", "task_types: [demo-task, viral-analysis]", 1)
 	manifest = strings.Replace(manifest, "  demo-task: task.demo", "  demo-task: task.demo\n  viral-analysis: task.viral-analysis", 1)
-	manifest = strings.Replace(manifest, "artifacts:\n", `progress_by_task_type:
+	manifest = strings.Replace(manifest, "artifacts:\n", `artifacts_by_task_type:
   viral-analysis:
-    - {id: research, title: Research, active_percent: 10, complete_percent: 40}
-    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100, required_artifacts: [output/source-analysis.md, output/viral-template.json]}
+    - {role: analysis, path: output/source-analysis.md, mime_type: text/markdown, required: true}
+    - {role: template, path: output/viral-template.json, mime_type: application/json, required: true}
 delivery_by_task_type:
   viral-analysis:
     - {role: analysis, path: output/source-analysis.md, mime_type: text/markdown}
@@ -412,20 +286,17 @@ artifacts:
 		t.Fatalf("LoadCatalog: %v", err)
 	}
 	pack := catalog.Packs[0]
-	defaultProgress := pack.ProgressForTaskType("demo-task")
-	if len(defaultProgress) != 1 || defaultProgress[0].ID != "prepare" {
-		t.Fatalf("default progress = %#v", defaultProgress)
+	defaultArtifacts := pack.ArtifactsForTaskType("demo-task")
+	if len(defaultArtifacts) != 1 || defaultArtifacts[0].Path != "output/final.md" {
+		t.Fatalf("default artifacts = %#v", defaultArtifacts)
 	}
-	viralProgress := pack.ProgressForTaskType("viral-analysis")
-	if len(viralProgress) != 2 || viralProgress[0].ID != "research" || viralProgress[1].ID != "delivery" {
-		t.Fatalf("viral progress = %#v", viralProgress)
-	}
-	if got := viralProgress[1].RequiredArtifacts; len(got) != 2 || got[0] != "output/source-analysis.md" || got[1] != "output/viral-template.json" {
-		t.Fatalf("viral delivery artifacts = %#v", got)
+	viralArtifacts := pack.ArtifactsForTaskType("viral-analysis")
+	if got := artifactPaths(viralArtifacts); !slices.Equal(got, []string{"output/source-analysis.md", "output/viral-template.json"}) {
+		t.Fatalf("viral artifacts = %#v", viralArtifacts)
 	}
 }
 
-func TestLoadCatalogValidatesProgressContractsByTaskType(t *testing.T) {
+func TestLoadCatalogValidatesArtifactContractsByTaskType(t *testing.T) {
 	tests := []struct {
 		name     string
 		override string
@@ -433,46 +304,31 @@ func TestLoadCatalogValidatesProgressContractsByTaskType(t *testing.T) {
 	}{
 		{
 			name: "rejects unbound task type",
-			override: `progress_by_task_type:
+			override: `artifacts_by_task_type:
   unknown-task:
-    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100}`,
-			want: `progress override references unbound task type "unknown-task"`,
+    - {role: final, path: output/final.md, mime_type: text/markdown, required: true}`,
+			want: `artifact override references unbound task type "unknown-task"`,
 		},
 		{
 			name: "rejects empty override",
-			override: `progress_by_task_type:
+			override: `artifacts_by_task_type:
   demo-task: []`,
-			want: `progress override for task type "demo-task" must not be empty`,
+			want: `artifact override for task type "demo-task" must not be empty`,
 		},
 		{
-			name: "rejects duplicate stage ids",
-			override: `progress_by_task_type:
+			name: "rejects duplicate artifact paths",
+			override: `artifacts_by_task_type:
   demo-task:
-    - {id: research, title: Research, active_percent: 10, complete_percent: 30}
-    - {id: research, title: Duplicate, active_percent: 40, complete_percent: 100}`,
-			want: `progress override for task type "demo-task": duplicate progress stage id "research"`,
+    - {role: final, path: output/final.md, mime_type: text/markdown, required: true}
+    - {role: duplicate, path: output/final.md, mime_type: text/markdown, required: true}`,
+			want: `artifact override for task type "demo-task": duplicate artifact path "output/final.md"`,
 		},
 		{
-			name: "rejects decreasing completion percentage",
-			override: `progress_by_task_type:
+			name: "rejects invalid artifact path",
+			override: `artifacts_by_task_type:
   demo-task:
-    - {id: research, title: Research, active_percent: 10, complete_percent: 60}
-    - {id: delivery, title: Delivery, active_percent: 40, complete_percent: 100}`,
-			want: `progress stage "delivery" active_percent must be >= previous complete_percent`,
-		},
-		{
-			name: "rejects contract that does not finish at 100",
-			override: `progress_by_task_type:
-  demo-task:
-    - {id: research, title: Research, active_percent: 10, complete_percent: 40}`,
-			want: "progress final complete_percent must be 100",
-		},
-		{
-			name: "rejects unsafe required artifact",
-			override: `progress_by_task_type:
-  demo-task:
-    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100, required_artifacts: [../secret.txt]}`,
-			want: "required artifact must be under output/",
+    - {role: unsafe, path: ../secret.txt, mime_type: text/plain, required: true}`,
+			want: `artifact override for task type "demo-task": invalid artifact contract`,
 		},
 	}
 
@@ -485,29 +341,6 @@ func TestLoadCatalogValidatesProgressContractsByTaskType(t *testing.T) {
 				t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
 			}
 		})
-	}
-}
-
-func TestLoadCatalogRejectsProgressOverrideWithoutDefaultContract(t *testing.T) {
-	manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100\n", "", 1)
-	manifest = strings.Replace(manifest, "artifacts:\n", `progress_by_task_type:
-  demo-task:
-    - {id: delivery, title: Delivery, active_percent: 90, complete_percent: 100}
-artifacts:
-`, 1)
-	root := writePackFixture(t, manifest)
-
-	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "progress_by_task_type requires non-empty progress") {
-		t.Fatalf("LoadCatalog error = %v, want override default progress rejection", err)
-	}
-}
-
-func TestLoadCatalogAllowsOmittedProgressContract(t *testing.T) {
-	manifest := strings.Replace(validFixtureManifest, "progress:\n  - id: prepare\n    title: Prepare\n    active_percent: 90\n    complete_percent: 100\n", "", 1)
-	root := writePackFixture(t, manifest)
-
-	if _, err := LoadCatalog(root); err != nil {
-		t.Fatalf("LoadCatalog: %v", err)
 	}
 }
 
@@ -1075,10 +908,6 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		if got := deliveryPaths(pack.DeliveryForTaskType("montage")); !slices.Equal(got, wantDelivery) {
 			t.Fatalf("montage delivery paths = %v, want %v", got, wantDelivery)
 		}
-		stage, ok := pack.ProgressStage("delivery")
-		if !ok || !slices.Equal(stage.RequiredArtifacts, wantRequiredArtifacts) {
-			t.Fatalf("montage delivery stage = %#v, want required artifacts %v", stage, wantRequiredArtifacts)
-		}
 	}
 	if _, ok := catalog.Pack("designer"); ok {
 		t.Fatal("removed Designer Pack is still present")
@@ -1469,11 +1298,6 @@ runtime:
 surfaces: [project, task, plan]
 billing_operations:
   demo-task: task.demo
-progress:
-  - id: prepare
-    title: Prepare
-    active_percent: 90
-    complete_percent: 100
 artifacts:
   - role: final
     path: output/final.md

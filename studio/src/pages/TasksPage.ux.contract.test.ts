@@ -74,7 +74,7 @@ describe('TasksPage recovery workspace contract', () => {
 
     expect(source).toContain('taskActionSignal')
     expect(helperSource).not.toContain('处理发布审批')
-    expect(helperSource).toContain('查看失败原因')
-    expect(helperSource).toContain('可查看、下载或复用')
+    expect(helperSource).toContain('taskStageSummary')
+    expect(helperSource).toContain("stage.title")
   })
 })

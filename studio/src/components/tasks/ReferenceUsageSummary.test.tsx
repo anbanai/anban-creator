@@ -51,7 +51,6 @@ const seednoteTask: Task = {
   topic: '新品体验',
   prompt: '生成一篇新品种草图文',
   status: 'completed',
-  progress: 100,
   input_attachments: [],
   plan_id: null,
   project_id: 'project-1',

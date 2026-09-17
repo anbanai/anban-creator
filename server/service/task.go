@@ -208,6 +208,9 @@ func (s *TaskService) SetImageCapabilityResolver(resolver *ImageCapabilityResolv
 func (s *TaskService) SetWechatPublicationService(publication *WechatPublicationService) {
 	if s != nil {
 		s.wechatPublicationSvc = publication
+		if publication != nil {
+			publication.SetLifecycleSync(s.SyncWechatPublicationLifecycle)
+		}
 	}
 }
 

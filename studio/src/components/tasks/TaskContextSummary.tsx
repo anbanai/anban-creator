@@ -25,7 +25,7 @@ export interface TaskContextSummaryProps {
   project?: Project
   files: TaskFile[]
   logs: string[]
-  progressDescription: string | null
+  latestStageUpdate: string | null
   sseError: string | null
   onOpenTab: (tab: TaskDetailsTab) => void
 }
@@ -121,7 +121,7 @@ export function TaskContextSummary({
   project,
   files,
   logs,
-  progressDescription,
+  latestStageUpdate,
   sseError,
   onOpenTab,
 }: TaskContextSummaryProps) {
@@ -137,9 +137,9 @@ export function TaskContextSummary({
   const configurationDetail = [visualStyle, imageRatio].filter(Boolean).join(' · ') || '未设置'
   const attachmentCount = task.input_attachments?.length ?? 0
   const hasReferenceSummary = files.some((file) => file.file_name === 'reference-usage-summary.json')
-  const progress = progressDescription?.trim()
-  const logDetail = task.status === 'running' && progress
-    ? progress
+  const stageUpdate = latestStageUpdate?.trim()
+  const logDetail = task.status === 'running' && stageUpdate
+    ? stageUpdate
     : latestNormalizedLogLine(logs) || '暂无日志'
   const logState = taskLogState(task, sseError)
 

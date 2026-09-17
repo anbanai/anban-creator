@@ -45,7 +45,7 @@ func Scaffold(pluginRoot string, options ScaffoldOptions) error {
 	} else {
 		manifest += "bindings: {}\nruntime: {}\nsurfaces: [plugin]\n"
 	}
-	manifest += "features: []\nprogress: []\nartifacts: []\n"
+	manifest += "features: []\nartifacts: []\n"
 	files := map[string]string{
 		"agent-pack.yaml":  manifest,
 		"agent.claude.md":  fmt.Sprintf("---\nname: %s\ndescription: %s Agent Pack\nmodel: inherit\nmaxTurns: 60\n---\n\n# %s\n", options.ID, options.ID, options.ID),

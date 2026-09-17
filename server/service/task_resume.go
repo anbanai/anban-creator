@@ -155,9 +155,6 @@ func applyResumedTaskState(task *model.Task, attachments []model.EntryAttachment
 	task.Outcome = nil
 	task.TerminalModelUsage = datatypes.NewJSONType([]model.ModelTokenUsage{})
 	task.CostStatus = ""
-	task.Progress = 0
-	task.ProgressSequence = 0
-	task.LatestProgress = datatypes.NewJSONType(model.ProgressPayload{})
 	task.WorkflowStatus = nil
 	task.SetInputAttachments(attachments)
 	task.ExecutionTarget = model.ExecutionTargetCloud

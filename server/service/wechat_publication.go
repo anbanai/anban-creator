@@ -68,12 +68,13 @@ type WechatPublicationAPI interface {
 type WechatPublicationAPIFactory func(*model.Project) (WechatPublicationAPI, error)
 
 type WechatPublicationService struct {
-	repo       repository.Repository
-	apiFactory WechatPublicationAPIFactory
-	logger     *zerolog.Logger
-	enqueuer   TaskEnqueuer
-	now        func() time.Time
-	recovery   func(context.Context, string, string) (model.TaskPublicationOutcome, error)
+	repo          repository.Repository
+	apiFactory    WechatPublicationAPIFactory
+	logger        *zerolog.Logger
+	enqueuer      TaskEnqueuer
+	now           func() time.Time
+	recovery      func(context.Context, string, string) (model.TaskPublicationOutcome, error)
+	lifecycleSync func(context.Context, string) (*model.TaskLifecycle, error)
 }
 
 // SetEnqueuer wires durable polling into the server's async worker. The
@@ -83,6 +84,19 @@ func (s *WechatPublicationService) SetEnqueuer(enqueuer TaskEnqueuer) { s.enqueu
 
 func (s *WechatPublicationService) SetRecovery(recovery func(context.Context, string, string) (model.TaskPublicationOutcome, error)) {
 	s.recovery = recovery
+}
+
+func (s *WechatPublicationService) SetLifecycleSync(sync func(context.Context, string) (*model.TaskLifecycle, error)) {
+	s.lifecycleSync = sync
+}
+
+func (s *WechatPublicationService) syncTaskLifecycle(ctx context.Context, taskID string) {
+	if s.lifecycleSync == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	if _, err := s.lifecycleSync(context.WithoutCancel(ctx), taskID); err != nil && s.logger != nil {
+		s.logger.Error().Err(err).Str("task_id", taskID).Msg("sync WeChat task lifecycle")
+	}
 }
 
 func (s *WechatPublicationService) Recover(ctx context.Context, userID, taskID string) (model.TaskPublicationOutcome, error) {
@@ -237,7 +251,11 @@ func (s *WechatPublicationService) Get(ctx context.Context, userID, taskID strin
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrWechatPublicationNotFound
 	}
-	return publication, err
+	if err != nil {
+		return nil, err
+	}
+	s.syncTaskLifecycle(ctx, taskID)
+	return publication, nil
 }
 
 func firstDraftArticle(request appwechat.DraftAddRequest) (appwechat.DraftArticle, error) {
@@ -465,6 +483,7 @@ func wechatDraftRequestFingerprint(article appwechat.DraftArticle) string {
 }
 
 func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, taskID, projectID, executionID string, request appwechat.DraftAddRequest) (publication *model.WechatPublication, resultErr error) {
+	defer s.syncTaskLifecycle(ctx, taskID)
 	task, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err
@@ -1168,6 +1187,7 @@ func listAllWechatPublishes(ctx context.Context, api WechatPublicationAPI) ([]pu
 }
 
 func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	defer s.syncTaskLifecycle(ctx, taskID)
 	_, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err
@@ -1384,6 +1404,7 @@ func (s *WechatPublicationService) handleFormalPublishProviderError(ctx context.
 // Accepted or ambiguous submissions resume observation and are never submitted
 // again.
 func (s *WechatPublicationService) RetryPublish(ctx context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	defer s.syncTaskLifecycle(ctx, taskID)
 	_, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err
@@ -1457,6 +1478,7 @@ func (s *WechatPublicationService) Poll(ctx context.Context, publicationID strin
 	if err != nil {
 		return nil, err
 	}
+	defer s.syncTaskLifecycle(ctx, publication.TaskID)
 	if publication.Status == model.WechatPublicationStatusPublishSubmitting && publication.PublishID == "" {
 		if err := s.ReconcileProject(ctx, publication.ProjectID); err != nil {
 			return publication, err
@@ -1734,6 +1756,7 @@ func publishedArticles(response *appwechat.FreePublishBatchGetResponse) []publis
 }
 
 func (s *WechatPublicationService) Reconcile(ctx context.Context, userID, taskID string) error {
+	defer s.syncTaskLifecycle(ctx, taskID)
 	_, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return err
@@ -1802,6 +1825,17 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 	defer func() {
 		if syncErr := s.syncReconciledDraftDeliveries(context.WithoutCancel(ctx), pending); syncErr != nil {
 			resultErr = errors.Join(resultErr, syncErr)
+		}
+		seen := make(map[string]struct{}, len(pending))
+		for _, publication := range pending {
+			if publication == nil {
+				continue
+			}
+			if _, ok := seen[publication.TaskID]; ok {
+				continue
+			}
+			seen[publication.TaskID] = struct{}{}
+			s.syncTaskLifecycle(ctx, publication.TaskID)
 		}
 	}()
 	if project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
@@ -2315,6 +2349,7 @@ func dedupeWechatCandidates(candidates []WechatPublicationCandidate) []WechatPub
 }
 
 func (s *WechatPublicationService) Select(ctx context.Context, userID, taskID, articleID string) (*model.WechatPublication, error) {
+	defer s.syncTaskLifecycle(ctx, taskID)
 	_, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err

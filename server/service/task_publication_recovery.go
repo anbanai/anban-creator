@@ -132,7 +132,6 @@ func (s *TaskService) enqueueArticleVisualRecovery(ctx context.Context, task *mo
 		current.Status = model.TaskStatusPending
 		current.CompletedAt = nil
 		current.ErrorMessage = ""
-		current.Progress = 0
 		if err := tx.Tasks().Update(ctx, current); err != nil {
 			return err
 		}
@@ -158,10 +157,7 @@ func (s *TaskService) enqueueArticleVisualRecovery(ctx context.Context, task *mo
 				current.Status = model.TaskStatusCompleted
 				current.CompletedAt = task.CompletedAt
 				current.ErrorMessage = task.ErrorMessage
-				current.Progress = task.Progress
 				current.ProgressLog = task.ProgressLog
-				current.ProgressSequence = task.ProgressSequence
-				current.LatestProgress = task.LatestProgress
 				current.AgentInput = task.AgentInput
 				return tx.Tasks().Update(context.WithoutCancel(ctx), current)
 			})

@@ -54,9 +54,7 @@ export interface ArtifactManifestFile {
 export interface StageProgressEvent {
   stage: string;
   state: "active" | "complete";
-  title: string;
   description?: string;
-  progress_percent: number;
 }
 
 type Sleep = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -101,9 +99,7 @@ export class Reporter {
     const body = this.identity({
       stage: event.stage,
       state: event.state,
-      title: event.title,
       description: event.description ?? "",
-      progress_percent: event.progress_percent,
     });
     await postJSONWithRetry(() => this.post("/api/v1/agent/progress", body, signal), undefined, signal);
   }

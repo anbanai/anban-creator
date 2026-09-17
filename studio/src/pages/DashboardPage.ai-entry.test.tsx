@@ -148,7 +148,6 @@ const {
       type: 'article',
       prompt: '帮我写一篇新品发布公众号文章',
       status: 'pending',
-      progress: 0,
       plan_id: null,
       project_id: 'project-1',
       execution_profile: 'effective',

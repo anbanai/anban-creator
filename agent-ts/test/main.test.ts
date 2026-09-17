@@ -72,10 +72,7 @@ const bootstrapData: ResolvedBootstrapResponse = {
   resolved_agent_pack: {
     id: "article", version: "1.0.0", digest: "0".repeat(64), agent: { name: "article" },
     bindings: { task_types: ["article"] }, runtime: { profile: "article", adapter: "standard" },
-    progress: [{
-      id: "delivery", title: "Delivery", active_percent: 80, complete_percent: 100,
-      required_artifacts: ["output/final.md"],
-    }],
+    artifacts: [{ role: "final", path: "output/final.md", required: true }],
   },
 };
 
@@ -242,7 +239,7 @@ describe("runJob finalization", () => {
     }
   });
 
-  test("emits final progress for a successful managed output", async () => {
+  test("validates final artifacts without synthesizing a final stage", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "anban-managed-finalization-"));
     const harness = runJobHarness();
     try {
@@ -257,13 +254,10 @@ describe("runJob finalization", () => {
       const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
 
       expect(result).toEqual({ success: true, work_dir: workspace });
-      expect(harness.stageProgressEvents).toEqual([
-        expect.objectContaining({ stage: "delivery", state: "complete", progress_percent: 100 }),
-      ]);
+      expect(harness.stageProgressEvents).toEqual([]);
       expect(harness.artifactManifest.map((file) => file.relative_path)).toEqual(["output/final.md"]);
       expect(harness.completed).toEqual(result);
       expect(harness.finalizationOrder).toEqual([
-        "stage-progress",
         "artifact-manifest",
         "text-progress-attempt",
         "complete",
@@ -273,7 +267,7 @@ describe("runJob finalization", () => {
     }
   });
 
-  test("continues artifact upload and completion when final progress delivery fails", async () => {
+  test("does not depend on lifecycle delivery during finalization", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "anban-managed-finalization-"));
     const harness = runJobHarness();
     try {
@@ -289,15 +283,11 @@ describe("runJob finalization", () => {
       const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
 
       expect(result).toEqual({ success: true, work_dir: workspace });
-      expect(harness.stageProgressAttempts).toEqual([
-        expect.objectContaining({ stage: "delivery", state: "complete", progress_percent: 100 }),
-      ]);
+      expect(harness.stageProgressAttempts).toEqual([]);
       expect(harness.stageProgressEvents).toEqual([]);
       expect(harness.artifactManifest.map((file) => file.relative_path)).toEqual(["output/final.md"]);
       expect(harness.completed).toEqual(result);
       expect(harness.finalizationOrder).toEqual([
-        "stage-progress",
-        "text-progress-attempt",
         "artifact-manifest",
         "text-progress-attempt",
         "complete",
@@ -327,7 +317,6 @@ describe("runJob finalization", () => {
       expect(harness.artifactManifest.map((file) => file.relative_path)).toEqual(["output/final.md"]);
       expect(harness.completed).toEqual(result);
       expect(harness.finalizationOrder).toEqual([
-        "stage-progress",
         "artifact-manifest",
         "text-progress-attempt",
         "complete",

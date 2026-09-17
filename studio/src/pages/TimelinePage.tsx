@@ -24,6 +24,7 @@ import {
   getBadgeVariant,
 } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { lifecycleStageStateLabel } from '@/lib/task-lifecycle'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
@@ -372,9 +373,9 @@ export default function TimelinePage() {
                                         {item.project_name}
                                       </Badge>
                                     )}
-                                    {item.type === 'task' && item.status === 'running' && (
+                                    {item.type === 'task' && item.current_stage && (
                                       <Badge variant="secondary" className="text-[10px]">
-                                        {item.progress ?? 0}%
+                                        {item.current_stage.title} · {lifecycleStageStateLabel(item.current_stage.state)}
                                       </Badge>
                                     )}
                                   </div>

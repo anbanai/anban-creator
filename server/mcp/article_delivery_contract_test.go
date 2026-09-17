@@ -31,7 +31,7 @@ func TestArticlePackHasOnlyCoreDeliveryRequirements(t *testing.T) {
 	}
 }
 
-func TestArticleAgentUsesOnlyThreeFormalProgressTasks(t *testing.T) {
+func TestArticleClaudeAgentUsesDynamicLifecycleTasks(t *testing.T) {
 	for _, path := range []string{
 		"../../harness/packs/article/agent.claude.md",
 		"../../harness/agents/article.md",
@@ -41,11 +41,15 @@ func TestArticleAgentUsesOnlyThreeFormalProgressTasks(t *testing.T) {
 			t.Fatal(err)
 		}
 		agent := string(raw)
-		if strings.Contains(agent, "十步细粒度") || strings.Contains(agent, "十步业务任务可以另建") {
-			t.Fatalf("%s still asks for fine-grained TaskCreate calls", path)
+		for _, required := range []string{"set_task_progress_plan", "2-7", "TaskCreate", "TaskUpdate", "anban_stage_id"} {
+			if !strings.Contains(agent, required) {
+				t.Fatalf("%s missing dynamic lifecycle contract %q", path, required)
+			}
 		}
-		if !strings.Contains(agent, "只创建 research、writing、delivery 三个正式 Task") {
-			t.Fatalf("%s does not declare the three-task contract", path)
+		for _, removed := range []string{"只创建 research、writing、delivery 三个正式 Task", "anban_progress_stage"} {
+			if strings.Contains(agent, removed) {
+				t.Fatalf("%s retains fixed lifecycle contract %q", path, removed)
+			}
 		}
 	}
 }

@@ -24,8 +24,6 @@ type TaskExecution struct {
 	AgentPackID       string `gorm:"type:varchar(80);index" json:"agent_pack_id,omitempty"`
 	AgentPackVersion  string `gorm:"type:varchar(32)" json:"agent_pack_version,omitempty"`
 	AgentPackDigest   string `gorm:"type:char(64);index" json:"agent_pack_digest,omitempty"`
-	// AgentPackProgressContract freezes the stage contract for resume safety.
-	AgentPackProgressContract datatypes.JSON `gorm:"type:json" json:"-"`
 	// AgentPackDeliveryContract freezes the user-facing delivery contract for
 	// resume safety and consistent file presentation/downloads.
 	AgentPackDeliveryContract datatypes.JSON `gorm:"type:json" json:"-"`

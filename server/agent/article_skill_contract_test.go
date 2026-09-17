@@ -96,7 +96,7 @@ func TestArticleIdentityFailuresAreNonRetryableAndRecoverable(t *testing.T) {
 	}
 }
 
-func TestArticleClaudeAgentUsesOnlyThreeProgressTasks(t *testing.T) {
+func TestArticleClaudeAgentUsesDynamicLifecycleTasks(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "harness", "agents", "article.md"),
@@ -105,21 +105,21 @@ func TestArticleClaudeAgentUsesOnlyThreeProgressTasks(t *testing.T) {
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
-			for _, term := range []string{"research、writing、delivery", "anban_progress_stage"} {
+			for _, term := range []string{"set_task_progress_plan", "2-7", "anban_stage_id", "TaskCreate", "TaskUpdate"} {
 				if !strings.Contains(text, term) {
-					t.Fatalf("%s missing three-stage progress contract %q", path, term)
+					t.Fatalf("%s missing dynamic lifecycle contract %q", path, term)
 				}
 			}
-			for _, stale := range []string{"流程启动时用 TaskCreate 创建任务列表", "每个任务对应一个流程步骤"} {
+			for _, stale := range []string{"anban_progress_stage", "research、writing、delivery"} {
 				if strings.Contains(text, stale) {
-					t.Fatalf("%s still contains stale fine-grained task instruction %q", path, stale)
+					t.Fatalf("%s still contains fixed lifecycle instruction %q", path, stale)
 				}
 			}
 		})
 	}
 }
 
-func TestArticleCodexAgentUsesOnlyThreeProgressTasks(t *testing.T) {
+func TestArticleCodexAgentUsesDynamicLifecycleTools(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "harness", "agents", "article.toml"),
@@ -128,12 +128,12 @@ func TestArticleCodexAgentUsesOnlyThreeProgressTasks(t *testing.T) {
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
-			for _, term := range []string{"research、writing、delivery", "update_task_progress"} {
+			for _, term := range []string{"set_task_progress_plan", "update_task_progress", "2-7", "state=\"active\"", "state=\"complete\""} {
 				if !strings.Contains(text, term) {
-					t.Fatalf("%s missing Codex three-stage progress contract %q", path, term)
+					t.Fatalf("%s missing Codex dynamic lifecycle contract %q", path, term)
 				}
 			}
-			for _, stale := range []string{"流程启动时用 TaskCreate 创建任务列表", "每个任务对应一个流程步骤", "anban_progress_stage"} {
+			for _, stale := range []string{"anban_progress_stage", "research、writing、delivery"} {
 				if strings.Contains(text, stale) {
 					t.Fatalf("%s contains incompatible Codex progress instruction %q", path, stale)
 				}

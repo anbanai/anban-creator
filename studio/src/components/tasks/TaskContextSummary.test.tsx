@@ -66,7 +66,7 @@ function renderSummary(overrides: Partial<ComponentProps<typeof TaskContextSumma
     project: currentProject,
     files: [],
     logs: [],
-    progressDescription: null,
+    latestStageUpdate: null,
     sseError: null,
     onOpenTab: vi.fn(),
     ...overrides,
@@ -110,7 +110,7 @@ describe('TaskContextSummary', () => {
     renderSummary({
       task: { ...snapshotTask, status: 'running' },
       logs: ['## 已完成大纲', '- 正在生成配图'],
-      progressDescription: '正在润色正文',
+      latestStageUpdate: '正在润色正文',
     })
 
     expect(screen.getByText('2 条 · 实时')).toBeInTheDocument()

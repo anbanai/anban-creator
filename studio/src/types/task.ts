@@ -17,6 +17,30 @@ export interface EcommerceTaskConfig {
 }
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
+export type TaskLifecycleStageSource = 'agent' | 'server'
+export type TaskLifecycleStageKind = 'work' | 'draft' | 'publication'
+export type TaskLifecycleStageState = 'pending' | 'active' | 'complete' | 'blocked' | 'failed' | 'cancelled' | 'skipped'
+
+export interface TaskLifecycleStage {
+  id: string
+  title: string
+  goal?: string
+  source: TaskLifecycleStageSource
+  kind: TaskLifecycleStageKind
+  state: TaskLifecycleStageState
+  latest_update?: string
+  started_at?: string
+  completed_at?: string
+}
+
+export interface TaskLifecycle {
+  version: 1
+  revision: number
+  execution_id?: string
+  updated_at: string
+  stages: TaskLifecycleStage[]
+}
+
 export interface TaskOutcome {
   core_delivery: { status: 'complete' | 'none' }
   visual: { status: 'complete' | 'partial' | 'not_requested' }
@@ -79,14 +103,8 @@ export interface Task {
   topic?: string
   prompt: string
   status: TaskStatus
-  progress?: number
   progress_log?: string
-  latest_progress?: {
-    stage?: string
-    title?: string
-    description?: string
-    percent?: number
-  }
+  lifecycle?: TaskLifecycle
   image_ratio?: string
   image_capability_key?: string
   skip_reference_image?: boolean

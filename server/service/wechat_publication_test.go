@@ -196,6 +196,48 @@ func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
 	return f
 }
 
+func TestWechatPublicationGetRepairsTaskLifecycleProjection(t *testing.T) {
+	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	taskService := newTestTaskService(f.repo, nil, nil, &logger, "", nil, nil)
+	taskService.SetWechatPublicationService(f.svc)
+	if err := f.db.WithContext(ctx).Model(&model.TaskExecution{}).Where("id = ?", f.executionID).Update("started", true).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := taskService.SetTaskProgressPlan(ctx, f.taskID, f.executionID, validLifecyclePlan())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.TaskExecutions().TransitionDraftDelivery(ctx, f.executionID, "", model.TaskExecutionDraftDeliverySucceeded, nil); err != nil {
+		t.Fatal(err)
+	}
+	publication := &model.WechatPublication{
+		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: f.executionID, UserID: f.userID, ProjectID: f.projectID,
+		Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusPublished,
+		DraftMediaID: "draft-1", ArticleURL: "https://mp.weixin.qq.com/s/example",
+	}
+	if err := f.repo.WechatPublications().Create(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.svc.Get(ctx, f.userID, f.taskID); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := persisted.Lifecycle.Data()
+	if lifecycle.Revision != created.Revision+1 {
+		t.Fatalf("lifecycle revision = %d, want %d", lifecycle.Revision, created.Revision+1)
+	}
+	if lifecycle.Stages[3].State != model.TaskLifecycleStateComplete || lifecycle.Stages[4].State != model.TaskLifecycleStateComplete {
+		t.Fatalf("publication lifecycle was not repaired: %#v", lifecycle.Stages)
+	}
+}
+
 type publicationRepositoryOverride struct {
 	repository.Repository
 	publications repository.WechatPublicationRepository

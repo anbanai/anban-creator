@@ -52,16 +52,51 @@ func (s ImageCapabilitySnapshot) ComputedDigest() (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-// ProgressPayload mirrors the MCP update_task_progress tool schema. Persisted
-// to Task.LatestProgress at every stage transition so Studio can render the
-// current stage across reloads without parsing the mixed progress_log column
-// (which also contains "Using tool: ..." noise from the agent executor).
-type ProgressPayload struct {
-	Stage       string `json:"stage,omitempty"`
-	State       string `json:"state,omitempty"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Percent     int    `json:"percent,omitempty"`
+const TaskLifecycleVersion = 1
+
+const (
+	TaskLifecycleSourceAgent  = "agent"
+	TaskLifecycleSourceServer = "server"
+
+	TaskLifecycleKindWork        = "work"
+	TaskLifecycleKindDraft       = "draft"
+	TaskLifecycleKindPublication = "publication"
+
+	TaskLifecycleStatePending   = "pending"
+	TaskLifecycleStateActive    = "active"
+	TaskLifecycleStateComplete  = "complete"
+	TaskLifecycleStateBlocked   = "blocked"
+	TaskLifecycleStateFailed    = "failed"
+	TaskLifecycleStateCancelled = "cancelled"
+	TaskLifecycleStateSkipped   = "skipped"
+)
+
+// TaskLifecyclePlanStage is the agent-owned, host-neutral plan declaration.
+// Runtime state and timestamps are always assigned by the Server.
+type TaskLifecyclePlanStage struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Goal  string `json:"goal,omitempty"`
+}
+
+type TaskLifecycleStage struct {
+	ID           string     `json:"id"`
+	Title        string     `json:"title"`
+	Goal         string     `json:"goal,omitempty"`
+	Source       string     `json:"source"`
+	Kind         string     `json:"kind"`
+	State        string     `json:"state"`
+	LatestUpdate string     `json:"latest_update,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+}
+
+type TaskLifecycle struct {
+	Version     int                  `json:"version"`
+	Revision    int                  `json:"revision"`
+	ExecutionID string               `json:"execution_id,omitempty"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+	Stages      []TaskLifecycleStage `json:"stages"`
 }
 
 // ModelTokenUsage is terminal per-model token evidence retained for provider
@@ -182,9 +217,7 @@ type Task struct {
 	MontageInput         datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
 	AgentInput           datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
 	ProgressLog          string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
-	Progress             int                                   `gorm:"default:0" json:"progress,omitempty"`
-	ProgressSequence     int                                   `gorm:"default:0" json:"-"`
-	LatestProgress       datatypes.JSONType[ProgressPayload]   `gorm:"type:json" json:"latest_progress"`
+	Lifecycle            datatypes.JSONType[TaskLifecycle]     `gorm:"type:json" json:"lifecycle"`
 	Result               *string                               `gorm:"type:json" json:"-"`
 	Outcome              *TaskOutcome                          `gorm:"type:json;serializer:json" json:"outcome,omitempty"`
 	TerminalModelUsage   datatypes.JSONType[[]ModelTokenUsage] `gorm:"type:json" json:"-"`

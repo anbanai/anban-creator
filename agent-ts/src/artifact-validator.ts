@@ -2,7 +2,7 @@ import { lstat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { validateRequiredArtifactInternal } from "./artifact-validator-internal.js";
-import type { AgentPack, AgentPackProgressStage } from "./bootstrap.js";
+import type { AgentPack } from "./bootstrap.js";
 
 const FAILURE_STATE_PATH = "output/failure-state.json";
 
@@ -15,17 +15,9 @@ export async function validateRequiredArtifact(workspace: string, artifactPath: 
   return validateRequiredArtifactInternal(workspace, artifactPath);
 }
 
-export async function validateStageArtifacts(pack: AgentPack, stageID: string, workspace: string): Promise<ArtifactValidationResult> {
-  const stage = pack.progress.find((candidate) => candidate.id === stageID);
-  if (!stage) throw new Error(`unknown progress stage: ${stageID}`);
-  return validateArtifacts(stage.required_artifacts ?? [], workspace);
+export async function validateFinalArtifacts(pack: AgentPack, workspace: string): Promise<ArtifactValidationResult> {
+  return validateArtifacts(pack.artifacts.filter((artifact) => artifact.required).map((artifact) => artifact.path), workspace);
 }
-
-export async function validateAllStageArtifacts(pack: AgentPack, workspace: string): Promise<ArtifactValidationResult> {
-  return validateArtifacts(requiredArtifacts(pack.progress), workspace);
-}
-
-export const validateFinalArtifacts = validateAllStageArtifacts;
 
 async function validateArtifacts(required: string[], workspace: string): Promise<ArtifactValidationResult> {
   if (await failureStateExists(workspace)) {
@@ -46,17 +38,4 @@ async function failureStateExists(workspace: string): Promise<boolean> {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== "ENOENT";
   }
-}
-
-function requiredArtifacts(stages: AgentPackProgressStage[]): string[] {
-  const seen = new Set<string>();
-  const artifacts: string[] = [];
-  for (const stage of stages) {
-    for (const artifactPath of stage.required_artifacts ?? []) {
-      if (seen.has(artifactPath)) continue;
-      seen.add(artifactPath);
-      artifacts.push(artifactPath);
-    }
-  }
-  return artifacts;
 }

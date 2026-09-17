@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "1.1.1",
+      "version": "2.0.0",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -46,31 +46,6 @@
       "billing_operations": {
         "article": "task.article"
       },
-      "progress": [
-        {
-          "id": "research",
-          "title": "选题研究",
-          "active_percent": 5,
-          "complete_percent": 25
-        },
-        {
-          "id": "writing",
-          "title": "内容创作",
-          "active_percent": 35,
-          "complete_percent": 80
-        },
-        {
-          "id": "delivery",
-          "title": "交付验收",
-          "active_percent": 90,
-          "complete_percent": 100,
-          "required_artifacts": [
-            "output/04-article-final.md",
-            "output/05-article.html",
-            "output/draft.json"
-          ]
-        }
-      ],
       "artifacts": [
         {
           "role": "final_markdown",
@@ -128,11 +103,11 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "7b27b910a6e722a6da318b1972f6d46dd78a779ec8516697d627a4bcce4a068f"
+      "digest": "09ba5e0660e060d41f8d7424b2e2886f556e0ec9219a3dba1a9d10f2a3947fb4"
     },
     {
       "id": "ecommerce",
-      "version": "1.0.1",
+      "version": "2.0.0",
       "kind": "managed",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -172,31 +147,6 @@
       "billing_operations": {
         "ecommerce": "task.ecommerce"
       },
-      "progress": [
-        {
-          "id": "analysis",
-          "title": "产品分析",
-          "active_percent": 5,
-          "complete_percent": 20
-        },
-        {
-          "id": "production",
-          "title": "素材生产",
-          "active_percent": 30,
-          "complete_percent": 85
-        },
-        {
-          "id": "delivery",
-          "title": "交付验收",
-          "active_percent": 90,
-          "complete_percent": 100,
-          "required_artifacts": [
-            "output/product-bible.md",
-            "output/copywriting.md",
-            "output/manifest.json"
-          ]
-        }
-      ],
       "artifacts": [
         {
           "role": "product_bible",
@@ -257,11 +207,11 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "69308b978b4f8ce8b1ce118f4fc436ea26ac0ad2aadc809b972826e8787e6cb0"
+      "digest": "d34b7a0901817490876444619be454bbb775754806715ef255ad57c64a29646b"
     },
     {
       "id": "live-slicer",
-      "version": "1.0.1",
+      "version": "2.0.0",
       "kind": "managed",
       "display_name": "直播切片",
       "description": "从直播视频转写、规划并批量导出短视频切片。",
@@ -289,31 +239,6 @@
       "features": [
         "video-processing",
         "transcription"
-      ],
-      "progress": [
-        {
-          "id": "transcription",
-          "title": "视频转写",
-          "active_percent": 5,
-          "complete_percent": 20
-        },
-        {
-          "id": "slicing",
-          "title": "切片导出",
-          "active_percent": 30,
-          "complete_percent": 85
-        },
-        {
-          "id": "delivery",
-          "title": "交付验收",
-          "active_percent": 90,
-          "complete_percent": 100,
-          "required_artifacts": [
-            "output/summary.md",
-            "output/clip-manifest.json",
-            "output/clip-plan.json"
-          ]
-        }
       ],
       "artifacts": [
         {
@@ -358,11 +283,11 @@
         }
       ],
       "ui": {},
-      "digest": "773c29a2a403cc39e30096bcbd1f2e0f1fab0c62541b3114eea21b41097b2a86"
+      "digest": "a459841d5a308f1ee0701d7cad641111adeaf4cac30b93b059b24a7805bc21fd"
     },
     {
       "id": "moments",
-      "version": "1.0.1",
+      "version": "2.0.0",
       "kind": "managed",
       "display_name": "朋友圈素材包",
       "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
@@ -398,70 +323,6 @@
       "billing_operations": {
         "moments": "task.moments"
       },
-      "progress": [
-        {
-          "id": "project",
-          "title": "项目选择",
-          "active_percent": 5,
-          "complete_percent": 10
-        },
-        {
-          "id": "material_analysis",
-          "title": "素材分析",
-          "active_percent": 15,
-          "complete_percent": 25,
-          "required_artifacts": [
-            "output/material-analysis.md"
-          ]
-        },
-        {
-          "id": "writing",
-          "title": "朋友圈正文",
-          "active_percent": 35,
-          "complete_percent": 55,
-          "required_artifacts": [
-            "output/content.md"
-          ]
-        },
-        {
-          "id": "image_generation",
-          "title": "朋友圈配图",
-          "active_percent": 65,
-          "complete_percent": 75,
-          "required_artifacts": [
-            "output/image-prompts.md",
-            "output/moments-image.png"
-          ]
-        },
-        {
-          "id": "quality_review",
-          "title": "质量复盘",
-          "active_percent": 80,
-          "complete_percent": 88,
-          "required_artifacts": [
-            "output/quality-review.md"
-          ]
-        },
-        {
-          "id": "delivery_validation",
-          "title": "交付校验",
-          "active_percent": 92,
-          "complete_percent": 97,
-          "required_artifacts": [
-            "output/material-analysis.md",
-            "output/content.md",
-            "output/image-prompts.md",
-            "output/moments-image.png",
-            "output/quality-review.md"
-          ]
-        },
-        {
-          "id": "finalize",
-          "title": "完成",
-          "active_percent": 99,
-          "complete_percent": 100
-        }
-      ],
       "artifacts": [
         {
           "role": "analysis",
@@ -509,11 +370,11 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "9194f30c272448b421a6521967cd0937b7a55113c02cababdb9d422f31340ead"
+      "digest": "b502fb85a1a642792ea01cdf1759d60620a150133d6491d9adf61d8ab1827a60"
     },
     {
       "id": "montage",
-      "version": "1.0.2",
+      "version": "2.0.0",
       "kind": "managed",
       "display_name": "Montage 视频",
       "description": "使用 OpenMontage 从素材和业务输入生产最终视频与交付清单。",
@@ -551,32 +412,6 @@
       "billing_operations": {
         "montage": "task.montage"
       },
-      "progress": [
-        {
-          "id": "prepare",
-          "title": "准备 Montage 项目",
-          "active_percent": 5,
-          "complete_percent": 20
-        },
-        {
-          "id": "production",
-          "title": "视频生产",
-          "active_percent": 30,
-          "complete_percent": 85
-        },
-        {
-          "id": "delivery",
-          "title": "交付验收",
-          "active_percent": 90,
-          "complete_percent": 100,
-          "required_artifacts": [
-            "output/final.mp4",
-            "output/montage-project.json",
-            "output/cover.png",
-            "output/delivery-manifest.json"
-          ]
-        }
-      ],
       "artifacts": [
         {
           "role": "final_video",
@@ -618,11 +453,11 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "4cda1a715834b8dbdb8e00419d2d9710d224426be346b50d828423d8a4af980e"
+      "digest": "999de46013aabe9390c8b9d3432806cdddbe8a7da4e715ed0e3034583293f946"
     },
     {
       "id": "seednote",
-      "version": "1.0.1",
+      "version": "2.0.0",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -666,50 +501,6 @@
         "seednote": "task.seednote",
         "viral_analysis": "task.viral_analysis"
       },
-      "progress": [
-        {
-          "id": "research",
-          "title": "素材研究",
-          "active_percent": 5,
-          "complete_percent": 25
-        },
-        {
-          "id": "writing",
-          "title": "笔记创作",
-          "active_percent": 35,
-          "complete_percent": 80
-        },
-        {
-          "id": "delivery",
-          "title": "交付验收",
-          "active_percent": 90,
-          "complete_percent": 100,
-          "required_artifacts": [
-            "output/content.md",
-            "output/image-plan.md"
-          ]
-        }
-      ],
-      "progress_by_task_type": {
-        "viral_analysis": [
-          {
-            "id": "research",
-            "title": "素材研究",
-            "active_percent": 5,
-            "complete_percent": 80
-          },
-          {
-            "id": "delivery",
-            "title": "交付验收",
-            "active_percent": 90,
-            "complete_percent": 100,
-            "required_artifacts": [
-              "output/source-analysis.md",
-              "output/viral-template.json"
-            ]
-          }
-        ]
-      },
       "artifacts": [
         {
           "role": "final_markdown",
@@ -730,6 +521,22 @@
           "required": false
         }
       ],
+      "artifacts_by_task_type": {
+        "viral_analysis": [
+          {
+            "role": "analysis",
+            "path": "output/source-analysis.md",
+            "mime_type": "text/markdown",
+            "required": true
+          },
+          {
+            "role": "template",
+            "path": "output/viral-template.json",
+            "mime_type": "application/json",
+            "required": true
+          }
+        ]
+      },
       "delivery": [
         {
           "role": "final_markdown",
@@ -769,7 +576,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "bce196b8240d230120ed19033b89a9ad0a1dc02ae656ca573ce94ee3721413c8"
+      "digest": "3d8024f07cc32de81f7133e7cde7bb1232aad3bebea80584460841d1272ad5b5"
     }
   ]
 }

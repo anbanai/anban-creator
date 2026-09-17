@@ -2887,7 +2887,7 @@ func TestResumeTask_RejectsCompletedTaskAndPreservesDeliveryState(t *testing.T) 
 	result := `{"success":true}`
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
-		Status: model.TaskStatusCompleted, Progress: 100, Result: &result, CompletedAt: &completedAt,
+		Status: model.TaskStatusCompleted, Result: &result, CompletedAt: &completedAt,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -2916,7 +2916,7 @@ func TestResumeTask_RejectsCompletedTaskAndPreservesDeliveryState(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Status != model.TaskStatusCompleted || persisted.Progress != 100 || persisted.Result == nil || *persisted.Result != result || persisted.CompletedAt == nil {
+	if persisted.Status != model.TaskStatusCompleted || persisted.Result == nil || *persisted.Result != result || persisted.CompletedAt == nil {
 		t.Fatalf("completed task was mutated: %#v", persisted)
 	}
 }

@@ -51,6 +51,11 @@ export type {
 export type {
   TaskType,
   TaskStatus,
+  TaskLifecycleStageSource,
+  TaskLifecycleStageKind,
+  TaskLifecycleStageState,
+  TaskLifecycleStage,
+  TaskLifecycle,
   TaskOutcome,
   ExecutionTarget,
   Task,

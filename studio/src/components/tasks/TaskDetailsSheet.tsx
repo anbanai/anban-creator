@@ -35,7 +35,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatFullDateTimeCN, statusBadgeVariant, taskFailurePresentation, taskStatusLabel } from '@/lib/labels'
+import { formatFullDateTimeCN, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskStatusLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskBillingChargeDetail, TaskFile } from '@/types'
 
@@ -201,6 +201,12 @@ function TaskOverviewDetails({
     ['来源', task.plan_id ? '计划任务' : '手动创建'],
   ]
   const failure = taskFailurePresentation(task)
+  const providerDiagnostic = task.outcome?.diagnostic
+  const diagnosticDirection = providerDiagnostic?.content_direction === 'input'
+    ? '输入内容'
+    : providerDiagnostic?.content_direction === 'output'
+      ? '生成内容'
+      : '供应商未说明'
 
   return (
     <div className="flex flex-col gap-4">
@@ -222,6 +228,19 @@ function TaskOverviewDetails({
           <DetailRows rows={[
             ['错误代码', failure.code || '未分类'],
             ['原始信息', failure.raw || failure.message],
+          ]} />
+        </TaskDetailsSection>
+      )}
+      {providerDiagnostic && (
+        <TaskDetailsSection label="供应商诊断" title="供应商诊断" icon={AlertTriangle}>
+          <DetailRows rows={[
+            ['供应商', providerDiagnostic.provider || '未披露'],
+            ['响应', providerDiagnostic.http_status ? `HTTP ${providerDiagnostic.http_status}` : '未提供'],
+            ['供应商代码', providerDiagnostic.provider_code || '未提供'],
+            ['发生阶段', providerDiagnostic.stage ? progressStageLabel[providerDiagnostic.stage] || providerDiagnostic.stage : '未提供'],
+            ['内容方向', diagnosticDirection],
+            ['请求 ID 指纹', providerDiagnostic.request_id || '未提供'],
+            ['诊断摘要', providerDiagnostic.summary],
           ]} />
         </TaskDetailsSection>
       )}

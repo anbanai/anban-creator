@@ -197,6 +197,7 @@ func NewRouter(svc *Services) *fiber.App {
 		app.Post("/api/v1/agent/artifacts/prepare", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.PrepareArtifactUpload)
 		app.Post("/api/v1/agent/artifacts/content", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.StreamArtifactContent)
 		app.Post("/api/v1/agent/artifacts/manifest", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.ReportArtifactManifest)
+		app.Post("/api/v1/agent/progress-plan", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.ProgressPlan)
 		app.Post("/api/v1/agent/progress", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.Progress)
 		app.Post("/api/v1/agent/claim", agentLimiter, svc.AgentHandler.ClaimAuthMiddleware, svc.AgentHandler.Claim)
 		app.Post("/api/v1/agent/complete", agentLimiter, svc.AgentHandler.ExecutionAuthMiddleware, svc.AgentHandler.Complete)

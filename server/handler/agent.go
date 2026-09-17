@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -342,137 +341,42 @@ func isAgentTaskAccessError(err error) bool {
 }
 
 type agentProgressRequest struct {
-	TaskID                 string   `json:"task_id"`
-	ExecutionID            string   `json:"execution_id"`
-	Message                string   `json:"message"`
-	Logs                   []string `json:"logs"`
-	Stage                  *string  `json:"stage"`
-	State                  *string  `json:"state"`
-	Title                  *string  `json:"title"`
-	Description            *string  `json:"description"`
-	ProgressPercent        *int     `json:"progress_percent"`
-	stagePresent           bool
-	statePresent           bool
-	titlePresent           bool
-	descriptionPresent     bool
-	progressPercentPresent bool
+	TaskID      string   `json:"task_id"`
+	ExecutionID string   `json:"execution_id"`
+	Message     string   `json:"message"`
+	Logs        []string `json:"logs"`
+	Stage       *string  `json:"stage"`
+	State       *string  `json:"state"`
+	Description *string  `json:"description"`
 }
 
 func (r *agentProgressRequest) UnmarshalJSON(data []byte) error {
-	type wireRequest struct {
-		TaskID      string   `json:"task_id"`
-		ExecutionID string   `json:"execution_id"`
-		Message     string   `json:"message"`
-		Logs        []string `json:"logs"`
-	}
-	var wire wireRequest
-	if err := json.Unmarshal(data, &wire); err != nil {
+	type wire agentProgressRequest
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	var value wire
+	if err := decoder.Decode(&value); err != nil {
 		return err
 	}
-	*r = agentProgressRequest{
-		TaskID:      wire.TaskID,
-		ExecutionID: wire.ExecutionID,
-		Message:     wire.Message,
-		Logs:        wire.Logs,
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	if _, err := decoder.Token(); err != nil {
-		return err
-	}
-	seen := make(map[string]struct{}, 5)
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		key, ok := token.(string)
-		if !ok {
-			return errors.New("agent progress JSON object key must be a string")
-		}
-		var raw json.RawMessage
-		if err := decoder.Decode(&raw); err != nil {
-			return err
-		}
-		canonical, structured := canonicalAgentProgressKey(key)
-		if !structured {
-			continue
-		}
-		if key != canonical {
-			return fmt.Errorf("structured progress key %q must use canonical casing %q", key, canonical)
-		}
-		if _, duplicate := seen[canonical]; duplicate {
-			return fmt.Errorf("duplicate structured progress key %q", canonical)
-		}
-		seen[canonical] = struct{}{}
-		if err := r.decodeStructuredProgressField(canonical, raw); err != nil {
-			return err
-		}
-	}
-	if _, err := decoder.Token(); err != nil {
-		return err
-	}
+	*r = agentProgressRequest(value)
 	return nil
 }
 
-func canonicalAgentProgressKey(key string) (string, bool) {
-	for _, canonical := range [...]string{"stage", "state", "title", "description", "progress_percent"} {
-		if strings.EqualFold(key, canonical) {
-			return canonical, true
-		}
-	}
-	return "", false
+type agentProgressPlanRequest struct {
+	TaskID      string                         `json:"task_id"`
+	ExecutionID string                         `json:"execution_id"`
+	Stages      []model.TaskLifecyclePlanStage `json:"stages"`
 }
 
-func (r *agentProgressRequest) decodeStructuredProgressField(key string, raw json.RawMessage) error {
-	null := bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
-	switch key {
-	case "stage":
-		r.stagePresent = true
-		if !null {
-			var value string
-			if err := json.Unmarshal(raw, &value); err != nil {
-				return err
-			}
-			r.Stage = &value
-		}
-	case "state":
-		r.statePresent = true
-		if !null {
-			var value string
-			if err := json.Unmarshal(raw, &value); err != nil {
-				return err
-			}
-			r.State = &value
-		}
-	case "title":
-		r.titlePresent = true
-		if !null {
-			var value string
-			if err := json.Unmarshal(raw, &value); err != nil {
-				return err
-			}
-			r.Title = &value
-		}
-	case "description":
-		r.descriptionPresent = true
-		if !null {
-			var value string
-			if err := json.Unmarshal(raw, &value); err != nil {
-				return err
-			}
-			r.Description = &value
-		}
-	case "progress_percent":
-		r.progressPercentPresent = true
-		if !null {
-			var value int
-			if err := json.Unmarshal(raw, &value); err != nil {
-				return err
-			}
-			r.ProgressPercent = &value
-		}
+func (r *agentProgressPlanRequest) UnmarshalJSON(data []byte) error {
+	type wire agentProgressPlanRequest
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	var value wire
+	if err := decoder.Decode(&value); err != nil {
+		return err
 	}
+	*r = agentProgressPlanRequest(value)
 	return nil
 }
 
@@ -482,7 +386,7 @@ type agentCompleteRequest struct {
 	Result      *serveragent.ExecutionResult `json:"result"`
 }
 
-const agentPackContractVersion = 3
+const agentPackContractVersion = 4
 const agentRuntimeContractVersion = 2
 
 // agentClaimRequest is the body for POST /api/v1/agent/claim.
@@ -547,7 +451,43 @@ func (h *AgentHandler) Claim(c fiber.Ctx) error {
 	return Success(c, cfg)
 }
 
-// Progress handles POST /api/v1/agent/progress.
+// ProgressPlan handles POST /api/v1/agent/progress-plan.
+func (h *AgentHandler) ProgressPlan(c fiber.Ctx) error {
+	if h.taskSvc == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
+	}
+	var req agentProgressPlanRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.ExecutionID) == "" {
+		return Error(c, fiber.StatusBadRequest, "task_id and execution_id are required")
+	}
+	if err := h.authorizeExecutionScope(c, req.TaskID); err != nil {
+		return Error(c, fiber.StatusForbidden, "task access denied")
+	}
+	executionID := strings.TrimSpace(h.authenticatedExecutionID(c))
+	if strings.TrimSpace(req.ExecutionID) != executionID {
+		return Error(c, fiber.StatusForbidden, "execution access denied")
+	}
+	lifecycle, err := h.taskSvc.SetTaskProgressPlan(c.Context(), req.TaskID, executionID, req.Stages)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidTaskLifecyclePlan), errors.Is(err, service.ErrTaskLifecycleImmutablePrefix):
+			return Error(c, fiber.StatusBadRequest, "invalid task progress plan")
+		case errors.Is(err, service.ErrStaleTaskExecution):
+			return Error(c, fiber.StatusConflict, "task execution is no longer current")
+		default:
+			h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to persist task progress plan")
+			return Error(c, fiber.StatusInternalServerError, "failed to persist task progress plan")
+		}
+	}
+	return Success(c, lifecycle)
+}
+
+// Progress handles POST /api/v1/agent/progress. Structured requests update a
+// declared lifecycle stage; unstructured requests append raw logs and refresh
+// the execution heartbeat.
 func (h *AgentHandler) Progress(c fiber.Ctx) error {
 	if h.taskSvc == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
@@ -564,7 +504,7 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	structuredIntent := req.stagePresent || req.statePresent || req.titlePresent || req.descriptionPresent || req.progressPercentPresent
+	structuredIntent := req.Stage != nil || req.State != nil || req.Description != nil
 	executionID := strings.TrimSpace(h.authenticatedExecutionID(c))
 	requestedExecutionID := strings.TrimSpace(req.ExecutionID)
 	if requestedExecutionID != "" && requestedExecutionID != executionID {
@@ -572,50 +512,37 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 	}
 
 	if structuredIntent {
-		stage, state, title, description, percent := "", "", "", "", 0
-		if !req.stagePresent || req.Stage == nil || strings.TrimSpace(*req.Stage) == "" {
+		if strings.TrimSpace(req.Message) != "" || len(req.Logs) > 0 {
+			return Error(c, fiber.StatusBadRequest, "structured lifecycle updates cannot include raw logs")
+		}
+		if req.Stage == nil || strings.TrimSpace(*req.Stage) == "" {
 			return Error(c, fiber.StatusBadRequest, "structured progress stage is required")
 		}
-		stage = strings.TrimSpace(*req.Stage)
-		if !req.statePresent || req.State == nil {
+		if req.State == nil {
 			return Error(c, fiber.StatusBadRequest, "structured progress state is required")
 		}
-		state = strings.TrimSpace(*req.State)
+		stage := strings.TrimSpace(*req.Stage)
+		state := strings.TrimSpace(*req.State)
 		if state != "active" && state != "complete" {
 			return Error(c, fiber.StatusBadRequest, "structured progress state must be active or complete")
 		}
-		if !req.titlePresent || req.Title == nil {
-			return Error(c, fiber.StatusBadRequest, "structured progress title is required")
+		description := ""
+		if req.Description != nil {
+			description = strings.TrimSpace(*req.Description)
 		}
-		title = *req.Title
-		if req.descriptionPresent {
-			if req.Description == nil {
-				return Error(c, fiber.StatusBadRequest, "structured progress description must not be null")
-			}
-			description = *req.Description
-		}
-		if !req.progressPercentPresent || req.ProgressPercent == nil {
-			return Error(c, fiber.StatusBadRequest, "structured progress_percent is required")
-		}
-		percent = *req.ProgressPercent
-		logs := append([]string(nil), req.Logs...)
-		if req.Message != "" {
-			logs = append(logs, req.Message)
-		}
-		if err := h.taskSvc.UpdateProgressFromAgent(c.Context(), req.TaskID, executionID, stage, state, title, description, percent, logs...); err != nil {
+		lifecycle, err := h.taskSvc.UpdateTaskProgress(c.Context(), req.TaskID, executionID, stage, state, description)
+		if err != nil {
 			switch {
-			case errors.Is(err, service.ErrAgentProgressUnknownStage), errors.Is(err, service.ErrAgentProgressStateMismatch), errors.Is(err, service.ErrAgentProgressTitleMismatch), errors.Is(err, service.ErrAgentProgressPercentMismatch):
+			case errors.Is(err, service.ErrTaskLifecycleUnknownStage), errors.Is(err, service.ErrTaskLifecycleInvalidState), errors.Is(err, service.ErrTaskLifecycleOutOfOrder):
 				return Error(c, fiber.StatusBadRequest, "invalid structured progress event")
 			case errors.Is(err, service.ErrStaleTaskExecution):
 				return Error(c, fiber.StatusConflict, "task execution is no longer current")
-			case errors.Is(err, service.ErrAgentProgressExecutionMismatch), errors.Is(err, service.ErrAgentProgressPackMismatch):
-				return Error(c, fiber.StatusConflict, "structured progress contract conflict")
 			default:
 				h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to persist structured agent progress")
 				return Error(c, fiber.StatusInternalServerError, "failed to persist structured progress")
 			}
 		}
-		return Success(c, fiber.Map{"ok": true})
+		return Success(c, lifecycle)
 	}
 
 	// Refresh the heartbeat on every unstructured progress report. This is the local-

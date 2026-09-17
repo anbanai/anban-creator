@@ -232,13 +232,12 @@ export interface LocalRunEvent {
   stage?: string
   level?: 'info' | 'warn' | 'error'
   message: string
-  percent?: number
 }
 
 /**
- * Subscribe to local-run progress events. Returns an unlisten function, or null
+ * Subscribe to local-run task events. Returns an unlisten function, or null
  * in a browser. The desktop emits only summaries here (full shell logs stay
- * local); cloud SSE still carries the canonical task progress.
+ * local); cloud SSE still carries the canonical task lifecycle and logs.
  */
 export async function onLocalRunEvent(
   handler: (e: LocalRunEvent) => void,

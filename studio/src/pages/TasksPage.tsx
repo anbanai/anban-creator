@@ -521,14 +521,6 @@ export default function TasksPage() {
                           累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分
                         </span>
                       </div>
-                      {task.status === 'running' && (
-                        <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
-                          <div
-                            className="h-1.5 rounded-full bg-primary transition-all animate-pulse"
-                            style={{ width: `${task.progress ?? 0}%` }}
-                          />
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>

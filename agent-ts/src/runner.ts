@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import { query, type HookCallback, type HookJSONOutput, type ModelUsage, type Options, type SDKMessage, type SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
 
-import { validateAllStageArtifacts, type ArtifactValidationResult } from "./artifact-validator.js";
+import { validateFinalArtifacts, type ArtifactValidationResult } from "./artifact-validator.js";
 import { CLAUDE_PROFILE_ENV_KEYS, type AgentPack, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./downloads.js";
 import { ProgressEmitter, type ProgressDiagnostic } from "./progress.js";
@@ -290,12 +290,11 @@ export function buildQueryOptions(
   const diagnostic: ProgressDiagnostic = (message) => {
     void reporter.progress(`progress hook: ${message}`, controller.signal).catch(() => {});
   };
-  const emitter = new ProgressEmitter(pack, reporter, diagnostic);
+  const emitter = new ProgressEmitter(reporter, diagnostic);
   const managedParallelWorkers = managedParallelWorkersEnabled(data.task_type);
-  let stopHook = createManagedProgressStopHook(emitter, cwd);
+  let stopHook = createManagedProgressStopHook(pack, cwd, diagnostic);
   if (data.task_type === "seednote" || data.task_type === "viral_analysis") {
     stopHook = createSeednoteProgressStopHook(
-      emitter,
       pack,
       cwd,
       createSeednoteStopGate(cwd, data.task_type, pluginRoot),
@@ -316,7 +315,7 @@ export function buildQueryOptions(
   };
   const hooks: NonNullable<Options["hooks"]> = {
     PreToolUse: [{ matcher: "Bash|WebFetch", hooks: [createManagedMCPBoundaryHook()] }],
-    PostToolUse: [{ matcher: "TaskCreate|TaskUpdate", hooks: [createTaskProgressHook(emitter, cwd, diagnostic)] }],
+    PostToolUse: [{ matcher: "TaskCreate|TaskUpdate", hooks: [createTaskProgressHook(emitter, diagnostic)] }],
     Stop: [{ hooks: [composedStopHook] }],
   };
   hooks.PreToolUse!.push({ matcher: "Agent", hooks: [createManagedAgentBoundaryHook(data.task_type)] });
@@ -387,7 +386,6 @@ export function createCompletionMetadataHook(
 
 export function createTaskProgressHook(
   emitter: ProgressEmitter,
-  workspace: string,
   diagnostic: ProgressDiagnostic = (message) => console.error(message),
   taskStages = new Map<string, string>(),
 ): HookCallback {
@@ -400,10 +398,7 @@ export function createTaskProgressHook(
     }
 
     const stage = progressStageMetadata(input.tool_input.metadata);
-    if (!stage) {
-      diagnostic(`${input.tool_name} is missing metadata.anban_progress_stage`);
-      return {};
-    }
+    if (!stage) return {};
 
     if (input.tool_name === "TaskCreate") {
       const taskID = taskCreateResponseID(input.tool_response);
@@ -433,28 +428,25 @@ export function createTaskProgressHook(
 
     const status = input.tool_input.status;
     if (status !== "in_progress" && status !== "completed") return {};
-    const result = await emitter.handle({
+    await emitter.handle({
       stage,
       state: status === "in_progress" ? "active" : "complete",
-    }, workspace, hookOptions.signal);
-    if (!result.validation || result.validation.ok) return {};
-
-    const additionalContext = result.validation.reason === "missing_artifacts"
-      ? `Stage ${stage} cannot be completed. Create or repair these required artifacts: ${result.validation.missing.join(", ")}.`
-      : `Stage ${stage} cannot be completed because failure state ${result.validation.path} exists. Resolve the recorded failure before completing the task.`;
-    return {
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext,
-      },
-    };
+      description: cleanString(input.tool_input.description),
+    }, hookOptions.signal);
+    return {};
   };
 }
 
-function createManagedProgressStopHook(emitter: ProgressEmitter, workspace: string): HookCallback {
+function createManagedProgressStopHook(pack: AgentPack, workspace: string, diagnostic: ProgressDiagnostic): HookCallback {
   return async (input, _toolUseID, hookOptions): Promise<HookJSONOutput> => {
     if (input.hook_event_name !== "Stop" || input.stop_hook_active) return {};
-    return emitFinalProgress(emitter, workspace, hookOptions.signal);
+    try {
+      const validation = await validateFinalArtifacts(pack, workspace);
+      return validation.ok ? {} : blockedStopOutput(validation);
+    } catch (error) {
+      diagnostic(`artifact stop validation failed: ${error instanceof Error ? error.message : String(error)}`);
+      return {};
+    }
   };
 }
 
@@ -475,7 +467,6 @@ function managedBackgroundTaskStopGuard(input: Parameters<HookCallback>[0]): Hoo
 }
 
 function createSeednoteProgressStopHook(
-  emitter: ProgressEmitter,
   pack: AgentPack,
   workspace: string,
   qualityGate: HookCallback,
@@ -484,7 +475,7 @@ function createSeednoteProgressStopHook(
   return async (input, toolUseID, hookOptions): Promise<HookJSONOutput> => {
     if (input.hook_event_name !== "Stop" || input.stop_hook_active) return {};
     try {
-      const validation = await validateAllStageArtifacts(pack, workspace);
+      const validation = await validateFinalArtifacts(pack, workspace);
       if (!validation.ok) return blockedStopOutput(validation);
     } catch (error) {
       diagnostic(`progress stop validation failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -493,13 +484,8 @@ function createSeednoteProgressStopHook(
 
     const qualityResult = await qualityGate(input, toolUseID, hookOptions);
     if (Object.keys(qualityResult).length > 0) return qualityResult;
-    return emitFinalProgress(emitter, workspace, hookOptions.signal);
+    return {};
   };
-}
-
-async function emitFinalProgress(emitter: ProgressEmitter, workspace: string, signal: AbortSignal): Promise<HookJSONOutput> {
-  const result = await emitter.handle({ state: "final" }, workspace, signal);
-  return result.validation && !result.validation.ok ? blockedStopOutput(result.validation) : {};
 }
 
 function blockedStopOutput(validation: Exclude<ArtifactValidationResult, { ok: true }>): HookJSONOutput {
@@ -518,7 +504,7 @@ function blockedStopOutput(validation: Exclude<ArtifactValidationResult, { ok: t
 
 function progressStageMetadata(metadata: unknown): string | undefined {
   if (!isRecord(metadata)) return undefined;
-  return cleanString(metadata.anban_progress_stage);
+  return cleanString(metadata.anban_stage_id);
 }
 
 function taskCreateResponseID(response: unknown): string | undefined {

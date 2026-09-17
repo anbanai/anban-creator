@@ -144,7 +144,6 @@ export const mockTasks: PaginatedResponse<Task> = {
       type: 'article',
       prompt: '测试任务',
       status: 'completed',
-      progress: 100,
       plan_id: null,
       project_id: 'ch-1',
       execution_profile: 'effective',

@@ -3,17 +3,17 @@ import { parseSSE } from './sse'
 
 describe('parseSSE', () => {
   it('parses a single event', () => {
-    const text = 'event:progress\ndata:step 1\n\n'
+    const text = 'event:log\ndata:step 1\n\n'
     const events = parseSSE(text)
     expect(events).toHaveLength(1)
-    expect(events[0]).toEqual({ event: 'progress', data: 'step 1' })
+    expect(events[0]).toEqual({ event: 'log', data: 'step 1' })
   })
 
   it('parses multiple events', () => {
-    const text = 'event:progress\ndata:step 1\n\nevent:done\ndata:complete\n\n'
+    const text = 'event:log\ndata:step 1\n\nevent:done\ndata:complete\n\n'
     const events = parseSSE(text)
     expect(events).toHaveLength(2)
-    expect(events[0].event).toBe('progress')
+    expect(events[0].event).toBe('log')
     expect(events[1].event).toBe('done')
   })
 
@@ -25,7 +25,7 @@ describe('parseSSE', () => {
   })
 
   it('handles event with id', () => {
-    const text = 'event:progress\ndata:test\nid:42\n\n'
+    const text = 'event:lifecycle\ndata:test\nid:42\n\n'
     const events = parseSSE(text)
     expect(events[0].id).toBe('42')
   })
@@ -35,7 +35,7 @@ describe('parseSSE', () => {
   })
 
   it('handles last event without trailing newline', () => {
-    const text = 'event:progress\ndata:test'
+    const text = 'event:log\ndata:test'
     const events = parseSSE(text)
     expect(events).toHaveLength(1)
     expect(events[0].data).toBe('test')

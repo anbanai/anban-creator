@@ -3,119 +3,167 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/anbanai/anban-creator/server/model"
 )
 
-func TestLegacyProgressCompatibilityToolRemainsRegistered(t *testing.T) {
-	tools := listToolNames(t, RegisterTools)
-	if !tools["update_task_progress"] {
-		t.Fatal("update_task_progress must remain registered for Codex, DSH, and other hosts without SDK Task lifecycle hooks")
-	}
-}
-
-func TestLegacyProgressCompatibilityToolSchema(t *testing.T) {
-	var progressTool *mcp.Tool
+func findProgressTool(t *testing.T, name string) *mcp.Tool {
+	t.Helper()
 	for _, tool := range listRegisteredTools(t, RegisterTools) {
-		if tool.Name == "update_task_progress" {
-			progressTool = tool
-			break
+		if tool.Name == name {
+			return tool
 		}
 	}
-	if progressTool == nil {
-		t.Fatal("update_task_progress is not registered")
-	}
-	description := strings.ToLower(progressTool.Description)
-	if !strings.Contains(description, "compatibility") || !strings.Contains(description, "hosts") || !strings.Contains(description, "without task lifecycle hooks") {
-		t.Fatalf("description = %q, want compatibility host boundary", progressTool.Description)
-	}
+	t.Fatalf("%s is not registered", name)
+	return nil
+}
 
-	schema, ok := progressTool.InputSchema.(map[string]any)
-	if !ok {
-		t.Fatalf("InputSchema type = %T, want map[string]any", progressTool.InputSchema)
+func TestLifecycleProgressToolsExposeOnlyServerOwnedContract(t *testing.T) {
+	tests := []struct {
+		name       string
+		properties map[string]string
+		required   map[string]bool
+	}{
+		{
+			name: "set_task_progress_plan",
+			properties: map[string]string{
+				"task_id": "string", "execution_id": "string", "stages": "array",
+			},
+			required: map[string]bool{"task_id": true, "execution_id": true, "stages": true},
+		},
+		{
+			name: "update_task_progress",
+			properties: map[string]string{
+				"task_id": "string", "execution_id": "string", "stage": "string", "state": "string", "description": "string",
+			},
+			required: map[string]bool{"task_id": true, "execution_id": true, "stage": true, "state": true},
+		},
 	}
-	if schema["type"] != "object" {
-		t.Fatalf("schema type = %#v, want object", schema["type"])
-	}
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("properties type = %T, want map[string]any", schema["properties"])
-	}
-	wantTypes := map[string]string{
-		"task_id":          "string",
-		"stage":            "string",
-		"title":            "string",
-		"description":      "string",
-		"progress_percent": "integer",
-	}
-	if len(properties) != len(wantTypes) {
-		t.Fatalf("property count = %d, want %d: %#v", len(properties), len(wantTypes), properties)
-	}
-	for name, wantType := range wantTypes {
-		property, ok := properties[name].(map[string]any)
-		if !ok {
-			t.Fatalf("property %q = %#v, want object", name, properties[name])
-		}
-		if property["type"] != wantType {
-			t.Fatalf("property %q type = %#v, want %q", name, property["type"], wantType)
-		}
-	}
-
-	requiredValues, ok := schema["required"].([]any)
-	if !ok {
-		t.Fatalf("required type = %T, want []any", schema["required"])
-	}
-	if len(requiredValues) != 3 {
-		t.Fatalf("required count = %d, want 3: %#v", len(requiredValues), requiredValues)
-	}
-	required := make(map[string]bool, len(requiredValues))
-	for _, value := range requiredValues {
-		name, ok := value.(string)
-		if !ok {
-			t.Fatalf("required value = %#v, want string", value)
-		}
-		required[name] = true
-	}
-	if len(required) != 3 || !required["task_id"] || !required["stage"] || !required["title"] {
-		t.Fatalf("required = %#v, want exactly task_id, stage, title", required)
-	}
-	if required["description"] || required["progress_percent"] {
-		t.Fatalf("optional properties unexpectedly required: %#v", required)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := findProgressTool(t, tt.name)
+			schema := tool.InputSchema.(map[string]any)
+			if schema["additionalProperties"] != false {
+				t.Fatalf("additionalProperties = %#v, want false", schema["additionalProperties"])
+			}
+			properties := schema["properties"].(map[string]any)
+			if len(properties) != len(tt.properties) {
+				t.Fatalf("properties = %#v", properties)
+			}
+			for name, wantType := range tt.properties {
+				property, ok := properties[name].(map[string]any)
+				if !ok || property["type"] != wantType {
+					t.Fatalf("property %s = %#v, want type %s", name, properties[name], wantType)
+				}
+			}
+			for _, removed := range []string{"title", "progress_percent", "percent"} {
+				if _, exists := properties[removed]; exists {
+					t.Fatalf("removed property %q remains in schema", removed)
+				}
+			}
+			required := map[string]bool{}
+			for _, raw := range schema["required"].([]any) {
+				required[raw.(string)] = true
+			}
+			if len(required) != len(tt.required) {
+				t.Fatalf("required = %#v", required)
+			}
+			for name := range tt.required {
+				if !required[name] {
+					t.Fatalf("required missing %s: %#v", name, required)
+				}
+			}
+		})
 	}
 }
 
-func TestLegacyProgressCompatibilityHandlerUsesStageFallback(t *testing.T) {
+func setupMCPTaskLifecycle(t *testing.T) (context.Context, string, string, func()) {
+	t.Helper()
 	_, _, repo, cleanup := setupAccountInfoTest(t)
-	defer cleanup()
 	userID := uuid.NewString()
 	project := createAccountInfoProject(t, repo, userID, "")
 	task := createAccountInfoTask(t, repo, userID, project.ID, "")
-	arguments, err := json.Marshal(map[string]any{
-		"task_id": task.ID,
-		"stage":   "writing",
-		"title":   "Writing",
-	})
-	if err != nil {
+	if err := repo.Tasks().UpdateStatus(context.Background(), task.ID, model.TaskStatusRunning); err != nil {
 		t.Fatal(err)
 	}
+	executionID := uuid.NewString()
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{
+		ID: executionID, TaskID: task.ID, Attempt: 1, Target: "test", Status: model.TaskExecutionRunning, Started: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.Tasks().SetCurrentExecution(context.Background(), task.ID, executionID); err != nil || !ok {
+		t.Fatalf("set current execution = %v, %v", ok, err)
+	}
+	return withMCPExecutionIdentity(context.Background(), userID, project.ID, task.ID, executionID), task.ID, executionID, cleanup
+}
 
-	result, err := progressUpdateHandler(context.Background(), &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Arguments: arguments},
-	})
+func lifecycleToolRequest(t *testing.T, arguments map[string]any) *mcp.CallToolRequest {
+	t.Helper()
+	raw, err := json.Marshal(arguments)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError {
-		t.Fatalf("progressUpdateHandler returned tool error: %#v", result.Content)
+	return &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: raw}}
+}
+
+func TestLifecycleProgressHandlersPersistPlanAndSequentialUpdate(t *testing.T) {
+	ctx, taskID, executionID, cleanup := setupMCPTaskLifecycle(t)
+	defer cleanup()
+	planResult, err := progressPlanHandler(ctx, lifecycleToolRequest(t, map[string]any{
+		"task_id": taskID, "execution_id": executionID,
+		"stages": []map[string]string{{"id": "research", "title": "研究素材"}, {"id": "writing", "title": "撰写内容"}},
+	}))
+	if err != nil || planResult.IsError {
+		t.Fatalf("set plan = %#v, %v", planResult, err)
 	}
-	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
-	if err != nil {
-		t.Fatal(err)
+	updateResult, err := progressUpdateHandler(ctx, lifecycleToolRequest(t, map[string]any{
+		"task_id": taskID, "execution_id": executionID, "stage": "research", "state": "active", "description": "正在核验来源",
+	}))
+	if err != nil || updateResult.IsError {
+		t.Fatalf("update stage = %#v, %v", updateResult, err)
 	}
-	if persisted.Progress != 40 || persisted.LatestProgress.Data().Percent != 40 {
-		t.Fatalf("legacy fallback progress = %d/%#v, want seednote writing percent 40", persisted.Progress, persisted.LatestProgress.Data())
+	data := decodeMCPMap(t, updateResult)
+	lifecycle := data["lifecycle"].(map[string]any)
+	if lifecycle["revision"] != float64(2) {
+		t.Fatalf("lifecycle = %#v", lifecycle)
+	}
+}
+
+func TestLifecycleProgressHandlersRequireMatchingExecutionIdentity(t *testing.T) {
+	ctx, taskID, executionID, cleanup := setupMCPTaskLifecycle(t)
+	defer cleanup()
+	for _, test := range []struct {
+		name    string
+		ctx     context.Context
+		handler func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)
+		args    map[string]any
+	}{
+		{
+			name: "missing identity", ctx: context.Background(), handler: progressPlanHandler,
+			args: map[string]any{"task_id": taskID, "execution_id": executionID, "stages": []map[string]string{{"id": "one", "title": "One"}, {"id": "two", "title": "Two"}}},
+		},
+		{
+			name: "execution mismatch", ctx: ctx, handler: progressPlanHandler,
+			args: map[string]any{"task_id": taskID, "execution_id": "wrong", "stages": []map[string]string{{"id": "one", "title": "One"}, {"id": "two", "title": "Two"}}},
+		},
+		{
+			name: "update mismatch", ctx: ctx, handler: progressUpdateHandler,
+			args: map[string]any{"task_id": taskID, "execution_id": "wrong", "stage": "one", "state": "active"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := test.handler(test.ctx, lifecycleToolRequest(t, test.args))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.IsError {
+				t.Fatalf("result = %#v, want tool error", result)
+			}
+		})
 	}
 }

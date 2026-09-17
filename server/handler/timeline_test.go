@@ -1,10 +1,15 @@
 package handler
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -29,6 +34,80 @@ func setupTestDBForHandler(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 	return db
+}
+
+func TestTimelineCurrentStagePrefersAttentionThenPending(t *testing.T) {
+	lifecycle := model.TaskLifecycle{Version: 1, Stages: []model.TaskLifecycleStage{
+		{ID: "research", Title: "研究素材", State: model.TaskLifecycleStateComplete},
+		{ID: "writing", Title: "撰写内容", State: model.TaskLifecycleStateBlocked},
+		{ID: "review", Title: "质量复核", State: model.TaskLifecycleStatePending},
+	}}
+	stage := timelineCurrentStage(lifecycle)
+	if stage == nil || stage.Title != "撰写内容" || stage.State != model.TaskLifecycleStateBlocked {
+		t.Fatalf("current stage = %#v", stage)
+	}
+}
+
+func TestTimelineCurrentStageSelectsCancellationPointBeforeSkippedTail(t *testing.T) {
+	lifecycle := model.TaskLifecycle{Version: 1, Stages: []model.TaskLifecycleStage{
+		{ID: "research", Title: "研究素材", State: model.TaskLifecycleStateComplete},
+		{ID: "writing", Title: "撰写内容", State: model.TaskLifecycleStateCancelled},
+		{ID: "review", Title: "质量复核", State: model.TaskLifecycleStateSkipped},
+	}}
+	stage := timelineCurrentStage(lifecycle)
+	if stage == nil || stage.Title != "撰写内容" || stage.State != model.TaskLifecycleStateCancelled {
+		t.Fatalf("current stage = %#v", stage)
+	}
+}
+
+func TestTimelineIncludesLifecycleForRunningTaskOutsideSelectedDateRange(t *testing.T) {
+	repo, logger := setupTimelineHandler(t)
+	ctx := t.Context()
+	userID := "user-running-stage"
+	project := &model.Project{ID: "project-running-stage", UserID: userID, Platform: model.ScopeArticle, Name: "Article", Status: model.ProjectStatusActive}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{
+		ID: "task-running-stage", UserID: userID, ProjectID: project.ID, Type: model.ScopeArticle,
+		Status: model.TaskStatusRunning, Prompt: "Running outside selected range",
+		CreatedAt: time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC),
+		Lifecycle: datatypes.NewJSONType(model.TaskLifecycle{Version: 1, Revision: 2, Stages: []model.TaskLifecycleStage{
+			{ID: "writing", Title: "撰写内容", Source: model.TaskLifecycleSourceAgent, Kind: model.TaskLifecycleKindWork, State: model.TaskLifecycleStateActive},
+		}}),
+	}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewTimelineHandler(repo, logger)
+	app := fiber.New()
+	app.Get("/timeline", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return handler.GetTimeline(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/timeline?from=2026-04-01&to=2026-04-30", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	var envelope struct {
+		Data struct {
+			Items []TimelineItem `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Items) != 1 || envelope.Data.Items[0].CurrentStage == nil {
+		t.Fatalf("timeline items = %#v, want running task with current stage", envelope.Data.Items)
+	}
+	if got := envelope.Data.Items[0].CurrentStage; got.Title != "撰写内容" || got.State != model.TaskLifecycleStateActive {
+		t.Fatalf("current stage = %#v", got)
+	}
 }
 
 func setupTimelineHandler(t *testing.T) (repository.Repository, *zerolog.Logger) {

@@ -144,9 +144,21 @@ function mockTask(task: Task) {
 }
 
 function taskWith(overrides: Partial<Task>): Task {
+  const status = overrides.status ?? mockTasks.items[0].status
+  const stageState = status === 'running' ? 'active'
+    : status === 'completed' ? 'complete'
+      : status === 'failed' ? 'failed'
+        : status === 'cancelled' ? 'cancelled' : 'pending'
   return {
     ...mockTasks.items[0],
     progress_log: undefined,
+    lifecycle: {
+      version: 1,
+      revision: 1,
+      execution_id: 'execution-1',
+      updated_at: '2026-09-17T08:00:00Z',
+      stages: [{ id: 'creation', title: '完成创作', source: 'agent', kind: 'work', state: stageState }],
+    },
     workflow_status: {
       version: '1',
       current_stage: 'writing',
@@ -211,7 +223,7 @@ function deferred<T>() {
 }
 
 async function openResumeDialog() {
-  fireEvent.click(await screen.findByRole('button', { name: '补充信息并继续' }))
+  fireEvent.click(await screen.findByRole('button', { name: '继续执行' }))
   const title = await screen.findByRole('heading', { name: '继续执行此任务' })
   return title.closest('[data-slot="dialog-content"]') as HTMLElement
 }
@@ -325,37 +337,44 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('region', { name: '任务交付状态' })).toHaveTextContent('核心交付完整')
-    expect(screen.getByRole('region', { name: '任务交付状态' })).toHaveTextContent('视觉部分完成')
-    expect(screen.getByText('请求的正文配图未全部生成。')).toBeInTheDocument()
-    expect(screen.getByText('文件 output/img_01.png 上传失败：HTTP 503')).toBeInTheDocument()
-    expect(screen.getByText('内容已完成，发布待处理', { selector: '[data-slot="badge"]' })).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '完成创作，已完成' }))
+    expect(screen.getByLabelText('内容验收结果')).toHaveTextContent('有警告')
+    expect(screen.getByLabelText('内容验收结果')).toHaveTextContent('请求的正文配图未全部生成。')
+    expect(screen.getByLabelText('内容验收结果')).toHaveTextContent('文件 output/img_01.png 上传失败：HTTP 503')
+    expect(screen.queryByText('内容已完成，发布待处理')).not.toBeInTheDocument()
+    await openTaskDetails('概览')
     const provider = screen.getByRole('region', { name: '供应商诊断' })
     expect(provider).toHaveTextContent('deepseek')
     expect(provider).toHaveTextContent('HTTP 400')
     expect(provider).toHaveTextContent('content_exists_risk')
     expect(provider).toHaveTextContent('写作')
     expect(provider).toHaveTextContent('供应商未说明')
-    expect(provider).toHaveTextContent('请求 ID 指纹 request-400')
+    expect(provider).toHaveTextContent('请求 ID 指纹')
+    expect(provider).toHaveTextContent('request-400')
     expect(provider).toHaveTextContent('供应商未披露具体片段')
   })
 
-  it('shows compact running progress and hides workflow stage grid', async () => {
+  it('shows the active lifecycle stage without percentage or tool noise', async () => {
     mockTask(taskWith({
       status: 'running',
-      progress: 42,
       progress_log: '准备素材\nUsing tool: Read',
-      latest_progress: { stage: 'writing', title: '正在写作正文', percent: 42 },
+      lifecycle: {
+        version: 1, revision: 3, execution_id: 'execution-1', updated_at: '2026-09-17T08:00:00Z',
+        stages: [
+          { id: 'research', title: '研究素材', source: 'agent', kind: 'work', state: 'complete' },
+          { id: 'writing', title: '正在写作正文', source: 'agent', kind: 'work', state: 'active', latest_update: '正在优化标题与段落结构' },
+          { id: 'review', title: '质量复核', source: 'agent', kind: 'work', state: 'pending' },
+        ],
+      },
       completed_at: '',
     }))
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('42%')).toBeInTheDocument()
-    const progressHeading = screen.getByRole('heading', { name: '正在写作正文' })
-    const progressSection = progressHeading.closest('section') as HTMLElement
-    // progress_log noise like "Using tool: ..." must NOT leak into the card.
+    const progressSection = (await screen.findByRole('button', { name: '正在写作正文，进行中' })).closest('section') as HTMLElement
+    expect(within(progressSection).getByText('正在优化标题与段落结构')).toBeInTheDocument()
     expect(within(progressSection).queryByText('Using tool: Read')).not.toBeInTheDocument()
+    expect(within(progressSection).queryByText(/%/)).not.toBeInTheDocument()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '任务结果' })).toBeInTheDocument()
@@ -397,13 +416,10 @@ describe('TaskDetailPage', () => {
   it('shows balanced context after results and opens logs in one action', async () => {
     mockTask(taskWith({
       status: 'running',
-      progress: 42,
       progress_log: '已读取参考素材\n正在写作正文',
-      latest_progress: {
-        stage: 'writing',
-        title: '正在写作正文',
-        description: '正在优化标题与段落结构',
-        percent: 42,
+      lifecycle: {
+        version: 1, revision: 2, execution_id: 'execution-1', updated_at: '2026-09-17T08:00:00Z',
+        stages: [{ id: 'writing', title: '正在写作正文', source: 'agent', kind: 'work', state: 'active', latest_update: '正在优化标题与段落结构' }],
       },
       input_attachments: [{ type: 'image', file_name: 'tea-reference.jpg' }],
       project_snapshot: {
@@ -834,7 +850,7 @@ describe('TaskDetailPage', () => {
     mockStreamTaskProgress.mockImplementation(async function* (_taskId, _token, signal) {
       if (!signal) return
       yield {
-        event: 'progress',
+        event: 'log',
         data: JSON.stringify('第一条持久化日志\n第二条持久化日志\n第三条新增日志'),
       }
       await waitForAbort(signal)
@@ -866,7 +882,7 @@ describe('TaskDetailPage', () => {
         return
       }
       yield {
-        event: 'progress',
+        event: 'log',
         data: JSON.stringify('第一条持久化日志\n第二条持久化日志'),
       }
       await waitForAbort(signal)
@@ -944,9 +960,11 @@ describe('TaskDetailPage', () => {
     Object.assign(navigator, { clipboard: { writeText } })
     mockTask(taskWith({
       status: 'pending',
-      progress: 42,
       progress_log: '## 阶段日志\n- 已完成选题',
-      latest_progress: { stage: 'writing', title: '正在写作正文', percent: 42 },
+      lifecycle: {
+        version: 1, revision: 1, execution_id: 'execution-1', updated_at: '2026-09-17T08:00:00Z',
+        stages: [{ id: 'writing', title: '正在写作正文', source: 'agent', kind: 'work', state: 'pending' }],
+      },
       input_attachments: [{ type: 'image', file_name: 'brief-reference.png' }],
       project_snapshot: {
         project_name: '创建时项目快照',
@@ -986,17 +1004,17 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('3:2')).toBeInTheDocument()
   })
 
-  it('hides the progress card after completion', async () => {
+  it('keeps the lifecycle rail after completion without a percentage', async () => {
     mockTask(taskWith({
       status: 'completed',
-      progress: 100,
-      progress_log: '[100%] 任务完成',
+      progress_log: '任务完成',
     }))
 
     render(<TaskDetailPage />)
 
-    await waitFor(() => expect(screen.getByText('已完成')).toBeInTheDocument())
-    expect(screen.queryByText('进度')).not.toBeInTheDocument()
+    await screen.findByRole('button', { name: '完成创作，已完成' })
+    expect(screen.getByRole('heading', { name: '执行进展' })).toBeInTheDocument()
+    expect(screen.queryByText(/100%/)).not.toBeInTheDocument()
     expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
     expect(screen.queryByText('结果生成后将在这里显示')).not.toBeInTheDocument()
   })
@@ -1004,7 +1022,6 @@ describe('TaskDetailPage', () => {
   it('shows review summary without terminal workflow stage grid', async () => {
     mockTask(taskWith({
       status: 'completed',
-      progress: 100,
       workflow_status: {
         version: 'creation_workflow_v1',
         current_stage: 'review',
@@ -1036,7 +1053,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const review = await screen.findByText('发布前检查')
+    fireEvent.click(await screen.findByRole('button', { name: '完成创作，已完成' }))
+    const review = await screen.findByText('内容验收')
     const files = await screen.findByText('交付成果 (1)')
     const moreDetails = await screen.findByRole('button', { name: /更多详情/ })
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -1052,7 +1070,6 @@ describe('TaskDetailPage', () => {
       id: 'task-1',
       title: '触发摘要组件失败',
       status: 'completed',
-      progress: 100,
       input_attachments: [{ type: 'image', file_name: 'front.png' }],
     }))
     vi.mocked(api.tasks.files).mockResolvedValue([
@@ -1084,7 +1101,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const taskStatus = await screen.findByText('已完成')
+    const taskStatus = await screen.findByText('已完成', { selector: '[data-slot="badge"]' })
     expect(taskStatus).toBeInTheDocument()
     const filesHeading = await screen.findByText('交付成果 (1)')
     expect(filesHeading).toBeInTheDocument()
@@ -1165,9 +1182,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('heading', { name: '续跑失败，历史交付已保留' })).toBeInTheDocument()
-    expect(screen.getByText('最新一次继续执行未完成；下方已有交付成果仍可预览和下载。')).toBeInTheDocument()
-    expect(screen.getByText('失败原因：runtime_failed')).toBeInTheDocument()
+    expect(await screen.findByText('执行失败')).toBeInTheDocument()
+    expect(screen.getByText('runtime_failed')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /下载交付成果/ })).toBeEnabled()
   })
 
@@ -1249,6 +1265,17 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       type: 'article',
       status: 'completed',
+      lifecycle: {
+        version: 1,
+        revision: 4,
+        execution_id: 'execution-1',
+        updated_at: '2026-09-17T08:00:00Z',
+        stages: [
+          { id: 'creation', title: '完成创作', source: 'agent', kind: 'work', state: 'complete' },
+          { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'complete', latest_update: '草稿已进入公众号后台' },
+          { id: 'system_publication', title: '正式发布', source: 'server', kind: 'publication', state: 'pending' },
+        ],
+      },
     }))
 
     vi.mocked(api.tasks.files).mockResolvedValue([{
@@ -1268,11 +1295,34 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const draftStatus = await screen.findByText('已进入草稿箱')
+    const draftStatus = await screen.findByRole('button', { name: '创建公众号草稿，已完成' })
     const deliveryHeading = await screen.findByText('交付成果 (1)')
     expect(draftStatus.compareDocumentPosition(deliveryHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByRole('button', { name: '立即检测' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '正式发布' })).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '公众号文章链接' })).not.toBeInTheDocument()
+  })
+
+  it('keeps streaming lifecycle events after creative completion while publication is pending', async () => {
+    mockTask(taskWith({
+      type: 'article',
+      status: 'completed',
+      lifecycle: {
+        version: 1,
+        revision: 4,
+        execution_id: 'execution-1',
+        updated_at: '2026-09-17T08:00:00Z',
+        stages: [
+          { id: 'creation', title: '完成创作', source: 'agent', kind: 'work', state: 'complete' },
+          { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'complete' },
+          { id: 'system_publication', title: '正式发布', source: 'server', kind: 'publication', state: 'pending' },
+        ],
+      },
+    }))
+
+    render(<TaskDetailPage />)
+
+    await screen.findByRole('button', { name: '正式发布' })
+    await waitFor(() => expect(mockStreamTaskProgress).toHaveBeenCalledWith('task-1', 'test-token', expect.any(AbortSignal)))
   })
 
   it('uses only the common delivery ZIP action for ecommerce files', async () => {
@@ -1386,7 +1436,6 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'completed',
-      progress: 100,
       prompt: '原始任务要求',
       project_id: 'ch-1',
       image_ratio: '16:9',
@@ -1463,7 +1512,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    await screen.findByText(/%/)
+    await screen.findByRole('button', { name: '完成创作，进行中' })
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '人工评价' })).not.toBeInTheDocument()
     expect(api.feedback.getTask).not.toHaveBeenCalled()
   })
@@ -1574,7 +1624,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const reopenTrigger = await screen.findByRole('button', { name: '补充信息并继续' })
+    const reopenTrigger = await screen.findByRole('button', { name: '继续执行' })
     fireEvent.click(reopenTrigger)
     const title = await screen.findByRole('heading', { name: '继续执行此任务' })
     const dialog = title.closest('[data-slot="dialog-content"]') as HTMLElement
@@ -1698,10 +1748,6 @@ describe('TaskDetailPage', () => {
   it.each(['running', 'pending'] as const)('shows only cancellation among task actions for a %s task', async (status) => {
     mockTask(taskWith({
       status,
-      progress: status === 'running' ? 42 : 0,
-      latest_progress: status === 'running'
-        ? { stage: 'writing', title: '正在写作正文', percent: 42 }
-        : undefined,
       completed_at: '',
     }))
 
@@ -1731,7 +1777,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByRole('button', { name: '删除任务' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()
-    expect(screen.getByText('执行已停止')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '完成创作，已取消' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
   })
@@ -1744,15 +1790,14 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '补充信息并继续' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '克隆任务' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除任务' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()
     expect(screen.getByText('执行失败')).toBeInTheDocument()
     expect(screen.getByText('模型超时')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '补充信息并继续' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: /返回任务列表/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /检查项目配置/ })).not.toBeInTheDocument()
   })
@@ -1782,7 +1827,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('任务未完成')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '完成创作，失败' })).toBeInTheDocument()
     expect(screen.getByText('服务端没有返回失败详情，可继续执行并补充说明。')).toBeInTheDocument()
     expect(screen.queryByText('失败原因')).not.toBeInTheDocument()
     expect(screen.queryByText(/工作目录已保留/)).not.toBeInTheDocument()
@@ -1931,7 +1976,6 @@ describe('TaskDetailPage', () => {
     })
     mockTask(taskWith({
       status: 'running',
-      progress: 10,
       progress_log: '## 阶段日志\n- 已完成选题\n```txt\nraw block\n```',
       completed_at: '',
     }))

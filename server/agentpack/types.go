@@ -1,9 +1,6 @@
 package agentpack
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "encoding/json"
 
 const (
 	KindPlugin  = "plugin"
@@ -14,26 +11,25 @@ const (
 )
 
 type Manifest struct {
-	ID                 string                     `yaml:"id" json:"id"`
-	Version            string                     `yaml:"version" json:"version"`
-	Kind               string                     `yaml:"kind" json:"kind"`
-	DisplayName        string                     `yaml:"display_name" json:"display_name"`
-	Description        string                     `yaml:"description" json:"description"`
-	Agent              AgentSpec                  `yaml:"agent" json:"agent"`
-	Bindings           Bindings                   `yaml:"bindings" json:"bindings"`
-	Runtime            RuntimeSpec                `yaml:"runtime" json:"runtime"`
-	Surfaces           []string                   `yaml:"surfaces" json:"surfaces"`
-	Features           []string                   `yaml:"features" json:"features,omitempty"`
-	BillingOperations  map[string]string          `yaml:"billing_operations" json:"billing_operations,omitempty"`
-	Progress           []ProgressStage            `yaml:"progress" json:"progress,omitempty"`
-	ProgressByTaskType map[string][]ProgressStage `yaml:"progress_by_task_type" json:"progress_by_task_type,omitempty"`
-	Artifacts          []ArtifactSpec             `yaml:"artifacts" json:"artifacts,omitempty"`
-	Delivery           []DeliverySpec             `yaml:"delivery" json:"delivery,omitempty"`
-	DeliveryByTaskType map[string][]DeliverySpec  `yaml:"delivery_by_task_type" json:"delivery_by_task_type,omitempty"`
-	SchemaFiles        SchemaRefs                 `yaml:"schemas" json:"-"`
-	Schemas            *SchemaDocuments           `yaml:"-" json:"schemas,omitempty"`
-	UI                 UISpec                     `yaml:"ui" json:"ui,omitempty"`
-	Digest             string                     `yaml:"-" json:"digest"`
+	ID                  string                    `yaml:"id" json:"id"`
+	Version             string                    `yaml:"version" json:"version"`
+	Kind                string                    `yaml:"kind" json:"kind"`
+	DisplayName         string                    `yaml:"display_name" json:"display_name"`
+	Description         string                    `yaml:"description" json:"description"`
+	Agent               AgentSpec                 `yaml:"agent" json:"agent"`
+	Bindings            Bindings                  `yaml:"bindings" json:"bindings"`
+	Runtime             RuntimeSpec               `yaml:"runtime" json:"runtime"`
+	Surfaces            []string                  `yaml:"surfaces" json:"surfaces"`
+	Features            []string                  `yaml:"features" json:"features,omitempty"`
+	BillingOperations   map[string]string         `yaml:"billing_operations" json:"billing_operations,omitempty"`
+	Artifacts           []ArtifactSpec            `yaml:"artifacts" json:"artifacts,omitempty"`
+	ArtifactsByTaskType map[string][]ArtifactSpec `yaml:"artifacts_by_task_type" json:"artifacts_by_task_type,omitempty"`
+	Delivery            []DeliverySpec            `yaml:"delivery" json:"delivery,omitempty"`
+	DeliveryByTaskType  map[string][]DeliverySpec `yaml:"delivery_by_task_type" json:"delivery_by_task_type,omitempty"`
+	SchemaFiles         SchemaRefs                `yaml:"schemas" json:"-"`
+	Schemas             *SchemaDocuments          `yaml:"-" json:"schemas,omitempty"`
+	UI                  UISpec                    `yaml:"ui" json:"ui,omitempty"`
+	Digest              string                    `yaml:"-" json:"digest"`
 
 	dir string
 }
@@ -56,14 +52,6 @@ type RuntimeSpec struct {
 	Profile  string `yaml:"profile" json:"profile,omitempty"`
 	Adapter  string `yaml:"adapter" json:"adapter,omitempty"`
 	MaxTurns int    `yaml:"max_turns" json:"max_turns,omitempty"`
-}
-
-type ProgressStage struct {
-	ID                string   `yaml:"id" json:"id"`
-	Title             string   `yaml:"title" json:"title"`
-	ActivePercent     int      `yaml:"active_percent" json:"active_percent"`
-	CompletePercent   int      `yaml:"complete_percent" json:"complete_percent"`
-	RequiredArtifacts []string `yaml:"required_artifacts,omitempty" json:"required_artifacts,omitempty"`
 }
 
 type ArtifactSpec struct {
@@ -108,22 +96,6 @@ type Catalog struct {
 	byProjectPlatform map[string]int
 }
 
-func (m Manifest) ProgressStage(id string) (ProgressStage, bool) {
-	for _, stage := range m.Progress {
-		if stage.ID == id {
-			return stage, true
-		}
-	}
-	return ProgressStage{}, false
-}
-
-func (m Manifest) ProgressForTaskType(taskType string) []ProgressStage {
-	if progress, ok := m.ProgressByTaskType[taskType]; ok {
-		return progress
-	}
-	return m.Progress
-}
-
 // DeliveryForTaskType returns the task-type-specific delivery contract when
 // one is declared, otherwise the Pack-wide contract.
 func (m Manifest) DeliveryForTaskType(taskType string) []DeliverySpec {
@@ -133,57 +105,21 @@ func (m Manifest) DeliveryForTaskType(taskType string) []DeliverySpec {
 	return m.Delivery
 }
 
-// RequiredArtifactsForTaskType resolves the paths named by the task's frozen
-// progress contract into role and MIME-aware artifact specifications.
-func (m Manifest) RequiredArtifactsForTaskType(taskType string) ([]ArtifactSpec, error) {
-	byPath := make(map[string]ArtifactSpec, len(m.Artifacts)+len(m.DeliveryForTaskType(taskType)))
-	for _, artifact := range m.Artifacts {
-		byPath[artifact.Path] = artifact
+// ArtifactsForTaskType returns a complete task-type override when present.
+func (m Manifest) ArtifactsForTaskType(taskType string) []ArtifactSpec {
+	if artifacts, ok := m.ArtifactsByTaskType[taskType]; ok {
+		return artifacts
 	}
-	for _, delivery := range m.DeliveryForTaskType(taskType) {
-		if _, exists := byPath[delivery.Path]; !exists {
-			byPath[delivery.Path] = ArtifactSpec{
-				Role:     delivery.Role,
-				Path:     delivery.Path,
-				MIMEType: delivery.MIMEType,
-			}
-		}
-	}
+	return m.Artifacts
+}
 
-	progress, taskTypeOverride := m.ProgressByTaskType[taskType]
-	if !taskTypeOverride {
-		progress = m.Progress
-	}
-	hasProgressRequirements := false
-	for _, stage := range progress {
-		if len(stage.RequiredArtifacts) > 0 {
-			hasProgressRequirements = true
-			break
-		}
-	}
-	seen := make(map[string]struct{})
+// RequiredArtifactsForTaskType derives final delivery requirements only from
+// the selected artifact contract. Runtime stages never affect validation.
+func (m Manifest) RequiredArtifactsForTaskType(taskType string) ([]ArtifactSpec, error) {
 	required := make([]ArtifactSpec, 0)
-	if !taskTypeOverride || !hasProgressRequirements {
-		for _, artifact := range m.Artifacts {
-			if !artifact.Required {
-				continue
-			}
+	for _, artifact := range m.ArtifactsForTaskType(taskType) {
+		if artifact.Required {
 			required = append(required, artifact)
-			seen[artifact.Path] = struct{}{}
-		}
-	}
-	for _, stage := range progress {
-		for _, artifactPath := range stage.RequiredArtifacts {
-			if _, duplicate := seen[artifactPath]; duplicate {
-				continue
-			}
-			spec, ok := byPath[artifactPath]
-			if !ok {
-				return nil, fmt.Errorf("required artifact %q has no role and MIME contract", artifactPath)
-			}
-			spec.Required = true
-			required = append(required, spec)
-			seen[artifactPath] = struct{}{}
 		}
 	}
 	return required, nil

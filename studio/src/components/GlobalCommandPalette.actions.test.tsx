@@ -34,7 +34,6 @@ vi.mock('@/lib/api', async () => {
             title: '失败文章',
             prompt: '失败任务',
             status: 'failed',
-            progress: 0,
             error_message: '模型超时',
             plan_id: null,
             project_id: 'project-1',

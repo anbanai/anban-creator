@@ -138,49 +138,42 @@ describe("validateBootstrapResponse", () => {
       id: "article", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "article" }, bindings: { task_types: ["article"] },
       runtime: { profile: "article", adapter: "standard" },
-      progress: [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100 }],
+      artifacts: [{ role: "final", path: "output/final.md", required: true }],
     }] };
 
     expect(() => validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog)).toThrow("Agent Pack identity");
   });
 
-  test("rejects malformed Agent Pack progress contracts", () => {
+  test("rejects malformed Agent Pack artifact contracts", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
     const basePack = {
       id: "article", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "article" }, bindings: { task_types: ["article"] },
       runtime: { profile: "article", adapter: "standard" },
     };
-    const invalidProgress = [
+    const invalidArtifacts = [
       undefined,
-      [{ id: "", title: "Research", active_percent: 10, complete_percent: 100 }],
-      [{ id: "research", title: "", active_percent: 10, complete_percent: 100 }],
-      [{ id: "research", title: "Research", active_percent: 10.5, complete_percent: 100 }],
-      [{ id: "research", title: "Research", active_percent: -1, complete_percent: 100 }],
-      [{ id: "research", title: "Research", active_percent: 30, complete_percent: 20 }],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 101 }],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: "output/a.md" }],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: [1] }],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 90 }],
+      [{ role: "", path: "output/a.md", required: true }],
+      [{ role: "final", path: "", required: true }],
+      [{ role: "final", path: "output/a.md", required: "yes" }],
+      [{ role: "final", path: "/tmp/a.md", required: true }],
+      [{ role: "final", path: "../a.md", required: true }],
+      [{ role: "final", path: "output/tmp/../a.md", required: true }],
+      [{ role: "final", path: "output//a.md", required: true }],
+      [{ role: "final", path: "output\\a.md", required: true }],
       [
-        { id: "research", title: "Research", active_percent: 10, complete_percent: 60 },
-        { id: "writing", title: "Writing", active_percent: 20, complete_percent: 50 },
-        { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100 },
+        { role: "first", path: "output/a.md", required: true },
+        { role: "second", path: "output/a.md", required: false },
       ],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["/tmp/a.md"] }],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["../a.md"] }],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output/tmp/../a.md"] }],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output//a.md"] }],
-      [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100, required_artifacts: ["output\\a.md"] }],
     ];
 
-    for (const progress of invalidProgress) {
-      const catalog = { packs: [{ ...basePack, ...(progress === undefined ? {} : { progress }) }] } as unknown as AgentPackCatalog;
-      expect(() => validateAgentPackCatalog(response, catalog)).toThrow("progress");
+    for (const artifacts of invalidArtifacts) {
+      const catalog = { packs: [{ ...basePack, ...(artifacts === undefined ? {} : { artifacts }) }] } as unknown as AgentPackCatalog;
+      expect(() => validateAgentPackCatalog(response, catalog)).toThrow("artifact");
     }
   });
 
-  test("resolves a task-specific progress contract without mutating the Catalog Pack", () => {
+  test("resolves a task-specific artifact contract without mutating the Catalog Pack", () => {
     const response = validateBootstrapResponse("execution-1", {
       ...validResponse(),
       task_type: "viral_analysis",
@@ -188,81 +181,73 @@ describe("validateBootstrapResponse", () => {
       runtime_profile: "seednote",
       agent_flag: "anban:seednote",
     });
-    const defaultProgress = [
-      { id: "research", title: "Research", active_percent: 5, complete_percent: 25 },
-      { id: "writing", title: "Writing", active_percent: 35, complete_percent: 80 },
-      { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100, required_artifacts: ["output/content.md", "output/image-plan.md"] },
+    const defaultArtifacts = [
+      { role: "content", path: "output/content.md", required: true },
+      { role: "image_plan", path: "output/image-plan.md", required: true },
     ];
-    const viralProgress = [
-      { id: "research", title: "Research", active_percent: 5, complete_percent: 40 },
-      { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100, required_artifacts: ["output/source-analysis.md", "output/viral-template.json"] },
+    const viralArtifacts = [
+      { role: "analysis", path: "output/source-analysis.md", required: true },
+      { role: "template", path: "output/viral-template.json", required: true },
     ];
     const pack = {
       id: "seednote", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "seednote" }, bindings: { task_types: ["seednote", "viral_analysis"] },
       runtime: { profile: "seednote", adapter: "standard" },
-      progress: defaultProgress,
-      progress_by_task_type: { viral_analysis: viralProgress },
+      artifacts: defaultArtifacts,
+      artifacts_by_task_type: { viral_analysis: viralArtifacts },
     };
 
     const resolved = validateAgentPackCatalog(response, { packs: [pack] } as unknown as AgentPackCatalog);
 
     expect(resolved).not.toBe(pack);
-    expect(resolved.progress).toEqual(viralProgress);
-    expect(pack.progress).toBe(defaultProgress);
+    expect(resolved.artifacts).toEqual(viralArtifacts);
+    expect(pack.artifacts).toBe(defaultArtifacts);
 
-    resolved.progress[0]!.title = "Changed";
-    resolved.progress[1]!.required_artifacts!.push("output/changed.json");
-    expect(viralProgress[0]!.title).toBe("Research");
-    expect(viralProgress[1]!.required_artifacts).toEqual(["output/source-analysis.md", "output/viral-template.json"]);
+    resolved.artifacts[0]!.role = "changed";
+    expect(viralArtifacts[0]!.role).toBe("analysis");
   });
 
-  test("shared progress resolution selects overrides and falls back to an isolated default", () => {
+  test("shared artifact resolution selects overrides and falls back to an isolated default", () => {
     const pack = {
       id: "seednote", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "seednote" }, bindings: { task_types: ["seednote", "viral_analysis"] },
       runtime: { profile: "seednote", adapter: "standard" },
-      progress: [
-        { id: "research", title: "Research", active_percent: 5, complete_percent: 25 },
-        { id: "writing", title: "Writing", active_percent: 35, complete_percent: 80 },
-        { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100 },
+      artifacts: [
+        { role: "content", path: "output/content.md", required: true },
+        { role: "image_plan", path: "output/image-plan.md", required: true },
       ],
-      progress_by_task_type: {
+      artifacts_by_task_type: {
         viral_analysis: [
-          { id: "research", title: "Viral Research", active_percent: 5, complete_percent: 80 },
-          { id: "delivery", title: "Viral Delivery", active_percent: 90, complete_percent: 100 },
+          { role: "analysis", path: "output/source-analysis.md", required: true },
+          { role: "template", path: "output/viral-template.json", required: true },
         ],
       },
     } as AgentPackCatalog["packs"][number];
 
-    expect(resolveAgentPackForTaskType(pack, "viral_analysis").progress.map((stage) => stage.id)).toEqual(["research", "delivery"]);
+    expect(resolveAgentPackForTaskType(pack, "viral_analysis").artifacts.map((artifact) => artifact.path)).toEqual(["output/source-analysis.md", "output/viral-template.json"]);
     const fallback = resolveAgentPackForTaskType(pack, "seednote");
-    expect(fallback.progress.map((stage) => stage.id)).toEqual(["research", "writing", "delivery"]);
-    expect(fallback.progress).not.toBe(pack.progress);
+    expect(fallback.artifacts.map((artifact) => artifact.path)).toEqual(["output/content.md", "output/image-plan.md"]);
+    expect(fallback.artifacts).not.toBe(pack.artifacts);
   });
 
-  test("rejects malformed task-specific progress contracts", () => {
+  test("rejects malformed task-specific artifact contracts", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
     const basePack = {
       id: "article", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "article" }, bindings: { task_types: ["article"] },
       runtime: { profile: "article", adapter: "standard" },
-      progress: [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100 }],
+      artifacts: [{ role: "final", path: "output/final.md", required: true }],
     };
     const invalidOverrides = [
       [],
-      { unknown: [{ id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100 }] },
+      { unknown: [{ role: "final", path: "output/final.md", required: true }] },
       { article: [] },
-      { article: [
-        { id: "research", title: "Research", active_percent: 10, complete_percent: 60 },
-        { id: "delivery", title: "Delivery", active_percent: 40, complete_percent: 100 },
-      ] },
-      { article: [{ id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100, required_artifacts: ["../secret.txt"] }] },
+      { article: [{ role: "final", path: "../secret.txt", required: true }] },
     ];
 
-    for (const progress_by_task_type of invalidOverrides) {
-      const catalog = { packs: [{ ...basePack, progress_by_task_type }] } as unknown as AgentPackCatalog;
-      expect(() => validateAgentPackCatalog(response, catalog)).toThrow("progress");
+    for (const artifacts_by_task_type of invalidOverrides) {
+      const catalog = { packs: [{ ...basePack, artifacts_by_task_type }] } as unknown as AgentPackCatalog;
+      expect(() => validateAgentPackCatalog(response, catalog)).toThrow("artifact");
     }
   });
 

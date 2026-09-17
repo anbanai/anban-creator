@@ -13,17 +13,38 @@ import (
 
 // TimelineItem represents a unified item in the timeline view.
 type TimelineItem struct {
-	ID          string     `json:"id"`
-	Type        string     `json:"type"`         // "task" or "plan"
-	ContentType string     `json:"content_type"` // "seednote", "article"
-	Title       string     `json:"title"`
-	Status      string     `json:"status"`
-	ProjectID   string     `json:"project_id,omitempty"`
-	ProjectName string     `json:"project_name,omitempty"`
-	Platform    string     `json:"platform,omitempty"`
-	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID           string             `json:"id"`
+	Type         string             `json:"type"`         // "task" or "plan"
+	ContentType  string             `json:"content_type"` // "seednote", "article"
+	Title        string             `json:"title"`
+	Status       string             `json:"status"`
+	ProjectID    string             `json:"project_id,omitempty"`
+	ProjectName  string             `json:"project_name,omitempty"`
+	Platform     string             `json:"platform,omitempty"`
+	ScheduledAt  *time.Time         `json:"scheduled_at,omitempty"`
+	CompletedAt  *time.Time         `json:"completed_at,omitempty"`
+	CreatedAt    time.Time          `json:"created_at"`
+	CurrentStage *TimelineTaskStage `json:"current_stage,omitempty"`
+}
+
+type TimelineTaskStage struct {
+	Title string `json:"title"`
+	State string `json:"state"`
+}
+
+func timelineCurrentStage(lifecycle model.TaskLifecycle) *TimelineTaskStage {
+	if lifecycle.Version != model.TaskLifecycleVersion || len(lifecycle.Stages) == 0 {
+		return nil
+	}
+	for _, state := range []string{model.TaskLifecycleStateActive, model.TaskLifecycleStateBlocked, model.TaskLifecycleStateFailed, model.TaskLifecycleStateCancelled, model.TaskLifecycleStatePending} {
+		for _, stage := range lifecycle.Stages {
+			if stage.State == state {
+				return &TimelineTaskStage{Title: stage.Title, State: stage.State}
+			}
+		}
+	}
+	stage := lifecycle.Stages[len(lifecycle.Stages)-1]
+	return &TimelineTaskStage{Title: stage.Title, State: stage.State}
 }
 
 // TimelineHandler handles the timeline API endpoint.
@@ -109,16 +130,17 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			platform = ch.Platform
 		}
 		items = append(items, TimelineItem{
-			ID:          t.ID,
-			Type:        "task",
-			ContentType: t.Type,
-			Title:       title,
-			Status:      t.Status,
-			ProjectID:   t.ProjectID,
-			ProjectName: projectName,
-			Platform:    platform,
-			CompletedAt: t.CompletedAt,
-			CreatedAt:   t.CreatedAt,
+			ID:           t.ID,
+			Type:         "task",
+			ContentType:  t.Type,
+			Title:        title,
+			Status:       t.Status,
+			ProjectID:    t.ProjectID,
+			ProjectName:  projectName,
+			Platform:     platform,
+			CompletedAt:  t.CompletedAt,
+			CreatedAt:    t.CreatedAt,
+			CurrentStage: timelineCurrentStage(t.Lifecycle.Data()),
 		})
 	}
 
@@ -188,15 +210,16 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 				platform = ch.Platform
 			}
 			items = append(items, TimelineItem{
-				ID:          t.ID,
-				Type:        "task",
-				ContentType: t.Type,
-				Title:       title,
-				Status:      t.Status,
-				ProjectID:   t.ProjectID,
-				ProjectName: projectName,
-				Platform:    platform,
-				CreatedAt:   t.CreatedAt,
+				ID:           t.ID,
+				Type:         "task",
+				ContentType:  t.Type,
+				Title:        title,
+				Status:       t.Status,
+				ProjectID:    t.ProjectID,
+				ProjectName:  projectName,
+				Platform:     platform,
+				CreatedAt:    t.CreatedAt,
+				CurrentStage: timelineCurrentStage(t.Lifecycle.Data()),
 			})
 		}
 	}

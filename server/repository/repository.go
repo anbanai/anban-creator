@@ -104,19 +104,7 @@ type TaskRepository interface {
 	UpdateStatusAndError(ctx context.Context, id, status, errorMsg string) error
 	UpdateProgressLog(ctx context.Context, id, log string) error
 	AppendProgressLog(ctx context.Context, id, message string) error
-	UpdateProgressColumn(ctx context.Context, id string, percent int) error
-	// UpdateLatestProgress writes the latest structured progress payload to the
-	// dedicated latest_progress JSON column. Called by TaskService.UpdateProgress
-	// so Studio can render the current stage without parsing progress_log.
-	UpdateLatestProgress(ctx context.Context, id string, payload model.ProgressPayload) error
-	// AdvanceStructuredProgress atomically advances the structured progress sequence
-	// and its latest payload/log for the current running execution. Lower,
-	// duplicate, stale-execution, and terminal-task events are ignored.
-	AdvanceStructuredProgress(ctx context.Context, id, executionID string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error)
-	// GetTypeAndProgress loads only the type and progress columns for a task.
-	// Used on hot paths (e.g. UpdateProgress) where loading the full row —
-	// including the longtext progress_log — would be wasteful.
-	GetTypeAndProgress(ctx context.Context, id string) (taskType string, progress int, err error)
+	UpdateLifecycle(ctx context.Context, id, executionID string, lifecycle model.TaskLifecycle) (bool, error)
 	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)

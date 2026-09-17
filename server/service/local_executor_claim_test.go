@@ -1529,7 +1529,7 @@ func TestCompleteLocalTaskConcurrentWinnerOwnsTerminalStateAndEvidence(t *testin
 // race detector without treating SQLite's single-writer behavior as MySQL
 // deadlock evidence.
 func TestCompleteLocalTaskConcurrentWithAgentRecordersLeavesLegalTerminalState(t *testing.T) {
-	for _, recorder := range []string{"legacy heartbeat", "structured progress"} {
+	for _, recorder := range []string{"heartbeat", "lifecycle"} {
 		t.Run(recorder, func(t *testing.T) {
 			svc, repo := setupTaskServiceWithEnqueuer(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1543,16 +1543,25 @@ func TestCompleteLocalTaskConcurrentWithAgentRecordersLeavesLegalTerminalState(t
 				t.Fatalf("load claimed task: task=%#v err=%v", task, err)
 			}
 			executionID := *task.CurrentExecutionID
+			if recorder == "lifecycle" {
+				if _, err := svc.SetTaskProgressPlan(ctx, taskID, executionID, []model.TaskLifecyclePlanStage{
+					{ID: "writing", Title: "笔记创作"},
+					{ID: "delivery", Title: "交付验收"},
+				}); err != nil {
+					t.Fatalf("set lifecycle plan: %v", err)
+				}
+			}
 			errs := make(chan error, 2)
 			go func() {
 				errs <- svc.CompleteLocalTask(ctx, taskID, executionID, &agent.ExecutionResult{Success: true, LogText: "done"})
 			}()
 			go func() {
-				if recorder == "legacy heartbeat" {
+				if recorder == "heartbeat" {
 					errs <- svc.UpdateAgentHeartbeat(ctx, taskID, executionID)
 					return
 				}
-				errs <- svc.UpdateProgressFromAgent(ctx, taskID, executionID, "writing", "active", "笔记创作", "writing", 35)
+				_, err := svc.UpdateTaskProgress(ctx, taskID, executionID, "writing", model.TaskLifecycleStateActive, "writing")
+				errs <- err
 			}()
 
 			for range 2 {

@@ -1,15 +1,9 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import WechatAnalyticsPanel from './WechatAnalyticsPanel'
-import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
-
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
-
-vi.mock('sonner', () => ({
-  toast: { error: toastError },
-}))
+import { render } from '@/test/test-utils'
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -17,19 +11,8 @@ vi.mock('@/lib/api', async () => {
     ...actual,
     api: {
       ...actual.api,
-      tasks: {
-        ...actual.api.tasks,
-        getWechatPublication: vi.fn(),
-        reconcileWechat: vi.fn(),
-        publishWechat: vi.fn(),
-        retryWechatPublish: vi.fn(),
-        selectWechatArticle: vi.fn(),
-        recoverWechatPublication: vi.fn(),
-      },
-      wechatAnalytics: {
-        ...actual.api.wechatAnalytics,
-        getByTask: vi.fn(),
-      },
+      tasks: { ...actual.api.tasks, getWechatPublication: vi.fn() },
+      wechatAnalytics: { ...actual.api.wechatAnalytics, getByTask: vi.fn() },
     },
   }
 })
@@ -37,449 +20,39 @@ vi.mock('@/lib/api', async () => {
 describe('WechatAnalyticsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(api.tasks.getWechatPublication).mockReset().mockResolvedValue({
-      id: 'publication-1',
-      task_id: 'task-1',
-      project_id: 'project-1',
-      source: 'wechat_console',
-      status: 'drafted',
-      draft_media_id: 'draft-media-1',
-      draft_title: '每日内容复盘',
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'drafted',
     })
-    vi.mocked(api.tasks.reconcileWechat).mockResolvedValue({ reconciled: true })
-    vi.mocked(api.tasks.publishWechat).mockResolvedValue({
-      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'publishing',
-    })
-    vi.mocked(api.tasks.retryWechatPublish).mockResolvedValue({
-      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'publishing',
-    })
-    vi.mocked(api.tasks.recoverWechatPublication).mockResolvedValue({ status: 'blocked', attempted: false })
     vi.mocked(api.wechatAnalytics.getByTask).mockResolvedValue({ series: [] })
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('does not query lifecycle state when WeChat publishing is disabled', () => {
+  it('does not load publication data when WeChat publishing is disabled', () => {
     render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'disabled' }} />)
-
     expect(api.tasks.getWechatPublication).not.toHaveBeenCalled()
-    expect(screen.queryByText('公众号发布状态加载中')).not.toBeInTheDocument()
   })
 
-  it('treats a lifecycle 404 as an expected empty state', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
-
-    render(<WechatAnalyticsPanel taskId="task-1" />)
-
-    expect(await screen.findByText('该任务尚未创建公众号草稿。')).toBeInTheDocument()
-    expect(screen.queryByText('公众号发布状态暂时无法加载，请稍后重试。')).not.toBeInTheDocument()
-  })
-
-  it('explains that automatic publishing never started when draft creation failed', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
-
-    render(
-      <WechatAnalyticsPanel
-        taskId="task-1"
-        projectConfig={{ wechat_publish_mode: 'api_confirmed' }}
-        taskOutcome={{
-          core_delivery: { status: 'complete' },
-          visual: { status: 'complete' },
-          review: { status: 'passed' },
-          publication: {
-            status: 'failed',
-            code: 'create_draft_invalid_payload',
-            message: '草稿内容或图片不符合公众号投递要求。',
-          },
-          warnings: [],
-        }}
-      />,
-    )
-
-    expect(await screen.findByText('草稿未创建')).toBeInTheDocument()
-    expect(screen.getByText('草稿内容或图片不符合公众号投递要求。')).toBeInTheDocument()
-    expect(screen.queryByText('该任务尚未创建公众号草稿。')).not.toBeInTheDocument()
-  })
-
-  it('does not invite a duplicate submission while an automatic draft result is uncertain', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
-
-    render(
-      <WechatAnalyticsPanel
-        taskId="task-1"
-        projectConfig={{ wechat_publish_mode: 'api_confirmed' }}
-        taskOutcome={{
-          core_delivery: { status: 'complete' },
-          visual: { status: 'complete' },
-          review: { status: 'passed' },
-          publication: { status: 'ambiguous' },
-          warnings: [],
-        }}
-      />,
-    )
-
-    expect(await screen.findByText('草稿状态待核对')).toBeInTheDocument()
-    expect(screen.getByText('微信是否收到请求暂时无法确认，请先到公众号后台核对草稿箱。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '打开公众号后台' })).toHaveAttribute('href', 'https://mp.weixin.qq.com/')
-  })
-
-  it('requires a manual WeChat check after unknown reconciliation expires without offering a duplicate retry', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
-
-    render(
-      <WechatAnalyticsPanel
-        taskId="task-1"
-        taskOutcome={{
-          core_delivery: { status: 'complete' },
-          visual: { status: 'complete' },
-          review: { status: 'passed' },
-          publication: {
-            status: 'failed',
-            attempted: true,
-            code: 'create_draft_reconciliation_failed',
-            action: 'check_wechat',
-          },
-          warnings: [],
-        }}
-      />,
-    )
-
-    expect(await screen.findByText('草稿状态待核对')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '打开公众号后台' })).toHaveAttribute('href', 'https://mp.weixin.qq.com/')
-    expect(screen.queryByRole('button', { name: '重新检查并继续发布' })).not.toBeInTheDocument()
-  })
-
-  it('does not describe a successful draft outcome as missing when lifecycle details return 404', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
-
-    render(
-      <WechatAnalyticsPanel
-        taskId="task-1"
-        taskOutcome={{
-          core_delivery: { status: 'complete' },
-          visual: { status: 'complete' },
-          review: { status: 'passed' },
-          publication: { status: 'succeeded' },
-          warnings: [],
-        }}
-      />,
-    )
-
-    expect(await screen.findByText('草稿已进入公众号草稿箱')).toBeInTheDocument()
-    expect(screen.getByText('草稿详情暂时无法加载，请稍后刷新。')).toBeInTheDocument()
-    expect(screen.queryByText('本次未创建公众号草稿。')).not.toBeInTheDocument()
-  })
-
-  it('offers one visual recovery action for a blocked publication', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
-    render(
-      <WechatAnalyticsPanel
-        taskId="task-1"
-        taskOutcome={{
-          core_delivery: { status: 'complete' },
-          visual: { status: 'partial' },
-          review: { status: 'passed' },
-          publication: {
-            status: 'blocked', attempted: false, action: 'retry_visuals',
-            message: '封面生成超时，微信尚未收到请求',
-          },
-          warnings: [],
-        }}
-      />,
-    )
-
-    expect(await screen.findByText('草稿未创建')).toBeInTheDocument()
-    expect(screen.getByText('封面生成超时，微信尚未收到请求')).toBeInTheDocument()
-    const button = screen.getByRole('button', { name: '重新生成图片并继续发布' })
-    expect(screen.getAllByRole('button', { name: '重新生成图片并继续发布' })).toHaveLength(1)
-    fireEvent.click(button)
-    await waitFor(() => expect(api.tasks.recoverWechatPublication).toHaveBeenCalledWith('task-1'))
-    expect(screen.queryByRole('button', { name: '打开公众号后台' })).not.toBeInTheDocument()
-  })
-
-  it('shows a visible error when publication recovery fails', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
-    vi.mocked(api.tasks.recoverWechatPublication).mockRejectedValue(new Error('queue unavailable'))
-    render(
-      <WechatAnalyticsPanel
-        taskId="task-1"
-        taskOutcome={{
-          core_delivery: { status: 'complete' }, visual: { status: 'partial' }, review: { status: 'passed' },
-          publication: { status: 'blocked', attempted: false, action: 'retry_visuals' }, warnings: [],
-        }}
-      />,
-    )
-    fireEvent.click(await screen.findByRole('button', { name: '重新生成图片并继续发布' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('恢复发布失败，请稍后重试。')
-  })
-
-  it('offers task-level draft recovery when an unsupported lifecycle row already exists', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
-      id: 'publication-1',
-      task_id: 'task-1',
-      project_id: 'project-1',
-      source: 'anban_api',
-      status: 'unsupported',
-      wechat_status_code: 40164,
-    })
-    render(
-      <WechatAnalyticsPanel
-        taskId="task-1"
-        taskOutcome={{
-          core_delivery: { status: 'complete' }, visual: { status: 'complete' }, review: { status: 'passed' },
-          publication: { status: 'failed', attempted: true, action: 'retry_draft' }, warnings: [],
-        }}
-      />,
-    )
-
-    fireEvent.click(await screen.findByRole('button', { name: '重新检查并继续发布' }))
-    await waitFor(() => expect(api.tasks.recoverWechatPublication).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(api.tasks.getWechatPublication).toHaveBeenCalledTimes(2))
-    expect(screen.queryByText('该任务尚未创建公众号草稿。')).not.toBeInTheDocument()
-  })
-
-  it('disables existing-row recovery while pending and shows its failure', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
-      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api',
-      status: 'unsupported', wechat_status_code: 40164,
-    })
-    let rejectRecovery!: (error: Error) => void
-    vi.mocked(api.tasks.recoverWechatPublication).mockImplementation(() => new Promise((_, reject) => {
-      rejectRecovery = reject
-    }))
-    render(
-      <WechatAnalyticsPanel
-        taskId="task-1"
-        taskOutcome={{
-          core_delivery: { status: 'complete' }, visual: { status: 'complete' }, review: { status: 'passed' },
-          publication: { status: 'failed', attempted: true, action: 'retry_draft' }, warnings: [],
-        }}
-      />,
-    )
-
-    const button = await screen.findByRole('button', { name: '重新检查并继续发布' })
-    fireEvent.click(button)
-    await waitFor(() => expect(button).toBeDisabled())
-    fireEvent.click(button)
-    expect(api.tasks.recoverWechatPublication).toHaveBeenCalledTimes(1)
-    await act(async () => rejectRecovery(new Error('queue unavailable')))
-    expect(await screen.findByRole('alert')).toHaveTextContent('恢复发布失败，请稍后重试。')
-  })
-
-  it('polls nonterminal lifecycle state until it becomes terminal', async () => {
-    vi.useFakeTimers()
-    vi.mocked(api.tasks.getWechatPublication)
-      .mockResolvedValueOnce({
-        id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'publishing',
-      })
-      .mockResolvedValueOnce({
-        id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'published',
-      })
-
-    render(<WechatAnalyticsPanel taskId="task-1" />)
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    expect(screen.getByText('微信发布处理中')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '立即检测' })).not.toBeInTheDocument()
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000)
-    })
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0)
-    })
-    expect(api.tasks.getWechatPublication).toHaveBeenCalledTimes(2)
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000)
-    })
-    expect(api.tasks.getWechatPublication).toHaveBeenCalledTimes(2)
-  })
-
-  it('shows lifecycle mutation failures', async () => {
-    vi.mocked(api.tasks.reconcileWechat).mockRejectedValue(new Error('provider unavailable'))
-    render(<WechatAnalyticsPanel taskId="task-1" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '立即检测' }))
-    expect(await screen.findByText('公众号发布操作失败，请稍后重试。')).toBeInTheDocument()
-  })
-
-  it('shows the draft lifecycle controls without any URL binding input', async () => {
-    render(<WechatAnalyticsPanel taskId="task-1" />)
-
-    expect(await screen.findByText('已进入草稿箱')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '打开公众号后台' })).toHaveAttribute('href', 'https://mp.weixin.qq.com/')
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '立即检测' }))
-    await waitFor(() => expect(api.tasks.reconcileWechat).toHaveBeenCalledWith('task-1'))
-  })
-
-  it('lets manual mode explicitly submit a drafted article for formal publishing', async () => {
+  it('keeps draft and publication controls out of the analytics region', async () => {
     render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '正式发布' }))
-    expect(screen.getByRole('heading', { name: '确认正式发布' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '确认发布' }))
-
-    await waitFor(() => expect(api.tasks.publishWechat).toHaveBeenCalledWith('task-1'))
+    await vi.waitFor(() => expect(api.tasks.getWechatPublication).toHaveBeenCalled())
+    expect(screen.queryByText('公众号发布')).not.toBeInTheDocument()
+    expect(api.wechatAnalytics.getByTask).not.toHaveBeenCalled()
   })
 
-  it('explains 48001 immediately after a formal publish attempt without disabling retry', async () => {
-    vi.mocked(api.tasks.publishWechat).mockResolvedValue({
-      id: 'publication-1',
-      task_id: 'task-1',
-      project_id: 'project-1',
-      source: 'anban_api',
-      status: 'unsupported',
-      draft_media_id: 'draft-media-1',
-      draft_title: '每日内容复盘',
-      wechat_status_code: 48001,
-    })
-
-    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '正式发布' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认发布' }))
-
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(
-      '正式发布失败：公众号没有接口权限',
-      expect.objectContaining({
-        description: expect.stringMatching(/48001.*草稿已保留.*公众号后台手动发布/),
-      }),
-    ))
-    expect(screen.getByRole('button', { name: '正式发布' })).toBeEnabled()
-  })
-
-  it('explains 48001 and lets a repaired account retry formal publishing', async () => {
+  it('loads the independent analytics region only after publication', async () => {
     vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
-      id: 'publication-1',
-      task_id: 'task-1',
-      project_id: 'project-1',
-      source: 'anban_api',
-      status: 'unsupported',
-      draft_media_id: 'draft-media-1',
-      draft_title: '每日内容复盘',
-      wechat_status_code: 48001,
-      last_error: 'api unauthorized rid: secret-request-id (错误码 48001)',
-    })
-
-    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
-
-    expect(await screen.findByText('微信返回 48001：当前公众号没有“发布草稿”接口权限，无法通过 API 正式发布。')).toBeInTheDocument()
-    expect(screen.getByText(/草稿已保留.*公众号后台手动发布.*AppSecret.*IP 白名单.*接口权限与额度.*发布能力/)).toBeInTheDocument()
-    expect(screen.queryByText(/secret-request-id/)).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '重新尝试正式发布' }))
-    await waitFor(() => expect(api.tasks.retryWechatPublish).toHaveBeenCalledWith('task-1'))
-  })
-
-  it('does not offer formal publish retry when 48001 happened before a draft was created', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
-      id: 'publication-1',
-      task_id: 'task-1',
-      project_id: 'project-1',
-      source: 'anban_api',
-      status: 'unsupported',
-      wechat_status_code: 48001,
-    })
-
-    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
-
-    expect(await screen.findByText('微信返回 48001：当前公众号没有草稿接口权限。')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '重新尝试正式发布' })).not.toBeInTheDocument()
-  })
-
-  it('offers formal publish retry after other definitive provider errors are repaired', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
-      id: 'publication-1',
-      task_id: 'task-1',
-      project_id: 'project-1',
-      source: 'anban_api',
-      status: 'unsupported',
-      draft_media_id: 'draft-media-1',
-      wechat_status_code: 50002,
-    })
-
-    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
-
-    expect(await screen.findByText('公众号接口调用失败')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '重新尝试正式发布' }))
-    await waitFor(() => expect(api.tasks.retryWechatPublish).toHaveBeenCalledWith('task-1'))
-  })
-
-  it('resumes result detection instead of resubmitting when WeChat may have accepted the first publish', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
-      id: 'publication-1',
-      task_id: 'task-1',
-      project_id: 'project-1',
-      source: 'anban_api',
-      status: 'unsupported',
-      draft_media_id: 'draft-media-1',
-      publish_id: 'publish-1',
-      submit_attempted_at: '2026-09-02T08:00:00Z',
-      wechat_status_code: 48001,
-    })
-
-    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '重新检测发布结果' }))
-    expect(screen.queryByRole('button', { name: '重新尝试正式发布' })).not.toBeInTheDocument()
-    await waitFor(() => expect(api.tasks.retryWechatPublish).toHaveBeenCalledWith('task-1'))
-  })
-
-  it('shows official metrics automatically after the article is identified', async () => {
-    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
-      id: 'publication-1',
-      task_id: 'task-1',
-      project_id: 'project-1',
-      source: 'wechat_console',
-      status: 'published',
-      article_url: 'https://mp.weixin.qq.com/s/article-1',
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'published', article_url: 'https://mp.weixin.qq.com/s/example',
     })
     vi.mocked(api.wechatAnalytics.getByTask).mockResolvedValue({
       tracking: {
-        status: 'tracking',
-        source: 'wechat_console',
-        article_url: 'https://mp.weixin.qq.com/s/article-1',
-        published_at: '2026-08-13T08:00:00Z',
-        expires_at: '2026-09-12T08:00:00Z',
-        run_count: 2,
+        source: 'anban_api', status: 'tracking', article_url: 'https://mp.weixin.qq.com/s/example', published_at: '2026-09-17T08:00:00Z',
+        expires_at: '2026-10-17T08:00:00Z', run_count: 1,
       },
-      metrics: {
-        read_users: 320,
-        share_users: 22,
-        collection_users: 16,
-        like_users: 10,
-        zaikan_users: 8,
-        comment_count: 6,
-        read_finish_rate: 72,
-        average_read_active_time: 86,
-        read_to_subscribe_users: 4,
-        target_user: 0,
-        int_page_read_user: 0,
-        int_page_read_count: 0,
-        ori_page_read_user: 0,
-        ori_page_read_count: 0,
-        share_user: 0,
-        share_count: 0,
-        add_to_fav_user: 0,
-        add_to_fav_count: 0,
-        stat_date: '2026-08-14',
-        captured_at: '2026-08-15T01:00:00Z',
-      },
-      trend: [],
+      series: [],
     })
 
-    render(<WechatAnalyticsPanel taskId="task-1" />)
+    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
 
-    expect(await screen.findByText('正在每日采集官方数据')).toBeInTheDocument()
-    expect(screen.getByText('320')).toBeInTheDocument()
-    expect(screen.getByText('22')).toBeInTheDocument()
-    expect(screen.getByText('16')).toBeInTheDocument()
-    expect(screen.getByText('72%')).toBeInTheDocument()
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(await screen.findByText('公众号数据追踪')).toBeInTheDocument()
+    expect(api.wechatAnalytics.getByTask).toHaveBeenCalledWith('task-1')
   })
 })

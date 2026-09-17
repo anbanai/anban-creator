@@ -15,21 +15,20 @@ async function localFixture() {
         id: "article", version: "1.2.3", digest: "a".repeat(64),
         agent: { name: "article" }, bindings: { task_types: ["article"] },
         runtime: { profile: "article", adapter: "standard", max_turns: 60 },
-        progress: [{ id: "research", title: "Research", active_percent: 10, complete_percent: 100 }],
+        artifacts: [{ role: "final", path: "output/article.md", required: true }],
       },
       {
         id: "seednote", version: "1.0.0", digest: "b".repeat(64),
         agent: { name: "seednote" }, bindings: { task_types: ["seednote", "viral_analysis"] },
         runtime: { profile: "seednote", adapter: "standard", max_turns: 20 },
-        progress: [
-          { id: "research", title: "Research", active_percent: 5, complete_percent: 25 },
-          { id: "writing", title: "Writing", active_percent: 35, complete_percent: 80 },
-          { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100, required_artifacts: ["output/content.md", "output/image-plan.md"] },
+        artifacts: [
+          { role: "content", path: "output/content.md", required: true },
+          { role: "image_plan", path: "output/image-plan.md", required: true },
         ],
-        progress_by_task_type: {
+        artifacts_by_task_type: {
           viral_analysis: [
-            { id: "research", title: "Research", active_percent: 5, complete_percent: 80 },
-            { id: "delivery", title: "Delivery", active_percent: 90, complete_percent: 100, required_artifacts: ["output/source-analysis.md", "output/viral-template.json"] },
+            { role: "analysis", path: "output/source-analysis.md", required: true },
+            { role: "template", path: "output/viral-template.json", required: true },
           ],
         },
       },
@@ -55,7 +54,7 @@ describe("parseLocalConfig", () => {
       articleWithContentImages: true,
       agentPack: {
         id: "article",
-        progress: [{ id: "research", active_percent: 10, complete_percent: 100 }],
+        artifacts: [{ role: "final", path: "output/article.md", required: true }],
       },
     });
   });
@@ -78,7 +77,7 @@ describe("parseLocalConfig", () => {
     ], { CLAUDE_PLUGIN_ROOT: plugin, ANBAN_EXECUTION_TOKEN: "execution-token" })).rejects.toThrow("frozen Agent Pack identity");
   });
 
-  test("resolves task-specific Seednote progress contracts for local runs", async () => {
+  test("resolves task-specific Seednote artifact contracts for local runs", async () => {
     const { root, plugin } = await localFixture();
     const baseArgs = [
       "run", "--server-url", "https://creator.example.com", "--artifact-upload-mode", "stream",
@@ -86,12 +85,10 @@ describe("parseLocalConfig", () => {
     ];
 
     const viral = await parseLocalConfig([...baseArgs, "--task-type", "viral_analysis"], { CLAUDE_PLUGIN_ROOT: plugin, ANBAN_EXECUTION_TOKEN: "execution-token" });
-    expect(viral.agentPack.progress.map((stage) => stage.id)).toEqual(["research", "delivery"]);
-    expect(viral.agentPack.progress.at(-1)!.required_artifacts).toEqual(["output/source-analysis.md", "output/viral-template.json"]);
+    expect(viral.agentPack.artifacts.map((artifact) => artifact.path)).toEqual(["output/source-analysis.md", "output/viral-template.json"]);
 
     const normal = await parseLocalConfig([...baseArgs, "--task-type", "seednote"], { CLAUDE_PLUGIN_ROOT: plugin, ANBAN_EXECUTION_TOKEN: "execution-token" });
-    expect(normal.agentPack.progress.map((stage) => stage.id)).toEqual(["research", "writing", "delivery"]);
-    expect(normal.agentPack.progress.at(-1)!.required_artifacts).toEqual(["output/content.md", "output/image-plan.md"]);
+    expect(normal.agentPack.artifacts.map((artifact) => artifact.path)).toEqual(["output/content.md", "output/image-plan.md"]);
   });
 
   test("requires a non-empty execution identity", async () => {
@@ -117,8 +114,8 @@ describe("parseLocalConfig", () => {
       return new Response("{}", { status: 200 });
     };
     try {
-      await createLocalReporter(config).stageProgress({ stage: "research", state: "active", title: "Research", progress_percent: 10 });
-      expect(requests).toEqual([{ task_id: "task-1", execution_id: "execution-local-1", stage: "research", state: "active", title: "Research", description: "", progress_percent: 10 }]);
+      await createLocalReporter(config).stageProgress({ stage: "research", state: "active" });
+      expect(requests).toEqual([{ task_id: "task-1", execution_id: "execution-local-1", stage: "research", state: "active", description: "" }]);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -6,7 +6,6 @@ import { join } from "node:path";
 import type { HookCallback } from "@anthropic-ai/claude-agent-sdk";
 
 import type { AgentPack } from "../src/bootstrap.js";
-import { ProgressEmitter } from "../src/progress.js";
 import type { StageProgressEvent } from "../src/reporter.js";
 import * as runner from "../src/runner.js";
 
@@ -19,16 +18,7 @@ const articlePack: AgentPack = {
   agent: { name: "article" },
   bindings: { task_types: ["article"] },
   runtime: { profile: "article", adapter: "standard" },
-  progress: [
-    {
-      id: "research",
-      title: "Research",
-      active_percent: 10,
-      complete_percent: 20,
-      required_artifacts: ["output/topic-analysis.md"],
-    },
-    { id: "delivery", title: "Delivery", active_percent: 80, complete_percent: 100 },
-  ],
+  artifacts: [{ role: "analysis", path: "output/topic-analysis.md", required: true }],
 };
 
 const viralAnalysisPack: AgentPack = {
@@ -37,30 +27,15 @@ const viralAnalysisPack: AgentPack = {
   agent: { name: "seednote" },
   bindings: { task_types: ["seednote", "viral_analysis"] },
   runtime: { profile: "seednote", adapter: "standard" },
-  progress: [
-    { id: "research", title: "Research", active_percent: 5, complete_percent: 40 },
-    {
-      id: "delivery",
-      title: "Delivery",
-      active_percent: 90,
-      complete_percent: 100,
-      required_artifacts: ["output/source-analysis.md", "output/viral-template.json"],
-    },
+  artifacts: [
+    { role: "analysis", path: "output/source-analysis.md", required: true },
+    { role: "template", path: "output/viral-template.json", required: true },
   ],
 };
 
 const finalArtifactPack: AgentPack = {
   ...articlePack,
-  progress: [
-    { id: "research", title: "Research", active_percent: 10, complete_percent: 20 },
-    {
-      id: "delivery",
-      title: "Delivery",
-      active_percent: 80,
-      complete_percent: 100,
-      required_artifacts: ["output/final.md"],
-    },
-  ],
+  artifacts: [{ role: "final", path: "output/final.md", required: true }],
 };
 
 const validBootstrap = () => ({
@@ -424,7 +399,7 @@ describe("buildQueryOptions", () => {
       }));
       expect(hooks.SubagentStop).toBeUndefined();
       await expect(hooks.Stop![0]!.hooks[0]!(stopHookInput(), undefined, hookOptions)).resolves.toEqual({});
-      expect(stageProgress).toHaveBeenCalledTimes(1);
+      expect(stageProgress).not.toHaveBeenCalled();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -518,8 +493,8 @@ describe("buildQueryOptions", () => {
 });
 
 describe("managed progress hooks", () => {
-  test("translates TaskUpdate in_progress metadata into an active stage event", async () => {
-    const root = await progressWorkspace();
+  test("translates Task metadata into lifecycle updates without Pack stage assumptions", async () => {
+    const root = await progressWorkspace(true);
     const stageProgress = mock(async (_event: StageProgressEvent) => {});
     try {
       const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
@@ -527,387 +502,152 @@ describe("managed progress hooks", () => {
         stageProgress,
       })).PostToolUse![0]!.hooks[0]!;
 
+      expect(await callback(taskHookInput("TaskCreate", {
+        subject: "Review sources",
+        description: "Review the supplied sources",
+        metadata: { anban_stage_id: "source_review" },
+      }, { task: { id: "stage-task" } }), "tool-create", hookOptions)).toEqual({});
+
       expect(await callback(taskHookInput("TaskUpdate", {
-        taskId: "task-1",
+        taskId: "stage-task",
         status: "in_progress",
-        metadata: { anban_progress_stage: "research" },
-      }), "tool-1", hookOptions)).toEqual({});
-      expect(stageProgress).toHaveBeenCalledWith({
-        stage: "research",
+        description: "正在核对来源",
+        metadata: { anban_stage_id: "source_review" },
+      }, { success: true }), "tool-active", hookOptions)).toEqual({});
+      expect(await callback(taskHookInput("TaskUpdate", {
+        taskId: "stage-task",
+        status: "completed",
+        description: "来源核对完成",
+        metadata: { anban_stage_id: "source_review" },
+      }, { success: true }), "tool-complete", hookOptions)).toEqual({});
+
+      expect(stageProgress).toHaveBeenNthCalledWith(1, {
+        stage: "source_review",
         state: "active",
-        title: "Research",
-        description: undefined,
-        progress_percent: 10,
+        description: "正在核对来源",
+      }, hookOptions.signal);
+      expect(stageProgress).toHaveBeenNthCalledWith(2, {
+        stage: "source_review",
+        state: "complete",
+        description: "来源核对完成",
       }, hookOptions.signal);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("returns non-blocking context and no completion event when stage artifacts are missing", async () => {
-    const root = await progressWorkspace();
-    const stageProgress = mock(async (_event: StageProgressEvent) => {});
-    try {
-      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
-        progress: async () => {},
-        stageProgress,
-      })).PostToolUse![0]!.hooks[0]!;
-
-      const result = await callback(taskHookInput("TaskUpdate", {
-        taskId: "task-1",
-        status: "completed",
-        metadata: { anban_progress_stage: "research" },
-      }), "tool-1", hookOptions);
-
-      expect(result).toEqual({
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext: expect.stringContaining("output/topic-analysis.md"),
-        },
-      });
-      expect(stageProgress).not.toHaveBeenCalled();
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("emits a completion event after the declared stage artifacts exist", async () => {
+  test("ignores non-lifecycle tasks and keeps annotated TaskCreate mapping stable", async () => {
     const root = await progressWorkspace(true);
     const stageProgress = mock(async (_event: StageProgressEvent) => {});
-    try {
-      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
-        progress: async () => {},
-        stageProgress,
-      })).PostToolUse![0]!.hooks[0]!;
-
-      expect(await callback(taskHookInput("TaskUpdate", {
-        taskId: "task-1",
-        status: "completed",
-        metadata: { anban_progress_stage: "research" },
-      }), "tool-1", hookOptions)).toEqual({});
-      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({
-        stage: "research",
-        state: "complete",
-        progress_percent: 20,
-      }), hookOptions.signal);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("returns failure-state context without describing artifacts as missing", async () => {
-    const root = await progressWorkspace(true);
-    await writeFile(join(root, "output", "failure-state.json"), "{}");
-    const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root)).PostToolUse![0]!.hooks[0]!;
-    try {
-      const result = await callback(taskHookInput("TaskUpdate", {
-        taskId: "task-1",
-        status: "completed",
-        metadata: { anban_progress_stage: "research" },
-      }), "tool-1", hookOptions);
-      const context = (result.hookSpecificOutput as { additionalContext: string }).additionalContext;
-
-      expect(context).toContain("failure state output/failure-state.json exists");
-      expect(context.toLowerCase()).not.toContain("missing");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("diagnoses an unknown stage and returns an empty Hook result", async () => {
-    const root = await progressWorkspace();
     const diagnostics: string[] = [];
-    const emitter = new ProgressEmitter(articlePack, { stageProgress: async () => {} }, (message) => diagnostics.push(message));
-    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message));
     try {
+      const emitter = new (await import("../src/progress.js")).ProgressEmitter({ stageProgress }, (message) => diagnostics.push(message));
+      const callback = runner.createTaskProgressHook(emitter, (message) => diagnostics.push(message));
+
       expect(await callback(taskHookInput("TaskUpdate", {
-        taskId: "task-1",
+        taskId: "stage-task",
         status: "in_progress",
-        metadata: { anban_progress_stage: "unknown" },
-      }), "tool-1", hookOptions)).toEqual({});
-      expect(diagnostics.join("\n")).toContain("unknown progress stage: unknown");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+      }), "tool-missing", hookOptions)).toEqual({});
+      expect(stageProgress).not.toHaveBeenCalled();
+      expect(diagnostics).toEqual([]);
 
-  test("diagnoses TaskUpdate without repeated progress metadata and leaves it unrelated", async () => {
-    const root = await progressWorkspace();
-    const diagnostics: string[] = [];
-    const emitter = new ProgressEmitter(articlePack, { stageProgress: async () => {} }, (message) => diagnostics.push(message));
-    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message));
-    try {
-      expect(await callback(taskHookInput("TaskUpdate", { taskId: "task-1", status: "in_progress" }), "tool-1", hookOptions)).toEqual({});
-      expect(diagnostics.join("\n")).toContain("anban_progress_stage");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("records the TaskCreate response id and diagnoses malformed responses without blocking", async () => {
-    const root = await progressWorkspace();
-    const diagnostics: string[] = [];
-    const taskStages = new Map<string, string>();
-    const emitter = new ProgressEmitter(articlePack, { stageProgress: async () => {} }, (message) => diagnostics.push(message));
-    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message), taskStages);
-    try {
-      expect(await callback(taskHookInput("TaskCreate", {
-        subject: "Research",
-        description: "Research",
-        metadata: { anban_progress_stage: "research" },
-      }, { task: { id: "task-1", subject: "Research" } }), "tool-1", hookOptions)).toEqual({});
-      expect(taskStages.get("task-1")).toBe("research");
-
-      expect(await callback(taskHookInput("TaskCreate", {
-        subject: "Research",
-        description: "Research",
-        metadata: { anban_progress_stage: "research" },
-      }, { task: {} }), "tool-2", hookOptions)).toEqual({});
-      expect(diagnostics.join("\n")).toContain("TaskCreate response");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("rejects a TaskUpdate stage that conflicts with its TaskCreate mapping", async () => {
-    const root = await progressWorkspace();
-    const diagnostics: string[] = [];
-    const stageProgress = mock(async (_event: StageProgressEvent) => {});
-    const emitter = new ProgressEmitter(articlePack, { stageProgress }, (message) => diagnostics.push(message));
-    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message));
-    try {
       await callback(taskHookInput("TaskCreate", {
-        subject: "Research",
-        description: "Research",
-        metadata: { anban_progress_stage: "research" },
-      }, { task: { id: "task-1", subject: "Research" } }), "tool-1", hookOptions);
-
-      expect(await callback(taskHookInput("TaskUpdate", {
-        taskId: "task-1",
+        metadata: { anban_stage_id: "source_review" },
+      }, { task: { id: "stage-task" } }), "tool-create", hookOptions);
+      await callback(taskHookInput("TaskUpdate", {
+        taskId: "stage-task",
         status: "in_progress",
-        metadata: { anban_progress_stage: "delivery" },
-      }, { success: true, taskId: "task-1", updatedFields: ["status", "metadata"] }), "tool-2", hookOptions)).toEqual({});
+        metadata: { anban_stage_id: "writing" },
+      }, { success: true }), "tool-conflict", hookOptions);
+
       expect(stageProgress).not.toHaveBeenCalled();
-      expect(diagnostics.join("\n")).toContain("does not match TaskCreate stage research");
-
-      expect(await callback(taskHookInput("TaskUpdate", {
-        taskId: "task-1",
-        status: "in_progress",
-        metadata: { anban_progress_stage: "research" },
-      }, { success: true, taskId: "task-1", updatedFields: ["status", "metadata"] }), "tool-3", hookOptions)).toEqual({});
-      expect(stageProgress).toHaveBeenCalledTimes(1);
-      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({ stage: "research", state: "active" }), hookOptions.signal);
+      expect(diagnostics.join("\n")).toContain("does not match TaskCreate stage source_review");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
   test("ignores an explicitly failed TaskUpdate response", async () => {
-    const root = await progressWorkspace();
-    const diagnostics: string[] = [];
+    const root = await progressWorkspace(true);
     const stageProgress = mock(async (_event: StageProgressEvent) => {});
-    const emitter = new ProgressEmitter(articlePack, { stageProgress }, (message) => diagnostics.push(message));
-    const callback = runner.createTaskProgressHook(emitter, root, (message) => diagnostics.push(message));
     try {
-      expect(await callback(taskHookInput("TaskUpdate", {
-        taskId: "task-1",
+      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
+        progress: async () => {},
+        stageProgress,
+      })).PostToolUse![0]!.hooks[0]!;
+
+      await callback(taskHookInput("TaskUpdate", {
+        taskId: "stage-task",
         status: "in_progress",
-        metadata: { anban_progress_stage: "research" },
-      }, { success: false, taskId: "task-1", updatedFields: [], error: "not found" }), "tool-1", hookOptions)).toEqual({});
+        metadata: { anban_stage_id: "source_review" },
+      }, { success: false, error: "not found" }), "tool-failed", hookOptions);
+
       expect(stageProgress).not.toHaveBeenCalled();
-      expect(diagnostics.join("\n")).toContain("reported success=false");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("generic Stop emits final 100 only after all artifacts validate", async () => {
-    const root = await progressWorkspace(true);
-    const stageProgress = mock(async (_event: StageProgressEvent) => {});
-    try {
-      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
-        progress: async () => {},
-        stageProgress,
-      })).Stop![0]!.hooks[0]!;
-
-      expect(await callback(stopHookInput(), undefined, hookOptions)).toEqual({});
-      expect(stageProgress).toHaveBeenCalledWith({
-        stage: "delivery",
-        state: "complete",
-        title: "Delivery",
-        description: undefined,
-        progress_percent: 100,
-      }, hookOptions.signal);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("delays generic final-stage completion until Stop while preserving artifact repair context", async () => {
+  test("validates required Pack artifacts only at Stop", async () => {
     const root = await progressWorkspace();
     const stageProgress = mock(async (_event: StageProgressEvent) => {});
     try {
-      const hooks = optionHooks(runner.buildQueryOptions({
-        ...validBootstrap(),
-        resolved_agent_pack: finalArtifactPack,
-      }, root, undefined, undefined, { progress: async () => {}, stageProgress }));
-      const taskProgress = hooks.PostToolUse![0]!.hooks[0]!;
-      const stop = hooks.Stop![0]!.hooks[0]!;
-      const completedDelivery = taskHookInput("TaskUpdate", {
-        taskId: "delivery-task",
-        status: "completed",
-        metadata: { anban_progress_stage: "delivery" },
-      });
-
-      expect(await taskProgress(completedDelivery, "tool-delivery", hookOptions)).toMatchObject({
-        hookSpecificOutput: { additionalContext: expect.stringContaining("output/final.md") },
-      });
-      expect(stageProgress).not.toHaveBeenCalled();
-
-      await writeFile(join(root, "output", "final.md"), "delivery");
-      expect(await taskProgress(completedDelivery, "tool-delivery", hookOptions)).toEqual({});
-      expect(stageProgress).not.toHaveBeenCalled();
-
-      expect(await stop(stopHookInput(), undefined, hookOptions)).toEqual({});
-      expect(stageProgress).toHaveBeenCalledTimes(1);
-      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({
-        stage: "delivery",
-        state: "complete",
-        progress_percent: 100,
-      }), hookOptions.signal);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("generic Stop blocks with repair context for missing artifacts and failure state", async () => {
-    const root = await progressWorkspace();
-    try {
-      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root)).Stop![0]!.hooks[0]!;
-      const missing = await callback(stopHookInput(), undefined, hookOptions);
-      expect(missing).toMatchObject({
-        decision: "block",
-        hookSpecificOutput: { hookEventName: "Stop", additionalContext: expect.stringContaining("output/topic-analysis.md") },
-      });
-
-      await writeFile(join(root, "output", "failure-state.json"), "{}");
-      const failed = await callback(stopHookInput(), undefined, hookOptions);
-      const failureContext = (failed.hookSpecificOutput as { additionalContext: string }).additionalContext;
-      expect(failed).toMatchObject({
-        decision: "block",
-        hookSpecificOutput: { hookEventName: "Stop", additionalContext: expect.stringContaining("failure state") },
-      });
-      expect(failureContext.toLowerCase()).not.toContain("missing");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("generic Stop avoids recursion and does not let Reporter failure block delivery", async () => {
-    const root = await progressWorkspace(true);
-    const stageProgress = mock(async () => { throw new Error("server unavailable"); });
-    try {
-      const callback = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
-        progress: async () => {},
-        stageProgress,
-      })).Stop![0]!.hooks[0]!;
-
-      expect(await callback(stopHookInput(true), undefined, hookOptions)).toEqual({});
-      expect(stageProgress).not.toHaveBeenCalled();
-      expect(await callback(stopHookInput(), undefined, hookOptions)).toEqual({});
-      expect(stageProgress).toHaveBeenCalledTimes(1);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("runs the Seednote quality gate before emitting final progress", async () => {
-    const root = await progressWorkspace(true);
-    const pluginRoot = join(root, "plugin");
-    const hooksRoot = join(pluginRoot, "hooks");
-    await mkdir(hooksRoot, { recursive: true });
-    const gatePath = join(hooksRoot, "seednote-quality-gate.sh");
-    await writeFile(gatePath, [
-      "#!/bin/sh",
-      'if [ -f "$CLAUDE_PROJECT_DIR/quality-pass" ]; then exit 0; fi',
-      "printf '%s' '{\"decision\":\"block\",\"reason\":\"quality blocked\"}'",
-    ].join("\n"));
-    await chmod(gatePath, 0o755);
-    const previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
-    const stageProgress = mock(async (_event: StageProgressEvent) => {});
-    try {
-      const hooks = optionHooks(runner.buildQueryOptions({ ...validBootstrap(), task_type: "seednote" }, root, undefined, undefined, {
+      const hooks = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, {
         progress: async () => {},
         stageProgress,
       }));
-      const callback = hooks.Stop![0]!.hooks[0]!;
       const taskProgress = hooks.PostToolUse![0]!.hooks[0]!;
+      const stop = hooks.Stop![0]!.hooks[0]!;
+
       expect(await taskProgress(taskHookInput("TaskUpdate", {
-        taskId: "delivery-task",
+        taskId: "stage-task",
         status: "completed",
-        metadata: { anban_progress_stage: "delivery" },
-      }), "tool-delivery", hookOptions)).toEqual({});
-      expect(stageProgress).not.toHaveBeenCalled();
+        metadata: { anban_stage_id: "delivery" },
+      }, { success: true }), "tool-complete", hookOptions)).toEqual({});
+      expect(stageProgress).toHaveBeenCalledWith({
+        stage: "delivery",
+        state: "complete",
+        description: undefined,
+      }, hookOptions.signal);
 
-      expect(await callback(stopHookInput(), undefined, hookOptions)).toMatchObject({ decision: "block", reason: "quality blocked" });
-      expect(stageProgress).not.toHaveBeenCalled();
+      expect(await stop(stopHookInput(), undefined, hookOptions)).toMatchObject({
+        decision: "block",
+        hookSpecificOutput: { additionalContext: expect.stringContaining("output/topic-analysis.md") },
+      });
 
-      await writeFile(join(root, "quality-pass"), "pass");
-      expect(await callback(stopHookInput(), undefined, hookOptions)).toEqual({});
+      await writeFile(join(root, "output", "topic-analysis.md"), "ready");
+      expect(await stop(stopHookInput(), undefined, hookOptions)).toEqual({});
       expect(stageProgress).toHaveBeenCalledTimes(1);
-      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({ progress_percent: 100 }), hookOptions.signal);
     } finally {
-      if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
-      else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("uses the resolved viral analysis artifacts and deduplicates delivery completion at Stop", async () => {
+  test("uses the resolved task-type artifact override at Stop", async () => {
     const root = await progressWorkspace();
     const pluginRoot = join(root, "plugin");
-    const hooksRoot = join(pluginRoot, "hooks");
-    await mkdir(hooksRoot, { recursive: true });
-    const gatePath = join(hooksRoot, "seednote-quality-gate.sh");
-    await writeFile(gatePath, "#!/bin/sh\nexit 0\n");
-    await chmod(gatePath, 0o755);
+    await mkdir(join(pluginRoot, "hooks"), { recursive: true });
+    await writeFile(join(pluginRoot, "hooks", "seednote-quality-gate.sh"), "#!/bin/sh\nexit 0\n");
+    await chmod(join(pluginRoot, "hooks", "seednote-quality-gate.sh"), 0o755);
     await writeFile(join(root, "output", "source-analysis.md"), "analysis");
     const previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
     process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
-    const stageProgress = mock(async (_event: StageProgressEvent) => {});
     try {
-      const options = runner.buildQueryOptions({
+      const stop = optionHooks(runner.buildQueryOptions({
         ...validBootstrap(),
         task_type: "viral_analysis",
         agent_pack_id: "seednote",
         runtime_profile: "seednote",
         agent_flag: "anban:seednote",
         resolved_agent_pack: viralAnalysisPack,
-      }, root, undefined, undefined, { progress: async () => {}, stageProgress });
-      const hooks = optionHooks(options);
-      const stop = hooks.Stop![0]!.hooks[0]!;
-      const taskProgress = hooks.PostToolUse![0]!.hooks[0]!;
+      }, root)).Stop![0]!.hooks[0]!;
 
       expect(await stop(stopHookInput(), undefined, hookOptions)).toMatchObject({
         decision: "block",
         hookSpecificOutput: { additionalContext: expect.stringContaining("output/viral-template.json") },
       });
-      expect(stageProgress).not.toHaveBeenCalled();
-
       await writeFile(join(root, "output", "viral-template.json"), "{}");
-      expect(await taskProgress(taskHookInput("TaskUpdate", {
-        taskId: "delivery-task",
-        status: "completed",
-        metadata: { anban_progress_stage: "delivery" },
-      }), "tool-delivery", hookOptions)).toEqual({});
       expect(await stop(stopHookInput(), undefined, hookOptions)).toEqual({});
-      expect(stageProgress).toHaveBeenCalledTimes(1);
-      expect(stageProgress).toHaveBeenCalledWith(expect.objectContaining({
-        stage: "delivery",
-        state: "complete",
-        progress_percent: 100,
-      }), hookOptions.signal);
     } finally {
       if (previousPluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
       else process.env.CLAUDE_PLUGIN_ROOT = previousPluginRoot;
@@ -915,18 +655,18 @@ describe("managed progress hooks", () => {
     }
   });
 
-  test("creates isolated progress state for each query options instance", async () => {
-    const root = await progressWorkspace();
+  test("creates isolated lifecycle event state for each query options instance", async () => {
+    const root = await progressWorkspace(true);
     const stageProgress = mock(async (_event: StageProgressEvent) => {});
     const reporter = { progress: async () => {}, stageProgress };
     try {
       const first = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, reporter)).PostToolUse![0]!.hooks[0]!;
       const second = optionHooks(runner.buildQueryOptions(validBootstrap(), root, undefined, undefined, reporter)).PostToolUse![0]!.hooks[0]!;
       const input = taskHookInput("TaskUpdate", {
-        taskId: "task-1",
+        taskId: "stage-task",
         status: "in_progress",
-        metadata: { anban_progress_stage: "research" },
-      });
+        metadata: { anban_stage_id: "source_review" },
+      }, { success: true });
 
       await first(input, "tool-1", hookOptions);
       await first(input, "tool-1", hookOptions);

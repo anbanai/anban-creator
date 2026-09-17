@@ -3,27 +3,26 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Loader2, Send, Ban, MessageSquare } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Loader2, Ban, MessageSquare } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
-import type { InputAttachment, Task, TaskFile, TaskOutcome } from '@/types'
+import type { InputAttachment, Task, TaskFile, TaskLifecycle } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Progress } from '@/components/ui/progress'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
-import { WorkflowReviewSummary } from '@/components/TaskWorkflowPanel'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
+import { TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
@@ -36,9 +35,9 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { taskStatusLabel, contentTypeLabel, statusBadgeVariant, progressStageLabel, taskFailurePresentation } from '@/lib/labels'
+import { taskStatusLabel, contentTypeLabel, statusBadgeVariant } from '@/lib/labels'
 import { renderPlatformIcon } from '@/lib/PlatformIcon'
-import { taskFailureMessage } from '@/lib/studio-ux'
+import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
@@ -53,65 +52,6 @@ const RESUME_ATTACHMENT_POLICY = {
     text: RESUME_FILE_MAX_BYTES,
   },
 } as const
-
-const outcomeLabels = {
-  core_delivery: { complete: '核心交付完整', none: '无核心交付' },
-  visual: { complete: '视觉完整', partial: '视觉部分完成', not_requested: '未请求视觉' },
-  review: { passed: '审核通过', warning: '审核有警告', unavailable: '审核不可用' },
-  publication: { succeeded: '草稿已进入草稿箱', blocked: '发布待处理', skipped: '草稿未投递', failed: '草稿创建失败', ambiguous: '草稿状态待核对', not_requested: '未请求草稿' },
-} as const
-
-function TaskOutcomeSummary({ outcome }: { outcome: TaskOutcome }) {
-  const dimensions = [
-    outcomeLabels.core_delivery[outcome.core_delivery.status],
-    outcomeLabels.visual[outcome.visual.status],
-    outcomeLabels.review[outcome.review.status],
-    outcomeLabels.publication[outcome.publication.status],
-  ]
-  const diagnostic = outcome.diagnostic
-  const direction = diagnostic?.content_direction === 'input'
-    ? '输入'
-    : diagnostic?.content_direction === 'output' ? '输出' : '供应商未说明'
-  return (
-    <section
-      aria-label="任务交付状态"
-      className={`border-y px-4 py-4 ${outcome.warnings.length > 0 ? 'border-amber-300 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-950/20' : 'border-border'}`}
-    >
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {dimensions.map((label) => (
-          <div key={label} className="min-w-0 border-l-2 border-border pl-3 text-sm font-medium text-foreground">{label}</div>
-        ))}
-      </div>
-      {outcome.warnings.length > 0 && (
-        <div className="mt-4 space-y-2">
-          {outcome.warnings.map((warning, index) => (
-            <div key={`${warning.code}-${index}`} className="flex items-start gap-2 text-sm text-amber-950 dark:text-amber-100">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <span className="break-words">
-                {warning.code.startsWith('publication_')
-                  ? outcome.publication.message || '微信是否收到草稿请求暂时无法确认；为避免重复投稿，系统不会再次提交。'
-                  : warning.message}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-      {diagnostic && (
-        <section aria-label="供应商诊断" className="mt-4 border-t border-amber-300 pt-3 text-xs text-muted-foreground dark:border-amber-800">
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            {diagnostic.provider && <span>供应商 {diagnostic.provider}</span>}
-            {diagnostic.http_status && <span>HTTP {diagnostic.http_status}</span>}
-            {diagnostic.provider_code && <span>错误码 {diagnostic.provider_code}</span>}
-            {diagnostic.stage && <span>阶段 {progressStageLabel[diagnostic.stage] ?? diagnostic.stage}</span>}
-            <span>方向 {direction}</span>
-            {diagnostic.request_id && <span>请求 ID 指纹 {diagnostic.request_id}</span>}
-          </div>
-          <p className="mt-2 text-foreground">{diagnostic.summary}</p>
-        </section>
-      )}
-    </section>
-  )
-}
 
 function ResumeTaskDialog({
   taskId,
@@ -267,12 +207,7 @@ export default function TaskDetailPage() {
   const [sseLogs, setSseLogs] = useState<string[]>([])
   const [sseError, setSseError] = useState<string | null>(null)
   const [sseTaskId, setSseTaskId] = useState<string | null>(null)
-  const [liveProgress, setLiveProgress] = useState<{
-    percent: number
-    stage: string | null
-    title: string | null
-    description: string | null
-  } | null>(null)
+  const [liveLifecycle, setLiveLifecycle] = useState<TaskLifecycle | null>(null)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showProjectDialog, setShowProjectDialog] = useState(false)
@@ -287,6 +222,7 @@ export default function TaskDetailPage() {
   const abortRef = useRef<AbortController | null>(null)
   const activeSseTaskRef = useRef<string | null>(null)
   const persistedLogsRef = useRef<string[]>([])
+  const lifecycleRevisionRef = useRef(0)
   const logContainerRef = useRef<HTMLDivElement | null>(null)
   const cloneSourceIdentityRef = useRef<{ routeId: string; taskId: string } | null>(null)
   const { submit } = useSubmitLock()
@@ -352,25 +288,13 @@ export default function TaskDetailPage() {
   const isCurrentSseTask = Boolean(task?.id && sseTaskId === task.id)
   const displayLogs = isCurrentSseTask && sseLogs.length > 0 ? sseLogs : persistedLogs
   const currentSseError = isCurrentSseTask && task?.status === 'running' ? sseError : null
-  const currentLiveProgress = isCurrentSseTask && task?.status === 'running' ? liveProgress : null
-  // progressValue takes the MAX of live SSE and persisted task.progress to
-  // guarantee a monotonic bar. task.progress is the server-side high-water
-  // mark (UpdateProgressColumn has a monotonic guard); latest_progress.percent
-  // is last-writer-wins and can be lower under out-of-order stage emissions,
-  // so it must NOT be the sole source — Math.max keeps the bar from regressing.
-  const progressValue = Math.max(0, Math.min(100, Math.max(
-    currentLiveProgress?.percent ?? 0,
-    task?.progress ?? 0,
-  )))
-  // Prefer live SSE > server-persisted latest_progress > generic fallback.
-  // Never fall back to arbitrary progress_log lines — that column mixes
-  // structured JSON with "Using tool: ..." noise and would leak into the card.
-  const fallbackTitle = task?.status === 'pending' ? '任务等待执行中...' : '任务执行中...'
-  const persistedProgress = task?.latest_progress
-  const progressTitle = currentLiveProgress?.title ?? persistedProgress?.title ?? fallbackTitle
-  const progressDescription = currentLiveProgress?.description ?? persistedProgress?.description ?? null
-  const progressStage = currentLiveProgress?.stage ?? persistedProgress?.stage ?? null
-  const isRunning = task?.status === 'running'
+  const persistedLifecycleRevision = task?.lifecycle?.revision ?? 0
+  if (persistedLifecycleRevision > lifecycleRevisionRef.current) lifecycleRevisionRef.current = persistedLifecycleRevision
+  const displayLifecycle = liveLifecycle && liveLifecycle.revision > persistedLifecycleRevision
+    ? liveLifecycle
+    : task?.lifecycle
+  const currentLifecycleUpdate = displayLifecycle?.stages?.find((stage) => stage.state === 'active' || stage.state === 'blocked' || stage.state === 'failed')?.latest_update ?? null
+  const streamLifecycle = task ? shouldStreamTaskLifecycle(task) : false
   const cancelMutation = useMutation({
     mutationFn: (taskId: string) => api.tasks.cancel(taskId),
     onSuccess: (_data, taskId) => {
@@ -410,54 +334,29 @@ export default function TaskDetailPage() {
     ]),
   })
 
-	const handleSSEEvent = useCallback((
-		taskId: string,
-		event: SSEEvent,
-    reconcileProgressReplay = false,
-	): boolean => {
-		if (activeSseTaskRef.current !== taskId) return false
+  const handleSSEEvent = useCallback((
+    taskId: string,
+    event: SSEEvent,
+  ): void => {
+    if (activeSseTaskRef.current !== taskId) return
 
     const parsed = typeof event.data === 'string'
       ? (() => { try { return JSON.parse(event.data) } catch { return event.data } })()
       : event.data
 
     switch (event.event) {
-      case 'progress': {
-        if (typeof parsed === 'string') {
-          setSseLogs((prev) => reconcileProgressReplay
-            ? appendPollingReplay(prev, parsed)
-            : appendLog(prev, parsed))
-          return true
-        } else {
-          const data = parsed as {
-            stage?: string
-            title?: string
-            description?: string
-            percent?: number
-          }
-          const pct = typeof data.percent === 'number' ? data.percent : null
-          const hasPositivePct = pct != null && pct > 0
-          // 任何结构化字段（stage/title/description/percent）到位都更新 liveProgress，
-          // 即使 percent === 0（未知 stage 时 server 默认 0）。否则卡片会回退到通用文案，
-          // 与同一时刻写入 SSE 日志面板的结构化数据不一致。
-          if (pct != null || data.title || data.stage || data.description) {
-            setLiveProgress({
-              percent: pct ?? 0,
-              stage: data.stage ?? null,
-              title: data.title ?? null,
-              description: data.description ?? null,
-            })
-          }
-          // Display priority: title (with description) → stage → bare percent.
-          // Structured events always carry title via the MCP tool contract.
-          const label = data.title
-            ? `${data.title}${data.description ? ' · ' + data.description : ''}`
-            : (data.stage || '')
-          if (label) {
-            const prefix = hasPositivePct ? `[${pct as number}%] ` : ''
-            setSseLogs((prev) => appendLog(prev, `${prefix}${label}`))
-          }
-        }
+      case 'lifecycle': {
+        if (typeof parsed === 'string') break
+        const next = parsed as TaskLifecycle
+        if (next.version !== 1 || !Array.isArray(next.stages)) break
+        if (!shouldApplyLifecycleRevision(lifecycleRevisionRef.current, next.revision)) break
+        lifecycleRevisionRef.current = next.revision
+        setLiveLifecycle(next)
+        break
+      }
+      case 'log': {
+        const data = typeof parsed === 'string' ? parsed : JSON.stringify(parsed)
+        if (data) setSseLogs((prev) => appendPollingReplay(prev, data))
         break
       }
       case 'timeout':
@@ -493,7 +392,6 @@ export default function TaskDetailPage() {
         }
       }
     }
-    return false
   }, [queryClient])
 
   const connectSSE = useCallback(async (taskId: string) => {
@@ -508,15 +406,9 @@ export default function TaskDetailPage() {
 
       try {
         let sawTimeout = false
-        let reconcileNextStringProgress = true
         for await (const event of streamTaskProgress(taskId, currentToken, controller.signal)) {
           if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
-          const handledStringProgress = handleSSEEvent(
-            taskId,
-            event,
-            reconcileNextStringProgress,
-          )
-          if (handledStringProgress) reconcileNextStringProgress = false
+          handleSSEEvent(taskId, event)
           if (TERMINAL_SSE_EVENTS.has(event.event)) return
           if (event.event === 'timeout') {
             sawTimeout = true
@@ -557,20 +449,21 @@ export default function TaskDetailPage() {
     const taskId = task?.id ?? null
     abortRef.current?.abort()
     abortRef.current = null
-    activeSseTaskRef.current = task?.status === 'running' ? taskId : null
+    activeSseTaskRef.current = streamLifecycle ? taskId : null
     setSseTaskId(taskId)
     setSseLogs(task?.status === 'running' ? persistedLogsRef.current : [])
     setSseError(null)
-    setLiveProgress(null)
+    setLiveLifecycle(null)
+    lifecycleRevisionRef.current = task?.lifecycle?.revision ?? 0
 
-    if (taskId && task?.status === 'running') void connectSSE(taskId)
+    if (taskId && streamLifecycle) void connectSSE(taskId)
 
     return () => {
       if (activeSseTaskRef.current === taskId) activeSseTaskRef.current = null
       abortRef.current?.abort()
       abortRef.current = null
     }
-  }, [connectSSE, task?.id, task?.status])
+  }, [connectSSE, streamLifecycle, task?.id])
 
   useEffect(() => {
     setTaskDetailsTab('overview')
@@ -648,15 +541,9 @@ export default function TaskDetailPage() {
     )
   }
 
-	const canCancel = task.status === 'pending' || task.status === 'running'
-	const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
-	const canResume = task.status === 'failed' || task.status === 'cancelled'
-  const publicationNeedsAttention = task.status === 'completed'
-    && task.outcome !== undefined
-    && task.outcome.publication.status !== 'succeeded'
-    && task.outcome.publication.status !== 'not_requested'
-  const failurePresentation = taskFailurePresentation(task)
-  const failureMessage = failurePresentation?.message || taskFailureMessage(task)
+  const canCancel = task.status === 'pending' || task.status === 'running'
+  const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+  const canResume = task.status === 'failed' || task.status === 'cancelled'
   const currentTask = task
   const snapshot = task.project_snapshot
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
@@ -691,8 +578,7 @@ export default function TaskDetailPage() {
     <div className="space-y-6">
       {/* Screen reader live region for status changes */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {publicationNeedsAttention && '内容已完成，发布待处理'}
-        {task.status === 'completed' && !publicationNeedsAttention && '任务已完成'}
+        {task.status === 'completed' && '任务已完成'}
         {task?.status === 'failed' && (hasPreservedDelivery ? '续跑失败，历史交付已保留' : '任务失败')}
         {task?.status === 'cancelled' && '任务已取消'}
       </div>
@@ -718,9 +604,9 @@ export default function TaskDetailPage() {
             <Badge variant="outline">
                 {renderPlatformIcon(task.type)}
                 {contentTypeLabel[task.type] || task.type}
-              </Badge>
+            </Badge>
             <Badge variant={statusBadgeVariant(task.status)}>
-              {publicationNeedsAttention ? '内容已完成，发布待处理' : taskStatusLabel[task.status] || task.status}
+              {taskStatusLabel[task.status] || task.status}
             </Badge>
             {project && (
               <button
@@ -779,12 +665,6 @@ export default function TaskDetailPage() {
               取消任务
             </Button>
           )}
-		  {canResume && task.status !== 'failed' && (
-            <Button variant="default" size="sm" onClick={() => setShowResumeDialog(true)}>
-              <Send className="h-4 w-4" />
-              继续执行
-            </Button>
-          )}
           {canClone ? (
             <Button variant="outline" size="sm" onClick={openCloneDialog}>
               <RefreshCw className="h-4 w-4" />
@@ -805,69 +685,17 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
-      {task.status !== 'completed' && (
-        <section className={`rounded-lg border p-4 ${task.status === 'failed' ? 'border-destructive/35 bg-destructive/5' : 'border-border bg-card'}`}>
-          {task.status === 'failed' ? (
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex min-w-0 items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-                <div className="min-w-0">
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {hasPreservedDelivery ? '续跑失败，历史交付已保留' : failurePresentation?.title || (failureMessage ? '执行失败' : '任务未完成')}
-                  </h2>
-                  {hasPreservedDelivery ? (
-                    <>
-                      <p className="mt-1 text-sm text-muted-foreground">最新一次继续执行未完成；下方已有交付成果仍可预览和下载。</p>
-                      {failureMessage && <p className="mt-1 break-words text-xs text-muted-foreground">失败原因：{failureMessage}</p>}
-                      {failurePresentation?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failurePresentation.recovery}</p>}
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-1 break-words text-sm text-muted-foreground">
-                        {failureMessage || '服务端没有返回失败详情，可继续执行并补充说明。'}
-                      </p>
-                      {failurePresentation?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failurePresentation.recovery}</p>}
-                    </>
-                  )}
-                </div>
-              </div>
-              <Button size="sm" className="shrink-0" onClick={() => setShowResumeDialog(true)}>
-                <Send className="h-4 w-4" />
-                补充信息并继续
-              </Button>
-            </div>
-          ) : task.status === 'cancelled' ? (
-            <div className="flex items-start gap-3">
-              <Ban className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">执行已停止</h2>
-                <p className="mt-1 text-sm text-muted-foreground">可继续此任务，已有上下文和文件会被保留。</p>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  {isRunning && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
-                  <h2 className="truncate text-sm font-semibold text-foreground">{progressTitle}</h2>
-                </div>
-                <span className="shrink-0 text-sm font-semibold tabular-nums text-primary">{progressValue}%</span>
-              </div>
-              <Progress value={progressValue} className="w-full" />
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                {progressStage && <span>{progressStageLabel[progressStage] ?? progressStage}</span>}
-                {progressDescription && <span>{progressDescription}</span>}
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {task.status === 'completed' && (
-        <WorkflowReviewSummary workflow={task.workflow_status} />
-      )}
-
-      {task.outcome && <TaskOutcomeSummary outcome={task.outcome} />}
+      <TaskExecutionRail
+        taskId={task.id}
+        status={task.status}
+        lifecycle={displayLifecycle}
+        workflow={task.workflow_status}
+        outcome={task.outcome}
+        errorMessage={task.error_message}
+        wechatPublishMode={project?.config?.wechat_publish_mode}
+        onOpenLogs={() => openTaskDetails('logs')}
+        onResume={canResume ? () => setShowResumeDialog(true) : undefined}
+      />
 
       <TaskDetailsSheet
         open={showTaskDetails}
@@ -896,7 +724,7 @@ export default function TaskDetailPage() {
       />
 
       {task.type === 'article' && task.status === 'completed' && project && (
-        <WechatAnalyticsPanel taskId={task.id} projectConfig={project.config} taskOutcome={task.outcome} />
+        <WechatAnalyticsPanel taskId={task.id} projectConfig={project.config} />
       )}
 
       {showPendingResultDestination && (
@@ -1040,7 +868,7 @@ export default function TaskDetailPage() {
         project={project}
         files={deliveredFiles}
         logs={displayLogs}
-        progressDescription={progressDescription}
+        latestStageUpdate={currentLifecycleUpdate}
         sseError={currentSseError}
         onOpenTab={openTaskDetails}
       />

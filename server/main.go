@@ -123,6 +123,9 @@ func main() {
 		if err := service.MigrateGoalModeRemoval(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to remove goal mode schema")
 		}
+		if err := service.MigrateTaskLifecycle(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate task lifecycle schema")
+		}
 		if err := service.MigrateDesignerRemoval(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to remove Designer schema")
 		}

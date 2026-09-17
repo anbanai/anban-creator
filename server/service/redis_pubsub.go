@@ -7,14 +7,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 )
 
 const (
 	// Redis channel prefixes for pub/sub.
-	cancelChannelPrefix   = "anban:task:cancel:"
-	progressChannelPrefix = "anban:task:progress:"
+	cancelChannelPrefix    = "anban:task:cancel:"
+	logChannelPrefix       = "anban:task:log:"
+	lifecycleChannelPrefix = "anban:task:lifecycle:"
 
 	// projectRunningCountPrefix is the Redis key prefix for per-project running task counters.
 	projectRunningCountPrefix = "anban:project:running:"
@@ -56,37 +58,62 @@ type CancelEvent struct {
 	TaskID string `json:"task_id"`
 }
 
-// ProgressEvent is published to Redis when task progress is updated,
-// allowing SSE handlers on any replica to push updates to clients.
-//
-// Stage/Title/Description/Percent are populated by either managed Claude's
-// UpdateProgressFromAgent path or compatibility update_task_progress MCP calls
-// through UpdateProgress. Message carries the raw log line for backward compat
-// with string-only callers (e.g. agent.go:170, task_execution.go:120 OnProgress).
-type ProgressEvent struct {
-	TaskID      string `json:"task_id"`
-	Message     string `json:"message"`
-	Stage       string `json:"stage,omitempty"`
-	State       string `json:"state,omitempty"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Percent     int    `json:"percent,omitempty"`
+type TaskLogEvent struct {
+	TaskID  string `json:"task_id"`
+	Message string `json:"message"`
 }
 
-// ProgressSubscriber receives progress events for a specific task.
-// It is used by the SSE handler to receive real-time updates.
-type ProgressSubscriber struct {
+type TaskLifecycleEvent struct {
+	TaskID    string              `json:"task_id"`
+	Lifecycle model.TaskLifecycle `json:"lifecycle"`
+}
+
+// PublishLifecycle publishes a complete revisioned lifecycle snapshot. SSE
+// clients can replace local state atomically and ignore stale revisions.
+func (ps *RedisPubSub) PublishLifecycle(ctx context.Context, taskID string, lifecycle model.TaskLifecycle) {
+	if ps.rdb == nil {
+		return
+	}
+	event := TaskLifecycleEvent{TaskID: taskID, Lifecycle: lifecycle}
+	data, err := json.Marshal(event)
+	if err != nil {
+		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to marshal lifecycle event")
+		return
+	}
+	channel := lifecycleChannelPrefix + taskID
+	if err := ps.rdb.Publish(ctx, channel, data).Err(); err != nil {
+		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to publish lifecycle event")
+	}
+}
+
+func (ps *RedisPubSub) PublishLog(ctx context.Context, taskID, message string) {
+	if ps.rdb == nil {
+		return
+	}
+	event := TaskLogEvent{TaskID: taskID, Message: message}
+	data, err := json.Marshal(event)
+	if err != nil {
+		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to marshal log event")
+		return
+	}
+	if err := ps.rdb.Publish(ctx, logChannelPrefix+taskID, data).Err(); err != nil {
+		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to publish log event")
+	}
+}
+
+// TaskEventSubscriber receives one typed event stream for a specific task.
+type TaskEventSubscriber struct {
 	ch      *redis.PubSub
 	msgChan <-chan *redis.Message
 }
 
-// Events returns the channel of incoming progress messages.
-func (s *ProgressSubscriber) Events() <-chan *redis.Message {
+// Events returns the channel of incoming task messages.
+func (s *TaskEventSubscriber) Events() <-chan *redis.Message {
 	return s.msgChan
 }
 
 // Close unsubscribes from the Redis channel and releases resources.
-func (s *ProgressSubscriber) Close() error {
+func (s *TaskEventSubscriber) Close() error {
 	return s.ch.Close()
 }
 
@@ -166,59 +193,20 @@ func (ps *RedisPubSub) SubscribeCancel(ctx context.Context) (<-chan string, cont
 	return out, cancel
 }
 
-// PublishProgress publishes a task progress event to Redis.
-func (ps *RedisPubSub) PublishProgress(ctx context.Context, taskID, message string) {
-	if ps.rdb == nil {
-		return
-	}
-	event := ProgressEvent{TaskID: taskID, Message: message}
-	data, err := json.Marshal(event)
-	if err != nil {
-		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to marshal progress event")
-		return
-	}
-	channel := progressChannelPrefix + taskID
-	if err := ps.rdb.Publish(ctx, channel, data).Err(); err != nil {
-		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to publish progress event")
-	}
+func (ps *RedisPubSub) SubscribeLogs(ctx context.Context, taskID string) *TaskEventSubscriber {
+	return ps.subscribe(ctx, logChannelPrefix+taskID)
 }
 
-// PublishProgressStructured publishes a structured progress event with stage,
-// title, description, and numeric percent. Used by UpdateProgress when an
-// MCP-driven progress update is reported. SSE clients render title and
-// description directly; no separate message payload is needed.
-func (ps *RedisPubSub) PublishProgressStructured(ctx context.Context, taskID, stage, state, title, description string, percent int) {
-	if ps.rdb == nil {
-		return
-	}
-	event := ProgressEvent{
-		TaskID:      taskID,
-		Stage:       stage,
-		State:       state,
-		Title:       title,
-		Description: description,
-		Percent:     percent,
-	}
-	data, err := json.Marshal(event)
-	if err != nil {
-		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to marshal structured progress event")
-		return
-	}
-	channel := progressChannelPrefix + taskID
-	if err := ps.rdb.Publish(ctx, channel, data).Err(); err != nil {
-		ps.logger.Error().Err(err).Str("task_id", taskID).Msg("failed to publish structured progress event")
-	}
+func (ps *RedisPubSub) SubscribeLifecycle(ctx context.Context, taskID string) *TaskEventSubscriber {
+	return ps.subscribe(ctx, lifecycleChannelPrefix+taskID)
 }
 
-// SubscribeProgress subscribes to progress events for a specific task.
-// The caller must call Close() on the returned subscriber when done.
-func (ps *RedisPubSub) SubscribeProgress(ctx context.Context, taskID string) *ProgressSubscriber {
+func (ps *RedisPubSub) subscribe(ctx context.Context, channel string) *TaskEventSubscriber {
 	if ps.rdb == nil {
 		return nil
 	}
-	channel := progressChannelPrefix + taskID
 	sub := ps.rdb.Subscribe(ctx, channel)
-	return &ProgressSubscriber{
+	return &TaskEventSubscriber{
 		ch:      sub,
 		msgChan: sub.Channel(redis.WithChannelSize(64)),
 	}

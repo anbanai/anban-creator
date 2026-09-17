@@ -17,7 +17,6 @@ function task(overrides: Partial<Task>): Task {
     title: '任务',
     prompt: '写一篇内容',
     status: 'completed',
-    progress: 100,
     plan_id: null,
     project_id: 'project-1',
     billing_price_credits: 5000,
@@ -76,7 +75,7 @@ describe('command center rules', () => {
     const signals = buildCommandCenterSignals({
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [
-        task({ id: 'running', status: 'running', progress: 42 }),
+        task({ id: 'running', status: 'running' }),
         task({ id: 'failed', status: 'failed', error_message: '模型超时' }),
       ],
       plans: [

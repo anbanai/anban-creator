@@ -80,9 +80,7 @@ describe("postJSONWithRetry", () => {
       await reporter.stageProgress({
         stage: "research",
         state: "active",
-        title: "Research",
         description: "Gathering sources",
-        progress_percent: 10,
       });
       expect(requests).toEqual([{
         url: "https://creator.example.com/api/v1/agent/progress",
@@ -91,9 +89,7 @@ describe("postJSONWithRetry", () => {
           execution_id: "execution-1",
           stage: "research",
           state: "active",
-          title: "Research",
           description: "Gathering sources",
-          progress_percent: 10,
         },
       }]);
     } finally {
@@ -157,7 +153,7 @@ describe("postJSONWithRetry", () => {
     };
     try {
       const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1" }, "execution-token", "task-1");
-      await reporter.stageProgress({ stage: "research", state: "active", title: "Research", progress_percent: 10 });
+      await reporter.stageProgress({ stage: "research", state: "active" });
       expect(attempts).toBe(3);
     } finally {
       globalThis.fetch = originalFetch;
@@ -174,7 +170,7 @@ describe("postJSONWithRetry", () => {
     };
     try {
       const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1" }, "execution-token", "task-1");
-      const pending = reporter.stageProgress({ stage: "research", state: "active", title: "Research", progress_percent: 10 }, controller.signal);
+      const pending = reporter.stageProgress({ stage: "research", state: "active" }, controller.signal);
       await Bun.sleep(10);
       controller.abort(new Error("progress deadline exceeded"));
 

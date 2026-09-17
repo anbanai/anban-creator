@@ -157,81 +157,13 @@ func (r *taskRepository) AppendProgressLog(ctx context.Context, id, message stri
 		Error
 }
 
-// UpdateProgressColumn writes the numeric progress percentage (0-100) to the
-// progress column. Called by UpdateProgress when a stage-derived or explicit
-// percent is available.
-func (r *taskRepository) UpdateProgressColumn(ctx context.Context, id string, percent int) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("progress", percent).Error
-}
-
-// UpdateLatestProgress writes the latest structured progress payload to the
-// dedicated latest_progress JSON column. Called by TaskService.UpdateProgress
-// at every stage transition so Studio can render the current stage across
-// reloads without parsing the mixed progress_log column.
-func (r *taskRepository) UpdateLatestProgress(ctx context.Context, id string, payload model.ProgressPayload) error {
-	return r.db.WithContext(ctx).Model(&model.Task{}).
-		Where("id = ?", id).
-		Update("latest_progress", datatypes.NewJSONType(payload)).Error
-}
-
-// AdvanceStructuredProgress uses the declared stage/state sequence as its CAS
-// high-water mark. Numeric progress is retained independently as a maximum so
-// Pack stages with equal or zero percentages still advance deterministically.
-func (r *taskRepository) AdvanceStructuredProgress(ctx context.Context, id, executionID string, sequence int, payload model.ProgressPayload) (advanced bool, persisted model.ProgressPayload, err error) {
-	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&model.Task{}).
-			Where("id = ? AND progress_sequence < ? AND current_execution_id = ? AND status = ?", id, sequence, executionID, model.TaskStatusRunning).
-			Updates(map[string]any{
-				"progress_sequence": sequence,
-				"progress": gorm.Expr(
-					"CASE WHEN progress < ? THEN ? ELSE progress END",
-					payload.Percent,
-					payload.Percent,
-				),
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return nil
-		}
-
-		var finalProgress int
-		if err := tx.Model(&model.Task{}).Select("progress").Where("id = ?", id).Scan(&finalProgress).Error; err != nil {
-			return err
-		}
-		payload.Percent = finalProgress
-		message, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("marshal structured progress: %w", err)
-		}
-		if err := tx.Model(&model.Task{}).Where("id = ?", id).Updates(map[string]any{
-			"latest_progress": datatypes.NewJSONType(payload),
-			"progress_log":    gorm.Expr("CONCAT(COALESCE(progress_log, ''), ?)", string(message)+"\n"),
-		}).Error; err != nil {
-			return err
-		}
-		advanced = true
-		persisted = payload
-		return nil
-	})
-	return advanced, persisted, err
-}
-
-// GetTypeAndProgress loads only the type and progress columns for a task,
-// avoiding the longtext progress_log transfer on hot paths.
-func (r *taskRepository) GetTypeAndProgress(ctx context.Context, id string) (string, int, error) {
-	var row struct {
-		Type     string
-		Progress int
-	}
-	if err := r.db.WithContext(ctx).Model(&model.Task{}).
-		Select("type, progress").
-		Where("id = ?", id).
-		Take(&row).Error; err != nil {
-		return "", 0, err
-	}
-	return row.Type, row.Progress, nil
+// UpdateLifecycle persists a full lifecycle snapshot only for the current
+// execution. Callers hold execution/task locks and own revision assignment.
+func (r *taskRepository) UpdateLifecycle(ctx context.Context, id, executionID string, lifecycle model.TaskLifecycle) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.Task{}).
+		Where("id = ? AND current_execution_id = ?", id, executionID).
+		Update("lifecycle", datatypes.NewJSONType(lifecycle))
+	return result.RowsAffected == 1, result.Error
 }
 
 // UpdateExecutionEvidence persists the JSON result and its typed cost evidence
@@ -329,14 +261,14 @@ func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID,
 }
 
 func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	_, _, locked, err := r.lockLocalTaskExecutionForFinalization(ctx, id, executionID)
+	task, _, locked, err := r.lockLocalTaskExecutionForFinalization(ctx, id, executionID)
 	if err != nil {
 		return false, fmt.Errorf("lock local task execution for finalization: %w", err)
 	}
 	if !locked {
 		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
 	}
-	return r.finalizeLocalTaskRows(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
+	return r.finalizeLocalTaskRows(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus, task.Lifecycle.Data())
 }
 
 // FinalizeLocalTaskWithArtifactsInTx owns the complete local terminal commit:
@@ -366,7 +298,7 @@ func (r *taskRepository) FinalizeLocalTaskWithArtifactsInTx(ctx context.Context,
 		return false, fmt.Errorf("unsupported local artifact action %q", artifactAction)
 	}
 
-	won, err := r.finalizeLocalTaskRows(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus)
+	won, err := r.finalizeLocalTaskRows(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus, task.Lifecycle.Data())
 	if err != nil || !won {
 		return won, err
 	}
@@ -429,12 +361,17 @@ func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context,
 	}
 
 	now := time.Now()
+	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(task.Lifecycle.Data(), status, errorMsg, now)
+	updates := map[string]any{
+		"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
+		"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
+	}
+	if lifecycleChanged {
+		updates["lifecycle"] = datatypes.NewJSONType(lifecycle)
+	}
 	res := r.db.WithContext(ctx).Model(&model.Task{}).
 		Where("id = ? AND status = ? AND current_execution_id = ?", id, model.TaskStatusRunning, executionID).
-		Updates(map[string]any{
-			"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
-			"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
-		})
+		Updates(updates)
 	if res.Error != nil {
 		return false, res.Error
 	}
@@ -488,14 +425,19 @@ func (r *taskRepository) lockLocalTaskExecutionForFinalization(ctx context.Conte
 	return task, execution, true, nil
 }
 
-func (r *taskRepository) finalizeLocalTaskRows(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
+func (r *taskRepository) finalizeLocalTaskRows(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string, currentLifecycle model.TaskLifecycle) (bool, error) {
 	now := time.Now()
+	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(currentLifecycle, status, errorMsg, now)
+	updates := map[string]any{
+		"status": status, "error_message": errorMsg, "completed_at": now, "result": taskResult,
+		"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
+	}
+	if lifecycleChanged {
+		updates["lifecycle"] = datatypes.NewJSONType(lifecycle)
+	}
 	res := r.db.WithContext(ctx).Model(&model.Task{}).
 		Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
-		Updates(map[string]any{
-			"status": status, "error_message": errorMsg, "completed_at": now, "result": taskResult,
-			"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
-		})
+		Updates(updates)
 	if res.Error != nil {
 		return false, res.Error
 	}
@@ -526,13 +468,24 @@ func (r *taskRepository) finalizeLocalTaskRows(ctx context.Context, id, executio
 }
 
 func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error) {
+	var current model.Task
+	if err := r.db.WithContext(ctx).Select("id", "lifecycle").Where("id = ? AND status = ? AND current_execution_id = ?", id, model.TaskStatusRunning, executionID).Take(&current).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	now := time.Now()
+	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(current.Lifecycle.Data(), status, errorMsg, now)
+	updates := map[string]any{
+		"status": status, "error_message": errorMsg, "completed_at": now,
+	}
+	if lifecycleChanged {
+		updates["lifecycle"] = datatypes.NewJSONType(lifecycle)
+	}
 	res := r.db.WithContext(ctx).Model(&model.Task{}).
 		Where("id = ? AND status = ? AND current_execution_id = ?", id, model.TaskStatusRunning, executionID).
-		Updates(map[string]any{
-			"status":        status,
-			"error_message": errorMsg,
-			"completed_at":  time.Now(),
-		})
+		Updates(updates)
 	if res.Error != nil {
 		return false, res.Error
 	}
@@ -922,9 +875,6 @@ func (r *taskRepository) ResetRetryableTaskForResume(ctx context.Context, taskID
 			"outcome":              nil,
 			"terminal_model_usage": datatypes.NewJSONType([]model.ModelTokenUsage{}),
 			"cost_status":          "",
-			"progress":             0,
-			"progress_sequence":    0,
-			"latest_progress":      datatypes.NewJSONType(model.ProgressPayload{}),
 			"workflow_status":      nil,
 			"input_attachments":    datatypes.NewJSONType(attachments),
 			"execution_target":     model.ExecutionTargetCloud,

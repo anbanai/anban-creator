@@ -75,7 +75,7 @@ struct ClaimBody<'a> {
     executor_info: ExecutorInfo<'a>,
 }
 
-const AGENT_PACK_CONTRACT_VERSION: u8 = 3;
+const AGENT_PACK_CONTRACT_VERSION: u8 = 4;
 
 fn claim_body() -> ClaimBody<'static> {
     ClaimBody {
@@ -108,7 +108,7 @@ mod contract_tests {
     #[test]
     fn claim_body_uses_execution_identity_contract_version() {
         let body = claim_body();
-        assert_eq!(body.agent_pack_contract_version, 3);
+        assert_eq!(body.agent_pack_contract_version, 4);
     }
 }
 

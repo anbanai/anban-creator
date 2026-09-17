@@ -2,6 +2,7 @@ import type { AgentExecutionProfileID, BillingCatalog, Project, Task, TaskType }
 import { projectsReturnHref } from '@/lib/command-center'
 import { taskCostFor } from '@/lib/pricing'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
+import { taskStageSummary } from '@/lib/task-lifecycle'
 
 export interface DashboardBlocker {
   id: 'no-project' | 'api-key'
@@ -122,24 +123,25 @@ export function taskFailureMessage(task: Pick<Task, 'error_message'>): string | 
 }
 
 export function taskActionSignal(task: Task): TaskActionSignal {
+  const stage = taskStageSummary(task)
   if (task.status === 'failed') {
     const failureMessage = taskFailureMessage(task)
     return failureMessage
-      ? { label: '查看失败原因', hint: '进入详情后可继续执行或克隆', tone: 'risk' }
-      : { label: '查看任务状态', hint: '未返回失败详情', tone: 'risk' }
+      ? { label: stage.title, hint: '进入详情后可继续执行或克隆', tone: 'risk' }
+      : { label: stage.title, hint: '未返回失败详情', tone: 'risk' }
   }
   if (task.status === 'running' || task.status === 'pending') {
     return {
-      label: task.status === 'running' ? '查看运行进度' : '等待执行',
-      hint: `${task.progress ?? 0}%`,
+      label: stage.title,
+      hint: stage.state === 'active' ? '进行中' : '待执行',
       tone: 'running',
     }
   }
   const readiness = workflowReadinessLabel(task.workflow_status)
   if (task.status === 'completed') {
     return {
-      label: readiness || '查看产物',
-      hint: '可查看、下载或复用',
+      label: stage.title,
+      hint: stage.state === 'pending' || stage.state === 'blocked' ? '等待下一步' : readiness || '已完成',
       tone: 'success',
     }
   }

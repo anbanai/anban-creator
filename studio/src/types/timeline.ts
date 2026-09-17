@@ -1,4 +1,4 @@
-import type { TaskType, TaskStatus } from './task'
+import type { TaskType, TaskStatus, TaskLifecycleStageState } from './task'
 import type { PlanType, PlanStatus } from './plan'
 
 export type TimelineItemType = 'task' | 'plan'
@@ -17,7 +17,10 @@ export interface TimelineItem {
   created_at: string
   plan_id?: number
   task_id?: string
-  progress?: number
+  current_stage?: {
+    title: string
+    state: TaskLifecycleStageState
+  }
   error?: string
 }
 

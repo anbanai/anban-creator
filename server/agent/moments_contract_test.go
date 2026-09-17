@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/anbanai/anban-creator/server/agentpack"
 )
 
 func TestMomentsAgentAndSkillContracts(t *testing.T) {
@@ -62,62 +60,6 @@ func TestMomentsAgentAndSkillContracts(t *testing.T) {
 	reg := readRepoFile(t, filepath.Join(root, "harness", "install", "agents-registration.toml"))
 	if !strings.Contains(reg, "[agents.moments]") {
 		t.Fatal("codex agents-registration.toml missing moments registration")
-	}
-}
-
-func TestMomentsProgressHookContract(t *testing.T) {
-	root := repositoryRoot(t)
-	catalog, err := agentpack.LoadCatalog(filepath.Join(root, "harness"))
-	if err != nil {
-		t.Fatalf("load Agent Pack catalog: %v", err)
-	}
-	pack, ok := catalog.Pack("moments")
-	if !ok {
-		t.Fatal("moments Agent Pack missing from catalog")
-	}
-
-	claudePaths := []string{
-		filepath.Join(root, "harness", "packs", "moments", "agent.claude.md"),
-		filepath.Join(root, "harness", "agents", "moments.md"),
-	}
-	for _, path := range claudePaths {
-		t.Run(filepath.Base(path), func(t *testing.T) {
-			body := readRepoFile(t, path)
-			if strings.Contains(body, "update_task_progress") {
-				t.Fatalf("%s must derive managed progress from Task metadata, not update_task_progress", path)
-			}
-			for _, want := range []string{
-				"TaskCreate",
-				"TaskUpdate status=in_progress",
-				"TaskUpdate status=completed",
-				"anban_progress_stage",
-				"Runner Hooks",
-				"保存每次返回的 Task id",
-				"对同一 Task id",
-				"不得依赖任务标题推断阶段",
-				"不得省略 TaskUpdate 的 metadata",
-			} {
-				if !strings.Contains(body, want) {
-					t.Fatalf("%s missing Task metadata progress rule %q", path, want)
-				}
-			}
-			for _, stage := range pack.Progress {
-				metadata := `{"anban_progress_stage":"` + stage.ID + `"}`
-				if !strings.Contains(body, metadata) {
-					t.Fatalf("%s does not map declared progress stage %q through Task metadata %s", path, stage.ID, metadata)
-				}
-			}
-		})
-	}
-
-	codexAgent := readRepoFile(t, filepath.Join(root, "harness", "agents", "moments.toml"))
-	if !strings.Contains(codexAgent, "update_task_progress") {
-		t.Fatal("Codex moments agent must retain explicit update_task_progress")
-	}
-	for _, forbidden := range []string{"anban_progress_stage", "官方 Task Hook", "Runner Hook"} {
-		if strings.Contains(codexAgent, forbidden) {
-			t.Fatalf("Codex moments agent must not claim Claude Task Hook progress support: %q", forbidden)
-		}
 	}
 }
 

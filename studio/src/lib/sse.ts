@@ -38,7 +38,7 @@ export function parseSSE(text: string): SSEEvent[] {
 }
 
 /**
- * Stream task progress events using fetch + ReadableStream.
+ * Stream task lifecycle and log events using fetch + ReadableStream.
  * This approach supports custom Authorization headers, unlike EventSource.
  */
 export async function* streamTaskProgress(

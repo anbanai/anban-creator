@@ -1978,7 +1978,6 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 		Type:           model.PlatformArticle,
 		Status:         model.TaskStatusFailed,
 		Prompt:         "finished topic",
-		Progress:       100,
 		Result:         &resultJSON,
 		ErrorMessage:   "old error",
 		CompletedAt:    &completedAt,
@@ -2015,7 +2014,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	if resumed.Status != model.TaskStatusPending {
 		t.Fatalf("status = %q, want pending", resumed.Status)
 	}
-	if resumed.CompletedAt != nil || resumed.Result != nil || resumed.ErrorMessage != "" || resumed.Progress != 0 || resumed.WorkflowStatus != nil {
+	if resumed.CompletedAt != nil || resumed.Result != nil || resumed.ErrorMessage != "" || resumed.WorkflowStatus != nil {
 		t.Fatalf("resume did not reset execution state: %+v", resumed)
 	}
 	if len(enqueuer.enqueued) != 1 {
@@ -2061,7 +2060,7 @@ func TestTaskServiceResumeRejectsCompletedTaskWithoutMutation(t *testing.T) {
 	result := `{"success":true}`
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		Status: model.TaskStatusCompleted, Progress: 100, Result: &result, CompletedAt: &completedAt,
+		Status: model.TaskStatusCompleted, Result: &result, CompletedAt: &completedAt,
 	}
 	freezeTestTaskProfile(t, task)
 	task.SetInputAttachments([]model.EntryAttachment{{Role: "brief", Text: "keep"}})
@@ -2083,7 +2082,7 @@ func TestTaskServiceResumeRejectsCompletedTaskWithoutMutation(t *testing.T) {
 	if findErr != nil {
 		t.Fatal(findErr)
 	}
-	if found.Status != model.TaskStatusCompleted || found.Progress != 100 || found.Result == nil || *found.Result != result || found.CompletedAt == nil || len(found.InputAttachments.Data()) != 1 || found.InputAttachments.Data()[0].Text != "keep" {
+	if found.Status != model.TaskStatusCompleted || found.Result == nil || *found.Result != result || found.CompletedAt == nil || len(found.InputAttachments.Data()) != 1 || found.InputAttachments.Data()[0].Text != "keep" {
 		t.Fatalf("completed task mutated: %#v", found)
 	}
 }
@@ -2721,16 +2720,15 @@ func TestTaskRepository_ResetRetryableTaskForResumeOnlyOneStatusSwap(t *testing.
 	userID := uuid.New().String()
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	task := &model.Task{
-		ID:               uuid.New().String(),
-		UserID:           userID,
-		ProjectID:        projectID,
-		Type:             model.PlatformArticle,
-		Status:           model.TaskStatusFailed,
-		Progress:         88,
-		ProgressSequence: 10,
-		LatestProgress: datatypes.NewJSONType(
-			model.ProgressPayload{Stage: "delivery", State: "complete", Percent: 88},
-		),
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		ProjectID: projectID,
+		Type:      model.PlatformArticle,
+		Status:    model.TaskStatusFailed,
+		Lifecycle: datatypes.NewJSONType(model.TaskLifecycle{Version: 1, Revision: 8, Stages: []model.TaskLifecycleStage{
+			{ID: "research", Title: "选题研究", Source: model.TaskLifecycleSourceAgent, Kind: model.TaskLifecycleKindWork, State: model.TaskLifecycleStateComplete},
+			{ID: "writing", Title: "内容创作", Source: model.TaskLifecycleSourceAgent, Kind: model.TaskLifecycleKindWork, State: model.TaskLifecycleStateFailed},
+		}}),
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -2757,8 +2755,8 @@ func TestTaskRepository_ResetRetryableTaskForResumeOnlyOneStatusSwap(t *testing.
 	if found.Status != model.TaskStatusPending {
 		t.Fatalf("status = %q, want pending", found.Status)
 	}
-	if found.Progress != 0 || found.ProgressSequence != 0 || found.LatestProgress.Data().Stage != "" {
-		t.Fatalf("progress reset = percent:%d sequence:%d latest:%#v", found.Progress, found.ProgressSequence, found.LatestProgress.Data())
+	if lifecycle := found.Lifecycle.Data(); lifecycle.Revision != 8 || len(lifecycle.Stages) != 2 || lifecycle.Stages[0].State != model.TaskLifecycleStateComplete {
+		t.Fatalf("lifecycle was not preserved for resume: %#v", lifecycle)
 	}
 }
 

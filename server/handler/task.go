@@ -1395,8 +1395,8 @@ func (h *TaskHandler) GetFiles(c fiber.Ctx) error {
 	return Success(c, files)
 }
 
-// Stream handles GET /api/v1/tasks/:id/stream — SSE endpoint for real-time progress.
-// When Redis pub/sub is available, it subscribes to progress events for immediate
+// Stream handles GET /api/v1/tasks/:id/stream for lifecycle and log events.
+// When Redis pub/sub is available, it subscribes to typed events for immediate
 // push delivery. Falls back to 1-second DB polling when Redis is unavailable.
 func (h *TaskHandler) Stream(c fiber.Ctx) error {
 	c.Set("Content-Type", "text/event-stream")
@@ -1433,15 +1433,50 @@ func (h *TaskHandler) Stream(c fiber.Ctx) error {
 	return h.streamWithPolling(c, ctx, taskID)
 }
 
-// streamWithPubSub uses Redis pub/sub for real-time progress delivery.
-// It also runs a slow DB poll as a fallback for any events missed by pub/sub
-// and for terminal state detection.
+func encodeTaskStreamEvent(event string, data any) (string, error) {
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("event: %s\ndata: %s\n\n", event, payload), nil
+}
+
+func writeTaskStreamEvent(c fiber.Ctx, event string, data any) error {
+	encoded, err := encodeTaskStreamEvent(event, data)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprint(c, encoded)
+	return err
+}
+
+func taskStreamTerminal(status string, lifecycle model.TaskLifecycle) bool {
+	if status != model.TaskStatusCompleted && status != model.TaskStatusFailed && status != model.TaskStatusCancelled {
+		return false
+	}
+	for _, stage := range lifecycle.Stages {
+		if stage.Source != model.TaskLifecycleSourceServer {
+			continue
+		}
+		switch stage.State {
+		case model.TaskLifecycleStatePending, model.TaskLifecycleStateActive, model.TaskLifecycleStateBlocked:
+			return false
+		}
+	}
+	return true
+}
+
+// streamWithPubSub subscribes to distinct lifecycle and raw-log channels. A
+// full lifecycle snapshot is sent first so reconnecting clients never need to
+// reconstruct structured state from transient events.
 func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID string, pubsub *service.RedisPubSub) error {
-	sub := pubsub.SubscribeProgress(ctx, taskID)
-	if sub == nil {
+	lifecycleSub := pubsub.SubscribeLifecycle(ctx, taskID)
+	logSub := pubsub.SubscribeLogs(ctx, taskID)
+	if lifecycleSub == nil || logSub == nil {
 		return h.streamWithPolling(c, ctx, taskID)
 	}
-	defer sub.Close()
+	defer lifecycleSub.Close()
+	defer logSub.Close()
 
 	// Slow fallback poll every 5 seconds to catch any missed pub/sub events
 	// and detect terminal states.
@@ -1452,10 +1487,16 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 	timeout := time.NewTimer(30 * time.Minute)
 	defer timeout.Stop()
 
-	// Fetch initial progress log length from DB.
-	lastLogLen := 0
-	if task, err := h.service.GetByID(ctx, taskID); err == nil {
-		lastLogLen = len(task.ProgressLog)
+	initial, err := h.service.GetByID(ctx, taskID)
+	if err != nil {
+		return nil
+	}
+	lastLogLen := len(initial.ProgressLog)
+	lastLifecycleRevision := initial.Lifecycle.Data().Revision
+	if lastLifecycleRevision > 0 {
+		if err := writeTaskStreamEvent(c, "lifecycle", initial.Lifecycle.Data()); err != nil {
+			return nil
+		}
 	}
 
 	for {
@@ -1465,48 +1506,52 @@ func (h *TaskHandler) streamWithPubSub(c fiber.Ctx, ctx context.Context, taskID 
 		case <-timeout.C:
 			fmt.Fprintf(c, "event: timeout\ndata: {}\n\n")
 			return nil
-		case msg, ok := <-sub.Events():
+		case msg, ok := <-lifecycleSub.Events():
 			if !ok {
-				// Subscription closed, fall back to polling.
 				return h.streamWithPolling(c, ctx, taskID)
 			}
-			var event service.ProgressEvent
+			var event service.TaskLifecycleEvent
 			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
 				continue
 			}
-			if event.Stage != "" || event.Percent > 0 {
-				payload := map[string]any{
-					"stage":       event.Stage,
-					"title":       event.Title,
-					"description": event.Description,
-					"percent":     event.Percent,
-				}
-				data, _ := json.Marshal(payload)
-				if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", data); err != nil {
-					return nil
-				}
-			} else {
-				escaped, _ := json.Marshal(event.Message)
-				if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
-					return nil
-				}
+			if event.Lifecycle.Revision <= lastLifecycleRevision {
+				continue
+			}
+			lastLifecycleRevision = event.Lifecycle.Revision
+			if err := writeTaskStreamEvent(c, "lifecycle", event.Lifecycle); err != nil {
+				return nil
+			}
+		case msg, ok := <-logSub.Events():
+			if !ok {
+				return h.streamWithPolling(c, ctx, taskID)
+			}
+			var event service.TaskLogEvent
+			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
+				continue
+			}
+			if err := writeTaskStreamEvent(c, "log", event.Message); err != nil {
+				return nil
 			}
 		case <-fallbackTicker.C:
 			task, err := h.service.GetByID(ctx, taskID)
 			if err != nil {
 				return nil
 			}
-			// Send any progress entries missed by pub/sub.
 			if len(task.ProgressLog) > lastLogLen {
 				newLog := task.ProgressLog[lastLogLen:]
 				lastLogLen = len(task.ProgressLog)
-				escaped, _ := json.Marshal(newLog)
-				if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
+				if err := writeTaskStreamEvent(c, "log", newLog); err != nil {
+					return nil
+				}
+			}
+			if lifecycle := task.Lifecycle.Data(); lifecycle.Revision > lastLifecycleRevision {
+				lastLifecycleRevision = lifecycle.Revision
+				if err := writeTaskStreamEvent(c, "lifecycle", lifecycle); err != nil {
 					return nil
 				}
 			}
 			// Terminal state detection (reliable via DB).
-			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
+			if taskStreamTerminal(task.Status, task.Lifecycle.Data()) {
 				statusData, _ := json.Marshal(map[string]string{"status": task.Status})
 				fmt.Fprintf(c, "event: %s\ndata: %s\n\n", task.Status, statusData)
 				return nil
@@ -1523,7 +1568,17 @@ func (h *TaskHandler) streamWithPolling(c fiber.Ctx, ctx context.Context, taskID
 	timeout := time.NewTimer(30 * time.Minute)
 	defer timeout.Stop()
 
-	lastLogLen := 0
+	initial, err := h.service.GetByID(ctx, taskID)
+	if err != nil {
+		return nil
+	}
+	lastLogLen := len(initial.ProgressLog)
+	lastLifecycleRevision := initial.Lifecycle.Data().Revision
+	if lastLifecycleRevision > 0 {
+		if err := writeTaskStreamEvent(c, "lifecycle", initial.Lifecycle.Data()); err != nil {
+			return nil
+		}
+	}
 
 	for {
 		select {
@@ -1541,16 +1596,18 @@ func (h *TaskHandler) streamWithPolling(c fiber.Ctx, ctx context.Context, taskID
 			if len(task.ProgressLog) > lastLogLen {
 				newLog := task.ProgressLog[lastLogLen:]
 				lastLogLen = len(task.ProgressLog)
-				escaped, err := json.Marshal(newLog)
-				if err != nil {
-					continue
+				if err := writeTaskStreamEvent(c, "log", newLog); err != nil {
+					return nil
 				}
-				if _, err := fmt.Fprintf(c, "event: progress\ndata: %s\n\n", escaped); err != nil {
+			}
+			if lifecycle := task.Lifecycle.Data(); lifecycle.Revision > lastLifecycleRevision {
+				lastLifecycleRevision = lifecycle.Revision
+				if err := writeTaskStreamEvent(c, "lifecycle", lifecycle); err != nil {
 					return nil
 				}
 			}
 
-			if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
+			if taskStreamTerminal(task.Status, task.Lifecycle.Data()) {
 				statusData, _ := json.Marshal(map[string]string{
 					"status": task.Status,
 				})
