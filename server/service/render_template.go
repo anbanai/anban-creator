@@ -10,7 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/anbanai/anban-creator/app/converter"
+	"github.com/anbanai/anban-creator/server/app/converter"
 	"github.com/anbanai/anban-creator/server/resources"
 )
 

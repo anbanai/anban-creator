@@ -18,17 +18,18 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
+          cache-dependency-path: server/go.sum
 
       - name: Download dependencies
-        run: go mod download
+        run: go -C server mod download
 
       - name: Build static Go binaries
         env:
           CGO_ENABLED: "0"
         run: |
-          go build -o /tmp/anban-creator-server ./server
+          go -C server build -o /tmp/anban-creator-server .
 
       - name: Check formatting
         run: |
@@ -40,10 +41,10 @@ jobs:
           fi
 
       - name: Vet
-        run: go vet ./...
+        run: go -C server vet ./...
 
       - name: Test
-        run: go test -race ./...
+        run: go -C server test -race ./...
 
   agent:
     runs-on: ubuntu-latest

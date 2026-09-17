@@ -31,7 +31,7 @@
 - Consumes: repository filesystem layout and the contents of `server/go.mod`, `Makefile`, `.github/workflows/ci.yml`, and `deploy/docker/Dockerfile.server`.
 - Produces: `TestServerOwnsGoModuleLayout` and `TestServerModuleToolingTargetsServerRoot`, which define the migration's structural acceptance criteria.
 
-- [ ] **Step 1: Write the failing layout contract test**
+- [x] **Step 1: Write the failing layout contract test**
 
 Create `server/module_layout_contract_test.go` in package `main` with tests that:
 
@@ -143,7 +143,7 @@ func TestServerModuleToolingTargetsServerRoot(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and verify the expected failure**
+- [x] **Step 2: Run the focused test and verify the expected failure**
 
 Run:
 
@@ -174,7 +174,7 @@ new Server module files and tooling strings do not exist yet.
 - Consumes: the package APIs currently exported by `app/config`, `app/converter`, `app/draft`, `app/image`, `app/wechat`, and `app/writer`.
 - Produces: behavior-identical packages at `github.com/anbanai/anban-creator/server/app/{config,converter,draft,image,wechat,writer}` and a complete Server module rooted at `server/`.
 
-- [ ] **Step 1: Move tracked files without editing package bodies**
+- [x] **Step 1: Move tracked files without editing package bodies**
 
 Run:
 
@@ -187,7 +187,7 @@ git mv go.sum server/go.sum
 git mv deploy/docker/runtime-smoke_test.go server/runtime_smoke_test.go
 ```
 
-- [ ] **Step 2: Change the module declaration and former App imports**
+- [x] **Step 2: Change the module declaration and former App imports**
 
 Change the first line of `server/go.mod` to:
 
@@ -209,7 +209,7 @@ github.com/anbanai/anban-creator/server/app/
 
 Do not rewrite existing `github.com/anbanai/anban-creator/server/*` imports.
 
-- [ ] **Step 3: Adapt the moved runtime smoke test to its new location**
+- [x] **Step 3: Adapt the moved runtime smoke test to its new location**
 
 In `server/runtime_smoke_test.go`, change `package docker` to `package main` and
 change `runtimeSmokeRepoRoot` to return one parent directory from the test file:
@@ -220,7 +220,7 @@ return filepath.Clean(filepath.Join(filepath.Dir(filename), ".."))
 
 Keep all reads of `deploy/docker/*` unchanged relative to the computed root.
 
-- [ ] **Step 4: Format moved and import-edited Go sources**
+- [x] **Step 4: Format moved and import-edited Go sources**
 
 Run:
 
@@ -228,7 +228,7 @@ Run:
 gofmt -w server/app server/runtime_smoke_test.go server/module_layout_contract_test.go
 ```
 
-- [ ] **Step 5: Run package-level tests from the new module root**
+- [x] **Step 5: Run package-level tests from the new module root**
 
 Run:
 
@@ -256,7 +256,7 @@ reports an unresolved old App import.
 - Consumes: the Server module root and import paths produced by Task 2.
 - Produces: root Make commands, CI jobs, release builds, Docker builds, and contract tests that all operate on `server/`.
 
-- [ ] **Step 1: Update existing contract-test expectations before production tooling**
+- [x] **Step 1: Update existing contract-test expectations before production tooling**
 
 Change `server/agent/sdk_fork_contract_test.go` to read
 `server/go.mod`. Change the Server Docker contract in
@@ -270,7 +270,7 @@ COPY server ./
 go build -ldflags="-s -w" -o /anban-creator-server .
 ```
 
-- [ ] **Step 2: Run the focused tooling tests and verify failure**
+- [x] **Step 2: Run the focused tooling tests and verify failure**
 
 Run:
 
@@ -281,7 +281,7 @@ go -C server test ./agent . -run 'Test.*(Docker|GoModule|ModuleLayout|ModuleTool
 Expected: FAIL because the Makefile, workflows, and Dockerfile still target the
 old root module.
 
-- [ ] **Step 3: Retarget root Make commands**
+- [x] **Step 3: Retarget root Make commands**
 
 Use `go -C server` for test, fmt, vet, dependency, coverage, Agent Pack
 commands, Server build, and Server test targets. Run golangci-lint with
@@ -292,14 +292,18 @@ path with:
 go -C server build -o ../$(BINDIR)/$(BINARY) .
 ```
 
-- [ ] **Step 4: Retarget GitHub Actions**
+Because Agent Pack defaults are relative to the process working directory, pass
+`-plugin-root ../harness` and `-catalog agentpack/catalog.generated.json` from
+the Server module root.
+
+- [x] **Step 4: Retarget GitHub Actions**
 
 Set `cache-dependency-path: server/go.sum` on Go setup steps. Run Go dependency,
 build, vet, test, and release commands with `go -C server`. Keep release
 artifacts in the existing repository-level `bin/` directory by using `../bin/`
 output paths from the Server module.
 
-- [ ] **Step 5: Retarget the Server Docker build**
+- [x] **Step 5: Retarget the Server Docker build**
 
 Use this builder layout in `deploy/docker/Dockerfile.server`:
 
@@ -314,7 +318,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
 Update final-stage billing copies from `/build/server/billing/*`; runtime paths
 and the image entry command remain unchanged.
 
-- [ ] **Step 6: Run focused tooling contracts**
+- [x] **Step 6: Run focused tooling contracts**
 
 Run:
 
@@ -340,20 +344,20 @@ Expected: PASS.
 - Consumes: the completed module layout and root Make interface.
 - Produces: accurate developer instructions and a dependency graph generated from the relocated Server module.
 
-- [ ] **Step 1: Replace active layout and command documentation**
+- [x] **Step 1: Replace active layout and command documentation**
 
 Describe `server/app/` as Server-owned reusable packages. Change direct commands
 from root-scoped `go test ./...` and `go build ... ./server` forms to
 `cd server && go test ./...` and `cd server && go build -o /tmp/anban-creator-server .`.
 Keep Make command examples unchanged where their target name does not change.
 
-- [ ] **Step 2: Update source and resource comments**
+- [x] **Step 2: Update source and resource comments**
 
 Replace references such as `app/converter`, `app/image`, and `app/writer` with
 their `server/app/*` paths. Do not alter container paths such as `/app/data` or
 Codex configuration paths such as `~/.codex`.
 
-- [ ] **Step 3: Tidy the relocated module**
+- [x] **Step 3: Tidy the relocated module**
 
 Run:
 
@@ -361,7 +365,7 @@ Run:
 go -C server mod tidy
 ```
 
-- [ ] **Step 4: Verify old package and layout references are gone**
+- [x] **Step 4: Verify old package and layout references are gone**
 
 Run:
 
@@ -446,10 +450,9 @@ comment-only resource files by explicit path. Do not use `git add server` or
 `git add -A`.
 
 `server/service/task_artifact_upload_test.go` overlaps pre-existing user work.
-Construct its staged blob from `HEAD` with only the old App import replaced,
-then stage that blob with `git update-index --cacheinfo`; do not stage the
-working-tree version of that file. Verify its staged diff contains only the
-single import-path change before committing.
+Its new, uncommitted tests already use the relocated import, while the `HEAD`
+version has no App import at all. Leave the entire file unstaged so none of that
+parallel work enters this migration commit.
 
 Commit with:
 

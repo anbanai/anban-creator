@@ -23,7 +23,7 @@ import (
 	"github.com/rs/zerolog"
 	_ "golang.org/x/image/webp"
 
-	appimage "github.com/anbanai/anban-creator/app/image"
+	appimage "github.com/anbanai/anban-creator/server/app/image"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/storage"

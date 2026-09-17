@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
-	appimage "github.com/anbanai/anban-creator/app/image"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
+	appimage "github.com/anbanai/anban-creator/server/app/image"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"

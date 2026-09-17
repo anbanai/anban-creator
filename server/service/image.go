@@ -17,9 +17,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
-	"github.com/anbanai/anban-creator/app/image"
 	"github.com/anbanai/anban-creator/server/agent"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
+	"github.com/anbanai/anban-creator/server/app/image"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -60,7 +60,7 @@ type UploadImageResult struct {
 }
 
 // ImageService handles image generation, upload, and compression
-// for server-side MCP tool use. It wraps the app/image package.
+// for server-side MCP tool use. It wraps the server/app/image package.
 type ImageService struct {
 	imageCfg           *srvconfig.ImageAPIConfig
 	storage            storage.Provider

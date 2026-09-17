@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/resolver"

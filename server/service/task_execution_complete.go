@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	appwechat "github.com/anbanai/anban-creator/app/wechat"
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"

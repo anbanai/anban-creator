@@ -58,7 +58,7 @@ type Project struct {
 	InstructionsSet bool `gorm:"-" json:"-"`
 	// VisualStyle is the 图片视觉 (image visual style, free text) dimension.
 	VisualStyle string `gorm:"column:style;type:text" json:"visual_style"`
-	// Writer is the 写作者 YAML resource key (e.g. "dan-koe") for the app/writer
+	// Writer is the 写作者 YAML resource key (e.g. "dan-koe") for server/app/writer
 	// styled-writing pipeline. Orthogonal to VisualStyle/Theme.
 	Writer string `gorm:"type:varchar(100);default:''" json:"writer"`
 	// Theme is the 排版 (layout/typesetting) resource key (e.g. "autumn-warm").

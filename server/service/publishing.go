@@ -7,10 +7,10 @@ import (
 
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
-	"github.com/anbanai/anban-creator/app/draft"
-	"github.com/anbanai/anban-creator/app/wechat"
 	"github.com/anbanai/anban-creator/server/agent"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
+	"github.com/anbanai/anban-creator/server/app/draft"
+	"github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )

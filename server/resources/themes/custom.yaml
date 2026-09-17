@@ -1,4 +1,4 @@
-# 自定义主题 — 结构化排版规格，供确定性渲染器（app/converter/render.go）消费。
+# 自定义主题 — 结构化排版规格，供确定性渲染器（server/app/converter/render.go）消费。
 #
 # 这是一个中性、克制的默认排版，适合作为自定义起点：直接编辑下面的
 # colors / typography / layout / modules 字段即可定制样式（不再需要写 LLM 提示词）。

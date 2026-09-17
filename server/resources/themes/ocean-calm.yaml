@@ -1,4 +1,4 @@
-# 深海静谧主题 — 结构化排版规格，供确定性渲染器（app/converter/render.go）消费。
+# 深海静谧主题 — 结构化排版规格，供确定性渲染器（server/app/converter/render.go）消费。
 name: ocean-calm
 type: deterministic
 description: "【深海静谧】深邃冷静，蓝色调，理性专业"

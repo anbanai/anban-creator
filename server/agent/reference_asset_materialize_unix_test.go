@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
 	"github.com/anbanai/anban-creator/server/model"
 )
 

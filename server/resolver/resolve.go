@@ -1,6 +1,6 @@
 // Package resolver is the SINGLE source of truth for resolving a task's effective
 // style/author/theme dimensions. It is a leaf package (imports only server/model
-// + app/writer) so that service (which imports agent), agent (which service
+// + server/app/writer) so that service (which imports agent), agent (which service
 // imports), and mcp can ALL call it without an import cycle.
 //
 // Every delivery channel to the agent — get_project_profile (MCP),
@@ -10,7 +10,7 @@
 package resolver
 
 import (
-	"github.com/anbanai/anban-creator/app/writer"
+	"github.com/anbanai/anban-creator/server/app/writer"
 	"github.com/anbanai/anban-creator/server/model"
 )
 

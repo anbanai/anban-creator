@@ -22,6 +22,10 @@ func TestProductionSourcesRejectLegacyDynamicBillingContracts(t *testing.T) {
 		"CreditService", "CreditTransaction", "CreditsBalance", `"/credits`, "model_prices:",
 		"recharge_tiers:", "credit_cost:",
 	}
+	allowedProviderErrors := map[string]map[string]bool{
+		filepath.Join("server", "app", "image", "openai.go"):     {"payment_required": true},
+		filepath.Join("server", "app", "image", "volcengine.go"): {"payment_required": true},
+	}
 	roots := []string{"server", filepath.Join("agent-ts", "src"), filepath.Join("studio", "src")}
 	for _, relativeRoot := range roots {
 		walkRoot := filepath.Join(root, relativeRoot)
@@ -44,9 +48,13 @@ func TestProductionSourcesRejectLegacyDynamicBillingContracts(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			relativePath := strings.TrimPrefix(path, root+string(filepath.Separator))
 			for _, token := range forbidden {
+				if allowedProviderErrors[relativePath][token] {
+					continue
+				}
 				if strings.Contains(string(raw), token) {
-					t.Errorf("%s contains removed billing contract %q", strings.TrimPrefix(path, root+string(filepath.Separator)), token)
+					t.Errorf("%s contains removed billing contract %q", relativePath, token)
 				}
 			}
 			return nil

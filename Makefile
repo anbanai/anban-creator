@@ -49,25 +49,25 @@ distclean: clean
 
 # Run all tests
 test:
-	@go test -v ./...
+	@go -C server test -v ./...
 	@cd agent-ts && bun run test
 
 # Code linting (requires golangci-lint)
 lint:
-	@golangci-lint run ./...
+	@cd server && golangci-lint run ./...
 
 # Format code
 fmt:
-	@go fmt ./...
+	@go -C server fmt ./...
 
 # Static analysis
 vet:
-	@go vet ./...
+	@go -C server vet ./...
 
 # Download and tidy dependencies
 deps:
-	@go mod download
-	@go mod tidy
+	@go -C server mod download
+	@go -C server mod tidy
 
 # Configure repository-local pull/push behavior for managed submodules.
 git-sync-setup:
@@ -82,21 +82,21 @@ humanizer-update:
 # scaffold flags through ARGS, for example:
 #   make agent-pack-new ARGS="-id my-agent -kind managed -task-type my-agent -runtime-profile article"
 agent-pack-new:
-	@go run ./server/cmd/agent-pack new $(ARGS)
+	@go -C server run ./cmd/agent-pack new -plugin-root ../harness $(ARGS)
 
 agent-pack-generate:
-	@go run ./server/cmd/agent-pack generate
+	@go -C server run ./cmd/agent-pack generate -plugin-root ../harness -catalog agentpack/catalog.generated.json
 
 agent-pack-check:
-	@go run ./server/cmd/agent-pack check
+	@go -C server run ./cmd/agent-pack check -plugin-root ../harness -catalog agentpack/catalog.generated.json
 
 # Run all CI checks (format, vet, test, lint)
 ci: agent-pack-check fmt vet test lint
 
 # Run tests with coverage report
 coverage:
-	@go test -coverprofile=coverage.out ./...
-	@go tool cover -func=coverage.out
+	@go -C server test -coverprofile=../coverage.out ./...
+	@go -C server tool cover -func=../coverage.out
 	@echo ""
 	@echo "Full report: go tool cover -html=coverage.out"
 
@@ -107,7 +107,7 @@ coverage:
 # Build the server binary
 server-build:
 	@mkdir -p $(BINDIR)
-	@go build -o $(BINDIR)/$(BINARY) ./server
+	@go -C server build -o ../$(BINDIR)/$(BINARY) .
 	@echo "Server build complete: $(BINDIR)/$(BINARY)"
 
 # Build and run the server
@@ -122,7 +122,7 @@ server-dev:
 
 # Run server tests
 server-test:
-	@go test -v ./server/...
+	@go -C server test -v ./...
 
 # ---------------------------------------------------------------------------
 # Agent targets

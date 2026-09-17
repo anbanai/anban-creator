@@ -1,4 +1,4 @@
-# 秋日暖光主题 — 结构化排版规格，供确定性渲染器（app/converter/render.go）消费。
+# 秋日暖光主题 — 结构化排版规格，供确定性渲染器（server/app/converter/render.go）消费。
 # type: deterministic 表示该主题由确定性渲染器驱动，不再需要 LLM 提示词。
 name: autumn-warm
 type: deterministic

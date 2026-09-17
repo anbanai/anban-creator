@@ -1,12 +1,12 @@
 FROM golang:alpine AS builder
 
-WORKDIR /build
+WORKDIR /build/server
 
-COPY go.mod go.sum ./
+COPY server/go.mod server/go.sum ./
 RUN go mod download
 
-COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server ./server/
+COPY server ./
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
 
 FROM alpine:latest
 

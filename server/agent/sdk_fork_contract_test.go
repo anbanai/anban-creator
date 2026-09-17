@@ -13,12 +13,12 @@ func TestClaudeAgentSDKIsRemoved(t *testing.T) {
 		t.Fatalf("removed Claude Agent SDK directory still exists: %v", err)
 	}
 
-	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	goMod, err := os.ReadFile(filepath.Join(root, "server", "go.mod"))
 	if err != nil {
-		t.Fatalf("read go.mod: %v", err)
+		t.Fatalf("read server/go.mod: %v", err)
 	}
 	if strings.Contains(string(goMod), "github.com/severity1/claude-agent-sdk-go") {
-		t.Fatal("go.mod still declares the removed Claude Agent SDK")
+		t.Fatal("server/go.mod still declares the removed Claude Agent SDK")
 	}
 
 	dockerfile, err := os.ReadFile(filepath.Join(root, "deploy", "docker", "Dockerfile.server"))

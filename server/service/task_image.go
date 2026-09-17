@@ -14,7 +14,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	appimage "github.com/anbanai/anban-creator/app/image"
+	appimage "github.com/anbanai/anban-creator/server/app/image"
 	"github.com/anbanai/anban-creator/server/model"
 )
 

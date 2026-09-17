@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
 	"github.com/anbanai/anban-creator/server/agentpack"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 )

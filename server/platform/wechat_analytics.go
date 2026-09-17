@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
-	appwechat "github.com/anbanai/anban-creator/app/wechat"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/rs/zerolog"
 )

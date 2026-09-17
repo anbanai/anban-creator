@@ -82,7 +82,7 @@ make web-build
 
 ```bash
 # Go tests
-go test ./...
+cd server && go test ./...
 
 # Frontend tests
 cd studio && bun run test
@@ -239,9 +239,8 @@ Users can configure per-account platform credentials and per-user model settings
 ## Repository Layout
 
 ```text
-server/       Go API server, MCP tools, scheduling, task execution, storage, publishing
+server/       Go module: API server plus server/app reusable content and publishing packages
 agent-ts/     TypeScript Agent runtime used by Docker/Kubernetes and Desktop local execution
-app/          Shared Go packages for config, converter, writer, humanizer, image, WeChat draft helpers
 studio/       React Web Studio
 desktop/      Tauri v2 desktop shell (local-execution client wrapping Studio)
 harness/ Unified Claude Code and Codex plugin: shared skills plus native agents, manifests, MCP, hooks, and installers
@@ -256,7 +255,7 @@ The WeChat Mini Program parity client is maintained in the private
 Run full backend and frontend verification before shipping:
 
 ```bash
-go test ./...
+cd server && go test ./...
 cd studio && bun run test
 cd studio && bun run build
 ```

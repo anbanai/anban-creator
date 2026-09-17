@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/server/app/config"
 	"github.com/rs/zerolog"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime"
 	"github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"

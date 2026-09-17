@@ -1,4 +1,4 @@
-module github.com/anbanai/anban-creator
+module github.com/anbanai/anban-creator/server
 
 go 1.27.0
 

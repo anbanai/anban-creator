@@ -7,7 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/anbanai/anban-creator/app/writer"
+	"github.com/anbanai/anban-creator/server/app/writer"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )

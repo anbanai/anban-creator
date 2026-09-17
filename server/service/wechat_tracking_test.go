@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	appwechat "github.com/anbanai/anban-creator/app/wechat"
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"

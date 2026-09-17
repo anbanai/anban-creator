@@ -9,7 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	appwechat "github.com/anbanai/anban-creator/app/wechat"
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/service"
 )
 

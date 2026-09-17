@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anbanai/anban-creator/app/config"
+	"github.com/anbanai/anban-creator/server/app/config"
 	"github.com/rs/zerolog"
 )
 

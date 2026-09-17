@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	appimage "github.com/anbanai/anban-creator/app/image"
+	appimage "github.com/anbanai/anban-creator/server/app/image"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"

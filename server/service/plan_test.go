@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	appdraft "github.com/anbanai/anban-creator/app/draft"
-	"github.com/anbanai/anban-creator/app/wechat"
+	appdraft "github.com/anbanai/anban-creator/server/app/draft"
+	"github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"

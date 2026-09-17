@@ -16,8 +16,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
 	"github.com/anbanai/anban-creator/server/agentpack"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/resolver"
@@ -79,7 +79,7 @@ func EffectiveProject(ch *model.Project, task *model.Task) *model.Project {
 	return model.ProjectFromSnapshot(ch, task.ProjectSnapshot.Data())
 }
 
-// BuildAppConfig constructs an app/config.Config from a Project DB record plus the
+// BuildAppConfig constructs a server/app/config.Config from a Project DB record plus the
 // resolved style dimensions. For new tasks this project is the frozen task
 // snapshot; old rows without a snapshot fall back through legacy task overrides.
 // This bridges the multi-user server config to the single-account app config used

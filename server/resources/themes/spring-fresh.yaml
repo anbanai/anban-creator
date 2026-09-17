@@ -1,4 +1,4 @@
-# 春日清新主题 — 结构化排版规格，供确定性渲染器（app/converter/render.go）消费。
+# 春日清新主题 — 结构化排版规格，供确定性渲染器（server/app/converter/render.go）消费。
 name: spring-fresh
 type: deterministic
 description: "【春日清新】清新自然，绿色调，生机盎然"

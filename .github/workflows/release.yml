@@ -317,11 +317,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
+          cache-dependency-path: server/go.sum
 
       - name: Download dependencies
-        run: go mod download
+        run: go -C server mod download
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -337,7 +338,7 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Run tests
-        run: go test -v ./...
+        run: go -C server test -v ./...
 
       - name: Validate release version contract
         id: version
@@ -413,11 +414,11 @@ jobs:
         run: |
           mkdir -p bin
 
-          GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w" -o bin/anban-creator-server-linux-amd64 ./server
-          GOOS=linux   GOARCH=arm64 go build -ldflags="-s -w" -o bin/anban-creator-server-linux-arm64 ./server
-          GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o bin/anban-creator-server-darwin-amd64 ./server
-          GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o bin/anban-creator-server-darwin-arm64 ./server
-          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/anban-creator-server-windows-amd64.exe ./server
+          GOOS=linux   GOARCH=amd64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-linux-amd64 .
+          GOOS=linux   GOARCH=arm64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-linux-arm64 .
+          GOOS=darwin  GOARCH=amd64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-darwin-amd64 .
+          GOOS=darwin  GOARCH=arm64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-darwin-arm64 .
+          GOOS=windows GOARCH=amd64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-windows-amd64.exe .
 
           cd agent-ts
           npm ci

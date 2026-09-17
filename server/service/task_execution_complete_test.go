@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	appwechat "github.com/anbanai/anban-creator/app/wechat"
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"

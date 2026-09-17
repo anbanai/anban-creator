@@ -1,4 +1,4 @@
-package docker
+package main
 
 import (
 	"encoding/json"
@@ -18,7 +18,7 @@ func runtimeSmokeRepoRoot(t *testing.T) string {
 	if !ok {
 		t.Fatal("resolve test source path")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+	return filepath.Clean(filepath.Join(filepath.Dir(filename), ".."))
 }
 
 func runtimeSmokeShell(t *testing.T, body string, env ...string) (string, int) {

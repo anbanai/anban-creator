@@ -1506,7 +1506,7 @@ func validateDSHReleaseWorkflow(workflow workflowContract) error {
 	if err := requireActionReference(release, "Checkout code", "actions/checkout@"+actionsCheckoutV4SHA); err != nil {
 		return err
 	}
-	if err := requireActionInput(release, "Set up Go", "actions/setup-go@"+actionsSetupGoV5SHA, "go-version", "1.26"); err != nil {
+	if err := requireActionInput(release, "Set up Go", "actions/setup-go@"+actionsSetupGoV5SHA, "go-version", "1.27"); err != nil {
 		return err
 	}
 	if err := requireActionInput(release, "Set up pnpm", "pnpm/action-setup@"+pnpmActionSetupV4SHA, "version", "11.19.0"); err != nil {

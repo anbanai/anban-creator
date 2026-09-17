@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 )

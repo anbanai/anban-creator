@@ -13,8 +13,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	appconfig "github.com/anbanai/anban-creator/app/config"
 	"github.com/anbanai/anban-creator/server/agentpack"
+	appconfig "github.com/anbanai/anban-creator/server/app/config"
 	"github.com/anbanai/anban-creator/server/auth"
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/model"
@@ -466,7 +466,7 @@ type StorageConfig struct {
 	LocalDataDir               string `yaml:"local_data_dir"`                // Default "./data/files"
 }
 
-// ImageAPIConfig is an internal runtime adapter for app/image. It is built from
+// ImageAPIConfig is an internal runtime adapter for server/app/image. It is built from
 // one selected capability and is never decoded from server YAML.
 type ImageAPIConfig struct {
 	API *appconfig.ImageAPI

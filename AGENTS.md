@@ -6,11 +6,10 @@ This file provides guidance to AI coding assistants when working in this reposit
 
 **Anban 智能创作助手** is a Studio-first content creation platform for WeChat articles, Seednote-style notes, live slicing, AI image work, and agent-assisted publishing workflows.
 
-The current repository is not a standalone Cobra CLI. It has four main surfaces:
+The current repository is not a standalone Cobra CLI. It has three main surfaces:
 
-- `server/`: Go Fiber v3 API server, MCP endpoint, scheduler, storage, publishing, and business services.
+- `server/`: Go Fiber v3 API server, MCP endpoint, scheduler, storage, publishing, business services, and Server-owned reusable Go packages under `server/app/`.
 - `agent-ts/`: TypeScript runner used for local and one-shot managed agent execution.
-- `app/`: Shared Go library for content conversion, image generation, humanization, WeChat draft helpers, and writer styles.
 - `studio/`: React 19 + TypeScript + Vite 8 Web Studio.
 
 Plugin assets have one canonical source at `harness/`:
@@ -33,14 +32,14 @@ Plugin assets have one canonical source at `harness/`:
 
 ```bash
 # Run all Go tests
-go test ./...
+cd server && go test ./...
 
 # Run package-specific tests
-go test ./server/mcp
-go test ./app/image
+cd server && go test ./mcp
+cd server && go test ./app/image
 
-# Build the Server binary without colliding with its source directory
-go build -o /tmp/anban-creator-server ./server
+# Build the Server binary
+cd server && go build -o /tmp/anban-creator-server .
 
 # Repository Make targets
 make test
@@ -49,7 +48,7 @@ make vet
 make fmt
 ```
 
-Avoid `go build ./server` from the repository root because Go will try to write a `server` binary where the same-named directory already exists.
+The Go module root is `server/`; run direct Go commands there or use the repository Make targets.
 
 ### Agent Runtime
 
@@ -145,18 +144,17 @@ Important files:
 - `agent-ts/src/downloads.ts`: generated image materialization.
 - `agent-ts/src/reporter.ts`: progress, artifact, and completion reporting.
 
-### App Library
+### Server App Packages
 
-`app/` contains reusable content functionality. It is a library, not the main product entry point.
+`server/app/` contains reusable content functionality owned exclusively by the Server.
 
 Key packages:
 
-- `app/converter`: Markdown to WeChat-safe inline HTML.
-- `app/image`: image compression and OpenAI/Gemini/Volcengine generation providers.
-- `app/writer`: style-based writing helpers.
-- `app/humanizer`: AI writing trace detection/removal.
-- `app/draft` and `app/wechat`: WeChat draft/material helpers.
-- `app/config`: JSON config loading for plugin/local workflows.
+- `server/app/converter`: Markdown to WeChat-safe inline HTML.
+- `server/app/image`: image compression and OpenAI/Gemini/Volcengine generation providers.
+- `server/app/writer`: style-based writing helpers.
+- `server/app/draft` and `server/app/wechat`: WeChat draft/material helpers.
+- `server/app/config`: JSON configuration helpers used by Server integrations.
 
 ### Studio
 
@@ -202,14 +200,14 @@ Use table-driven Go tests for behavior with multiple cases. Prefer `httptest` fo
 Useful targeted commands:
 
 ```bash
-go test ./server/mcp -run TestLiveSliceSkillFiles -count=1
-go test ./server/service -run TestBuildLive -count=1
+cd server && go test ./mcp -run TestLiveSliceSkillFiles -count=1
+cd server && go test ./service -run TestBuildLive -count=1
 cd studio && bun run test -- src/lib/vite-config.test.ts
 ```
 
 Before claiming completion, run fresh verification that matches the changed surface:
 
-- Go changes: `go test ./...` and relevant `go build -o /tmp/...`.
+- Go changes: `cd server && go test ./...` and relevant `cd server && go build -o /tmp/... .`.
 - Studio changes: `cd studio && bun run test` and `cd studio && bun run build`.
 - Skill/agent contract changes: targeted `server/mcp` tests plus full Go tests.
 

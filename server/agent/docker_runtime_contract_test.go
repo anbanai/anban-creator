@@ -413,7 +413,10 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	for _, want := range []string{
 		"FROM alpine:latest",
 		"apk add --no-cache ca-certificates ffmpeg tzdata",
-		"go build -ldflags=\"-s -w\" -o /anban-creator-server ./server/",
+		"WORKDIR /build/server",
+		"COPY server/go.mod server/go.sum ./",
+		"COPY server ./",
+		"go build -ldflags=\"-s -w\" -o /anban-creator-server .",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
 		"COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/economics.yaml",
 		"COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml",

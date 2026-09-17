@@ -13,7 +13,7 @@ Client surfaces wrapping the same server API:
 - **Desktop** (`desktop/`): Tauri v2 (Rust) shell that bundles Node plus the TypeScript Agent runtime to run tasks locally; claims work by polling `POST /api/v1/agent/claim`
 - **Miniapp** ([private companion repository](https://github.com/anbanai/creator-miniapp)): WeChat Mini Program client kept at feature parity with Studio (real-time updates via SSE, not WebSocket)
 
-The `app/` directory is a **library** (no `main.go`) providing content creation functionality used by both the server and agent. It handles Markdown-to-WeChat-HTML conversion, AI writing, image generation, humanization, and WeChat publishing.
+The `server/app/` directory contains Server-owned reusable Go packages for Markdown-to-WeChat-HTML conversion, styled writing, image generation, and WeChat publishing. The TypeScript Agent runtime does not import them.
 
 Claude Code and Codex share one repository-owned plugin source at `harness/`. Third-party dependencies remain submodules and should be initialized before Docker builds. The `sidecar-ilink` image used by the iLink WeChat assistant channel is fetched from `lich0821/wcfLink` by `deploy/docker/Dockerfile.sidecar-ilink` at build time.
 
@@ -26,7 +26,7 @@ Claude Code and Codex share one repository-owned plugin source at `harness/`. Th
 
 MCP server config uses the `creator` server key. Business-facing agent, skill, and setup docs must reference bare MCP tool names such as `generate_image`; host-specific tool-name prefixes are a runtime concern and belong only in system-level config or tests.
 
-- **Language**: Go 1.26.0 (Server + app library), TypeScript (Agent + Studio), Rust (desktop Tauri core)
+- **Language**: Go 1.27.0 (Server), TypeScript (Agent + Studio), Rust (desktop Tauri core)
 - **Logging**: Zerolog for Go components; never mix with zap
 - **WeChat SDK**: silenceper/wechat/v2
 
@@ -38,7 +38,7 @@ MCP server config uses the `creator` server key. Business-facing agent, skill, a
 make server-build             # Build server binary to bin/anban-creator-server
 make server-run               # Build and run server with config
 make server-dev               # Run server via go run (development)
-make server-test              # Run server tests (go test -v ./server/...)
+make server-test              # Run server tests (go -C server test -v ./...)
 
 make docker-agent-image       # Build minimal Article Agent image
 make docker-seednote-agent-image # Build independent Seednote workflow image
@@ -55,14 +55,14 @@ from the repository-root context. Article, Seednote, and Montage use independent
 Agent Dockerfiles so their system dependencies and release lifecycles stay
 separate.
 
-Never run `go build ./server` from the repo root; Go tries to write a binary over the same-named directory. Use `make server-build` or `go build -o /tmp/anban-creator-server ./server`.
+The Go module root is `server/`. Use `make server-build` or `cd server && go build -o /tmp/anban-creator-server .`.
 
 ### Go Tests
 
 ```bash
-make test                     # Run all Go tests (go test -v ./...)
-go test -v ./app/config       # Run specific package tests
-go test -v -run TestConfig_Validate ./app/config  # Run specific test
+make test                     # Run all Go tests (go -C server test -v ./...)
+cd server && go test -v ./app/config       # Run specific package tests
+cd server && go test -v -run TestConfig_Validate ./app/config  # Run specific test
 make coverage                 # Tests with coverage report
 make ci                       # Run all CI checks (fmt + vet + test + lint)
 make fmt                      # Format code (go fmt)
@@ -70,7 +70,7 @@ make vet                      # Static analysis (go vet)
 make lint                     # Lint (requires golangci-lint)
 ```
 
-> ⚠️ `make lint` panics on Go 1.26 with golangci-lint versions that bundle go-critic v0.6.2 (its `init` runs regardless of which linters are enabled). If it panics, `brew upgrade golangci-lint` to a release built against a newer go-critic. See `.golangci.yml`.
+> ⚠️ Older golangci-lint builds that bundle go-critic v0.6.2 may panic during initialization. If that happens, upgrade golangci-lint. See `.golangci.yml`.
 
 ### Studio Frontend
 
@@ -141,14 +141,12 @@ Key packages:
 - `handlers.go` — Handler instantiation
 - `workers.go` — Asynq server, periodic cleanup startup
 
-### App Library (`app/`)
+### Server App Packages (`server/app/`)
 
-Shared Go library for content creation and server capabilities:
+Server-owned reusable Go packages for content creation and publishing capabilities:
 - `converter/` — Markdown → WeChat HTML with theme system and AI mode
 - `writer/` — AI-powered styled writing with YAML-defined writing styles
-- `humanizer/` — AI trace detection and removal with quality scoring
 - `image/` — Multi-provider image generation (OpenAI, Gemini, Volcengine), compression, processing
-- `storage/` — SQLite via GORM for CLI-side content/draft/image records
 - `draft/` — WeChat draft creation and publishing
 - `wechat/` — WeChat API wrapper with retry logic
 - `config/` — Configuration management (JSON)
@@ -206,7 +204,7 @@ YAML config at `server/config.yaml` — the single source of truth. Environment 
 
 Graceful degradation: MySQL unreachable → degraded mode (no persistence). Redis unreachable → in-process goroutine task execution, rate limiting skipped.
 
-### App Library (used by CLI commands via plugin skills)
+### Server App Configuration
 
 Single WeChat account via `.anban-creator/settings.json`. Config search priority: CWD → `CLAUDE_PLUGIN_ROOT` → `~/.config/anban-creator/` → `~/.anban-creator/` → executable-relative.
 
@@ -214,7 +212,7 @@ Two loading modes: `Load()`/`LoadWithDefaults()` (full validation) vs `LoadMinim
 
 ## Key Data Flows
 
-### Conversion Flow (app/converter)
+### Conversion Flow (`server/app/converter`)
 
 1. Image extraction from Markdown (local/online/AI-generated references)
 2. Markdown → WeChat HTML with inline CSS and theme styling (AI mode uses Claude)
@@ -233,7 +231,7 @@ Local-execution variant (desktop): instead of Docker, bundled Node runs `agent-t
 
 ## Image Generation Providers
 
-All implement `Provider` interface (`app/image/provider.go`).
+All implement the `Provider` interface in `server/app/image/provider.go`.
 
 | Provider | Value | Notes |
 |----------|-------|-------|
@@ -259,8 +257,8 @@ All implement `Provider` interface (`app/image/provider.go`).
 
 ### Adding New Image Providers
 
-1. Implement `Provider` interface in `app/image/{provider}.go`
-2. Register in `app/image/provider.go` factory
+1. Implement `Provider` interface in `server/app/image/{provider}.go`
+2. Register in `server/app/image/provider.go` factory
 3. Add tests with httptest mocking
 
 ### Adding New Themes
@@ -404,13 +402,12 @@ Before completing a new scenario, verify every applicable item:
 - [ ] Every managed task type exposed through `project`, `task`, or `plan` has an explicit billing mapping and real SKU coverage. Runtime-only Packs remain plugin-only. Every advertised surface has valid service support.
 - [ ] A new runtime image/profile is added only when dependency isolation requires it, with Docker/Kubernetes configuration and smoke validation.
 - [ ] `make agent-pack-generate` and `make agent-pack-check` pass without unexpected generated drift.
-- [ ] Targeted tests, `go test ./...`, Server and Agent builds, Studio tests, and Studio build pass.
+- [ ] Targeted tests, `cd server && go test ./...`, Server and Agent builds, Studio tests, and Studio build pass.
 - [ ] Both `harness/.claude-plugin/plugin.json` and `harness/.codex-plugin/plugin.json` receive the same semantic-version bump, and `harness/CHANGELOG.md` documents the release.
 
 ## Notes
 
 - CLI uses zerolog logging — all components use zerolog, never mix with zap
-- Two Cobra patterns coexist in app/: package-level var with `init()` (older) and factory functions returning `*cobra.Command` (preferred)
 - Docker Compose provides MySQL 8.0 + Redis 7 + agent + server containers
 - Server binary is `bin/anban-creator-server`
 - **Never modify base UI components in `studio/src/components/ui/`**. These are managed shadcn/ui primitives. If a base component update breaks business logic, fix the business component only — never patch the primitive.

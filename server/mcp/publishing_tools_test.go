@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	appwechat "github.com/anbanai/anban-creator/app/wechat"
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -197,8 +197,8 @@ func TestLegacyDraftPublicationProductionSymbolsAreRemoved(t *testing.T) {
 		"publishing_tools.go",
 		filepath.Join("..", "service", "publishing.go"),
 		filepath.Join("..", "service", "task.go"),
-		filepath.Join("..", "..", "app", "draft", "service.go"),
-		filepath.Join("..", "..", "app", "wechat", "service.go"),
+		filepath.Join("..", "app", "draft", "service.go"),
+		filepath.Join("..", "app", "wechat", "service.go"),
 	}
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
