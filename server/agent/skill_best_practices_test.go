@@ -168,7 +168,7 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"moments":     {"moments", "humanizer"},
 		"montage":     {"montage", "video-cover-design"},
 		"seednote":    {"humanizer", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
-		"article":     {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-publishing", "article-viral-strategy"},
+		"article":     {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-viral-strategy"},
 	}
 
 	for agentName, want := range expected {
@@ -206,6 +206,7 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 	userEntrypoints := map[string]bool{
 		"anban-setup":            true,
 		"article":                true,
+		"article-publishing":     true,
 		"ecommerce":              true,
 		"portrait-pose-variants": true,
 		"short-video-cover":      true,
@@ -253,6 +254,38 @@ func TestCodexAgentSkillConfigsPointToBundledSkills(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk codex agents: %v", err)
+	}
+}
+
+func TestArticleCodexAgentDeclaresOwnedSkills(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "harness", "agents", "article.toml")
+	body := readRepoFile(t, path)
+	skillPathRE := regexp.MustCompile(`path\s*=\s*"__PLUGIN_ROOT__/skills/([^/]+)/SKILL\.md"`)
+	matches := skillPathRE.FindAllStringSubmatch(body, -1)
+	got := make([]string, 0, len(matches))
+	for _, match := range matches {
+		got = append(got, match[1])
+	}
+	want := []string{
+		"content-writing",
+		"humanizer",
+		"article-visual-design",
+		"article-cover-design",
+		"topic-research",
+		"seo-optimization",
+		"article-viral-strategy",
+	}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("%s skills = %q, want %q", path, got, want)
+	}
+
+	for _, forbidden := range []string{"article", "article-publishing"} {
+		for _, skill := range got {
+			if skill == forbidden {
+				t.Fatalf("%s must not preload %q", path, forbidden)
+			}
+		}
 	}
 }
 

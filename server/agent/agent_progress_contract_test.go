@@ -191,8 +191,8 @@ func assertClaudeTaskProgressContract(t *testing.T, path string, pack agentpack.
 	case "article":
 		for _, want := range []string{
 			"只创建 research、writing、delivery 三个正式 Task",
-			"服务端可验证的 `output/04-article-final.md`、`output/05-article.html` 和 `output/draft.json`",
-			"不依赖外部发布副作用",
+			"`output/04-article-final.md`、`output/05-article.html` 和 `output/draft.json`",
+			"审核通过的图片仍须调用 `upload_image` 写入微信图片元数据",
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s missing article delivery boundary %q", path, want)

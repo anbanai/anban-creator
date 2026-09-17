@@ -24,7 +24,7 @@ func TestArticlePackHasOnlyCoreDeliveryRequirements(t *testing.T) {
 		t.Fatal("final review must be optional")
 	}
 	if !strings.Contains(pack, "path: output/draft.json, mime_type: application/json, required: true") {
-		t.Fatal("article pack must require the Server publication package")
+		t.Fatal("article pack must require the article delivery package")
 	}
 	if got := strings.Count(pack, "required: true"); got != 3 {
 		t.Fatalf("required artifacts = %d, want exactly 3", got)
@@ -50,7 +50,7 @@ func TestArticleAgentUsesOnlyThreeFormalProgressTasks(t *testing.T) {
 	}
 }
 
-func TestArticleAgentKeepsDraftPublicationIndependent(t *testing.T) {
+func TestArticleAgentKeepsDraftDeliveryFileBacked(t *testing.T) {
 	for _, path := range []string{
 		"../../harness/packs/article/agent.claude.md",
 		"../../harness/agents/article.md",
@@ -68,28 +68,28 @@ func TestArticleAgentKeepsDraftPublicationIndependent(t *testing.T) {
 			strings.Contains(agent, "create_draft` 实际调用失败立即写") {
 			t.Fatalf("%s still makes draft publication part of core delivery success", path)
 		}
-		for _, required := range []string{"output/draft.json", "Server", "readiness"} {
+		for _, required := range []string{"output/draft.json", "schema_version", "readiness"} {
 			if !strings.Contains(agent, required) {
-				t.Fatalf("%s missing independent publication rule %q", path, required)
+				t.Fatalf("%s missing article delivery contract %q", path, required)
 			}
 		}
 	}
 }
 
-func TestArticleDraftRetryIsServerOwned(t *testing.T) {
+func TestArticleInteractiveDraftUsesSingleAtomicAttempt(t *testing.T) {
 	raw, err := os.ReadFile("../../harness/skills/article-publishing/SKILL.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	contract := string(raw)
 	for _, required := range []string{
-		"显式交互式发布工作流",
+		"本节只适用于用户在交互会话中明确要求立即创建草稿",
 		"调用一次 `create_draft",
 		"调用后不在 Agent 侧重试",
-		"幂等、安全重试、对账和终态均由 Server 负责",
+		"结果不明确时，原样呈现状态，不宣称成功",
 	} {
 		if !strings.Contains(contract, required) {
-			t.Errorf("article-publishing skill missing Server-owned retry rule %q", required)
+			t.Errorf("article-publishing skill missing interactive draft rule %q", required)
 		}
 	}
 	if strings.Contains(contract, "`retryable=true`") {
@@ -143,7 +143,6 @@ func TestArticleImageModeHasNoCompatibilityDefault(t *testing.T) {
 	for _, path := range []string{
 		"../../harness/packs/article/agent.claude.md",
 		"../../harness/skills/article/SKILL.md",
-		"../../harness/skills/article-publishing/SKILL.md",
 		"../../harness/skills/article-visual-design/SKILL.md",
 	} {
 		raw, err := os.ReadFile(path)

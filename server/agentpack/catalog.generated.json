@@ -5,7 +5,7 @@
       "version": "1.1.1",
       "kind": "managed",
       "display_name": "微信公众号文章",
-      "description": "从选题研究、写作和视觉设计到微信公众号草稿的完整创作流程。",
+      "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
       "agent": {
         "name": "article",
         "skills": [
@@ -40,7 +40,6 @@
         "plan"
       ],
       "features": [
-        "publishing",
         "image-generation",
         "reference-images"
       ],
@@ -129,7 +128,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "b942e88b47a71eecd25ec0d4b7bc5a3e06de1571174ea4c5f8979d722bef25b8"
+      "digest": "7b27b910a6e722a6da318b1972f6d46dd78a779ec8516697d627a4bcce4a068f"
     },
     {
       "id": "ecommerce",
@@ -258,7 +257,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "e07c75c323ef704e08eaf2078ae06cff0bbc334dc7877da1fcaab27155df5dee"
+      "digest": "69308b978b4f8ce8b1ce118f4fc436ea26ac0ad2aadc809b972826e8787e6cb0"
     },
     {
       "id": "live-slicer",
@@ -359,7 +358,7 @@
         }
       ],
       "ui": {},
-      "digest": "893556dbf951ce685ed6bb992d08f43bad981c2a25431bce74f3e841c1e3158d"
+      "digest": "773c29a2a403cc39e30096bcbd1f2e0f1fab0c62541b3114eea21b41097b2a86"
     },
     {
       "id": "moments",

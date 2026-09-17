@@ -357,10 +357,10 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,
 	})
 	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
-		prompt += "\n\n发布恢复模式：\n" +
+		prompt += "\n\n视觉生成恢复：\n" +
 			"- 从 image_generation 阶段继续；Server 已恢复并校验原执行的文章、SEO、视觉规划、HTML 和审核产物。\n" +
 			"- 不得重新执行选题、正文创作、SEO 或语义审核，也不得改写已恢复的文章内容。\n" +
-			"- 只重新生成缺失或失败的已请求图片，然后更新图片引用、最终 HTML 和 output/draft.json；不要调用 create_draft，发布由 Server 完成。"
+			"- 只重新生成缺失或失败的已请求图片，然后更新图片引用、最终 HTML 和 output/draft.json；已成功且可验证的图片不得重复生成。"
 	}
 	resumeContextPath := ""
 	for _, attachment := range attachments {

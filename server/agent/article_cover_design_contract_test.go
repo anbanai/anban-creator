@@ -60,7 +60,7 @@ func TestArticleCoverDesignDefinesEightPartMediumAdaptiveArtDirection(t *testing
 	body := readRepoFile(t, filepath.Join(root, "harness", "skills", "article-cover-design", "references", "art-direction.md"))
 
 	for _, want := range []string{
-		"比例与发布派生",
+		"比例与展示派生",
 		"标题策略",
 		"人物或主体",
 		"背景与场景",

@@ -100,12 +100,17 @@ func TestBootstrapPublicationRecoveryHydratesOnlyDeliveredSourceArtifacts(t *tes
 		t.Fatalf("build recovery bootstrap response: %v", err)
 	}
 	for _, instruction := range []string{
-		"发布恢复模式",
+		"视觉生成恢复",
 		"从 image_generation 阶段继续",
 		"不得重新执行选题、正文创作、SEO 或语义审核",
 	} {
 		if !strings.Contains(response.Prompt, instruction) {
 			t.Fatalf("recovery prompt = %q, want instruction %q", response.Prompt, instruction)
+		}
+	}
+	for _, forbidden := range []string{"发布恢复模式", "create_draft", "发布由 Server 完成"} {
+		if strings.Contains(response.Prompt, forbidden) {
+			t.Fatalf("recovery prompt = %q, must not contain %q", response.Prompt, forbidden)
 		}
 	}
 	got := map[string]BootstrapFile{}

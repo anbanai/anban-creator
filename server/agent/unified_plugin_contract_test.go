@@ -70,8 +70,8 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if claudeManifest.Version == "" || claudeManifest.Version != codexManifest.Version {
 		t.Fatalf("native manifest versions = %q/%q, want one aligned version", claudeManifest.Version, codexManifest.Version)
 	}
-	if claudeManifest.Version != "4.1.30" {
-		t.Fatalf("native manifest version = %q, want 4.1.30 for the current plugin surface", claudeManifest.Version)
+	if claudeManifest.Version != "4.1.31" {
+		t.Fatalf("native manifest version = %q, want 4.1.31 for the current plugin surface", claudeManifest.Version)
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")
@@ -100,6 +100,30 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	tomlAgents := pluginAgentNames(t, filepath.Join(pluginRoot, "agents"), ".toml")
 	if len(markdownAgents) != 6 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
 		t.Fatalf("native Agent sets differ: Claude=%v Codex=%v", markdownAgents, tomlAgents)
+	}
+}
+
+func TestManagedAgentsDoNotRequestMidRunUserInput(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "harness", "agents")
+	for _, extension := range []string{".md", ".toml"} {
+		paths, err := filepath.Glob(filepath.Join(root, "*"+extension))
+		if err != nil {
+			t.Fatalf("glob managed agents: %v", err)
+		}
+		for _, path := range paths {
+			body := readRepoFile(t, path)
+			for _, forbidden := range []string{
+				"阻塞时再询问",
+				"向用户请求协助",
+				"向用户展示候选让其选择",
+				"多个候选向用户列出并请求选择",
+				"停止并请求用户协助",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("%s contains managed mid-run interaction %q", path, forbidden)
+				}
+			}
+		}
 	}
 }
 
