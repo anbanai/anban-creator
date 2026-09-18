@@ -422,6 +422,10 @@ type CreateManualParams struct {
 	// via ClaimLocalTask. Unclaimed tasks fall back to cloud after the deadline
 	// (ReclaimExpiredLocalTasks). Empty = cloud (default).
 	ExecutionTarget string
+	// MontageSourceTaskID is an internal clone authorization for task-file
+	// locators that originate from the source task rather than the destination
+	// project.
+	MontageSourceTaskID string
 }
 
 // ResolveTaskCreationProject loads the authoritative project once and applies
@@ -626,6 +630,23 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	if isMontageTask {
 		quantity = 1
+		effectiveProject := project
+		if p.ProjectSnapshot != nil {
+			effectiveProject = model.ProjectFromSnapshot(project, *p.ProjectSnapshot)
+		}
+		montageConfig := s.montageCfg
+		if s.montageCapabilities != nil {
+			montageConfig = s.montageCapabilities.config
+		}
+		if err := ValidateMontageInlineBootstrapBudget(p.MontageInput, effectiveProject, montageConfig.ToolPolicy, montageConfig.PipelineDefaults, p.InputAttachments); err != nil {
+			return nil, err
+		}
+		if err := ValidateMaterializableMontageSourceTaskFiles(ctx, s.repo, s.StorageProviderName(), p.UserID, p.ProjectID, p.MontageInput.SourceAssets,
+			montageSourceTaskTrust{taskID: p.MontageSourceTaskID},
+			montageSourceTaskTrust{taskID: p.InputSourceTaskID, projectID: p.InputSourceProjectID, includeLineage: true},
+		); err != nil {
+			return nil, err
+		}
 		if !p.PreserveFrozenConfig && s.montageCapabilities != nil {
 			var input *model.MontageInput
 			if p.MontageInput != nil {
@@ -1021,6 +1042,10 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	var planMontageInput *model.MontageInput
 	montageExecutionTarget := model.ExecutionTargetCloud
 	if isMontageTask {
+		montageConfig := s.montageCfg
+		if s.montageCapabilities != nil {
+			montageConfig = s.montageCapabilities.config
+		}
 		input := plan.MontageInput.Data()
 		if s.montageCapabilities != nil {
 			defaults := model.MontageDefaults{}
@@ -1030,6 +1055,12 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			if err := s.montageCapabilities.NormalizeAndValidateInput(&input, defaults); err != nil {
 				return nil, err
 			}
+			if err := ValidateMaterializableMontageSourceTaskFiles(ctx, s.repo, s.StorageProviderName(), plan.UserID, plan.ProjectID, input.SourceAssets); err != nil {
+				return nil, err
+			}
+		}
+		if err := ValidateMontageInlineBootstrapBudget(&input, project, montageConfig.ToolPolicy, montageConfig.PipelineDefaults, plan.InputAttachments.Data()); err != nil {
+			return nil, err
 		}
 		planMontageInput = &input
 		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{

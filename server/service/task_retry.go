@@ -41,6 +41,7 @@ type CloneTaskOverrides struct {
 	Ecommerce                *model.EcommerceConfig
 	MontageInput             *model.MontageInput
 	ExecutionTarget          string
+	MontageSourceTaskID      string
 }
 
 func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
@@ -118,6 +119,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			Ecommerce:                override.Ecommerce,
 			MontageInput:             override.MontageInput,
 			ExecutionTarget:          override.ExecutionTarget,
+			MontageSourceTaskID:      src.ID,
 		}
 		tasks, err := s.CreateManual(ctx, params)
 		if err != nil {
