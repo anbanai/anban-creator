@@ -154,7 +154,6 @@ func TestAIEntryHandlerSubmitPassesExplicitParametersAndReturnsCreatedTasks(t *t
 			"quantity":2,
 			"image_ratio":"3:4",
 		"image_capability_key":"professional",
-		"execution_target":"local",
 		"attachments":[{
 			"type":"text",
 			"text":"补充材料",
@@ -177,9 +176,6 @@ func TestAIEntryHandlerSubmitPassesExplicitParametersAndReturnsCreatedTasks(t *t
 	}
 	if submitter.req.Quantity != 2 || submitter.req.ImageRatio != "3:4" || submitter.req.ImageCapabilityKey != "professional" {
 		t.Fatalf("explicit parameters = quantity %d, ratio %q, capability %q", submitter.req.Quantity, submitter.req.ImageRatio, submitter.req.ImageCapabilityKey)
-	}
-	if submitter.req.ExecutionTarget != model.ExecutionTargetLocal {
-		t.Fatalf("execution target = %q", submitter.req.ExecutionTarget)
 	}
 	if len(submitter.req.Attachments) != 1 || submitter.req.Attachments[0].FileName != "brief.md" {
 		t.Fatalf("attachments = %#v", submitter.req.Attachments)

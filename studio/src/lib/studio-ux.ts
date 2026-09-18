@@ -159,11 +159,9 @@ export interface SettingsReadinessListItem {
 }
 
 export function buildSettingsReadinessItems({
-  isDesktopApp,
   apiKeyCount,
   hasPassword,
 }: {
-  isDesktopApp: boolean
   apiKeyCount: number
   hasPassword: boolean
 }): SettingsReadinessListItem[] {
@@ -171,9 +169,9 @@ export function buildSettingsReadinessItems({
     {
       id: 'execution',
       title: '执行环境',
-      status: isDesktopApp ? '桌面执行器可检查' : '浏览器模式',
-      impact: isDesktopApp ? '影响本地 ffmpeg、任务认领和本机运行。' : '当前任务默认走云端执行。',
-      actionLabel: isDesktopApp ? '检查执行器' : '查看执行说明',
+      status: '云端执行',
+      impact: '当前任务统一由云端执行。',
+      actionLabel: '查看执行说明',
       href: '#execution-settings',
       ready: true,
     },

@@ -75,7 +75,7 @@ func TestFailStaleRunningTaskForInfrastructureRevalidatesCurrentState(t *testing
 				case "execution attached":
 					executionID := uuid.NewString()
 					execution := &model.TaskExecution{
-						ID: executionID, TaskID: task.ID, Attempt: 1, Target: model.ExecutionTargetCloud,
+						ID: executionID, TaskID: task.ID, Attempt: 1, Target: "kubernetes",
 						Status: model.TaskExecutionRunning, Started: true, StartedAt: &stale,
 					}
 					if err := repo.TaskExecutions().Create(ctx, execution); err != nil {

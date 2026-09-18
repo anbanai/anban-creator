@@ -15,11 +15,18 @@ func TestContentMetadataServiceSubmitIsIdempotentPerExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
+	if err := db.AutoMigrate(&model.Task{}, &model.TaskExecution{}, &model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
 		t.Fatal(err)
 	}
 	svc := NewContentMetadataService(repository.New(db), nil)
-	input := ContentMetadataInput{TaskID: "local-task-1", ExecutionID: "exec-1", TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: []byte(`{"task_type":"article","tags":[{"dimension":"industry","value":"茶叶","confidence":0.9}],"feedback":{"scores":{"quality":8},"summary":"ok"}}`)}
+	repo := repository.New(db)
+	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-1", TaskID: "task-1", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+	input := ContentMetadataInput{TaskID: "task-1", ExecutionID: "exec-1", TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: []byte(`{"task_type":"article","tags":[{"dimension":"industry","value":"茶叶","confidence":0.9}],"feedback":{"scores":{"quality":8},"summary":"ok"}}`)}
 	first, err := svc.Submit(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +46,7 @@ func TestContentMetadataServiceSubmitIsIdempotentPerExecution(t *testing.T) {
 		t.Fatalf("reports = %d, want 1", count)
 	}
 	var feedback model.AgentFeedback
-	if err := db.First(&feedback, "task_id = ? AND agent_name = ?", "local-task-1", "article").Error; err != nil {
+	if err := db.First(&feedback, "task_id = ? AND agent_name = ?", "task-1", "article").Error; err != nil {
 		t.Fatal(err)
 	}
 	if feedback.Source != "hook" || feedback.ExecutionID != "exec-1" {
@@ -52,11 +59,18 @@ func TestContentMetadataServiceRejectsUnknownDimension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
+	if err := db.AutoMigrate(&model.Task{}, &model.TaskExecution{}, &model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
 		t.Fatal(err)
 	}
 	svc := NewContentMetadataService(repository.New(db), nil)
-	_, err = svc.Submit(context.Background(), ContentMetadataInput{TaskID: "local-task-1", ExecutionID: "exec-1", RawMetadata: []byte(`{"tags":[{"dimension":"unknown","value":"x"}]}`)})
+	repo := repository.New(db)
+	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-invalid", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-invalid", TaskID: "task-invalid", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Submit(context.Background(), ContentMetadataInput{TaskID: "task-invalid", ExecutionID: "exec-invalid", RawMetadata: []byte(`{"tags":[{"dimension":"unknown","value":"x"}]}`)})
 	if err == nil {
 		t.Fatal("expected unknown dimension error")
 	}
@@ -67,7 +81,7 @@ func TestContentMetadataServiceNormalizesVocabularyAliasAndPersistsDisplayName(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
+	if err := db.AutoMigrate(&model.Task{}, &model.TaskExecution{}, &model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
 		t.Fatal(err)
 	}
 	aliasJSON := []byte(`["茶饮"]`)
@@ -75,7 +89,14 @@ func TestContentMetadataServiceNormalizesVocabularyAliasAndPersistsDisplayName(t
 		t.Fatal(err)
 	}
 	svc := NewContentMetadataService(repository.New(db), nil)
-	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: "local-task-vocab", ExecutionID: "exec-vocab", RawMetadata: []byte(`{"tags":[{"dimension":"industry","value":"茶饮","confidence":0.9}]}`)})
+	repo := repository.New(db)
+	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-vocab", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-vocab", TaskID: "task-vocab", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: "task-vocab", ExecutionID: "exec-vocab", RawMetadata: []byte(`{"tags":[{"dimension":"industry","value":"茶饮","confidence":0.9}]}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,19 +3,13 @@ package service
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/rs/zerolog"
-
-	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
-	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type taskFileLockOrderRecorder struct {
@@ -247,107 +241,5 @@ func TestUploadExecutionTaskFileStillRejectsDeletingTaskAfterExecutionLock(t *te
 	calls := recorder.snapshot()
 	if len(calls) < 2 || calls[0] != "execution" || calls[1] != "task" {
 		t.Fatalf("transaction lock order = %v, want prefix [execution task]", calls)
-	}
-}
-
-func TestUploadExecutionTaskFileRacingLocalCompletionLeavesLegalTerminalState(t *testing.T) {
-	db := setupTaskTestDB(t)
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// SQLite does not provide MySQL row locks. A single connection makes the
-	// behavioral race deterministic; the SQL contract proves production order.
-	sqlDB.SetMaxOpenConns(1)
-	repo := repository.New(db)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	executionID := uuid.NewString()
-	task := &model.Task{
-		ID: userID + "-task", UserID: userID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
-		ExecutionTarget: model.ExecutionTargetLocalClaimed, CurrentExecutionID: &executionID,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
-		ID: executionID, TaskID: task.ID, Attempt: 1,
-		Target: model.ExecutionTargetLocalClaimed, Status: model.TaskExecutionRunning, Started: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	store, err := storage.NewLocalProvider(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	logger := zerolog.New(io.Discard)
-	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
-	executionLocked := make(chan struct{})
-	releaseExecutionLock := make(chan struct{})
-	uploadSvc := newTestTaskService(&taskFileLockOrderRepository{
-		Repository: repo, recorder: &taskFileLockOrderRecorder{},
-		executionLocked: executionLocked, releaseExecutionLock: releaseExecutionLock,
-	}, &mockEnqueuer{}, store, &logger, "", nil, nil)
-
-	uploaded := make(chan error, 1)
-	completed := make(chan error, 1)
-	go func() {
-		_, uploadErr := uploadSvc.UploadExecutionTaskFileFromReader(
-			ctx, task.ID, task.UserID, executionID,
-			"output/race.txt", strings.NewReader("race"), "text/plain", 4,
-		)
-		uploaded <- uploadErr
-	}()
-	select {
-	case <-executionLocked:
-	case <-time.After(5 * time.Second):
-		t.Fatal("upload did not acquire the execution lock")
-	}
-	go func() {
-		completed <- svc.CompleteLocalTask(ctx, task.ID, executionID, &agent.ExecutionResult{
-			Success: false, Error: "intentional terminal race",
-		})
-	}()
-	close(releaseExecutionLock)
-
-	var uploadErr, completionErr error
-	for received := 0; received < 2; received++ {
-		select {
-		case uploadErr = <-uploaded:
-			uploaded = nil
-		case completionErr = <-completed:
-			completed = nil
-		case <-time.After(5 * time.Second):
-			t.Fatal("upload/local completion race did not finish")
-		}
-	}
-	if completionErr != nil {
-		t.Fatalf("CompleteLocalTask error = %v", completionErr)
-	}
-	if uploadErr != nil {
-		t.Fatalf("upload that held the execution lock failed: %v", uploadErr)
-	}
-
-	persistedTask, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	persistedExecution, err := repo.TaskExecutions().FindByID(ctx, executionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persistedTask.Status != model.TaskStatusFailed || persistedTask.CompletedAt == nil ||
-		persistedExecution.Status != model.TaskExecutionFailed || persistedExecution.CompletedAt == nil {
-		t.Fatalf("terminal state = task:%q/%v execution:%q/%v",
-			persistedTask.Status, persistedTask.CompletedAt, persistedExecution.Status, persistedExecution.CompletedAt)
-	}
-	files, err := repo.TaskFiles().FindByExecutionID(ctx, executionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 1 || files[0].FilePath != "output/race.txt" {
-		t.Fatalf("artifact rows after race = %#v", files)
 	}
 }

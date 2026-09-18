@@ -11,7 +11,6 @@ import AppLayout from '@/components/layout/AppLayout'
 import { NavigationProgress } from '@/components/NavigationProgress'
 import ShortcutHelp from '@/components/ShortcutHelp'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette'
-import LocalExecutorLayer from '@/components/desktop/LocalExecutorLayer'
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 import AdminRoute from '@/components/auth/AdminRoute'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
@@ -128,7 +127,6 @@ function AppRoutes() {
                 <NavigationProgress />
                 <KeyboardShortcuts />
                 <GlobalCommandPalette />
-                <LocalExecutorLayer />
                 <AppLayout />
               </AgentPromptDropProvider>
             </ProtectedRoute>

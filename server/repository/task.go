@@ -19,7 +19,6 @@ import (
 
 var (
 	ErrTaskExecutionEvidenceConflict = errors.New("task execution evidence conflict")
-	ErrLocalTaskExecutionCASLost     = errors.New("local task execution finalization CAS lost")
 	ErrCloudTaskExecutionCASLost     = errors.New("cloud task execution finalization CAS lost")
 )
 
@@ -248,72 +247,6 @@ func jsonValuesEqual(left, right string) bool {
 	return leftErr == nil && rightErr == nil && reflect.DeepEqual(leftValue, rightValue)
 }
 
-// FinalizeLocalTask makes terminal ownership and terminal evidence one CAS.
-// Only the request that still owns a running local claim can write any field.
-func (r *taskRepository) FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	var won bool
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		won, err = (&taskRepository{db: tx}).FinalizeLocalTaskInTx(ctx, id, executionID, status, errorMsg, result, result, usage, costStatus)
-		return err
-	})
-	return won, err
-}
-
-func (r *taskRepository) FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error) {
-	task, _, locked, err := r.lockLocalTaskExecutionForFinalization(ctx, id, executionID)
-	if err != nil {
-		return false, fmt.Errorf("lock local task execution for finalization: %w", err)
-	}
-	if !locked {
-		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
-	}
-	return r.finalizeLocalTaskRows(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus, task.Lifecycle.Data())
-}
-
-// FinalizeLocalTaskWithArtifactsInTx owns the complete local terminal commit:
-// execution/task ownership, artifact visibility, terminal evidence, and the
-// caller's billing updates all remain under one transaction and lock order.
-func (r *taskRepository) FinalizeLocalTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string, artifactAction LocalTaskArtifactAction) (bool, error) {
-	task, execution, locked, err := r.lockLocalTaskExecutionForFinalization(ctx, id, executionID)
-	if err != nil {
-		return false, fmt.Errorf("lock local task execution for finalization: %w", err)
-	}
-	if !locked {
-		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
-	}
-	switch artifactAction {
-	case LocalTaskArtifactsDeliver:
-		if status != model.TaskStatusCompleted {
-			return false, fmt.Errorf("publishing local artifacts requires completed task status")
-		}
-		if err := deliverLockedExecutionManifest(ctx, r.db, task, execution); err != nil {
-			return false, err
-		}
-	case LocalTaskArtifactsRetain:
-		if status != model.TaskStatusFailed && status != model.TaskStatusCancelled {
-			return false, fmt.Errorf("collecting local artifacts requires failed or cancelled task status")
-		}
-	default:
-		return false, fmt.Errorf("unsupported local artifact action %q", artifactAction)
-	}
-
-	won, err := r.finalizeLocalTaskRows(ctx, id, executionID, status, errorMsg, taskResult, executionResult, usage, costStatus, task.Lifecycle.Data())
-	if err != nil || !won {
-		return won, err
-	}
-	if artifactAction == LocalTaskArtifactsRetain {
-		execution.Status = model.TaskExecutionFailed
-		if status == model.TaskStatusCancelled {
-			execution.Status = model.TaskExecutionCancelled
-		}
-		if err := retainLockedExecutionManifest(ctx, r.db, execution); err != nil && !errors.Is(err, ErrNoPendingExecutionArtifacts) {
-			return false, err
-		}
-	}
-	return true, nil
-}
-
 // FinalizeCloudTaskWithArtifactsInTx owns the atomic cloud terminal state:
 // current-execution authority, artifact visibility, terminal evidence, and
 // task status. The caller persists billing in the same outer transaction.
@@ -326,8 +259,7 @@ func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context,
 		return false, fmt.Errorf("lock cloud task execution for finalization: %w", err)
 	}
 	expectedStatus, terminal := cloudTaskStatusForExecution(execution.Status)
-	if task.ExecutionTarget != model.ExecutionTargetCloud || execution.Target == model.ExecutionTargetLocalClaimed ||
-		strings.TrimSpace(execution.Target) == "" || !terminal || execution.CompletedAt == nil || status != expectedStatus {
+	if strings.TrimSpace(execution.Target) == "" || !terminal || execution.CompletedAt == nil || status != expectedStatus {
 		return false, ErrCloudTaskExecutionCASLost
 	}
 
@@ -408,63 +340,6 @@ func cloudTaskTerminalStateMatches(task *model.Task, execution *model.TaskExecut
 	default:
 		return false
 	}
-}
-
-func (r *taskRepository) lockLocalTaskExecutionForFinalization(ctx context.Context, id, executionID string) (*model.Task, *model.TaskExecution, bool, error) {
-	task, execution, err := lockCurrentArtifactExecution(r.db.WithContext(ctx), id, executionID)
-	if errors.Is(err, ErrTaskFileExecutionNotCurrent) {
-		return nil, nil, false, nil
-	}
-	if err != nil {
-		return nil, nil, false, err
-	}
-	if task.Status != model.TaskStatusRunning || task.ExecutionTarget != model.ExecutionTargetLocalClaimed ||
-		execution.Status != model.TaskExecutionRunning || execution.Target != model.ExecutionTargetLocalClaimed {
-		return task, execution, false, nil
-	}
-	return task, execution, true, nil
-}
-
-func (r *taskRepository) finalizeLocalTaskRows(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string, currentLifecycle model.TaskLifecycle) (bool, error) {
-	now := time.Now()
-	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(currentLifecycle, status, errorMsg, now)
-	updates := map[string]any{
-		"status": status, "error_message": errorMsg, "completed_at": now, "result": taskResult,
-		"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
-	}
-	if lifecycleChanged {
-		updates["lifecycle"] = datatypes.NewJSONType(lifecycle)
-	}
-	res := r.db.WithContext(ctx).Model(&model.Task{}).
-		Where("id = ? AND status = ? AND execution_target = ? AND current_execution_id = ?", id, model.TaskStatusRunning, model.ExecutionTargetLocalClaimed, executionID).
-		Updates(updates)
-	if res.Error != nil {
-		return false, res.Error
-	}
-	if res.RowsAffected == 0 {
-		return false, fmt.Errorf("%w: task %s no longer owns execution %s", ErrLocalTaskExecutionCASLost, id, executionID)
-	}
-	executionStatus := model.TaskExecutionFailed
-	if status == model.TaskStatusCompleted {
-		executionStatus = model.TaskExecutionSucceeded
-	} else if status == model.TaskStatusCancelled {
-		executionStatus = model.TaskExecutionCancelled
-	}
-	fullExecutionResult := datatypes.JSON([]byte(executionResult))
-	execRes := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
-		Where("id = ? AND task_id = ? AND target = ? AND status = ?", executionID, id, model.ExecutionTargetLocalClaimed, model.TaskExecutionRunning).
-		Updates(map[string]any{
-			"status": executionStatus, "terminal_reason": errorMsg, "result": fullExecutionResult,
-			"completed_at": now, "finalization_status": model.TaskExecutionFinalizationTerminal,
-			"cleanup_status": model.TaskExecutionCleanupDone,
-		})
-	if execRes.Error != nil {
-		return false, execRes.Error
-	}
-	if execRes.RowsAffected != 1 {
-		return false, fmt.Errorf("%w: execution %s is missing or not running", ErrLocalTaskExecutionCASLost, executionID)
-	}
-	return true, nil
 }
 
 func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error) {
@@ -570,11 +445,6 @@ func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID str
 	err := r.db.WithContext(ctx).
 		Where("project_id = ? AND status = ? AND deleting_at IS NULL", projectID, model.TaskStatusPending).
 		Where("(plan_id IS NULL OR EXISTS (SELECT 1 FROM plans WHERE plans.id = tasks.plan_id AND plans.status = ?))", model.PlanStatusActive).
-		// Exclude tasks awaiting a desktop local-executor claim — those must not
-		// be scooped up by cloud DispatchPendingTasks. execution_target defaults
-		// to '' (cloud); only "local" tasks are skipped here. "local_claimed"
-		// tasks are already status=running so they never match this query.
-		Where("execution_target <> ?", model.ExecutionTargetLocal).
 		Where("NOT (retry_count > 0 AND updated_at > ?)", time.Now().Add(-2*time.Minute)).
 		Order("created_at ASC").
 		Limit(limit).
@@ -589,91 +459,6 @@ func (r *taskRepository) FindPendingByPlanID(ctx context.Context, planID string)
 		Order("created_at ASC").
 		Find(&tasks).Error
 	return tasks, err
-}
-
-// ClaimNextLocalTask atomically claims the oldest pending local-target task for
-// the user. The find + conditional CAS run inside a single transaction: the
-// UPDATE ... WHERE id=? AND status='pending' guarantees exactly one concurrent
-// claimer wins (RowsAffected=1); losers get 0 and surface as (nil, nil). The
-// executorInfo blob is recorded for diagnostics. Returns (nil, nil) when no
-// task is claimable.
-func (r *taskRepository) ClaimNextLocalTask(ctx context.Context, userID string, executorInfo []byte) (*model.Task, error) {
-	var claimedID string
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var task model.Task
-		findErr := tx.
-			Where("user_id = ? AND status = ? AND execution_target = ? AND deleting_at IS NULL", userID, model.TaskStatusPending, model.ExecutionTargetLocal).
-			Where("local_claim_deadline IS NULL OR local_claim_deadline >= ?", time.Now()).
-			Order("created_at ASC").
-			First(&task).Error
-		if findErr != nil {
-			if errors.Is(findErr, gorm.ErrRecordNotFound) {
-				return nil // nothing claimable
-			}
-			return findErr
-		}
-
-		updates := map[string]interface{}{
-			"status":           model.TaskStatusRunning,
-			"started_at":       time.Now(),
-			"execution_target": model.ExecutionTargetLocalClaimed,
-		}
-		if len(executorInfo) > 0 {
-			updates["executor_info"] = string(executorInfo)
-		}
-		res := tx.Model(&model.Task{}).
-			Where("id = ? AND status = ? AND deleting_at IS NULL", task.ID, model.TaskStatusPending).
-			Updates(updates)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			// Lost the race to another claimer (or status changed). Treat as
-			// nothing-claimable so the caller polls again.
-			return nil
-		}
-		claimedID = task.ID
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if claimedID == "" {
-		return nil, nil
-	}
-	// Reload so the returned task reflects the CAS (status=running, target set).
-	return r.FindByID(ctx, claimedID)
-}
-
-// FindExpiredLocalTasks returns IDs of pending local-target tasks past their
-// claim deadline — candidates for cloud fallback.
-func (r *taskRepository) FindExpiredLocalTasks(ctx context.Context, now time.Time) ([]string, error) {
-	var ids []string
-	err := r.db.WithContext(ctx).Model(&model.Task{}).
-		Where("status = ? AND execution_target = ? AND deleting_at IS NULL", model.TaskStatusPending, model.ExecutionTargetLocal).
-		Where("local_claim_deadline IS NOT NULL AND local_claim_deadline < ?", now).
-		Limit(100).
-		Pluck("id", &ids).Error
-	return ids, err
-}
-
-// ResetLocalTarget atomically clears the local-execution markers so a task is
-// eligible for normal cloud dispatch — but ONLY while it is still pending +
-// local-target (a guarded CAS, mirroring ClaimNextLocalTask). Returns reset=true
-// when the CAS matched; reset=false when the task was claimed or changed since
-// the fallback selected it, in which case the caller must NOT re-enqueue (doing
-// so would double-run the task on cloud + the desktop that just claimed it).
-func (r *taskRepository) ResetLocalTarget(ctx context.Context, taskID string) (bool, error) {
-	res := r.db.WithContext(ctx).Model(&model.Task{}).
-		Where("id = ? AND status = ? AND execution_target = ? AND deleting_at IS NULL", taskID, model.TaskStatusPending, model.ExecutionTargetLocal).
-		Updates(map[string]interface{}{
-			"execution_target":     model.ExecutionTargetCloud,
-			"local_claim_deadline": nil,
-		})
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
 }
 
 func (r *taskRepository) BeginDelete(ctx context.Context, taskID string) (bool, error) {
@@ -877,9 +662,6 @@ func (r *taskRepository) ResetRetryableTaskForResume(ctx context.Context, taskID
 			"cost_status":          "",
 			"workflow_status":      nil,
 			"input_attachments":    datatypes.NewJSONType(attachments),
-			"execution_target":     model.ExecutionTargetCloud,
-			"local_claim_deadline": nil,
-			"executor_info":        datatypes.NewJSONType(model.ExecutorMeta{}),
 		})
 	if result.Error != nil {
 		return false, result.Error

@@ -68,25 +68,10 @@ func tryAcquireAndCheck(ctx context.Context, repo repository.Repository, taskSvc
 	checkAndTriggerPlans(ctx, repo, taskSvc, logger)
 	syncProjectRunningCounts(ctx, repo, taskSvc, logger)
 	reapStuckTasks(ctx, repo, taskSvc, logger)
-	reapStaleLocalExecutions(ctx, taskSvc, logger)
 }
 
 // stuckTaskThreshold is how long without a heartbeat before a task is considered stuck.
 const stuckTaskThreshold = 5 * time.Minute
-const localExecutionHeartbeatTimeout = 5 * time.Minute
-
-func reapStaleLocalExecutions(ctx context.Context, taskSvc *service.TaskService, logger *zerolog.Logger) {
-	if taskSvc == nil {
-		return
-	}
-	reaped, err := taskSvc.ReapStaleLocalExecutions(ctx, time.Now(), localExecutionHeartbeatTimeout, 100)
-	if err != nil {
-		logger.Error().Err(err).Msg("failed to reconcile local executions")
-	}
-	if reaped > 0 {
-		logger.Info().Int("count", reaped).Msg("reaped stale local executions")
-	}
-}
 
 // reapStuckTasks finds running tasks whose heartbeat has stopped and marks them
 // as failed. Uses last_heartbeat_at to distinguish "actively working" from "stuck".

@@ -16,7 +16,7 @@ used only by Server code:
 - `wechat`
 - `writer`
 
-The TypeScript Agent runtime, Studio, Desktop, and Harness do not import these
+The TypeScript Agent runtime, Studio, and Harness do not import these
 Go packages. The Docker runtime smoke test imports Server configuration only
 to validate the generated Server configuration, so it belongs to the Server
 test boundary as well.

@@ -1620,9 +1620,6 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		if task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
 			t.Fatalf("article fields = cover %v content %v", task.ArticleWithCover, task.ArticleWithContentImages)
 		}
-		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
-			t.Fatalf("execution target = %q deadline %v", task.ExecutionTarget, task.LocalClaimDeadline)
-		}
 		if got := task.InputAttachments.Data(); len(got) != 2 || got[0].AssetID != referenceAsset.ID || got[1] != attachments[0] {
 			t.Fatalf("attachments = %#v, want reference then %#v", got, attachments)
 		}

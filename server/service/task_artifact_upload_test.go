@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
@@ -165,6 +166,17 @@ func (f *fakeTaskArtifactStorage) GetURL(key string) string {
 
 func (f *fakeTaskArtifactStorage) Read(context.Context, string) ([]byte, error) {
 	return nil, os.ErrNotExist
+}
+
+func (f *fakeTaskArtifactStorage) ReadObject(_ context.Context, key string, maxBytes int64) ([]byte, error) {
+	data, ok := f.objects[key]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectNotFound, key)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: %s", storage.ErrObjectExceedsMaxSize, key)
+	}
+	return append([]byte(nil), data...), nil
 }
 
 func (f *fakeTaskArtifactStorage) Delete(_ context.Context, key string) error {
@@ -1600,6 +1612,193 @@ func TestFinalizeTaskArtifactManifestPreservesWechatMetadataForIdenticalWorkspac
 	if got.ID != original.ID || got.OSSKey != workspaceKey || got.Role != model.FileRoleCover ||
 		got.MediaID != "cover-media-id" || got.WechatURL != "https://mmbiz.qpic.cn/cover.png" {
 		t.Fatalf("finalized cover = %#v, want workspace delivery with preserved WeChat metadata", got)
+	}
+}
+
+func TestFinalizeTaskArtifactManifestPreservesWechatMetadataForSettledGeneratedImage(t *testing.T) {
+	repo, _ := newBillingServiceRepositoryWithDB(t)
+	fixture := newBillingWalletFixtureWithRepository(t, repo, 500, 0, 0)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	store := &fakeTaskArtifactStorage{name: "oss"}
+	svc := newTestTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+	svc.SetBillingWalletService(fixture.wallet)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
+		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+	}
+	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	executionID := startTaskArtifactExecution(t, fixture.repo, task)
+	generated, err := svc.UploadExecutionTaskFileWithSettlementFromReader(
+		ctx, task.ID, task.UserID, executionID, "output/cover.png",
+		strings.NewReader("image"), "image/png", 5,
+		TaskFileOperationSettlement{
+			CatalogID: "retail-test-v1", SKUID: "image.cover.v1", ToolCallID: "image:cover",
+			RequestFingerprint: billingFingerprint("image:cover"),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdateTaskFileMetadata(
+		ctx, generated, model.FileRoleCover, "cover-media-id", "https://mmbiz.qpic.cn/cover.png",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	workspaceKey := expectedTaskArtifactFinalKey(task, executionID, generated.ContentHash, generated.FilePath)
+	store.stats = map[string]*storage.ObjectInfo{
+		workspaceKey: {
+			Key: workspaceKey, Size: generated.FileSize,
+			ContentType: generated.MimeType, SHA256: generated.ContentHash,
+		},
+	}
+	manifest := TaskArtifactManifestRequest{
+		TaskID: task.ID, ExecutionID: executionID,
+		Files: []TaskArtifactManifestFile{{
+			RelativePath: generated.FilePath, ObjectKey: workspaceKey,
+			ContentType: generated.MimeType, Size: generated.FileSize,
+			SHA256: generated.ContentHash, Role: model.FileRoleCover,
+		}},
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := fixture.repo.TaskFiles().FindByExecutionID(ctx, executionID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("execution rows = %#v, err=%v", rows, err)
+	}
+	got := rows[0]
+	if got.ID != generated.ID || got.OSSKey != workspaceKey || got.Role != model.FileRoleCover ||
+		got.MediaID != "cover-media-id" || got.WechatURL != "https://mmbiz.qpic.cn/cover.png" {
+		t.Fatalf("finalized settled cover = %#v, want workspace delivery with preserved WeChat metadata", got)
+	}
+	replayFile, _, err := svc.FindTaskFileOperationSettlement(
+		ctx, task.ID, executionID, "image:cover", billingFingerprint("image:cover"),
+	)
+	if err != nil || replayFile.ID != generated.ID {
+		t.Fatalf("settlement replay file = %#v, err=%v", replayFile, err)
+	}
+}
+
+func TestGeneratedCoverWechatMetadataSurvivesManifestAndReachesDraftAdd(t *testing.T) {
+	repo, _ := newBillingServiceRepositoryWithDB(t)
+	fixture := newBillingWalletFixtureWithRepository(t, repo, 500, 0, 0)
+	ctx := context.Background()
+	logger := zerolog.New(io.Discard)
+	store := &fakeTaskArtifactStorage{
+		name: "oss", stats: make(map[string]*storage.ObjectInfo), objects: make(map[string][]byte),
+	}
+	svc := newTestTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
+	svc.SetBillingWalletService(fixture.wallet)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	withCover, withContentImages := true, false
+	task := &model.Task{
+		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
+		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		ArticleWithCover: &withCover, ArticleWithContentImages: &withContentImages,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+	}
+	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	executionID := startTaskArtifactExecution(t, fixture.repo, task)
+	coverBody := []byte("generated-cover")
+	generated, err := svc.UploadExecutionTaskFileWithSettlementFromReader(
+		ctx, task.ID, task.UserID, executionID, "output/cover.png",
+		strings.NewReader(string(coverBody)), "image/png", int64(len(coverBody)),
+		TaskFileOperationSettlement{
+			CatalogID: "retail-test-v1", SKUID: "image.cover.v1", ToolCallID: "image:cover:draft",
+			RequestFingerprint: billingFingerprint("image:cover:draft"),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const coverMediaID = "cover-media-id"
+	const coverURL = "https://mmbiz.qpic.cn/generated-cover.png"
+	if _, err := svc.UpdateTaskFileMetadata(ctx, generated, model.FileRoleCover, coverMediaID, coverURL); err != nil {
+		t.Fatal(err)
+	}
+
+	markdownBody := validTaskDeliveryFixtureBody("output/04-article-final.md", "text/markdown")
+	htmlBody := []byte(`<section><img src="` + coverURL + `"><p>Valid article delivery.</p></section>`)
+	htmlHash := fmt.Sprintf("%x", sha256.Sum256(htmlBody))
+	packageBody, err := json.Marshal(map[string]any{
+		"schema_version": "1.0",
+		"article": map[string]string{
+			"title": "Generated cover draft", "digest": "Manifest metadata regression",
+			"content_path": "output/05-article.html", "content_sha256": htmlHash,
+		},
+		"readiness": map[string]any{
+			"status": "ready", "code": "",
+			"evidence_paths": []string{"output/marketing-scan.json", "output/final-review.md", "output/viral-audit.md"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	markdownHash := fmt.Sprintf("%x", sha256.Sum256(markdownBody))
+	artifacts := []struct {
+		path, mimeType, role string
+		body                 []byte
+	}{
+		{path: "output/04-article-final.md", mimeType: "text/markdown", body: markdownBody},
+		{path: "output/05-article.html", mimeType: "text/html", body: htmlBody},
+		{path: "output/draft.json", mimeType: "application/json", body: packageBody},
+		{path: "output/marketing-scan.json", mimeType: "application/json", body: []byte(fmt.Sprintf(`{"version":"1.0","status":"passed","content_hash":"%s","findings":[]}`, markdownHash))},
+		{path: "output/final-review.md", mimeType: "text/markdown", body: []byte("# Final review\n\nPASS\n")},
+		{path: "output/viral-audit.md", mimeType: "text/markdown", body: []byte("# Viral audit\n\nPASS\n")},
+		{path: generated.FilePath, mimeType: generated.MimeType, role: model.FileRoleCover, body: coverBody},
+	}
+	manifest := TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID}
+	for _, artifact := range artifacts {
+		hash := fmt.Sprintf("%x", sha256.Sum256(artifact.body))
+		key := expectedTaskArtifactFinalKey(task, executionID, hash, artifact.path)
+		store.objects[key] = append([]byte(nil), artifact.body...)
+		store.stats[key] = &storage.ObjectInfo{
+			Key: key, Size: int64(len(artifact.body)), ContentType: artifact.mimeType, SHA256: hash,
+		}
+		manifest.Files = append(manifest.Files, TaskArtifactManifestFile{
+			RelativePath: artifact.path, ObjectKey: key, ContentType: artifact.mimeType,
+			Size: int64(len(artifact.body)), SHA256: hash, Role: artifact.role,
+		})
+	}
+	if err := svc.FinalizeTaskArtifactManifest(ctx, task.ID, task.UserID, executionID, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repo.TaskFiles().DeliverCurrentExecution(ctx, task.ID, executionID); err != nil {
+		t.Fatal(err)
+	}
+	execution, err := fixture.repo.TaskExecutions().FindByID(ctx, executionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeWechatPublicationAPI{
+		draftListResponse: &appwechat.DraftBatchGetResponse{},
+		addResponse:       &appwechat.DraftAddResponse{MediaID: "draft-media-id"},
+	}
+	svc.SetWechatPublicationService(NewWechatPublicationService(fixture.repo, func(*model.Project) (WechatPublicationAPI, error) {
+		return api, nil
+	}, &logger))
+
+	status, evidence, err := svc.finalizeArticlePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliverySucceeded {
+		t.Fatalf("publication status = %q, evidence=%s", status, evidence)
+	}
+	if api.addCalls != 1 || len(api.addRequests) != 1 || len(api.addRequests[0].Articles) != 1 {
+		t.Fatalf("draft/add calls = %d, requests=%#v", api.addCalls, api.addRequests)
+	}
+	if got := api.addRequests[0].Articles[0].ThumbMediaID; got != coverMediaID {
+		t.Fatalf("draft thumb_media_id = %q, want %q", got, coverMediaID)
 	}
 }
 

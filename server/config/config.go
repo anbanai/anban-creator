@@ -163,18 +163,16 @@ type MCPToolTimeoutsConfig struct {
 }
 
 type MontageConfig struct {
-	Enabled                bool                                   `yaml:"enabled"`
-	enabledSet             bool                                   `yaml:"-"`
-	DefaultPipeline        string                                 `yaml:"default_pipeline"`
-	AllowedPipelines       []string                               `yaml:"allowed_pipelines"`
-	MaxDurationSeconds     int64                                  `yaml:"max_duration_seconds"`
-	MaxAssets              int                                    `yaml:"max_assets"`
-	TimeoutMinutes         int                                    `yaml:"timeout_minutes"`
-	ExecutionTargets       []string                               `yaml:"execution_targets"`
-	DefaultExecutionTarget string                                 `yaml:"default_execution_target"`
-	Env                    map[string]string                      `yaml:"env"`
-	ToolPolicy             map[string]MontageToolCapabilityPolicy `yaml:"tool_policy"`
-	PipelineDefaults       map[string]map[string]any              `yaml:"pipeline_defaults"`
+	Enabled            bool                                   `yaml:"enabled"`
+	enabledSet         bool                                   `yaml:"-"`
+	DefaultPipeline    string                                 `yaml:"default_pipeline"`
+	AllowedPipelines   []string                               `yaml:"allowed_pipelines"`
+	MaxDurationSeconds int64                                  `yaml:"max_duration_seconds"`
+	MaxAssets          int                                    `yaml:"max_assets"`
+	TimeoutMinutes     int                                    `yaml:"timeout_minutes"`
+	Env                map[string]string                      `yaml:"env"`
+	ToolPolicy         map[string]MontageToolCapabilityPolicy `yaml:"tool_policy"`
+	PipelineDefaults   map[string]map[string]any              `yaml:"pipeline_defaults"`
 }
 
 type MontageToolCapabilityPolicy struct {
@@ -219,12 +217,6 @@ func (c *MontageConfig) ApplyDefaults() {
 	if c.TimeoutMinutes <= 0 {
 		c.TimeoutMinutes = 90
 	}
-	if len(c.ExecutionTargets) == 0 {
-		c.ExecutionTargets = []string{"cloud", "local"}
-	}
-	if c.DefaultExecutionTarget == "" {
-		c.DefaultExecutionTarget = "cloud"
-	}
 	if c.Env == nil {
 		c.Env = map[string]string{}
 	}
@@ -255,17 +247,6 @@ func (c MontageConfig) Validate() error {
 	if !montageStringSliceContains(c.AllowedPipelines, c.DefaultPipeline) {
 		return fmt.Errorf("montage.default_pipeline must be in montage.allowed_pipelines")
 	}
-	if !validMontageTarget(c.DefaultExecutionTarget) {
-		return fmt.Errorf("montage.default_execution_target must be cloud or local")
-	}
-	if !montageStringSliceContains(c.ExecutionTargets, c.DefaultExecutionTarget) {
-		return fmt.Errorf("montage.default_execution_target must be in montage.execution_targets")
-	}
-	for _, target := range c.ExecutionTargets {
-		if !validMontageTarget(target) {
-			return fmt.Errorf("montage.execution_targets contains invalid target %q", target)
-		}
-	}
 	for key, value := range c.Env {
 		if key == "" || strings.ContainsAny(key, "=\x00") {
 			return fmt.Errorf("montage.env contains invalid key %q", key)
@@ -283,10 +264,6 @@ func (c MontageConfig) RedactedEnv() map[string]bool {
 		redacted[key] = strings.TrimSpace(value) != ""
 	}
 	return redacted
-}
-
-func validMontageTarget(target string) bool {
-	return target == "cloud" || target == "local"
 }
 
 func montageStringSliceContains(values []string, want string) bool {

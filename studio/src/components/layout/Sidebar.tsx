@@ -9,10 +9,8 @@ import {
   Search,
 } from "lucide-react";
 import UserAccountPopover from "@/components/auth/UserAccountPopover";
-import LocalExecutorStatusPill from "@/components/desktop/LocalExecutorStatusPill";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { isDesktop } from "@/lib/tauri";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Tooltip,
@@ -174,12 +172,6 @@ export default function Sidebar() {
             </div>
           ) : null}
         </nav>
-
-        {isDesktop() && (
-          <div className="border-t border-sidebar-border px-3 py-2">
-            <LocalExecutorStatusPill collapsed={collapsed} />
-          </div>
-        )}
 
         {/* Bottom: User account */}
         <div className={`border-t border-sidebar-border py-3 ${collapsed ? "flex justify-center px-0" : "px-3"}`}>

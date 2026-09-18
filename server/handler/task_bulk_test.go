@@ -81,7 +81,6 @@ func seedBulkTask(t *testing.T, repo repository.Repository, userID, projectID, s
 		ProjectID:        projectID,
 		Type:             model.PlatformSeednote,
 		Status:           status,
-		ExecutionTarget:  model.ExecutionTargetCloud,
 		ExecutionProfile: "balanced",
 	}
 	freezeHandlerTaskImageCapability(t, task, "standard", handlerTestImageCapabilityRoute("image.standard", model.TierFree))

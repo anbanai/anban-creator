@@ -57,7 +57,6 @@ export type {
   TaskLifecycleStage,
   TaskLifecycle,
   TaskOutcome,
-  ExecutionTarget,
   Task,
   TaskBillingChargeDetail,
   TaskFile,

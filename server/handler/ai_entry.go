@@ -22,7 +22,6 @@ type aiEntrySubmitBody struct {
 	Quantity           *int                    `json:"quantity,omitempty"`
 	ImageRatio         string                  `json:"image_ratio,omitempty"`
 	ImageCapabilityKey string                  `json:"image_capability_key,omitempty"`
-	ExecutionTarget    string                  `json:"execution_target,omitempty"`
 }
 
 type AIEntryHandler struct {
@@ -66,7 +65,6 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 		Quantity:           quantity,
 		ImageRatio:         strings.TrimSpace(body.ImageRatio),
 		ImageCapabilityKey: strings.TrimSpace(body.ImageCapabilityKey),
-		ExecutionTarget:    body.ExecutionTarget,
 	}
 	if req.Channel == "" {
 		req.Channel = "studio"

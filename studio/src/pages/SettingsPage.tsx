@@ -21,9 +21,7 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import { changePasswordSchema, type ChangePasswordFormValues } from '@/lib/schemas'
 import type { CreateAPIKeyResponse } from '@/types'
 import { tierLabels, tierDescriptions } from '@/lib/labels'
-import LocalExecutorSection from '@/components/settings/LocalExecutorSection'
 import IlinkBindingSection from '@/components/settings/IlinkBindingSection'
-import { isDesktop } from '@/lib/tauri'
 import { buildSettingsReadinessItems, type SettingsReadinessListItem } from '@/lib/studio-ux'
 
 export default function SettingsPage() {
@@ -35,7 +33,6 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
   const { submit } = useSubmitLock()
-  const desktopApp = isDesktop()
 
   const passwordForm = useForm<ChangePasswordFormValues>({
     resolver: zodResolver(changePasswordSchema),
@@ -51,7 +48,6 @@ export default function SettingsPage() {
   })
 
   const readinessItems = buildSettingsReadinessItems({
-    isDesktopApp: desktopApp,
     apiKeyCount: apiKeys.length,
     hasPassword: Boolean(user?.has_password),
   })
@@ -119,17 +115,22 @@ export default function SettingsPage() {
       <SettingsGroupTitle
         id="execution-settings"
         title="执行环境"
-        description="本机执行、任务通知和创作助手接入状态。"
+        description="所有任务统一由云端 Agent 执行，Studio 不再提供本机执行器。"
       />
-      {/* Local executor (desktop only — renders nothing in the web build) */}
-      {desktopApp && <LocalExecutorSection />}
+      <Card>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            任务会由服务器调度到受控的 Agent 运行时，执行结果和生成文件继续在 Studio 中查看。
+          </p>
+        </CardContent>
+      </Card>
 
       <SettingsGroupTitle
         id="publishing-settings"
         title="发布渠道"
         description="微信助手、发布通知和后续渠道能力。"
       />
-      {/* WeChat bot binding (web + desktop) — task notifications + commands */}
+      {/* WeChat bot binding — task notifications and commands */}
       <IlinkBindingSection />
 
       <SettingsGroupTitle

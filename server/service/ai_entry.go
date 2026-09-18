@@ -32,7 +32,6 @@ type AIEntrySubmitRequest struct {
 	Quantity           int                     `json:"quantity,omitempty"`
 	ImageRatio         string                  `json:"image_ratio,omitempty"`
 	ImageCapabilityKey string                  `json:"image_capability_key,omitempty"`
-	ExecutionTarget    string                  `json:"execution_target,omitempty"`
 }
 
 type AIEntrySubmitResult struct {
@@ -182,7 +181,6 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		ImageRatio:         imageRatio,
 		ImageCapabilityKey: imageCapabilityKey,
 		InputAttachments:   normalizeEntryAttachments(req.Attachments),
-		ExecutionTarget:    normalizeAIEntryExecutionTarget(req.ExecutionTarget),
 		ProjectSnapshot:    &projectSnapshot,
 	}
 	var referenceView *model.AssetView
@@ -451,15 +449,6 @@ func normalizeEntryAttachmentType(t, contentType string) string {
 		return "text"
 	default:
 		return "document"
-	}
-}
-
-func normalizeAIEntryExecutionTarget(target string) string {
-	switch strings.TrimSpace(target) {
-	case model.ExecutionTargetLocal:
-		return model.ExecutionTargetLocal
-	default:
-		return model.ExecutionTargetCloud
 	}
 }
 

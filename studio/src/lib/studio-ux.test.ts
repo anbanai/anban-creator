@@ -161,7 +161,6 @@ describe('studio business UX helpers', () => {
   it('builds settings readiness as dependency checklist items', () => {
     expect(
       buildSettingsReadinessItems({
-        isDesktopApp: false,
         apiKeyCount: 0,
         hasPassword: false,
       }).map((item) => [item.id, item.ready, item.actionLabel]),
@@ -174,7 +173,7 @@ describe('studio business UX helpers', () => {
   })
 
   it('links platform keys without reviving the removed model configuration section', () => {
-    const item = buildSettingsReadinessItems({ isDesktopApp: false, apiKeyCount: 1, hasPassword: true })
+    const item = buildSettingsReadinessItems({ apiKeyCount: 1, hasPassword: true })
       .find((entry) => entry.id === 'api-key')
     expect(item).toMatchObject({ title: '平台密钥', actionLabel: '检查密钥', href: '#api-key-settings' })
   })

@@ -1,40 +1,12 @@
 import axios from 'axios'
-import { isDesktop } from '@/lib/tauri'
 import type { ApiResponse } from '@/types'
 
 const TOKEN_KEY = 'anban_creator_token'
 const REFRESH_TOKEN_KEY = 'anban_creator_refresh_token'
 const USER_KEY = 'anban_creator_user'
-// Mirror of the desktop-configured cloud API base. The Tauri shell seeds this
-// via a webview initialization script before the SPA boots, so resolution stays
-// synchronous (the very first request — login — fires before any IPC could
-// resolve). The settings UI updates it through setApiBase().
-const API_BASE_STORAGE_KEY = 'anban_creator_api_base'
-
-/**
- * Resolve the axios baseURL at module load, with no async/IPC so the first
- * request never races configuration:
- *   1. Explicit build-time env (self-hosted / docker) wins outright.
- *   2. Desktop-configured base mirrored into localStorage by the Tauri shell.
- *   3. Web dev proxy (same-origin /api/v1).
- *   4. Desktop without any configured base: the production cloud server.
- */
-export const DEFAULT_CLOUD_API_BASE = 'https://api.anbanai.com/api/v1'
-
 function resolveApiBase(): string {
   if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL
-  // Only the desktop shell seeds localStorage.anban_creator_api_base. Honoring it
-  // on the plain web/self-hosted build would let any writer of that key (XSS, a
-  // malicious browser extension, or a shared machine) silently redirect every
-  // authenticated request — including /auth/refresh — to an attacker-controlled
-  // origin and exfiltrate the JWT + refresh token from the Authorization header.
-  // Gate it behind isDesktop(); the web build always uses the same-origin proxy.
-  if (isDesktop() && typeof localStorage !== 'undefined') {
-    const stored = localStorage.getItem(API_BASE_STORAGE_KEY)
-    if (stored) return stored
-  }
-  if (!isDesktop()) return '/api/v1'
-  return DEFAULT_CLOUD_API_BASE
+  return '/api/v1'
 }
 
 export const http = axios.create({
@@ -54,18 +26,6 @@ const refreshHttp = axios.create({
     'Content-Type': 'application/json',
   },
 })
-
-/**
- * Update the cloud API base at runtime (settings UI). Applies to both axios
- * instances and mirrors into localStorage so it survives reloads. No-op for the
- * value currently in effect.
- */
-export function applyApiBase(base: string): void {
-  const normalized = base.replace(/\/+$/, '')
-  if (typeof localStorage !== 'undefined') localStorage.setItem(API_BASE_STORAGE_KEY, normalized)
-  http.defaults.baseURL = normalized
-  refreshHttp.defaults.baseURL = normalized
-}
 
 // Request interceptor: attach auth token
 http.interceptors.request.use((config) => {

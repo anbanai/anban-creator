@@ -33,9 +33,6 @@ func TestMontageConfigDefaults(t *testing.T) {
 	if cfg.TimeoutMinutes != 90 {
 		t.Fatalf("TimeoutMinutes = %d, want 90", cfg.TimeoutMinutes)
 	}
-	if cfg.DefaultExecutionTarget != "cloud" {
-		t.Fatalf("DefaultExecutionTarget = %q, want cloud", cfg.DefaultExecutionTarget)
-	}
 	if cfg.Env == nil {
 		t.Fatal("Env = nil, want empty map")
 	}
@@ -49,14 +46,12 @@ func TestMontageConfigDefaults(t *testing.T) {
 
 func TestMontageConfigValidate(t *testing.T) {
 	cfg := MontageConfig{
-		Enabled:                true,
-		DefaultPipeline:        "cinematic",
-		AllowedPipelines:       []string{"cinematic", "social-short"},
-		MaxDurationSeconds:     600,
-		MaxAssets:              20,
-		TimeoutMinutes:         90,
-		ExecutionTargets:       []string{"cloud", "local"},
-		DefaultExecutionTarget: "cloud",
+		Enabled:            true,
+		DefaultPipeline:    "cinematic",
+		AllowedPipelines:   []string{"cinematic", "social-short"},
+		MaxDurationSeconds: 600,
+		MaxAssets:          20,
+		TimeoutMinutes:     90,
 		Env: map[string]string{
 			"NEW_PROVIDER_TOKEN":      "future-secret",
 			"VIDEO_GEN_LOCAL_ENABLED": "false",
@@ -81,14 +76,12 @@ func TestMontageConfigValidate(t *testing.T) {
 
 func TestMontageConfigAcceptsArbitraryEnvKeys(t *testing.T) {
 	cfg := MontageConfig{
-		Enabled:                true,
-		DefaultPipeline:        "default",
-		AllowedPipelines:       []string{"default"},
-		MaxDurationSeconds:     600,
-		MaxAssets:              20,
-		TimeoutMinutes:         90,
-		ExecutionTargets:       []string{"cloud"},
-		DefaultExecutionTarget: "cloud",
+		Enabled:            true,
+		DefaultPipeline:    "default",
+		AllowedPipelines:   []string{"default"},
+		MaxDurationSeconds: 600,
+		MaxAssets:          20,
+		TimeoutMinutes:     90,
 		Env: map[string]string{
 			"NEW_PROVIDER_TOKEN": "secret",
 		},
@@ -101,14 +94,12 @@ func TestMontageConfigAcceptsArbitraryEnvKeys(t *testing.T) {
 
 func TestMontageConfigRejectsMalformedEnvEntries(t *testing.T) {
 	base := MontageConfig{
-		Enabled:                true,
-		DefaultPipeline:        "default",
-		AllowedPipelines:       []string{"default"},
-		MaxDurationSeconds:     600,
-		MaxAssets:              20,
-		TimeoutMinutes:         90,
-		ExecutionTargets:       []string{"cloud"},
-		DefaultExecutionTarget: "cloud",
+		Enabled:            true,
+		DefaultPipeline:    "default",
+		AllowedPipelines:   []string{"default"},
+		MaxDurationSeconds: 600,
+		MaxAssets:          20,
+		TimeoutMinutes:     90,
 	}
 	for _, env := range []map[string]string{
 		{"": "secret"},

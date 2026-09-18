@@ -1641,9 +1641,6 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		if task.HasContentImage || !task.HasTailImage || task.ArticleWithCover == nil || *task.ArticleWithCover || task.ArticleWithContentImages == nil || *task.ArticleWithContentImages {
 			t.Fatalf("image overrides = %#v", task)
 		}
-		if task.ExecutionTarget != model.ExecutionTargetCloud || task.LocalClaimDeadline != nil {
-			t.Fatalf("execution target = %q deadline=%v", task.ExecutionTarget, task.LocalClaimDeadline)
-		}
 		if got := task.InputAttachments.Data(); len(got) != 1 || got[0].Text != "validated attachment" {
 			t.Fatalf("attachments = %#v", got)
 		}

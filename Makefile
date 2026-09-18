@@ -25,7 +25,6 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         server-build server-run server-dev server-test git-sync-setup humanizer-update \
         agent-pack-new agent-pack-generate agent-pack-check \
         agent-install agent-test agent-build \
-        dsh-plugin-install dsh-plugin-check dsh-plugin-smoke \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
         docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
@@ -137,15 +136,6 @@ agent-test:
 
 agent-build:
 	@cd agent-ts && bun run build
-
-dsh-plugin-install:
-	@$(MAKE) -C harness dsh-install
-
-dsh-plugin-check:
-	@$(MAKE) -C harness dsh-check
-
-dsh-plugin-smoke:
-	@$(MAKE) -C harness dsh-smoke
 
 # ---------------------------------------------------------------------------
 # Frontend targets
@@ -262,9 +252,6 @@ help:
 	@echo "  make agent-install  - Install TypeScript Agent dependencies"
 	@echo "  make agent-test     - Test and type-check the TypeScript Agent"
 	@echo "  make agent-build    - Compile the TypeScript Agent"
-	@echo "  make dsh-plugin-install - Install locked DSH plugin dependencies"
-	@echo "  make dsh-plugin-check - Type-check, test, build, and pack-check the DSH plugin"
-	@echo "  make dsh-plugin-smoke - Smoke-test DSH Web profile installation"
 	@echo "  make clean         - Remove build artifacts"
 	@echo "  make distclean     - Remove build artifacts + dependencies"
 	@echo ""

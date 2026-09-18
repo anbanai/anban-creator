@@ -107,9 +107,6 @@ type TaskRepository interface {
 	UpdateLifecycle(ctx context.Context, id, executionID string, lifecycle model.TaskLifecycle) (bool, error)
 	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
-	FinalizeLocalTask(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
-	FinalizeLocalTaskInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
-	FinalizeLocalTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, taskResult, executionResult string, usage []model.ModelTokenUsage, costStatus string, artifactAction LocalTaskArtifactAction) (bool, error)
 	FinalizeCloudTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction) (bool, error)
 	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error)
 	UpdateBillingTerminalReason(ctx context.Context, id, reason string) error
@@ -125,28 +122,6 @@ type TaskRepository interface {
 	FindPendingByProject(ctx context.Context, projectID string, limit int) ([]*model.Task, error)
 	FindPendingByPlanID(ctx context.Context, planID string) ([]*model.Task, error)
 	CancelPendingTask(ctx context.Context, taskID, errorMsg string) (bool, error)
-	// ClaimNextLocalTask atomically claims the oldest pending local-target task
-	// owned by userID: CAS status pending→running, set execution_target=
-	// local_claimed + executor_info + started_at, all inside one transaction so
-	// concurrent claimers cannot double-claim. Returns the claimed task, or
-	// (nil, nil) when no task is claimable (none pending, none local-target, or
-	// deadline already expired). executorInfo is an opaque JSON blob.
-	ClaimNextLocalTask(ctx context.Context, userID string, executorInfo []byte) (*model.Task, error)
-	// FindExpiredLocalTasks returns IDs of pending local-target tasks whose
-	// claim deadline has passed — candidates for cloud fallback. A nil/zero
-	// deadline never expires (treated as unclaimed indefinitely, which should
-	// not happen since creation always sets a deadline).
-	FindExpiredLocalTasks(ctx context.Context, now time.Time) ([]string, error)
-	// ResetLocalTarget atomically clears the local-execution markers
-	// (execution_target back to cloud, deadline cleared) ONLY while the task is
-	// still pending + local-target — a guarded CAS. Returns reset=true when the
-	// CAS matched and the task is now eligible for cloud dispatch; reset=false
-	// when the task was claimed (running+local_claimed) or otherwise changed
-	// since the fallback selected it. In the false case the caller MUST NOT
-	// re-enqueue, or the task would run twice (cloud + the desktop that just
-	// claimed it). Used by the fallback worker before re-enqueueing an
-	// unclaimed local task.
-	ResetLocalTarget(ctx context.Context, taskID string) (bool, error)
 	BeginDelete(ctx context.Context, taskID string) (bool, error)
 	DeleteIfDeleting(ctx context.Context, taskID string) (bool, error)
 	CompareAndSwapStatus(ctx context.Context, taskID, expected, newStatus string) (bool, error)
@@ -166,13 +141,6 @@ type TaskRepository interface {
 	AggregateUsageByUser(ctx context.Context, userID string, from, to time.Time, projectID string) (totalTasks int64, totalInput, totalOutput, totalCacheRead, totalCacheCreation int64, err error)
 	AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error)
 }
-
-type LocalTaskArtifactAction string
-
-const (
-	LocalTaskArtifactsDeliver LocalTaskArtifactAction = "deliver"
-	LocalTaskArtifactsRetain  LocalTaskArtifactAction = "retain"
-)
 
 type CloudTaskArtifactAction string
 
@@ -229,7 +197,6 @@ type TaskExecutionRepository interface {
 	FindByIDForUpdate(ctx context.Context, id string) (*model.TaskExecution, error)
 	FindCurrentByTaskID(ctx context.Context, taskID string) (*model.TaskExecution, error)
 	FindReconcilable(ctx context.Context, before time.Time, limit int) ([]*model.TaskExecution, error)
-	FindLocalReconcileCandidates(ctx context.Context, heartbeatBefore, createdBefore time.Time, limit int) ([]*model.TaskExecution, error)
 	SetRuntimeIdentity(ctx context.Context, id string, identity model.RuntimeIdentity) error
 	SetCleanupRuntimeIdentity(ctx context.Context, id, token string, identity model.RuntimeIdentity) (bool, error)
 	// LockActiveForProgress validates and locks the execution before progress

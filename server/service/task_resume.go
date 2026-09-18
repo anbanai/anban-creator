@@ -157,9 +157,6 @@ func applyResumedTaskState(task *model.Task, attachments []model.EntryAttachment
 	task.CostStatus = ""
 	task.WorkflowStatus = nil
 	task.SetInputAttachments(attachments)
-	task.ExecutionTarget = model.ExecutionTargetCloud
-	task.LocalClaimDeadline = nil
-	task.ExecutorInfo = datatypes.NewJSONType(model.ExecutorMeta{})
 }
 
 func (s *TaskService) persistResumeInputs(ctx context.Context, task *model.Task, prompt string, files []ResumeTaskFile) ([]model.EntryAttachment, string, error) {

@@ -185,16 +185,6 @@ vi.mock('@/lib/direct-upload', async () => {
   return { ...actual, uploadToOSS: uploadToOSSMock }
 })
 
-vi.mock('@/lib/tauri', () => ({
-  isDesktop: () => true,
-  getLocalExecutorStatus: vi.fn().mockResolvedValue({
-    state: 'running_idle',
-    available: true,
-    running: true,
-    reason: '',
-  }),
-}))
-
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
   return {

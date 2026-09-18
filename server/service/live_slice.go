@@ -429,7 +429,7 @@ func validLiveAnalysisReferenceField(value string) bool {
 	return true
 }
 
-// LiveAnalysisResult is the stable JSON shape consumed by the skill and desktop concepts.
+// LiveAnalysisResult is the stable JSON shape consumed by the skill and analysis clients.
 type LiveAnalysisResult struct {
 	Status       string               `json:"status"`
 	Completed    bool                 `json:"completed"`

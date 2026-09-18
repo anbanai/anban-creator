@@ -28,7 +28,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { uploadsApi, type ResolveDownloadUrlRequest } from '@/lib/api/uploads'
-import { downloadBlob, isDesktop, saveUrlToFile } from '@/lib/tauri'
 import type {
   AgentPromptValue,
   InputAttachment,
@@ -157,6 +156,17 @@ async function readBlobTextWithLimit(blob: Blob) {
   const bytes = await blob.slice(0, MAX_TEXT_PREVIEW_BYTES + 1).arrayBuffer()
   if (bytes.byteLength > MAX_TEXT_PREVIEW_BYTES) throw new TextPreviewTooLargeError()
   return new TextDecoder().decode(bytes)
+}
+
+async function downloadBlob(filename: string, blob: Blob): Promise<void> {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
 }
 
 async function readResponseTextWithLimit(response: Response) {
@@ -393,13 +403,6 @@ export function AttachmentPreviewDialog({
     for (;;) {
       const remote = await resolveRemote(attachment, inherited, refreshed)
       if (!remote) throw new Error('没有可下载的附件来源')
-      if (isDesktop()) {
-        try {
-          if (await saveUrlToFile(remote.url, attachment.fileName)) return
-        } catch {
-          // Fall through so a signed-URL status can be inspected and refreshed.
-        }
-      }
       let response: Response
       try {
         response = await fetch(remote.url)

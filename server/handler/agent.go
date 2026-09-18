@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -35,7 +34,6 @@ type AgentHandler struct {
 	apiKeySvc        *service.APIKeyService
 	directUploadCfg  service.DirectUploadConfig
 	executionTokens  *auth.ExecutionTokenService
-	localTokenTTL    time.Duration
 	workloadVerifier serveragent.WorkloadVerifier
 	bootstrapper     agentBootstrapper
 	logger           *zerolog.Logger
@@ -43,12 +41,6 @@ type AgentHandler struct {
 
 func (h *AgentHandler) SetExecutionTokenService(tokens *auth.ExecutionTokenService) {
 	h.executionTokens = tokens
-}
-
-// SetLocalExecutionTokenTTL sets the complete local execution credential
-// lifetime, including the configured execution and persistence windows.
-func (h *AgentHandler) SetLocalExecutionTokenTTL(ttl time.Duration) {
-	h.localTokenTTL = ttl
 }
 
 func (h *AgentHandler) SetBootstrap(verifier serveragent.WorkloadVerifier, bootstrapper agentBootstrapper) {
@@ -68,41 +60,6 @@ func NewAgentHandler(taskSvc *service.TaskService, apiKeySvc *service.APIKeyServ
 // artifact uploads.
 func (h *AgentHandler) SetDirectUploadConfig(cfg service.DirectUploadConfig) {
 	h.directUploadCfg = cfg
-}
-
-// ClaimAuthMiddleware accepts only a user API key for the desktop claim route.
-// Execution tokens cannot claim new work, and server-wide static keys are not
-// user identities.
-func (h *AgentHandler) ClaimAuthMiddleware(c fiber.Ctx) error {
-	authorization := strings.TrimSpace(c.Get("Authorization"))
-	secondary, secondaryCount := extractAgentHeaderCredential(c)
-	var token string
-	if authorization != "" {
-		if secondaryCount > 0 {
-			return Error(c, fiber.StatusUnauthorized, "conflicting agent credentials")
-		}
-		parts := strings.SplitN(authorization, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" {
-			return Error(c, fiber.StatusUnauthorized, "invalid agent authorization")
-		}
-		token = strings.TrimSpace(parts[1])
-	} else {
-		if secondaryCount == 0 {
-			return Error(c, fiber.StatusUnauthorized, "missing agent api key")
-		}
-		if secondaryCount > 1 {
-			return Error(c, fiber.StatusUnauthorized, "conflicting agent credentials")
-		}
-		token = secondary
-	}
-	if h.authenticateUserAPIKey(c, token) {
-		return c.Next()
-	}
-
-	if h.logger != nil {
-		h.logger.Warn().Msg("agent auth failed: invalid token")
-	}
-	return Error(c, fiber.StatusUnauthorized, "invalid agent api key")
 }
 
 // ExecutionAuthMiddleware is used by execution-scoped agent routes. It never
@@ -139,18 +96,6 @@ func (h *AgentHandler) authenticateUserAPIKey(c fiber.Ctx, token string) bool {
 		}
 	}
 	return false
-}
-
-func extractAgentHeaderCredential(c fiber.Ctx) (string, int) {
-	var token string
-	count := 0
-	for _, name := range []string{"X-Agent-API-Key", "X-API-Key", "X-Admin-API-Key"} {
-		if candidate := strings.TrimSpace(c.Get(name)); candidate != "" {
-			token = candidate
-			count++
-		}
-	}
-	return token, count
 }
 
 // WorkloadAuthMiddleware accepts only the projected Kubernetes bearer token.
@@ -386,70 +331,7 @@ type agentCompleteRequest struct {
 	Result      *serveragent.ExecutionResult `json:"result"`
 }
 
-const agentPackContractVersion = 4
 const agentRuntimeContractVersion = 2
-
-// agentClaimRequest is the body for POST /api/v1/agent/claim.
-// executor_info is an opaque JSON blob (desktop hostname/version) recorded for
-// diagnostics. The contract version prevents older executors from claiming a
-// task whose Agent Pack fields and runner arguments they cannot consume.
-type agentClaimRequest struct {
-	AgentPackContractVersion int             `json:"agent_pack_contract_version"`
-	ExecutorInfo             json.RawMessage `json:"executor_info"`
-}
-
-// Claim handles POST /api/v1/agent/claim.
-//
-// A desktop local executor polls this endpoint to atomically claim its oldest
-// pending local-target task. On success it returns the full task config
-// (service.LocalExecutionConfig) which the desktop turns into an anban run
-// argv (matching managed bootstrap defaults), supplying its own server_url +
-// API key. The claimed task is already status=running, so cloud Asynq never
-// picks it up. Returns 204 No Content when nothing is claimable.
-func (h *AgentHandler) Claim(c fiber.Ctx) error {
-	if executionID, _ := c.Locals(agentExecutionIDContextKey).(string); executionID != "" {
-		return Error(c, fiber.StatusForbidden, "execution credentials cannot claim local tasks")
-	}
-	if h.taskSvc == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
-	}
-	if h.executionTokens == nil || h.localTokenTTL <= 0 {
-		return Error(c, fiber.StatusServiceUnavailable, "local execution credentials unavailable")
-	}
-
-	userID := h.authenticatedUserID(c)
-
-	var req agentClaimRequest
-	if len(c.Body()) > 0 {
-		if err := c.Bind().Body(&req); err != nil {
-			return Error(c, fiber.StatusBadRequest, "invalid request body")
-		}
-	}
-	if req.AgentPackContractVersion != agentPackContractVersion {
-		return Error(c, fiber.StatusUpgradeRequired, "desktop Agent Pack contract upgrade required")
-	}
-
-	cfg, err := h.taskSvc.ClaimLocalTask(c.Context(), userID, string(req.ExecutorInfo))
-	if err != nil {
-		h.logger.Error().Err(err).Msg("claim local task failed")
-		return Error(c, fiber.StatusInternalServerError, "claim failed")
-	}
-	if cfg == nil {
-		return c.Status(fiber.StatusNoContent).SendString("")
-	}
-	token, err := h.executionTokens.Issue(auth.ExecutionClaims{
-		UserID: userID, ProjectID: cfg.ProjectID, TaskID: cfg.TaskID, ExecutionID: cfg.ExecutionID,
-	}, time.Now().Add(h.localTokenTTL))
-	if err != nil {
-		failure := &serveragent.ExecutionResult{Success: false, Error: "local execution credential issuance failed", TerminalReason: "platform_error"}
-		if completeErr := h.taskSvc.CompleteLocalTask(c.Context(), cfg.TaskID, cfg.ExecutionID, failure); completeErr != nil && h.logger != nil {
-			h.logger.Error().Err(completeErr).Str("task_id", cfg.TaskID).Msg("failed to terminalize local task after credential issuance failure")
-		}
-		return Error(c, fiber.StatusServiceUnavailable, "local execution credentials unavailable")
-	}
-	cfg.ExecutionToken = token
-	return Success(c, cfg)
-}
 
 // ProgressPlan handles POST /api/v1/agent/progress-plan.
 func (h *AgentHandler) ProgressPlan(c fiber.Ctx) error {
@@ -545,12 +427,7 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		return Success(c, lifecycle)
 	}
 
-	// Refresh the heartbeat on every unstructured progress report. This is the local-
-	// execution keep-alive: a desktop agent reports progress per turn/line, and
-	// each report resets the 5-min stuck-task reaper. Cloud tasks are also kept
-	// alive by HandleExecution's HeartbeatFunc, so this is a harmless redundant
-	// refresh there. Without it, a long-running local task would be force-failed
-	// by reapStuckTasks (plan_checker.go) before it completes.
+	// Refresh the heartbeat on every unstructured progress report.
 	if err := h.taskSvc.UpdateAgentHeartbeat(c.Context(), req.TaskID, executionID); err != nil {
 		h.logger.Warn().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("failed to update agent heartbeat")
 		return Error(c, fiber.StatusInternalServerError, "failed to persist heartbeat")
@@ -569,13 +446,7 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 
 // Complete handles POST /api/v1/agent/complete.
 //
-// A desktop local executor calls this once when anban finishes, with
-// the final ExecutionResult. The service finalizes the task (status → completed
-// or failed, slot release, dispatch, refund-on-failure) — guarded to the
-// current local_claimed execution. Identical terminal retries are acknowledged.
-// This is the terminal half of the local-execution path; without it a
-// local task could never reach a terminal state (the agent binary is shared with
-// cloud, whose authoritative finalization is server-side HandleExecution).
+// Complete handles the final execution result from a managed Agent runtime.
 func (h *AgentHandler) Complete(c fiber.Ctx) error {
 	if h.taskSvc == nil {
 		return Error(c, fiber.StatusServiceUnavailable, "task service unavailable")
@@ -592,7 +463,7 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
-	task, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c))
+	_, err := h.taskSvc.ValidateAgentTaskAccess(c.Context(), req.TaskID, h.authenticatedUserID(c))
 	if err != nil {
 		if errors.Is(err, service.ErrAgentAccessDenied) {
 			return Error(c, fiber.StatusForbidden, "task access denied")
@@ -614,11 +485,7 @@ func (h *AgentHandler) Complete(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Str("task_id", req.TaskID).Str("execution_id", executionID).Msg("validate execution completion access")
 		return Error(c, fiber.StatusInternalServerError, "complete failed")
 	}
-	if task.ExecutionTarget == model.ExecutionTargetLocalClaimed {
-		err = h.taskSvc.CompleteLocalTask(c.Context(), req.TaskID, executionID, req.Result)
-	} else {
-		err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
-	}
+	err = h.taskSvc.CompleteCloudExecution(c.Context(), executionID, req.Result)
 	if err != nil {
 		status, message := agentCompletionErrorResponse(err)
 		if status == fiber.StatusConflict {

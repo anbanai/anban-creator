@@ -11,9 +11,7 @@ import (
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
-	"gorm.io/gorm"
 )
 
 func newFixedTaskBillingFixture(t *testing.T, paid, debt int64) (*TaskService, *billingWalletFixture, *mockEnqueuer) {
@@ -255,7 +253,7 @@ func TestShouldReverseTaskChargeUsesExplicitReasonAndDurableDelivery(t *testing.
 	}
 }
 
-func TestTaskTerminalBillingReasonIsIdenticalForLocalAndCloudEvidence(t *testing.T) {
+func TestTaskTerminalBillingReasonUsesExecutionEvidence(t *testing.T) {
 	tests := []struct {
 		name      string
 		execution model.TaskExecution
@@ -275,196 +273,5 @@ func TestTaskTerminalBillingReasonIsIdenticalForLocalAndCloudEvidence(t *testing
 				t.Fatalf("terminalBillingReason=%q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-// seedHistoricalManagedLocalExecution models an execution that began locally
-// before managed profiles were made cloud-only. Terminal settlement must remain
-// able to finalize this durable historical state.
-func seedHistoricalManagedLocalExecution(t *testing.T, f *billingWalletFixture, task *model.Task) {
-	t.Helper()
-	ctx := context.Background()
-	now := time.Now()
-	task.Status = model.TaskStatusRunning
-	task.ExecutionTarget = model.ExecutionTargetLocalClaimed
-	task.LocalClaimDeadline = nil
-
-	profiledExecution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)
-	execution := &profiledExecution
-	execution.ID = uuid.NewString()
-	execution.TaskID = task.ID
-	attempt, err := f.repo.TaskExecutions().NextAttempt(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("allocate historical local attempt: %v", err)
-	}
-	execution.Attempt = attempt
-	execution.Target = model.ExecutionTargetLocalClaimed
-	execution.Status = model.TaskExecutionRunning
-	execution.Started = true
-	execution.StartedAt = &now
-	execution.RuntimeProfile = "local"
-	if err := applyAgentPackIdentity(execution, task.Type); err != nil {
-		t.Fatalf("freeze historical local execution Pack: %v", err)
-	}
-	execution.RuntimeProfile = "local"
-	if err := f.repo.TaskExecutions().Create(ctx, execution); err != nil {
-		t.Fatalf("create historical local execution: %v", err)
-	}
-	task.CurrentExecutionID = &execution.ID
-	if err := f.repo.Tasks().Update(ctx, task); err != nil {
-		t.Fatalf("seed historical local task: %v", err)
-	}
-}
-
-func TestLocalTaskTerminalBillingEnqueuesAndAppliesOneReversal(t *testing.T) {
-	ctx := context.Background()
-	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
-		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "local failure", Quantity: 1,
-	})
-	if err != nil {
-		t.Fatalf("CreateManual: %v", err)
-	}
-	task := tasks[0]
-	seedHistoricalManagedLocalExecution(t, f, task)
-	result := &agent.ExecutionResult{Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError}
-	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, result); err != nil {
-		t.Fatalf("CompleteLocalTask: %v", err)
-	}
-	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, result); err != nil {
-		t.Fatalf("duplicate CompleteLocalTask: %v", err)
-	}
-	found, err := f.repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil || found.BillingTerminalReason != model.TaskBillingTerminalProviderError {
-		t.Fatalf("terminal task = %#v, %v", found, err)
-	}
-	settlement, err := f.repo.Billing().FindSettlementByKey(ctx, "task-terminal-reversal", *task.BillingChargeID)
-	if err != nil || settlement.Action != model.BillingSettlementActionReverseTask || settlement.Reason != model.TaskBillingTerminalProviderError {
-		t.Fatalf("reversal settlement = %#v, %v", settlement, err)
-	}
-	if processed, err := f.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 1 {
-		t.Fatalf("ProcessSettlementOutbox=%d, %v", processed, err)
-	}
-	if processed, err := f.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 0 {
-		t.Fatalf("duplicate ProcessSettlementOutbox=%d, %v", processed, err)
-	}
-	if account := f.account(t, billingWalletUserID); account.PaidCredits != 1_000 || account.DebtCredits != 0 {
-		t.Fatalf("account after reversal = %#v", account)
-	}
-}
-
-func TestConcurrentIdenticalLocalFailureEnqueuesOneBillingSettlement(t *testing.T) {
-	ctx := context.Background()
-	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
-		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "overlapping local failure", Quantity: 1,
-	})
-	if err != nil {
-		t.Fatalf("CreateManual: %v", err)
-	}
-	task := tasks[0]
-	seedHistoricalManagedLocalExecution(t, f, task)
-	executionID := *task.CurrentExecutionID
-	svc.repo = newLocalCompletionRaceRepository(f.repo, true)
-	newResult := func() *agent.ExecutionResult {
-		return &agent.ExecutionResult{
-			Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError,
-		}
-	}
-	errs := make(chan error, 2)
-	go func() { errs <- svc.CompleteLocalTask(ctx, task.ID, executionID, newResult()) }()
-	go func() { errs <- svc.CompleteLocalTask(ctx, task.ID, executionID, newResult()) }()
-	for range 2 {
-		if err := <-errs; err != nil {
-			t.Fatalf("identical concurrent failure = %v, want nil", err)
-		}
-	}
-
-	settlements, err := f.repo.Billing().ListSettlementsByTask(ctx, task.ID)
-	if err != nil || len(settlements) != 1 || settlements[0].Action != model.BillingSettlementActionReverseTask {
-		t.Fatalf("billing settlements = %#v, %v; want one reversal", settlements, err)
-	}
-	if processed, err := f.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 1 {
-		t.Fatalf("ProcessSettlementOutbox=%d, %v; want one", processed, err)
-	}
-	if processed, err := f.wallet.ProcessSettlementOutbox(ctx, 10); err != nil || processed != 0 {
-		t.Fatalf("duplicate ProcessSettlementOutbox=%d, %v; want zero", processed, err)
-	}
-}
-
-func TestLocalTaskTerminalBillingKeepsChargeWhenDurableOutputExists(t *testing.T) {
-	ctx := context.Background()
-	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	store := &fakeTaskStorage{files: make(map[string][]byte)}
-	svc.store = store
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
-		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "partial output", Quantity: 1,
-	})
-	if err != nil {
-		t.Fatalf("CreateManual: %v", err)
-	}
-	task := tasks[0]
-	now := time.Now()
-	priorExecution := &model.TaskExecution{
-		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: model.ExecutionTargetCloud,
-		Status: model.TaskExecutionSucceeded, Started: true, StartedAt: &now, CompletedAt: &now,
-		ManifestStatus: model.TaskExecutionManifestDelivered, ManifestSealed: true,
-		FinalizationStatus: model.TaskExecutionFinalizationDone,
-	}
-	if err := applyAgentPackIdentity(priorExecution, task.Type); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.repo.TaskExecutions().Create(ctx, priorExecution); err != nil {
-		t.Fatal(err)
-	}
-	addDurableArticleDelivery(t, f.repo, store, task, priorExecution.ID)
-	seedHistoricalManagedLocalExecution(t, f, task)
-	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, &agent.ExecutionResult{
-		Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError,
-	}); err != nil {
-		t.Fatalf("CompleteLocalTask: %v", err)
-	}
-	if _, err := f.repo.Billing().FindSettlementByKey(ctx, "task-terminal-reversal", *task.BillingChargeID); !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("durable output reversal lookup error=%v, want not found", err)
-	}
-	if account := f.account(t, billingWalletUserID); account.PaidCredits != 500 {
-		t.Fatalf("paid credits=%d, want original charge retained", account.PaidCredits)
-	}
-}
-
-func TestLocalTaskTerminalBillingReversesForPublishedFileWithoutSuccessfulExecution(t *testing.T) {
-	ctx := context.Background()
-	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	store := &fakeTaskStorage{files: make(map[string][]byte)}
-	svc.store = store
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
-		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "partial output", Quantity: 1,
-	})
-	if err != nil {
-		t.Fatalf("CreateManual: %v", err)
-	}
-	task := tasks[0]
-	seedHistoricalManagedLocalExecution(t, f, task)
-	body := []byte("# Uncommitted delivery\n")
-	objectKey := buildTaskMCPArtifactStoragePrefix(task, *task.CurrentExecutionID) + "output/04-article-final.md"
-	store.files[objectKey] = body
-	if err := f.repo.TaskFiles().Create(ctx, &model.TaskFile{
-		TaskID: task.ID, ExecutionID: *task.CurrentExecutionID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown,
-		FileName: "04-article-final.md", FilePath: "output/04-article-final.md", MimeType: "text/markdown",
-		FileSize: int64(len(body)), OSSKey: objectKey, StorageProvider: store.Name(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := completeLocalForCurrentExecution(ctx, svc, f.repo, task.ID, &agent.ExecutionResult{
-		Success: false, Error: "ark unavailable", TerminalReason: model.TaskBillingTerminalProviderError,
-	}); err != nil {
-		t.Fatalf("CompleteLocalTask: %v", err)
-	}
-	if _, err := f.repo.Billing().FindSettlementByKey(ctx, "task-terminal-reversal", *task.BillingChargeID); err != nil {
-		t.Fatalf("incomplete execution did not enqueue reversal: %v", err)
 	}
 }

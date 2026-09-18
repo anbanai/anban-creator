@@ -107,17 +107,15 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 	if strings.TrimSpace(input.SourceDigest) == "" {
 		input.SourceDigest = strings.TrimSpace(payload.SourceDigest)
 	}
-	if !isLocalFeedbackTaskID(input.TaskID) {
-		task, err := s.repo.Tasks().FindByID(ctx, input.TaskID)
-		if err != nil || task == nil {
-			return nil, fmt.Errorf("task not found")
-		}
-		if execution, err := s.repo.TaskExecutions().FindByID(ctx, input.ExecutionID); err != nil || execution.TaskID != input.TaskID {
-			return nil, fmt.Errorf("execution does not belong to task")
-		}
-		if userID := strings.TrimSpace(input.AuthenticatedUserID); userID != "" && task.UserID != userID {
-			return nil, fmt.Errorf("task does not belong to authenticated user")
-		}
+	task, err := s.repo.Tasks().FindByID(ctx, input.TaskID)
+	if err != nil || task == nil {
+		return nil, fmt.Errorf("task not found")
+	}
+	if execution, err := s.repo.TaskExecutions().FindByID(ctx, input.ExecutionID); err != nil || execution.TaskID != input.TaskID {
+		return nil, fmt.Errorf("execution does not belong to task")
+	}
+	if userID := strings.TrimSpace(input.AuthenticatedUserID); userID != "" && task.UserID != userID {
+		return nil, fmt.Errorf("task does not belong to authenticated user")
 	}
 	report := &model.ContentMetadataReport{ID: uuid.NewString(), TaskID: input.TaskID, ExecutionID: input.ExecutionID, Status: model.ContentMetadataPending, TaggingStatus: model.ContentMetadataPending, FeedbackStatus: model.ContentMetadataPending, TaxonomyVersion: version, SourceDigest: strings.TrimSpace(input.SourceDigest), RawMetadata: datatypes.JSON(input.RawMetadata), Attempts: 1}
 	if existing, findErr := s.repo.ContentMetadata().FindByTaskExecution(ctx, input.TaskID, input.ExecutionID); findErr == nil && existing != nil {

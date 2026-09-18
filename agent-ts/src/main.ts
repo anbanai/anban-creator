@@ -6,7 +6,6 @@ import { uploadWorkspaceArtifacts, type ArtifactReporter, type ArtifactUploadSum
 import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
 import { CompletionReportError, exitCodeForError } from "./errors.js";
-import { runLocal } from "./local.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
 import { runWithProviderPolicyRecovery } from "./policy-recovery.js";
 import { runClaude, type RunnerReporter } from "./runner.js";
@@ -242,7 +241,7 @@ function abortAfter(timeout: number, parent?: AbortSignal): AbortController {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);
-  const execute = args[0] === "run" ? runLocal(args) : runJob(args);
+  const execute = runJob(args);
   execute
     .then((result) => { if (!result.success) process.exitCode = 1; })
     .catch((error) => {

@@ -5,13 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 **Anban 智能创作助手** (anban-creator) is a content creation platform. Core components:
-- **Agent** (`agent-ts/`): TypeScript runtime for containerized and local Claude Code task execution
+- **Agent** (`agent-ts/`): TypeScript runtime for containerized Claude Code task execution
 - **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
 - **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management
 
-Client surfaces wrapping the same server API:
-- **Desktop** (`desktop/`): Tauri v2 (Rust) shell that bundles Node plus the TypeScript Agent runtime to run tasks locally; claims work by polling `POST /api/v1/agent/claim`
+Companion client surfaces wrapping the same server API:
 - **Miniapp** ([private companion repository](https://github.com/anbanai/creator-miniapp)): WeChat Mini Program client kept at feature parity with Studio (real-time updates via SSE, not WebSocket)
+
+Anban provides the Web Studio, cloud Agent runtime, and installable plugin assets.
 
 The `server/app/` directory contains Server-owned reusable Go packages for Markdown-to-WeChat-HTML conversion, styled writing, image generation, and WeChat publishing. The TypeScript Agent runtime does not import them.
 
@@ -26,7 +27,7 @@ Claude Code and Codex share one repository-owned plugin source at `harness/`. Th
 
 MCP server config uses the `creator` server key. Business-facing agent, skill, and setup docs must reference bare MCP tool names such as `generate_image`; host-specific tool-name prefixes are a runtime concern and belong only in system-level config or tests.
 
-- **Language**: Go 1.27.0 (Server), TypeScript (Agent + Studio), Rust (desktop Tauri core)
+- **Language**: Go 1.27.0 (Server), TypeScript (Agent + Studio)
 - **Logging**: Zerolog for Go components; never mix with zap
 - **WeChat SDK**: silenceper/wechat/v2
 
@@ -90,17 +91,6 @@ make agent-test
 make agent-build
 ```
 
-### Desktop (Tauri v2)
-
-The `desktop/` shell wraps Studio with a Tauri v2 app and runs the agent locally (local-execution client). Resources must be populated before the first Rust build (see `reference_tauri_v2_build_gotchas`).
-
-```bash
-cd desktop && bash populate-resources.sh  # Populate Tauri resources before first cargo build
-cd desktop && bun install      # Install desktop JS deps
-cd desktop && bun run dev      # Run desktop app in development (tauri dev)
-cd desktop && bun run build    # Build desktop installers (tauri build)
-```
-
 ### Docker Infrastructure
 
 ```bash
@@ -113,10 +103,9 @@ make docker-logs              # Follow container logs
 
 ### Agent (`agent-ts/`)
 
-TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes and through Desktop local execution. The server dispatches managed tasks to one of three dependency profiles: `creator-agent-article`, `creator-agent-seednote`, or `creator-agent-montage`. All profiles contain the same canonical plugin; only their system runtimes differ.
+TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes. The server dispatches managed tasks to one of three dependency profiles: `creator-agent-article`, `creator-agent-seednote`, or `creator-agent-montage`. All profiles contain the same canonical plugin; only their system runtimes differ.
 
 - `src/main.ts` — Managed `job` lifecycle and terminal finalization
-- `src/local.ts` — Desktop `run` lifecycle and local prompt construction
 - `src/runner.ts` — Claude Agent SDK query and stream handling
 - `src/bootstrap.ts` / `src/workspace.ts` — Bootstrap validation and workspace materialization
 - `src/downloads.ts` / `src/artifacts.ts` — Generated image and final artifact transport
@@ -182,7 +171,7 @@ All routes are registered in `server/router/router.go`. Everything under `/api/v
 - `GET /ws`, `GET /ws/login` — WebSocket for real-time updates / QR login
 - `POST /api/v1/auth/*` — Public: register, login, code-login (SMS), send-code, refresh, logout, wx-login, qrcode/scanned/qr-callback (QR login)
 - `GET /api/v1/auth/me`, `PUT /api/v1/auth/password` — Authenticated user
-- `POST /api/v1/agent/*` — Agent↔server protocol (API-key auth): upload, progress, claim, complete
+- `POST /api/v1/agent/*` — Agent↔server protocol (execution-token auth): bootstrap, upload, progress, complete
 - `/api/v1/projects` — Project CRUD + fetch-profile, analyze-image, archive/restore, stats (formerly `/channels`)
 - `/api/v1/projects/:project_id/topics` — Topic pool (create/list/delete/reset)
 - `GET /api/v1/image-capabilities` — Tier-filtered public image capability catalog
@@ -227,7 +216,6 @@ Two loading modes: `Load()`/`LoadWithDefaults()` (full validation) vs `LoadMinim
 4. Agent reports results back to server
 5. Server streams progress to Studio via WebSocket/SSE
 
-Local-execution variant (desktop): instead of Docker, bundled Node runs `agent-ts` after claiming the task over `/api/v1/agent/claim`; the same progress/report protocol is reused.
 
 ## Image Generation Providers
 

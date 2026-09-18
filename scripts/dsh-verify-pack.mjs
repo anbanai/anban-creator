@@ -43,7 +43,7 @@ export async function verifyPackResult(metadataPath, expectedVersion) {
     tarballs.length !== 1 ||
     tarballs[0] !== basename(result.filename)
   ) {
-    throw new Error('Desktop acceptance artifact is not the exact pack result')
+    throw new Error('DSH package artifact is not the exact pack result')
   }
 
   return resolve(packDirectory, tarballs[0])

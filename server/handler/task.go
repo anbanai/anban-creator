@@ -177,10 +177,6 @@ type createTaskRequest struct {
 	SellingPoints   string              `json:"selling_points,omitempty"`
 	Language        string              `json:"language,omitempty"`
 	MontageInput    *model.MontageInput `json:"montage_input,omitempty"`
-	// ExecutionTarget, when "local", routes non-Montage tasks to the caller's
-	// desktop local executor. Montage ignores this user input and resolves cloud
-	// vs local from server policy and runtime capability.
-	ExecutionTarget string `json:"execution_target,omitempty"`
 }
 
 type cloneTaskRequest struct {
@@ -205,7 +201,6 @@ type cloneTaskRequest struct {
 	SellingPoints            string                           `json:"selling_points,omitempty"`
 	Language                 string                           `json:"language,omitempty"`
 	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
-	ExecutionTarget          string                           `json:"execution_target,omitempty"`
 }
 
 type resumeTaskRequest struct {
@@ -614,7 +609,6 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			ArticleWithContentImages: req.ArticleWithContentImages,
 			Ecommerce:                ecommerceCfg,
 			MontageInput:             req.MontageInput,
-			ExecutionTarget:          req.ExecutionTarget,
 		},
 	}, nil
 }
@@ -625,9 +619,6 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	}
 	if handled, response := respondAgentProfileError(c, err); handled {
 		return response
-	}
-	if errors.Is(err, service.ErrManagedProfileLocalExecutionUnsupported) {
-		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if errors.Is(err, service.ErrViralAnalysisRequiresSeednoteProject) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
@@ -959,7 +950,6 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			SellingPoints:            req.SellingPoints,
 			Language:                 req.Language,
 			MontageInput:             req.MontageInput,
-			ExecutionTarget:          req.ExecutionTarget,
 		}
 		if req.AgentInput != nil {
 			creationReq.AgentInput = *req.AgentInput
@@ -987,7 +977,6 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			ArticleWithContentImages: prepared.params.ArticleWithContentImages,
 			Ecommerce:                prepared.params.Ecommerce,
 			MontageInput:             prepared.params.MontageInput,
-			ExecutionTarget:          prepared.params.ExecutionTarget,
 		}})
 		if err != nil {
 			return h.respondTaskCreationServiceError(c, userID, err, "editable clone task failed", "克隆任务失败")

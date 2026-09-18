@@ -84,7 +84,6 @@ export default function GlobalCommandPalette() {
     projects,
     billingWallet,
     apiKeysReady: apiKeys.length > 0,
-    localExecutorReady: true,
   }), [tasks, plans, projects, billingWallet, apiKeys.length])
   const nextActions = useMemo(
     () => buildNextBestActions(signals).filter((action) => action.id !== 'connect-settings' || isAdmin),

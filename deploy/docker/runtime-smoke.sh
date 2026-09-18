@@ -333,8 +333,6 @@ montage:
   max_duration_seconds: 60
   max_assets: 1
   timeout_minutes: 10
-  execution_targets: ["cloud"]
-  default_execution_target: "cloud"
 claude:
   execution_profiles:
     effective:

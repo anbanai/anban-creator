@@ -85,7 +85,6 @@ describe('command center rules', () => {
       projects: [project()],
       billingWallet: { paid: 80, promotional: 0, debt: 0, balance: 80 } satisfies BillingWallet,
       apiKeysReady: true,
-      localExecutorReady: true,
     })
 
     expect(signals.runningTasks).toHaveLength(1)
@@ -105,7 +104,6 @@ describe('command center rules', () => {
       projects: [project()],
       billingWallet: { paid: 80, promotional: 0, debt: 0, balance: 80 },
       apiKeysReady: true,
-      localExecutorReady: true,
     })
 
     expect(buildNextBestActions(signals).map((action) => action.id)).toEqual([
@@ -123,7 +121,6 @@ describe('command center rules', () => {
       projects: [],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: true,
-      localExecutorReady: true,
     })
 
     expect(signals.readiness.projectsReady).toBe(false)
@@ -190,14 +187,12 @@ describe('command center rules', () => {
       projects: [project({ platform: 'article', config: { wechat_publish_mode: 'api_confirmed' } })],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: null,
-      localExecutorReady: true,
     })
 
     expect(signals.readiness.projectsReady).toBe(true)
     expect(signals.readiness.publishingReady).toBe(true)
     expect(signals.readiness.checks.projects.status).toBe('ready')
     expect(signals.readiness.checks.apiKeys.status).toBe('unknown')
-    expect(signals.readiness.checks.localExecutor.status).toBe('ready')
     expect(signals.readiness.checks.publishing.description).toBe('1 个项目已配置公众号发布流程')
   })
 
@@ -209,7 +204,6 @@ describe('command center rules', () => {
       projects: [project()],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: false,
-      localExecutorReady: true,
     })
 
     const actions = buildNextBestActions(signals)

@@ -428,35 +428,3 @@ func TestStuckTaskReaperSkipsDurableExecution(t *testing.T) {
 		t.Fatalf("durable execution was reaped: status=%q error=%q", found.Status, found.ErrorMessage)
 	}
 }
-
-func TestLocalExecutionReaperOwnsStaleDesktopExecution(t *testing.T) {
-	repo, taskSvc, _, logger := setupPlanCheckerTest(t)
-	ctx := context.Background()
-	stale := time.Now().Add(-localExecutionHeartbeatTimeout - time.Minute)
-	executionID := uuid.NewString()
-	task := &model.Task{
-		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformSeednote,
-		Status: model.TaskStatusRunning, ExecutionTarget: model.ExecutionTargetLocalClaimed,
-		StartedAt: &stale, LastHeartbeatAt: &stale, CurrentExecutionID: &executionID,
-	}
-	if err := repo.Tasks().Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
-		ID: executionID, TaskID: task.ID, Attempt: 1,
-		Target: model.ExecutionTargetLocalClaimed, Status: model.TaskExecutionRunning,
-		Started: true, StartedAt: &stale, LastHeartbeatAt: &stale,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	reapStaleLocalExecutions(ctx, taskSvc, logger)
-
-	found, err := repo.Tasks().FindByID(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if found.Status != model.TaskStatusFailed || found.BillingTerminalReason != model.TaskBillingTerminalExecutionTimeout {
-		t.Fatalf("stale local execution was not reaped: status=%q billing_reason=%q", found.Status, found.BillingTerminalReason)
-	}
-}

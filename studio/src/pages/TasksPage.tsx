@@ -510,9 +510,6 @@ export default function TasksPage() {
                         </Badge>
                         <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>
                         {actionSignal.tone !== 'risk' && <span>{actionSignal.hint}</span>}
-                        {(task.execution_target === 'local' || task.execution_target === 'local_claimed') && (
-                          <span>本地{task.execution_target === 'local' ? '待认领' : '运行中'}</span>
-                        )}
                         <span>创建：{formatDateTimeCN(task.created_at)}</span>
                         {task.completed_at && (
                           <span>完成：{formatDateTimeCN(task.completed_at)}</span>

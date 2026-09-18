@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -16,16 +15,14 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestAgentFeedbackCreateAllowsLocalTaskID(t *testing.T) {
+func TestAgentFeedbackCreateRequiresExistingTask(t *testing.T) {
 	repo := setupAgentFeedbackRepo(t)
 	svc := NewAgentFeedbackService(repo, nil)
-
-	feedback, err := svc.Create(context.Background(), "local-video-"+uuid.NewString(), "video", `{"quality":8}`, "", "", "local run")
-	if err != nil {
-		t.Fatalf("Create returned error: %v", err)
-	}
-	if feedback.ID == "" || !strings.HasPrefix(feedback.TaskID, "local-video-") {
-		t.Fatalf("unexpected feedback: %#v", feedback)
+	taskID := uuid.NewString()
+	seedFeedbackTask(t, repo, taskID)
+	feedback, err := svc.Create(context.Background(), taskID, "video", `{"quality":8}`, "", "", "run")
+	if err != nil || feedback.ID == "" || feedback.TaskID != taskID {
+		t.Fatalf("Create result = %#v, error = %v", feedback, err)
 	}
 }
 
@@ -33,7 +30,8 @@ func TestAgentFeedbackCreateIsIdempotentPerTaskAndAgent(t *testing.T) {
 	repo := setupAgentFeedbackRepo(t)
 	svc := NewAgentFeedbackService(repo, nil)
 	ctx := context.Background()
-	taskID := "local-idempotent-" + uuid.NewString()
+	taskID := uuid.NewString()
+	seedFeedbackTask(t, repo, taskID)
 
 	first, err := svc.Create(ctx, taskID, "seednote", `{"quality":8}`, "", "", "done")
 	if err != nil {
@@ -59,7 +57,8 @@ func TestAgentFeedbackCreateUpdatesLatestPayload(t *testing.T) {
 	repo := setupAgentFeedbackRepo(t)
 	svc := NewAgentFeedbackService(repo, nil)
 	ctx := context.Background()
-	taskID := "local-update-" + uuid.NewString()
+	taskID := uuid.NewString()
+	seedFeedbackTask(t, repo, taskID)
 
 	first, err := svc.Create(ctx, taskID, "montage", `{"quality":5}`, "first error", "first optimization", "first summary")
 	if err != nil {
@@ -89,7 +88,8 @@ func TestAgentFeedbackCreateUsesTrimmedBusinessKey(t *testing.T) {
 	repo := setupAgentFeedbackRepo(t)
 	svc := NewAgentFeedbackService(repo, nil)
 	ctx := context.Background()
-	taskID := "local-trim-" + uuid.NewString()
+	taskID := uuid.NewString()
+	seedFeedbackTask(t, repo, taskID)
 
 	first, err := svc.Create(ctx, "  "+taskID+"  ", " seednote ", `{"quality":8}`, "", "", "first")
 	if err != nil {
@@ -117,7 +117,8 @@ func TestAgentFeedbackCreateUsesTrimmedBusinessKey(t *testing.T) {
 func TestAgentFeedbackDatabaseRejectsDuplicateBusinessKey(t *testing.T) {
 	_, db := setupAgentFeedbackRepoAndDB(t)
 	ctx := context.Background()
-	taskID := "local-unique-" + uuid.NewString()
+	taskID := uuid.NewString()
+	seedFeedbackTask(t, repository.New(db), taskID)
 	first := &model.AgentFeedback{ID: uuid.NewString(), TaskID: taskID, AgentName: "moments"}
 	second := &model.AgentFeedback{ID: uuid.NewString(), TaskID: taskID, AgentName: "moments"}
 	if err := db.WithContext(ctx).Create(first).Error; err != nil {
@@ -146,7 +147,8 @@ func TestAgentFeedbackConcurrentUpsertReturnsCanonicalCompletePayload(t *testing
 
 	svc := NewAgentFeedbackService(repository.New(db), nil)
 	const submissions = 12
-	taskID := "local-concurrent-" + uuid.NewString()
+	taskID := uuid.NewString()
+	seedFeedbackTask(t, repository.New(db), taskID)
 	ids := make(chan string, submissions)
 	errs := make(chan error, submissions)
 	start := make(chan struct{})
@@ -203,6 +205,15 @@ func setupAgentFeedbackRepo(t *testing.T) repository.Repository {
 	t.Helper()
 	repo, _ := setupAgentFeedbackRepoAndDB(t)
 	return repo
+}
+
+func seedFeedbackTask(t *testing.T, repo repository.Repository, taskID string) {
+	t.Helper()
+	if err := repo.Tasks().Create(context.Background(), &model.Task{
+		ID: taskID, UserID: uuid.NewString(), ProjectID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+	}); err != nil {
+		t.Fatalf("seed feedback task: %v", err)
+	}
 }
 
 func setupAgentFeedbackRepoAndDB(t *testing.T) (repository.Repository, *gorm.DB) {

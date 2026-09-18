@@ -5,7 +5,6 @@ import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronR
 import { toast } from 'sonner'
 import type { TaskFile } from '@/types'
 import { api } from '../lib/api'
-import { downloadBlob, isDesktop, saveUrlToFile } from '@/lib/tauri'
 import {
   Dialog,
   DialogContent,
@@ -55,6 +54,12 @@ function startBrowserDownload(url: string, filename: string) {
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
+}
+
+async function downloadBlob(filename: string, blob: Blob): Promise<void> {
+  const url = URL.createObjectURL(blob)
+  startBrowserDownload(url, filename)
+  URL.revokeObjectURL(url)
 }
 
 function filePreviewTone(file: TaskFile) {
@@ -236,16 +241,10 @@ function FilePreviewModalContent({
     try {
       const directDownloadURL = firstAbsoluteHTTPURL(file.download_url)
       if (directDownloadURL) {
-        if (isDesktop()) {
-          if (await saveUrlToFile(directDownloadURL, file.file_name)) return
-        } else {
-          startBrowserDownload(directDownloadURL, file.file_name)
-          return
-        }
+        startBrowserDownload(directDownloadURL, file.file_name)
+        return
       }
       const blob = await api.tasks.downloadFileBlob(taskId, file.id)
-      // Native save dialog on desktop (WKWebView ignores <a download>); anchor
-      // click in the browser. See lib/tauri.ts downloadBlob.
       await downloadBlob(file.file_name, blob)
     } catch (err) {
       console.error('Failed to download file:', err)
@@ -567,16 +566,10 @@ function FilePreviewInline({
     try {
       const directDownloadURL = firstAbsoluteHTTPURL(file.download_url)
       if (directDownloadURL) {
-        if (isDesktop()) {
-          if (await saveUrlToFile(directDownloadURL, file.file_name)) return
-        } else {
-          startBrowserDownload(directDownloadURL, file.file_name)
-          return
-        }
+        startBrowserDownload(directDownloadURL, file.file_name)
+        return
       }
       const blob = await api.tasks.downloadFileBlob(taskId, file.id)
-      // Native save dialog on desktop (WKWebView ignores <a download>); anchor
-      // click in the browser. See lib/tauri.ts downloadBlob.
       await downloadBlob(file.file_name, blob)
     } catch (err) {
       console.error('Failed to download file:', err)

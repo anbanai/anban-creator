@@ -9,7 +9,7 @@ This file provides guidance to AI coding assistants when working in this reposit
 The current repository is not a standalone Cobra CLI. It has three main surfaces:
 
 - `server/`: Go Fiber v3 API server, MCP endpoint, scheduler, storage, publishing, business services, and Server-owned reusable Go packages under `server/app/`.
-- `agent-ts/`: TypeScript runner used for local and one-shot managed agent execution.
+- `agent-ts/`: TypeScript runner used for one-shot managed agent execution.
 - `studio/`: React 19 + TypeScript + Vite 8 Web Studio.
 
 Plugin assets have one canonical source at `harness/`:
@@ -133,12 +133,11 @@ Keep handlers thin. Put behavior in services, persistence in repositories, and c
 ### Agent Runner
 
 `agent-ts/` is the single Agent runtime. It supports both the managed `job`
-entrypoint used by Docker/Kubernetes and the local `run` entrypoint used by Desktop.
+entrypoint used by Docker/Kubernetes.
 
 Important files:
 
 - `agent-ts/src/main.ts`: managed job lifecycle entry point.
-- `agent-ts/src/local.ts`: Desktop/local execution entry point.
 - `agent-ts/src/runner.ts`: Claude Agent SDK execution and stream handling.
 - `agent-ts/src/bootstrap.ts`: managed Bootstrap validation.
 - `agent-ts/src/downloads.ts`: generated image materialization.

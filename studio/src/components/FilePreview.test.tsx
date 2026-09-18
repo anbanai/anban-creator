@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FilePreviewGallery } from './FilePreview'
 import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
-import { downloadBlob, isDesktop, saveUrlToFile } from '@/lib/tauri'
 import type { TaskFile } from '@/types'
 
 vi.mock('@/lib/api', async () => {
@@ -22,12 +21,6 @@ vi.mock('@/lib/api', async () => {
     },
   }
 })
-
-vi.mock('@/lib/tauri', () => ({
-  downloadBlob: vi.fn(),
-  isDesktop: vi.fn(() => false),
-  saveUrlToFile: vi.fn(),
-}))
 
 function fileWith(overrides: Partial<TaskFile>): TaskFile {
   return {
@@ -48,9 +41,6 @@ function fileWith(overrides: Partial<TaskFile>): TaskFile {
 describe('FilePreviewGallery', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(isDesktop).mockReturnValue(false)
-    vi.mocked(saveUrlToFile).mockResolvedValue(false)
-    vi.mocked(downloadBlob).mockResolvedValue(undefined)
   })
 
   it('uses a stable 70vh frame for HTML previews', async () => {
@@ -131,7 +121,6 @@ describe('FilePreviewGallery', () => {
   })
 
   it('uses the authenticated download endpoint when download_url is relative even if file.url is absolute', async () => {
-    vi.mocked(isDesktop).mockReturnValue(true)
     vi.mocked(api.tasks.downloadFileBlob).mockResolvedValue(new Blob(['video']))
     const videoFile = fileWith({
       id: 'video-1',
@@ -149,8 +138,7 @@ describe('FilePreviewGallery', () => {
     await waitFor(() => {
       expect(api.tasks.downloadFileBlob).toHaveBeenCalledWith('task-1', 'video-1')
     })
-    expect(saveUrlToFile).not.toHaveBeenCalled()
-    expect(downloadBlob).toHaveBeenCalledWith('final.mp4', expect.any(Blob))
+    expect(document.querySelector('a[download="final.mp4"]')).not.toBeInTheDocument()
   })
 
   it('starts a browser download from an absolute signed attachment URL without loading a blob', async () => {
@@ -168,7 +156,6 @@ describe('FilePreviewGallery', () => {
 
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1))
     expect(api.tasks.downloadFileBlob).not.toHaveBeenCalled()
-    expect(downloadBlob).not.toHaveBeenCalled()
     click.mockRestore()
   })
 

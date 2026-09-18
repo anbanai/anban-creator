@@ -141,11 +141,6 @@ export interface Task {
   billing_total_credits?: number
   billing_charge_details?: TaskBillingChargeDetail[]
   billing_terminal_reason?: string
-  // Where the task runs (mirrors server model.ExecutionTarget*):
-  // ''/'cloud' = cloud Asynq/Docker; 'local' = awaiting a desktop local-executor
-  // claim; 'local_claimed' = a desktop claimed it and is running it on the user's
-  // machine. Drives the "本地运行中" badge on task cards. Absent on older rows.
-  execution_target?: ExecutionTarget
   created_at: string
   started_at: string
   completed_at: string
@@ -267,9 +262,6 @@ export interface CreateTaskRequest {
 
 // Cloning creates another task through the same complete creation contract.
 export type CloneTaskRequest = CreateTaskRequest
-
-// Where a task executes (mirrors server model.ExecutionTarget* constants).
-export type ExecutionTarget = '' | 'cloud' | 'local' | 'local_claimed'
 
 export interface WorkflowStatus {
   version: string

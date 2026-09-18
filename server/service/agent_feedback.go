@@ -31,12 +31,8 @@ func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, sc
 	if taskID == "" {
 		return nil, fmt.Errorf("task_id is required")
 	}
-	if !isLocalFeedbackTaskID(taskID) {
-		if _, err := s.repo.Tasks().FindByID(ctx, taskID); err != nil {
-			return nil, fmt.Errorf("task not found: %w", err)
-		}
-	} else if s.logger != nil {
-		s.logger.Info().Str("task_id", taskID).Str("agent_name", agentName).Msg("accepting local agent feedback without persisted task")
+	if _, err := s.repo.Tasks().FindByID(ctx, taskID); err != nil {
+		return nil, fmt.Errorf("task not found: %w", err)
 	}
 	if agentName == "" {
 		return nil, fmt.Errorf("agent_name is required")
@@ -58,11 +54,6 @@ func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, sc
 		return nil, err
 	}
 	return feedback, nil
-}
-
-func isLocalFeedbackTaskID(taskID string) bool {
-	taskID = strings.TrimSpace(taskID)
-	return strings.HasPrefix(taskID, "local-") || strings.HasPrefix(taskID, "video-local-")
 }
 
 // FindByTaskID returns all feedback entries for a task.

@@ -67,9 +67,6 @@ func (s *TaskService) ResumeExecutionFinalization(ctx context.Context, execution
 	if task.CurrentExecutionID == nil || *task.CurrentExecutionID != execution.ID {
 		return ErrStaleTaskExecution
 	}
-	if execution.Target == model.ExecutionTargetLocalClaimed {
-		return s.finalizeLocalTaskFromExecution(ctx, task, execution)
-	}
 	return s.finalizeTaskFromExecution(ctx, task, execution)
 }
 

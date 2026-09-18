@@ -206,7 +206,7 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.TaskStatusFailed, ExecutionTarget: model.ExecutionTargetCloud, ReferenceImageAssetID: asset.ID}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.TaskStatusFailed, ReferenceImageAssetID: asset.ID}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +560,7 @@ func TestCloneResponseAttachesSignedReferenceView(t *testing.T) {
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted, ExecutionTarget: model.ExecutionTargetCloud, ReferenceImageAssetID: asset.ID}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted, ReferenceImageAssetID: asset.ID}
 	freezeHandlerTaskImageCapability(t, source, "standard", handlerTestImageCapabilityRoute("image.standard", model.TierFree))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)

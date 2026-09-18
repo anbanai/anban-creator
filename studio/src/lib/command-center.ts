@@ -13,13 +13,11 @@ export interface CommandCenterReadinessCheck {
 
 export interface CommandCenterReadiness {
   projectsReady: boolean
-  localExecutorKnown: boolean
   apiKeysKnown: boolean
   publishingReady: boolean
   checks: {
     projects: CommandCenterReadinessCheck
     apiKeys: CommandCenterReadinessCheck
-    localExecutor: CommandCenterReadinessCheck
     publishing: CommandCenterReadinessCheck
   }
 }
@@ -49,9 +47,7 @@ export interface BuildCommandCenterSignalsInput {
   projects?: Project[]
   plans?: Plan[]
   billingWallet?: BillingWallet | null
-  localExecutorKnown?: boolean
   apiKeysKnown?: boolean
-  localExecutorReady?: boolean | null
   apiKeysReady?: boolean | null
 }
 
@@ -214,7 +210,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
   const publishingStatus: ReadinessStatus =
     projects.length === 0 ? 'unknown' : publishableProjects.length > 0 ? 'ready' : 'not_ready'
   const apiKeysStatus = readinessStatus(input.apiKeysReady, input.apiKeysKnown)
-  const localExecutorStatus = readinessStatus(input.localExecutorReady, input.localExecutorKnown)
   const checks: CommandCenterReadiness['checks'] = {
     projects: {
       status: projectStatus,
@@ -231,17 +226,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
           : apiKeysStatus === 'not_ready'
             ? '需要创建平台密钥'
             : '正在检查密钥状态',
-      href: '/settings',
-    },
-    localExecutor: {
-      status: localExecutorStatus,
-      label: '执行环境',
-      description:
-        localExecutorStatus === 'ready'
-          ? '执行环境可用'
-          : localExecutorStatus === 'not_ready'
-            ? '本地执行器未就绪，可走云端'
-            : '正在检查桌面执行状态',
       href: '/settings',
     },
     publishing: {
@@ -269,7 +253,6 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
     walletRisk,
     readiness: {
       projectsReady: checks.projects.status === 'ready',
-      localExecutorKnown: checks.localExecutor.status !== 'unknown',
       apiKeysKnown: checks.apiKeys.status === 'ready',
       publishingReady: checks.publishing.status === 'ready',
       checks,

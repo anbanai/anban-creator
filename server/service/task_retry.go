@@ -40,8 +40,6 @@ type CloneTaskOverrides struct {
 	ArticleWithContentImages *bool
 	Ecommerce                *model.EcommerceConfig
 	MontageInput             *model.MontageInput
-	ExecutionTarget          string
-	MontageSourceTaskID      string
 }
 
 func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
@@ -118,7 +116,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			ArticleWithContentImages: override.ArticleWithContentImages,
 			Ecommerce:                override.Ecommerce,
 			MontageInput:             override.MontageInput,
-			ExecutionTarget:          override.ExecutionTarget,
 			MontageSourceTaskID:      src.ID,
 		}
 		tasks, err := s.CreateManual(ctx, params)
@@ -151,10 +148,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	if cloneParams.Prompt != nil {
 		prompt = strings.TrimSpace(*cloneParams.Prompt)
 	}
-	executionTarget, err := cloneExecutionTarget(src.ExecutionTarget)
-	if err != nil {
-		return nil, err
-	}
 	preservedReferenceAssetID := ""
 	if src.Type == model.PlatformArticle {
 		directReferenceAssetID := strings.TrimSpace(src.ReferenceImageAssetID)
@@ -184,7 +177,6 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		HasTailImage:                  &hasTail,
 		ArticleWithCover:              articleCover,
 		ArticleWithContentImages:      articleContent,
-		ExecutionTarget:               executionTarget,
 		AgentInput:                    src.AgentInput.Data(),
 	}
 	if cloneParams.AgentInput != nil {
@@ -305,17 +297,6 @@ func ResolveCloneInputSource(src *model.Task) (taskID, projectID string) {
 		projectID = src.ProjectID
 	}
 	return taskID, projectID
-}
-
-func cloneExecutionTarget(source string) (string, error) {
-	switch source {
-	case model.ExecutionTargetLocal, model.ExecutionTargetLocalClaimed:
-		return model.ExecutionTargetLocal, nil
-	case model.ExecutionTargetCloud:
-		return model.ExecutionTargetCloud, nil
-	default:
-		return "", fmt.Errorf("unsupported source execution target %q", source)
-	}
 }
 
 func cloneOriginalInputAttachments(attachments []model.EntryAttachment) []model.EntryAttachment {

@@ -27,23 +27,6 @@ func TestExecutionTokenIssueAndValidate(t *testing.T) {
 	}
 }
 
-func TestExecutionTokenAcceptsDefaultLocalExecutionLifecycle(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	svc, err := NewExecutionTokenService("0123456789abcdef0123456789abcdef")
-	if err != nil {
-		t.Fatal(err)
-	}
-	svc.now = func() time.Time { return now }
-	identity := ExecutionClaims{UserID: "u1", ProjectID: "p1", TaskID: "t1", ExecutionID: "e1"}
-	token, err := svc.Issue(identity, now.Add(70*time.Minute))
-	if err != nil {
-		t.Fatalf("issue default local lifecycle token: %v", err)
-	}
-	if _, err := svc.Validate(token); err != nil {
-		t.Fatalf("validate default local lifecycle token: %v", err)
-	}
-}
-
 func TestExecutionTokenRejectsWeakSecretAndWrongAlgorithm(t *testing.T) {
 	if _, err := NewExecutionTokenService(""); err == nil {
 		t.Fatal("empty secret accepted")

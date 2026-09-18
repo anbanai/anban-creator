@@ -179,7 +179,6 @@ func TestDockerRuntimeContractRemovesPersistentHostExecutors(t *testing.T) {
 		t.Error("production runtime scan includes _test.go files")
 	}
 	for _, forbidden := range []string{
-		"NewLocalExecutor(",
 		"NewDockerExecutor(",
 		"ContainerExecCreate(",
 		"ANBAN_CLAUDE_DOCKER_CONTAINER_NAME",
@@ -616,7 +615,6 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 	root := repositoryRoot(t)
 	body := readTextFile(t, filepath.Join(root, ".dockerignore"))
 	for _, want := range []string{
-		"desktop/",
 		"**/.git",
 		"**/node_modules/",
 		"**/dist/",

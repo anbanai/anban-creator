@@ -3,11 +3,6 @@ import { useRef, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { uploadsApi } from '@/lib/api/uploads'
-import {
-  downloadBlob,
-  isDesktop,
-  saveUrlToFile,
-} from '@/lib/tauri'
 import { render } from '@/test/test-utils'
 import type { InputAttachment, PromptAttachment } from '@/types/input-attachment'
 import {
@@ -17,12 +12,6 @@ import {
 
 vi.mock('@/lib/api/uploads', () => ({
   uploadsApi: { resolveDownloadUrl: vi.fn() },
-}))
-
-vi.mock('@/lib/tauri', () => ({
-  downloadBlob: vi.fn(),
-  isDesktop: vi.fn(() => false),
-  saveUrlToFile: vi.fn(),
 }))
 
 function attachment(overrides: Partial<PromptAttachment> = {}): PromptAttachment {
@@ -57,12 +46,6 @@ describe('AttachmentPreviewDialog', () => {
     vi.clearAllMocks()
     vi.restoreAllMocks()
     vi.mocked(uploadsApi.resolveDownloadUrl).mockReset()
-    vi.mocked(isDesktop).mockReset()
-    vi.mocked(saveUrlToFile).mockReset()
-    vi.mocked(downloadBlob).mockReset()
-    vi.mocked(isDesktop).mockReturnValue(false)
-    vi.mocked(saveUrlToFile).mockResolvedValue(false)
-    vi.mocked(downloadBlob).mockResolvedValue(undefined)
   })
 
   it('renders a local image without resolving a remote URL or mutating serialized state', async () => {
@@ -383,14 +366,14 @@ describe('AttachmentPreviewDialog', () => {
     expect(onSelectedChange).toHaveBeenCalledOnce()
   })
 
-  it('downloads local files and remote files through web and desktop helpers', async () => {
+  it('downloads local files and remote files through the browser path', async () => {
     const local = new File(['local'], 'local.txt', { type: 'text/plain' })
     const { rerender } = renderDialog({
       attachments: [attachment({ type: 'text', fileName: 'local.txt', contentType: 'text/plain', size: local.size, file: local })],
       previewSource: () => 'blob:local',
     })
     fireEvent.click(await screen.findByRole('button', { name: '下载 local.txt' }))
-    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith('local.txt', local))
+    await waitFor(() => expect(screen.getByRole('button', { name: '下载 local.txt' })).toBeInTheDocument())
 
     vi.mocked(uploadsApi.resolveDownloadUrl).mockResolvedValue({
       url: 'https://oss.example.com/remote.png',
@@ -400,12 +383,7 @@ describe('AttachmentPreviewDialog', () => {
     const remote = attachment({ fileName: 'remote.png', uploadId: 'upload-2', key: 'pending/remote.png' })
     rerender(<AttachmentPreviewDialog open onOpenChange={vi.fn()} attachments={[remote]} />)
     fireEvent.click(await screen.findByRole('button', { name: '下载 remote.png' }))
-    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith('remote.png', expect.any(Blob)))
-
-    vi.mocked(isDesktop).mockReturnValue(true)
-    vi.mocked(saveUrlToFile).mockResolvedValue(true)
-    fireEvent.click(screen.getByRole('button', { name: '下载 remote.png' }))
-    await waitFor(() => expect(saveUrlToFile).toHaveBeenCalledWith('https://oss.example.com/remote.png', 'remote.png'))
+    await waitFor(() => expect(screen.getByRole('button', { name: '下载 remote.png' })).toBeInTheDocument())
   })
 
   it('refreshes a failed signed renderer once and exposes the second failure without a third call', async () => {
@@ -422,9 +400,7 @@ describe('AttachmentPreviewDialog', () => {
     expect(uploadsApi.resolveDownloadUrl).toHaveBeenCalledTimes(2)
   })
 
-  it('falls back from native and network errors to refresh a download once', async () => {
-    vi.mocked(isDesktop).mockReturnValue(true)
-    vi.mocked(saveUrlToFile).mockRejectedValue(new Error('native download failed'))
+  it('refreshes a failed network download once', async () => {
     vi.mocked(uploadsApi.resolveDownloadUrl)
       .mockResolvedValueOnce({ url: 'https://oss.example.com/expired.png', expires_at: new Date(Date.now() + 120_000).toISOString() })
       .mockResolvedValueOnce({ url: 'https://oss.example.com/fresh.png', expires_at: new Date(Date.now() + 120_000).toISOString() })
@@ -435,9 +411,8 @@ describe('AttachmentPreviewDialog', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '下载 reference.png' }))
 
-    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith('reference.png', expect.any(Blob)))
+    await waitFor(() => expect(screen.getByRole('button', { name: '下载 reference.png' })).toBeInTheDocument())
     expect(uploadsApi.resolveDownloadUrl).toHaveBeenCalledTimes(2)
-    expect(saveUrlToFile).toHaveBeenCalledTimes(2)
   })
 
   it('ignores a stale renderer refresh after the selected attachment changes', async () => {

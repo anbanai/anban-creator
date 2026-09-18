@@ -33,20 +33,8 @@ type UniqueTaskEnqueuer interface {
 }
 
 var (
-	ErrTaskCapabilityAccessDenied              = errors.New("task capability access denied")
-	ErrManagedProfileLocalExecutionUnsupported = errors.New("managed Agent profiles require cloud execution")
+	ErrTaskCapabilityAccessDenied = errors.New("task capability access denied")
 )
-
-func validateAgentExecutionTarget(target string) error {
-	switch strings.TrimSpace(target) {
-	case model.ExecutionTargetCloud:
-		return nil
-	case model.ExecutionTargetLocal, model.ExecutionTargetLocalClaimed:
-		return ErrManagedProfileLocalExecutionUnsupported
-	default:
-		return fmt.Errorf("invalid execution target %q", target)
-	}
-}
 
 // TypeContentGenerate is the Asynq task type for content generation.
 const TypeContentGenerate = "content:generate"
@@ -63,7 +51,6 @@ type TaskService struct {
 	finalizationLease        time.Duration
 	finalizationRenewEvery   time.Duration
 	finalizationRenewClaim   func(context.Context, string, string) (bool, error)
-	localFinalizationLocks   sync.Map
 	cleanupRetryBackoff      time.Duration
 	projectConcurrencyCap    int
 	logger                   *zerolog.Logger
@@ -88,9 +75,7 @@ type TaskService struct {
 	// persistTimeout bounds the post-execution DB writes (result/files/status),
 	// decoupled from the execution ctx so completed work is saved even on overrun.
 	// Default 10m; override via SetExecutionTimeouts.
-	persistTimeout time.Duration
-	// maxTurnsOverrides feeds the local-executor claim response.
-	maxTurnsOverrides map[string]int
+	persistTimeout    time.Duration
 	nasResumeEnabled  bool
 	taskWorkspace     TaskWorkspaceLifecycle
 	referenceAssets   *ReferenceAssetService
@@ -281,10 +266,6 @@ func (s *TaskService) SetExecutionTimeouts(execution, persist time.Duration) {
 	}
 }
 
-func (s *TaskService) SetExecutorMaxTurns(maxTurnsOverrides map[string]int) {
-	s.maxTurnsOverrides = maxTurnsOverrides
-}
-
 func (s *TaskService) SetProjectConcurrencyCap(cap int) {
 	if cap < 0 {
 		cap = 0
@@ -416,12 +397,6 @@ type CreateManualParams struct {
 	// MontageInput carries the Montage-specific creation contract.
 	// It is only valid for montage projects.
 	MontageInput *model.MontageInput
-	// ExecutionTarget, when model.ExecutionTargetLocal, routes the task to a
-	// desktop local executor instead of cloud Asynq/Docker. The task is created
-	// pending with a LocalClaimDeadline and is NOT enqueued; a desktop claims it
-	// via ClaimLocalTask. Unclaimed tasks fall back to cloud after the deadline
-	// (ReclaimExpiredLocalTasks). Empty = cloud (default).
-	ExecutionTarget string
 	// MontageSourceTaskID is an internal clone authorization for task-file
 	// locators that originate from the source task rather than the destination
 	// project.
@@ -510,9 +485,6 @@ func (s *TaskService) validateTaskCreationReferences(ctx context.Context, userID
 func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([]*model.Task, error) {
 	if strings.TrimSpace(p.ExecutionProfile) == "" {
 		return nil, fmt.Errorf("execution_profile is required")
-	}
-	if err := validateAgentExecutionTarget(p.ExecutionTarget); err != nil {
-		return nil, err
 	}
 	if p.ProjectID == "" {
 		return nil, fmt.Errorf("project_id is required")
@@ -630,6 +602,20 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	if isMontageTask {
 		quantity = 1
+		if !p.PreserveFrozenConfig && s.montageCapabilities != nil {
+			var input *model.MontageInput
+			if p.MontageInput != nil {
+				copy := *p.MontageInput
+				input = &copy
+			}
+			if err := s.montageCapabilities.NormalizeAndValidateInput(input, project.MontageDefaults.Data()); err != nil {
+				return nil, err
+			}
+			p.MontageInput = input
+		}
+		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
+			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
+		}
 		effectiveProject := project
 		if p.ProjectSnapshot != nil {
 			effectiveProject = model.ProjectFromSnapshot(project, *p.ProjectSnapshot)
@@ -647,36 +633,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		); err != nil {
 			return nil, err
 		}
-		if !p.PreserveFrozenConfig && s.montageCapabilities != nil {
-			var input *model.MontageInput
-			if p.MontageInput != nil {
-				copy := *p.MontageInput
-				input = &copy
-			}
-			if err := s.montageCapabilities.NormalizeAndValidateInput(input, project.MontageDefaults.Data()); err != nil {
-				return nil, err
-			}
-			p.MontageInput = input
-		}
-		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
-			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
-		}
-		if !p.PreserveFrozenConfig {
-			target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
-				Config:          s.montageCfg,
-				TaskType:        taskType,
-				LocalAvailable:  containsMontageTarget(s.montageCfg.ExecutionTargets, model.ExecutionTargetLocal),
-				CloudAvailable:  s.montageCloudAvailable(),
-				AssetsCloudSafe: true,
-			})
-			if err != nil {
-				return nil, err
-			}
-			p.ExecutionTarget = target
-		}
-	}
-	if err := validateAgentExecutionTarget(p.ExecutionTarget); err != nil {
-		return nil, err
 	}
 	if taskType == model.PlatformEcommerce {
 		// E-commerce creates one deliverable package task. Selected modules
@@ -750,7 +706,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			HasTailImage:             hasTail,
 			ArticleWithCover:         &articleCover,
 			ArticleWithContentImages: &articleContent,
-			ExecutionTarget:          p.ExecutionTarget,
 			ExecutionProfile:         p.ExecutionProfile,
 			AgentProfileSnapshot:     profileSnapshot,
 			AgentProfileFingerprint:  profileFingerprint,
@@ -1040,13 +995,12 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		effectiveImageCapabilityKey = resolved.Key
 	}
 	var planMontageInput *model.MontageInput
-	montageExecutionTarget := model.ExecutionTargetCloud
 	if isMontageTask {
+		input := plan.MontageInput.Data()
 		montageConfig := s.montageCfg
 		if s.montageCapabilities != nil {
 			montageConfig = s.montageCapabilities.config
 		}
-		input := plan.MontageInput.Data()
 		if s.montageCapabilities != nil {
 			defaults := model.MontageDefaults{}
 			if project != nil {
@@ -1063,18 +1017,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			return nil, err
 		}
 		planMontageInput = &input
-		target, err := ResolveMontageExecutionTarget(MontageExecutionTargetRequest{
-			Config:          s.montageCfg,
-			TaskType:        taskType,
-			FromPlan:        true,
-			CloudAvailable:  s.montageCloudAvailable(),
-			AssetsCloudSafe: true,
-		})
-		if err != nil {
-			s.logger.Warn().Err(err).Str("user_id", plan.UserID).Str("plan_id", plan.ID).Msg("skipping montage plan task due to execution target policy")
-			return nil, nil
-		}
-		montageExecutionTarget = target
 	}
 
 	task := &model.Task{
@@ -1109,9 +1051,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		task.SetAgentInput(agentInput)
 	}
 	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
-	if model.IsMontagePlatform(taskType) {
-		task.ExecutionTarget = montageExecutionTarget
-	}
 	if project != nil {
 		task.SetProjectSnapshot(model.SnapshotProject(project))
 	}
@@ -1291,12 +1230,9 @@ func (s *TaskService) cancel(ctx context.Context, id, userID string) error {
 		return fmt.Errorf("task not found")
 	}
 	if taskErr == nil && task != nil && task.CurrentExecutionID != nil {
-		execution, executionErr := s.repo.TaskExecutions().FindByID(ctx, *task.CurrentExecutionID)
+		_, executionErr := s.repo.TaskExecutions().FindByID(ctx, *task.CurrentExecutionID)
 		if executionErr != nil {
 			return fmt.Errorf("find current execution before cancellation: %w", executionErr)
-		}
-		if execution.Target == model.ExecutionTargetLocalClaimed {
-			return s.cancelLocalExecution(ctx, task, execution)
 		}
 		if s.runtimeDispatcher != nil {
 			return s.cancelCloudExecution(ctx, task, userID)
