@@ -329,7 +329,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, attachmentFiles...)
-	montageFiles, err := s.buildMontageFiles(task)
+	montageFiles, err := s.buildMontageFiles(ctx, task, credentialDeadline)
 	if err != nil {
 		return nil, err
 	}
@@ -555,25 +555,97 @@ func (s *AgentBootstrapService) montageEnv(task *model.Task) map[string]string {
 	return env
 }
 
-func (s *AgentBootstrapService) buildMontageFiles(task *model.Task) ([]BootstrapFile, error) {
+func (s *AgentBootstrapService) buildMontageFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
 	if task == nil || !model.IsMontagePlatform(task.Type) {
 		return nil, nil
+	}
+	input := task.MontageInput.Data()
+	input.SourceAssets = append([]model.MontageAsset(nil), input.SourceAssets...)
+	assetFiles, err := s.materializeMontageTaskFileSources(ctx, task, &input, credentialDeadline)
+	if err != nil {
+		return nil, err
 	}
 	values := []struct {
 		path  string
 		value any
 	}{
-		{"montage-input.json", task.MontageInput.Data()},
+		{"montage-input.json", input},
 		{"montage-tool-policy.json", s.cfg.MontageToolPolicy},
 		{"montage-pipeline-defaults.json", s.cfg.MontagePipelineDefaults},
 	}
-	files := make([]BootstrapFile, 0, len(values))
+	files := make([]BootstrapFile, 0, len(assetFiles)+len(values))
+	files = append(files, assetFiles...)
 	for _, value := range values {
 		raw, err := json.MarshalIndent(value.value, "", "  ")
 		if err != nil {
 			return nil, fmt.Errorf("marshal %s: %w", value.path, err)
 		}
 		files = append(files, BootstrapFile{Path: value.path, Text: string(raw), Mode: 0644})
+	}
+	return files, nil
+}
+
+func (s *AgentBootstrapService) materializeMontageTaskFileSources(ctx context.Context, task *model.Task, input *model.MontageInput, credentialDeadline time.Time) ([]BootstrapFile, error) {
+	if input == nil {
+		return nil, fmt.Errorf("%w: montage input is required", ErrAgentBootstrapConflict)
+	}
+	files := make([]BootstrapFile, 0, len(input.SourceAssets))
+	totalBytes := int64(0)
+	for i := range input.SourceAssets {
+		asset := &input.SourceAssets[i]
+		fileID := strings.TrimSpace(asset.TaskFileID)
+		if fileID == "" {
+			continue
+		}
+		if s.repo == nil {
+			return nil, fmt.Errorf("%w: task file repository is unavailable", ErrAgentBootstrapUnavailable)
+		}
+		file, err := s.repo.TaskFiles().FindByID(ctx, fileID)
+		if err != nil || file == nil {
+			return nil, fmt.Errorf("%w: Montage source task file %q is unavailable", ErrAgentBootstrapConflict, fileID)
+		}
+		sourceTask, err := s.repo.Tasks().FindByID(ctx, file.TaskID)
+		if err != nil || sourceTask == nil || sourceTask.UserID != task.UserID {
+			return nil, fmt.Errorf("%w: Montage source task file %q is not owned by the task user", ErrAgentBootstrapConflict, fileID)
+		}
+		if !montageSourceTaskAuthorized(sourceTask, task.ProjectID, montageSourceTaskTrust{
+			taskID: task.InputSourceTaskID, projectID: task.InputSourceProjectID, includeLineage: true,
+		}) {
+			return nil, fmt.Errorf("%w: Montage source task file %q is not authorized for this project", ErrAgentBootstrapConflict, fileID)
+		}
+		if !montageSourceTaskFileTypeMatches(asset.Type, file.MimeType) {
+			return nil, fmt.Errorf("%w: Montage source task file %q does not match asset type %q", ErrAgentBootstrapConflict, fileID, asset.Type)
+		}
+		if s.cfg.Store == nil {
+			return nil, fmt.Errorf("%w: storage provider is required for Montage source downloads", ErrAgentBootstrapUnavailable)
+		}
+		expectedProvider := strings.TrimSpace(s.cfg.Store.Name())
+		if err := validateMontageSourceTaskFileMaterializable(file, expectedProvider); err != nil {
+			return nil, fmt.Errorf("%w: Montage source task file %q %v", ErrAgentBootstrapConflict, fileID, err)
+		}
+		if file.FileSize > montageSourceTotalMaxBytes-totalBytes {
+			return nil, fmt.Errorf("%w: Montage task-file sources exceed the runtime aggregate size limit", ErrAgentBootstrapConflict)
+		}
+		totalBytes += file.FileSize
+		objectKey := file.OSSKey
+		contentHash := file.ContentHash
+		signed, err := s.signedBootstrapObjectKey(ctx, objectKey, credentialDeadline)
+		if err != nil {
+			return nil, fmt.Errorf("sign Montage source task file %q: %w", fileID, err)
+		}
+		name := serveragent.InputAttachmentFilename(i+1, model.EntryAttachment{
+			FileName: file.FileName, ContentType: file.MimeType, Key: objectKey,
+		})
+		rel := path.Join(".anban-creator/montage-assets", name)
+		files = append(files, BootstrapFile{
+			Path: rel, DownloadURL: signed, ContentSHA256: contentHash, Mode: 0644,
+			ExpectedSize: file.FileSize, MaxBytes: montageSourceMaxBytes,
+		})
+		asset.URL = rel
+		asset.TaskFileID = ""
+		asset.FileName = file.FileName
+		asset.MimeType = file.MimeType
+		asset.FileSize = file.FileSize
 	}
 	return files, nil
 }
@@ -695,6 +767,8 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 				return nil, fmt.Errorf("sign attachment %q: %w", attachment.FileName, err)
 			}
 			file.DownloadURL = signed
+			file.ExpectedSize = attachment.Size
+			file.MaxBytes = maxTaskResumeFileBytes
 		} else if strings.TrimSpace(attachment.Text) != "" {
 			file.Text = attachment.Text
 		} else {
@@ -719,6 +793,7 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 
 func ValidateBootstrapFiles(files []BootstrapFile) error {
 	seen := make(map[string]struct{}, len(files))
+	totalBytes := int64(0)
 	for i := range files {
 		file := &files[i]
 		raw := strings.TrimSpace(strings.ReplaceAll(file.Path, "\\", "/"))
@@ -751,6 +826,26 @@ func ValidateBootstrapFiles(files []BootstrapFile) error {
 		if file.ContentSHA256 != "" && !lowercaseSHA256.MatchString(file.ContentSHA256) {
 			return fmt.Errorf("bootstrap file %q has invalid content SHA-256", clean)
 		}
+		if file.ExpectedSize < 0 || file.MaxBytes < 0 {
+			return fmt.Errorf("bootstrap file %q has an invalid byte limit", clean)
+		}
+		declaredBytes := int64(len([]byte(file.Text)))
+		if file.DownloadURL != "" {
+			declaredBytes = file.ExpectedSize
+			if declaredBytes == 0 {
+				declaredBytes = file.MaxBytes
+			}
+			if declaredBytes == 0 {
+				declaredBytes = agentBootstrapFileMaxBytes
+			}
+			if declaredBytes > agentBootstrapFileMaxBytes || (file.MaxBytes > 0 && file.ExpectedSize > file.MaxBytes) {
+				return fmt.Errorf("bootstrap file %q exceeds the runtime file size limit", clean)
+			}
+		}
+		if declaredBytes > agentBootstrapTotalMaxBytes-totalBytes {
+			return errors.New("bootstrap files exceed the runtime total size limit")
+		}
+		totalBytes += declaredBytes
 		if file.Mode == 0 || file.Mode&07000 != 0 || file.Mode&0002 != 0 || file.Mode&0111 != 0 {
 			return fmt.Errorf("unsafe bootstrap file mode %#o", file.Mode)
 		}

@@ -61,6 +61,13 @@ func (s *PlanService) SetMontageCapabilityService(capabilities *MontageCapabilit
 	}
 }
 
+func (s *PlanService) montageStorageProviderName() string {
+	if s == nil || s.referenceAssets == nil || s.referenceAssets.store == nil {
+		return ""
+	}
+	return s.referenceAssets.store.Name()
+}
+
 // CreatePlanParams holds the inputs for PlanService.Create. Pointer-typed optional
 // fields use the same nil-means-default / nil-means-unchanged semantics as the
 // underlying model. Struct form keeps call sites readable as fields are added
@@ -159,6 +166,12 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 				input = &copy
 			}
 			if err := s.montageCapabilities.NormalizeAndValidateInput(input, project.MontageDefaults.Data()); err != nil {
+				return nil, err
+			}
+			if err := ValidateMaterializableMontageSourceTaskFiles(ctx, s.repo, s.montageStorageProviderName(), p.UserID, p.ProjectID, input.SourceAssets); err != nil {
+				return nil, err
+			}
+			if err := ValidateMontageInlineBootstrapBudget(input, project, s.montageCapabilities.config.ToolPolicy, s.montageCapabilities.config.PipelineDefaults, p.InputAttachments); err != nil {
 				return nil, err
 			}
 			p.MontageInput = input
@@ -443,7 +456,7 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		}
 		plan.SetAgentInput(agentInput)
 	}
-	if p.MontageInput != nil {
+	if p.MontageInput != nil || (model.IsMontagePlatform(plan.Type) && s.montageCapabilities != nil) {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
 			return nil, fmt.Errorf("find project: %w", err)
@@ -451,17 +464,27 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		if !model.IsMontagePlatform(project.Platform) {
 			return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
 		}
+		candidate := plan.MontageInput.Data()
+		if p.MontageInput != nil {
+			candidate = *p.MontageInput
+		}
 		if s.montageCapabilities != nil {
-			copy := *p.MontageInput
-			if err := s.montageCapabilities.NormalizeAndValidateInput(&copy, project.MontageDefaults.Data()); err != nil {
+			if err := s.montageCapabilities.NormalizeAndValidateInput(&candidate, project.MontageDefaults.Data()); err != nil {
 				return nil, err
 			}
-			p.MontageInput = &copy
+			if err := ValidateMaterializableMontageSourceTaskFiles(ctx, s.repo, s.montageStorageProviderName(), plan.UserID, plan.ProjectID, candidate.SourceAssets); err != nil {
+				return nil, err
+			}
+			if err := ValidateMontageInlineBootstrapBudget(&candidate, project, s.montageCapabilities.config.ToolPolicy, s.montageCapabilities.config.PipelineDefaults, plan.InputAttachments.Data()); err != nil {
+				return nil, err
+			}
 		}
-		if strings.TrimSpace(p.MontageInput.Brief) == "" {
+		if strings.TrimSpace(candidate.Brief) == "" {
 			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
 		}
-		plan.SetMontageInput(*p.MontageInput)
+		if p.MontageInput != nil {
+			plan.SetMontageInput(candidate)
+		}
 	}
 	// If cron expression changed, validate and recompute next run.
 	if scheduleChanged {

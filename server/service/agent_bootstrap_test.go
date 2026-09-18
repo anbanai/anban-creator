@@ -770,6 +770,10 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if paths[".anban-creator/input-attachments/attachment_02_input.png"].DownloadURL == "" || paths[".anban-creator/input-attachments/attachment_03_key-first.png"].DownloadURL == "" {
 		t.Fatal("private objects were not signed")
 	}
+	resumeFile := paths[resumeAttachmentPath]
+	if resumeFile.ExpectedSize != 0 || resumeFile.MaxBytes != maxTaskResumeFileBytes {
+		t.Fatalf("resume attachment limits = expected:%d max:%d, want 0 and %d", resumeFile.ExpectedSize, resumeFile.MaxBytes, maxTaskResumeFileBytes)
+	}
 	if !strings.Contains(paths[".anban-creator/settings.json"].Text, `"seednote"`) {
 		t.Fatalf("settings did not use runtime app config: %s", paths[".anban-creator/settings.json"].Text)
 	}
@@ -1178,13 +1182,31 @@ func TestValidateBootstrapFilesRejectsUnsafeContracts(t *testing.T) {
 	}
 }
 
+func TestValidateBootstrapFilesReservesTotalRuntimeBudgetForInlineFiles(t *testing.T) {
+	files := make([]BootstrapFile, 0, 9)
+	for i := 0; i < 8; i++ {
+		files = append(files, BootstrapFile{
+			Path:         fmt.Sprintf("assets/source-%d.mp4", i),
+			DownloadURL:  fmt.Sprintf("https://example.com/source-%d.mp4", i),
+			Mode:         0644,
+			ExpectedSize: 64 << 20,
+			MaxBytes:     64 << 20,
+		})
+	}
+	files = append(files, BootstrapFile{Path: "montage-input.json", Text: "{}", Mode: 0644})
+
+	if err := ValidateBootstrapFiles(files); err == nil {
+		t.Fatal("bootstrap contract exceeding the runtime total byte budget was accepted")
+	}
+}
+
 func TestBuildMontageBootstrapFiles(t *testing.T) {
 	svc := &AgentBootstrapService{cfg: AgentBootstrapConfig{
 		MontageEnv:              map[string]string{"NEW_PROVIDER_TOKEN": "future-secret"},
 		MontageToolPolicy:       map[string]config.MontageToolCapabilityPolicy{},
 		MontagePipelineDefaults: map[string]map[string]any{},
 	}}
-	files, err := svc.buildMontageFiles(&model.Task{Type: model.PlatformMontage})
+	files, err := svc.buildMontageFiles(t.Context(), &model.Task{Type: model.PlatformMontage}, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1202,6 +1224,155 @@ func TestBuildMontageBootstrapFiles(t *testing.T) {
 	}
 	if got := svc.montageEnv(&model.Task{Type: model.PlatformArticle}); len(got) != 0 {
 		t.Fatalf("article env = %#v, want empty", got)
+	}
+}
+
+func TestBootstrapMaterializesMontageTaskFileSources(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootTask := &model.Task{
+		ID: "root-task", UserID: "user-1", ProjectID: "root-project",
+		Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
+	}
+	sourceTask := &model.Task{
+		ID: "source-task", UserID: "user-1", ProjectID: "source-project",
+		Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
+		InputSourceTaskID: rootTask.ID, InputSourceProjectID: rootTask.ProjectID,
+	}
+	for _, source := range []*model.Task{rootTask, sourceTask} {
+		if err := repo.Tasks().Create(t.Context(), source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sourceFile := &model.TaskFile{
+		ID: "source-file", TaskID: sourceTask.ID, State: model.TaskFileStateDelivered,
+		Role: model.FileRoleVideo, FilePath: "output/source.mp4", FileName: "source.mp4",
+		MimeType: "video/mp4", FileSize: 1024, ContentHash: strings.Repeat("a", 64),
+		OSSKey: "tasks/source-task/output/source.mp4", StorageProvider: "fake",
+	}
+	if err := repo.TaskFiles().Create(t.Context(), sourceFile); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{
+		ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformMontage,
+		Status: model.TaskStatusPending, InputSourceTaskID: rootTask.ID, InputSourceProjectID: rootTask.ProjectID,
+	}
+	task.SetMontageInput(model.MontageInput{
+		Brief:        "reuse delivered video",
+		SourceAssets: []model.MontageAsset{{Type: "video", TaskFileID: sourceFile.ID}},
+	})
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
+		Store: store, TokenTTL: time.Hour, SignedURLTTL: 60,
+	}, zerolog.Nop())
+
+	response, err := buildBootstrapTestResponse(t, svc, t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{
+		ID: task.ProjectID, UserID: task.UserID, Platform: task.Type,
+	}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("buildResponse: %v", err)
+	}
+
+	const materializedPath = ".anban-creator/montage-assets/attachment_01_source.mp4"
+	var input model.MontageInput
+	foundMaterialized := false
+	for _, file := range response.Files {
+		switch file.Path {
+		case materializedPath:
+			foundMaterialized = true
+			if file.DownloadURL == "" || file.ExpectedSize != 1024 || file.MaxBytes != 64<<20 || file.ContentSHA256 != strings.Repeat("a", 64) {
+				t.Fatalf("materialized source = %#v", file)
+			}
+		case "montage-input.json":
+			if err := json.Unmarshal([]byte(file.Text), &input); err != nil {
+				t.Fatalf("decode montage-input.json: %v", err)
+			}
+		}
+	}
+	if !foundMaterialized {
+		t.Fatalf("bootstrap files = %#v, want %s", response.Files, materializedPath)
+	}
+	if len(input.SourceAssets) != 1 {
+		t.Fatalf("source assets = %#v, want one", input.SourceAssets)
+	}
+	asset := input.SourceAssets[0]
+	if asset.URL != materializedPath || asset.TaskFileID != "" || asset.FileName != "source.mp4" || asset.MimeType != "video/mp4" || asset.FileSize != 1024 {
+		t.Fatalf("rewritten source asset = %#v", asset)
+	}
+	if len(store.signedKeys) != 1 || store.signedKeys[0] != sourceFile.OSSKey {
+		t.Fatalf("signed keys = %#v, want [%s]", store.signedKeys, sourceFile.OSSKey)
+	}
+}
+
+func TestBootstrapRejectsInvalidMontageTaskFileSourcesBeforeSigning(t *testing.T) {
+	tests := []struct {
+		name       string
+		mutateTask func(*model.Task)
+		mutateFile func(*model.TaskFile)
+	}{
+		{name: "unauthorized project", mutateTask: func(task *model.Task) { task.ProjectID = "other-project" }},
+		{name: "superseded", mutateFile: func(file *model.TaskFile) { file.State = model.TaskFileStateSuperseded }},
+		{name: "MIME mismatch", mutateFile: func(file *model.TaskFile) { file.MimeType = "image/png" }},
+		{name: "storage provider mismatch", mutateFile: func(file *model.TaskFile) { file.StorageProvider = "other" }},
+		{name: "missing object key", mutateFile: func(file *model.TaskFile) { file.OSSKey = "" }},
+		{name: "oversized", mutateFile: func(file *model.TaskFile) { file.FileSize = 64<<20 + 1 }},
+		{name: "invalid hash", mutateFile: func(file *model.TaskFile) { file.ContentHash = "NOT-A-SHA256" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := openBootstrapTestRepository(t)
+			store := &bootstrapSecurityStore{signFakeStore: &signFakeStore{}}
+			tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceTask := &model.Task{
+				ID: "source-task", UserID: "user-1", ProjectID: "project-1",
+				Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
+			}
+			if tt.mutateTask != nil {
+				tt.mutateTask(sourceTask)
+			}
+			if err := repo.Tasks().Create(t.Context(), sourceTask); err != nil {
+				t.Fatal(err)
+			}
+			sourceFile := &model.TaskFile{
+				ID: "source-file", TaskID: sourceTask.ID, State: model.TaskFileStateDelivered,
+				Role: model.FileRoleVideo, FilePath: "output/source.mp4", FileName: "source.mp4",
+				MimeType: "video/mp4", FileSize: 1024, ContentHash: strings.Repeat("a", 64),
+				OSSKey: "tasks/source-task/output/source.mp4", StorageProvider: "fake",
+			}
+			if tt.mutateFile != nil {
+				tt.mutateFile(sourceFile)
+			}
+			if err := repo.TaskFiles().Create(t.Context(), sourceFile); err != nil {
+				t.Fatal(err)
+			}
+			task := &model.Task{
+				ID: "task-1", UserID: "user-1", ProjectID: "project-1",
+				Type: model.PlatformMontage, Status: model.TaskStatusPending,
+			}
+			task.SetMontageInput(model.MontageInput{
+				Brief:        "reuse delivered video",
+				SourceAssets: []model.MontageAsset{{Type: "video", TaskFileID: sourceFile.ID}},
+			})
+			svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{
+				Store: store, TokenTTL: time.Hour, SignedURLTTL: 60,
+			}, zerolog.Nop())
+
+			_, err = buildBootstrapTestResponse(t, svc, t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{
+				ID: task.ProjectID, UserID: task.UserID, Platform: task.Type,
+			}, time.Now().Add(time.Hour))
+			if err == nil {
+				t.Fatal("invalid Montage source reached bootstrap")
+			}
+			if len(store.signedKeys) != 0 {
+				t.Fatalf("invalid source reached signer: %#v", store.signedKeys)
+			}
+		})
 	}
 }
 

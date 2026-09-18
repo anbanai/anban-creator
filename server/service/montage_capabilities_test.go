@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	serverconfig "github.com/anbanai/anban-creator/server/config"
@@ -41,6 +42,20 @@ func TestMontageCapabilityServiceCatalogUsesConfiguredOrderAndSafeFallbacks(t *t
 	}
 	if got := catalog.Items[4]; got.DisplayName != "长视频拆条" || got.SourceRequirement != MontageSourceRequirementVideoOrAudio || got.OutputMode != MontageOutputModeMultiple {
 		t.Fatalf("clip-factory capability = %#v", got)
+	}
+}
+
+func TestMontageCapabilityServiceAcceptsWhitespacePaddedAllowedPipeline(t *testing.T) {
+	svc := NewMontageCapabilityService(serverconfig.MontageConfig{
+		Enabled: true, DefaultPipeline: " cinematic ", AllowedPipelines: []string{" cinematic "},
+		MaxDurationSeconds: 600, MaxAssets: 20,
+	})
+	input := model.MontageInput{Brief: "带空格的配置", PipelineKey: "cinematic"}
+	if err := svc.NormalizeAndValidateInput(&input, model.MontageDefaults{}); err != nil {
+		t.Fatalf("NormalizeAndValidateInput error: %v", err)
+	}
+	if input.PipelineKey != "cinematic" {
+		t.Fatalf("pipeline_key = %q, want cinematic", input.PipelineKey)
 	}
 }
 
@@ -202,6 +217,38 @@ func TestMontageCapabilityServiceValidatesProjectDefaultsWithoutAssets(t *testin
 		if err := svc.ValidateProjectDefaults(defaults); err == nil || !errors.Is(err, ErrProjectMontageDefaults) {
 			t.Fatalf("defaults %#v error = %v, want ErrProjectMontageDefaults", defaults, err)
 		}
+	}
+}
+
+func TestMontageCapabilityServiceRejectsProjectDefaultsWhenDisabled(t *testing.T) {
+	svc := NewMontageCapabilityService(serverconfig.MontageConfig{Enabled: false, MaxDurationSeconds: 600})
+
+	if err := svc.ValidateProjectDefaults(model.MontageDefaults{}); err == nil || !errors.Is(err, ErrProjectMontageDefaults) {
+		t.Fatalf("empty defaults error = %v, want ErrProjectMontageDefaults when Montage is disabled", err)
+	}
+}
+
+func TestValidateMontageInlineBootstrapBudgetRejectsOversizedMetadata(t *testing.T) {
+	input := &model.MontageInput{
+		Brief:    "bounded metadata",
+		Advanced: map[string]any{"payload": strings.Repeat("x", montageBootstrapInlineReserveBytes)},
+	}
+	if err := ValidateMontageInlineBootstrapBudget(input, nil, nil, nil); err == nil || !errors.Is(err, ErrMontageInput) {
+		t.Fatalf("budget validation error = %v, want ErrMontageInput", err)
+	}
+}
+
+func TestValidateMontageInlineBootstrapBudgetRejectsOversizedProjectInstructions(t *testing.T) {
+	project := &model.Project{Instructions: strings.Repeat("x", montageBootstrapInlineReserveBytes)}
+	if err := ValidateMontageInlineBootstrapBudget(&model.MontageInput{Brief: "bounded instructions"}, project, nil, nil); err == nil || !errors.Is(err, ErrMontageInput) {
+		t.Fatalf("budget validation error = %v, want ErrMontageInput", err)
+	}
+}
+
+func TestValidateMontageInlineBootstrapBudgetIncludesInputAttachments(t *testing.T) {
+	attachments := []model.EntryAttachment{{Type: "text", FileName: "notes.txt", Text: strings.Repeat("x", montageBootstrapInlineReserveBytes)}}
+	if err := ValidateMontageInlineBootstrapBudget(&model.MontageInput{Brief: "bounded attachments"}, nil, nil, nil, attachments); err == nil || !errors.Is(err, ErrMontageInput) {
+		t.Fatalf("budget validation error = %v, want ErrMontageInput", err)
 	}
 }
 

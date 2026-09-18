@@ -263,13 +263,6 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.Platform != "" {
 		effectivePlatform = ch.Platform
 	}
-	if ch.MontageDefaultsSet {
-		candidate := *ch
-		candidate.Platform = effectivePlatform
-		if err := validateProjectMontageDefaults(&candidate, s.montageCapabilities); err != nil {
-			return nil, err
-		}
-	}
 	if ch.AgentConfigSet || (ch.Platform != "" && ch.Platform != existing.Platform) {
 		candidate := *existing
 		candidate.Platform = effectivePlatform
@@ -353,6 +346,13 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	}
 	if ch.MontageDefaultsSet {
 		existing.MontageDefaults = ch.MontageDefaults
+	}
+	if model.IsMontagePlatform(existing.Platform) || ch.MontageDefaultsSet {
+		candidate := *existing
+		candidate.MontageDefaultsSet = true
+		if err := validateProjectMontageDefaults(&candidate, s.montageCapabilities); err != nil {
+			return nil, err
+		}
 	}
 	if ch.AgentConfigSet {
 		existing.AgentConfig = ch.AgentConfig
