@@ -11,7 +11,7 @@ import {
   Clock3,
   ExternalLink,
   FileCheck2,
-  ListTree,
+  FolderOpen,
   LoaderCircle,
   Minus,
   PauseCircle,
@@ -26,7 +26,10 @@ import { api } from '@/lib/api'
 import { taskFailurePresentation } from '@/lib/labels'
 import { parseWorkflowStatus, readinessValueLabel } from '@/lib/workflow-readiness'
 import { cn } from '@/lib/utils'
+import { groupTaskStageFiles } from '@/lib/task-stage-files'
+import { TaskFileDownloads, TaskStageFiles } from './TaskStageFiles'
 import type {
+  TaskFile,
   TaskLifecycle,
   TaskLifecycleStage,
   TaskLifecycleStageState,
@@ -127,6 +130,11 @@ export interface TaskExecutionRailProps {
   errorMessage?: string
   onOpenLogs: () => void
   onResume?: () => void
+  files?: TaskFile[]
+  taskType?: string
+  filesLoading?: boolean
+  filesError?: boolean
+  onRetryFiles?: () => void
 }
 
 export function TaskExecutionRail({
@@ -138,6 +146,11 @@ export function TaskExecutionRail({
   errorMessage,
   onOpenLogs,
   onResume,
+  files = [],
+  taskType,
+  filesLoading,
+  filesError,
+  onRetryFiles,
 }: TaskExecutionRailProps) {
   const queryClient = useQueryClient()
   const stages = lifecycle?.stages ?? []
@@ -153,11 +166,28 @@ export function TaskExecutionRail({
   const currentStage = stages[currentIndex]
   const failure = taskFailurePresentation({ error_message: errorMessage })
 
-  const [expandedStages, setExpandedStages] = useState<Set<string>>(() => automaticallyExpandedStageIds(stages, status, currentStage))
-
-  useEffect(() => {
-    setExpandedStages(automaticallyExpandedStageIds(stages, status, currentStage))
-  }, [currentStage?.id, lifecycle?.revision, status])
+  const groupedFiles = useMemo(() => groupTaskStageFiles(files, lifecycle, workflow), [files, lifecycle, workflow])
+  const expandedStages = automaticallyExpandedStageIds(stages, status, currentStage)
+  const expansionScope = `${taskId}:${lifecycle?.execution_id ?? ''}`
+  const [expansion, setExpansion] = useState<{ scope: string; stages: Record<string, boolean> }>({ scope: expansionScope, stages: {} })
+  const manualExpansion = expansion.scope === expansionScope ? expansion.stages : {}
+  const fileProps = { taskId, taskType }
+  const fileFallback = (
+    <>
+      {filesLoading && <p className="px-4 py-3 text-xs text-muted-foreground" role="status">正在加载产物…</p>}
+      {filesError && <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="alert">产物暂时加载失败<Button size="xs" variant="ghost" onClick={onRetryFiles}>重新加载</Button></div>}
+      {groupedFiles.unassigned.length > 0 && <section aria-label="其他产物" className="mx-4 mt-4 border-t border-border/60 py-4 sm:ml-14">
+        <p className="mb-3 flex items-center gap-2 text-sm font-medium"><FolderOpen className="size-4 text-muted-foreground" />{stages.length ? '其他产物' : '任务产物'}</p>
+        {stages.length > 0 && <p className="mb-3 text-xs text-muted-foreground">这些文件暂未关联到具体环节。</p>}
+        <TaskStageFiles {...fileProps} files={groupedFiles.unassigned} />
+      </section>}
+      {groupedFiles.historical.length > 0 && <section aria-label="历史执行产物" className="mx-4 mt-4 border-t border-border/60 py-4 sm:ml-14">
+        <p className="mb-3 text-sm font-medium">历史执行产物</p>
+        <TaskStageFiles {...fileProps} files={groupedFiles.historical} />
+      </section>}
+    </>
+  )
+  const heading = <RailHeading onOpenLogs={onOpenLogs} taskId={taskId} files={files} stages={stages} />
 
   const publicationQuery = useQuery({
     queryKey: ['wechat-publication', taskId],
@@ -217,8 +247,8 @@ export function TaskExecutionRail({
             : { title: '等待任务开始', description: '启动后会在这里显示执行阶段', icon: Clock3, iconClassName: 'border-border bg-background text-muted-foreground' }
     const EmptyStateIcon = emptyState.icon
     return (
-      <section className="border-y border-border py-4" aria-labelledby="task-execution-heading">
-        <RailHeading onOpenLogs={onOpenLogs} />
+      <section className="rounded-xl border border-border/70 bg-card py-4" aria-labelledby="task-execution-heading">
+        {heading}
         <div className="mx-4 mt-4 flex min-h-14 items-start gap-3 border-l border-border pl-5">
           <span className={cn('flex size-7 shrink-0 items-center justify-center rounded-full border', emptyState.iconClassName)}>
             <EmptyStateIcon className={cn('size-4', status === 'running' && 'animate-spin')} />
@@ -235,55 +265,55 @@ export function TaskExecutionRail({
             )}
           </div>
         </div>
+        {fileFallback}
       </section>
     )
   }
 
   return (
-    <section className="border-y border-border py-4" aria-labelledby="task-execution-heading">
+    <section className="rounded-xl border border-border/70 bg-card py-4 sm:py-5" aria-labelledby="task-execution-heading">
       <div className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
-      <RailHeading onOpenLogs={onOpenLogs} />
-      <ol className="mx-4 mt-3" aria-label="任务执行阶段">
+      {heading}
+      <ol className="mx-4 mt-5 sm:mx-5" aria-label="任务执行阶段">
         {stages.map((stage, index) => {
           const presentation = lifecycleStatePresentation[stage.state]
           const Icon = presentation.icon
-          const isExpanded = expandedStages.has(stage.id)
-          const canExpand = stage.state !== 'pending' && Boolean(
+          const stageFiles = groupedFiles.byStage.get(stage.id) ?? []
+          const isExpanded = manualExpansion[stage.id] ?? (expandedStages.has(stage.id) || stageFiles.length > 0)
+          const canExpand = stageFiles.length > 0 || (stage.state !== 'pending' && Boolean(
             stage.goal || stage.latest_update || stage.id === lastWorkStageId || stage.source === 'server',
-          )
+          ))
           const isCurrent = index === currentIndex
           const isTerminalRecoveryPoint = isCurrent && stage.kind === 'work' && (status === 'failed' || status === 'cancelled')
+          const duplicatesFailure = isTerminalRecoveryPoint && status === 'failed' && failure && stage.latest_update?.trim().replace(/[。.!！]+$/, '') === failure.message.trim().replace(/[。.!！]+$/, '')
           const time = formatStageTime(stage.completed_at || stage.started_at)
           return (
-            <li key={stage.id} className="relative grid grid-cols-[28px_minmax(0,1fr)] gap-3 pb-1 last:pb-0">
-              {index < stages.length - 1 && <span aria-hidden="true" className="absolute left-[13px] top-7 h-[calc(100%-12px)] w-px bg-border" />}
+            <li key={stage.id} className="relative grid grid-cols-[28px_minmax(0,1fr)] gap-3 pb-3 last:pb-0 sm:gap-4">
+              {index < stages.length - 1 && <span aria-hidden="true" className="absolute left-[13px] top-9 bottom-0 w-px bg-border/70" />}
               <span className={cn('relative z-10 mt-2 flex size-7 items-center justify-center rounded-full border', presentation.iconClassName)}>
                 <Icon className={cn('size-3.5', stage.state === 'active' && 'animate-spin')} />
               </span>
-              <div className={cn('min-w-0 border-b border-border/70 py-2.5 last:border-b-0', isCurrent && 'bg-muted/20 -mx-2 px-2')}>
+              <div className="min-w-0 py-2.5">
                 <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <button
                     type="button"
                     aria-label={`${stage.title}，${presentation.label}`}
                     aria-current={isCurrent ? 'step' : undefined}
                     aria-expanded={canExpand ? isExpanded : undefined}
+                    aria-controls={canExpand ? `stage-${stage.id}-content` : undefined}
                     disabled={!canExpand}
                     onClick={() => {
                       if (!canExpand) return
-                      setExpandedStages((previous) => {
-                        const next = new Set(previous)
-                        if (next.has(stage.id)) next.delete(stage.id)
-                        else next.add(stage.id)
-                        return next
-                      })
+                      setExpansion({ scope: expansionScope, stages: { ...manualExpansion, [stage.id]: !isExpanded } })
                     }}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default"
+                    className="group flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default"
                   >
-                    {canExpand ? (isExpanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />) : <span className="w-3.5" />}
-                    <span className="min-w-0 break-words text-sm font-medium text-foreground">{stage.title}</span>
+                    <span className="min-w-0 break-words text-sm font-semibold text-foreground">{stage.title}</span>
                     <span className={cn('shrink-0 text-xs', presentation.textClassName)}>{presentation.label}</span>
-                    {time && <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">{time}</span>}
+                    {stageFiles.length > 0 && <span className="rounded bg-muted/70 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">{stageFiles.length} 个产物</span>}
+                    {canExpand && (isExpanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />)}
                   </button>
+                  {time && <span className="hidden shrink-0 text-[11px] tabular-nums text-muted-foreground sm:inline">{time}</span>}
                   {stage.source === 'server' && (
                     <PublicationStageActions
                       stage={stage}
@@ -297,7 +327,7 @@ export function TaskExecutionRail({
                     />
                   )}
                   {isTerminalRecoveryPoint && onResume && (
-                    <Button size="xs" variant="outline" onClick={onResume}>
+                    <Button size="xs" variant="secondary" onClick={onResume}>
                       <Send className="size-3" />
                       继续执行
                     </Button>
@@ -305,9 +335,8 @@ export function TaskExecutionRail({
                 </div>
 
                 {isExpanded && (
-                  <div className="ml-5 mt-2 min-w-0 space-y-2 pb-1 text-sm">
-                    {stage.goal && <p className="text-muted-foreground"><span className="text-foreground">目标：</span>{stage.goal}</p>}
-                    {stage.latest_update && <p className="break-words text-foreground">{stage.latest_update}</p>}
+                  <div id={`stage-${stage.id}-content`} className="mt-3 min-w-0 space-y-3 pb-1 text-sm">
+                    {stage.latest_update && !duplicatesFailure && <p className="break-words text-xs leading-relaxed text-muted-foreground">{stage.latest_update}</p>}
                     {isTerminalRecoveryPoint && status === 'failed' && <FailureSummary failure={failure} />}
                     {isTerminalRecoveryPoint && status === 'cancelled' && stage.state !== 'cancelled' && (
                       <p className="text-xs text-muted-foreground">执行已停止，可从已有上下文继续。</p>
@@ -319,7 +348,12 @@ export function TaskExecutionRail({
                     {stage.source === 'server' && publication?.last_error && (
                       <p className="flex items-start gap-2 text-xs text-destructive"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{publication.last_error}</p>
                     )}
-                    {time && <p className="text-xs text-muted-foreground md:hidden">{time}</p>}
+                    {stageFiles.length > 0 && <TaskStageFiles {...fileProps} files={stageFiles} />}
+                    {stage.goal && <details className="text-xs text-muted-foreground">
+                      <summary className="w-fit cursor-pointer rounded py-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">环节说明</summary>
+                      <p className="mt-1 break-words leading-relaxed">{stage.goal}</p>
+                    </details>}
+                    {time && <p className="text-[11px] text-muted-foreground sm:hidden">{time}</p>}
                   </div>
                 )}
               </div>
@@ -327,6 +361,7 @@ export function TaskExecutionRail({
           )
         })}
       </ol>
+      {fileFallback}
       {publicationActionFailed && (
         <p className="mx-4 mt-3 flex items-center gap-2 text-xs text-destructive" role="alert">
           <AlertTriangle className="size-3.5" />公众号操作失败，请稍后重试。
@@ -349,17 +384,19 @@ export function TaskExecutionRail({
   )
 }
 
-function RailHeading({ onOpenLogs }: { onOpenLogs: () => void }) {
+function RailHeading({ onOpenLogs, taskId, files, stages }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[] }) {
+  const completed = stages.filter((stage) => stage.state === 'complete').length
   return (
-    <div className="flex items-center justify-between gap-3 px-4">
-      <div className="flex items-center gap-2">
-        <ListTree className="size-4 text-muted-foreground" />
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 pb-4 sm:px-5">
+      <div className="flex flex-wrap items-center gap-3">
         <h2 id="task-execution-heading" className="text-sm font-semibold text-foreground">执行进展</h2>
+        {stages.length > 0 && <span className="text-xs text-muted-foreground">{completed} / {stages.length} 环节完成</span>}
+        {files.length > 0 && <span className="text-xs text-muted-foreground">{files.length} 个产物</span>}
       </div>
-      <Button size="xs" variant="ghost" onClick={onOpenLogs}>
-        <ScrollText className="size-3.5" />
-        查看完整日志
-      </Button>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <TaskFileDownloads taskId={taskId} files={files} />
+        <Button size="xs" variant="ghost" onClick={onOpenLogs}><ScrollText className="size-3.5" />查看完整日志</Button>
+      </div>
     </div>
   )
 }
@@ -476,9 +513,9 @@ function FailureSummary({ failure }: { failure: ReturnType<typeof taskFailurePre
     return <p className="text-xs text-muted-foreground">服务端没有返回失败详情，可继续执行并补充说明。</p>
   }
   return (
-    <div className="space-y-1 text-xs">
+    <div className="space-y-1 rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-2.5 text-xs">
       <p className="font-medium text-destructive">{failure.title}</p>
-      <p className="text-muted-foreground">{failure.message}</p>
+      <p className="break-words leading-relaxed text-foreground/80">{failure.message}</p>
       {failure.recovery && <p className="text-muted-foreground">{failure.recovery}</p>}
     </div>
   )

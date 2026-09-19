@@ -29,9 +29,11 @@ function moduleKeyOf(name: string): string | null {
 export function EcommerceFilesGallery({
   files,
   taskId,
+  compact = false,
 }: {
   files: TaskFile[]
   taskId: string
+  compact?: boolean
 }) {
   const images = files.filter((f) => f.mime_type?.startsWith('image/'))
   const nonImages = files.filter((f) => !f.mime_type?.startsWith('image/'))
@@ -64,6 +66,7 @@ export function EcommerceFilesGallery({
             <FilePreviewGallery
               files={grp.files}
               taskId={taskId}
+              compact={compact}
               inlineItemClassName="shrink-0 snap-start"
             />
           </div>
@@ -84,6 +87,7 @@ export function EcommerceFilesGallery({
             <FilePreviewGallery
               files={nonImages}
               taskId={taskId}
+              compact={compact}
             />
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -45,6 +45,23 @@ const lifecycle: TaskLifecycle = {
 }
 
 describe('TaskExecutionRail', () => {
+  it('shows artifacts inside their stage and preserves an explicit collapse across live updates', () => {
+    const files = [{ id: 'file', task_id: 'task-1', state: 'delivered' as const, role: 'topic', file_name: 'research.md', mime_type: 'text/markdown', file_size: 100, url: '', created_at: '' }]
+    const props = { taskId: 'task-1', status: 'running' as const, onOpenLogs: vi.fn(), files }
+    const { rerender } = render(<TaskExecutionRail {...props} lifecycle={lifecycle} />)
+    const research = screen.getByRole('button', { name: '研究素材，已完成' })
+    expect(within(research.closest('li')!).getByRole('button', { name: '预览 research.md' })).toBeVisible()
+    fireEvent.click(research)
+    expect(screen.queryByRole('button', { name: '预览 research.md' })).not.toBeInTheDocument()
+    rerender(<TaskExecutionRail {...props} lifecycle={{ ...lifecycle, revision: 8 }} />)
+    expect(research).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('shows a failed stage error once when it repeats the task error', () => {
+    render(<TaskExecutionRail taskId="task-1" status="failed" errorMessage="供应商请求失败。" lifecycle={{ ...lifecycle, stages: [{ ...lifecycle.stages[1], state: 'failed', latest_update: '供应商请求失败。' }] }} onOpenLogs={vi.fn()} />)
+    expect(screen.getAllByText('供应商请求失败。')).toHaveLength(1)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
@@ -69,6 +86,8 @@ describe('TaskExecutionRail', () => {
     render(<TaskExecutionRail taskId="task-1" status="running" lifecycle={lifecycle} onOpenLogs={vi.fn()} />)
 
     expect(screen.getByText('正在收束文章结构')).toBeVisible()
+    expect(screen.getByText('形成完整初稿')).not.toBeVisible()
+    fireEvent.click(screen.getByText('环节说明'))
     expect(screen.getByText('形成完整初稿')).toBeVisible()
     expect(screen.queryByText('事实已经核验')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '撰写内容，进行中' })).toHaveAttribute('aria-current', 'step')

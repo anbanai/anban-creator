@@ -377,8 +377,7 @@ describe('TaskDetailPage', () => {
     expect(within(progressSection).queryByText(/%/)).not.toBeInTheDocument()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '任务结果' })).toBeInTheDocument()
-    expect(screen.getByText('结果生成后将在这里显示')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '任务结果' })).not.toBeInTheDocument()
     expect(screen.queryByText('任务配置')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '执行动态' })).not.toBeInTheDocument()
     expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
@@ -433,7 +432,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const resultHeading = await screen.findByRole('heading', { name: '任务结果' })
+    const resultHeading = await screen.findByRole('heading', { name: '执行进展' })
     const context = screen.getByRole('region', { name: '任务上下文' })
     expect(resultHeading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(context).getByText('茶小茶')).toBeInTheDocument()
@@ -1053,7 +1052,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '完成创作，已完成' }))
+    await screen.findByRole('button', { name: '预览 article.html' })
     const review = await screen.findByText('内容验收')
     const files = await screen.findByText('交付成果 (1)')
     const moreDetails = await screen.findByRole('button', { name: /更多详情/ })
@@ -1153,8 +1152,8 @@ describe('TaskDetailPage', () => {
 
     const generatedHeading = await screen.findByText('交付成果 (1)')
     const failedHeading = await screen.findByText('已保留产物 (1)')
-    const generatedSection = generatedHeading.closest('[data-slot="card"]') as HTMLElement
-    const failedSection = failedHeading.closest('[data-slot="card"]') as HTMLElement
+    const generatedSection = generatedHeading.closest('section') as HTMLElement
+    const failedSection = failedHeading.closest('section') as HTMLElement
     expect(within(generatedSection).getByTitle('content.md')).toBeInTheDocument()
     expect(within(generatedSection).queryByTitle('failure-state.json')).not.toBeInTheDocument()
     expect(within(failedSection).getByTitle('failure-state.json')).toBeInTheDocument()
@@ -1297,7 +1296,7 @@ describe('TaskDetailPage', () => {
 
     const draftStatus = await screen.findByRole('button', { name: '创建公众号草稿，已完成' })
     const deliveryHeading = await screen.findByText('交付成果 (1)')
-    expect(draftStatus.compareDocumentPosition(deliveryHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(deliveryHeading.compareDocumentPosition(draftStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('button', { name: '正式发布' })).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '公众号文章链接' })).not.toBeInTheDocument()
   })

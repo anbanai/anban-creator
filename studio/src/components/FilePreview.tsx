@@ -112,11 +112,15 @@ function FilePreviewModalContent({
   file,
   taskId,
   details,
+  navigation,
+  onKeyDown,
   children,
 }: {
   file: TaskFile
   taskId: string
   details?: React.ReactNode
+  navigation?: React.ReactNode
+  onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>
   children?: React.ReactNode
 }) {
   const [loading, setLoading] = useState(false)
@@ -264,7 +268,7 @@ function FilePreviewModalContent({
         : 'sm:max-w-4xl'
 
   return (
-    <DialogContent className={modalClass}>
+    <DialogContent className={`${modalClass} max-h-[calc(100dvh-2rem)] overflow-y-auto`} onKeyDown={onKeyDown}>
       <DialogHeader>
         <DialogTitle className="truncate">{isVideo ? '视频结果' : file.file_name}</DialogTitle>
         <DialogDescription>
@@ -340,7 +344,8 @@ function FilePreviewModalContent({
         </pre>
       )}
 
-      <div className="flex items-center justify-end gap-2 pt-2">
+      <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+        {navigation}
         {isMD && textContent && (
           <Button
             variant="secondary"
@@ -429,12 +434,14 @@ export function FilePreviewGallery({
   taskType,
   inlineItemClassName,
   renderPreviewDetails,
+  compact = false,
 }: {
   files: TaskFile[]
   taskId: string
   taskType?: string
   inlineItemClassName?: string
   renderPreviewDetails?: (file: TaskFile) => React.ReactNode
+  compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -454,23 +461,18 @@ export function FilePreviewGallery({
     setOpen(true)
   }, [])
 
-  // Keyboard navigation
-  useEffect(() => {
-    if (!open || !hasMultiple) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        goPrev()
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        goNext()
-      }
+  // Dialogs stop arrow keys from bubbling to window; handle them in the popup.
+  const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (event) => {
+    if (!hasMultiple || event.defaultPrevented) return
+    if (event.target instanceof Element && event.target.closest('video, audio, input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      goPrev()
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      goNext()
     }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, hasMultiple, goPrev, goNext])
+  }
 
   const currentFile = files[currentIndex]
 
@@ -484,6 +486,7 @@ export function FilePreviewGallery({
               taskId={taskId}
               taskType={taskType}
               onClick={() => handleOpen(index)}
+              compact={compact}
             />
           </div>
         ) : (
@@ -493,6 +496,7 @@ export function FilePreviewGallery({
             taskId={taskId}
             taskType={taskType}
             onClick={() => handleOpen(index)}
+            compact={compact}
           />
         )
       ))}
@@ -502,8 +506,16 @@ export function FilePreviewGallery({
             file={currentFile}
             taskId={taskId}
             details={renderPreviewDetails?.(currentFile)}
+            onKeyDown={handleKeyDown}
+            navigation={compact && hasMultiple ? (
+              <nav aria-label="文件切换" className="mr-auto flex items-center gap-1">
+                <Button size="icon-sm" variant="ghost" onClick={goPrev} aria-label="上一张"><ChevronLeft className="size-4" /></Button>
+                <span className="text-xs tabular-nums text-muted-foreground">{currentIndex + 1} / {files.length}</span>
+                <Button size="icon-sm" variant="ghost" onClick={goNext} aria-label="下一张"><ChevronRight className="size-4" /></Button>
+              </nav>
+            ) : undefined}
           >
-            {hasMultiple && (
+            {hasMultiple && !compact && (
               <>
                 {/* Counter */}
                 <div className="pointer-events-none absolute bottom-4 left-1/2 z-50 -translate-x-1/2">
@@ -543,11 +555,13 @@ function FilePreviewInline({
   taskId,
   taskType,
   onClick,
+  compact = false,
 }: {
   file: TaskFile
   taskId: string
   taskType?: string
   onClick: () => void
+  compact?: boolean
 }) {
   const isImage = file.mime_type?.startsWith('image/')
   const isVideo = isVideoFile(file)
@@ -582,7 +596,7 @@ function FilePreviewInline({
   const [imgSrc, setImgSrc] = useState<string>('')
   const blobUrlRef = useRef<string>('')
   useEffect(() => {
-    if (!isImage && !isVideo) return
+    if (!isImage && (!isVideo || compact)) return
     const url = previewUrl
     if (!url) {
       setImgSrc('')
@@ -616,21 +630,18 @@ function FilePreviewInline({
       }
       setImgSrc(url)
     }
-  }, [isImage, isVideo, file.url, file.preview_url, taskId, file.id, canDownload])
+  }, [isImage, isVideo, compact, file.url, file.preview_url, taskId, file.id, canDownload])
 
   if (isImage) {
     return (
-      <div className={`space-y-1 ${file.is_deliverable === true ? '' : 'opacity-55 grayscale'}`}>
+      <div className={`space-y-1 ${compact || file.is_deliverable === true ? '' : 'opacity-55 grayscale'}`}>
         <div className="relative w-fit">
           {imgSrc ? (
-            <img
-              src={imgSrc}
-              alt={file.file_name}
-              className="h-48 w-auto cursor-pointer rounded-md ring-1 ring-border transition-opacity hover:opacity-90"
-              onClick={onClick}
-            />
+            <button type="button" onClick={onClick} aria-label={`预览 ${file.file_name}`} className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <img src={imgSrc} alt={file.file_name} className={`${compact ? 'h-32' : 'h-48'} w-auto rounded-md ring-1 ring-border transition-opacity hover:opacity-90`} />
+            </button>
           ) : (
-            <div className="flex h-48 w-36 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
+            <div className={`flex ${compact ? 'h-32 w-28' : 'h-48 w-36'} items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground`}>
               加载中...
             </div>
           )}
@@ -654,6 +665,26 @@ function FilePreviewInline({
   const Icon = filePreviewIcon(file)
   const canPreview = isVideo || isText || isHTML
   const roleLabel = taskFileRoleLabel(file, taskType)
+  if (compact) {
+    return (
+      <div className="flex min-w-0 items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/25">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground"><Icon className="size-4" /></span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground" title={file.file_name}>{roleLabel ? `${roleLabel} · ${file.file_name}` : file.file_name}</p>
+          <p className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span>{file.file_name.split('.').pop()?.toUpperCase()} · {formatSize(file.file_size)}</span>
+            {!canDownload && <span role="img" aria-label="仅支持预览">仅预览</span>}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {canPreview && <Button size="sm" variant="ghost" onClick={onClick} aria-label={`预览 ${file.file_name}`}><Eye className="size-3.5" /><span className="hidden sm:inline">预览</span></Button>}
+          <Button size="icon-sm" variant="ghost" onClick={handleDownload} disabled={downloading || !canDownload} aria-label={`下载 ${file.file_name}`} title={canDownload ? '下载' : '仅支持预览'}>
+            {downloading ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+          </Button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="space-y-2">
       <div className={`flex items-center justify-between rounded-lg border p-3 ${tone} ${file.is_deliverable === true ? 'ring-1 ring-emerald-500/20' : 'opacity-60 grayscale'}`}>

@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FilePreviewGallery } from './FilePreview'
@@ -39,6 +39,40 @@ function fileWith(overrides: Partial<TaskFile>): TaskFile {
 }
 
 describe('FilePreviewGallery', () => {
+  it('preserves arrow keys for video controls and editable preview details', async () => {
+    const files = [
+      fileWith({ id: 'video', file_name: 'final.mp4', mime_type: 'video/mp4', preview_url: 'https://assets.example.com/final.mp4' }),
+      fileWith({ id: 'report', file_name: 'report.json', mime_type: 'application/json' }),
+    ]
+    render(<FilePreviewGallery files={files} taskId="task-1" compact renderPreviewDetails={() => <input aria-label="预览备注" />} />)
+    fireEvent.click(screen.getByRole('button', { name: '预览 final.mp4' }))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(dialog.querySelector('video')).toBeInTheDocument())
+    for (const target of [dialog.querySelector('video')!, screen.getByRole('textbox', { name: '预览备注' })]) {
+      for (const key of ['ArrowLeft', 'ArrowRight']) {
+        expect(fireEvent.keyDown(target, { key })).toBe(true)
+        expect(screen.getByRole('heading', { name: '视频结果' })).toBeVisible()
+      }
+    }
+  })
+
+  it.each([true, false])('switches previews using buttons and in-dialog arrow keys (compact: %s)', async (compact) => {
+    vi.mocked(api.tasks.previewFileBlob).mockResolvedValue(new Blob(['{"ok":true}']))
+    const files = ['brief.json', 'review.json'].map((name) => fileWith({ id: name, file_name: name, mime_type: 'application/json', preview_url: '/preview' }))
+    render(<FilePreviewGallery files={files} taskId="task-1" compact={compact} />)
+    fireEvent.click(screen.getByRole('button', { name: '预览 brief.json' }))
+    const navigation = compact
+      ? await screen.findByRole('navigation', { name: '文件切换' })
+      : await screen.findByRole('dialog')
+    fireEvent.click(within(navigation).getByRole('button', { name: '下一张' }))
+    expect(await screen.findByRole('heading', { name: 'review.json' })).toBeVisible()
+    expect(await screen.findByRole('button', { name: '复制文本' })).toBeEnabled()
+    fireEvent.keyDown(within(navigation).getByRole('button', { name: '下一张' }), { key: 'ArrowLeft' })
+    expect(await screen.findByRole('heading', { name: 'brief.json' })).toBeVisible()
+    fireEvent.keyDown(screen.getByRole('button', { name: '复制文本' }), { key: 'ArrowRight' })
+    expect(await screen.findByRole('heading', { name: 'review.json' })).toBeVisible()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })

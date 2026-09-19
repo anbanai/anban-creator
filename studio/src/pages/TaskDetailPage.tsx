@@ -3,21 +3,18 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowLeft, Download, Trash2, RefreshCw, Loader2, Ban, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Trash2, RefreshCw, Loader2, Ban, MessageSquare } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
-import type { InputAttachment, Task, TaskFile, TaskLifecycle } from '@/types'
+import type { InputAttachment, Task, TaskLifecycle } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
-import { FilePreviewGallery } from '@/components/FilePreview'
-import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 import { SignedImage } from '@/components/ui/SignedImage'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
@@ -28,7 +25,6 @@ import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDe
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
-import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
@@ -258,16 +254,14 @@ export default function TaskDetailPage() {
     return active.routeId === taskId && active.taskId === taskId
   }, [])
 
-  const { data: files } = useQuery({
+  const { data: files, isLoading: filesLoading, isError: filesError, refetch: refetchFiles } = useQuery({
     queryKey: ['task-files', id],
     queryFn: () => api.tasks.files(id!),
     enabled: !!id && !!task && ['completed', 'failed', 'cancelled'].includes(task.status),
   })
 
   const deliveredFiles = files?.filter((file) => file.state === 'delivered') ?? []
-  const retainedFiles = files?.filter((file) => file.state === 'retained') ?? []
   const deliverableFiles = deliveredFiles.filter((file) => file.is_deliverable === true)
-  const processFiles = deliveredFiles.filter((file) => file.is_deliverable !== true)
   const hasPreservedDelivery = task?.status === 'failed' && deliverableFiles.length > 0
 
   // Resolve project info for the task
@@ -549,9 +543,6 @@ export default function TaskDetailPage() {
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
-  const showPendingResultDestination = (task.status === 'pending' || task.status === 'running')
-    && deliveredFiles.length === 0
-    && retainedFiles.length === 0
 
   function openCloneDialog() {
     cloneSourceIdentityRef.current = { routeId: id!, taskId: currentTask.id }
@@ -686,6 +677,7 @@ export default function TaskDetailPage() {
       </div>
 
       <TaskExecutionRail
+        key={task.id}
         taskId={task.id}
         status={task.status}
         lifecycle={displayLifecycle}
@@ -694,6 +686,11 @@ export default function TaskDetailPage() {
         errorMessage={task.error_message}
         onOpenLogs={() => openTaskDetails('logs')}
         onResume={canResume ? () => setShowResumeDialog(true) : undefined}
+        files={files}
+        taskType={task.type}
+        filesLoading={filesLoading}
+        filesError={filesError}
+        onRetryFiles={() => void refetchFiles()}
       />
 
       <TaskDetailsSheet
@@ -726,134 +723,6 @@ export default function TaskDetailPage() {
         <WechatAnalyticsPanel taskId={task.id} />
       )}
 
-      {showPendingResultDestination && (
-        <section aria-labelledby="task-result-heading" className="border-y border-border py-4">
-          <h2 id="task-result-heading" className="px-4 text-sm font-semibold text-foreground">任务结果</h2>
-          <Empty className="min-h-24 rounded-none border-0 p-4">
-            <EmptyHeader>
-              <EmptyTitle>结果生成后将在这里显示</EmptyTitle>
-            </EmptyHeader>
-          </Empty>
-        </section>
-      )}
-
-      {/* Deliverables and preview-only files. */}
-      {deliveredFiles.length > 0 && (
-        <Card>
-          <div className="border-b border-border px-4 py-3 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">交付成果 ({deliverableFiles.length})</h2>
-            </div>
-            <Button
-              size="sm"
-              disabled={deliverableFiles.length === 0}
-              onClick={async () => {
-                try {
-                  const blob = await api.tasks.downloadZipBlob(task.id)
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = `task_${task.id}_files.zip`
-                  a.click()
-                  URL.revokeObjectURL(url)
-                } catch (err) {
-                  toast.error('下载 ZIP 失败，请稍后重试')
-                }
-              }}
-            >
-              <Download className="h-4 w-4" />
-              下载交付成果 (ZIP)
-            </Button>
-          </div>
-          <div className="p-4 space-y-4">
-            {task.type === 'ecommerce' ? (
-              <EcommerceFilesGallery
-                files={deliverableFiles}
-                taskId={task.id}
-              />
-            ) : (
-              <>
-                {/* Image files in compact grid */}
-                {(() => {
-                  const imageFiles = deliverableFiles.filter((f: TaskFile) => f.mime_type?.startsWith('image/'))
-                  if (imageFiles.length === 0) return null
-                  return (
-                    <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-                      <FilePreviewGallery
-                        files={imageFiles}
-                        taskId={task.id}
-                        taskType={task.type}
-                        inlineItemClassName="shrink-0 snap-start"
-                      />
-                    </div>
-                  )
-                })()}
-                {/* Non-image files share the same full-width preview rows. */}
-                {(() => {
-                  const nonImageFiles = deliverableFiles.filter((f: TaskFile) => !f.mime_type?.startsWith('image/'))
-                  if (nonImageFiles.length === 0) return null
-                  return (
-                    <div className="space-y-2">
-                      <FilePreviewGallery
-                        files={nonImageFiles}
-                        taskId={task.id}
-                        taskType={task.type}
-                      />
-                    </div>
-                  )
-                })()}
-              </>
-            )}
-            {processFiles.length > 0 && (
-              <section className="border-t border-border pt-4" aria-label="仅支持预览的文件">
-                <FilePreviewGallery
-                  files={processFiles}
-                  taskId={task.id}
-                  taskType={task.type}
-                />
-              </section>
-            )}
-          </div>
-        </Card>
-      )}
-
-      {retainedFiles.length > 0 && (
-        <Card>
-          <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-            <div className="flex min-w-0 items-start gap-3">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-foreground">已保留产物 ({retainedFiles.length})</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">阶段文件不包含在正式交付 ZIP 中。</p>
-              </div>
-            </div>
-            <Button size="sm" variant="secondary" onClick={async () => {
-              try {
-                const blob = await api.tasks.downloadRetainedZipBlob(task.id)
-                const url = URL.createObjectURL(blob)
-                const anchor = document.createElement('a')
-                anchor.href = url
-                anchor.download = `task_${task.id}_retained_files.zip`
-                anchor.click()
-                URL.revokeObjectURL(url)
-              } catch {
-                toast.error('下载已保留产物失败，请稍后重试')
-              }
-            }}>
-              <Download className="h-4 w-4" />
-              下载 ZIP
-            </Button>
-          </div>
-          <div className="flex flex-col gap-2 p-4">
-            <FilePreviewGallery
-              files={retainedFiles}
-              taskId={task.id}
-              taskType={task.type}
-            />
-          </div>
-        </Card>
-      )}
-
       {task.type === 'seednote' && task.status === 'completed' && (
         <SeednoteAnalyticsPanel taskId={task.id} />
       )}
@@ -863,6 +732,7 @@ export default function TaskDetailPage() {
       )}
 
       <TaskContextSummary
+        compact
         task={task}
         project={project}
         files={deliveredFiles}
