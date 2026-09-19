@@ -118,7 +118,7 @@ func TestTemplateServiceRejectsBlankPromptOnCreateAndUpdate(t *testing.T) {
 	}
 }
 
-func TestTemplateServiceReadsLegacyPromptWrittenDuringRollingDeployment(t *testing.T) {
+func TestTemplateServiceDoesNotReadLegacyPromptAtRuntime(t *testing.T) {
 	svc, _, db := setupTemplateService(t)
 	ctx := context.Background()
 
@@ -141,8 +141,8 @@ func TestTemplateServiceReadsLegacyPromptWrittenDuringRollingDeployment(t *testi
 	if len(templates) != 1 {
 		t.Fatalf("templates = %d, want 1", len(templates))
 	}
-	if templates[0].Prompt != "旧 Pod 最后写入的视觉版式" {
-		t.Fatalf("prompt = %q, want rolling-deployment legacy fallback", templates[0].Prompt)
+	if templates[0].Prompt != "" {
+		t.Fatalf("prompt = %q, want canonical field only", templates[0].Prompt)
 	}
 }
 
@@ -425,11 +425,8 @@ func TestTemplateService_Create_AssignsDefaults(t *testing.T) {
 	ctx := context.Background()
 
 	tmpl := &model.Template{
-		Name:         "我的种草模板",
-		Type:         "seednote",
-		Category:     model.SeednoteTemplateCategoryProduct,
-		ThumbnailURL: "https://example.com/x.png",
-		Prompt:       "暖色调，柔和光线",
+		Name: "我的种草模板", Type: "seednote",
+		Category: model.SeednoteTemplateCategoryProduct, Prompt: "暖色调，柔和光线",
 	}
 	userID := uuid.New().String()
 

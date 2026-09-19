@@ -11,15 +11,20 @@ import (
 // Legacy columns remain on the model so old rows can still be read, but new
 // handlers only write visual metadata.
 type Template struct {
-	ID           string         `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID       string         `gorm:"type:char(36);index" json:"user_id,omitempty"`
-	Visibility   string         `gorm:"type:varchar(20);default:'public'" json:"visibility"` // public | private
-	Type         string         `gorm:"type:varchar(20);not null;index" json:"type"`
-	Name         string         `gorm:"type:varchar(100);not null" json:"name"`
-	Category     string         `gorm:"type:varchar(50);index" json:"category"`
-	ThumbnailURL string         `gorm:"type:varchar(500)" json:"thumbnail_url"`
-	Structure    map[string]any `gorm:"type:json;serializer:json" json:"structure"`
-	Prompt       string         `gorm:"column:prompt;type:text" json:"prompt"`
+	ID                string             `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID            string             `gorm:"type:char(36);index" json:"user_id,omitempty"`
+	Visibility        string             `gorm:"type:varchar(20);default:'public'" json:"visibility"` // public | private
+	Type              string             `gorm:"type:varchar(20);not null;index" json:"type"`
+	Name              string             `gorm:"type:varchar(100);not null" json:"name"`
+	Category          string             `gorm:"type:varchar(50);index" json:"category"`
+	ThumbnailAssetID  string             `gorm:"type:char(36);index" json:"-"`
+	Thumbnail         *AssetView         `gorm:"-" json:"thumbnail,omitempty"`
+	Structure         map[string]any     `gorm:"type:json;serializer:json" json:"structure"`
+	Prompt            string             `gorm:"column:prompt;type:text" json:"prompt"`
+	PromptSource      string             `gorm:"type:varchar(20);default:''" json:"prompt_source"`
+	ReadinessStatus   string             `gorm:"type:varchar(20);default:'ready';index" json:"readiness_status"`
+	ActivateWhenReady bool               `gorm:"default:false" json:"activate_when_ready"`
+	ImageAnalysis     *ImageAnalysisView `gorm:"-" json:"image_analysis,omitempty"`
 	// LegacyStylePrompt is read-only during the rolling deployment window. It is
 	// never migrated, written, or serialized by the canonical template surface.
 	LegacyStylePrompt string `gorm:"column:style_prompt;->;-:migration" json:"-"`

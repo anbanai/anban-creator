@@ -12,7 +12,9 @@ const (
 
 	WechatPublicationStatusDrafting          = "drafting"
 	WechatPublicationStatusDrafted           = "drafted"
-	WechatPublicationStatusPublishSubmitting = "publish_submitting"
+	WechatPublicationStatusAwaitingManual    = "awaiting_manual_publish"
+	WechatPublicationStatusAmbiguous         = "ambiguous"
+	WechatPublicationStatusPublishSubmitting = WechatPublicationStatusAmbiguous
 	WechatPublicationStatusPublishing        = "publishing"
 	WechatPublicationStatusPublished         = "published"
 	WechatPublicationStatusNeedsSelection    = "needs_selection"
@@ -27,7 +29,7 @@ func IsWechatPublicationSource(value string) bool {
 // IsWechatPublicationStatus reports whether value is a lifecycle status.
 func IsWechatPublicationStatus(value string) bool {
 	for _, status := range []string{
-		WechatPublicationStatusDrafting, WechatPublicationStatusDrafted, WechatPublicationStatusPublishSubmitting,
+		WechatPublicationStatusDrafting, WechatPublicationStatusDrafted, WechatPublicationStatusAwaitingManual, WechatPublicationStatusPublishSubmitting,
 		WechatPublicationStatusPublishing, WechatPublicationStatusPublished, WechatPublicationStatusNeedsSelection,
 		WechatPublicationStatusPublishFailed, WechatPublicationStatusUnsupported,
 	} {
@@ -57,7 +59,7 @@ type WechatPublication struct {
 	DraftRequestFingerprint string `gorm:"type:char(64);not null;default:''" json:"draft_request_fingerprint,omitempty"`
 
 	Source           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_source,source IN ('anban_api','wechat_console')" json:"source"`
-	Status           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_status,status IN ('drafting','drafted','publish_submitting','publishing','published','needs_selection','publish_failed','unsupported')" json:"status"`
+	Status           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_status,status IN ('drafting','drafted','awaiting_manual_publish','ambiguous','publishing','published','needs_selection','publish_failed','unsupported')" json:"status"`
 	PublishID        string `gorm:"type:varchar(191);not null;default:'';index" json:"publish_id,omitempty"`
 	MsgDataID        string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_data_id,omitempty"`
 	MsgID            string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_id,omitempty"`
@@ -65,6 +67,12 @@ type WechatPublication struct {
 	ArticleURL       string `gorm:"type:varchar(1000);not null;default:''" json:"article_url,omitempty"`
 	ArticleIndex     int    `gorm:"not null;default:1" json:"article_index"`
 	WechatStatusCode int    `gorm:"not null;default:0" json:"wechat_status_code"`
+	// ManualPublishRequired is set when draft creation succeeded but the
+	// account is not allowed to call freepublish/submit (for example 48001).
+	// The publication remains durable and can be completed by binding the URL
+	// after the user publishes it in the official-account console.
+	ManualPublishRequired bool   `gorm:"not null;default:false;index" json:"manual_publish_required"`
+	AnalyticsStatus       string `gorm:"type:varchar(32);not null;default:'not_available'" json:"analytics_status"`
 
 	DraftCreatedAt *time.Time     `gorm:"index" json:"draft_created_at,omitempty"`
 	PublishedAt    *time.Time     `gorm:"index" json:"published_at,omitempty"`
@@ -110,3 +118,20 @@ type WechatPublicationBinding struct {
 }
 
 func (WechatPublicationBinding) TableName() string { return "wechat_publication_bindings" }
+
+type WechatPublicationAttempt struct {
+	ID                 string     `gorm:"type:char(36);primaryKey;not null" json:"id"`
+	PublicationID      string     `gorm:"type:char(36);index;not null" json:"publication_id"`
+	Operation          string     `gorm:"type:varchar(64);index;not null" json:"operation"`
+	RequestFingerprint string     `gorm:"type:char(64);not null;default:''" json:"request_fingerprint,omitempty"`
+	StartedAt          time.Time  `gorm:"index;not null" json:"started_at"`
+	CompletedAt        *time.Time `gorm:"index" json:"completed_at,omitempty"`
+	WechatCode         int        `gorm:"not null;default:0" json:"wechat_code"`
+	WechatRequestID    string     `gorm:"type:varchar(191);not null;default:''" json:"wechat_request_id,omitempty"`
+	DurableEvidence    string     `gorm:"type:text;not null" json:"durable_evidence,omitempty"`
+	ResultStatus       string     `gorm:"type:varchar(32);index;not null" json:"result_status"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
+func (WechatPublicationAttempt) TableName() string { return "wechat_publication_attempts" }

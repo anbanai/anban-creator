@@ -248,7 +248,6 @@ export const projectSchema = z.object({
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
-  wechat_publish_mode: z.enum(['disabled', 'manual', 'api_confirmed']).default('manual'),
   wechat_app_id: z.string().optional(),
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
@@ -271,7 +270,7 @@ export const projectSchema = z.object({
   portrait_reference_image: referenceImageSelectionSchema.nullable().optional(),
   image_ratio: imageRatioSchema.optional(),
 }).refine((data) => {
-  if (data.platform === 'article' && data.wechat_publish_mode !== 'disabled') {
+  if (data.platform === 'article') {
     return !!data.wechat_app_id?.trim()
   }
   return true

@@ -19,6 +19,7 @@ type Repository interface {
 	TaskFiles() TaskFileRepository
 	UploadSessions() UploadSessionRepository
 	Assets() AssetRepository
+	ImageAnalyses() ImageAnalysisRepository
 	Projects() ProjectRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
@@ -32,6 +33,8 @@ type Repository interface {
 	WechatTrackings() WechatTrackingRepository
 	WechatPublications() WechatPublicationRepository
 	WechatMetricSnapshots() WechatMetricSnapshotRepository
+	WechatAnalyticsImports() WechatAnalyticsImportRepository
+	WechatCapabilities() WechatCapabilityRepository
 	ChannelsTrackings() ChannelsTrackingRepository
 	ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository
 	Templates() TemplateRepository
@@ -57,6 +60,17 @@ type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	Update(ctx context.Context, user *model.User) error
 	IncrementInviteCount(ctx context.Context, userID string, maxCount int) (bool, error)
+}
+
+type ImageAnalysisRepository interface {
+	Create(ctx context.Context, job *model.ImageAnalysisJob) error
+	FindByID(ctx context.Context, id string) (*model.ImageAnalysisJob, error)
+	FindByIDForUpdate(ctx context.Context, id string) (*model.ImageAnalysisJob, error)
+	FindBySubject(ctx context.Context, subjectType, subjectID, kind string) (*model.ImageAnalysisJob, error)
+	FindBySubjectForUpdate(ctx context.Context, subjectType, subjectID, kind string) (*model.ImageAnalysisJob, error)
+	Update(ctx context.Context, job *model.ImageAnalysisJob) error
+	ListRecoverable(ctx context.Context, now, queuedBefore time.Time, limit int) ([]*model.ImageAnalysisJob, error)
+	MarkEnqueued(ctx context.Context, id string, generation int64, at time.Time) (bool, error)
 }
 
 // SessionRepository provides access to the login_sessions table.
@@ -324,6 +338,9 @@ type WechatPublicationRepository interface {
 	FindByID(ctx context.Context, id string) (*model.WechatPublication, error)
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatPublication, error)
 	FindByArticleID(ctx context.Context, projectID, articleID string) (*model.WechatPublication, error)
+	ListByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error)
+	CreateAttempt(ctx context.Context, attempt *model.WechatPublicationAttempt) error
+	UpdateAttempt(ctx context.Context, attempt *model.WechatPublicationAttempt) error
 	RebindExecution(ctx context.Context, id, expectedExecutionID, executionID string, expectedUpdatedAt time.Time) (bool, error)
 	FindPendingByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error)
 	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatPublication, error)
@@ -355,6 +372,25 @@ type WechatMetricSnapshotRepository interface {
 	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.WechatMetricSnapshot) error
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.WechatMetricSnapshot, error)
 	DeleteByTrackingID(ctx context.Context, trackingID string) error
+}
+
+type WechatAnalyticsImportRepository interface {
+	CreateBatch(ctx context.Context, batch *model.WechatAnalyticsImportBatch) error
+	FindBatchByID(ctx context.Context, projectID, id string) (*model.WechatAnalyticsImportBatch, error)
+	FindBatchByIDAnyProject(ctx context.Context, id string) (*model.WechatAnalyticsImportBatch, error)
+	ListBatches(ctx context.Context, projectID string, offset, limit int) ([]*model.WechatAnalyticsImportBatch, int64, error)
+	UpdateBatch(ctx context.Context, batch *model.WechatAnalyticsImportBatch) error
+	CreateRows(ctx context.Context, rows []*model.WechatAnalyticsImportRow) error
+	FindRowsByBatchID(ctx context.Context, projectID, batchID string) ([]*model.WechatAnalyticsImportRow, error)
+	FindRowByID(ctx context.Context, projectID, batchID, rowID string) (*model.WechatAnalyticsImportRow, error)
+	UpdateRow(ctx context.Context, row *model.WechatAnalyticsImportRow) error
+	CreateSnapshot(ctx context.Context, snapshot *model.WechatAnalyticsSnapshot) error
+	FindSnapshotsByPublicationID(ctx context.Context, projectID, publicationID string) ([]*model.WechatAnalyticsSnapshot, error)
+}
+
+type WechatCapabilityRepository interface {
+	ListByProject(ctx context.Context, projectID string) ([]*model.WechatAccountCapability, error)
+	Upsert(ctx context.Context, capability *model.WechatAccountCapability) error
 }
 
 type ChannelsTrackingRepository interface {
@@ -415,6 +451,7 @@ type repository struct {
 	files                   TaskFileRepository
 	uploadSessions          UploadSessionRepository
 	assets                  AssetRepository
+	imageAnalyses           ImageAnalysisRepository
 	projects                ProjectRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
@@ -428,6 +465,8 @@ type repository struct {
 	wechatTrackings         WechatTrackingRepository
 	wechatPublications      WechatPublicationRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
+	wechatAnalyticsImports  WechatAnalyticsImportRepository
+	wechatCapabilities      WechatCapabilityRepository
 	channelsTrackings       ChannelsTrackingRepository
 	channelsMetricSnapshots ChannelsMetricSnapshotRepository
 	templates               TemplateRepository
@@ -451,6 +490,7 @@ func New(db *gorm.DB) Repository {
 	files := newTaskFileRepository(db)
 	uploadSessions := newUploadSessionRepository(db)
 	assets := newAssetRepository(db)
+	imageAnalyses := newImageAnalysisRepository(db)
 	projects := newProjectRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
@@ -464,6 +504,8 @@ func New(db *gorm.DB) Repository {
 	wechatTrackings := newWechatTrackingRepository(db)
 	wechatPublications := newWechatPublicationRepository(db)
 	wechatMetricSnapshots := newWechatMetricSnapshotRepository(db)
+	wechatAnalyticsImports := newWechatAnalyticsImportRepository(db)
+	wechatCapabilities := newWechatCapabilityRepository(db)
 	channelsTrackings := newChannelsTrackingRepository(db)
 	channelsMetricSnapshots := newChannelsMetricSnapshotRepository(db)
 	templates := newTemplateRepository(db)
@@ -486,6 +528,7 @@ func New(db *gorm.DB) Repository {
 		files:                   files,
 		uploadSessions:          uploadSessions,
 		assets:                  assets,
+		imageAnalyses:           imageAnalyses,
 		projects:                projects,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
@@ -499,6 +542,8 @@ func New(db *gorm.DB) Repository {
 		wechatTrackings:         wechatTrackings,
 		wechatPublications:      wechatPublications,
 		wechatMetricSnapshots:   wechatMetricSnapshots,
+		wechatAnalyticsImports:  wechatAnalyticsImports,
+		wechatCapabilities:      wechatCapabilities,
 		channelsTrackings:       channelsTrackings,
 		channelsMetricSnapshots: channelsMetricSnapshots,
 		templates:               templates,
@@ -521,6 +566,7 @@ func (r *repository) TaskExecutions() TaskExecutionRepository       { return r.t
 func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
 func (r *repository) UploadSessions() UploadSessionRepository       { return r.uploadSessions }
 func (r *repository) Assets() AssetRepository                       { return r.assets }
+func (r *repository) ImageAnalyses() ImageAnalysisRepository        { return r.imageAnalyses }
 func (r *repository) Projects() ProjectRepository                   { return r.projects }
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
@@ -540,7 +586,11 @@ func (r *repository) WechatPublications() WechatPublicationRepository { return r
 func (r *repository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
 	return r.wechatMetricSnapshots
 }
-func (r *repository) ChannelsTrackings() ChannelsTrackingRepository { return r.channelsTrackings }
+func (r *repository) WechatAnalyticsImports() WechatAnalyticsImportRepository {
+	return r.wechatAnalyticsImports
+}
+func (r *repository) WechatCapabilities() WechatCapabilityRepository { return r.wechatCapabilities }
+func (r *repository) ChannelsTrackings() ChannelsTrackingRepository  { return r.channelsTrackings }
 func (r *repository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
 	return r.channelsMetricSnapshots
 }
@@ -592,6 +642,7 @@ type txRepository struct {
 	files                   TaskFileRepository
 	uploadSessions          UploadSessionRepository
 	assets                  AssetRepository
+	imageAnalyses           ImageAnalysisRepository
 	projects                ProjectRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
@@ -605,6 +656,8 @@ type txRepository struct {
 	wechatTrackings         WechatTrackingRepository
 	wechatPublications      WechatPublicationRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
+	wechatAnalyticsImports  WechatAnalyticsImportRepository
+	wechatCapabilities      WechatCapabilityRepository
 	channelsTrackings       ChannelsTrackingRepository
 	channelsMetricSnapshots ChannelsMetricSnapshotRepository
 	templates               TemplateRepository
@@ -629,6 +682,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		files:                   newTaskFileRepository(tx),
 		uploadSessions:          newUploadSessionRepository(tx),
 		assets:                  newAssetRepository(tx),
+		imageAnalyses:           newImageAnalysisRepository(tx),
 		projects:                newProjectRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
 		feedbacks:               newFeedbackRepository(tx),
@@ -642,6 +696,8 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		wechatTrackings:         newWechatTrackingRepository(tx),
 		wechatPublications:      newWechatPublicationRepository(tx),
 		wechatMetricSnapshots:   newWechatMetricSnapshotRepository(tx),
+		wechatAnalyticsImports:  newWechatAnalyticsImportRepository(tx),
+		wechatCapabilities:      newWechatCapabilityRepository(tx),
 		channelsTrackings:       newChannelsTrackingRepository(tx),
 		channelsMetricSnapshots: newChannelsMetricSnapshotRepository(tx),
 		templates:               newTemplateRepository(tx),
@@ -664,6 +720,7 @@ func (r *txRepository) TaskExecutions() TaskExecutionRepository       { return r
 func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
 func (r *txRepository) UploadSessions() UploadSessionRepository       { return r.uploadSessions }
 func (r *txRepository) Assets() AssetRepository                       { return r.assets }
+func (r *txRepository) ImageAnalyses() ImageAnalysisRepository        { return r.imageAnalyses }
 func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
@@ -685,7 +742,11 @@ func (r *txRepository) WechatPublications() WechatPublicationRepository { return
 func (r *txRepository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
 	return r.wechatMetricSnapshots
 }
-func (r *txRepository) ChannelsTrackings() ChannelsTrackingRepository { return r.channelsTrackings }
+func (r *txRepository) WechatAnalyticsImports() WechatAnalyticsImportRepository {
+	return r.wechatAnalyticsImports
+}
+func (r *txRepository) WechatCapabilities() WechatCapabilityRepository { return r.wechatCapabilities }
+func (r *txRepository) ChannelsTrackings() ChannelsTrackingRepository  { return r.channelsTrackings }
 func (r *txRepository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
 	return r.channelsMetricSnapshots
 }

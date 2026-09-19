@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectsPage from './ProjectsPage'
 import { api } from '@/lib/api'
 import { render } from '@/test/test-utils'
@@ -8,7 +8,11 @@ import type { Project } from '@/types'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const { errorMock, authState } = vi.hoisted(() => ({ errorMock: vi.fn(), authState: { isAdmin: true } }))
+const { errorMock, successMock, authState } = vi.hoisted(() => ({
+  errorMock: vi.fn(),
+  successMock: vi.fn(),
+  authState: { isAdmin: true },
+}))
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
 
 const projectWithReference: Project = {
@@ -45,7 +49,7 @@ async function clickProjectAction(projectName: string, actionName: string) {
   fireEvent.click(await screen.findByRole('button', { name: `${actionName}：${projectName}` }))
 }
 
-vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { error: errorMock, success: successMock } }))
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ user: { is_admin: authState.isAdmin } }),
@@ -70,6 +74,7 @@ vi.mock('@/lib/api', async () => {
         stats: vi.fn().mockResolvedValue({ 'ch-1': mockProjectDetail.stats }),
         platformConfigs: vi.fn().mockResolvedValue(mockPlatformConfigs),
         create: vi.fn(),
+        get: vi.fn(),
         update: vi.fn(),
       },
       imageCapabilities: {
@@ -91,6 +96,8 @@ vi.mock('@/lib/api', async () => {
 describe('ProjectsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     authState.isAdmin = true
     vi.mocked(api.projects.list).mockResolvedValue([projectWithReference])
     vi.mocked(api.projects.stats).mockResolvedValue({
@@ -107,6 +114,7 @@ describe('ProjectsPage', () => {
     })
     vi.mocked(api.projects.platformConfigs).mockResolvedValue(mockPlatformConfigs)
     vi.mocked(api.projects.create).mockReset()
+    vi.mocked(api.projects.get).mockReset()
     vi.mocked(api.projects.update).mockReset()
 		vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
     vi.mocked(api.montageCapabilities.list).mockReset().mockResolvedValue({
@@ -139,6 +147,11 @@ describe('ProjectsPage', () => {
       size: 9,
     })
     window.history.pushState({}, '', '/projects')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('keeps Montage visible while hiding internal project platforms from ordinary users', async () => {
@@ -236,6 +249,14 @@ describe('ProjectsPage', () => {
       ...(await vi.mocked(api.projects.list)())[0],
       id: 'created-project',
       platform: 'seednote',
+      image_analysis: {
+        id: 'analysis-created',
+        kind: 'project_visual_style',
+        status: 'queued',
+        attempt_count: 0,
+        can_retry: false,
+        updated_at: '2026-09-18T10:00:00Z',
+      },
     } })
     window.history.pushState({}, '', '/projects?create=true&type=seednote&intent=new')
 
@@ -254,6 +275,33 @@ describe('ProjectsPage', () => {
       upload_session_id: '11111111-1111-4111-8111-111111111111',
     })
     expect(payload).not.toHaveProperty('reference_image_url')
+    expect(successMock).toHaveBeenCalledWith('项目已创建，正在后台识别视觉风格')
+  })
+
+  it('only polls the project list while an image analysis is active', async () => {
+    vi.useFakeTimers()
+    const activeProject: Project = {
+      ...projectWithReference,
+      image_analysis: {
+        id: 'analysis-active',
+        kind: 'project_visual_style',
+        status: 'running',
+        attempt_count: 1,
+        can_retry: false,
+        updated_at: '2026-09-18T10:00:00Z',
+      },
+    }
+    vi.mocked(api.projects.list)
+      .mockResolvedValueOnce([activeProject])
+      .mockResolvedValue([projectWithReference])
+
+    render(<ProjectsPage />)
+    await vi.waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(2100)
+    await vi.waitFor(() => expect(api.projects.list).toHaveBeenCalledTimes(2))
+
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(api.projects.list).toHaveBeenCalledTimes(2)
   })
 
   it('keeps the uploaded selection open when server finalization fails', async () => {
@@ -326,7 +374,56 @@ describe('ProjectsPage', () => {
     expect(payload.reference_image).toEqual({
       upload_session_id: '11111111-1111-4111-8111-111111111111',
     })
+    expect(payload).not.toHaveProperty('visual_style')
     expect(payload).not.toHaveProperty('reference_image_url')
+  })
+
+  it('polls an open active analysis and unlocks the generated style on completion', async () => {
+    let resolveGet!: (value: Awaited<ReturnType<typeof api.projects.get>>) => void
+    const runningProject: Project = {
+      ...projectWithReference,
+      visual_style: '',
+      image_analysis: {
+        id: 'analysis-running',
+        kind: 'project_visual_style',
+        status: 'running',
+        attempt_count: 1,
+        can_retry: false,
+        updated_at: '2026-09-18T10:00:00Z',
+      },
+    }
+    vi.mocked(api.projects.list).mockResolvedValue([runningProject])
+    vi.mocked(api.projects.get).mockReturnValue(new Promise((resolve) => { resolveGet = resolve }))
+    render(<ProjectsPage />)
+
+    await clickProjectAction('测试项目', '编辑项目')
+    const style = screen.getByPlaceholderText(/可手动描述封面与配图风格/)
+    expect(style).toBeDisabled()
+    resolveGet({
+      project: {
+        ...runningProject,
+        visual_style: '最新自动视觉风格',
+        visual_style_source: 'analysis',
+        image_analysis: {
+          ...runningProject.image_analysis!,
+          status: 'succeeded',
+          updated_at: '2026-09-18T10:01:00Z',
+        },
+      },
+      stats: {
+        total_tasks: 0,
+        completed_tasks: 0,
+        failed_tasks: 0,
+        running_tasks: 0,
+        pending_tasks: 0,
+        unused_topics: 0,
+        success_rate: 0,
+        last_activity_at: '',
+      },
+    })
+
+    await waitFor(() => expect(style).toBeEnabled())
+    expect(style).toHaveValue('最新自动视觉风格')
   })
 
   it('opens moments project creation without social-card preset jargon', async () => {
@@ -334,7 +431,7 @@ describe('ProjectsPage', () => {
     render(<ProjectsPage />)
 
     expect(await screen.findByText('朋友圈')).toBeInTheDocument()
-    const styleField = await screen.findByPlaceholderText(/描述图片视觉风格/)
+    const styleField = await screen.findByPlaceholderText(/可手动描述真实生活感/)
 
     expect(screen.queryByRole('button', { name: /归藏社交卡/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/Guizang|归藏|社交卡片/)).not.toBeInTheDocument()

@@ -25,18 +25,6 @@ func IsTerminalTaskStatus(s string) bool {
 	return slices.Contains(TerminalTaskStatuses, s)
 }
 
-// WeChat project modes are the complete publication policy contract.
-const (
-	WechatPublishModeDisabled     = "disabled"
-	WechatPublishModeManual       = "manual"
-	WechatPublishModeAPIConfirmed = "api_confirmed"
-)
-
-// IsWechatPublishMode reports whether value is a supported project mode.
-func IsWechatPublishMode(value string) bool {
-	return slices.Contains([]string{WechatPublishModeDisabled, WechatPublishModeManual, WechatPublishModeAPIConfirmed}, value)
-}
-
 // Plan status constants.
 const (
 	PlanStatusActive    = "active"

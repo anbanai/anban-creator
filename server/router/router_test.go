@@ -129,6 +129,22 @@ func TestWechatAnalyticsURLBindRouteIsNotRegistered(t *testing.T) {
 	}
 }
 
+func TestSynchronousImageAnalysisRoutesAreNotRegistered(t *testing.T) {
+	app, cleanup := setupTestApp(t, true)
+	defer cleanup()
+
+	removed := map[string]bool{
+		"POST /api/v1/projects/analyze-image":      true,
+		"POST /api/v1/templates/analyze-thumbnail": true,
+	}
+	for _, route := range app.GetRoutes() {
+		key := route.Method + " " + route.Path
+		if removed[key] {
+			t.Fatalf("removed synchronous image analysis route is still registered: %s", key)
+		}
+	}
+}
+
 // TestHealthCheck tests that the health endpoint returns 200 with a valid database.
 func TestHealthCheck(t *testing.T) {
 	app, closeFunc := setupTestApp(t, true)

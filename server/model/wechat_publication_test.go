@@ -10,31 +10,17 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestWechatPublishModeContract(t *testing.T) {
-	tests := []struct {
-		name string
-		mode string
-		want string
-	}{
-		{name: "zero defaults manual", want: WechatPublishModeManual},
-		{name: "disabled", mode: WechatPublishModeDisabled, want: WechatPublishModeDisabled},
-		{name: "manual", mode: WechatPublishModeManual, want: WechatPublishModeManual},
-		{name: "api confirmed", mode: WechatPublishModeAPIConfirmed, want: WechatPublishModeAPIConfirmed},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			project := Project{Config: ProjectConfig{WechatPublishMode: tt.mode}}
-			if got := project.GetWechatPublishMode(); got != tt.want {
-				t.Fatalf("publish mode = %q, want %q", got, tt.want)
-			}
-		})
+func TestProjectConfigDoesNotExposeLegacyWechatPublishMode(t *testing.T) {
+	configType := reflect.TypeOf(ProjectConfig{})
+	if _, exists := configType.FieldByName("WechatPublishMode"); exists {
+		t.Fatal("ProjectConfig still exposes the legacy WechatPublishMode field")
 	}
 
-	raw, err := json.Marshal(ProjectConfig{WechatPublishMode: WechatPublishModeAPIConfirmed})
+	raw, err := json.Marshal(ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"enable_publishing", "require_publish_approval"} {
+	for _, forbidden := range []string{"wechat_publish_mode", "enable_publishing", "require_publish_approval"} {
 		if string(raw) == forbidden || containsJSONKey(raw, forbidden) {
 			t.Fatalf("project config still serializes obsolete %q: %s", forbidden, raw)
 		}
@@ -83,7 +69,7 @@ func TestWechatPublicationSchemaIsOnePerTaskAndHasLifecycleContract(t *testing.T
 		}
 	}
 	for _, status := range []string{
-		WechatPublicationStatusDrafting, WechatPublicationStatusDrafted, WechatPublicationStatusPublishSubmitting,
+		WechatPublicationStatusDrafting, WechatPublicationStatusDrafted, WechatPublicationStatusAwaitingManual, WechatPublicationStatusPublishSubmitting,
 		WechatPublicationStatusPublishing, WechatPublicationStatusPublished, WechatPublicationStatusNeedsSelection,
 		WechatPublicationStatusPublishFailed, WechatPublicationStatusUnsupported,
 	} {

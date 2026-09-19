@@ -174,7 +174,7 @@ describe('TaskExecutionRail', () => {
       ],
     }
 
-    render(<TaskExecutionRail taskId="task-1" status="completed" lifecycle={articleLifecycle} wechatPublishMode="manual" onOpenLogs={vi.fn()} />)
+    render(<TaskExecutionRail taskId="task-1" status="completed" lifecycle={articleLifecycle} onOpenLogs={vi.fn()} />)
 
     fireEvent.click(await screen.findByRole('button', { name: '正式发布' }))
     expect(screen.getByRole('heading', { name: '确认正式发布' })).toBeInTheDocument()
@@ -196,7 +196,7 @@ describe('TaskExecutionRail', () => {
       ],
     }
 
-    render(<TaskExecutionRail taskId="task-1" status="completed" lifecycle={blockedLifecycle} wechatPublishMode="manual" onOpenLogs={vi.fn()} />)
+    render(<TaskExecutionRail taskId="task-1" status="completed" lifecycle={blockedLifecycle} onOpenLogs={vi.fn()} />)
 
     fireEvent.click(await screen.findByRole('button', { name: '检测状态' }))
     await waitFor(() => expect(api.tasks.reconcileWechat).toHaveBeenCalledWith('task-1'))

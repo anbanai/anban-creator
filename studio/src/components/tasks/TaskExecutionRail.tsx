@@ -33,7 +33,6 @@ import type {
   TaskOutcome,
   TaskStatus,
   WechatPublication,
-  WechatPublishMode,
   WorkflowStatus,
 } from '@/types'
 import { Badge } from '@/components/ui/badge'
@@ -62,7 +61,7 @@ const lifecycleStatePresentation: Record<TaskLifecycleStageState, {
   skipped: { label: '已跳过', icon: Minus, iconClassName: 'border-border bg-muted text-muted-foreground', textClassName: 'text-muted-foreground' },
 }
 
-const terminalPublicationStatuses = new Set(['published', 'publish_failed', 'unsupported'])
+const terminalPublicationStatuses = new Set(['published', 'publish_failed', 'unsupported', 'awaiting_manual_publish'])
 
 function formatStageTime(value?: string) {
   if (!value) return null
@@ -126,7 +125,6 @@ export interface TaskExecutionRailProps {
   workflow?: WorkflowStatus | string | null
   outcome?: TaskOutcome
   errorMessage?: string
-  wechatPublishMode?: WechatPublishMode
   onOpenLogs: () => void
   onResume?: () => void
 }
@@ -138,7 +136,6 @@ export function TaskExecutionRail({
   workflow,
   outcome,
   errorMessage,
-  wechatPublishMode = 'manual',
   onOpenLogs,
   onResume,
 }: TaskExecutionRailProps) {
@@ -165,7 +162,7 @@ export function TaskExecutionRail({
   const publicationQuery = useQuery({
     queryKey: ['wechat-publication', taskId],
     queryFn: () => api.tasks.getWechatPublication(taskId),
-    enabled: hasServerPublicationStages && wechatPublishMode !== 'disabled',
+    enabled: hasServerPublicationStages,
     retry: false,
     refetchInterval: (query) => {
       const publicationStatus = query.state.data?.status
@@ -291,7 +288,6 @@ export function TaskExecutionRail({
                     <PublicationStageActions
                       stage={stage}
                       publication={publication}
-                      publishMode={wechatPublishMode}
                       outcome={outcome}
                       pending={publicationActionPending}
                       onPublish={() => setConfirmPublish(true)}
@@ -371,7 +367,6 @@ function RailHeading({ onOpenLogs }: { onOpenLogs: () => void }) {
 function PublicationStageActions({
   stage,
   publication,
-  publishMode,
   outcome,
   pending,
   onPublish,
@@ -381,7 +376,6 @@ function PublicationStageActions({
 }: {
   stage: TaskLifecycleStage
   publication?: WechatPublication
-  publishMode: WechatPublishMode
   outcome?: TaskOutcome
   pending: boolean
   onPublish: () => void
@@ -433,8 +427,11 @@ function PublicationStageActions({
   if (publication?.status === 'needs_selection') return null
 
   const submitted = hasSubmissionEvidence(publication)
-  if (stage.state === 'pending' && publishMode === 'manual' && publication?.status === 'drafted' && !submitted) {
+  if (stage.state === 'pending' && publication?.status === 'drafted' && !submitted) {
     return <Button size="xs" loading={pending} onClick={onPublish}><Send className="size-3" />正式发布</Button>
+  }
+  if (stage.state === 'blocked' && publication?.status === 'awaiting_manual_publish' && publication.draft_media_id) {
+    return backendLink
   }
   if (stage.state === 'blocked' && publication?.status === 'unsupported' && publication.draft_media_id) {
     if (submitted) {

@@ -18,8 +18,12 @@ export interface Template {
   type: TemplateType
   name: string
   category: string
-  thumbnail_url: string
+  thumbnail?: ReferenceAssetView | null
   prompt: string
+  prompt_source: 'manual' | 'analysis' | ''
+  readiness_status: 'analyzing' | 'ready' | 'failed'
+  activate_when_ready: boolean
+  image_analysis?: ImageAnalysis | null
   visibility: TemplateVisibility
   sort_order: number
   is_active: boolean
@@ -31,11 +35,13 @@ export interface CreateTemplateRequest {
   name: string
   type: TemplateType
   category: SeednoteTemplateCategory
-  thumbnail_url: string
-  prompt: string
+  thumbnail_image: ReferenceImageSelection
+  prompt?: string
   visibility: TemplateVisibility
   sort_order: number
   is_active: boolean
 }
 
-export type UpdateTemplateRequest = CreateTemplateRequest
+export type UpdateTemplateRequest = Partial<CreateTemplateRequest>
+import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+import type { ImageAnalysis } from './image-analysis'

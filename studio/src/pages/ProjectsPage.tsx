@@ -9,8 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig } from '@/types'
+import type { ImageAnalysis, Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig } from '@/types'
+import { isImageAnalysisActive, isImageAnalysisUpdateOlder } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
+import { queryKeys } from '@/lib/query-keys'
 import { ProjectCard } from '@/components/ProjectCard'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
@@ -20,6 +22,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
 import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
+import { AnalyzedImageField } from '@/components/image-analysis/AnalyzedImageField'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
 import { PersonaBlock } from '@/components/templates/PersonaBlock'
 import { ThemePicker } from '@/components/templates/ThemePicker'
@@ -95,7 +98,6 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   },
   reference_image: null,
   image_ratio: '3:4',
-  wechat_publish_mode: 'manual',
 }
 
 function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): ProjectPlatform {
@@ -143,7 +145,6 @@ function projectToForm(ch: Project): ProjectFormValues {
     reference_image: ch.reference_image ?? null,
     portrait_reference_image: ch.portrait_reference_image ?? null,
     image_ratio: (ch.image_ratio as ProjectFormValues['image_ratio']) || 'auto',
-    wechat_publish_mode: ch.config?.wechat_publish_mode ?? 'manual',
   }
 }
 
@@ -163,11 +164,10 @@ export default function ProjectsPage() {
   const [fetchingProfile, setFetchingProfile] = useState(false)
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
-  const [analyzingStyle, setAnalyzingStyle] = useState(false)
+  const [editingAnalysis, setEditingAnalysis] = useState<ImageAnalysis | null>(null)
+  const editingAnalysisUpdatedAtRef = useRef('')
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [montageDefaultsReady, setMontageDefaultsReady] = useState(false)
-  const [referenceAnalysisUrl, setReferenceAnalysisUrl] = useState('')
-  const styleManuallyEditedRef = useRef(false)
   const { submit } = useSubmitLock()
 
   const form = useForm<ProjectFormValues>({
@@ -187,10 +187,8 @@ export default function ProjectsPage() {
 	const isEcommerce = selectedPlatform === 'ecommerce'
 	const isMontage = selectedPlatform === 'montage'
 	const supportsVisualReference = true
-	const shouldAnalyzeReferenceStyle = !isMontage
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
-  const publishMode = useWatch({ control: form.control, name: 'wechat_publish_mode' })
-  const enablePublishing = publishMode !== 'disabled'
+  const enablePublishing = isWechat
   const referenceImage = useWatch({ control: form.control, name: 'reference_image' })
   const portraitReferenceImage = useWatch({ control: form.control, name: 'portrait_reference_image' })
   const authorValue = useWatch({ control: form.control, name: 'author' })
@@ -264,36 +262,6 @@ export default function ProjectsPage() {
     return () => clearTimeout(timer)
   }, [modalOpen, profileUrl, selectedPlatform, platformConfigMap])
 
-  // Auto-analyze reference image to fill visual style for image-based project types.
-  useEffect(() => {
-    if (!modalOpen || !referenceAnalysisUrl || !shouldAnalyzeReferenceStyle) return
-    if (styleManuallyEditedRef.current) return
-
-    let cancelled = false
-    const timer = setTimeout(async () => {
-      setAnalyzingStyle(true)
-      try {
-        const result = await api.projects.analyzeImage(referenceAnalysisUrl)
-        if (!cancelled && result.visual_style && !styleManuallyEditedRef.current) {
-          form.setValue('visual_style', result.visual_style)
-        }
-      } catch {
-        toast.error('风格识别失败，请手动填写或重试')
-      } finally {
-        if (!cancelled) setAnalyzingStyle(false)
-      }
-    }, 1000)
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [modalOpen, referenceAnalysisUrl, shouldAnalyzeReferenceStyle, form])
-
-  // Reset manual-edit flag when modal reopens
-  useEffect(() => {
-    styleManuallyEditedRef.current = false
-  }, [modalOpen])
-
   async function handleFetchProfile(url: string, options?: { silent?: boolean }) {
     if (!url || !selectedPlatform) return
     if (!hasSupportedProfileUrl(url)) {
@@ -331,6 +299,10 @@ export default function ProjectsPage() {
       api.projects.list({
         status: statusFilter === 'all' ? undefined : statusFilter,
       }),
+    refetchInterval: (query) => {
+      const items = query.state.data ?? []
+      return items.some((project) => isImageAnalysisActive(project.image_analysis)) ? 2000 : false
+    },
   })
 
   const visibleProjects = useMemo(
@@ -353,6 +325,26 @@ export default function ProjectsPage() {
     enabled: visibleProjects.length > 0,
   })
 
+  const editingProjectQuery = useQuery({
+    queryKey: queryKeys.projects.detail(editingProject?.id ?? ''),
+    queryFn: ({ signal }) => api.projects.get(editingProject!.id, signal),
+    enabled: modalOpen && Boolean(editingProject) && isImageAnalysisActive(editingAnalysis),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchInterval: isImageAnalysisActive(editingAnalysis) ? 2000 : false,
+  })
+
+  useEffect(() => {
+    const refreshed = editingProjectQuery.data?.project
+    if (!refreshed) return
+    const updatedAt = refreshed.image_analysis?.updated_at ?? ''
+    if (isImageAnalysisUpdateOlder(updatedAt, editingAnalysisUpdatedAtRef.current)) return
+    editingAnalysisUpdatedAtRef.current = updatedAt
+    setEditingAnalysis(refreshed.image_analysis ?? null)
+    form.setValue('visual_style', refreshed.visual_style ?? '')
+    form.setValue('reference_image', refreshed.reference_image ?? null)
+  }, [editingProjectQuery.data, form])
+
   useEffect(() => {
     const editID = searchParams.get('edit')
     if (!editID || modalOpen) return
@@ -363,7 +355,7 @@ export default function ProjectsPage() {
   const createMutation = useMutation({
     mutationFn: (data: CreateProjectRequest) => api.projects.create(data),
     onSuccess: (created) => {
-      toast.success('项目创建成功')
+      toast.success(created.project.image_analysis ? '项目已创建，正在后台识别视觉风格' : '项目创建成功')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       const createdProject = created.project
@@ -431,7 +423,8 @@ export default function ProjectsPage() {
       platform,
       image_ratio: (platformConfigMap[platform]?.default_image_ratio || 'auto') as ProjectFormValues['image_ratio'],
     })
-    setReferenceAnalysisUrl('')
+    setEditingAnalysis(null)
+    editingAnalysisUpdatedAtRef.current = ''
     setReferenceUploading(false)
     setMontageDefaultsReady(false)
     setModalOpen(true)
@@ -445,7 +438,8 @@ export default function ProjectsPage() {
   function openEdit(project: Project) {
     setEditingProject(project)
     setProfileFetchHint(null)
-    setReferenceAnalysisUrl('')
+    setEditingAnalysis(project.image_analysis ?? null)
+    editingAnalysisUpdatedAtRef.current = project.image_analysis?.updated_at ?? ''
     setReferenceUploading(false)
     setMontageDefaultsReady(false)
     form.reset(projectToForm(project))
@@ -466,7 +460,8 @@ export default function ProjectsPage() {
     setShowDirtyDialog(false)
     setEditingProject(null)
     setProfileFetchHint(null)
-    setReferenceAnalysisUrl('')
+    setEditingAnalysis(null)
+    editingAnalysisUpdatedAtRef.current = ''
     setReferenceUploading(false)
     setMontageDefaultsReady(false)
     form.reset(CHANNEL_FORM_DEFAULTS)
@@ -502,7 +497,6 @@ export default function ProjectsPage() {
       avatar_url: values.avatar_url?.trim() || undefined,
       keywords: values.keywords?.trim() || undefined,
       instructions: values.instructions?.trim() || undefined,
-      visual_style: values.platform === 'montage' ? undefined : values.visual_style?.trim() || undefined,
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
       author: values.platform === 'article' || values.platform === 'moments'
@@ -511,7 +505,9 @@ export default function ProjectsPage() {
       image_ratio: values.image_ratio,
       wechat_app_id: values.wechat_app_id?.trim() || undefined,
       wechat_secret: values.wechat_secret?.trim() || undefined,
-      wechat_publish_mode: values.platform === 'article' ? values.wechat_publish_mode : undefined,
+    }
+    if (values.platform !== 'montage' && (!editingProject || form.formState.dirtyFields.visual_style)) {
+      payload.visual_style = values.visual_style?.trim() ?? ''
     }
     if (values.platform === 'ecommerce') {
       payload.ecommerce_defaults = {
@@ -669,7 +665,6 @@ export default function ProjectsPage() {
                         )
                         form.setValue('wechat_app_id', '')
                         form.setValue('wechat_secret', '')
-                        form.setValue('wechat_publish_mode', v === 'article' ? 'manual' : 'disabled')
                       }}
                       disabled={!!editingProject}
                     >
@@ -780,20 +775,10 @@ export default function ProjectsPage() {
                     <h4 className="mb-3 text-sm font-medium text-muted-foreground">发布配置</h4>
                   </div>
 
-                  <FormField control={form.control} name="wechat_publish_mode" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>公众号投递</FormLabel>
-                      <FormControl>
-                        <ToggleGroup value={[field.value ?? 'manual']} onValueChange={(value) => { const selected = value[0]; if (selected) field.onChange(selected) }} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                          <ToggleGroupItem value="disabled" className="h-auto justify-start px-3 py-2 text-left">不投递公众号</ToggleGroupItem>
-                          <ToggleGroupItem value="manual" className="h-auto justify-start px-3 py-2 text-left">草稿后手动发布</ToggleGroupItem>
-                          <ToggleGroupItem value="api_confirmed" className="h-auto justify-start px-3 py-2 text-left">草稿后自动发布</ToggleGroupItem>
-                        </ToggleGroup>
-                      </FormControl>
-                      <FormDescription>后两种方式都会自动进入草稿箱；手动模式由你在任务详情确认正式发布，自动模式会在草稿成功后直接提交。</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
+                  <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                    <p className="font-medium">自动识别公众号能力</p>
+                    <p className="mt-1 text-xs text-muted-foreground">系统先创建草稿；具备正式发布权限时继续发布，无权限时保留草稿并提示人工发布。</p>
+                  </div>
 
                   {enablePublishing && (
                     <>
@@ -847,30 +832,61 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
-              {supportsVisualReference && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">{isMontage ? '人物参考' : '视觉参考'}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {isMontage
-                          ? '封面需要本人出镜时，系统会把这张人物参考图提供给 Agent。'
-                          : '上传一张参考图，系统会尝试识别色彩、质感和构图。'}
-                      </p>
-                    </div>
-                    <ReferenceAssetUpload
-                      value={referenceImage ?? null}
-                      onChange={(value) => {
-                        form.setValue('reference_image', value, { shouldDirty: true, shouldValidate: true })
-                        if (!value) setReferenceAnalysisUrl('')
-                      }}
-                      purpose="project_reference"
-                      onUploadingChange={setReferenceUploading}
-                      onUploadedPreview={setReferenceAnalysisUrl}
-                    />
+              {supportsVisualReference && isMontage ? (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">人物参考</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">封面需要本人出镜时，系统会把这张人物参考图提供给 Agent。</p>
                   </div>
+                  <ReferenceAssetUpload
+                    value={referenceImage ?? null}
+                    onChange={(value) => form.setValue('reference_image', value, { shouldDirty: true, shouldValidate: true })}
+                    purpose="project_reference"
+                    onUploadingChange={setReferenceUploading}
+                  />
                 </div>
-              )}
+              ) : null}
+
+              {!isMontage ? (
+                <FormField control={form.control} name="visual_style" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>视觉参考与风格</FormLabel>
+                    <FormControl>
+                      <AnalyzedImageField
+                        asset={referenceImage ?? null}
+                        onAssetChange={(value) => form.setValue('reference_image', value, { shouldDirty: true, shouldValidate: true })}
+                        purpose="project_reference"
+                        text={field.value ?? ''}
+                        onTextChange={field.onChange}
+                        analysis={editingAnalysis}
+                        placeholder={isSeednote
+                          ? '可手动描述风格；留空时在创建后后台识别色彩、质感与构图'
+                          : isMoments
+                            ? '可手动描述真实生活感、光线和画面调性；留空时后台识别'
+                            : isEcommerce
+                              ? '可手动描述品牌视觉基线；留空时后台识别'
+                              : '可手动描述封面与配图风格；留空时后台识别'}
+                        onUploadingChange={setReferenceUploading}
+                        onBeforeAnalysisAction={() => editingProject
+                          ? queryClient.cancelQueries({ queryKey: queryKeys.projects.detail(editingProject.id) })
+                          : undefined}
+                        onAnalysisAction={async () => {
+                          if (!editingProject) return
+                          const refreshed = await api.projects.get(editingProject.id)
+                          queryClient.setQueryData(queryKeys.projects.detail(editingProject.id), refreshed)
+                          editingAnalysisUpdatedAtRef.current = refreshed.project.image_analysis?.updated_at ?? ''
+                          setEditingAnalysis(refreshed.project.image_analysis ?? null)
+                          form.setValue('visual_style', refreshed.project.visual_style ?? '')
+                          form.setValue('reference_image', refreshed.project.reference_image ?? null)
+                          await queryClient.invalidateQueries({ queryKey: ['projects'] })
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription>图片和文本在识别期间保持锁定；停止识别后可手动填写。</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              ) : null}
 
               {isWechat && (
                 <div className="space-y-3">
@@ -889,51 +905,6 @@ export default function ProjectsPage() {
                   </div>
                 </div>
               )}
-
-			  {!isMontage ? (
-				<FormField control={form.control} name="visual_style" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>视觉风格</FormLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <Textarea
-                          placeholder={isSeednote
-                            ? '描述图片视觉风格，如：手绘感、暖色调、小清新、治愈系水彩插画风格'
-                            : isMoments
-                              ? '描述图片视觉风格，如：真实生活感、轻杂志排版、暖色自然光、不过度营销'
-                            : isEcommerce
-                              ? '描述品牌视觉风格基线，如：高端极简白底、国潮暖橙插画、电商爆款高饱和促销感。作为主图/详情/封面跨图一致的视觉锚点'
-                              : '描述文章封面与配图的视觉风格，如：温暖自然的生活摄影、柔光大地色系、写实治愈。留空则由项目定位与内容主题三维分析自动确定'}
-                          className={analyzingStyle ? 'pr-10' : ''}
-                          {...field}
-                          onChange={(e) => {
-                            styleManuallyEditedRef.current = true
-                            field.onChange(e)
-                          }}
-                        />
-                        {analyzingStyle && (
-                          <div className="absolute right-2 top-2">
-                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                          </div>
-                        )}
-                      </div>
-                    </FormControl>
-                    {analyzingStyle && (
-                      <p className="text-xs text-muted-foreground">正在分析参考图...</p>
-                    )}
-                    <FormDescription>
-                      {isSeednote
-                        ? '用于封面和内容图的风格提示。'
-                        : isMoments
-                          ? '用于保持朋友圈素材的画面调性；留空则由内容自动判断。'
-                        : isEcommerce
-                          ? '作为电商素材跨图一致的视觉基线，产品图仍在任务里上传。'
-                          : '仅决定封面与配图的视觉，与写作风格、排版样式相互独立。'}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-				)} />
-			  ) : null}
 
 			  <FormField control={form.control} name="image_ratio" render={({ field }) => (
 				  <FormItem>

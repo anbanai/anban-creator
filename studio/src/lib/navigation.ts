@@ -29,6 +29,7 @@ export const mvpNavItems: NavItem[] = [
   { to: '/plugins', label: '插件', icon: PlugZap },
   { to: '/settings', label: '设置', icon: Settings },
   { to: '/seednote-data', label: '小红书数据', icon: BarChart3 },
+  { to: '/wechat-data', label: '公众号内容', icon: BarChart3 },
 ]
 
 export const adminNavItems: NavItem[] = [

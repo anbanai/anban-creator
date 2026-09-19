@@ -65,6 +65,8 @@ export const tasksApi = {
     unwrap<NonNullable<Task['outcome']>['publication']>(http.post(`/tasks/${id}/wechat-publication/recover`)),
   selectWechatArticle: (id: string, articleId: string) =>
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/select`, { article_id: articleId })),
+  bindManualWechatPublication: (id: string, articleUrl: string) =>
+    unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/manual-bind`, { article_url: articleUrl, confirmed_published: true })),
 
   files: (id: string) =>
     unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),

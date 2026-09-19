@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/rs/zerolog"
 	"gorm.io/gorm"
 )
@@ -63,5 +64,39 @@ func MigrateTemplatePrompt(ctx context.Context, db *gorm.DB, log *zerolog.Logger
 		}
 	}
 
+	return nil
+}
+
+// MigrateTemplateThumbnailAssets makes the Asset-backed thumbnail contract a
+// hard cutover. Legacy URL-only templates cannot prove ownership or provide a
+// durable source image, so they remain visible to administrators as failed and
+// inactive until a new thumbnail is uploaded.
+func MigrateTemplateThumbnailAssets(ctx context.Context, db *gorm.DB, log *zerolog.Logger) error {
+	if db == nil {
+		return nil
+	}
+	migrator := db.Migrator()
+	if !migrator.HasTable("templates") ||
+		!migrator.HasColumn("templates", "thumbnail_url") ||
+		!migrator.HasColumn("templates", "thumbnail_asset_id") ||
+		!migrator.HasColumn("templates", "is_active") ||
+		!migrator.HasColumn("templates", "readiness_status") {
+		return nil
+	}
+
+	result := db.WithContext(ctx).Exec(`
+		UPDATE templates
+		SET is_active = ?, readiness_status = ?
+		WHERE TRIM(COALESCE(thumbnail_asset_id, '')) = ''
+		  AND TRIM(COALESCE(thumbnail_url, '')) <> ''
+		  AND (is_active <> ? OR readiness_status <> ?)`,
+		false, model.TemplateReadinessFailed, false, model.TemplateReadinessFailed,
+	)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 && log != nil {
+		log.Info().Int64("disabled", result.RowsAffected).Msg("template thumbnail migration: disabled URL-only templates")
+	}
 	return nil
 }

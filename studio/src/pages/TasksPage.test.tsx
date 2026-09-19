@@ -491,7 +491,7 @@ describe('TasksPage Seednote reference materials', () => {
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
-    await screen.findByText('product.png')
+    await screen.findByRole('button', { name: '预览 product.png' })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() => {

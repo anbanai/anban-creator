@@ -31,6 +31,7 @@ const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
 const SeednoteAdminPage = React.lazy(() => import('@/pages/SeednoteAdminPage'))
 const PluginsPage = React.lazy(() => import('@/pages/PluginsPage'))
 const SeednoteDataPage = React.lazy(() => import('@/pages/SeednoteDataPage'))
+const WechatDataPage = React.lazy(() => import('@/pages/WechatDataPage'))
 
 function LoadingSpinner() {
   return (
@@ -159,6 +160,7 @@ function AppRoutes() {
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
           <Route path="seednote-data" element={<LazyPage component={SeednoteDataPage} />} />
+          <Route path="wechat-data" element={<LazyPage component={WechatDataPage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

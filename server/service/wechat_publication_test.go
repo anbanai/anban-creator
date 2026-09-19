@@ -155,7 +155,7 @@ type publicationFixture struct {
 	executionID string
 }
 
-func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
+func newPublicationFixture(t *testing.T) *publicationFixture {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -177,7 +177,7 @@ func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
 	if err := repo.Users().Create(ctx, &model.User{ID: f.userID, Email: f.userID + "@publication.test", Password: "x", InviteCode: f.userID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformArticle, Name: "WeChat", Status: model.ProjectStatusActive, Config: model.ProjectConfig{WechatAppID: "app", WechatSecret: "secret", WechatPublishMode: mode}}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformArticle, Name: "WeChat", Status: model.ProjectStatusActive, Config: model.ProjectConfig{WechatAppID: "app", WechatSecret: "secret"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &f.executionID}); err != nil {
@@ -196,8 +196,15 @@ func newPublicationFixture(t *testing.T, mode string) *publicationFixture {
 	return f
 }
 
+func newUnavailableFormalPublishFixture(t *testing.T) *publicationFixture {
+	t.Helper()
+	f := newPublicationFixture(t)
+	f.svc.recordCapability(context.Background(), f.projectID, model.WechatCapabilityFreePublishSubmit, model.WechatCapabilityDenied, 48001)
+	return f
+}
+
 func TestWechatPublicationGetRepairsTaskLifecycleProjection(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	ctx := context.Background()
 	logger := zerolog.New(io.Discard)
 	taskService := newTestTaskService(f.repo, nil, nil, &logger, "", nil, nil)
@@ -386,7 +393,7 @@ func (f *publicationFixture) seedAmbiguousTaskOutcome(t *testing.T, publication 
 }
 
 func TestScheduledDraftReconciliationSynchronizesTaskOutcomeWithoutResubmission(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	request := f.draftInput()
 	article := normalizeDraftArticle(request.Articles[0])
 	attemptedAt := f.now.Add(-time.Minute)
@@ -446,7 +453,7 @@ func TestReconciledDraftDeliverySynchronizationHandlesPendingAndDefinitiveFailur
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			f := newPublicationFixture(t)
 			attemptedAt := f.now.Add(-time.Minute)
 			publication := &model.WechatPublication{ID: uuid.NewString(), Source: model.WechatPublicationSourceAnbanAPI, Status: tt.publicationStatus, DraftAddAttemptedAt: &attemptedAt, DraftAddAttempts: 1}
 			if tt.publicationStatus == model.WechatPublicationStatusUnsupported {
@@ -485,7 +492,7 @@ func TestReconciledDraftDeliverySynchronizationHandlesPendingAndDefinitiveFailur
 }
 
 func TestCreateDraftRejectsMultipleArticlesBeforeProviderCalls(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	request := f.draftInput()
 	request.Articles = append(request.Articles, request.Articles[0])
 
@@ -547,7 +554,7 @@ func TestCreateDraftBlocksOutboundMarketingBeforeProviderCalls(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			f := newPublicationFixture(t)
 			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 			request := f.draftInput()
@@ -583,7 +590,7 @@ func TestCreateDraftRejectsUnsafeHTMLBeforeProviderCalls(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			f := newPublicationFixture(t)
 			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 			request := f.draftInput()
@@ -600,7 +607,7 @@ func TestCreateDraftRejectsUnsafeHTMLBeforeProviderCalls(t *testing.T) {
 }
 
 func TestCreateDraftAcceptsBodyImageRegisteredByCurrentExecution(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	const imageURL = "https://wechat.example/current-image.png"
 	if err := f.repo.TaskFiles().Create(context.Background(), &model.TaskFile{
 		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: f.executionID, State: model.TaskFileStatePending,
@@ -623,7 +630,7 @@ func TestCreateDraftAcceptsBodyImageRegisteredByCurrentExecution(t *testing.T) {
 }
 
 func TestCreateDraftAcceptsRegisteredHTTPWechatImage(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	const imageURL = "http://mmbiz.qpic.cn/current-image.png"
 	if err := f.repo.TaskFiles().Create(context.Background(), &model.TaskFile{
 		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: f.executionID, State: model.TaskFileStatePending,
@@ -649,7 +656,7 @@ func TestCreateDraftAcceptsRegisteredHTTPWechatImage(t *testing.T) {
 }
 
 func TestCreateDraftRejectsBodyImageRegisteredByEarlierExecution(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	const imageURL = "https://wechat.example/old-image.png"
 	if err := f.repo.TaskFiles().Create(context.Background(), &model.TaskFile{
 		ID: uuid.NewString(), TaskID: f.taskID, ExecutionID: uuid.NewString(), State: model.TaskFileStateRetained,
@@ -686,7 +693,7 @@ func TestCreateDraftUsesEveryMaterialFieldForIdempotency(t *testing.T) {
 
 	for _, tt := range mutations {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			f := newUnavailableFormalPublishFixture(t)
 			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 			f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 			request := f.draftInput()
@@ -712,7 +719,7 @@ func TestCreateDraftUsesEveryMaterialFieldForIdempotency(t *testing.T) {
 }
 
 func TestCreateDraftExactReplayIsIdempotent(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 	request := f.draftInput()
@@ -731,7 +738,7 @@ func TestCreateDraftExactReplayIsIdempotent(t *testing.T) {
 }
 
 func TestCreateDraftRejectsPublicationFromEarlierExecution(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput()); err != nil {
@@ -751,7 +758,7 @@ func TestCreateDraftRejectsPublicationFromEarlierExecution(t *testing.T) {
 }
 
 func TestCreateDraftReusesExactPublicationFromTerminalEarlierExecution(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
@@ -784,8 +791,8 @@ func TestCreateDraftReusesExactPublicationFromTerminalEarlierExecution(t *testin
 	}
 }
 
-func TestCreateDraftRetriesExactUnsupportedPublicationAfterExecutionHandoff(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+func TestCreateDraftRetriesExactUnsupportedPublicationAfterExecutionHandoffToManualPublish(t *testing.T) {
+	f := newUnavailableFormalPublishFixture(t)
 	ctx := context.Background()
 	if err := f.db.Model(&model.TaskExecution{}).Where("id = ?", f.executionID).Update("status", model.TaskExecutionFailed).Error; err != nil {
 		t.Fatal(err)
@@ -822,16 +829,17 @@ func TestCreateDraftRetriesExactUnsupportedPublicationAfterExecutionHandoff(t *t
 	if err != nil {
 		t.Fatalf("CreateDraft after handoff: %v", err)
 	}
-	if retried.ExecutionID != newExecutionID || retried.Status != model.WechatPublicationStatusDrafted || retried.DraftMediaID != "draft-after-handoff" {
+	if retried.ExecutionID != newExecutionID || retried.Status != model.WechatPublicationStatusAwaitingManual ||
+		!retried.ManualPublishRequired || retried.WechatStatusCode != 48001 || retried.DraftMediaID != "draft-after-handoff" {
 		t.Fatalf("retried publication = %#v", retried)
 	}
-	if f.api.addCalls != 1 {
-		t.Fatalf("AddDraft calls = %d, want 1", f.api.addCalls)
+	if f.api.addCalls != 1 || f.api.submitCalls != 0 {
+		t.Fatalf("provider calls add=%d submit=%d, want 1/0", f.api.addCalls, f.api.submitCalls)
 	}
 }
 
-func TestCreateDraftStartsManualReconciliationSchedule(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+func TestCreateDraftWithDeniedFormalPublishCapabilityDoesNotScheduleReconciliation(t *testing.T) {
+	f := newUnavailableFormalPublishFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-1"}
 	enqueuer := &recordingWechatPublicationEnqueuer{}
@@ -841,11 +849,11 @@ func TestCreateDraftStartsManualReconciliationSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if publication.NextCheckAt == nil || !publication.NextCheckAt.Equal(f.now.Add(10*time.Minute)) {
-		t.Fatalf("next check = %v, want %v", publication.NextCheckAt, f.now.Add(10*time.Minute))
+	if publication.Status != model.WechatPublicationStatusAwaitingManual || !publication.ManualPublishRequired ||
+		publication.WechatStatusCode != 48001 || publication.NextCheckAt != nil {
+		t.Fatalf("manual publication fallback = %#v", publication)
 	}
-	if len(enqueuer.delayed) != 1 || enqueuer.delayed[0].taskType != WechatPublicationReconcileTaskType ||
-		enqueuer.delayed[0].payload["project_id"] != f.projectID || enqueuer.delayed[0].delay != 10*time.Minute {
+	if len(enqueuer.delayed) != 0 || f.api.submitCalls != 0 {
 		t.Fatalf("delayed tasks = %#v", enqueuer.delayed)
 	}
 }
@@ -866,7 +874,7 @@ func TestCreateDraftRecoveryRequiresAllMaterialMetadata(t *testing.T) {
 
 	for _, tt := range mutations {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeManual)
+			f := newUnavailableFormalPublishFixture(t)
 			candidate := f.draftInput().Articles[0]
 			tt.mutate(&candidate)
 			f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{
@@ -917,7 +925,7 @@ func setPublicationCandidates(t *testing.T, publication *model.WechatPublication
 }
 
 func TestCreateDraftRecoversResponseLossBeforeRetrying(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	recoveredArticle := f.draftInput().Articles[0]
 	recoveredArticle.Content = `<section> <p>Hello <strong>world</strong></p> </section>`
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{ItemCount: 1, Items: []appwechat.DraftBatchItem{{
@@ -929,7 +937,8 @@ func TestCreateDraftRecoversResponseLossBeforeRetrying(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDraft: %v", err)
 	}
-	if publication.DraftMediaID != "recovered-media" || publication.Status != model.WechatPublicationStatusDrafted {
+	if publication.DraftMediaID != "recovered-media" || publication.Status != model.WechatPublicationStatusAwaitingManual ||
+		!publication.ManualPublishRequired || publication.WechatStatusCode != 48001 {
 		t.Fatalf("recovered publication = %#v", publication)
 	}
 	if f.api.draftListCalls != 1 || f.api.addCalls != 0 {
@@ -943,7 +952,7 @@ func TestCreateDraftRecoversResponseLossBeforeRetrying(t *testing.T) {
 }
 
 func TestCreateDraftRecoveryDoesNotOverwriteConcurrentAutomaticPublish(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	created := f.now.Add(-time.Hour)
 	request := f.draftInput()
 	article := normalizeDraftArticle(request.Articles[0])
@@ -983,7 +992,7 @@ func TestCreateDraftRecoveryDoesNotOverwriteConcurrentAutomaticPublish(t *testin
 }
 
 func TestCreateDraftResponseDoesNotOverwriteConcurrentAutomaticPublish(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-from-provider"}
 	f.api.submitResponse = &appwechat.FreePublishSubmitResponse{PublishID: "duplicate-publish"}
 	f.api.onAdd = func() {
@@ -1022,7 +1031,7 @@ func TestCreateDraftResponseDoesNotOverwriteConcurrentAutomaticPublish(t *testin
 }
 
 func TestCreateDraftRecoveryPaginatesAndRejectsUnsafeUpdateTimes(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	article := f.draftInput().Articles[0]
 	f.api.draftListResponses = map[int64]*appwechat.DraftBatchGetResponse{
 		0: {TotalCount: 3, ItemCount: 2, Items: []appwechat.DraftBatchItem{
@@ -1047,7 +1056,7 @@ func TestCreateDraftRecoveryPaginatesAndRejectsUnsafeUpdateTimes(t *testing.T) {
 }
 
 func TestCreateDraftRecoveryAcceptsProviderTimestampInIntentSecond(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.now = f.now.Add(750 * time.Millisecond)
 	article := f.draftInput().Articles[0]
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{
@@ -1064,7 +1073,7 @@ func TestCreateDraftRecoveryAcceptsProviderTimestampInIntentSecond(t *testing.T)
 }
 
 func TestCreateDraftRecoveryRejectsProviderTimestampInPriorSecond(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.now = f.now.Add(750 * time.Millisecond)
 	article := f.draftInput().Articles[0]
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{
@@ -1082,7 +1091,7 @@ func TestCreateDraftRecoveryRejectsProviderTimestampInPriorSecond(t *testing.T) 
 }
 
 func TestRecoverDraftFromItemsDoesNotOverwriteConcurrentLifecycleUpdate(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	created := f.now.Add(-time.Hour)
 	request := f.draftInput()
 	article := request.Articles[0]
@@ -1140,7 +1149,7 @@ func TestWechatContentFingerprintPreservesMeaningfulInlineSpaces(t *testing.T) {
 }
 
 func TestCreateDraftPersistsIntentBeforeExternalCallAndDoesNotBlindRetry(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = errors.New("connection reset after response")
 
@@ -1164,7 +1173,7 @@ func TestCreateDraftPersistsIntentBeforeExternalCallAndDoesNotBlindRetry(t *test
 }
 
 func TestCreateDraftRecordsProviderSubmissionFailureAsAmbiguous(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = errors.New("connection reset after WeChat may have accepted draft")
 
@@ -1190,7 +1199,7 @@ func TestCreateDraftRecordsProviderSubmissionFailureAsAmbiguous(t *testing.T) {
 }
 
 func TestCreateDraftRejectsMissingExecutionBeforeProviderUse(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	if err := f.db.Delete(&model.TaskExecution{}, "id = ?", f.executionID).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -1206,7 +1215,7 @@ func TestCreateDraftRejectsMissingExecutionBeforeProviderUse(t *testing.T) {
 }
 
 func TestCreateDraftRecordsPreflightFailureOnCurrentExecution(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	request := f.draftInput()
 	request.Articles[0].Title = "添加我微信领取茶叶资料"
 
@@ -1226,7 +1235,7 @@ func TestCreateDraftRecordsPreflightFailureOnCurrentExecution(t *testing.T) {
 }
 
 func TestCreateDraftRetryableProviderFailureCanRetryOnce(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-retry"}
 	var factoryCalls int
@@ -1258,7 +1267,7 @@ func TestCreateDraftRetryableProviderFailureCanRetryOnce(t *testing.T) {
 }
 
 func TestCreateDraftRetryableProviderFailureRejectsThirdAttempt(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	var factoryCalls int
 	f.svc.apiFactory = func(*model.Project) (WechatPublicationAPI, error) {
 		factoryCalls++
@@ -1279,7 +1288,7 @@ func TestCreateDraftRetryableProviderFailureRejectsThirdAttempt(t *testing.T) {
 }
 
 func TestCreateDraftDoesNotContinueWhileDeliveryIsInFlight(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	evidence := []byte(`{"source":"create_draft","status":"in_flight","attempt":1}`)
 	if won, err := f.repo.TaskExecutions().TransitionDraftDelivery(context.Background(), f.executionID, "", model.TaskExecutionDraftDeliveryInFlight, evidence); err != nil || !won {
 		t.Fatalf("record in-flight delivery: won=%v err=%v", won, err)
@@ -1293,7 +1302,7 @@ func TestCreateDraftDoesNotContinueWhileDeliveryIsInFlight(t *testing.T) {
 }
 
 func TestCreateDraftReleasesFreshIntentAfterAPIFactoryFailure(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.svc.apiFactory = func(*model.Project) (WechatPublicationAPI, error) {
 		return nil, errors.New("temporary API factory failure")
 	}
@@ -1315,7 +1324,7 @@ func TestCreateDraftReleasesFreshIntentAfterAPIFactoryFailure(t *testing.T) {
 }
 
 func TestCreateDraftReleasesFreshIntentAfterReadOnlyPreflightFailure(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.api.draftListError = errors.New("temporary draft-list failure")
 
 	if _, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput()); err == nil {
@@ -1338,7 +1347,7 @@ func TestCreateDraftReleasesFreshIntentAfterReadOnlyPreflightFailure(t *testing.
 }
 
 func TestCreateDraftReclaimsStaleUnattemptedIntentAfterCrash(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	request := f.draftInput()
 	article, err := firstDraftArticle(request)
 	if err != nil {
@@ -1373,7 +1382,8 @@ func TestCreateDraftReclaimsStaleUnattemptedIntentAfterCrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDraft after crash: %v", err)
 	}
-	if recovered.ID != intent.ID || recovered.Status != model.WechatPublicationStatusDrafted || recovered.DraftMediaID != "draft-after-crash" {
+	if recovered.ID != intent.ID || recovered.Status != model.WechatPublicationStatusAwaitingManual ||
+		!recovered.ManualPublishRequired || recovered.WechatStatusCode != 48001 || recovered.DraftMediaID != "draft-after-crash" {
 		t.Fatalf("recovered intent = %#v", recovered)
 	}
 	if f.api.addCalls != 1 {
@@ -1382,7 +1392,7 @@ func TestCreateDraftReclaimsStaleUnattemptedIntentAfterCrash(t *testing.T) {
 }
 
 func TestDraftReconciliationPermissionFailurePreservesAmbiguousAddEvidence(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = errors.New("connection reset after WeChat may have accepted draft")
 
@@ -1416,7 +1426,7 @@ func TestDraftReconciliationPermissionFailurePreservesAmbiguousAddEvidence(t *te
 }
 
 func TestCreateDraftRetriesDefinitive48001AfterPermissionRepair(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	f.api.draftListError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
 
 	first, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, f.draftInput())
@@ -1444,13 +1454,14 @@ func TestCreateDraftRetriesDefinitive48001AfterPermissionRepair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retried CreateDraft: %v", err)
 	}
-	if retried.Status != model.WechatPublicationStatusDrafted || retried.DraftMediaID != "draft-after-repair" || f.api.addCalls != 1 {
+	if retried.Status != model.WechatPublicationStatusAwaitingManual || !retried.ManualPublishRequired ||
+		retried.WechatStatusCode != 48001 || retried.DraftMediaID != "draft-after-repair" || f.api.addCalls != 1 || f.api.submitCalls != 0 {
 		t.Fatalf("retried = %#v addCalls=%d", retried, f.api.addCalls)
 	}
 }
 
 func TestCreateDraftRetriesDefinitive40164AfterIPAllowlistRepair(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = &appwechat.WechatAPIError{ErrCode: 40164, UserMsg: "request ip is not in whitelist"}
 
@@ -1490,14 +1501,15 @@ func TestCreateDraftRetriesDefinitive40164AfterIPAllowlistRepair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retried CreateDraft: %v", err)
 	}
-	if retried.Status != model.WechatPublicationStatusDrafted || retried.DraftMediaID != "draft-after-allowlist-repair" ||
+	if retried.Status != model.WechatPublicationStatusAwaitingManual || !retried.ManualPublishRequired || retried.WechatStatusCode != 48001 ||
+		retried.DraftMediaID != "draft-after-allowlist-repair" ||
 		retried.DraftAddAttemptedAt == nil || !retried.DraftAddAttemptedAt.Equal(firstAttemptedAt) || retried.DraftAddAttempts != 2 || f.api.addCalls != 2 {
 		t.Fatalf("retried = %#v addCalls=%d", retried, f.api.addCalls)
 	}
 }
 
 func TestCreateDraftAllowsOnlyOneSafeRetryAfterDefinitiveRejections(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = &appwechat.WechatAPIError{ErrCode: 40164, UserMsg: "request ip is not in whitelist"}
 
@@ -1535,7 +1547,7 @@ func TestCreateDraftAllowsOnlyOneSafeRetryAfterDefinitiveRejections(t *testing.T
 }
 
 func TestDefinitiveDraftRetryPreflightFailurePreservesOriginalCode(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = &appwechat.WechatAPIError{ErrCode: 40164, UserMsg: "request ip is not in whitelist"}
 
@@ -1566,14 +1578,24 @@ func TestDefinitiveDraftRetryPreflightFailurePreservesOriginalCode(t *testing.T)
 
 	f.api.draftListError = nil
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "draft-after-transient-preflight"}
+	f.api.submitResponse = &appwechat.FreePublishSubmitResponse{PublishID: "publish-after-transient-preflight"}
+	f.api.onAdd = func() {
+		article := f.draftInput().Articles[0]
+		f.api.mu.Lock()
+		f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{
+			MediaID: "draft-after-transient-preflight", UpdateTime: f.now.Unix(), Content: appwechat.DraftContent{NewsItems: []appwechat.DraftArticle{article}},
+		}}}
+		f.api.mu.Unlock()
+	}
 	retried, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, newExecutionID, f.draftInput())
-	if err != nil || retried.Status != model.WechatPublicationStatusDrafted || retried.DraftMediaID != "draft-after-transient-preflight" {
+	if err != nil || retried.Status != model.WechatPublicationStatusPublishing || retried.DraftMediaID != "draft-after-transient-preflight" ||
+		retried.PublishID != "publish-after-transient-preflight" {
 		t.Fatalf("retried = %#v err=%v", retried, err)
 	}
 }
 
 func TestAmbiguousDraftAddSchedulesExactBatchRecoveryWithoutResubmission(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newUnavailableFormalPublishFixture(t)
 	enqueuer := &recordingWechatPublicationEnqueuer{}
 	f.svc.SetEnqueuer(enqueuer)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
@@ -1599,7 +1621,8 @@ func TestAmbiguousDraftAddSchedulesExactBatchRecoveryWithoutResubmission(t *test
 		t.Fatal(err)
 	}
 	stored, err := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
-	if err != nil || stored.Status != model.WechatPublicationStatusDrafted || stored.DraftMediaID != "recovered-draft" {
+	if err != nil || stored.Status != model.WechatPublicationStatusAwaitingManual || !stored.ManualPublishRequired ||
+		stored.WechatStatusCode != 48001 || stored.DraftMediaID != "recovered-draft" {
 		t.Fatalf("recovered publication = %#v err=%v", stored, err)
 	}
 	if f.api.addCalls != 1 || f.api.draftListCalls != 2 {
@@ -1608,7 +1631,7 @@ func TestAmbiguousDraftAddSchedulesExactBatchRecoveryWithoutResubmission(t *test
 }
 
 func TestAmbiguousDraftRecoveryReturnsTerminalFailureAfterPermissionRepairAnd72Hours(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addError = errors.New("connection reset after request write")
 
@@ -1663,7 +1686,7 @@ func TestAmbiguousDraftRecoveryReturnsTerminalFailureAfterPermissionRepairAnd72H
 }
 
 func TestPublishUsesSingleCASWinnerAndKeepsStringIdentifiers(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	release := make(chan struct{})
 	entered := make(chan struct{})
@@ -1691,7 +1714,7 @@ func TestPublishUsesSingleCASWinnerAndKeepsStringIdentifiers(t *testing.T) {
 }
 
 func TestFormalPublishRequiresDurableEnqueuerBeforeProviderCalls(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.svc.SetEnqueuer(nil)
 
@@ -1704,7 +1727,7 @@ func TestFormalPublishRequiresDurableEnqueuerBeforeProviderCalls(t *testing.T) {
 }
 
 func TestManualModeAllowsExplicitFormalPublish(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.submitResponse = &appwechat.FreePublishSubmitResponse{PublishID: "manual-publish"}
 
@@ -1718,7 +1741,7 @@ func TestManualModeAllowsExplicitFormalPublish(t *testing.T) {
 }
 
 func TestAPIConfirmedModeAutomaticallyPublishesAfterDraftCreation(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "auto-draft"}
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{
 		TotalCount: 1,
@@ -1740,7 +1763,7 @@ func TestAPIConfirmedModeAutomaticallyPublishesAfterDraftCreation(t *testing.T) 
 }
 
 func TestFreshPublishClaimResetsPreflightReconciliationAttempts(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	lastCheckedAt := f.now.Add(-time.Minute)
 	publication.CheckAttempts = 17
@@ -1761,32 +1784,88 @@ func TestFreshPublishClaimResetsPreflightReconciliationAttempts(t *testing.T) {
 	}
 }
 
-func TestRetryPublishResubmitsUnsupportedFormalPublishAfterPermissionRepair(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+func TestRetryPublishDoesNotResubmitWhenManualPublishIsRequired(t *testing.T) {
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.submitError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
 
-	unsupported, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
-	if err != nil || unsupported.Status != model.WechatPublicationStatusUnsupported {
-		t.Fatalf("first Publish = %#v, %v", unsupported, err)
+	waiting, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+	if err != nil || waiting.Status != model.WechatPublicationStatusAwaitingManual {
+		t.Fatalf("first Publish = %#v, %v", waiting, err)
 	}
 
-	f.api.submitError = nil
-	f.api.submitResponse = &appwechat.FreePublishSubmitResponse{PublishID: "retry-publish"}
 	retried, err := f.svc.RetryPublish(context.Background(), f.userID, f.taskID)
 	if err != nil {
 		t.Fatalf("RetryPublish: %v", err)
 	}
-	if retried.Status != model.WechatPublicationStatusPublishing || retried.PublishID != "retry-publish" {
+	if retried.Status != model.WechatPublicationStatusAwaitingManual || !retried.ManualPublishRequired {
 		t.Fatalf("retried = %#v", retried)
 	}
-	if f.api.submitCalls != 2 {
-		t.Fatalf("submit calls = %d, want 2", f.api.submitCalls)
+	if f.api.submitCalls != 1 {
+		t.Fatalf("submit calls = %d, want 1", f.api.submitCalls)
 	}
 }
 
-func TestPublishPersists48001FromPreflightAsRetryableUnsupported(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+func TestPublishUsesDeniedCapabilityWithoutCallingProvider(t *testing.T) {
+	f := newPublicationFixture(t)
+	f.seedDrafted(t)
+	checkedAt := f.now.Add(-time.Hour)
+	if err := f.repo.WechatCapabilities().Upsert(context.Background(), &model.WechatAccountCapability{
+		ProjectID: f.projectID, Capability: model.WechatCapabilityFreePublishSubmit,
+		Status: model.WechatCapabilityDenied, LastCheckedAt: &checkedAt, LastWechatCode: 48001,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	publication, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publication.Status != model.WechatPublicationStatusAwaitingManual || !publication.ManualPublishRequired {
+		t.Fatalf("publication = %#v", publication)
+	}
+	if f.api.publishedListCalls != 0 || f.api.draftListCalls != 0 || f.api.submitCalls != 0 {
+		t.Fatalf("provider calls: published=%d drafts=%d submit=%d", f.api.publishedListCalls, f.api.draftListCalls, f.api.submitCalls)
+	}
+}
+
+func TestBindManualPublicationCompletesDraftWithoutCallingProvider(t *testing.T) {
+	f := newPublicationFixture(t)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusAwaitingManual
+	publication.ManualPublishRequired = true
+	publication.WechatStatusCode = 48001
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+
+	bound, err := f.svc.BindManualPublication(context.Background(), f.userID, f.taskID, "https://mp.weixin.qq.com/s?mid=1#rd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound.Status != model.WechatPublicationStatusPublished || bound.Source != model.WechatPublicationSourceWechatConsole || bound.ArticleURL != "https://mp.weixin.qq.com/s?mid=1" || bound.ManualPublishRequired {
+		t.Fatalf("bound = %#v", bound)
+	}
+	if f.api.submitCalls != 0 {
+		t.Fatalf("submit calls = %d, want 0", f.api.submitCalls)
+	}
+
+	publication.Status = model.WechatPublicationStatusAwaitingManual
+	publication.ArticleURL = ""
+	publication.PublishedAt = nil
+	publication.ManualPublishRequired = true
+	publication.WechatStatusCode = 48001
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+	bound, err = f.svc.BindManualPublication(context.Background(), f.userID, f.taskID, "")
+	if err != nil || bound.Status != model.WechatPublicationStatusPublished || bound.ArticleURL != "" {
+		t.Fatalf("empty URL manual bind = %#v, %v", bound, err)
+	}
+}
+
+func TestPublishPersists48001FromPreflightAsAwaitingManual(t *testing.T) {
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.publishedListError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
 
@@ -1794,17 +1873,17 @@ func TestPublishPersists48001FromPreflightAsRetryableUnsupported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if publication.Status != model.WechatPublicationStatusUnsupported || publication.WechatStatusCode != 48001 {
+	if publication.Status != model.WechatPublicationStatusAwaitingManual || publication.WechatStatusCode != 48001 || !publication.ManualPublishRequired {
 		t.Fatalf("publication = %#v", publication)
 	}
 	stored, findErr := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
-	if findErr != nil || stored.Status != model.WechatPublicationStatusUnsupported {
+	if findErr != nil || stored.Status != model.WechatPublicationStatusAwaitingManual {
 		t.Fatalf("stored = %#v, %v", stored, findErr)
 	}
 }
 
 func TestDefinitive48001ClearsSubmissionEvidenceForSafeRetry(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.submitError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
 
@@ -1812,7 +1891,7 @@ func TestDefinitive48001ClearsSubmissionEvidenceForSafeRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if publication.Status != model.WechatPublicationStatusUnsupported || publication.SubmitAttemptedAt != nil {
+	if publication.Status != model.WechatPublicationStatusAwaitingManual || publication.SubmitAttemptedAt != nil {
 		t.Fatalf("publication = %#v", publication)
 	}
 	stored, findErr := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
@@ -1822,7 +1901,7 @@ func TestDefinitive48001ClearsSubmissionEvidenceForSafeRetry(t *testing.T) {
 }
 
 func TestDefinitiveSubmitRejectionClearsEvidenceAndCanRetry(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.submitError = &appwechat.WechatAPIError{ErrCode: 40007, UserMsg: "invalid media id", Retryable: false}
 
@@ -1847,7 +1926,7 @@ func TestDefinitiveSubmitRejectionClearsEvidenceAndCanRetry(t *testing.T) {
 }
 
 func TestRetryPublishWithSubmissionEvidenceOnlyResumesObservation(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	attemptedAt := f.now.Add(-time.Minute)
 	publication.Status = model.WechatPublicationStatusUnsupported
@@ -1877,7 +1956,7 @@ func TestRetryPublishWithSubmissionEvidenceOnlyResumesObservation(t *testing.T) 
 }
 
 func TestPublishDoesNotResubmitADraftWithSubmissionEvidence(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	attemptedAt := f.now.Add(-time.Minute)
 	publication.SubmitAttemptedAt = &attemptedAt
@@ -1898,7 +1977,7 @@ func TestPublishDoesNotResubmitADraftWithSubmissionEvidence(t *testing.T) {
 }
 
 func TestAutomaticDraftCreationPreservesDraftSuccessWhenFormalPublishIsTemporarilyUnavailable(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	enqueuer := &recordingWechatPublicationEnqueuer{}
 	f.svc.SetEnqueuer(enqueuer)
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "durable-draft"}
@@ -1922,7 +2001,7 @@ func TestAutomaticDraftCreationPreservesDraftSuccessWhenFormalPublishIsTemporari
 }
 
 func TestAutomaticDraftCreationDoesNotPersistProviderURLSecrets(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "safe-draft"}
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{
 		TotalCount: 1,
@@ -1945,7 +2024,7 @@ func TestAutomaticDraftCreationDoesNotPersistProviderURLSecrets(t *testing.T) {
 }
 
 func TestRetryPublishRejectsUnsupportedStatesWithoutProviderErrorCode(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	publication.Status = model.WechatPublicationStatusUnsupported
 	publication.WechatStatusCode = 0
@@ -1962,7 +2041,7 @@ func TestRetryPublishRejectsUnsupportedStatesWithoutProviderErrorCode(t *testing
 }
 
 func TestRetryPublishRequiresDurableEnqueuerBeforeStateChange(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	publication.Status = model.WechatPublicationStatusUnsupported
 	publication.WechatStatusCode = 48001
@@ -1988,7 +2067,7 @@ func TestRetryPublishRequiresDurableEnqueuerBeforeStateChange(t *testing.T) {
 }
 
 func TestAutomaticReconciliationSubmitsAStillDraftedArticle(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.submitResponse = &appwechat.FreePublishSubmitResponse{PublishID: "reconciled-auto-publish"}
 
@@ -2005,7 +2084,7 @@ func TestAutomaticReconciliationSubmitsAStillDraftedArticle(t *testing.T) {
 }
 
 func TestAutomaticReconciliationStopsOnDefinitiveProviderErrorAndCanRetry(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.publishedListError = &appwechat.WechatAPIError{ErrCode: 40164, UserMsg: "request rejected", Retryable: false}
 
@@ -2032,7 +2111,7 @@ func TestAutomaticReconciliationStopsOnDefinitiveProviderErrorAndCanRetry(t *tes
 }
 
 func TestTransientReconciliationFailureAdvancesCadenceAndStopsAtDeadline(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	enqueuer := &recordingWechatPublicationEnqueuer{}
 	f.svc.SetEnqueuer(enqueuer)
@@ -2064,8 +2143,8 @@ func TestTransientReconciliationFailureAdvancesCadenceAndStopsAtDeadline(t *test
 	}
 }
 
-func TestManualDraftRemainsPublishableWhenBackgroundReconciliationExpires(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+func TestCachedDeniedFormalPublishCapabilityBypassesBackgroundReconciliation(t *testing.T) {
+	f := newUnavailableFormalPublishFixture(t)
 	publication := f.seedDrafted(t)
 	oldDraftCreatedAt := f.now.Add(-73 * time.Hour)
 	publication.DraftCreatedAt = &oldDraftCreatedAt
@@ -2082,13 +2161,17 @@ func TestManualDraftRemainsPublishableWhenBackgroundReconciliationExpires(t *tes
 		t.Fatalf("reconcile: %v", err)
 	}
 	stored, err := f.repo.WechatPublications().FindByID(context.Background(), publication.ID)
-	if err != nil || stored.Status != model.WechatPublicationStatusDrafted || stored.NextCheckAt != nil {
+	if err != nil || stored.Status != model.WechatPublicationStatusAwaitingManual || !stored.ManualPublishRequired ||
+		stored.WechatStatusCode != 48001 || stored.NextCheckAt != nil {
 		t.Fatalf("stored = %#v err=%v", stored, err)
+	}
+	if f.api.publishedListCalls != 0 {
+		t.Fatalf("published-list calls = %d, want 0 for cached denied capability", f.api.publishedListCalls)
 	}
 }
 
 func TestManualDraftAndImmediateReconciliationDoNotRequireEnqueuer(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	f.svc.SetEnqueuer(nil)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "manual-draft"}
@@ -2104,7 +2187,7 @@ func TestManualDraftAndImmediateReconciliationDoNotRequireEnqueuer(t *testing.T)
 }
 
 func TestPublishResponseLossSchedulesReconciliationWithoutResubmitting(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 
 	got, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
@@ -2123,7 +2206,7 @@ func TestPublishResponseLossSchedulesReconciliationWithoutResubmitting(t *testin
 }
 
 func TestAmbiguousAPIPublishSelectionPreservesResponseIdentity(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	f.api.submitResponse = &appwechat.FreePublishSubmitResponse{MsgDataID: "msg-data-from-submit"}
 
@@ -2162,7 +2245,7 @@ func TestAmbiguousAPIPublishSelectionPreservesResponseIdentity(t *testing.T) {
 }
 
 func TestPublishTransportAmbiguityPersistsPendingBeforeReturning(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.submitError = errors.New("connection reset after submit")
 
@@ -2177,7 +2260,7 @@ func TestPublishTransportAmbiguityPersistsPendingBeforeReturning(t *testing.T) {
 }
 
 func TestAmbiguousSubmitOnOldDraftUsesFreshSubmissionDeadline(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	oldDraftCreatedAt := f.now.Add(-96 * time.Hour)
 	publication.DraftCreatedAt = &oldDraftCreatedAt
@@ -2198,7 +2281,7 @@ func TestAmbiguousSubmitOnOldDraftUsesFreshSubmissionDeadline(t *testing.T) {
 
 func TestFormalReconciliationUsesSubmissionDeadline(t *testing.T) {
 	t.Run("recent submission on old draft keeps retrying transient list errors", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		publication := f.seedDrafted(t)
 		oldDraftCreatedAt := f.now.Add(-96 * time.Hour)
 		recentSubmission := f.now.Add(-time.Hour)
@@ -2225,7 +2308,7 @@ func TestFormalReconciliationUsesSubmissionDeadline(t *testing.T) {
 	})
 
 	t.Run("successful empty list becomes terminal after submission deadline", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		publication := f.seedDrafted(t)
 		oldDraftCreatedAt := f.now.Add(-96 * time.Hour)
 		oldSubmission := f.now.Add(-73 * time.Hour)
@@ -2251,7 +2334,7 @@ func TestFormalReconciliationUsesSubmissionDeadline(t *testing.T) {
 }
 
 func TestAmbiguousTransportSubmitReconcilesAsAnbanAPI(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	f.api.submitError = errors.New("connection reset after submit")
 
@@ -2281,7 +2364,7 @@ func TestAmbiguousTransportSubmitReconcilesAsAnbanAPI(t *testing.T) {
 }
 
 func TestPublishDoesNotSubmitWhenAttemptEvidenceCannotPersist(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	persistErr := errors.New("persist submit attempt failed")
 	f.overridePublications(failingWechatPublicationRepository{
@@ -2300,7 +2383,7 @@ func TestPublishDoesNotSubmitWhenAttemptEvidenceCannotPersist(t *testing.T) {
 func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) {
 	persistErr := errors.New("publication persistence failed")
 	t.Run("ambiguous submit", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		f.seedDrafted(t)
 		f.api.submitError = errors.New("connection reset")
 		f.overridePublications(failingWechatPublicationRepository{WechatPublicationRepository: f.repo.WechatPublications(), updateClaimedErr: persistErr})
@@ -2310,7 +2393,7 @@ func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) 
 	})
 
 	t.Run("poll failure", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		p := f.seedDrafted(t)
 		p.Status, p.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
 		if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
@@ -2324,7 +2407,7 @@ func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) 
 	})
 
 	t.Run("unsupported reconcile", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeManual)
+		f := newPublicationFixture(t)
 		f.seedDrafted(t)
 		f.api.publishedListError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "unsupported"}
 		f.overridePublications(failingWechatPublicationRepository{WechatPublicationRepository: f.repo.WechatPublications(), updateErr: persistErr})
@@ -2334,7 +2417,7 @@ func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) 
 	})
 
 	t.Run("binding lookup", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeManual)
+		f := newPublicationFixture(t)
 		p := f.seedDrafted(t)
 		f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
 			ArticleID: "candidate", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: p.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/candidate"}}},
@@ -2347,7 +2430,7 @@ func TestPublicationResponseLossPathsPropagatePersistenceFailures(t *testing.T) 
 }
 
 func TestPublishPreflightFindsPublishedArticleAcrossPagesBeforeSubmit(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	f.api.publishedListResponses = map[int64]*appwechat.FreePublishBatchGetResponse{
 		0: {TotalCount: 2, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
@@ -2371,7 +2454,7 @@ func TestPublishPreflightFindsPublishedArticleAcrossPagesBeforeSubmit(t *testing
 }
 
 func TestPublishPreflightPersistsPendingWhenDraftDisappeared(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{MediaID: "different", UpdateTime: f.now.Unix()}}}
@@ -2386,7 +2469,7 @@ func TestPublishPreflightPersistsPendingWhenDraftDisappeared(t *testing.T) {
 }
 
 func TestMissingDraftPreflightReconcilesAsWechatConsole(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{MediaID: "different", UpdateTime: f.now.Unix()}}}
@@ -2413,7 +2496,7 @@ func TestMissingDraftPreflightReconcilesAsWechatConsole(t *testing.T) {
 }
 
 func TestPublishPreflightCandidateDoesNotRegressConcurrentBinding(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
 		ArticleID: "stale-candidate", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
@@ -2445,7 +2528,7 @@ func TestPublishPreflightCandidateDoesNotRegressConcurrentBinding(t *testing.T) 
 }
 
 func TestPublishPreflightMissingDraftDoesNotRegressConcurrentBinding(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	f.seedDrafted(t)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.DraftBatchItem{{MediaID: "different", UpdateTime: f.now.Unix()}}}
@@ -2494,7 +2577,7 @@ func assertConcurrentPreflightWinner(t *testing.T, f *publicationFixture, got *m
 
 func TestPollPublishMapsStatusesAndDurableSchedule(t *testing.T) {
 	t.Run("publishing schedule", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		enqueuer := &recordingWechatPublicationEnqueuer{}
 		f.svc.SetEnqueuer(enqueuer)
 		p := f.seedDrafted(t)
@@ -2517,7 +2600,7 @@ func TestPollPublishMapsStatusesAndDurableSchedule(t *testing.T) {
 	})
 
 	t.Run("empty response remains durably scheduled", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		p := f.seedDrafted(t)
 		p.Status, p.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
 		if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
@@ -2541,7 +2624,7 @@ func TestPollPublishMapsStatusesAndDurableSchedule(t *testing.T) {
 		{"user deleted", 5, "publish_failed"}, {"system banned", 6, "publish_failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			f := newPublicationFixture(t)
 			p := f.seedDrafted(t)
 			p.Status, p.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
 			if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
@@ -2557,7 +2640,7 @@ func TestPollPublishMapsStatusesAndDurableSchedule(t *testing.T) {
 }
 
 func TestPollFallsBackToPublishedListReconciliationAfterTwoHours(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	enqueuer := &recordingWechatPublicationEnqueuer{}
 	f.svc.SetEnqueuer(enqueuer)
 	p := f.seedDrafted(t)
@@ -2580,7 +2663,7 @@ func TestPollFallsBackToPublishedListReconciliationAfterTwoHours(t *testing.T) {
 }
 
 func TestProcessPollDoesNotRetryAnOutcomeAlreadyDurablyScheduled(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	p.Status, p.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
 	if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
@@ -2598,7 +2681,7 @@ func TestProcessPollDoesNotRetryAnOutcomeAlreadyDurablyScheduled(t *testing.T) {
 }
 
 func TestWechatPublicationRecoverDueDispatchesDatabaseBackedWork(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	enqueuer := &recordingWechatPublicationEnqueuer{}
 	f.svc.SetEnqueuer(enqueuer)
 
@@ -2645,7 +2728,7 @@ func TestWechatPublicationRecoverDueDispatchesDatabaseBackedWork(t *testing.T) {
 }
 
 func TestWechatPublicationRecoverDueReleasesDispatchLeaseAfterEnqueueFailure(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	enqueuer := &recordingWechatPublicationEnqueuer{err: errors.New("redis unavailable")}
 	f.svc.SetEnqueuer(enqueuer)
 
@@ -2692,7 +2775,7 @@ func TestPollReconciliationOutcomesDoNotOverwriteConcurrentBinding(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			f := newPublicationFixture(t)
 			publication := f.seedDrafted(t)
 			publication.Status, publication.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
 			if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
@@ -2756,7 +2839,7 @@ func TestPollCASLossReturnsConcurrentPublishedWinner(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			f := newPublicationFixture(t)
 			publication := f.seedDrafted(t)
 			publication.Status, publication.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
 			if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
@@ -2805,7 +2888,7 @@ func TestPollCASLossReturnsPublicErrorForDurableNonSuccessState(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			f := newPublicationFixture(t)
 			publication := f.seedDrafted(t)
 			publication.Status, publication.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
 			if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
@@ -2846,7 +2929,7 @@ func TestPollCASLossReturnsPublicErrorForDurableNonSuccessState(t *testing.T) {
 }
 
 func TestPollSuccessBindsPublicationAndCreatesTracking(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	enqueuer := &recordingWechatPublicationEnqueuer{}
 	f.svc.SetEnqueuer(enqueuer)
 	p := f.seedDrafted(t)
@@ -2886,7 +2969,7 @@ func TestPollSuccessRequiresAuthoritativeBatchTimestamp(t *testing.T) {
 	providerPublishedAt := time.Date(2026, 8, 31, 15, 55, 0, 0, time.UTC)
 
 	t.Run("uses provider update time across Shanghai midnight", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		f.now = time.Date(2026, 8, 31, 16, 5, 0, 0, time.UTC)
 		p := f.seedDrafted(t)
 		p.Status, p.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
@@ -2915,7 +2998,7 @@ func TestPollSuccessRequiresAuthoritativeBatchTimestamp(t *testing.T) {
 	})
 
 	t.Run("remains pending until article is visible in batch list", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		p := f.seedDrafted(t)
 		p.Status, p.PublishID = model.WechatPublicationStatusPublishing, "publish-1"
 		if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
@@ -2952,16 +3035,16 @@ func TestPublishedArticlesRejectsMissingUpdateTime(t *testing.T) {
 
 func TestPublishUnsupportedAndMissingDraftNeverBlindSubmit(t *testing.T) {
 	t.Run("48001", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		f.seedDrafted(t)
 		f.api.submitError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "unauthorized"}
 		got, err := f.svc.Publish(context.Background(), f.userID, f.taskID)
-		if err != nil || got.Status != model.WechatPublicationStatusUnsupported || got.WechatStatusCode != 48001 {
+		if err != nil || got.Status != model.WechatPublicationStatusAwaitingManual || got.WechatStatusCode != 48001 {
 			t.Fatalf("Publish = %#v, %v", got, err)
 		}
 	})
 	t.Run("missing draft", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+		f := newPublicationFixture(t)
 		created := f.now.Add(-time.Hour)
 		p := &model.WechatPublication{ID: uuid.NewString(), TaskID: f.taskID, UserID: f.userID, ProjectID: f.projectID, DraftTitle: "Durable lifecycle", DraftContentFingerprint: WechatContentFingerprint("<p>body</p>"), Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted, DraftCreatedAt: &created}
 		if err := f.repo.WechatPublications().Create(context.Background(), p); err != nil {
@@ -2976,7 +3059,7 @@ func TestPublishUnsupportedAndMissingDraftNeverBlindSubmit(t *testing.T) {
 }
 
 func TestDisappearedManualDraftBecomesTerminalAfterReconciliationDeadline(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
 
@@ -3000,7 +3083,7 @@ func TestDisappearedManualDraftBecomesTerminalAfterReconciliationDeadline(t *tes
 
 func TestExpiredPublishPreflightBecomesTerminalImmediately(t *testing.T) {
 	t.Run("missing draft", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeManual)
+		f := newPublicationFixture(t)
 		publication := f.seedDrafted(t)
 		oldDraftCreatedAt := f.now.Add(-73 * time.Hour)
 		publication.DraftCreatedAt = &oldDraftCreatedAt
@@ -3016,7 +3099,7 @@ func TestExpiredPublishPreflightBecomesTerminalImmediately(t *testing.T) {
 	})
 
 	t.Run("existing submission evidence", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeManual)
+		f := newPublicationFixture(t)
 		publication := f.seedDrafted(t)
 		oldSubmission := f.now.Add(-73 * time.Hour)
 		publication.SubmitAttemptedAt = &oldSubmission
@@ -3035,7 +3118,7 @@ func TestExpiredPublishPreflightBecomesTerminalImmediately(t *testing.T) {
 }
 
 func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	first := f.seedDrafted(t)
 	secondTaskID := uuid.NewString()
 	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
@@ -3068,7 +3151,7 @@ func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testin
 }
 
 func TestManualReconcileEvaluatesExactUniquenessAcrossAllPages(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	item := func(id string) appwechat.FreePublishBatchItem {
 		return appwechat.FreePublishBatchItem{ArticleID: id, UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: p.DraftTitle, Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/" + id}}}}
@@ -3088,7 +3171,7 @@ func TestManualReconcileEvaluatesExactUniquenessAcrossAllPages(t *testing.T) {
 }
 
 func TestEvidencedSelectionReturnsToSubmittingAndExpiresWithoutResubmit(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
 	f.api.submitError = errors.New("connection reset after publish request")
@@ -3150,7 +3233,7 @@ func TestEvidencedSelectionReturnsToSubmittingAndExpiresWithoutResubmit(t *testi
 }
 
 func TestReconcilePreservesAPIOriginAndCompositeMsgID(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	p.Status, p.Source, p.MsgDataID = model.WechatPublicationStatusPublishSubmitting, model.WechatPublicationSourceAnbanAPI, "msg-data-1"
 	if err := f.repo.WechatPublications().Update(context.Background(), p); err != nil {
@@ -3170,7 +3253,7 @@ func TestReconcilePreservesAPIOriginAndCompositeMsgID(t *testing.T) {
 }
 
 func TestPollRecoversStalePublishSubmittingWithoutResubmit(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	p.Status = model.WechatPublicationStatusPublishSubmitting
 	p.NextCheckAt = nextWechatManualCheck(f.now, *p.DraftCreatedAt)
@@ -3187,100 +3270,31 @@ func TestPollRecoversStalePublishSubmittingWithoutResubmit(t *testing.T) {
 	}
 }
 
-func TestManualReconcileRateLimitAndSchedule(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
-	p := f.seedDrafted(t)
+func TestReconcileUsesDeniedCapabilityWithoutSubmittingAgain(t *testing.T) {
+	f := newPublicationFixture(t)
+	f.seedDrafted(t)
+	f.svc.recordCapability(context.Background(), f.projectID, model.WechatCapabilityFreePublishSubmit, model.WechatCapabilityDenied, 48001)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
 	if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := f.repo.WechatPublications().FindByTaskID(context.Background(), f.taskID)
-	if got.NextCheckAt == nil || !got.NextCheckAt.Equal(f.now.Add(10*time.Minute)) {
-		t.Fatalf("next check = %v", got.NextCheckAt)
+	if got.Status != model.WechatPublicationStatusAwaitingManual || got.NextCheckAt != nil {
+		t.Fatalf("publication after denied capability = %#v", got)
 	}
-	if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); !errors.Is(err, ErrWechatPublicationRateLimited) {
-		t.Fatalf("second reconcile err=%v", err)
+	if f.api.publishedListCalls != 0 || f.api.submitCalls != 0 {
+		t.Fatalf("provider calls list=%d submit=%d", f.api.publishedListCalls, f.api.submitCalls)
 	}
-	if f.api.publishedListCalls != 1 {
-		t.Fatalf("rate-limited provider calls=%d", f.api.publishedListCalls)
-	}
-	_ = p
 }
 
-func TestDisabledProjectReconcilesOnlyRowsWithSubmissionEvidence(t *testing.T) {
-	t.Run("scheduled project reconciliation", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
-		evidenced := f.seedDrafted(t)
-		evidenced.Status = model.WechatPublicationStatusPublishSubmitting
-		evidenced.SubmitAttemptedAt = &f.now
-		due := f.now.Add(-time.Minute)
-		evidenced.NextCheckAt = &due
-		if err := f.repo.WechatPublications().Update(context.Background(), evidenced); err != nil {
-			t.Fatal(err)
-		}
-
-		ordinaryTaskID := uuid.NewString()
-		if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: ordinaryTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
-			t.Fatal(err)
-		}
-		ordinary := &model.WechatPublication{ID: uuid.NewString(), TaskID: ordinaryTaskID, UserID: f.userID, ProjectID: f.projectID, DraftMediaID: "ordinary-draft", Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafted, DraftCreatedAt: &due, NextCheckAt: &due}
-		if err := f.repo.WechatPublications().Create(context.Background(), ordinary); err != nil {
-			t.Fatal(err)
-		}
-		project, err := f.repo.Projects().FindByID(context.Background(), f.projectID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		project.Config.WechatPublishMode = model.WechatPublishModeDisabled
-		if err := f.repo.Projects().Update(context.Background(), project); err != nil {
-			t.Fatal(err)
-		}
-		f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{TotalCount: 1, ItemCount: 1, Items: []appwechat.FreePublishBatchItem{{
-			ArticleID: "disabled-recovered", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/disabled-recovered"}}},
-		}}}
-
-		if err := f.svc.ReconcileProject(context.Background(), f.projectID); err != nil {
-			t.Fatal(err)
-		}
-		gotEvidence, _ := f.repo.WechatPublications().FindByID(context.Background(), evidenced.ID)
-		gotOrdinary, _ := f.repo.WechatPublications().FindByID(context.Background(), ordinary.ID)
-		if gotEvidence.Status != model.WechatPublicationStatusPublished || gotEvidence.ArticleID != "disabled-recovered" {
-			t.Fatalf("evidenced row was not finalized: %#v", gotEvidence)
-		}
-		if gotOrdinary.Status != model.WechatPublicationStatusDrafted || gotOrdinary.NextCheckAt != nil {
-			t.Fatalf("ordinary disabled row kept recovery work: %#v", gotOrdinary)
-		}
-		if f.api.publishedListCalls != 1 {
-			t.Fatalf("published list calls = %d, want one batched reconciliation", f.api.publishedListCalls)
-		}
-	})
-
-	t.Run("immediate reconciliation", func(t *testing.T) {
-		f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
-		publication := f.seedDrafted(t)
-		publication.Status, publication.PublishID = model.WechatPublicationStatusPublishSubmitting, "publish-1"
-		if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
-			t.Fatal(err)
-		}
-		project, _ := f.repo.Projects().FindByID(context.Background(), f.projectID)
-		project.Config.WechatPublishMode = model.WechatPublishModeDisabled
-		if err := f.repo.Projects().Update(context.Background(), project); err != nil {
-			t.Fatal(err)
-		}
-		f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
-
-		if err := f.svc.Reconcile(context.Background(), f.userID, f.taskID); err != nil {
-			t.Fatalf("evidenced disabled reconciliation: %v", err)
-		}
-		if f.api.publishedListCalls != 1 {
-			t.Fatalf("published list calls = %d, want 1", f.api.publishedListCalls)
-		}
-	})
-}
-
-func TestManualReconcileRateLimitIsAtomicAcrossConcurrentRequests(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
-	f.seedDrafted(t)
+func TestReconcileRateLimitIsAtomicAcrossConcurrentRequests(t *testing.T) {
+	f := newPublicationFixture(t)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusAmbiguous
+	publication.SubmitAttemptedAt = &f.now
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{}
 	entered, release := make(chan struct{}), make(chan struct{})
 	f.api.onPublishedList = func(call int) {
@@ -3307,7 +3321,7 @@ func TestManualReconcileRateLimitIsAtomicAcrossConcurrentRequests(t *testing.T) 
 }
 
 func TestReconcileDoesNotOverwriteConcurrentPublishClaim(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+	f := newPublicationFixture(t)
 	drafted := f.seedDrafted(t)
 	findEntered, releaseFind := make(chan struct{}), make(chan struct{})
 	publications := &pausingFindPendingWechatPublicationRepository{
@@ -3452,7 +3466,7 @@ func TestReconciliationOutcomesRequireLoadedPublicationVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newPublicationFixture(t, model.WechatPublishModeAPIConfirmed)
+			f := newPublicationFixture(t)
 			publication := f.seedDrafted(t)
 			f.api.publishedListResponse = tt.response(f, publication)
 			f.api.publishedListError = tt.listError
@@ -3497,7 +3511,7 @@ func TestReconciliationOutcomesRequireLoadedPublicationVersion(t *testing.T) {
 }
 
 func TestManualReconcileRequiresOneUniqueArticleAcrossAllExactSignals(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{Items: []appwechat.FreePublishBatchItem{
 		{ArticleID: "body-match", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{Title: "Different", Digest: "Different", ThumbMediaID: "different", Content: `<section class="body"><p>Hello <strong>world</strong></p></section>`, URL: "https://mp.weixin.qq.com/s/body-match"}}}},
@@ -3514,7 +3528,7 @@ func TestManualReconcileRequiresOneUniqueArticleAcrossAllExactSignals(t *testing
 }
 
 func TestManualReconcileDoesNotBindArticleWithoutProviderURL(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	f.api.publishedListResponse = &appwechat.FreePublishBatchGetResponse{Items: []appwechat.FreePublishBatchItem{{
 		ArticleID: "missing-url", UpdateTime: f.now.Unix(), Content: appwechat.FreePublishContent{NewsItems: []appwechat.DraftArticle{{
@@ -3531,7 +3545,7 @@ func TestManualReconcileDoesNotBindArticleWithoutProviderURL(t *testing.T) {
 }
 
 func TestSelectRefetchesProviderAndRejectsForeignOrBoundArticle(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	p.Status = model.WechatPublicationStatusNeedsSelection
 	setPublicationCandidates(t, p, "owned")
@@ -3553,7 +3567,7 @@ func TestSelectRefetchesProviderAndRejectsForeignOrBoundArticle(t *testing.T) {
 }
 
 func TestSelectRejectsAccountArticleOutsideStoredCandidateSet(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	p.Status = model.WechatPublicationStatusNeedsSelection
 	p.Candidates = datatypes.JSON(`[{"article_id":"allowed","title":"Allowed"}]`)
@@ -3575,7 +3589,7 @@ func TestSelectRejectsAccountArticleOutsideStoredCandidateSet(t *testing.T) {
 }
 
 func TestSelectScansPublishedPagesUntilArticleIDFound(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	p := f.seedDrafted(t)
 	p.Status = model.WechatPublicationStatusNeedsSelection
 	setPublicationCandidates(t, p, "selected")
@@ -3594,7 +3608,7 @@ func TestSelectScansPublishedPagesUntilArticleIDFound(t *testing.T) {
 }
 
 func TestOverlappingSelectionOfSamePublicationIsIdempotent(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)
 	publication.Status = model.WechatPublicationStatusNeedsSelection
 	setPublicationCandidates(t, publication, "same-selection")
@@ -3629,7 +3643,7 @@ func TestOverlappingSelectionOfSamePublicationIsIdempotent(t *testing.T) {
 }
 
 func TestConcurrentSelectionHasOneAtomicArticleBindingWinner(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeManual)
+	f := newPublicationFixture(t)
 	first := f.seedDrafted(t)
 	first.Status = model.WechatPublicationStatusNeedsSelection
 	setPublicationCandidates(t, first, "one-owner")
@@ -3678,17 +3692,6 @@ func TestConcurrentSelectionHasOneAtomicArticleBindingWinner(t *testing.T) {
 	var bindings int64
 	if err := f.db.Model(&model.WechatPublicationBinding{}).Where("project_id = ? AND article_id = ?", f.projectID, "one-owner").Count(&bindings).Error; err != nil || bindings != 1 {
 		t.Fatalf("bindings=%d err=%v", bindings, err)
-	}
-}
-
-func TestWechatPublicationOwnershipAndDisabledStateConflicts(t *testing.T) {
-	f := newPublicationFixture(t, model.WechatPublishModeDisabled)
-	f.seedDrafted(t)
-	if _, err := f.svc.Get(context.Background(), uuid.NewString(), f.taskID); !errors.Is(err, ErrWechatPublicationForbidden) {
-		t.Fatalf("Get foreign err=%v", err)
-	}
-	if _, err := f.svc.Publish(context.Background(), f.userID, f.taskID); !errors.Is(err, ErrWechatPublicationModeConflict) {
-		t.Fatalf("disabled publish err=%v", err)
 	}
 }
 

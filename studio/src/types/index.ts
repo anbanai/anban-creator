@@ -18,7 +18,6 @@ export type {
 export type {
   ProjectPlatform,
   ProjectStatus,
-  WechatPublishMode,
   ProjectConfig,
   Project,
   ProjectStats,
@@ -37,6 +36,8 @@ export type {
   ReferenceImageSelection,
   ReferenceImageValue,
 } from './asset'
+export type { ImageAnalysis, ImageAnalysisKind, ImageAnalysisStatus } from './image-analysis'
+export { isImageAnalysisActive, isImageAnalysisUpdateOlder } from './image-analysis'
 
 // Plan
 export type {
@@ -94,6 +95,14 @@ export type {
   WechatPublicationCandidate,
   WechatPublication,
 } from './wechat-publication'
+export type {
+  WechatAnalyticsImportBatch,
+  WechatAnalyticsImportRow,
+  WechatAnalyticsImportSummary,
+  WechatAnalyticsArticleView,
+  WechatAnalyticsSnapshot,
+  WechatAnalyticsOverview,
+} from './wechat-analytics-import'
 
 export type {
   ChannelsAnalytics,

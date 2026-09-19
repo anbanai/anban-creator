@@ -163,6 +163,35 @@ func TestWechatTrackingCaptureMatchesExactAPICompositeMsgIDAndMapsAllMetrics(t *
 	}
 }
 
+func TestWechatAnalyticsWorkbenchIncludesOfficialSnapshots(t *testing.T) {
+	published := time.Date(2026, 8, 1, 9, 30, 0, 0, wechatAnalyticsLocation)
+	f := newWechatTrackingFixture(t, model.WechatPublicationSourceAnbanAPI, "msg-data-1", "msg-data-1_1", "https://mp.weixin.qq.com/s/api", published)
+	f.provider.response = &appwechat.ArticleTotalDetailResponse{List: []appwechat.ArticleTotalDetailItem{{
+		MsgID: "msg-data-1_1",
+		DetailList: []appwechat.ArticleTotalDetailMetric{{
+			StatDate: "2026-08-02", ReadUser: 42, ShareUser: 7, ReadFinishRate: 0.625, ReadSubscribeUser: 3,
+		}},
+	}}}
+	if err := f.svc.CaptureMetrics(context.Background(), f.tracking.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	workbench := NewWechatAnalyticsImportService(f.repo, nil)
+	articles, err := workbench.ListArticles(context.Background(), f.userID, f.projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(articles) != 1 || articles[0].Latest == nil {
+		t.Fatalf("workbench articles = %#v", articles)
+	}
+	latest := articles[0].Latest
+	if latest.Source != "wechat_official_api" || latest.ReadUsers == nil || *latest.ReadUsers != 42 ||
+		latest.ShareUsers == nil || *latest.ShareUsers != 7 || latest.ReadToFollowUsers == nil || *latest.ReadToFollowUsers != 3 ||
+		latest.ReadCompletionRate == nil || *latest.ReadCompletionRate != 0.625 {
+		t.Fatalf("official workbench snapshot = %#v", latest)
+	}
+}
+
 func TestWechatTrackingCaptureMatchesManualPublicationByExactContentURLAndPersistsMsgID(t *testing.T) {
 	published := time.Date(2026, 8, 4, 10, 0, 0, 0, wechatAnalyticsLocation)
 	articleURL := "https://mp.weixin.qq.com/s/manual?mid=1&idx=1"

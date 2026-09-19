@@ -8,9 +8,8 @@ import (
 
 // ProjectConfig holds platform-specific configuration stored as JSON.
 type ProjectConfig struct {
-	WechatAppID       string `json:"wechat_app_id,omitempty"`
-	WechatSecret      string `json:"wechat_secret,omitempty"`
-	WechatPublishMode string `json:"wechat_publish_mode,omitempty"`
+	WechatAppID  string `json:"wechat_app_id,omitempty"`
+	WechatSecret string `json:"wechat_secret,omitempty"`
 }
 
 // EcommerceProjectDefaults holds the reusable e-commerce defaults for a project
@@ -57,7 +56,10 @@ type Project struct {
 	// fields as clears. It is never persisted or serialized.
 	InstructionsSet bool `gorm:"-" json:"-"`
 	// VisualStyle is the 图片视觉 (image visual style, free text) dimension.
-	VisualStyle string `gorm:"column:style;type:text" json:"visual_style"`
+	VisualStyle       string             `gorm:"column:style;type:text" json:"visual_style"`
+	VisualStyleSource string             `gorm:"type:varchar(20);default:''" json:"visual_style_source"`
+	VisualStyleSet    bool               `gorm:"-" json:"-"`
+	ImageAnalysis     *ImageAnalysisView `gorm:"-" json:"image_analysis,omitempty"`
 	// Writer is the 写作者 YAML resource key (e.g. "dan-koe") for server/app/writer
 	// styled-writing pipeline. Orthogonal to VisualStyle/Theme.
 	Writer string `gorm:"type:varchar(100);default:''" json:"writer"`
@@ -98,13 +100,4 @@ func (p *Project) GetWechatAppID() string {
 // GetWechatSecret returns the WeChat Secret from config.
 func (p *Project) GetWechatSecret() string {
 	return p.Config.WechatSecret
-}
-
-// GetWechatPublishMode returns the selected lifecycle behavior. An omitted
-// value is manual so newly created and zero-value projects never auto-publish.
-func (p *Project) GetWechatPublishMode() string {
-	if p == nil || p.Config.WechatPublishMode == "" {
-		return WechatPublishModeManual
-	}
-	return p.Config.WechatPublishMode
 }

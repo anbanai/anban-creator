@@ -69,25 +69,23 @@ type failingProjectPlanCountRepository struct {
 	err error
 }
 
-func (r failingProjectPlanCountRepository) CountByUserID(context.Context, string, string) (int64, error) {
-	return 0, r.err
-}
-
-type rejectingProjectCASRepository struct {
+type unlockedProjectReadRejectingRepository struct {
 	repository.ProjectRepository
 }
 
-func (r rejectingProjectCASRepository) UpdateIfReferenceImageAssetID(context.Context, *model.Project, string) (bool, error) {
-	return false, nil
+func (r unlockedProjectReadRejectingRepository) FindByID(context.Context, string) (*model.Project, error) {
+	return nil, errors.New("unlocked project read is forbidden during update")
 }
 
-type projectCASRepositoryOverride struct {
+type projectRepositoryOverride struct {
 	repository.Repository
 	projects repository.ProjectRepository
 }
 
-func (r projectCASRepositoryOverride) Projects() repository.ProjectRepository {
-	return r.projects
+func (r projectRepositoryOverride) Projects() repository.ProjectRepository { return r.projects }
+
+func (r failingProjectPlanCountRepository) CountByUserID(context.Context, string, string) (int64, error) {
+	return 0, r.err
 }
 
 func (f *projectMemoryLifecycleFake) DeleteProject(_ context.Context, projectID string) error {
@@ -490,7 +488,7 @@ func TestProjectUpdateReferenceImageAssetIDOnlyWhenExplicitlySet(t *testing.T) {
 	project := &model.Project{
 		ID: uuid.NewString(), UserID: userID, Name: "brand", Platform: model.PlatformArticle,
 		ReferenceImageAssetID: "asset-old", Status: model.ProjectStatusActive,
-		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
+		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
@@ -523,16 +521,12 @@ func TestProjectUpdateReferenceImageAssetIDOnlyWhenExplicitlySet(t *testing.T) {
 
 func TestProjectServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWriting(t *testing.T) {
 	base := repository.New(setupTaskTestDB(t))
-	repo := projectCASRepositoryOverride{
-		Repository: base,
-		projects:   rejectingProjectCASRepository{ProjectRepository: base.Projects()},
-	}
 	logger := zerolog.New(io.Discard)
-	svc := NewProjectService(repo, &logger)
+	svc := NewProjectService(base, &logger)
 	project := &model.Project{
 		ID: uuid.NewString(), UserID: "user-1", Name: "before", Platform: model.PlatformArticle,
-		ReferenceImageAssetID: "asset-a", Status: model.ProjectStatusActive,
-		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
+		ReferenceImageAssetID: "asset-b", Status: model.ProjectStatusActive,
+		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}
 	if err := base.Projects().Create(t.Context(), project); err != nil {
 		t.Fatal(err)
@@ -546,7 +540,32 @@ func TestProjectServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWritin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.Name != "before" || persisted.ReferenceImageAssetID != "asset-a" {
+	if persisted.Name != "before" || persisted.ReferenceImageAssetID != "asset-b" {
 		t.Fatalf("conflicting update modified project: name=%q reference=%q", persisted.Name, persisted.ReferenceImageAssetID)
+	}
+}
+
+func TestProjectServiceUpdateMergesAfterTransactionalLock(t *testing.T) {
+	base := repository.New(setupTaskTestDB(t))
+	repo := projectRepositoryOverride{
+		Repository: base,
+		projects:   unlockedProjectReadRejectingRepository{ProjectRepository: base.Projects()},
+	}
+	logger := zerolog.New(io.Discard)
+	svc := NewProjectService(repo, &logger)
+	project := &model.Project{
+		ID: uuid.NewString(), UserID: "user-1", Name: "before", Platform: model.PlatformArticle,
+		Status: model.ProjectStatusActive, Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
+	}
+	if err := base.Projects().Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := svc.Update(t.Context(), project.UserID, project.ID, &model.Project{Name: "after"})
+	if err != nil {
+		t.Fatalf("Update used an unlocked pre-read: %v", err)
+	}
+	if updated.Name != "after" {
+		t.Fatalf("updated name = %q, want after", updated.Name)
 	}
 }

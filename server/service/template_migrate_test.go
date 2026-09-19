@@ -183,3 +183,66 @@ func TestMigrateTemplatePromptFreshSchemaIsNoOp(t *testing.T) {
 		t.Fatalf("fresh migration: %v", err)
 	}
 }
+
+func TestMigrateTemplateThumbnailAssetsDisablesURLOnlyTemplates(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE templates (id TEXT PRIMARY KEY, thumbnail_url TEXT, thumbnail_asset_id TEXT, is_active BOOLEAN, readiness_status TEXT)`,
+		`INSERT INTO templates VALUES ('url-only', 'https://legacy.example/thumb.png', '', 1, 'ready')`,
+		`INSERT INTO templates VALUES ('asset-backed', 'https://legacy.example/ignored.png', 'asset-1', 1, 'ready')`,
+		`INSERT INTO templates VALUES ('manual-no-url', '', '', 1, 'ready')`,
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("setup %q: %v", stmt, err)
+		}
+	}
+	log := zerolog.Nop()
+	for pass := 1; pass <= 2; pass++ {
+		if err := MigrateTemplateThumbnailAssets(context.Background(), db, &log); err != nil {
+			t.Fatalf("migration pass %d: %v", pass, err)
+		}
+	}
+
+	var rows []struct {
+		ID              string
+		IsActive        bool
+		ReadinessStatus string
+	}
+	if err := db.Table("templates").Select("id, is_active, readiness_status").Order("id").Scan(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]struct {
+		active    bool
+		readiness string
+	}, len(rows))
+	for _, row := range rows {
+		got[row.ID] = struct {
+			active    bool
+			readiness string
+		}{row.IsActive, row.ReadinessStatus}
+	}
+	if row := got["url-only"]; row.active || row.readiness != "failed" {
+		t.Fatalf("url-only = %+v, want inactive/failed", row)
+	}
+	for _, id := range []string{"asset-backed", "manual-no-url"} {
+		if row := got[id]; !row.active || row.readiness != "ready" {
+			t.Fatalf("%s = %+v, want unchanged active/ready", id, row)
+		}
+	}
+}
+
+func TestMigrateTemplateThumbnailAssetsIsNoOpWithoutLegacyURLColumn(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE templates (id TEXT PRIMARY KEY, thumbnail_asset_id TEXT, is_active BOOLEAN, readiness_status TEXT)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateTemplateThumbnailAssets(context.Background(), db, nil); err != nil {
+		t.Fatalf("fresh migration: %v", err)
+	}
+}

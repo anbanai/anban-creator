@@ -21,7 +21,6 @@ var (
 	ErrProjectUpdateConflict     = errors.New("project update conflict")
 	ErrProjectMontageDefaults    = errors.New("invalid montage project defaults")
 	ErrInvalidAgentConfig        = errors.New("invalid agent config")
-	ErrInvalidWechatPublishMode  = errors.New("invalid wechat publish mode")
 	ErrWechatCredentialsRequired = errors.New("wechat credentials required")
 )
 
@@ -55,22 +54,12 @@ func validateProjectAgentConfig(project *model.Project) error {
 	return nil
 }
 
-func validateProjectWechatPublishMode(project *model.Project) error {
-	if project == nil || project.Config.WechatPublishMode == "" {
-		return nil
-	}
-	if !model.IsWechatPublishMode(project.Config.WechatPublishMode) {
-		return fmt.Errorf("%w: %q", ErrInvalidWechatPublishMode, project.Config.WechatPublishMode)
-	}
-	return nil
-}
-
 func validateProjectWechatCredentials(project *model.Project) error {
-	if project == nil || project.Platform != model.PlatformArticle || project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
+	if project == nil || project.Platform != model.PlatformArticle {
 		return nil
 	}
 	if strings.TrimSpace(project.Config.WechatAppID) == "" || strings.TrimSpace(project.Config.WechatSecret) == "" {
-		return fmt.Errorf("%w: wechat_app_id and wechat_secret are required when wechat_publish_mode is %q", ErrWechatCredentialsRequired, project.GetWechatPublishMode())
+		return fmt.Errorf("%w: wechat_app_id and wechat_secret are required for article projects", ErrWechatCredentialsRequired)
 	}
 	return nil
 }
@@ -99,6 +88,7 @@ type ProjectService struct {
 	templateSvc         *TemplateService
 	memory              ProjectMemoryLifecycle
 	montageCapabilities *MontageCapabilityService
+	imageAnalyses       *ImageAnalysisService
 }
 
 type ProjectMemoryLifecycle interface {
@@ -125,6 +115,10 @@ func (s *ProjectService) SetMontageCapabilityService(capabilities *MontageCapabi
 	}
 }
 
+func (s *ProjectService) SetImageAnalysisService(analyses *ImageAnalysisService) {
+	s.imageAnalyses = analyses
+}
+
 // Create creates a new project for the given user.
 // It sets UserID and Status, validates the platform, then persists via the repository.
 //
@@ -135,12 +129,6 @@ func (s *ProjectService) SetMontageCapabilityService(capabilities *MontageCapabi
 func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
 	if !validProjectPlatform(ch.Platform) {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
-	}
-	if err := validateProjectWechatPublishMode(ch); err != nil {
-		return nil, err
-	}
-	if ch.Platform == model.PlatformArticle && ch.Config.WechatPublishMode == "" {
-		ch.Config.WechatPublishMode = model.WechatPublishModeManual
 	}
 	if err := validateProjectMontageDefaults(ch, s.montageCapabilities); err != nil {
 		return nil, err
@@ -173,7 +161,18 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	ch.ID = uuid.New().String()
 	ch.UserID = userID
 	ch.Status = model.ProjectStatusActive
+	if strings.TrimSpace(ch.VisualStyle) != "" {
+		ch.VisualStyleSource = model.ImageAnalysisSourceManual
+	}
 
+	if s.imageAnalyses != nil && ch.Platform != model.PlatformMontage && ch.ReferenceImageAssetID != "" && strings.TrimSpace(ch.VisualStyle) == "" {
+		job, err := s.imageAnalyses.CreateProjectWithJob(ctx, ch)
+		if err != nil {
+			return nil, fmt.Errorf("create project: %w", err)
+		}
+		ch.ImageAnalysis = job.View()
+		return ch, nil
+	}
 	if err := s.repo.Projects().Create(ctx, ch); err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
 	}
@@ -189,6 +188,11 @@ func (s *ProjectService) Get(ctx context.Context, userID, projectID string) (*mo
 	}
 	if ch.UserID != userID {
 		return nil, nil, ErrProjectOwnedByUser
+	}
+	if s.imageAnalyses != nil {
+		if err := s.imageAnalyses.PresentProject(ctx, ch); err != nil {
+			return nil, nil, fmt.Errorf("present project image analysis: %w", err)
+		}
 	}
 
 	stats, err := s.repo.Projects().GetStats(ctx, projectID)
@@ -207,6 +211,13 @@ func (s *ProjectService) List(ctx context.Context, userID string, opts repositor
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
+	if s.imageAnalyses != nil {
+		for _, project := range projects {
+			if err := s.imageAnalyses.PresentProject(ctx, project); err != nil {
+				return nil, fmt.Errorf("present project image analysis: %w", err)
+			}
+		}
+	}
 	return projects, nil
 }
 
@@ -220,45 +231,57 @@ func (s *ProjectService) BatchStats(ctx context.Context, projectIDs []string) (m
 
 // Update updates mutable fields on a project owned by the user.
 func (s *ProjectService) Update(ctx context.Context, userID, projectID string, ch *model.Project) (*model.Project, error) {
-	existing, err := s.prepareProjectUpdate(ctx, userID, projectID, ch)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.Projects().Update(ctx, existing); err != nil {
-		return nil, fmt.Errorf("update project: %w", err)
-	}
-	return existing, nil
+	return s.update(ctx, userID, projectID, ch, "", false)
 }
 
 func (s *ProjectService) UpdateIfReferenceImageAssetID(ctx context.Context, userID, projectID string, ch *model.Project, expectedID string) (*model.Project, error) {
-	existing, err := s.prepareProjectUpdate(ctx, userID, projectID, ch)
-	if err != nil {
-		return nil, err
-	}
-	if existing.ReferenceImageAssetID != expectedID {
-		return nil, ErrProjectUpdateConflict
-	}
-	won, err := s.repo.Projects().UpdateIfReferenceImageAssetID(ctx, existing, expectedID)
+	return s.update(ctx, userID, projectID, ch, expectedID, true)
+}
+
+func (s *ProjectService) update(ctx context.Context, userID, projectID string, ch *model.Project, expectedReferenceAssetID string, enforceReferenceCAS bool) (*model.Project, error) {
+	var existing *model.Project
+	var queued *model.ImageAnalysisJob
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		current, err := tx.Projects().FindByIDForUpdate(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+		}
+		if current.UserID != userID {
+			return ErrProjectOwnedByUser
+		}
+		if enforceReferenceCAS && current.ReferenceImageAssetID != expectedReferenceAssetID {
+			return ErrProjectUpdateConflict
+		}
+		before := *current
+		if err := s.applyProjectUpdate(current, ch); err != nil {
+			return err
+		}
+		if s.imageAnalyses != nil {
+			queued, err = s.imageAnalyses.updateProjectTx(ctx, tx, &before, current)
+		} else {
+			err = tx.Projects().Update(ctx, current)
+		}
+		if err != nil {
+			return err
+		}
+		existing = current
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("update project: %w", err)
 	}
-	if !won {
-		return nil, ErrProjectUpdateConflict
+	if s.imageAnalyses != nil {
+		s.imageAnalyses.enqueue(ctx, queued)
+		if queued != nil {
+			existing.ImageAnalysis = queued.View()
+		} else if err := s.imageAnalyses.PresentProject(ctx, existing); err != nil {
+			return nil, fmt.Errorf("present project image analysis: %w", err)
+		}
 	}
 	return existing, nil
 }
 
-func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, projectID string, ch *model.Project) (*model.Project, error) {
-	existing, err := s.repo.Projects().FindByID(ctx, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProjectNotFound, err)
-	}
-	if existing.UserID != userID {
-		return nil, ErrProjectOwnedByUser
-	}
-	if err := validateProjectWechatPublishMode(ch); err != nil {
-		return nil, err
-	}
+func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
 	effectivePlatform := existing.Platform
 	if ch.Platform != "" {
 		effectivePlatform = ch.Platform
@@ -271,7 +294,7 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 			candidate.AgentConfig = ch.AgentConfig
 		}
 		if err := validateProjectAgentConfig(&candidate); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
@@ -282,7 +305,7 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	}
 	if ch.Platform != "" {
 		if !validProjectPlatform(ch.Platform) {
-			return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
+			return fmt.Errorf("invalid platform: %s", ch.Platform)
 		}
 		existing.Platform = ch.Platform
 	}
@@ -299,8 +322,9 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	if ch.Keywords != "" {
 		existing.Keywords = ch.Keywords
 	}
-	if ch.VisualStyle != "" {
+	if ch.VisualStyleSet {
 		existing.VisualStyle = ch.VisualStyle
+		existing.VisualStyleSet = true
 	}
 	if ch.Writer != "" {
 		existing.Writer = ch.Writer
@@ -322,13 +346,13 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 	supportedImageRatios := model.SupportedImageRatios(existing.Platform)
 	if len(supportedImageRatios) == 0 {
 		if strings.TrimSpace(ch.ImageRatio) != "" {
-			return nil, fmt.Errorf("image_ratio is not supported for platform %s", existing.Platform)
+			return fmt.Errorf("image_ratio is not supported for platform %s", existing.Platform)
 		}
 		existing.ImageRatio = ""
 	} else {
 		if strings.TrimSpace(ch.ImageRatio) != "" {
 			if !model.IsBusinessImageRatioAllowed(existing.Platform, ch.ImageRatio) {
-				return nil, fmt.Errorf("%s: %s", model.ValidImageRatioHint, ch.ImageRatio)
+				return fmt.Errorf("%s: %s", model.ValidImageRatioHint, ch.ImageRatio)
 			}
 			existing.ImageRatio = ch.ImageRatio
 		} else if platformChanged || strings.TrimSpace(existing.ImageRatio) == "" {
@@ -351,27 +375,24 @@ func (s *ProjectService) prepareProjectUpdate(ctx context.Context, userID, proje
 		candidate := *existing
 		candidate.MontageDefaultsSet = true
 		if err := validateProjectMontageDefaults(&candidate, s.montageCapabilities); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if ch.AgentConfigSet {
 		existing.AgentConfig = ch.AgentConfig
 	}
-	// Credentials are partial-update fields: a mode-only update, including a
-	// transition to disabled, must not erase an existing account configuration.
+	// Credentials are partial-update fields so ordinary project edits do not
+	// erase an existing account configuration.
 	if ch.Config.WechatAppID != "" {
 		existing.Config.WechatAppID = ch.Config.WechatAppID
-	}
-	if ch.Config.WechatPublishMode != "" {
-		existing.Config.WechatPublishMode = ch.Config.WechatPublishMode
 	}
 	if ch.Config.WechatSecret != "" {
 		existing.Config.WechatSecret = ch.Config.WechatSecret
 	}
 	if err := validateProjectWechatCredentials(existing); err != nil {
-		return nil, err
+		return err
 	}
-	return existing, nil
+	return nil
 }
 
 // Archive sets a project's status to "archived" after verifying ownership.

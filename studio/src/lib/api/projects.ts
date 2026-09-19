@@ -14,8 +14,8 @@ export const projectsApi = {
   list: (params?: { status?: string; platform?: string }) =>
     unwrap<Project[]>(http.get('/projects', { params })),
 
-  get: (id: string) =>
-    unwrap<ProjectDetail>(http.get(`/projects/${id}`)),
+  get: (id: string, signal?: AbortSignal) =>
+    unwrap<ProjectDetail>(http.get(`/projects/${id}`, { signal })),
 
   memory: (id: string) =>
     unwrap<ProjectMemory>(http.get(`/projects/${id}/memory`)),
@@ -51,10 +51,5 @@ export const projectsApi = {
       profile_url: profileUrl,
       wechat_app_id: wechatAppId,
       wechat_secret: wechatSecret,
-    }, { timeout: 120000 })),
-
-  analyzeImage: (imageUrl: string) =>
-    unwrap<{ visual_style: string }>(http.post('/projects/analyze-image', {
-      image_url: imageUrl,
     }, { timeout: 120000 })),
 }

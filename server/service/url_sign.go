@@ -6,7 +6,6 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
@@ -67,14 +66,4 @@ func SignURL(ctx context.Context, store storage.Provider, log *zerolog.Logger, r
 		return rawURL
 	}
 	return signed
-}
-
-// SignTemplateURLs resolves a *model.Template's runtime image fields to
-// directly-fetchable signed URLs in place. No-op when t is nil or no store is
-// wired.
-func SignTemplateURLs(ctx context.Context, store storage.Provider, log *zerolog.Logger, t *model.Template) {
-	if t == nil {
-		return
-	}
-	t.ThumbnailURL = SignURL(ctx, store, log, t.ThumbnailURL, DefaultSignedURLTTL)
 }

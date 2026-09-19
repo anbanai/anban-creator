@@ -24,6 +24,8 @@ import { agentProfilesApi } from './agent-profiles'
 import { agentPacksApi } from './agent-packs'
 import { seednoteAdminApi } from './seednote-admin'
 import { seednoteImportApi } from './seednote-import'
+import { wechatAnalyticsImportApi } from './wechat-analytics-import'
+import { imageAnalysesApi } from './image-analyses'
 
 export const api = {
   auth: authApi,
@@ -52,4 +54,6 @@ export const api = {
   agentPacks: agentPacksApi,
   seednoteAdmin: seednoteAdminApi,
   seednoteImport: seednoteImportApi,
+  wechatAnalyticsImport: wechatAnalyticsImportApi,
+  imageAnalyses: imageAnalysesApi,
 }

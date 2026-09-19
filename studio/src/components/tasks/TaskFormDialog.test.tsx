@@ -237,7 +237,7 @@ beforeEach(() => {
   vi.mocked(api.templates.list).mockResolvedValue({
     items: [{
       id: 'template-1', type: 'seednote', name: '清透说明书', category: '美妆护肤',
-      thumbnail_url: '', prompt: '模板视觉 Prompt', visibility: 'public', sort_order: 0,
+      thumbnail: null, prompt: '模板视觉 Prompt', prompt_source: 'manual', readiness_status: 'ready', activate_when_ready: true, visibility: 'public', sort_order: 0,
       is_active: true, created_at: '2026-08-02T00:00:00Z', updated_at: '2026-08-02T00:00:00Z',
     }],
     total: 1,

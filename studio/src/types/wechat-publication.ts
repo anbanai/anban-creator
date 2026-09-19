@@ -1,7 +1,8 @@
 export type WechatPublicationStatus =
   | 'drafting'
   | 'drafted'
-  | 'publish_submitting'
+  | 'awaiting_manual_publish'
+  | 'ambiguous'
   | 'publishing'
   | 'published'
   | 'needs_selection'
@@ -42,5 +43,7 @@ export interface WechatPublication {
   submit_attempted_at?: string
   check_attempts?: number
   last_error?: string
+  manual_publish_required?: boolean
+  analytics_status?: string
   candidates?: WechatPublicationCandidate[]
 }

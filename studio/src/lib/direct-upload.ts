@@ -4,11 +4,13 @@ import type { InputAttachment, InputAttachmentType } from '@/types/input-attachm
 export type DirectUploadPurpose =
   | 'project_reference'
   | 'project_portrait_reference'
+  | 'template_thumbnail'
   | 'task_reference'
   | 'ecommerce_product_photo'
   | 'ai_entry_attachment'
   | 'montage_asset'
   | 'seednote_analytics_import'
+  | 'wechat_analytics_import'
 
 export interface UploadToOSSOptions {
   purpose: DirectUploadPurpose

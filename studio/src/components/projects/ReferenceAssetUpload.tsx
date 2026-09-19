@@ -7,7 +7,7 @@ import type { ReferenceImageSelection, ReferenceImageValue } from '@/types/asset
 
 type ReferenceUploadPurpose = Extract<
   DirectUploadPurpose,
-  'project_reference' | 'project_portrait_reference' | 'task_reference'
+  'project_reference' | 'project_portrait_reference' | 'task_reference' | 'template_thumbnail'
 >
 
 interface ReferenceAssetUploadProps {
@@ -17,6 +17,7 @@ interface ReferenceAssetUploadProps {
   ariaLabel?: string
   onUploadingChange?: (uploading: boolean) => void
   onUploadedPreview?: (previewUrl: string) => void
+  disabled?: boolean
 }
 
 interface ActiveUpload {
@@ -36,6 +37,7 @@ export function ReferenceAssetUpload({
   ariaLabel = '参考图文件',
   onUploadingChange,
   onUploadedPreview,
+  disabled = false,
 }: ReferenceAssetUploadProps) {
   const [localPreviewUrl, setLocalPreviewUrl] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -114,7 +116,7 @@ export function ReferenceAssetUpload({
   }
 
   const uploadFile = async (file: File) => {
-    if (activeUploadRef.current) return
+	if (activeUploadRef.current || disabled) return
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
       setUploadError(`文件大小不能超过 ${MAX_SIZE_MB}MB`)
       return
@@ -194,7 +196,7 @@ export function ReferenceAssetUpload({
             type="button"
             aria-label="移除参考图"
             onClick={handleClear}
-            disabled={uploading}
+            disabled={uploading || disabled}
             className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-foreground disabled:opacity-50"
           >
             <X className="h-3.5 w-3.5" />
@@ -209,18 +211,18 @@ export function ReferenceAssetUpload({
         <button
           type="button"
           aria-label="上传参考图"
-          disabled={uploading}
+          disabled={uploading || disabled}
           className={`flex h-32 w-32 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-2 text-center transition-colors ${
             isDragging
               ? 'border-ring bg-muted/50'
               : 'border-muted-foreground/25 hover:border-muted-foreground/50'
           }`}
           onClick={() => {
-            if (!uploading) fileInputRef.current?.click()
+            if (!uploading && !disabled) fileInputRef.current?.click()
           }}
           onDragOver={(event) => {
             event.preventDefault()
-            if (!uploading) setIsDragging(true)
+            if (!uploading && !disabled) setIsDragging(true)
           }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
@@ -243,7 +245,7 @@ export function ReferenceAssetUpload({
         accept={ACCEPTED_IMAGE_TYPES}
         aria-label={ariaLabel}
         onChange={handleFileChange}
-        disabled={uploading}
+        disabled={uploading || disabled}
         className="hidden"
       />
 

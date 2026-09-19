@@ -95,6 +95,7 @@ type resolveAssetURLRequest struct {
 var previewReferenceAssetPurposes = []string{
 	service.DirectUploadPurposeProjectReference,
 	service.DirectUploadPurposeProjectPortraitReference,
+	service.DirectUploadPurposeTemplateThumbnail,
 	service.DirectUploadPurposeTaskReference,
 	service.DirectUploadPurposeAIEntryAttachment,
 }

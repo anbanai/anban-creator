@@ -56,7 +56,68 @@ func taskAPIResponse(task *model.Task, store storage.Provider) map[string]any {
 	resp["billing_total_credits"] = task.BillingPriceCredits
 	rewriteMontageAPIField(resp, task.Type, task.MontageInput.Data())
 	enrichOwnedObjectKeys(resp, store)
+	sanitizeTaskAPIResponse(resp, task)
 	return resp
+}
+
+// taskAPIPrivateFields are task fields that exist for Server-side execution,
+// identity, cost accounting, and scheduling only. They must never reach the
+// Studio API.
+var taskAPIPrivateFields = []string{
+	"agent_profile_fingerprint",
+	"current_execution_id",
+	"last_heartbeat_at",
+	"max_retries",
+	"rate_limit_retry_count",
+	"retry_count",
+	"billing_quote_id",
+}
+
+// sanitizeTaskAPIResponse removes Server-internal task fields and replaces the
+// full agent profile snapshot with its lean public projection.
+func sanitizeTaskAPIResponse(resp map[string]any, task *model.Task) {
+	for _, key := range taskAPIPrivateFields {
+		delete(resp, key)
+	}
+	if task != nil && task.AgentProfileSnapshot.ProfileID != "" {
+		resp["agent_profile_snapshot"] = modelAPIMap(task.AgentProfileSnapshot.APISnapshot())
+	} else {
+		delete(resp, "agent_profile_snapshot")
+	}
+	if raw, ok := resp["progress_log"].(string); ok {
+		if clean := sanitizeTaskAPIPublicLog(raw); clean != raw {
+			if clean == "" {
+				delete(resp, "progress_log")
+			} else {
+				resp["progress_log"] = clean
+			}
+		}
+	}
+}
+
+// sanitizeTaskAPIPublicLog filters persisted agent log lines down to the
+// user-facing progress surface, dropping internal Claude Code diagnostics
+// (e.g. "[claude-code:unrecognized_model] ...") and tool-trace records
+// ("Using tool: ..."). The Agent runtime no longer writes these lines; this is
+// defense-in-depth for legacy rows that already contain them.
+func sanitizeTaskAPIPublicLog(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, "\r \t")
+		if trimmed == "" || isInternalAgentLogLine(trimmed) {
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+	return strings.Join(kept, "\n")
+}
+
+func isInternalAgentLogLine(line string) bool {
+	return strings.HasPrefix(line, "[claude-code:") || strings.HasPrefix(line, "Using tool:")
 }
 
 func planAPIResponses(plans []*model.Plan, store storage.Provider) []map[string]any {

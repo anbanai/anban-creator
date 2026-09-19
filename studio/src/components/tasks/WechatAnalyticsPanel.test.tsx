@@ -26,13 +26,8 @@ describe('WechatAnalyticsPanel', () => {
     vi.mocked(api.wechatAnalytics.getByTask).mockResolvedValue({ series: [] })
   })
 
-  it('does not load publication data when WeChat publishing is disabled', () => {
-    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'disabled' }} />)
-    expect(api.tasks.getWechatPublication).not.toHaveBeenCalled()
-  })
-
   it('keeps draft and publication controls out of the analytics region', async () => {
-    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
+		render(<WechatAnalyticsPanel taskId="task-1" />)
     await vi.waitFor(() => expect(api.tasks.getWechatPublication).toHaveBeenCalled())
     expect(screen.queryByText('公众号发布')).not.toBeInTheDocument()
     expect(api.wechatAnalytics.getByTask).not.toHaveBeenCalled()
@@ -50,7 +45,7 @@ describe('WechatAnalyticsPanel', () => {
       series: [],
     })
 
-    render(<WechatAnalyticsPanel taskId="task-1" projectConfig={{ wechat_publish_mode: 'manual' }} />)
+		render(<WechatAnalyticsPanel taskId="task-1" />)
 
     expect(await screen.findByText('公众号数据追踪')).toBeInTheDocument()
     expect(api.wechatAnalytics.getByTask).toHaveBeenCalledWith('task-1')

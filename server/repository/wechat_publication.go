@@ -37,6 +37,20 @@ func (r *wechatPublicationRepository) FindByTaskID(ctx context.Context, taskID s
 	return &publication, err
 }
 
+func (r *wechatPublicationRepository) ListByProject(ctx context.Context, projectID string) ([]*model.WechatPublication, error) {
+	var publications []*model.WechatPublication
+	err := r.db.WithContext(ctx).Where("project_id = ?", projectID).Order("created_at DESC").Find(&publications).Error
+	return publications, err
+}
+
+func (r *wechatPublicationRepository) CreateAttempt(ctx context.Context, attempt *model.WechatPublicationAttempt) error {
+	return r.db.WithContext(ctx).Create(attempt).Error
+}
+
+func (r *wechatPublicationRepository) UpdateAttempt(ctx context.Context, attempt *model.WechatPublicationAttempt) error {
+	return r.db.WithContext(ctx).Save(attempt).Error
+}
+
 func (r *wechatPublicationRepository) FindByArticleID(ctx context.Context, projectID, articleID string) (*model.WechatPublication, error) {
 	var binding model.WechatPublicationBinding
 	if err := retryWechatSQLiteBusy(ctx, r.db.Dialector.Name(), func() error {
@@ -216,14 +230,16 @@ func (r *wechatPublicationRepository) UpdateReconciliation(ctx context.Context, 
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 			Where("id = ? AND status = ? AND updated_at = ?", publication.ID, expectedStatus, expectedUpdatedAt).
 			Updates(map[string]any{
-				"status":             publication.Status,
-				"source":             publication.Source,
-				"wechat_status_code": publication.WechatStatusCode,
-				"next_check_at":      publication.NextCheckAt,
-				"last_checked_at":    publication.LastCheckedAt,
-				"check_attempts":     publication.CheckAttempts,
-				"last_error":         publication.LastError,
-				"candidates":         publication.Candidates,
+				"status":                  publication.Status,
+				"source":                  publication.Source,
+				"wechat_status_code":      publication.WechatStatusCode,
+				"next_check_at":           publication.NextCheckAt,
+				"last_checked_at":         publication.LastCheckedAt,
+				"check_attempts":          publication.CheckAttempts,
+				"last_error":              publication.LastError,
+				"candidates":              publication.Candidates,
+				"manual_publish_required": publication.ManualPublishRequired,
+				"analytics_status":        publication.AnalyticsStatus,
 			})
 	})
 	return rows == 1, err
@@ -234,19 +250,21 @@ func (r *wechatPublicationRepository) TransitionToPublished(ctx context.Context,
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 			Where("id = ? AND status = ? AND updated_at = ?", publication.ID, expectedStatus, expectedUpdatedAt).
 			Updates(map[string]any{
-				"status":             publication.Status,
-				"source":             publication.Source,
-				"msg_id":             publication.MsgID,
-				"article_id":         publication.ArticleID,
-				"article_url":        publication.ArticleURL,
-				"article_index":      publication.ArticleIndex,
-				"wechat_status_code": publication.WechatStatusCode,
-				"published_at":       publication.PublishedAt,
-				"next_check_at":      publication.NextCheckAt,
-				"last_checked_at":    publication.LastCheckedAt,
-				"check_attempts":     publication.CheckAttempts,
-				"last_error":         publication.LastError,
-				"candidates":         publication.Candidates,
+				"status":                  publication.Status,
+				"source":                  publication.Source,
+				"msg_id":                  publication.MsgID,
+				"article_id":              publication.ArticleID,
+				"article_url":             publication.ArticleURL,
+				"article_index":           publication.ArticleIndex,
+				"wechat_status_code":      publication.WechatStatusCode,
+				"published_at":            publication.PublishedAt,
+				"next_check_at":           publication.NextCheckAt,
+				"last_checked_at":         publication.LastCheckedAt,
+				"check_attempts":          publication.CheckAttempts,
+				"last_error":              publication.LastError,
+				"candidates":              publication.Candidates,
+				"manual_publish_required": publication.ManualPublishRequired,
+				"analytics_status":        publication.AnalyticsStatus,
 			})
 	})
 	return rows == 1, err
@@ -453,6 +471,8 @@ func (r *wechatPublicationRepository) UpdateClaimed(ctx context.Context, publica
 		"wechat_status_code": publication.WechatStatusCode, "next_check_at": publication.NextCheckAt,
 		"last_error": publication.LastError, "claim_token": "", "claimed_at": nil,
 		"submit_attempted_at": publication.SubmitAttemptedAt,
+		"source":              publication.Source, "manual_publish_required": publication.ManualPublishRequired,
+		"analytics_status": publication.AnalyticsStatus,
 	}
 	result := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 		Where("id = ? AND claim_token = ? AND status = ?", publication.ID, token, model.WechatPublicationStatusPublishSubmitting).

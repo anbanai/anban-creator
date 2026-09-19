@@ -184,7 +184,7 @@ describe('command center rules', () => {
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [],
       plans: [],
-      projects: [project({ platform: 'article', config: { wechat_publish_mode: 'api_confirmed' } })],
+      projects: [project({ platform: 'article', config: { wechat_app_id: 'wx-app' } })],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: null,
     })

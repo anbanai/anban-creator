@@ -2,17 +2,11 @@ package handler
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
@@ -34,7 +28,6 @@ const projectMemoryMaxResponseBytes = 256 << 10
 type ProjectHandler struct {
 	service           *service.ProjectService
 	logger            *zerolog.Logger
-	visionClient      service.LLMClient
 	templateSvc       *service.TemplateService
 	store             storage.Provider
 	uploadRepo        repository.Repository
@@ -50,11 +43,6 @@ type ProjectHandler struct {
 // NewProjectHandler creates a new ProjectHandler.
 func NewProjectHandler(svc *service.ProjectService, logger *zerolog.Logger) *ProjectHandler {
 	return &ProjectHandler{service: svc, logger: logger}
-}
-
-// SetVisionClient injects a dedicated vision-capable LLM client used by AnalyzeImage.
-func (h *ProjectHandler) SetVisionClient(client service.LLMClient) {
-	h.visionClient = client
 }
 
 // SetTemplateService injects an optional TemplateService for template recommendations on project creation.
@@ -189,7 +177,7 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrInvalidAgentConfig) {
 		return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
 	}
-	if errors.Is(err, service.ErrInvalidWechatPublishMode) || errors.Is(err, service.ErrWechatCredentialsRequired) {
+	if errors.Is(err, service.ErrWechatCredentialsRequired) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
@@ -225,6 +213,7 @@ type projectRequest struct {
 	Positioning                   string                           `json:"positioning"`
 	Keywords                      string                           `json:"keywords"`
 	VisualStyle                   string                           `json:"visual_style"`
+	VisualStyleSet                bool                             `json:"-"`
 	Writer                        string                           `json:"writer"`
 	Theme                         string                           `json:"theme"`
 	Author                        string                           `json:"author"`
@@ -243,9 +232,9 @@ type projectRequest struct {
 	AgentConfig                   map[string]any                   `json:"agent_config,omitempty"`
 	AgentConfigSet                bool                             `json:"-"`
 	// Config fields for platform-specific credentials.
-	WechatAppID       string `json:"wechat_app_id"`
-	WechatSecret      string `json:"wechat_secret"`
-	WechatPublishMode string `json:"wechat_publish_mode"`
+	WechatAppID             string  `json:"wechat_app_id"`
+	WechatSecret            string  `json:"wechat_secret"`
+	LegacyWechatPublishMode *string `json:"wechat_publish_mode"`
 }
 
 func hasJSONField(body []byte, field string) bool {
@@ -272,6 +261,7 @@ func (req *projectRequest) toProject() *model.Project {
 		AvatarURL:                     req.AvatarURL,
 		Keywords:                      req.Keywords,
 		VisualStyle:                   req.VisualStyle,
+		VisualStyleSet:                req.VisualStyleSet,
 		Writer:                        req.Writer,
 		Theme:                         req.Theme,
 		Author:                        req.Author,
@@ -283,7 +273,7 @@ func (req *projectRequest) toProject() *model.Project {
 		MaxConcurrentTasks:            req.MaxConcurrentTasks,
 		Instructions:                  instructions,
 		InstructionsSet:               instructionsSet,
-		Config:                        model.ProjectConfig{WechatAppID: req.WechatAppID, WechatSecret: req.WechatSecret, WechatPublishMode: req.WechatPublishMode},
+		Config:                        model.ProjectConfig{WechatAppID: req.WechatAppID, WechatSecret: req.WechatSecret},
 	}
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
@@ -399,10 +389,14 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
+	if req.LegacyWechatPublishMode != nil {
+		return Error(c, fiber.StatusBadRequest, "wechat_publish_mode is no longer supported; publishing is capability-driven")
+	}
 	if hasJSONField(c.Body(), "instructions") {
 		req.InstructionsSet = true
 	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
+	req.VisualStyleSet = hasJSONField(c.Body(), "visual_style")
 	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
 	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 
@@ -472,7 +466,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrInvalidAgentConfig) {
 			return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
 		}
-		if errors.Is(err, service.ErrInvalidWechatPublishMode) || errors.Is(err, service.ErrWechatCredentialsRequired) {
+		if errors.Is(err, service.ErrWechatCredentialsRequired) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
@@ -488,11 +482,15 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	recommended := []templateResponse{}
 	if created.Platform == model.PlatformSeednote && h.templateSvc != nil {
 		if rec := h.getRecommendedTemplates(c.Context(), created); rec != nil {
-			// Sign each recommended template's image URLs so the cross-account
-			// signed-direct path covers them too (these are public templates the
-			// viewer may not have uploaded).
 			for _, t := range rec {
-				service.SignTemplateURLs(c.Context(), h.store, h.logger, t)
+				if h.referenceAssets != nil && t.ThumbnailAssetID != "" {
+					thumbnail, presentErr := h.referenceAssets.Present(c.Context(), t.UserID, t.ThumbnailAssetID, []string{service.DirectUploadPurposeTemplateThumbnail})
+					if presentErr != nil {
+						h.logger.Warn().Err(presentErr).Str("template_id", t.ID).Msg("present recommended template thumbnail")
+					} else {
+						t.Thumbnail = thumbnail
+					}
+				}
 				recommended = append(recommended, canonicalTemplateResponse(t))
 			}
 		}
@@ -632,10 +630,14 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
+	if req.LegacyWechatPublishMode != nil {
+		return Error(c, fiber.StatusBadRequest, "wechat_publish_mode is no longer supported; publishing is capability-driven")
+	}
 	if hasJSONField(c.Body(), "instructions") {
 		req.InstructionsSet = true
 	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
+	req.VisualStyleSet = hasJSONField(c.Body(), "visual_style")
 	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
 	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 	if !projectPlatformIsVisibleToUser(c, req.Platform) {
@@ -653,6 +655,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	}
 	if !projectPlatformIsVisibleToUser(c, current.Platform) {
 		return Forbidden(c, "project platform is currently available to administrators only")
+	}
+	if req.VisualStyleSet && req.VisualStyle == current.VisualStyle {
+		req.VisualStyleSet = false
 	}
 	targetPlatform := current.Platform
 	if req.Platform != "" {
@@ -978,8 +983,6 @@ func (req *projectRequest) getFieldValue(key string) string {
 		return req.WechatAppID
 	case "wechat_secret":
 		return req.WechatSecret
-	case "wechat_publish_mode":
-		return req.WechatPublishMode
 	default:
 		return ""
 	}
@@ -1020,14 +1023,6 @@ func validateProjectImageRatio(platform, ratio string) error {
 		return errors.New(model.ValidImageRatioHint)
 	}
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Image style analysis
-// ---------------------------------------------------------------------------
-
-type analyzeImageRequest struct {
-	ImageURL string `json:"image_url"`
 }
 
 func requireProjectAdmin(c fiber.Ctx) (bool, error) {
@@ -1120,252 +1115,4 @@ func (h *ProjectHandler) AdminSeednoteLogout(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadGateway, "退出小红书登录失败")
 	}
 	return Success(c, fiber.Map{"logged_in": false})
-}
-
-// AnalyzeImage handles POST /projects/analyze-image.
-// It sends the reference image to a vision LLM and returns a visual style description.
-func (h *ProjectHandler) AnalyzeImage(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-
-	var req analyzeImageRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-	if req.ImageURL == "" {
-		return Error(c, fiber.StatusBadRequest, "image_url is required")
-	}
-
-	llm := h.visionClient
-	if llm == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "image understanding model is not configured")
-	}
-
-	const maxAnalysisImageSize = 10 << 20 // 10 MB
-
-	var imageData []byte
-
-	// Server-owned URLs (Local /api/v1/files/* or OSS bucket / custom domain):
-	// read via store.Read to avoid SSRF, signed-URL expiry, and private-bucket
-	// 403s. OSSProvider.Read signs the URL internally; LocalProvider.Read hits
-	// disk. Truly external URLs (e.g. Unsplash) fall through to getPublicHTTPSImage.
-	ownedPath := h.store != nil && h.store.IsOwnedURL(req.ImageURL)
-	h.logger.Debug().
-		Str("image_url", req.ImageURL).
-		Bool("owned", ownedPath).
-		Msg("analyze-image routing")
-	if ownedPath {
-		key, respondErr := h.cleanAnalysisImageKey(c.Context(), req.ImageURL, userID)
-		if respondErr != nil {
-			return respondErr(c)
-		}
-		data, err := h.store.Read(c.Context(), key)
-		if err != nil {
-			h.logger.Error().Err(err).Str("key", key).Msg("failed to read image for analysis")
-			return Error(c, fiber.StatusInternalServerError, "failed to read image file")
-		}
-		imageData = data
-	} else if strings.HasPrefix(req.ImageURL, "https://") {
-		resp, err := getPublicHTTPSImage(c.Context(), req.ImageURL, maxAnalysisImageSize)
-		if err != nil {
-			h.logger.Error().Err(err).Str("url", req.ImageURL).Msg("failed to download external image")
-			return Error(c, fiber.StatusBadRequest, "failed to download image")
-		}
-		imageData = resp
-	} else {
-		return Error(c, fiber.StatusBadRequest, "image_url must be a valid file URL")
-	}
-
-	if int64(len(imageData)) > maxAnalysisImageSize {
-		return Error(c, fiber.StatusBadRequest, "image is too large for analysis (max 10MB)")
-	}
-
-	mimeType := http.DetectContentType(imageData)
-	if !strings.HasPrefix(mimeType, "image/") {
-		return Error(c, fiber.StatusBadRequest, "the file is not an image")
-	}
-	imageURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(imageData))
-
-	systemPrompt := "你是一位专业的小红书视觉风格分析师，擅长把参考图提炼成可直接用于 AI 图片生成的中文风格指令。"
-	userPrompt := `请分析这张图片，生成一段详细的中文风格指令，用于指导 AI 生成与图中相同风格的小红书图片。
-
-需要覆盖的维度（按重要性排序）：
-- 整体氛围与艺术流派（治愈系水彩 / 极简日系 / 复古胶片 / 二次元插画等）
-- 色彩色调：主色调、饱和度高低、明暗对比、冷暖倾向
-- 画面质感与笔触：手绘感 / 磨砂颗粒 / 柔焦 / 油画厚涂 / 数码平滑
-- 构图手法与视角：留白比例、俯拍/平视、对称/不对称、镜头焦段感
-- 光影特征：自然光 / 侧逆光 / 平光 / 戏剧化光影 / 漫反射
-- 信息密度与节奏：画面是极简留白还是元素密集叠加；主体与背景的层次关系；视觉焦点的强弱
-
-输出要求：
-- 按上述六个维度逐行输出，每行一个维度，格式为「维度名：具体描述」（例如「色彩色调：暖色调为主，低饱和，柔和明暗对比」）
-- 维度名使用：整体氛围、色彩色调、画面质感、构图手法、光影特征、信息密度
-- 必须输出全部 6 行；若某维度在图中不显著，仍需保留维度名并填入「不适用」或最接近的描述，不得跳过
-- 每行聚焦一个维度，避免重复，信息密度高、避免空话套话（如"精美"、"好看"这类无信息量形容词）
-- 信息类型为「风格指令」而非「画面描述」：不要描述图中具体的物体、人物、文字、品牌或场景
-- 不加总标题或前后缀说明，六行之间用换行分隔，直接输出风格指令文本`
-
-	result, err := llm.CompleteWithImage(c.Context(), systemPrompt, userPrompt, imageURL)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			h.logger.Warn().Err(err).Str("user_id", userID).Msg("image style analysis canceled or timed out")
-			return Error(c, fiber.StatusServiceUnavailable, "analysis canceled or timed out")
-		}
-		h.logger.Error().Err(err).Str("user_id", userID).Msg("image style analysis failed")
-		return Error(c, fiber.StatusInternalServerError, "image style analysis failed")
-	}
-
-	style := strings.TrimSpace(result)
-	if style == "" {
-		return Error(c, fiber.StatusInternalServerError, "failed to analyze image style")
-	}
-
-	return Success(c, fiber.Map{"visual_style": style})
-}
-
-func getPublicHTTPSImage(ctx context.Context, imageURL string, maxSize int64) ([]byte, error) {
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-		Transport: &http.Transport{
-			DialContext: publicOnlyDialContext,
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 3 {
-				return fmt.Errorf("too many redirects")
-			}
-			if req.URL.Scheme != "https" {
-				return fmt.Errorf("external image redirects must use https")
-			}
-			return nil
-		},
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	if req.URL.Scheme != "https" || req.URL.Hostname() == "" || req.URL.User != nil {
-		return nil, fmt.Errorf("invalid external image URL")
-	}
-	req.Header.Set("Accept", "image/*")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("download external image: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download external image: unexpected status %d", resp.StatusCode)
-	}
-	if resp.ContentLength > maxSize {
-		return nil, fmt.Errorf("external image exceeds max size")
-	}
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
-	if err != nil {
-		return nil, fmt.Errorf("read external image: %w", err)
-	}
-	if int64(len(data)) > maxSize {
-		return nil, fmt.Errorf("external image exceeds max size")
-	}
-	return data, nil
-}
-
-func publicOnlyDialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return nil, fmt.Errorf("invalid address: %w", err)
-	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, fmt.Errorf("resolve host: %w", err)
-	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("host did not resolve")
-	}
-	for _, addr := range ips {
-		if !isPublicIP(addr.IP) {
-			return nil, fmt.Errorf("external image host resolves to a non-public address")
-		}
-	}
-
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
-}
-
-func isPublicIP(ip net.IP) bool {
-	return ip.IsGlobalUnicast() &&
-		!ip.IsPrivate() &&
-		!ip.IsLoopback() &&
-		!ip.IsLinkLocalUnicast() &&
-		!ip.IsLinkLocalMulticast() &&
-		!ip.IsUnspecified() &&
-		!ip.IsMulticast()
-}
-
-type fiberErrorFunc func(fiber.Ctx) error
-
-func (h *ProjectHandler) cleanAnalysisImageKey(ctx context.Context, imageURL, userID string) (string, fiberErrorFunc) {
-	if key, ok := storage.StorageKeyFromURL(imageURL); ok {
-		cleanKey := filepath.Clean(key)
-		if strings.HasPrefix(cleanKey, "uploads/pending/") {
-			var sessions repository.UploadSessionRepository
-			if h.uploadRepo != nil {
-				sessions = h.uploadRepo.UploadSessions()
-			}
-			pendingKey, err := service.ValidateUploadSessionURL(ctx, sessions, userID, []string{
-				service.DirectUploadPurposeProjectReference,
-				service.DirectUploadPurposeTaskReference,
-			}, imageURL, time.Now())
-			if err != nil {
-				return "", uploadSessionAnalyzeError(h.logger, err)
-			}
-			return pendingKey, nil
-		}
-	}
-	return cleanOwnedUploadKey(imageURL, userID)
-}
-
-func uploadSessionAnalyzeError(logger *zerolog.Logger, err error) fiberErrorFunc {
-	switch {
-	case errors.Is(err, service.ErrUploadSessionInvalidURL):
-		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
-	case errors.Is(err, service.ErrUploadSessionExpired):
-		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "pending upload has expired") }
-	case errors.Is(err, service.ErrUploadSessionStateConflict):
-		return func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "pending upload is not pending") }
-	case errors.Is(err, service.ErrUploadSessionAccessDenied):
-		return func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
-	default:
-		if logger != nil {
-			logger.Error().Err(err).Msg("failed to validate pending upload for image analysis")
-		}
-		return func(c fiber.Ctx) error {
-			return Error(c, fiber.StatusInternalServerError, "failed to validate pending upload")
-		}
-	}
-}
-
-func cleanOwnedUploadKey(imageURL, userID string) (string, fiberErrorFunc) {
-	key, ok := storage.StorageKeyFromURL(imageURL)
-	if !ok || key == "" {
-		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
-	}
-
-	// filepath.Clean (not path.Clean) for parity with FileHandler.ServeFile.
-	// Storage keys are POSIX-style forward-slash paths on both Linux servers
-	// and OSS, so the OS-separator rewrite under non-POSIX builds is a no-op
-	// in production.
-	cleanKey := filepath.Clean(key)
-	if strings.Contains(cleanKey, "..") {
-		return "", func(c fiber.Ctx) error { return Error(c, fiber.StatusBadRequest, "image_url is invalid") }
-	}
-	// Align with FileHandler.ServeFile (file.go) ownership rules:
-	if isUserOwnedStorageKey(userID, cleanKey) {
-		return cleanKey, nil
-	}
-	return "", func(c fiber.Ctx) error { return Forbidden(c, "you do not have access to this file") }
 }

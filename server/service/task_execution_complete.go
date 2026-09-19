@@ -590,12 +590,8 @@ func draftRetryEligible(publication *model.WechatPublication) bool {
 }
 
 func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
-	project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
-	if err != nil {
+	if _, err := s.repo.Projects().FindByID(ctx, task.ProjectID); err != nil {
 		return "", nil, fmt.Errorf("load article publication project: %w", err)
-	}
-	if project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
-		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "publication_disabled", false, ""), nil
 	}
 	block := func(code, action string) (string, []byte, error) {
 		return model.TaskExecutionDraftDeliveryBlocked, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryBlocked, code, false, action), nil

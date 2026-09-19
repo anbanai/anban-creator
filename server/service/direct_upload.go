@@ -25,12 +25,14 @@ import (
 const (
 	DirectUploadPurposeProjectReference         = "project_reference"
 	DirectUploadPurposeProjectPortraitReference = "project_portrait_reference"
+	DirectUploadPurposeTemplateThumbnail        = "template_thumbnail"
 	DirectUploadPurposeTaskReference            = "task_reference"
 	DirectUploadPurposeEcommercePhoto           = "ecommerce_product_photo"
 	DirectUploadPurposeMontageAsset             = "montage_asset"
 	DirectUploadPurposeAIEntryAttachment        = "ai_entry_attachment"
 	DirectUploadPurposeTaskArtifact             = "task_artifact"
 	DirectUploadPurposeSeednoteImport           = "seednote_analytics_import"
+	DirectUploadPurposeWechatAnalyticsImport    = "wechat_analytics_import"
 
 	defaultDirectUploadTTLSeconds = 15 * 60
 	uploadSessionCleanupLease     = 5 * time.Minute
@@ -155,11 +157,13 @@ type directUploadPurposePolicy struct {
 var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeProjectReference:         {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeProjectPortraitReference: {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
+	DirectUploadPurposeTemplateThumbnail:        {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeTaskReference:            {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeEcommercePhoto:           {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeMontageAsset:             {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeAIEntryAttachment:        {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
 	DirectUploadPurposeSeednoteImport:           {maxSize: 20 * 1024 * 1024, validate: isDirectUploadSeednoteImport},
+	DirectUploadPurposeWechatAnalyticsImport:    {maxSize: 20 * 1024 * 1024, validate: isDirectUploadWechatAnalyticsImport},
 }
 
 const maxUploadImageBytes = 10 * 1024 * 1024
@@ -1078,6 +1082,15 @@ func isDirectUploadMontageAsset(contentType, ext string) bool {
 func isDirectUploadSeednoteImport(contentType, ext string) bool {
 	return strings.EqualFold(ext, ".xlsx") &&
 		(strings.EqualFold(contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") || strings.EqualFold(contentType, "application/octet-stream"))
+}
+
+func isDirectUploadWechatAnalyticsImport(contentType, ext string) bool {
+	if !strings.EqualFold(ext, ".xls") && !strings.EqualFold(ext, ".xlsx") {
+		return false
+	}
+	return strings.EqualFold(contentType, "application/vnd.ms-excel") ||
+		strings.EqualFold(contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") ||
+		strings.EqualFold(contentType, "application/octet-stream")
 }
 
 func aiEntryAttachmentMaxSize(contentType, ext string) int64 {

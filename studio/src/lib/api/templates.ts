@@ -13,8 +13,8 @@ export const templatesApi = {
   list: (params?: ListTemplatesParams) =>
     unwrap<{ items: Template[]; total: number }>(http.get('/templates', { params })),
 
-  get: (id: string) =>
-    unwrap<Template>(http.get(`/templates/${id}`)),
+  get: (id: string, signal?: AbortSignal) =>
+    unwrap<Template>(http.get(`/templates/${id}`, { signal })),
 
   create: (data: CreateTemplateRequest) =>
     unwrap<Template>(http.post('/templates', data)),
@@ -24,7 +24,4 @@ export const templatesApi = {
 
   remove: (id: string) =>
     unwrap<{ deleted: string }>(http.delete(`/templates/${id}`)),
-
-  analyzeThumbnail: (data: { type: 'seednote'; thumbnail_url: string }) =>
-    unwrap<{ prompt: string }>(http.post('/templates/analyze-thumbnail', data)),
 }

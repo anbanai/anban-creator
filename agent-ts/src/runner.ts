@@ -188,6 +188,17 @@ export interface ToolUseDiagnostics {
 }
 export type RunnerReporter = Pick<Reporter, "progress" | "stageProgress">;
 
+// runnerLogLine trims one Claude Code output line and drops internal runtime
+// diagnostics (for example "[claude-code:unrecognized_model] ..."), which leak
+// provider/model routing facts. It returns the trimmed user-facing line, or
+// undefined when the line must not be surfaced as task progress.
+export function runnerLogLine(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("[claude-code:")) return undefined;
+  return trimmed;
+}
+
 class RuntimeArtifactMaterializationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(`runtime_artifact_materialization_failed: ${message}`, options);
@@ -349,7 +360,10 @@ export function buildQueryOptions(
       : undefined,
     settingSources: ["user", "project"],
     includePartialMessages: false,
-    stderr: (line) => void reporter.progress(line.trim()),
+    stderr: (line) => {
+      const logLine = runnerLogLine(line);
+      if (logLine) void reporter.progress(logLine);
+    },
     hooks,
   };
 }
@@ -624,7 +638,6 @@ async function consumeMessage(message: SDKMessage, reporter: RunnerReporter, log
       }
       if (block.type === "tool_use") {
         toolCalls.set(block.id, { name: block.name, input: block.input as Record<string, unknown> });
-        void reporter.progress(`Using tool: ${block.name}`);
       }
     }
   }

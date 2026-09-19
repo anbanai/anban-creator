@@ -117,7 +117,16 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 			tracking.RunCount++
 			tracking.FailureCount++
 			tracking.LastError = err.Error()
-			return s.repo.WechatTrackings().Update(ctx, tracking)
+			if updateErr := s.repo.WechatTrackings().Update(ctx, tracking); updateErr != nil {
+				return updateErr
+			}
+			if publication, findErr := s.repo.WechatPublications().FindByID(ctx, tracking.PublicationID); findErr == nil {
+				publication.AnalyticsStatus = "unsupported"
+				_ = s.repo.WechatPublications().Update(ctx, publication)
+			}
+			nowChecked := now
+			_ = s.repo.WechatCapabilities().Upsert(ctx, &model.WechatAccountCapability{ProjectID: tracking.ProjectID, Capability: model.WechatCapabilityDataCubeArticleStats, Status: model.WechatCapabilityDenied, LastCheckedAt: &nowChecked, LastWechatCode: code})
+			return nil
 		}
 		return s.recordFetchError(ctx, tracking, now, fmt.Errorf("fetch official article detail: %w", err))
 	}
@@ -173,7 +182,23 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 				return errWechatPublicationMsgIDConflict
 			}
 		}
-		return tx.WechatTrackings().Update(ctx, &updatedTracking)
+		if err := tx.WechatTrackings().Update(ctx, &updatedTracking); err != nil {
+			return err
+		}
+		publication, err := tx.WechatPublications().FindByID(ctx, tracking.PublicationID)
+		if err != nil {
+			return err
+		}
+		if len(snapshots) > 0 {
+			publication.AnalyticsStatus = "official_available"
+		} else {
+			publication.AnalyticsStatus = "official_fetching"
+		}
+		if err := tx.WechatPublications().Update(ctx, publication); err != nil {
+			return err
+		}
+		checkedAt := now
+		return tx.WechatCapabilities().Upsert(ctx, &model.WechatAccountCapability{ProjectID: tracking.ProjectID, Capability: model.WechatCapabilityDataCubeArticleStats, Status: model.WechatCapabilityAvailable, LastCheckedAt: &checkedAt})
 	}); err != nil {
 		if errors.Is(err, errWechatPublicationMsgIDConflict) || errors.Is(err, gorm.ErrRecordNotFound) {
 			return s.recordFetchError(ctx, tracking, now, err)

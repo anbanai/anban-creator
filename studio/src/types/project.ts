@@ -1,14 +1,12 @@
 import type { MontagePreferences } from './montage'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
+import type { ImageAnalysis } from './image-analysis'
 
 export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage'
 export type ProjectStatus = 'active' | 'archived'
-export type WechatPublishMode = 'disabled' | 'manual' | 'api_confirmed'
-
 export interface ProjectConfig {
   wechat_app_id?: string
   wechat_secret?: string
-  wechat_publish_mode?: WechatPublishMode
 }
 
 export interface Project {
@@ -24,6 +22,8 @@ export interface Project {
   keywords: string
   instructions?: string
   visual_style: string
+  visual_style_source?: 'manual' | 'analysis' | ''
+  image_analysis?: ImageAnalysis | null
   writer: string
   theme: string
   author: string
@@ -108,7 +108,6 @@ export interface CreateProjectRequest {
   max_concurrent_tasks?: number
   wechat_app_id?: string
   wechat_secret?: string
-  wechat_publish_mode?: WechatPublishMode
 }
 
 export interface CreateProjectResponse {

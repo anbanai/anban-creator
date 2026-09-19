@@ -32,7 +32,7 @@ function isSignedOSSUrl(u: URL): boolean {
  * - Signed OSS URLs and other absolute external URLs pass through unchanged.
  * - `/api/v1/files/...` and unsigned `*.aliyuncs.com` URLs are rewritten to the
  *   `/files/...` proxy path (the caller blob-fetches these via the authenticated
- *   http client — see `SignedImage` / `ReferenceImageUpload`).
+ *   http client — see `SignedImage` / `ReferenceAssetUpload`).
  */
 export function normalizeStorageUrl(url: string): string {
   if (url.startsWith('/api/v1/files/')) {

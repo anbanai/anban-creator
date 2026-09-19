@@ -557,25 +557,16 @@ describe('planSchema', () => {
 })
 
 describe('projectSchema', () => {
-  it('accepts article platform without wechat_app_id when publishing disabled', () => {
+  it('accepts article platform with wechat_app_id', () => {
     expect(projectSchema.safeParse({
       platform: 'article',
-      wechat_publish_mode: 'disabled',
-    }).success).toBe(true)
-  })
-
-  it('accepts article platform with wechat_app_id when publishing enabled', () => {
-    expect(projectSchema.safeParse({
-      platform: 'article',
-      wechat_publish_mode: 'manual',
       wechat_app_id: 'wx123',
     }).success).toBe(true)
   })
 
-  it('rejects article platform without wechat_app_id when publishing enabled', () => {
+  it('rejects article platform without wechat_app_id', () => {
     const result = projectSchema.safeParse({
       platform: 'article',
-      wechat_publish_mode: 'api_confirmed',
     })
     expect(result.success).toBe(false)
   })
@@ -619,7 +610,6 @@ describe('projectSchema', () => {
   it('accepts all optional fields', () => {
     const result = projectSchema.safeParse({
       platform: 'article',
-      wechat_publish_mode: 'manual',
       wechat_app_id: 'wx123',
       wechat_secret: 'secret',
       name: '项目名称',

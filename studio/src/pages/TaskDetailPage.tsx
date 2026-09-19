@@ -692,7 +692,6 @@ export default function TaskDetailPage() {
         workflow={task.workflow_status}
         outcome={task.outcome}
         errorMessage={task.error_message}
-        wechatPublishMode={project?.config?.wechat_publish_mode}
         onOpenLogs={() => openTaskDetails('logs')}
         onResume={canResume ? () => setShowResumeDialog(true) : undefined}
       />
@@ -724,7 +723,7 @@ export default function TaskDetailPage() {
       />
 
       {task.type === 'article' && task.status === 'completed' && project && (
-        <WechatAnalyticsPanel taskId={task.id} projectConfig={project.config} />
+        <WechatAnalyticsPanel taskId={task.id} />
       )}
 
       {showPendingResultDestination && (

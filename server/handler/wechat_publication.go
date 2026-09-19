@@ -56,6 +56,28 @@ func (h *WechatPublicationHandler) Get(c fiber.Ctx) error {
 	return Success(c, publication)
 }
 
+func (h *WechatPublicationHandler) Capabilities(c fiber.Ctx) error {
+	projectID, err := validateUUIDParam(c, "id")
+	if err != nil {
+		return err
+	}
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	provider, ok := h.service.(interface {
+		GetCapabilities(context.Context, string, string) ([]*model.WechatAccountCapability, error)
+	})
+	if !ok {
+		return Error(c, fiber.StatusServiceUnavailable, "WeChat capabilities unavailable")
+	}
+	items, err := provider.GetCapabilities(c.Context(), userID, projectID)
+	if err != nil {
+		return h.handleError(c, projectID, err)
+	}
+	return Success(c, fiber.Map{"items": items})
+}
+
 func (h *WechatPublicationHandler) Publish(c fiber.Ctx) error {
 	userID, taskID, err := h.requestIdentity(c)
 	if err != nil {
@@ -121,6 +143,34 @@ func (h *WechatPublicationHandler) Select(c fiber.Ctx) error {
 	return Success(c, publication)
 }
 
+func (h *WechatPublicationHandler) ManualBind(c fiber.Ctx) error {
+	userID, taskID, err := h.requestIdentity(c)
+	if err != nil {
+		return err
+	}
+	var body struct {
+		ArticleURL         string `json:"article_url"`
+		ConfirmedPublished bool   `json:"confirmed_published"`
+	}
+	if err := c.Bind().Body(&body); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if !body.ConfirmedPublished {
+		return Error(c, fiber.StatusBadRequest, "confirmed_published must be true")
+	}
+	manualBinder, ok := h.service.(interface {
+		BindManualPublication(context.Context, string, string, string) (*model.WechatPublication, error)
+	})
+	if !ok {
+		return Error(c, fiber.StatusServiceUnavailable, "manual publication binding unavailable")
+	}
+	publication, err := manualBinder.BindManualPublication(c.Context(), userID, taskID, body.ArticleURL)
+	if err != nil {
+		return h.handleError(c, taskID, err)
+	}
+	return Success(c, publication)
+}
+
 func (h *WechatPublicationHandler) handleError(c fiber.Ctx, taskID string, err error) error {
 	switch {
 	case errors.Is(err, service.ErrWechatPublicationNotFound):
@@ -141,6 +191,8 @@ func (h *WechatPublicationHandler) handleError(c fiber.Ctx, taskID string, err e
 		return Error(c, fiber.StatusConflict, service.ErrWechatPublicationRecoveryUnavailable.Error())
 	case errors.Is(err, service.ErrWechatPublicationArticleNotFound):
 		return Error(c, fiber.StatusBadRequest, service.ErrWechatPublicationArticleNotFound.Error())
+	case errors.Is(err, service.ErrWechatPublicationInvalidPayload):
+		return Error(c, fiber.StatusBadRequest, service.ErrWechatPublicationInvalidPayload.Error())
 	default:
 		if h.logger != nil {
 			h.logger.Error().Err(err).Str("task_id", taskID).Msg("WeChat publication action failed")

@@ -33,6 +33,13 @@ export const queryKeys = {
     posts: (projectId: string) => ['seednote-import-posts', projectId] as const,
     post: (projectId: string, postId: string, params?: { from?: string; to?: string }) => ['seednote-import-post', projectId, postId, params] as const,
   },
+  wechatAnalyticsImport: {
+    batches: (projectId: string) => ['wechat-import-batches', projectId] as const,
+    batch: (projectId: string, batchId: string) => ['wechat-import-batch', projectId, batchId] as const,
+    overview: (projectId: string) => ['wechat-import-overview', projectId] as const,
+    articles: (projectId: string) => ['wechat-import-articles', projectId] as const,
+    article: (projectId: string, articleId: string) => ['wechat-import-article', projectId, articleId] as const,
+  },
   timeline: {
     range: (from: string, to: string, filters?: Record<string, string>) =>
       ['timeline', from, to, filters] as const,

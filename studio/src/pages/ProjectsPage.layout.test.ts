@@ -33,10 +33,13 @@ describe('ProjectsPage layout contracts', () => {
 
   it('keeps Montage portrait references out of visual-style analysis', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
+    const montageGuard = source.indexOf('{!isMontage ? (')
+    const analyzedField = source.indexOf('<AnalyzedImageField')
 
     expect(source).toContain('supportsVisualReference')
-    expect(source).toContain('shouldAnalyzeReferenceStyle = !isMontage')
-    expect(source).toContain('!shouldAnalyzeReferenceStyle')
+    expect(source).toContain('supportsVisualReference && isMontage')
+    expect(montageGuard).toBeGreaterThan(-1)
+    expect(analyzedField).toBeGreaterThan(montageGuard)
     expect(source).not.toContain("selectedPlatform !== 'seednote'")
   })
 

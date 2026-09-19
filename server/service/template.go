@@ -19,27 +19,32 @@ import (
 
 // TemplateService handles template business logic.
 type TemplateService struct {
-	repo   repository.Repository
-	logger *zerolog.Logger
+	repo          repository.Repository
+	logger        *zerolog.Logger
+	imageAnalyses *ImageAnalysisService
 }
 
 // TemplatePatch carries explicit field-presence for template updates. A nil
 // pointer means "leave unchanged"; a non-nil pointer, including "", means "set
 // to this value".
 type TemplatePatch struct {
-	Name         *string
-	Type         *string
-	ThumbnailURL *string
-	Prompt       *string
-	Visibility   *string
-	Category     *string
-	SortOrder    *int
-	IsActive     *bool
+	Name             *string
+	Type             *string
+	ThumbnailAssetID *string
+	Prompt           *string
+	Visibility       *string
+	Category         *string
+	SortOrder        *int
+	IsActive         *bool
 }
 
 // NewTemplateService creates a new TemplateService.
 func NewTemplateService(repo repository.Repository, logger *zerolog.Logger) *TemplateService {
 	return &TemplateService{repo: repo, logger: logger}
+}
+
+func (s *TemplateService) SetImageAnalysisService(analyses *ImageAnalysisService) {
+	s.imageAnalyses = analyses
 }
 
 // Sentinel errors for template operations. Handlers should use errors.Is to
@@ -159,11 +164,12 @@ func (s *TemplateService) create(ctx context.Context, tmpl *model.Template, user
 	if err := validateSeednoteTemplate(tmpl); err != nil {
 		return nil, err
 	}
+	tmpl.Prompt = strings.TrimSpace(tmpl.Prompt)
 	tmpl.Name = ResolveTemplateName(tmpl.Name, tmpl.Prompt)
 	if tmpl.Name == "" {
 		return nil, ErrTemplateNameMissing
 	}
-	if strings.TrimSpace(tmpl.Prompt) == "" {
+	if strings.TrimSpace(tmpl.Prompt) == "" && strings.TrimSpace(tmpl.ThumbnailAssetID) == "" {
 		return nil, ErrTemplatePromptMissing
 	}
 	if tmpl.Visibility != "public" && tmpl.Visibility != "private" {
@@ -173,8 +179,24 @@ func (s *TemplateService) create(ctx context.Context, tmpl *model.Template, user
 		tmpl.ID = uuid.NewString()
 	}
 	prepareTemplateForCreate(tmpl, userID)
-	tmpl.IsActive = isActive
+	tmpl.ActivateWhenReady = isActive
+	if strings.TrimSpace(tmpl.Prompt) != "" {
+		tmpl.PromptSource = model.ImageAnalysisSourceManual
+		tmpl.ReadinessStatus = model.TemplateReadinessReady
+		tmpl.IsActive = isActive
+	} else {
+		tmpl.ReadinessStatus = model.TemplateReadinessAnalyzing
+		tmpl.IsActive = false
+	}
 
+	if s.imageAnalyses != nil && tmpl.Prompt == "" {
+		job, err := s.imageAnalyses.CreateTemplateWithJob(ctx, tmpl)
+		if err != nil {
+			return nil, fmt.Errorf("create template: %w", err)
+		}
+		tmpl.ImageAnalysis = job.View()
+		return tmpl, nil
+	}
 	if err := s.repo.Templates().Create(ctx, tmpl); err != nil {
 		return nil, fmt.Errorf("create template: %w", err)
 	}
@@ -205,8 +227,8 @@ func (s *TemplateService) Update(ctx context.Context, id string, userID string, 
 	if patch.Type != "" {
 		p.Type = &patch.Type
 	}
-	if patch.ThumbnailURL != "" {
-		p.ThumbnailURL = &patch.ThumbnailURL
+	if patch.ThumbnailAssetID != "" {
+		p.ThumbnailAssetID = &patch.ThumbnailAssetID
 	}
 	if patch.Prompt != "" {
 		p.Prompt = &patch.Prompt
@@ -237,47 +259,93 @@ func (s *TemplateService) UpdatePatch(ctx context.Context, id string, userID str
 	if patch.Name != nil && strings.TrimSpace(*patch.Name) == "" {
 		return nil, ErrTemplateNameMissing
 	}
-	if patch.Prompt != nil && strings.TrimSpace(*patch.Prompt) == "" {
-		return nil, ErrTemplatePromptMissing
-	}
-	existing, err := s.repo.Templates().FindByID(ctx, id)
+	var existing *model.Template
+	var queued *model.ImageAnalysisJob
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		current, err := tx.Templates().FindByIDForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := validateSeednoteTemplate(current); err != nil {
+			return ErrTemplateNotFound
+		}
+		previousPrompt := current.Prompt
+		if patch.Name != nil {
+			current.Name = strings.TrimSpace(*patch.Name)
+		}
+		if patch.Type != nil {
+			current.Type = *patch.Type
+		}
+		thumbnailChanged := false
+		if patch.ThumbnailAssetID != nil {
+			thumbnailChanged = current.ThumbnailAssetID != *patch.ThumbnailAssetID
+			current.ThumbnailAssetID = *patch.ThumbnailAssetID
+		}
+		promptExplicit := patch.Prompt != nil
+		manualPrompt := false
+		if patch.Prompt != nil {
+			current.Prompt = strings.TrimSpace(*patch.Prompt)
+			manualPrompt = current.Prompt != ""
+		}
+		if patch.Visibility != nil && (*patch.Visibility == "public" || *patch.Visibility == "private") {
+			current.Visibility = *patch.Visibility
+		}
+		if patch.Category != nil {
+			current.Category = *patch.Category
+		}
+		if patch.SortOrder != nil {
+			current.SortOrder = *patch.SortOrder
+		}
+		if patch.IsActive != nil {
+			current.ActivateWhenReady = *patch.IsActive
+			if current.ReadinessStatus == model.TemplateReadinessReady {
+				current.IsActive = *patch.IsActive
+			}
+		}
+		generatedPromptFollowsThumbnail := thumbnailChanged && !promptExplicit && current.PromptSource == model.ImageAnalysisSourceAnalysis
+		startAnalysis := strings.TrimSpace(current.ThumbnailAssetID) != "" &&
+			((strings.TrimSpace(current.Prompt) == "" && (promptExplicit || thumbnailChanged)) || generatedPromptFollowsThumbnail)
+		if strings.TrimSpace(current.Prompt) == "" && strings.TrimSpace(current.ThumbnailAssetID) == "" {
+			return ErrTemplatePromptMissing
+		}
+		if s.imageAnalyses != nil && manualPrompt {
+			current.PromptSource = model.ImageAnalysisSourceManual
+			current.ReadinessStatus = model.TemplateReadinessReady
+			current.IsActive = current.ActivateWhenReady
+			if err := supersedeImageAnalysisTx(ctx, tx, model.ImageAnalysisSubjectTemplate, current.ID, model.ImageAnalysisKindTemplatePrompt); err != nil {
+				return err
+			}
+		}
+		if s.imageAnalyses != nil && startAnalysis {
+			current.Prompt = ""
+			current.PromptSource = ""
+			current.ReadinessStatus = model.TemplateReadinessAnalyzing
+			current.IsActive = false
+			queued, err = s.imageAnalyses.upsertJobTx(ctx, tx, current.UserID, model.ImageAnalysisSubjectTemplate, current.ID, model.ImageAnalysisKindTemplatePrompt, current.ThumbnailAssetID, previousPrompt)
+			if err != nil {
+				return err
+			}
+		}
+		ensureTagsNotNil(current)
+		if err := tx.Templates().Update(ctx, current); err != nil {
+			return err
+		}
+		existing = current
+		return nil
+	})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrTemplateNotFound
 		}
-		return nil, fmt.Errorf("find template: %w", err)
-	}
-	if err := validateSeednoteTemplate(existing); err != nil {
-		return nil, ErrTemplateNotFound
-	}
-	if patch.Name != nil {
-		existing.Name = strings.TrimSpace(*patch.Name)
-	}
-	if patch.Type != nil {
-		existing.Type = *patch.Type
-	}
-	if patch.ThumbnailURL != nil {
-		existing.ThumbnailURL = *patch.ThumbnailURL
-	}
-	if patch.Prompt != nil {
-		existing.Prompt = *patch.Prompt
-	}
-	if patch.Visibility != nil && (*patch.Visibility == "public" || *patch.Visibility == "private") {
-		existing.Visibility = *patch.Visibility
-	}
-	if patch.Category != nil {
-		existing.Category = *patch.Category
-	}
-	if patch.SortOrder != nil {
-		existing.SortOrder = *patch.SortOrder
-	}
-	if patch.IsActive != nil {
-		existing.IsActive = *patch.IsActive
-	}
-
-	ensureTagsNotNil(existing)
-	if err := s.repo.Templates().Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("update template: %w", err)
+	}
+	if s.imageAnalyses != nil {
+		s.imageAnalyses.enqueue(ctx, queued)
+		if queued != nil {
+			existing.ImageAnalysis = queued.View()
+		} else if err := s.imageAnalyses.PresentTemplate(ctx, existing); err != nil {
+			return nil, fmt.Errorf("present template image analysis: %w", err)
+		}
 	}
 	return existing, nil
 }
@@ -320,10 +388,15 @@ func (s *TemplateService) GetByID(ctx context.Context, id, userID string) (*mode
 	if err != nil {
 		return nil, err
 	}
-	if !isAdmin && (!tmpl.IsActive || tmpl.Visibility != "public") {
+	if !isAdmin && (!tmpl.IsActive || tmpl.ReadinessStatus != model.TemplateReadinessReady || tmpl.Visibility != "public") {
 		return nil, ErrTemplateNotFound
 	}
 	ensureTagsNotNil(tmpl)
+	if s.imageAnalyses != nil {
+		if err := s.imageAnalyses.PresentTemplate(ctx, tmpl); err != nil {
+			return nil, err
+		}
+	}
 	return tmpl, nil
 }
 
@@ -362,6 +435,13 @@ func (s *TemplateService) List(ctx context.Context, templateType, category, tag,
 	}
 
 	ensureTagsNotNil(templates...)
+	if s.imageAnalyses != nil {
+		for _, tmpl := range templates {
+			if err := s.imageAnalyses.PresentTemplate(ctx, tmpl); err != nil {
+				return nil, 0, err
+			}
+		}
+	}
 	return templates, total, nil
 }
 

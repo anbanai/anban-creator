@@ -130,7 +130,8 @@ vi.mock('@/lib/api', async () => {
         list: vi.fn().mockResolvedValue({
           items: [{
             id: 'template-1', type: 'seednote', name: '知识卡片', category: '知识科普',
-            thumbnail_url: '', prompt: '模板视觉 Prompt', visibility: 'public', sort_order: 0,
+            thumbnail: null, prompt: '模板视觉 Prompt', prompt_source: 'manual', readiness_status: 'ready',
+            activate_when_ready: true, visibility: 'public', sort_order: 0,
             is_active: true, created_at: '2026-08-02T00:00:00Z', updated_at: '2026-08-02T00:00:00Z',
           }],
           total: 1,

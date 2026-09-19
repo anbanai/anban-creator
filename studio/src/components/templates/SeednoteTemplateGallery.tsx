@@ -124,9 +124,9 @@ export function SeednoteTemplateGallery({ platform, onApply, className }: Seedno
               onClick={() => onApply(template.prompt, template)}
             >
               <span className="relative aspect-[3/4] w-full overflow-hidden rounded-md border border-border bg-muted">
-                {template.thumbnail_url ? (
+                {template.thumbnail?.download_url ? (
                   <SignedImage
-                    src={template.thumbnail_url}
+                    src={template.thumbnail.download_url}
                     alt={template.name}
                     className="size-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
                     fallbackIcon={<ImageOff />}

@@ -27,46 +27,48 @@ import (
 
 // Services aggregates all service dependencies required by the router.
 type Services struct {
-	Config                   *config.Config
-	Logger                   *zerolog.Logger
-	DB                       *gorm.DB
-	Redis                    *redis.Client
-	Repo                     repository.Repository
-	JWTService               *auth.JWTService
-	WechatSvc                *auth.WeChatService
-	WSHub                    *handler.WebSocketHub
-	AuthHandler              *handler.AuthHandler
-	PlanService              *service.PlanService
-	TaskService              *service.TaskService
-	PlanHandler              *handler.PlanHandler
-	TaskHandler              *handler.TaskHandler
-	SeednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
-	SeednoteImportHandler    *handler.SeednoteImportHandler
-	WechatAnalyticsHandler   *handler.WechatAnalyticsHandler
-	WechatPublicationHandler *handler.WechatPublicationHandler
-	ChannelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
-	AgentHandler             *handler.AgentHandler
-	AgentProfileHandler      *handler.AgentProfileHandler
-	AgentPackHandler         *handler.AgentPackHandler
-	BillingHandler           *handler.BillingHandler
-	BillingAdminHandler      *handler.BillingAdminHandler
-	ProjectHandler           *handler.ProjectHandler
-	TimelineHandler          *handler.TimelineHandler
-	APIKeyHandler            *handler.APIKeyHandler
-	FileHandler              *handler.FileHandler
-	UploadHandler            *handler.UploadHandler
-	AIEntryHandler           *handler.AIEntryHandler
-	FeedbackHandler          *handler.FeedbackHandler
-	ImageCapabilityHandler   *handler.ImageCapabilityHandler
-	MontageCapabilityHandler *handler.MontageCapabilityHandler
-	TemplateHandler          *handler.TemplateHandler
-	ViralAnalysisHandler     *handler.ViralAnalysisHandler
-	PosterHandler            *handler.PosterHandler
-	ResourceHandler          *handler.ResourceHandler
-	TopicPoolHandler         *handler.TopicPoolHandler
-	IlinkHandler             *handler.IlinkHandler
-	MCPHandler               http.Handler
-	StorageProvider          storage.Provider
+	Config                       *config.Config
+	Logger                       *zerolog.Logger
+	DB                           *gorm.DB
+	Redis                        *redis.Client
+	Repo                         repository.Repository
+	JWTService                   *auth.JWTService
+	WechatSvc                    *auth.WeChatService
+	WSHub                        *handler.WebSocketHub
+	AuthHandler                  *handler.AuthHandler
+	PlanService                  *service.PlanService
+	TaskService                  *service.TaskService
+	PlanHandler                  *handler.PlanHandler
+	TaskHandler                  *handler.TaskHandler
+	SeednoteAnalyticsHandler     *handler.SeednoteAnalyticsHandler
+	SeednoteImportHandler        *handler.SeednoteImportHandler
+	WechatAnalyticsHandler       *handler.WechatAnalyticsHandler
+	WechatAnalyticsImportHandler *handler.WechatAnalyticsImportHandler
+	WechatPublicationHandler     *handler.WechatPublicationHandler
+	ChannelsAnalyticsHandler     *handler.ChannelsAnalyticsHandler
+	AgentHandler                 *handler.AgentHandler
+	AgentProfileHandler          *handler.AgentProfileHandler
+	AgentPackHandler             *handler.AgentPackHandler
+	BillingHandler               *handler.BillingHandler
+	BillingAdminHandler          *handler.BillingAdminHandler
+	ProjectHandler               *handler.ProjectHandler
+	TimelineHandler              *handler.TimelineHandler
+	APIKeyHandler                *handler.APIKeyHandler
+	FileHandler                  *handler.FileHandler
+	UploadHandler                *handler.UploadHandler
+	AIEntryHandler               *handler.AIEntryHandler
+	FeedbackHandler              *handler.FeedbackHandler
+	ImageCapabilityHandler       *handler.ImageCapabilityHandler
+	MontageCapabilityHandler     *handler.MontageCapabilityHandler
+	TemplateHandler              *handler.TemplateHandler
+	ImageAnalysisHandler         *handler.ImageAnalysisHandler
+	ViralAnalysisHandler         *handler.ViralAnalysisHandler
+	PosterHandler                *handler.PosterHandler
+	ResourceHandler              *handler.ResourceHandler
+	TopicPoolHandler             *handler.TopicPoolHandler
+	IlinkHandler                 *handler.IlinkHandler
+	MCPHandler                   http.Handler
+	StorageProvider              storage.Provider
 }
 
 // NewRouter creates a new Fiber app with middleware and route groups.
@@ -269,7 +271,6 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/projects/stats", svc.ProjectHandler.Stats)
 		apiV1.Post("/projects", svc.ProjectHandler.Create)
 		apiV1.Post("/projects/fetch-profile", svc.ProjectHandler.FetchProfile)
-		apiV1.Post("/projects/analyze-image", svc.ProjectHandler.AnalyzeImage)
 		apiV1.Get("/projects/:id", svc.ProjectHandler.Get)
 		apiV1.Get("/projects/:id/memory", svc.ProjectHandler.Memory)
 		apiV1.Put("/projects/:id", svc.ProjectHandler.Update)
@@ -357,12 +358,27 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/projects/:id/seednote-analytics/posts/:postId", svc.SeednoteImportHandler.Post)
 	}
 	if svc.WechatPublicationHandler != nil {
+		apiV1.Get("/projects/:id/wechat/capabilities", svc.WechatPublicationHandler.Capabilities)
 		apiV1.Get("/tasks/:id/wechat-publication", svc.WechatPublicationHandler.Get)
 		apiV1.Post("/tasks/:id/wechat-publication/publish", svc.WechatPublicationHandler.Publish)
 		apiV1.Post("/tasks/:id/wechat-publication/retry-publish", svc.WechatPublicationHandler.RetryPublish)
 		apiV1.Post("/tasks/:id/wechat-publication/reconcile", svc.WechatPublicationHandler.Reconcile)
 		apiV1.Post("/tasks/:id/wechat-publication/recover", svc.WechatPublicationHandler.Recover)
 		apiV1.Post("/tasks/:id/wechat-publication/select", svc.WechatPublicationHandler.Select)
+		apiV1.Post("/tasks/:id/wechat-publication/manual-bind", svc.WechatPublicationHandler.ManualBind)
+	}
+	if svc.WechatAnalyticsImportHandler != nil {
+		apiV1.Get("/wechat-analytics/imports/:batchId", svc.WechatAnalyticsImportHandler.GlobalDetail)
+		apiV1.Post("/wechat-analytics/imports/:batchId/resolve", svc.WechatAnalyticsImportHandler.GlobalResolve)
+		apiV1.Get("/articles/:articleId/wechat-analytics", svc.WechatAnalyticsImportHandler.GlobalArticle)
+		apiV1.Post("/projects/:id/wechat-analytics/imports/preview", svc.WechatAnalyticsImportHandler.Preview)
+		apiV1.Post("/projects/:id/wechat-analytics/imports", svc.WechatAnalyticsImportHandler.Import)
+		apiV1.Get("/projects/:id/wechat-analytics/imports", svc.WechatAnalyticsImportHandler.List)
+		apiV1.Get("/projects/:id/wechat-analytics/imports/:batchId", svc.WechatAnalyticsImportHandler.Detail)
+		apiV1.Post("/projects/:id/wechat-analytics/imports/:batchId/resolve", svc.WechatAnalyticsImportHandler.Resolve)
+		apiV1.Get("/projects/:id/wechat-analytics/overview", svc.WechatAnalyticsImportHandler.Overview)
+		apiV1.Get("/projects/:id/wechat-analytics/articles", svc.WechatAnalyticsImportHandler.Articles)
+		apiV1.Get("/projects/:id/wechat-analytics/articles/:articleId", svc.WechatAnalyticsImportHandler.Article)
 	}
 
 	// Local file serving (only when using local storage provider).
@@ -437,10 +453,13 @@ func NewRouter(svc *Services) *fiber.App {
 		templates := apiV1.Group("/templates")
 		templates.Get("/", svc.TemplateHandler.List)
 		templates.Post("/", svc.TemplateHandler.Create)
-		templates.Post("/analyze-thumbnail", svc.TemplateHandler.AnalyzeThumbnail)
 		templates.Get("/:id", svc.TemplateHandler.GetByID)
 		templates.Put("/:id", svc.TemplateHandler.Update)
 		templates.Delete("/:id", svc.TemplateHandler.Delete)
+	}
+	if svc.ImageAnalysisHandler != nil {
+		apiV1.Post("/image-analyses/:id/retry", svc.ImageAnalysisHandler.Retry)
+		apiV1.Post("/image-analyses/:id/cancel", svc.ImageAnalysisHandler.Cancel)
 	}
 
 	// ---------------------------------------------------------------------------

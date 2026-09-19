@@ -47,7 +47,7 @@ const {
 
     image_ratio: '16:9',
     max_concurrent_tasks: 1,
-    config: { wechat_publish_mode: 'manual' },
+    config: { wechat_app_id: 'wx-app' },
     status: 'active',
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:00:00.000Z',
@@ -233,7 +233,8 @@ vi.mock('@/lib/api', async () => {
         list: vi.fn().mockResolvedValue({
           items: [{
             id: 'template-1', type: 'seednote', name: '居家前后对比', category: '家居家装',
-            thumbnail_url: '', prompt: '模板视觉 Prompt', visibility: 'public', sort_order: 0,
+            thumbnail: null, prompt: '模板视觉 Prompt', prompt_source: 'manual', readiness_status: 'ready',
+            activate_when_ready: true, visibility: 'public', sort_order: 0,
             is_active: true, created_at: '2026-08-02T00:00:00Z', updated_at: '2026-08-02T00:00:00Z',
           }],
           total: 1,
@@ -605,7 +606,7 @@ describe('DashboardPage AI entry', () => {
 
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
-    expect(await screen.findByText(file.name)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: `预览 ${file.name}` })).toBeInTheDocument()
     const parameters = await openParameters()
     fireEvent.click(within(parameters).getByText('Professional'))
     await closeParameters()
@@ -614,7 +615,7 @@ describe('DashboardPage AI entry', () => {
 
     expect(await screen.findByText(/请重新选择图片能力/)).toBeInTheDocument()
     expect(prompt).toHaveValue('保留这段 Prompt 和附件')
-    expect(screen.getByText(file.name)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: `预览 ${file.name}` })).toBeInTheDocument()
     await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(2))
     expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
     await expectParameterSummary('16:9')
@@ -752,7 +753,7 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files } })
     await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledTimes(5))
     expect(screen.getByLabelText('选择附件文件')).toBeDisabled()
-    await screen.findByText('product.png')
+    await screen.findByRole('button', { name: '预览 product.png' })
     fireEvent.change(prompt, { target: { value: '帮我写一篇新品发布公众号文章' } })
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
@@ -915,12 +916,12 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['image'], 'keep.png', { type: 'image/png' })] },
     })
-    expect(await screen.findByText('keep.png')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '预览 keep.png' })).toBeInTheDocument()
 
     fireEvent.click(await screen.findByRole('button', { name: /居家前后对比/ }))
 
     expect(prompt).toHaveValue('模板视觉 Prompt')
-    expect(screen.getByText('keep.png')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '预览 keep.png' })).toBeInTheDocument()
   })
 
   it('does not render legacy shortcut cards for project types that cannot create plans', async () => {

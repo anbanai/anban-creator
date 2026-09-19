@@ -203,9 +203,7 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
             : 'ok',
   }
 
-  const publishableProjects = projects.filter(
-    (project) => project.platform === 'article' && (project.config.wechat_publish_mode ?? 'manual') !== 'disabled',
-  )
+  const publishableProjects = projects.filter((project) => project.platform === 'article')
   const projectStatus: ReadinessStatus = projects.length > 0 ? 'ready' : 'not_ready'
   const publishingStatus: ReadinessStatus =
     projects.length === 0 ? 'unknown' : publishableProjects.length > 0 ? 'ready' : 'not_ready'

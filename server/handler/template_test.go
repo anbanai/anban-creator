@@ -27,7 +27,7 @@ import (
 
 func setupTemplateHandlerTest(t *testing.T, configureStore ...func(*fakeStorageProvider)) (*fiber.App, repository.Repository) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -37,7 +37,7 @@ func setupTemplateHandlerTest(t *testing.T, configureStore ...func(*fakeStorageP
 			sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.Template{}, &model.User{}, &model.UploadSession{}, &model.Asset{}); err != nil {
+	if err := db.AutoMigrate(&model.Template{}, &model.User{}, &model.UploadSession{}, &model.Asset{}, &model.ImageAnalysisJob{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	db.Exec("DELETE FROM templates")
@@ -53,8 +53,9 @@ func setupTemplateHandlerTest(t *testing.T, configureStore ...func(*fakeStorageP
 	for _, configure := range configureStore {
 		configure(store)
 	}
-	h.SetStore(store)
-	h.SetUploadRepository(repo)
+	analyses := service.NewImageAnalysisService(repo, store, nil, nil, nil, service.ImageAnalysisConfig{}, &logger)
+	svc.SetImageAnalysisService(analyses)
+	h.SetReferenceAssetService(service.NewReferenceAssetService(repo, store, time.Now))
 
 	app := fiber.New()
 	// Stub middleware: read X-User-ID into locals, mirroring how GetUserID works.
@@ -96,15 +97,18 @@ func TestTemplateHandlerCreateRequiresAdminAndCanonicalPrompt(t *testing.T) {
 	createTemplateHandlerUser(t, repo, "regular-api-user", false)
 	createTemplateHandlerUser(t, repo, "admin-api-user", true)
 
-	valid := map[string]any{
+	regularRequest := map[string]any{
 		"name": "晨光模板", "type": "seednote", "category": model.SeednoteTemplateCategoryProduct,
 		"prompt": "暖色晨光，标题居中，正文留白", "visibility": "public",
+		"thumbnail_image": templateThumbnailSelection(createTemplateThumbnailAsset(t, repo, "regular-api-user")),
 	}
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", "regular-api-user", valid)
+	resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", "regular-api-user", regularRequest)
 	if resp.StatusCode != fiber.StatusForbidden {
 		t.Fatalf("regular create status = %d, want 403; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
 
+	valid := maps.Clone(regularRequest)
+	valid["thumbnail_image"] = templateThumbnailSelection(createTemplateThumbnailAsset(t, repo, "admin-api-user"))
 	resp = doRequest(t, app, http.MethodPost, "/api/v1/templates/", "admin-api-user", valid)
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("admin create status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
@@ -113,7 +117,7 @@ func TestTemplateHandlerCreateRequiresAdminAndCanonicalPrompt(t *testing.T) {
 	if data["prompt"] != valid["prompt"] {
 		t.Fatalf("prompt = %v, want %v", data["prompt"], valid["prompt"])
 	}
-	for _, legacy := range []string{"style_prompt", "visual_style"} {
+	for _, legacy := range []string{"style_prompt", "visual_style", "thumbnail_url"} {
 		if _, exists := data[legacy]; exists {
 			t.Fatalf("response retained legacy prompt alias %q", legacy)
 		}
@@ -123,95 +127,6 @@ func TestTemplateHandlerCreateRequiresAdminAndCanonicalPrompt(t *testing.T) {
 		legacyResp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", "admin-api-user", legacyBody)
 		if legacyResp.StatusCode != fiber.StatusBadRequest {
 			t.Fatalf("%s create status = %d, want 400", legacy, legacyResp.StatusCode)
-		}
-	}
-}
-
-func TestTemplateHandlerAnalyzeThumbnailRequiresAdminAndUsesRestrictedPrompt(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if err := db.AutoMigrate(&model.Template{}, &model.User{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	repo := repository.New(db)
-	createTemplateHandlerUser(t, repo, "regular-analyze-user", false)
-	createTemplateHandlerUser(t, repo, "admin-analyze-user", true)
-	logger := zerolog.New(io.Discard)
-	svc := service.NewTemplateService(repo, &logger)
-	h := NewTemplateHandler(svc, &logger)
-	llm := &fakeProjectLLM{
-		response:           "低饱和暖色；上图下文；标题居中；大面积留白",
-		validationResponse: `{"allowed":true}`,
-	}
-	h.SetVisionClient(llm)
-	key := "uploads/references/admin-analyze-user/template-thumbnail.png"
-	store := &fakeStorageProvider{data: map[string][]byte{key: {'\x89', 'P', 'N', 'G', '\r', '\n', '\x1a', '\n'}}}
-	h.SetStore(store)
-
-	app := fiber.New()
-	app.Post("/api/v1/templates/analyze-thumbnail", func(c fiber.Ctx) error {
-		c.Locals("user_id", c.Get("X-User-ID"))
-		return h.AnalyzeThumbnail(c)
-	})
-	body := map[string]any{"type": "seednote", "thumbnail_url": "/api/v1/files/" + key}
-	resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/analyze-thumbnail", "regular-analyze-user", body)
-	if resp.StatusCode != fiber.StatusForbidden {
-		t.Fatalf("regular analyze status = %d, want 403", resp.StatusCode)
-	}
-
-	resp = doRequest(t, app, http.MethodPost, "/api/v1/templates/analyze-thumbnail", "admin-analyze-user", body)
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("admin analyze status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
-	}
-	data := decodeBody(t, resp)["data"].(map[string]any)
-	if data["prompt"] != llm.response || len(data) != 1 {
-		t.Fatalf("analyze data = %v, want prompt only", data)
-	}
-	for _, required := range []string{"视觉", "版式", "商业目标", "卖点", "正文", "CTA", "产品事实"} {
-		if !strings.Contains(llm.imagePrompt, required) {
-			t.Errorf("analysis prompt missing restriction/subject %q: %s", required, llm.imagePrompt)
-		}
-	}
-	for _, required := range []string{"目标受众", "受众策略"} {
-		if !strings.Contains(llm.imagePrompt, required) {
-			t.Errorf("analysis prompt missing audience restriction %q: %s", required, llm.imagePrompt)
-		}
-	}
-
-	for _, prohibited := range []string{
-		"目标受众是年轻女性",
-		"受众策略采用职场新人定位",
-		"产品卖点是快速见效",
-		"正文策略先痛点后转化",
-		"CTA：立即购买",
-		"产品事实：售价99元",
-	} {
-		llm.response = prohibited
-		resp = doRequest(t, app, http.MethodPost, "/api/v1/templates/analyze-thumbnail", "admin-analyze-user", body)
-		if resp.StatusCode != fiber.StatusUnprocessableEntity {
-			t.Fatalf("prohibited response %q status=%d, want 422; body=%v", prohibited, resp.StatusCode, decodeBody(t, resp))
-		}
-		errorBody := decodeBody(t, resp)
-		raw, _ := json.Marshal(errorBody)
-		if bytes.Contains(raw, []byte(prohibited)) {
-			t.Fatalf("prohibited model output leaked in response: %s", raw)
-		}
-		if errorBody["code"] == nil || errorBody["msg"] == nil {
-			t.Fatalf("prohibited response is not structured: %v", errorBody)
-		}
-	}
-
-	llm.response = "面向年轻女性的补水保湿画面，右下角放购买按钮"
-	llm.validationResponse = `{"allowed":false}`
-	resp = doRequest(t, app, http.MethodPost, "/api/v1/templates/analyze-thumbnail", "admin-analyze-user", body)
-	if resp.StatusCode != fiber.StatusUnprocessableEntity {
-		t.Fatalf("semantic boundary bypass status=%d, want 422; body=%v", resp.StatusCode, decodeBody(t, resp))
-	}
-	for _, required := range []string{"视觉", "版式", "受众", "卖点", "CTA", "产品事实"} {
-		if !strings.Contains(llm.validationPrompt, required) {
-			t.Errorf("validation prompt missing boundary %q: %s", required, llm.validationPrompt)
 		}
 	}
 }
@@ -263,7 +178,8 @@ func assertCanonicalTemplateResponse(t *testing.T, data map[string]any) {
 	t.Helper()
 	want := map[string]bool{
 		"id": true, "type": true, "name": true, "category": true,
-		"thumbnail_url": true, "prompt": true, "visibility": true,
+		"thumbnail": true, "prompt": true, "prompt_source": true,
+		"readiness_status": true, "activate_when_ready": true, "visibility": true,
 		"sort_order": true, "is_active": true, "created_at": true, "updated_at": true,
 	}
 	if len(data) != len(want) {
@@ -276,18 +192,32 @@ func assertCanonicalTemplateResponse(t *testing.T, data map[string]any) {
 	}
 }
 
+func createTemplateThumbnailAsset(t *testing.T, repo repository.Repository, ownerID string) *model.Asset {
+	t.Helper()
+	id := uuid.NewString()
+	asset := &model.Asset{
+		ID: id, UserID: ownerID, Purpose: service.DirectUploadPurposeTemplateThumbnail,
+		StorageKey: "assets/users/" + ownerID + "/" + id + "/thumb.png",
+		FileName:   "thumb.png", ContentType: "image/png", Size: 123, ETag: "etag-" + id,
+	}
+	if err := repo.Assets().Create(t.Context(), asset); err != nil {
+		t.Fatalf("seed template thumbnail asset: %v", err)
+	}
+	return asset
+}
+
+func templateThumbnailSelection(asset *model.Asset) map[string]any {
+	return map[string]any{"asset_id": asset.ID}
+}
+
 func createTemplateRow(t *testing.T, repo repository.Repository, ownerID, visibility, name string) *model.Template {
 	t.Helper()
+	asset := createTemplateThumbnailAsset(t, repo, ownerID)
 	tmpl := &model.Template{
-		ID:           uuid.New().String(),
-		UserID:       ownerID,
-		Name:         name,
-		Type:         "seednote",
-		Category:     model.SeednoteTemplateCategoryProduct,
-		Visibility:   visibility,
-		IsActive:     true,
-		ThumbnailURL: "https://example.com/x.png",
-		Prompt:       "暖色",
+		ID: uuid.New().String(), UserID: ownerID, Name: name, Type: "seednote",
+		Category: model.SeednoteTemplateCategoryProduct, Visibility: visibility, IsActive: true,
+		ThumbnailAssetID: asset.ID, Prompt: "暖色", PromptSource: model.ImageAnalysisSourceManual,
+		ReadinessStatus: model.TemplateReadinessReady,
 	}
 	if err := repo.Templates().Create(t.Context(), tmpl); err != nil {
 		t.Fatalf("seed template: %v", err)
@@ -391,18 +321,19 @@ func TestTemplateHandler_Create_RequiresUserID(t *testing.T) {
 }
 
 func TestTemplateHandler_Create_Success(t *testing.T) {
-	app, _ := setupTemplateHandlerTest(t)
+	app, repo := setupTemplateHandlerTest(t)
 	userID := uuid.New().String()
+	asset := createTemplateThumbnailAsset(t, repo, userID)
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
-		"name":          "新模板",
-		"type":          "seednote",
-		"category":      model.SeednoteTemplateCategoryProduct,
-		"thumbnail_url": "https://example.com/x.png",
-		"prompt":        "暖色",
-		"visibility":    "private",
-		"sort_order":    17,
-		"is_active":     false,
+		"name":            "新模板",
+		"type":            "seednote",
+		"category":        model.SeednoteTemplateCategoryProduct,
+		"thumbnail_image": templateThumbnailSelection(asset),
+		"prompt":          "暖色",
+		"visibility":      "private",
+		"sort_order":      17,
+		"is_active":       false,
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -427,7 +358,6 @@ func TestTemplateHandlerCanonicalResponsesHidePersistenceFields(t *testing.T) {
 	createTemplateHandlerUser(t, repo, adminID, true)
 	tmpl := createTemplateRow(t, repo, adminID, "public", "strict response")
 	tmpl.Category = model.SeednoteTemplateCategoryProduct
-	tmpl.UserID = "must-not-leak"
 	tmpl.Writer = "legacy-writer"
 	tmpl.Theme = "legacy-theme"
 	tmpl.Author = "legacy-author"
@@ -458,6 +388,7 @@ func TestTemplateHandlerRejectsRemovedTagsAndUpdatesSortOrder(t *testing.T) {
 	base := map[string]any{
 		"name": "strict request", "type": model.TemplateTypeSeednote,
 		"category": model.SeednoteTemplateCategoryProduct, "prompt": "留白排版",
+		"thumbnail_image": templateThumbnailSelection(createTemplateThumbnailAsset(t, repo, adminID)),
 	}
 	withTags := maps.Clone(base)
 	withTags["tags"] = []string{"removed"}
@@ -492,11 +423,10 @@ func TestTemplateHandler_CreateFinalizesThumbnailUploadSession(t *testing.T) {
 	userID := uuid.New().String()
 	uploadID := "thumbnail-upload"
 	key := "uploads/pending/" + userID + "/" + uploadID + "/thumb.png"
-	publicURL := "https://cdn.example.com/" + key
 	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
 		ID:         uploadID,
 		UserID:     userID,
-		Purpose:    service.DirectUploadPurposeProjectReference,
+		Purpose:    service.DirectUploadPurposeTemplateThumbnail,
 		StagingKey: key,
 
 		FileName:    "thumb.png",
@@ -509,12 +439,12 @@ func TestTemplateHandler_CreateFinalizesThumbnailUploadSession(t *testing.T) {
 	}
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
-		"name":          "新模板",
-		"type":          "seednote",
-		"category":      model.SeednoteTemplateCategoryProduct,
-		"thumbnail_url": publicURL,
-		"prompt":        "暖色",
-		"visibility":    "private",
+		"name":            "新模板",
+		"type":            "seednote",
+		"category":        model.SeednoteTemplateCategoryProduct,
+		"thumbnail_image": map[string]any{"upload_session_id": uploadID},
+		"prompt":          "暖色",
+		"visibility":      "private",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
@@ -557,21 +487,21 @@ func TestTemplateHandler_CreateClassifiesUploadSessionFinalizeErrors(t *testing.
 			configure: func(store *fakeStorageProvider) {
 				store.statErr = errors.New(backendDetail)
 			},
-			wantStatus: fiber.StatusInternalServerError,
+			wantStatus: fiber.StatusServiceUnavailable,
 		},
 		{
 			name: "timeout is redacted internal error",
 			configure: func(store *fakeStorageProvider) {
 				store.statErr = context.DeadlineExceeded
 			},
-			wantStatus: fiber.StatusInternalServerError,
+			wantStatus: fiber.StatusServiceUnavailable,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app, repo := setupTemplateHandlerTest(t, tt.configure)
 			if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
-				ID: "thumbnail-upload", UserID: "user-1", Purpose: service.DirectUploadPurposeProjectReference,
+				ID: "thumbnail-upload", UserID: "user-1", Purpose: service.DirectUploadPurposeTemplateThumbnail,
 				StagingKey: objectKey,
 				FileName:   "thumb.png", ContentType: "image/png", Size: 123,
 				Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
@@ -581,7 +511,7 @@ func TestTemplateHandler_CreateClassifiesUploadSessionFinalizeErrors(t *testing.
 
 			resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", "user-1", map[string]any{
 				"name": "template", "type": "seednote", "category": model.SeednoteTemplateCategoryProduct,
-				"prompt": "暖色留白排版", "thumbnail_url": "https://cdn.example.com/" + objectKey,
+				"prompt": "暖色留白排版", "thumbnail_image": map[string]any{"upload_session_id": "thumbnail-upload"},
 			})
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
@@ -600,18 +530,19 @@ func TestTemplateHandler_CreateClassifiesUploadSessionFinalizeErrors(t *testing.
 }
 
 func TestTemplateHandler_Create_IgnoresNonVisualRuntimeFields(t *testing.T) {
-	app, _ := setupTemplateHandlerTest(t)
+	app, repo := setupTemplateHandlerTest(t)
 	userID := uuid.New().String()
+	asset := createTemplateThumbnailAsset(t, repo, userID)
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
-		"name":          "老李的公众号",
-		"type":          "seednote",
-		"category":      model.SeednoteTemplateCategoryKnowledge,
-		"thumbnail_url": "https://example.com/x.png",
-		"prompt":        "暖色",
-		"visibility":    "public",
-		"author":        "老李",
-		"writer":        "dan-koe",
+		"name":            "老李的公众号",
+		"type":            "seednote",
+		"category":        model.SeednoteTemplateCategoryKnowledge,
+		"thumbnail_image": templateThumbnailSelection(asset),
+		"prompt":          "暖色",
+		"visibility":      "public",
+		"author":          "老李",
+		"writer":          "dan-koe",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -628,15 +559,17 @@ func TestTemplateHandler_Create_IgnoresNonVisualRuntimeFields(t *testing.T) {
 }
 
 func TestTemplateHandler_Create_ReturnsCanonicalPrompt(t *testing.T) {
-	app, _ := setupTemplateHandlerTest(t)
+	app, repo := setupTemplateHandlerTest(t)
 	userID := uuid.New().String()
+	asset := createTemplateThumbnailAsset(t, repo, userID)
 
 	resp := doRequest(t, app, "POST", "/api/v1/templates/", userID, map[string]any{
-		"name":       "视觉模板",
-		"type":       "seednote",
-		"category":   model.SeednoteTemplateCategoryProduct,
-		"prompt":     "暖色生活摄影",
-		"visibility": "public",
+		"name":            "视觉模板",
+		"type":            "seednote",
+		"category":        model.SeednoteTemplateCategoryProduct,
+		"prompt":          "暖色生活摄影",
+		"visibility":      "public",
+		"thumbnail_image": templateThumbnailSelection(asset),
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -647,57 +580,38 @@ func TestTemplateHandler_Create_ReturnsCanonicalPrompt(t *testing.T) {
 	}
 }
 
-func TestTemplateHandler_CreateAndUpdateRejectBlankPrompt(t *testing.T) {
+func TestTemplateHandlerBlankPromptCreatesAndRestartsBackgroundAnalysis(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	adminID := uuid.New().String()
-	seedPending := func(id string) string {
-		key := "uploads/pending/" + adminID + "/" + id + "/thumb.png"
-		if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
-			ID: id, UserID: adminID, Purpose: service.DirectUploadPurposeProjectReference,
-			StagingKey: key, FileName: "thumb.png", ContentType: "image/png", Size: 123,
-			Status: model.UploadSessionPending, ExpiresAt: time.Now().Add(time.Hour),
-		}); err != nil {
-			t.Fatalf("seed pending upload %s: %v", id, err)
-		}
-		return "https://cdn.example.com/" + key
-	}
+	asset := createTemplateThumbnailAsset(t, repo, adminID)
 
-	createUploadID := "blank-create-thumbnail"
 	resp := doRequest(t, app, http.MethodPost, "/api/v1/templates/", adminID, map[string]any{
-		"name": "无内容模板", "type": "seednote",
-		"category": model.SeednoteTemplateCategoryProduct, "prompt": "  ",
-		"thumbnail_url": seedPending(createUploadID),
+		"name": "待识别模板", "type": "seednote", "category": model.SeednoteTemplateCategoryProduct,
+		"prompt": "  ", "thumbnail_image": templateThumbnailSelection(asset), "is_active": true,
 	})
-	if resp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("create status = %d, want 400; body=%v", resp.StatusCode, decodeBody(t, resp))
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("create status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
-	if session, err := repo.UploadSessions().FindByID(t.Context(), createUploadID); err != nil || session.Status != model.UploadSessionPending {
-		t.Fatalf("create upload session = %#v, err=%v; want pending", session, err)
+	created := decodeBody(t, resp)["data"].(map[string]any)
+	if created["readiness_status"] != model.TemplateReadinessAnalyzing || created["is_active"] != false || created["activate_when_ready"] != true {
+		t.Fatalf("created analysis state = %#v", created)
 	}
-
-	blankNameUploadID := "blank-derived-name-thumbnail"
-	resp = doRequest(t, app, http.MethodPost, "/api/v1/templates/", adminID, map[string]any{
-		"name": "  ", "type": "seednote",
-		"category": model.SeednoteTemplateCategoryProduct, "prompt": "整体氛围：",
-		"thumbnail_url": seedPending(blankNameUploadID),
-	})
-	if resp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("blank derived name create status = %d, want 400; body=%v", resp.StatusCode, decodeBody(t, resp))
-	}
-	if session, err := repo.UploadSessions().FindByID(t.Context(), blankNameUploadID); err != nil || session.Status != model.UploadSessionPending {
-		t.Fatalf("blank derived name upload session = %#v, err=%v; want pending", session, err)
+	analysis := created["image_analysis"].(map[string]any)
+	if analysis["status"] != model.ImageAnalysisStatusQueued || analysis["kind"] != model.ImageAnalysisKindTemplatePrompt {
+		t.Fatalf("image_analysis = %#v", analysis)
 	}
 
 	tmpl := createTemplateRow(t, repo, adminID, "public", "existing")
-	updateUploadID := "blank-update-thumbnail"
+	replacement := createTemplateThumbnailAsset(t, repo, adminID)
 	resp = doRequest(t, app, http.MethodPut, "/api/v1/templates/"+tmpl.ID, adminID, map[string]any{
-		"prompt": "\n\t", "thumbnail_url": seedPending(updateUploadID),
+		"prompt": "\n\t", "thumbnail_image": templateThumbnailSelection(replacement),
 	})
-	if resp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("update status = %d, want 400; body=%v", resp.StatusCode, decodeBody(t, resp))
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("update status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
-	if session, err := repo.UploadSessions().FindByID(t.Context(), updateUploadID); err != nil || session.Status != model.UploadSessionPending {
-		t.Fatalf("update upload session = %#v, err=%v; want pending", session, err)
+	updated := decodeBody(t, resp)["data"].(map[string]any)
+	if updated["prompt"] != "" || updated["readiness_status"] != model.TemplateReadinessAnalyzing || updated["is_active"] != false {
+		t.Fatalf("updated analysis state = %#v", updated)
 	}
 }
 
@@ -763,13 +677,14 @@ func TestTemplateHandler_Update_AdminSucceeds(t *testing.T) {
 	app, repo := setupTemplateHandlerTest(t)
 	owner := uuid.New().String()
 	tmpl := createTemplateRow(t, repo, owner, "public", "old name")
+	replacement := createTemplateThumbnailAsset(t, repo, owner)
 
 	resp := doRequest(t, app, "PUT", "/api/v1/templates/"+tmpl.ID, owner, map[string]any{
-		"name":          "new name",
-		"type":          "seednote",
-		"thumbnail_url": "https://example.com/new.png",
-		"prompt":        "新风格",
-		"visibility":    "private",
+		"name":            "new name",
+		"type":            "seednote",
+		"thumbnail_image": templateThumbnailSelection(replacement),
+		"prompt":          "新风格",
+		"visibility":      "private",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -790,11 +705,10 @@ func TestTemplateHandler_UpdateFinalizesThumbnailUploadSession(t *testing.T) {
 	tmpl := createTemplateRow(t, repo, owner, "public", "old name")
 	uploadID := "updated-thumbnail-upload"
 	key := "uploads/pending/" + owner + "/" + uploadID + "/thumb.png"
-	publicURL := "https://cdn.example.com/" + key
 	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
 		ID:         uploadID,
 		UserID:     owner,
-		Purpose:    service.DirectUploadPurposeProjectReference,
+		Purpose:    service.DirectUploadPurposeTemplateThumbnail,
 		StagingKey: key,
 
 		FileName:    "thumb.png",
@@ -807,7 +721,7 @@ func TestTemplateHandler_UpdateFinalizesThumbnailUploadSession(t *testing.T) {
 	}
 
 	resp := doRequest(t, app, "PUT", "/api/v1/templates/"+tmpl.ID, owner, map[string]any{
-		"thumbnail_url": publicURL,
+		"thumbnail_image": map[string]any{"upload_session_id": uploadID},
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
@@ -826,7 +740,7 @@ func TestTemplateHandler_UpdateByAnotherAdminPreservesExistingFinalizedThumbnail
 	uploadID := "existing-thumbnail-upload"
 	finalKey := "assets/users/" + owner + "/" + uploadID + "/thumb.png"
 	if err := repo.UploadSessions().Create(t.Context(), &model.UploadSession{
-		ID: uploadID, UserID: owner, Purpose: service.DirectUploadPurposeProjectReference,
+		ID: uploadID, UserID: owner, Purpose: service.DirectUploadPurposeTemplateThumbnail,
 		StagingKey: "uploads/pending/" + owner + "/" + uploadID + "/thumb.png",
 		FileName:   "thumb.png", ContentType: "image/png", Size: 123,
 		Status: model.UploadSessionFinalized, AssetID: uploadID,
@@ -835,20 +749,19 @@ func TestTemplateHandler_UpdateByAnotherAdminPreservesExistingFinalizedThumbnail
 		t.Fatalf("seed finalized upload session: %v", err)
 	}
 	if err := repo.Assets().Create(t.Context(), &model.Asset{
-		ID: uploadID, UserID: owner, Purpose: service.DirectUploadPurposeProjectReference,
-		StorageKey: finalKey, FileName: "thumb.png", ContentType: "image/png", Size: 123,
+		ID: uploadID, UserID: owner, Purpose: service.DirectUploadPurposeTemplateThumbnail,
+		StorageKey: finalKey, FileName: "thumb.png", ContentType: "image/png", Size: 123, ETag: "etag-existing",
 	}); err != nil {
 		t.Fatalf("seed finalized thumbnail asset: %v", err)
 	}
 	tmpl := createTemplateRow(t, repo, owner, "public", "old name")
-	tmpl.ThumbnailURL = "/api/v1/files/" + finalKey
+	tmpl.ThumbnailAssetID = uploadID
 	if err := repo.Templates().Update(t.Context(), tmpl); err != nil {
 		t.Fatalf("seed template thumbnail: %v", err)
 	}
 
 	resp := doRequest(t, app, http.MethodPut, "/api/v1/templates/"+tmpl.ID, editor, map[string]any{
-		"name":          "renamed by another admin",
-		"thumbnail_url": "/api/v1/files/" + finalKey + "?signature=existing",
+		"name": "renamed by another admin",
 	})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%v", resp.StatusCode, decodeBody(t, resp))
@@ -860,8 +773,8 @@ func TestTemplateHandler_UpdateByAnotherAdminPreservesExistingFinalizedThumbnail
 	if persisted.Name != "renamed by another admin" {
 		t.Fatalf("name = %q, want cross-admin update", persisted.Name)
 	}
-	if persisted.ThumbnailURL != "/api/v1/files/"+finalKey {
-		t.Fatalf("thumbnail_url = %q, want canonical existing URL", persisted.ThumbnailURL)
+	if persisted.ThumbnailAssetID != uploadID {
+		t.Fatalf("thumbnail_asset_id = %q, want %q", persisted.ThumbnailAssetID, uploadID)
 	}
 }
 

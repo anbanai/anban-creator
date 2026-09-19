@@ -26,7 +26,7 @@ function directPurposeForMultiImage(purpose?: string): DirectUploadPurpose {
 // MultiImageUpload manages an ordered list of image URLs (e.g. e-commerce product
 // photos). Each upload uses the shared direct-upload helper and appends the
 // returned URL; order is preserved end-to-end (the server materializes them as
-// product_01..NN in the agent workspace). Mirrors ReferenceImageUpload's upload
+// product_01..NN in the agent workspace). Mirrors the shared asset upload
 // + internal-storage preview pattern, extended to a list.
 export function MultiImageUpload({ value = [], onChange, purpose, max = 16 }: MultiImageUploadProps) {
   const [uploading, setUploading] = useState(false)

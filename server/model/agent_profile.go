@@ -43,6 +43,45 @@ type AgentProfileSnapshot struct {
 	ModelUsageAliases map[string]string `json:"model_usage_aliases"`
 }
 
+// agentProfilePublicEnvKeys are the only Claude profile env vars the Studio API
+// may surface. Provider routing, the base URL, the model matrix, the subagent
+// model, and the usage aliases stay internal execution facts.
+var agentProfilePublicEnvKeys = []string{
+	claudeEnvEffortLevel,
+	claudeEnvMaxContextTokens,
+	claudeEnvDisableThinking,
+}
+
+// AgentProfileAPISnapshot is the lean public projection of a frozen agent
+// profile. It carries only the facts the Studio renders (schema, profile id,
+// display name, and display-scoped env values such as effort/context/thinking)
+// and never the provider base URL, model matrix, or model usage aliases.
+type AgentProfileAPISnapshot struct {
+	SchemaVersion int               `json:"schema_version"`
+	ProfileID     string            `json:"profile_id,omitempty"`
+	DisplayName   string            `json:"display_name,omitempty"`
+	Envs          map[string]string `json:"envs,omitempty"`
+}
+
+// APISnapshot returns the public-safe projection of the frozen profile for the
+// Studio task API. The returned value never carries routing or model facts.
+func (s AgentProfileSnapshot) APISnapshot() AgentProfileAPISnapshot {
+	public := AgentProfileAPISnapshot{
+		SchemaVersion: s.SchemaVersion,
+		ProfileID:     s.ProfileID,
+		DisplayName:   s.DisplayName,
+	}
+	for _, key := range agentProfilePublicEnvKeys {
+		if value, ok := s.Envs[key]; ok {
+			if public.Envs == nil {
+				public.Envs = make(map[string]string, len(agentProfilePublicEnvKeys))
+			}
+			public.Envs[key] = value
+		}
+	}
+	return public
+}
+
 func ValidateAgentProfileSnapshot(snapshot AgentProfileSnapshot) error {
 	if snapshot.SchemaVersion != ClaudeProfileSchemaV3 {
 		return fmt.Errorf("agent profile snapshot schema_version must be %d", ClaudeProfileSchemaV3)

@@ -19,6 +19,7 @@ describe('navigation IA', () => {
       '插件',
       '设置',
       '小红书数据',
+      '公众号内容',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
@@ -43,6 +44,7 @@ describe('navigation IA', () => {
       '/plugins',
       '/settings',
       '/seednote-data',
+      '/wechat-data',
       '/templates',
       '/admin/seednote',
     ])

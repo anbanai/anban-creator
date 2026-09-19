@@ -4,6 +4,7 @@ import { ImageOff, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react
 import { toast } from 'sonner'
 
 import EmptyState from '@/components/EmptyState'
+import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBadge'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +25,7 @@ import {
   type SeednoteTemplateCategory,
   type Template,
   type TemplateScope,
+  isImageAnalysisActive,
 } from '@/types'
 import { TemplateCreateDialog } from './TemplateCreateDialog'
 
@@ -51,11 +53,26 @@ export function TemplateGrid() {
       scope,
       limit: 100,
     }),
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? []
+      return items.some((item) => isImageAnalysisActive(item.image_analysis)) ? 2000 : false
+    },
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.templates.remove(id),
   })
+  const retryMutation = useMutation({ mutationFn: (id: string) => api.imageAnalyses.retry(id) })
+
+  const retryAnalysis = async (template: Template) => {
+    if (!template.image_analysis) return
+    try {
+      await retryMutation.mutateAsync(template.image_analysis.id)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.all })
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '重试识别失败'))
+    }
+  }
 
   const openCreate = () => {
     setEditingTemplate(null)
@@ -159,7 +176,7 @@ export function TemplateGrid() {
                     </div>
                   ) : (
                     <img
-                      src={template.thumbnail_url}
+                      src={template.thumbnail?.download_url}
                       alt={template.name}
                       className="h-full w-full object-cover"
                       onError={() => setFailedImages((current) => new Set(current).add(template.id))}
@@ -170,6 +187,7 @@ export function TemplateGrid() {
                       {template.visibility === 'public' ? '公开' : '私有'}
                     </Badge>
                     {!template.is_active ? <Badge variant="destructive">已停用</Badge> : null}
+                    <ImageAnalysisBadge analysis={template.image_analysis} />
                   </div>
                 </div>
                 <div className="space-y-2 p-3">
@@ -179,8 +197,22 @@ export function TemplateGrid() {
                       <span className="truncate">{template.category}</span>
                       <span className="shrink-0">排序 {template.sort_order}</span>
                     </div>
+                    {isImageAnalysisActive(template.image_analysis) ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {template.activate_when_ready ? '识别中，完成后自动启用' : '识别中，完成后保持停用'}
+                      </p>
+                    ) : template.image_analysis?.status === 'failed' ? (
+                      <p className="mt-1 line-clamp-2 text-xs text-destructive">
+                        {template.image_analysis.error_message || '识别失败，可重试或手动填写'}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex justify-end gap-1 border-t border-border pt-2">
+                    {template.image_analysis?.can_retry ? (
+                      <Button type="button" variant="ghost" size="icon-sm" title="重试识别" aria-label={`重试识别 ${template.name}`} onClick={() => void retryAnalysis(template)}>
+                        <RefreshCw className={retryMutation.isPending ? 'animate-spin' : ''} />
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       variant="ghost"

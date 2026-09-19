@@ -135,6 +135,9 @@ func main() {
 		if err := service.MigrateTemplatePrompt(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate canonical template prompts")
 		}
+		if err := service.MigrateTemplateThumbnailAssets(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate template thumbnails to assets")
+		}
 		if err := service.MigratePlanReferenceAttachments(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate plan reference attachments")
 		}
@@ -362,6 +365,7 @@ func main() {
 	var viralAnalysisHistorySvc *service.ViralAnalysisHistoryService
 	var posterSvc *service.PosterService
 	var referenceAssetSvc *service.ReferenceAssetService
+	var imageAnalysisSvc *service.ImageAnalysisService
 	var asynqClient *scheduler.AsynqClient
 	montageCapabilitySvc := service.NewMontageCapabilityService(cfg.Montage)
 	if repo != nil {
@@ -445,6 +449,15 @@ func main() {
 		imageUnderstandingClient, _ = imageUnderstandingBaseClient.(service.ImageUnderstandingClient)
 		log.Info().Str("endpoint", cfg.ImageUnderstanding.BaseURL).Str("model", cfg.ImageUnderstanding.Model).Msg("image understanding LLM client initialized")
 	}
+	if repo != nil {
+		imageAnalysisSvc = service.NewImageAnalysisService(repo, store, imageUnderstandingBaseClient, asynqClient, fixedBilling.Cost, service.ImageAnalysisConfig{
+			LeaseDuration: 5 * time.Minute,
+			Provider:      cfg.ImageUnderstanding.ProviderKey,
+			Model:         cfg.ImageUnderstanding.Model,
+		}, log)
+		projectSvc.SetImageAnalysisService(imageAnalysisSvc)
+		templateSvc.SetImageAnalysisService(imageAnalysisSvc)
+	}
 	var videoUnderstandingClient service.LLMClient
 	if cfg.VideoUnderstanding.BaseURL != "" && cfg.VideoUnderstanding.Key != "" && cfg.VideoUnderstanding.Model != "" {
 		videoUnderstandingClient = service.NewOpenAILLMClient(cfg.VideoUnderstanding.BaseURL, cfg.VideoUnderstanding.Key, cfg.VideoUnderstanding.Model, cfg.VideoUnderstanding.Timeout)
@@ -509,6 +522,7 @@ func main() {
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var seednoteImportHandler *handler.SeednoteImportHandler
 	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
+	var wechatAnalyticsImportHandler *handler.WechatAnalyticsImportHandler
 	var wechatPublicationHandler *handler.WechatPublicationHandler
 	var channelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
 	var agentHandler *handler.AgentHandler
@@ -524,6 +538,7 @@ func main() {
 	var imageCapabilityHandler *handler.ImageCapabilityHandler
 	var montageCapabilityHandler *handler.MontageCapabilityHandler
 	var templateHandler *handler.TemplateHandler
+	var imageAnalysisHandler *handler.ImageAnalysisHandler
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
 	var posterHandler *handler.PosterHandler
 	var resourceHandler *handler.ResourceHandler
@@ -548,6 +563,7 @@ func main() {
 		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
 		seednoteImportHandler = handler.NewSeednoteImportHandler(service.NewSeednoteImportService(repo, store), log)
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
+		wechatAnalyticsImportHandler = handler.NewWechatAnalyticsImportHandler(service.NewWechatAnalyticsImportService(repo, store), log)
 		wechatPublicationHandler = handler.NewWechatPublicationHandler(wechatPublicationSvc, log)
 		channelsAnalyticsHandler = handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, log)
 		if ilinkBindingSvc != nil {
@@ -558,9 +574,6 @@ func main() {
 		projectHandler.SetReferenceAssetService(referenceAssetSvc)
 		projectHandler.SetUploadRepository(repo)
 		projectHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration)
-		if imageUnderstandingBaseClient != nil {
-			projectHandler.SetVisionClient(imageUnderstandingBaseClient)
-		}
 		if templateSvc != nil {
 			projectHandler.SetTemplateService(templateSvc)
 		}
@@ -593,13 +606,8 @@ func main() {
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
-		templateHandler.SetUploadRepository(repo)
-		if imageUnderstandingBaseClient != nil {
-			templateHandler.SetVisionClient(imageUnderstandingBaseClient)
-		}
-		if store != nil {
-			templateHandler.SetStore(store)
-		}
+		templateHandler.SetReferenceAssetService(referenceAssetSvc)
+		imageAnalysisHandler = handler.NewImageAnalysisHandler(imageAnalysisSvc, log)
 		if viralAnalysisHistorySvc != nil {
 			viralAnalysisHandler = handler.NewViralAnalysisHandler(viralAnalysisHistorySvc, log)
 		}
@@ -722,7 +730,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, cfg, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -732,6 +740,11 @@ func main() {
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
 	}
 	if asynqClient != nil {
+		if imageAnalysisSvc != nil {
+			analysisRecoveryCtx, analysisRecoveryCancel := context.WithCancel(context.Background())
+			defer analysisRecoveryCancel()
+			go startImageAnalysisRecovery(analysisRecoveryCtx, imageAnalysisSvc, log)
+		}
 		analyticsRecoveryCtx, analyticsRecoveryCancel := context.WithCancel(context.Background())
 		defer analyticsRecoveryCancel()
 		go startAnalyticsRecovery(analyticsRecoveryCtx, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, log)
@@ -775,46 +788,48 @@ func main() {
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
-		Config:                   cfg,
-		Logger:                   log,
-		DB:                       mysqlDB,
-		Redis:                    rdb,
-		Repo:                     repo,
-		JWTService:               jwtSvc,
-		WechatSvc:                wechatSvc,
-		WSHub:                    wsHub,
-		AuthHandler:              authHandler,
-		PlanService:              planSvc,
-		TaskService:              taskSvc,
-		ProjectHandler:           projectHandler,
-		PlanHandler:              planHandler,
-		TaskHandler:              taskHandler,
-		SeednoteAnalyticsHandler: seednoteAnalyticsHandler,
-		SeednoteImportHandler:    seednoteImportHandler,
-		WechatAnalyticsHandler:   wechatAnalyticsHandler,
-		WechatPublicationHandler: wechatPublicationHandler,
-		ChannelsAnalyticsHandler: channelsAnalyticsHandler,
-		AgentHandler:             agentHandler,
-		AgentProfileHandler:      agentProfileHandler,
-		AgentPackHandler:         agentPackHandler,
-		BillingHandler:           fixedBilling.Handler,
-		BillingAdminHandler:      fixedBilling.AdminHandler,
-		TimelineHandler:          timelineHandler,
-		APIKeyHandler:            apiKeyHandler,
-		FileHandler:              fileHandler,
-		UploadHandler:            uploadHandler,
-		AIEntryHandler:           aiEntryHandler,
-		FeedbackHandler:          feedbackHandler,
-		ImageCapabilityHandler:   imageCapabilityHandler,
-		MontageCapabilityHandler: montageCapabilityHandler,
-		TemplateHandler:          templateHandler,
-		ViralAnalysisHandler:     viralAnalysisHandler,
-		PosterHandler:            posterHandler,
-		ResourceHandler:          resourceHandler,
-		TopicPoolHandler:         topicPoolHandler,
-		IlinkHandler:             ilinkHandler,
-		MCPHandler:               mcpHandler,
-		StorageProvider:          store,
+		Config:                       cfg,
+		Logger:                       log,
+		DB:                           mysqlDB,
+		Redis:                        rdb,
+		Repo:                         repo,
+		JWTService:                   jwtSvc,
+		WechatSvc:                    wechatSvc,
+		WSHub:                        wsHub,
+		AuthHandler:                  authHandler,
+		PlanService:                  planSvc,
+		TaskService:                  taskSvc,
+		ProjectHandler:               projectHandler,
+		PlanHandler:                  planHandler,
+		TaskHandler:                  taskHandler,
+		SeednoteAnalyticsHandler:     seednoteAnalyticsHandler,
+		SeednoteImportHandler:        seednoteImportHandler,
+		WechatAnalyticsHandler:       wechatAnalyticsHandler,
+		WechatAnalyticsImportHandler: wechatAnalyticsImportHandler,
+		WechatPublicationHandler:     wechatPublicationHandler,
+		ChannelsAnalyticsHandler:     channelsAnalyticsHandler,
+		AgentHandler:                 agentHandler,
+		AgentProfileHandler:          agentProfileHandler,
+		AgentPackHandler:             agentPackHandler,
+		BillingHandler:               fixedBilling.Handler,
+		BillingAdminHandler:          fixedBilling.AdminHandler,
+		TimelineHandler:              timelineHandler,
+		APIKeyHandler:                apiKeyHandler,
+		FileHandler:                  fileHandler,
+		UploadHandler:                uploadHandler,
+		AIEntryHandler:               aiEntryHandler,
+		FeedbackHandler:              feedbackHandler,
+		ImageCapabilityHandler:       imageCapabilityHandler,
+		MontageCapabilityHandler:     montageCapabilityHandler,
+		TemplateHandler:              templateHandler,
+		ImageAnalysisHandler:         imageAnalysisHandler,
+		ViralAnalysisHandler:         viralAnalysisHandler,
+		PosterHandler:                posterHandler,
+		ResourceHandler:              resourceHandler,
+		TopicPoolHandler:             topicPoolHandler,
+		IlinkHandler:                 ilinkHandler,
+		MCPHandler:                   mcpHandler,
+		StorageProvider:              store,
 	}
 
 	// 17. Create router.
@@ -1226,7 +1241,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1272,6 +1287,9 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 		log,
 		publicationHandlers,
 	)
+	if imageAnalysisSvc != nil {
+		srv.RegisterImageAnalysisHandler(imageAnalysisSvc.Process, log)
+	}
 
 	go func() {
 		log.Info().Int("concurrency", cfg.Asynq.Concurrency).Msg("starting Asynq task processor")
@@ -1281,6 +1299,25 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	}()
 
 	return srv
+}
+
+func startImageAnalysisRecovery(ctx context.Context, analyses *service.ImageAnalysisService, log *zerolog.Logger) {
+	run := func() {
+		if err := analyses.Recover(ctx, 100); err != nil && ctx.Err() == nil {
+			log.Error().Err(err).Msg("image analysis recovery failed")
+		}
+	}
+	run()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
 }
 
 type analyticsRecoveryService interface {

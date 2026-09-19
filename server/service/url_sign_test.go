@@ -9,7 +9,6 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
@@ -123,20 +122,4 @@ func TestSignURL_DownloadURLErrorFallsBack(t *testing.T) {
 	if !strings.Contains(logOutput.String(), `"url":"https://bucket.oss-cn-x.aliyuncs.com/uploads/references/u/abc.jpg?REDACTED"`) {
 		t.Fatalf("service log did not retain a redacted URL path: %s", logOutput.String())
 	}
-}
-
-// TestSignTemplateURLs: runtime image fields resolve to signed URLs in place,
-// and a nil template must not panic (guards the recommended-templates loop where
-// a nil element is theoretically possible).
-func TestSignTemplateURLs(t *testing.T) {
-	store := &signFakeStore{ownedPrefix: "https://bucket.oss-cn-x.aliyuncs.com/"}
-	tmpl := &model.Template{
-		ThumbnailURL: "https://bucket.oss-cn-x.aliyuncs.com/uploads/references/u/a.jpg",
-	}
-	SignTemplateURLs(context.Background(), store, nil, tmpl)
-	if !strings.Contains(tmpl.ThumbnailURL, "Signature=") {
-		t.Errorf("thumbnail should be signed, got %q", tmpl.ThumbnailURL)
-	}
-	// nil template must not panic.
-	SignTemplateURLs(context.Background(), store, nil, nil)
 }

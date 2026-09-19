@@ -428,26 +428,6 @@ func TestCreateDraftHandlerReturnsStructuredLifecycleErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("disabled", func(t *testing.T) {
-		f := newPublishingToolFixture(t)
-		project, err := f.repo.Projects().FindByID(context.Background(), f.projectID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		project.Config.WechatPublishMode = model.WechatPublishModeDisabled
-		if err := f.repo.Projects().Update(context.Background(), project); err != nil {
-			t.Fatal(err)
-		}
-		result, err := createDraftHandler(interactivePublishingContext(f), createDraftToolRequest(t, validCreateDraftArgs(f)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		failure := decodeCreateDraftToolFailure(t, result)
-		if failure.Code != "create_draft_disabled" || failure.Retryable {
-			t.Fatalf("failure = %#v", failure)
-		}
-	})
-
 	t.Run("request conflict", func(t *testing.T) {
 		f := newPublishingToolFixture(t)
 		ctx := interactivePublishingContext(f)

@@ -906,3 +906,24 @@ describe("buildExecutionEnvironment", () => {
     expect(environment.ANTHROPIC_MODEL).toBe("frozen-model");
   });
 });
+
+describe("runnerLogLine", () => {
+  test("trims and keeps user-facing log lines", () => {
+    expect(runner.runnerLogLine("  正在生成封面图  ")).toBe("正在生成封面图");
+  });
+
+  test("drops blank lines", () => {
+    expect(runner.runnerLogLine("  ")).toBeUndefined();
+    expect(runner.runnerLogLine("\n")).toBeUndefined();
+  });
+
+  test("drops internal Claude Code diagnostics that leak model routing", () => {
+    const line = "[claude-code:unrecognized_model] {\"model\":\"deepseek-flash[1m]\",\"query_source\":\"sdk\"}";
+    expect(runner.runnerLogLine(line)).toBeUndefined();
+    expect(runner.runnerLogLine("[claude-code:something] internal")).toBeUndefined();
+  });
+
+  test("keeps non-diagnostic stderr narration", () => {
+    expect(runner.runnerLogLine("Reading reference asset …")).toBe("Reading reference asset …");
+  });
+});

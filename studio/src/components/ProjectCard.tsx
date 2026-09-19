@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
 import { ProjectMemorySheet } from '@/components/projects/ProjectMemorySheet'
+import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBadge'
 
 interface ProjectCardProps {
   project: Project
@@ -44,7 +45,10 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
             </Badge>
           </div>
         </div>
-        {isArchived && <Badge variant="outline">已归档</Badge>}
+        <div className="flex flex-col items-end gap-1">
+          {isArchived && <Badge variant="outline">已归档</Badge>}
+          <ImageAnalysisBadge analysis={project.image_analysis} />
+        </div>
       </div>
       {positioning && (
         <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{positioning}</p>

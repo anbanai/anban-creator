@@ -22,6 +22,7 @@ const (
 	TypeChannelsCaptureMetrics     = "channels:capture_metrics"
 	TypeWechatPublicationPoll      = "wechat:publication_poll"
 	TypeWechatPublicationReconcile = "wechat:publication_reconcile"
+	TypeImageAnalyze               = "image:analyze"
 )
 
 // TaskEnqueuer abstracts the async task enqueue mechanism.
@@ -85,6 +86,27 @@ func (c *AsynqClient) EnqueueUnique(taskType string, payload []byte, uniqueKey s
 	return err == nil, err
 }
 
+func (c *AsynqClient) EnqueueImageAnalysis(jobID string, generation int64) error {
+	payload, err := json.Marshal(struct {
+		JobID      string `json:"job_id"`
+		Generation int64  `json:"generation"`
+	}{JobID: jobID, Generation: generation})
+	if err != nil {
+		return err
+	}
+	_, err = c.client.Enqueue(
+		asynq.NewTask(TypeImageAnalyze, payload),
+		asynq.TaskID(fmt.Sprintf("%s:%d", jobID, generation)),
+		asynq.Queue("analysis"),
+		asynq.MaxRetry(3),
+		asynq.Timeout(c.effectiveTimeout()),
+	)
+	if errors.Is(err, asynq.ErrTaskIDConflict) {
+		return nil
+	}
+	return err
+}
+
 // EnqueueIn creates an Asynq task and enqueues it with a delay.
 func (c *AsynqClient) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
 	_, err := c.client.Enqueue(
@@ -105,6 +127,24 @@ func (c *AsynqClient) Close() error {
 type TaskProcessor struct {
 	server *asynq.Server
 	mux    *asynq.ServeMux
+}
+
+type ImageAnalysisHandler func(ctx context.Context, jobID string, generation int64) error
+
+func (tp *TaskProcessor) RegisterImageAnalysisHandler(handler ImageAnalysisHandler, logger *zerolog.Logger) {
+	if tp == nil || handler == nil {
+		return
+	}
+	tp.mux.HandleFunc(TypeImageAnalyze, func(ctx context.Context, task *asynq.Task) error {
+		var payload struct {
+			JobID      string `json:"job_id"`
+			Generation int64  `json:"generation"`
+		}
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil || payload.JobID == "" || payload.Generation < 1 {
+			return fmt.Errorf("invalid image analysis payload")
+		}
+		return handler(ctx, payload.JobID, payload.Generation)
+	})
 }
 
 // ContentGenerateHandler is the function signature for handling content generation tasks.
@@ -245,6 +285,7 @@ func NewTaskProcessor(
 			Queues: map[string]int{
 				"default":  6,
 				"critical": 10,
+				"analysis": 4,
 			},
 			RetryDelayFunc: func(n int, err error, task *asynq.Task) time.Duration {
 				// Exponential backoff: 10s, 20s, 40s, ... capped at 5 minutes.

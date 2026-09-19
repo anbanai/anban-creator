@@ -39,7 +39,7 @@ func TestProjectServiceDoesNotBakeArticleWriter(t *testing.T) {
 			ch, err := svc.Create(context.Background(), "user-1", &model.Project{
 				Platform: platform,
 				Name:     "Default Style Project",
-				Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
+				Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 			})
 			if err != nil {
 				t.Fatalf("Create: %v", err)
@@ -81,7 +81,7 @@ func TestProjectServiceUpdateDoesNotBakeArticleWriter(t *testing.T) {
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
 		Platform: model.PlatformArticle,
 		Name:     "Article Project",
-		Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
+		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -113,7 +113,7 @@ func TestProjectServiceUpdatePreservesExistingWriterWhenOmitted(t *testing.T) {
 		Platform: model.PlatformArticle,
 		Name:     "Article Project",
 		Writer:   "casual-science",
-		Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
+		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -167,50 +167,14 @@ func TestProjectServiceUpdateInstructionsSetControlsClear(t *testing.T) {
 	}
 }
 
-func TestProjectServiceUpdatePersistsWechatPublishMode(t *testing.T) {
-	svc, _ := setupTestProjectService(t)
-	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Config: model.ProjectConfig{
-			WechatAppID: "wx-app", WechatSecret: "secret", WechatPublishMode: model.WechatPublishModeManual,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
-		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatPublishMode: model.WechatPublishModeAPIConfirmed},
-	})
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if updated.Config.WechatPublishMode != model.WechatPublishModeAPIConfirmed {
-		t.Fatalf("WechatPublishMode = %q", updated.Config.WechatPublishMode)
-	}
-}
-
-func TestProjectServiceCreateRejectsInvalidWechatPublishMode(t *testing.T) {
-	svc, _ := setupTestProjectService(t)
-	_, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Config:   model.ProjectConfig{WechatPublishMode: "automatic"},
-	})
-	if !errors.Is(err, ErrInvalidWechatPublishMode) {
-		t.Fatalf("Create error = %v, want ErrInvalidWechatPublishMode", err)
-	}
-}
-
-func TestProjectServiceCreateRequiresWechatCredentialsForEnabledPublishing(t *testing.T) {
+func TestProjectServiceCreateRequiresWechatCredentials(t *testing.T) {
 	tests := []struct {
 		name   string
 		config model.ProjectConfig
 	}{
-		{name: "default manual mode"},
-		{name: "manual missing secret", config: model.ProjectConfig{WechatAppID: "wx-app", WechatPublishMode: model.WechatPublishModeManual}},
-		{name: "api confirmed missing app id", config: model.ProjectConfig{WechatSecret: "secret", WechatPublishMode: model.WechatPublishModeAPIConfirmed}},
+		{name: "both missing"},
+		{name: "missing secret", config: model.ProjectConfig{WechatAppID: "wx-app"}},
+		{name: "missing app id", config: model.ProjectConfig{WechatSecret: "secret"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -227,69 +191,12 @@ func TestProjectServiceCreateRequiresWechatCredentialsForEnabledPublishing(t *te
 	}
 }
 
-func TestProjectServiceCreateAllowsDisabledPublishingWithoutWechatCredentials(t *testing.T) {
+func TestProjectServiceUpdatePreservesWechatCredentialsWhenOmitted(t *testing.T) {
 	svc, _ := setupTestProjectService(t)
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
 		Platform: model.PlatformArticle,
 		Name:     "Article",
-		Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if created.Config.WechatPublishMode != model.WechatPublishModeDisabled {
-		t.Fatalf("WechatPublishMode = %q", created.Config.WechatPublishMode)
-	}
-}
-
-func TestProjectServiceUpdateRejectsEnabledPublishingWithoutCompleteCredentials(t *testing.T) {
-	svc, _ := setupTestProjectService(t)
-	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Config:   model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	_, err = svc.Update(context.Background(), "user-1", created.ID, &model.Project{
-		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeManual},
-	})
-	if !errors.Is(err, ErrWechatCredentialsRequired) {
-		t.Fatalf("Update error = %v, want ErrWechatCredentialsRequired", err)
-	}
-}
-
-func TestProjectServiceUpdateRejectsInvalidWechatPublishMode(t *testing.T) {
-	svc, _ := setupTestProjectService(t)
-	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Config: model.ProjectConfig{
-			WechatAppID: "wx-app", WechatSecret: "secret", WechatPublishMode: model.WechatPublishModeManual,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	_, err = svc.Update(context.Background(), "user-1", created.ID, &model.Project{
-		Config: model.ProjectConfig{WechatPublishMode: "automatic"},
-	})
-	if !errors.Is(err, ErrInvalidWechatPublishMode) {
-		t.Fatalf("Update error = %v, want ErrInvalidWechatPublishMode", err)
-	}
-}
-
-func TestProjectServiceUpdatePreservesWechatPublishModeWhenOmitted(t *testing.T) {
-	svc, _ := setupTestProjectService(t)
-	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Config: model.ProjectConfig{
-			WechatAppID: "wx-app", WechatSecret: "secret", WechatPublishMode: model.WechatPublishModeAPIConfirmed,
-		},
+		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -299,31 +206,7 @@ func TestProjectServiceUpdatePreservesWechatPublishModeWhenOmitted(t *testing.T)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if got := updated.Config.WechatPublishMode; got != model.WechatPublishModeAPIConfirmed {
-		t.Fatalf("WechatPublishMode = %q, want %q", got, model.WechatPublishModeAPIConfirmed)
-	}
-}
-
-func TestProjectServiceDisablingWechatPreservesExistingCredentials(t *testing.T) {
-	svc, _ := setupTestProjectService(t)
-	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
-		Name:     "Article",
-		Config: model.ProjectConfig{
-			WechatAppID: "wx-existing", WechatSecret: "secret-existing", WechatPublishMode: model.WechatPublishModeManual,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
-		Config: model.ProjectConfig{WechatPublishMode: model.WechatPublishModeDisabled},
-	})
-	if err != nil {
-		t.Fatalf("Update disabled: %v", err)
-	}
-	if updated.Config.WechatAppID != "wx-existing" || updated.Config.WechatSecret != "secret-existing" {
-		t.Fatalf("credentials after disabling = %#v, want existing credentials preserved", updated.Config)
+	if updated.Config.WechatAppID != "wx-app" || updated.Config.WechatSecret != "secret" {
+		t.Fatalf("credentials after update = %#v, want existing credentials preserved", updated.Config)
 	}
 }

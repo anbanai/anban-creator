@@ -304,7 +304,7 @@ func deriveWechatPublicationLifecycle(deliveryStatus string, publication *model.
 				} else if projection.Draft.State == model.TaskLifecycleStatePending {
 					projection.Draft = taskLifecycleStageProjection{State: model.TaskLifecycleStateActive, LatestUpdate: "正在创建公众号草稿"}
 				}
-			case model.WechatPublicationStatusUnsupported:
+			case model.WechatPublicationStatusUnsupported, model.WechatPublicationStatusAwaitingManual:
 				if publication.DraftAddAttemptedAt != nil && publication.DraftRetryAuthorizedAt == nil {
 					projection.Draft = taskLifecycleStageProjection{State: model.TaskLifecycleStateBlocked, LatestUpdate: "创建结果待确认，请先检测公众号状态"}
 				} else {
@@ -328,7 +328,7 @@ func deriveWechatPublicationLifecycle(deliveryStatus string, publication *model.
 		projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateBlocked, LatestUpdate: "请选择要关联的公众号文章"}
 	case model.WechatPublicationStatusPublishSubmitting, model.WechatPublicationStatusPublishing:
 		projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateActive, LatestUpdate: "正在等待微信返回正式发布结果"}
-	case model.WechatPublicationStatusUnsupported:
+	case model.WechatPublicationStatusUnsupported, model.WechatPublicationStatusAwaitingManual:
 		if hasWechatSubmissionEvidence(publication) {
 			projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateBlocked, LatestUpdate: "正式发布可能已提交，只能检测结果"}
 		} else {
@@ -455,12 +455,8 @@ func taskServerLifecycleStages(ctx context.Context, repo repository.Repository, 
 	if task == nil || task.Type != model.PlatformArticle {
 		return nil, nil
 	}
-	project, err := repo.Projects().FindByID(ctx, task.ProjectID)
-	if err != nil {
+	if _, err := repo.Projects().FindByID(ctx, task.ProjectID); err != nil {
 		return nil, fmt.Errorf("load lifecycle publication project: %w", err)
-	}
-	if project.GetWechatPublishMode() == model.WechatPublishModeDisabled {
-		return nil, nil
 	}
 	return []model.TaskLifecycleStage{
 		{

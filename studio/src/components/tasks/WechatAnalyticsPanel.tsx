@@ -25,26 +25,23 @@ import {
 } from 'recharts'
 
 import { api } from '@/lib/api'
-import type { ProjectConfig, WechatAnalytics } from '@/types'
+import type { WechatAnalytics } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function WechatAnalyticsPanel({
   taskId,
-  projectConfig,
 }: {
   taskId: string
-  projectConfig?: ProjectConfig
 }) {
   const publicationQuery = useQuery({
     queryKey: ['wechat-publication', taskId],
     queryFn: () => api.tasks.getWechatPublication(taskId),
-    enabled: Boolean(taskId) && projectConfig?.wechat_publish_mode !== 'disabled',
+    enabled: Boolean(taskId),
     retry: false,
   })
 
-  if (projectConfig?.wechat_publish_mode === 'disabled') return null
   if (!publicationQuery.data || publicationQuery.data.status !== 'published') return null
   return <WechatAnalyticsContent taskId={taskId} />
 }
