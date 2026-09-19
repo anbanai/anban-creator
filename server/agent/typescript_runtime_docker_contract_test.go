@@ -2,16 +2,26 @@ package agent
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
-		data := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
+	for _, runtime := range []struct {
+		name string
+		from []string
+	}{
+		{name: "Dockerfile.agent-article", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
+		{name: "Dockerfile.agent-seednote", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
+		{name: "Dockerfile.agent-montage", from: []string{"FROM node:24-bookworm-slim AS builder", "FROM node:24-bookworm-slim"}},
+	} {
+		data := readTextFile(t, filepath.Join(root, "deploy", "docker", runtime.name))
+		if got := dockerfileFromInstructions(data); !reflect.DeepEqual(got, runtime.from) {
+			t.Fatalf("%s FROM instructions mismatch\nwant: %v\n got: %v", runtime.name, runtime.from, got)
+		}
 		for _, want := range []string{
-			"node:bookworm-slim",
 			"agent-ts/package.json agent-ts/package-lock.json",
 			"npm ci",
 			"@anthropic-ai/claude-agent-sdk",
@@ -21,12 +31,12 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 			"USER 1000:1000",
 		} {
 			if !strings.Contains(data, want) {
-				t.Fatalf("%s missing TypeScript runtime contract %q", name, want)
+				t.Fatalf("%s missing TypeScript runtime contract %q", runtime.name, want)
 			}
 		}
 		for _, forbidden := range []string{"FROM golang:", "@anthropic-ai/claude-code", "claude plugin marketplace", "claude plugin install", "ANBAN_HOME_TEMPLATE"} {
 			if strings.Contains(data, forbidden) {
-				t.Fatalf("%s retains obsolete Go/Claude CLI bootstrap %q", name, forbidden)
+				t.Fatalf("%s retains obsolete Go/Claude CLI bootstrap %q", runtime.name, forbidden)
 			}
 		}
 	}

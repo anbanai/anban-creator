@@ -17,6 +17,33 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestDockerfileFromInstructionsIgnoreSubstringDecoys(t *testing.T) {
+	body := `FROM node:24-bookworm-slim AS builder
+RUN printf '%s\n' 'FROM node:24-bookworm-slim'
+FROM debian:bookworm-slim
+`
+	want := []string{
+		"FROM node:24-bookworm-slim AS builder",
+		"FROM debian:bookworm-slim",
+	}
+
+	if got := dockerfileFromInstructions(body); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Dockerfile FROM instructions mismatch\nwant: %v\n got: %v", want, got)
+	}
+}
+
+func dockerfileFromInstructions(body string) []string {
+	var instructions []string
+	for _, line := range strings.Split(body, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || !strings.EqualFold(fields[0], "FROM") {
+			continue
+		}
+		instructions = append(instructions, strings.Join(fields, " "))
+	}
+	return instructions
+}
+
 func TestCreatorAgentImageNamingContract(t *testing.T) {
 	root := repositoryRoot(t)
 
@@ -380,16 +407,28 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 	root := repositoryRoot(t)
 	path := filepath.Join(root, "deploy/docker/Dockerfile.agent-montage")
 	body := readTextFile(t, path)
+	wantFrom := []string{
+		"FROM node:24-bookworm-slim AS builder",
+		"FROM node:24-bookworm-slim",
+	}
+	if got := dockerfileFromInstructions(body); !reflect.DeepEqual(got, wantFrom) {
+		t.Fatalf("%s FROM instructions mismatch\nwant: %v\n got: %v", path, wantFrom, got)
+	}
 	for _, want := range []string{
-		"FROM node:bookworm-slim AS builder",
-		"FROM ghcr.io/openhands/agent-server:latest-python",
 		"ARG OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git",
 		"ARG OPENMONTAGE_REF=4eab34c5cfcccaa4f1970554928feccce73ee930",
+		"apt-get install -y --no-install-recommends",
+		"ca-certificates curl git jq ffmpeg fontconfig fonts-noto-cjk fonts-noto-color-emoji",
+		"libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2",
+		"libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1",
+		"libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2",
+		"python3 python3-venv tini",
 		"git fetch --depth 1 origin \"$OPENMONTAGE_REF\"",
 		"test \"$(git rev-parse HEAD)\" = \"$OPENMONTAGE_REF\"",
 		"requirements.txt",
 		"remotion-composer/package-lock.json",
 		"npm ci",
+		"./node_modules/.bin/remotion browser ensure",
 		"registry.discover()",
 		"load_pipeline",
 		"ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
@@ -398,7 +437,16 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 			t.Fatalf("%s missing %q", path, want)
 		}
 	}
-	for _, forbidden := range []string{"COPY third_party/OpenMontage/", "git submodule", "OPENMONTAGE_RUNTIME_IMAGE", "creator-openmontage-runtime"} {
+	for _, forbidden := range []string{
+		"COPY third_party/OpenMontage/",
+		"git submodule",
+		"OPENMONTAGE_RUNTIME_IMAGE",
+		"creator-openmontage-runtime",
+		"ghcr.io/openhands",
+		"OpenHands",
+		"deb.nodesource.com",
+		"normalize-debian-apt-sources.sh",
+	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("%s retains obsolete runtime dependency %q", path, forbidden)
 		}
@@ -670,40 +718,41 @@ func TestStudioDockerfileIsCentralized(t *testing.T) {
 func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, tc := range []struct {
-		path string
-		want []string
+		path     string
+		from     []string
+		contains []string
 	}{
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-article"),
-			want: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote"),
-			want: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"),
-			want: []string{"FROM node:bookworm-slim AS builder", "FROM ghcr.io/openhands/agent-server:latest-python"},
+			from: []string{"FROM node:24-bookworm-slim AS builder", "FROM node:24-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
-			want: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
+			from: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.studio"),
-			want: []string{"FROM oven/bun:latest AS build", "FROM nginx:alpine"},
+			from: []string{"FROM oven/bun:latest AS build", "FROM nginx:alpine"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.sidecar-ilink"),
-			want: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
+			from: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.sidecar-seednote"),
-			want: []string{"FROM golang:1.24 AS source", "FROM ubuntu:22.04"},
+			from: []string{"FROM golang:1.24 AS source", "FROM source AS builder", "FROM ubuntu:22.04"},
 		},
 		{
 			path: filepath.Join(root, "docker-compose.yml"),
-			want: []string{
+			contains: []string{
 				"image: mysql:latest",
 				"image: redis:alpine",
 				"image: anban-creator-sidecar-ilink:latest",
@@ -716,7 +765,12 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		},
 	} {
 		body := readTextFile(t, tc.path)
-		for _, want := range tc.want {
+		if tc.from != nil {
+			if got := dockerfileFromInstructions(body); !reflect.DeepEqual(got, tc.from) {
+				t.Errorf("%s FROM instructions mismatch\nwant: %v\n got: %v", tc.path, tc.from, got)
+			}
+		}
+		for _, want := range tc.contains {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s missing rolling image/build contract %q", tc.path, want)
 			}
