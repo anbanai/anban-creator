@@ -35,8 +35,9 @@ const WechatDataPage = React.lazy(() => import('@/pages/WechatDataPage'))
 
 function LoadingSpinner() {
   return (
-    <div className="flex items-center justify-center py-16">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    <div role="status" className="flex items-center justify-center gap-3 py-16 text-sm text-muted-foreground">
+      <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin text-primary" />
+      正在加载页面…
     </div>
   )
 }

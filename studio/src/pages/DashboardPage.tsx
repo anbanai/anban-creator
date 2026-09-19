@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, Lightbulb } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -42,6 +42,7 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  const composerRef = useRef<HTMLDivElement>(null)
   const [prompt, setPrompt] = useState('')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [entryError, setEntryError] = useState<EntryError | null>(null)
@@ -275,16 +276,22 @@ export default function DashboardPage() {
     }
   }
 
+  const starterPrompts = selectedProject?.platform === 'montage'
+    ? ['制作一条 30 秒的品牌介绍视频，突出产品特点，画面简洁。', '把上传的口播视频剪成节奏紧凑的短片，保留重点并加上字幕。', '根据项目定位，制作一个适合社交平台传播的产品演示视频。']
+    : ['围绕项目定位，创作一篇适合新手阅读的实用指南，给出具体步骤。', '把上传的素材整理成一篇内容，突出重点，语言自然、有条理。', '围绕项目主题，创作一份值得收藏的实用清单，附上使用建议。']
+
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col px-1 pb-8">
-      <section className="mx-auto flex min-h-[calc(100dvh-9rem)] w-full max-w-4xl flex-col justify-center gap-5 py-8 md:py-12">
+    <div className="mx-auto flex w-full max-w-5xl flex-col pb-8">
+      <section className="mx-auto flex w-full max-w-4xl flex-col gap-6 py-8 md:pt-[min(12vh,7rem)] md:pb-12">
         <div className="mx-auto flex w-full flex-col items-center text-center">
-          <h1 className="text-balance text-3xl font-medium leading-tight tracking-normal text-foreground md:text-[2rem]">
-            首页
+          <p className="mb-3 text-sm font-medium text-primary">从一个想法开始</p>
+          <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
+            今天想创作什么？
           </h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">选好项目，写下想法或上传素材，剩下的交给 AI 助手。</p>
         </div>
 
-        <div className="mx-auto w-full max-w-3xl">
+        <div ref={composerRef} className="mx-auto w-full max-w-3xl">
           <AgentPromptInput
             value={{ prompt, attachments }}
             onChange={(value) => {
@@ -351,6 +358,28 @@ export default function DashboardPage() {
           />
         </div>
 
+        <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>任务创建后，可在「任务」中查看进度与作品</span>
+          {executionProfilePrice !== undefined && <span className="tabular-nums">任务固定费 { (executionProfilePrice * quantity).toLocaleString() } 积分{quantity > 1 ? ` / ${quantity} 个任务` : ''} · 图片、视频等按用量另计</span>}
+        </div>
+
+        {!prompt.trim() && (
+          <section aria-label="创作灵感" className="mx-auto w-full max-w-3xl">
+            <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground"><Lightbulb className="size-4" />还没有头绪？试试这样开始</p>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {starterPrompts.map((starter, index) => (
+                <button key={starter} type="button" disabled={submitMutation.isPending}
+                  onClick={() => { setPrompt(starter); composerRef.current?.querySelector('textarea')?.focus() }}
+                  className="group rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50"
+                >
+                  <span className="flex items-center justify-between text-sm font-medium">{(selectedProject?.platform === 'montage' ? ['品牌介绍视频', '口播精剪', '产品演示视频'] : ['从零开始创作', '把素材变成内容', '整理实用清单'])[index]}<ArrowUpRight className="size-4 text-muted-foreground group-hover:text-primary" /></span>
+                  <span className="mt-2 block text-xs leading-5 text-muted-foreground">{starter}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         <SeednoteTemplateGallery
           platform={selectedProject?.platform}
           onApply={(templatePrompt) => setPrompt(templatePrompt)}
@@ -367,7 +396,7 @@ export default function DashboardPage() {
         )}
 
         {entryError && (
-          <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+          <div role="alert" className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
             <span className="flex min-w-0 items-center gap-2 text-destructive">
               <AlertTriangle className="size-4 shrink-0" />
               <span>{entryError.message}</span>

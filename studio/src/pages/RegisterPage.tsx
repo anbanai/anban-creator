@@ -81,7 +81,7 @@ export default function RegisterPage() {
               <FormItem>
                 <FormLabel>邮箱</FormLabel>
                 <FormControl>
-                  <Input type="email" placeholder="请输入邮箱地址" {...field} />
+                  <Input type="email" autoComplete="email" placeholder="请输入邮箱地址" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -95,7 +95,7 @@ export default function RegisterPage() {
                 <FormLabel>验证码</FormLabel>
                 <div className="flex gap-2">
                   <FormControl>
-                    <Input placeholder="请输入验证码" className="flex-1" {...field} />
+                    <Input inputMode="numeric" autoComplete="one-time-code" placeholder="请输入验证码" className="flex-1" {...field} />
                   </FormControl>
                   <Button
                     type="button"
@@ -120,7 +120,7 @@ export default function RegisterPage() {
               <FormItem>
                 <FormLabel>邀请码</FormLabel>
                 <FormControl>
-                  <Input placeholder="请输入邀请码" className="uppercase" {...field} />
+                  <Input autoComplete="off" placeholder="请输入邀请码" className="uppercase" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -133,7 +133,7 @@ export default function RegisterPage() {
               <FormItem>
                 <FormLabel>昵称</FormLabel>
                 <FormControl>
-                  <Input placeholder="可选的显示名称" {...field} />
+                  <Input autoComplete="nickname" placeholder="可选的显示名称" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -146,7 +146,7 @@ export default function RegisterPage() {
               <FormItem>
                 <FormLabel>密码</FormLabel>
                 <FormControl>
-                  <PasswordInput placeholder="至少 8 个字符" {...field} />
+                  <PasswordInput autoComplete="new-password" placeholder="至少 8 个字符" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>

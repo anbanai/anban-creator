@@ -14,13 +14,13 @@ export default function QueryErrorState({
   description = '请检查网络连接后重试。',
 }: QueryErrorStateProps) {
   return (
-    <div className="flex items-center justify-center py-16">
+    <div role="alert" className="flex items-center justify-center rounded-xl border border-dashed border-border bg-card/60 px-5 py-12">
       <div className="flex flex-col items-center gap-3 text-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
           <AlertCircle className="h-6 w-6 text-destructive" />
         </div>
         <p className="text-sm font-medium text-foreground">{title}</p>
-        <p className="max-w-sm text-xs text-muted-foreground">{description}</p>
+        <p className="max-w-sm text-sm text-muted-foreground">{description}</p>
         {onRetry && (
           <Button variant="outline" size="sm" onClick={onRetry}>
             重试

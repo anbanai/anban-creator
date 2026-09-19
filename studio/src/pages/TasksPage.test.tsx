@@ -275,6 +275,28 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project])
   })
 
+  it('keeps pagination available when searching the current page has no matches', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({ items: [fixtures.failedTask as Task], total: 100 })
+    renderTasksPage()
+    await screen.findByText('失败文章')
+    fireEvent.change(screen.getByPlaceholderText('搜索本页任务...'), { target: { value: '不存在的内容' } })
+    expect(await screen.findByText('未找到匹配的任务')).toBeInTheDocument()
+    expect(screen.queryByText('还没有任务')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '清空筛选' }))
+    expect(await screen.findByText('失败文章')).toBeInTheDocument()
+  })
+
+  it('separates task selection from the link and clears hidden selections', async () => {
+    renderTasksPage()
+    const select = await screen.findByRole('button', { name: '选择任务' })
+    expect(select.closest('a')).toBeNull()
+    fireEvent.click(select)
+    fireEvent.change(screen.getByPlaceholderText('搜索本页任务...'), { target: { value: '找不到' } })
+    fireEvent.click(await screen.findByRole('button', { name: '清空筛选' }))
+    expect(await screen.findByRole('button', { name: '选择任务' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('syncs recovery queue links into the task status filter', async () => {
     renderTasksPage()
 

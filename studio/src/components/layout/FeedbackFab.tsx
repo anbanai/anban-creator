@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { MessageCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -6,51 +6,44 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/common/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { feedbackApi } from '@/lib/api/feedback'
 
 type FeedbackType = 'bug' | 'suggestion'
 
 export default function FeedbackFab() {
   const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
 
   // Feedback form state
   const [type, setType] = useState<FeedbackType>('bug')
   const [content, setContent] = useState('')
   const { submit, isSubmitting } = useSubmitLock()
 
-  // Click outside to close
-  useEffect(() => {
-    if (!open) return
-    function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [open])
-
   async function handleSubmit() {
     const trimmed = content.trim()
     if (!trimmed) return
-    await submit(async () => {
-      await feedbackApi.create({ type, content: trimmed })
-      toast.success('反馈提交成功，感谢您的建议！')
-      setContent('')
-      setType('bug')
-    })
+    try {
+      await submit(async () => {
+        await feedbackApi.create({ type, content: trimmed })
+        toast.success('反馈提交成功，感谢您的建议！')
+        setContent('')
+        setType('bug')
+        setOpen(false)
+      })
+    } catch {
+      toast.error('反馈提交失败，内容已保留，请稍后重试。')
+    }
   }
 
   return (
     <div
-      ref={containerRef}
+      role="region"
       className="relative z-40 mt-4 flex justify-end md:fixed md:bottom-20 md:right-6 md:mt-0"
       aria-label="反馈"
     >
-      {/* Expandable panel */}
-      {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-80 rounded-lg border border-border bg-card shadow-lg">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverContent side="top" align="end" sideOffset={10} className="w-80 max-w-[calc(100vw-2rem)] p-0">
+          <PopoverTitle className="sr-only">帮助与反馈</PopoverTitle>
           <Tabs defaultValue="contact">
             <div className="border-b border-border px-1 pt-1">
               <TabsList className="w-full">
@@ -95,6 +88,7 @@ export default function FeedbackFab() {
 
               {/* Content */}
               <Textarea
+                aria-label="反馈内容"
                 placeholder="请描述您遇到的问题或想要的功能..."
                 rows={4}
                 value={content}
@@ -113,17 +107,16 @@ export default function FeedbackFab() {
               </Button>
             </TabsContent>
           </Tabs>
-        </div>
-      )}
-
-      {/* FAB button */}
-      <Button
-        variant="default"
-        className="h-12 w-12 rounded-full shadow-lg"
-        onClick={() => setOpen(!open)}
-      >
-        <MessageCircle className="size-5" />
-      </Button>
+        </PopoverContent>
+        {/* FAB button */}
+        <PopoverTrigger render={<Button
+          aria-label="帮助与反馈"
+          variant="default"
+          className="h-12 w-12 rounded-full shadow-lg"
+        />}>
+          <MessageCircle className="size-5" />
+        </PopoverTrigger>
+      </Popover>
     </div>
   )
 }

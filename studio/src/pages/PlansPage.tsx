@@ -222,7 +222,7 @@ export default function PlansPage() {
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
 
-  useEffect(() => { setPage(1) }, [projectFilter, searchFilter])
+  useEffect(() => { setPage(1) }, [projectFilter])
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['plans', projectFilter, page],
@@ -238,7 +238,7 @@ export default function PlansPage() {
   const totalPages = Math.ceil(totalPlans / 50)
   const filteredPlans = useMemo(() => {
     if (!searchFilter.trim()) return plans
-    const q = searchFilter.toLowerCase()
+    const q = searchFilter.trim().toLowerCase()
     return plans.filter((p) => (p.prompt || '').toLowerCase().includes(q))
   }, [plans, searchFilter])
 
@@ -660,10 +660,17 @@ export default function PlansPage() {
           <SearchInput
             value={searchFilter}
             onChange={setSearchFilter}
-            placeholder="搜索计划..."
+            placeholder="搜索本页计划..."
           />
         </div>
       </div>
+
+      {!isLoading && !isError && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <p role="status">共 {totalPlans} 个计划 · 本页显示 {filteredPlans.length} 个</p>
+          {(projectFilter || searchFilter) && <Button variant="ghost" size="sm" onClick={() => { setProjectFilter(''); setSearchFilter('') }}>清空筛选</Button>}
+        </div>
+      )}
 
       {isError ? (
         <QueryErrorState onRetry={() => refetch()} />
@@ -688,9 +695,9 @@ export default function PlansPage() {
       ) : filteredPlans.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="还没有计划"
-          description="创建你的第一个内容计划，让 AI 定时帮你创作。"
-          action={{ label: '新建计划', onClick: openCreate }}
+          title={searchFilter.trim() || projectFilter ? "未找到匹配的计划" : "还没有计划"}
+          description={searchFilter.trim() || projectFilter ? "试试其他关键词、清空筛选，或翻页查看其他计划。搜索仅匹配当前页。" : "创建你的第一个内容计划，让 AI 定时帮你创作。"}
+          action={!searchFilter.trim() && !projectFilter ? { label: '新建计划', onClick: openCreate } : undefined}
         />
       ) : (
         <>
@@ -767,16 +774,17 @@ export default function PlansPage() {
           })}
         </div>
 
-        {totalPages > 1 && (
-          <div className="mt-4 flex justify-center">
-            <SimplePagination
-              page={page}
-              totalPages={totalPages}
-              onPageChange={setPage}
-            />
-          </div>
-        )}
         </>
+      )}
+
+      {!isLoading && !isError && totalPages > 1 && (
+        <div className="mt-4 flex justify-center">
+          <SimplePagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+          />
+        </div>
       )}
 
       {/* Create/Edit Dialog */}

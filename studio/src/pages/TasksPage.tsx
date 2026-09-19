@@ -63,7 +63,7 @@ export default function TasksPage() {
     setStatusFilter((current) => (current === nextStatus ? current : nextStatus))
   }, [searchParams])
 
-  useEffect(() => { setPage(1) }, [statusFilter, projectFilter, searchFilter])
+  useEffect(() => { setPage(1) }, [statusFilter, projectFilter])
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects', 'active'],
@@ -112,7 +112,7 @@ export default function TasksPage() {
   const totalPages = Math.ceil(totalTasks / 50)
   const filteredTasks = useMemo(() => {
     if (!searchFilter.trim()) return tasks
-    const q = searchFilter.toLowerCase()
+    const q = searchFilter.trim().toLowerCase()
     return tasks.filter((t) => (t.title || '').toLowerCase().includes(q) || (t.prompt || '').toLowerCase().includes(q))
   }, [tasks, searchFilter])
   const selectedTaskIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
@@ -153,7 +153,7 @@ export default function TasksPage() {
       const next = prev.filter((id) => visibleTaskIds.has(id))
       return next.length === prev.length ? prev : next
     })
-  }, [tasks])
+  }, [filteredTasks])
 
   const bulkDownloadMutation = useMutation({
     mutationFn: (taskIds: string[]) => api.tasks.downloadBulkZipBlob(taskIds),
@@ -292,7 +292,7 @@ export default function TasksPage() {
         title="任务"
         description={
           queueStats.active > 0 || queueStats.failed > 0
-            ? <>{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}</>
+            ? <>本页：{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}</>
             : '查看进度、产物与发布状态。'
         }
       >
@@ -314,26 +314,27 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* Filters row */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      {/* Filters apply to the task queue; text search only covers the loaded page. */}
+      <div className="flex flex-wrap items-center gap-3">
         {/* Status filter tabs */}
-        <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted p-1" role="tablist">
+        <div className="flex max-w-full flex-wrap gap-1 rounded-lg bg-muted p-1" role="group" aria-label="任务状态">
           {statusTabs.map((tab) => (
             <button
               key={tab.value}
-              role="tab"
-              aria-selected={statusFilter === tab.value}
+              type="button"
+              aria-pressed={statusFilter === tab.value}
               onClick={() => {
                 setStatusFilter(tab.value)
-                if (tab.value !== 'all') {
-                  setSearchParams({ status: tab.value })
-                } else {
-                  setSearchParams({}, { replace: true })
-                }
+                setSearchParams((current) => {
+                  const next = new URLSearchParams(current)
+                  if (tab.value === 'all') next.delete('status')
+                  else next.set('status', tab.value)
+                  return next
+                }, { replace: true })
               }}
               className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 statusFilter === tab.value
-                  ? 'bg-primary text-primary-foreground'
+                  ? 'bg-card text-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
               }`}
             >
@@ -355,10 +356,22 @@ export default function TasksPage() {
           <SearchInput
             value={searchFilter}
             onChange={setSearchFilter}
-            placeholder="搜索任务..."
+            placeholder="搜索本页任务..."
           />
         </div>
       </div>
+
+      {!isLoading && !isError && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <p role="status">共 {totalTasks} 个任务 · 本页显示 {filteredTasks.length} 个{searchFilter.trim() ? '匹配结果' : ''}</p>
+          {(statusFilter !== 'all' || projectFilter || searchFilter) && (
+            <Button variant="ghost" size="sm" onClick={() => {
+              setStatusFilter('all'); setProjectFilter(''); setSearchFilter('')
+              setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('status'); return next }, { replace: true })
+            }}>清空筛选</Button>
+          )}
+        </div>
+      )}
 
       {isError ? (
         <QueryErrorState onRetry={() => refetch()} />
@@ -384,16 +397,18 @@ export default function TasksPage() {
       ) : filteredTasks.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
-          title={statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
+          title={searchFilter.trim() || projectFilter ? '未找到匹配的任务' : statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
           description={
-            statusFilter === 'all'
+            searchFilter.trim() || projectFilter
+              ? '试试其他关键词、清空筛选，或翻页查看其他任务。搜索仅匹配当前页。'
+              : statusFilter === 'all'
               ? projects.length === 0
                 ? '先创建一个项目，再开始生成内容。'
                 : '创建任务开始生成内容。'
               : '尝试其他筛选条件或创建新任务。'
           }
           action={
-            statusFilter === 'all'
+            !searchFilter.trim() && !projectFilter && statusFilter === 'all'
               ? projects.length === 0
                 ? { label: '去创建项目', onClick: () => navigate('/projects') }
                 : { label: '新建任务', onClick: openCreate }
@@ -471,7 +486,7 @@ export default function TasksPage() {
             const actionSignal = taskActionSignal(task)
 
             return (
-              <Link key={task.id} to={`/tasks/${task.id}`} className="block border-b border-border last:border-b-0">
+              <div key={task.id} className="border-b border-border last:border-b-0">
                 <div className={`border-l-2 p-4 ${borderColor} ${hoverBorderColor} transition-colors hover:bg-muted/35`}>
                   <div className="flex items-start gap-3">
                     <button
@@ -483,60 +498,63 @@ export default function TasksPage() {
                         e.stopPropagation()
                         toggleTaskSelection(task.id)
                       }}
-                      className={`mt-1 rounded-md p-1 transition-colors ${
+                      className={`-ml-1 flex min-h-9 min-w-9 items-center justify-center rounded-md transition-colors ${
                         selected ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                       }`}
                     >
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
-                    <span className="hidden sm:block">
-                      <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={task.type} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="truncate text-sm font-medium text-foreground">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <Badge variant={statusBadgeVariant(task.status)}>
-                            {taskStatusLabel[task.status] || task.status}
+                    <Link to={`/tasks/${task.id}`} className="flex min-w-0 flex-1 items-start gap-3 rounded-md">
+                      <span className="hidden sm:block">
+                        <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={task.type} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <Badge variant={statusBadgeVariant(task.status)}>
+                              {taskStatusLabel[task.status] || task.status}
+                            </Badge>
+                          </div>
+                        </div>
+                        {project?.name && (
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
+                        )}
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <Badge variant="outline" className="text-[10px]">
+                            {contentTypeLabel[task.type] || task.type}
                           </Badge>
+                          <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>
+                          {actionSignal.tone !== 'risk' && <span>{actionSignal.hint}</span>}
+                          <span>创建：{formatDateTimeCN(task.created_at)}</span>
+                          {task.completed_at && (
+                            <span>完成：{formatDateTimeCN(task.completed_at)}</span>
+                          )}
+                          <span className="font-medium text-foreground">
+                            累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分
+                          </span>
                         </div>
                       </div>
-                      {project?.name && (
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
-                      )}
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <Badge variant="outline" className="text-[10px]">
-                          {contentTypeLabel[task.type] || task.type}
-                        </Badge>
-                        <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>
-                        {actionSignal.tone !== 'risk' && <span>{actionSignal.hint}</span>}
-                        <span>创建：{formatDateTimeCN(task.created_at)}</span>
-                        {task.completed_at && (
-                          <span>完成：{formatDateTimeCN(task.completed_at)}</span>
-                        )}
-                        <span className="font-medium text-foreground">
-                          累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分
-                        </span>
-                      </div>
-                    </div>
+                    </Link>
                   </div>
                 </div>
-              </Link>
+              </div>
             )
             })}
           </div>
         </div>
 
-        {totalPages > 1 && (
-          <div className="mt-4 flex justify-center">
-            <SimplePagination
-              page={page}
-              totalPages={totalPages}
-              onPageChange={setPage}
-            />
-          </div>
-        )}
         </>
+      )}
+
+      {!isLoading && !isError && totalPages > 1 && (
+        <div className="mt-4 flex justify-center">
+          <SimplePagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+          />
+        </div>
       )}
 
       <TaskFormDialog

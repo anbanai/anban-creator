@@ -52,6 +52,7 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        aria-label={`账户菜单：${user.nickname || user.email}`}
         className={cn(
           'flex items-center rounded-lg text-sm text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground',
           collapsed ? 'justify-center p-2' : 'gap-2 px-3 py-1.5',
@@ -68,7 +69,7 @@ export default function UserAccountPopover({ collapsed }: { collapsed?: boolean 
             {initials}
           </span>
         )}
-        {!collapsed && <span className="hidden sm:inline max-w-[120px] truncate">{user.nickname || user.email}</span>}
+        {!collapsed && <span className="max-w-[150px] truncate">{user.nickname || user.email}</span>}
       </DropdownMenuTrigger>
 
       <DropdownMenuContent

@@ -563,7 +563,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="项目">
+      <PageHeader title="项目" description="按账号或品牌管理创作方向、素材与风格，后续任务自动沿用。">
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />
           新建项目
@@ -621,7 +621,7 @@ export default function ProjectsPage() {
           icon={Inbox}
           title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有项目' : statusFilter === 'active' ? '没有活跃的项目' : '没有已归档的项目') : '未找到匹配的项目'}
           description={!visibleProjects.length ? '创建项目后即可开始创作。' : '换个关键词试试'}
-          action={!visibleProjects.length ? { label: '新建项目', onClick: openCreate } : undefined}
+          action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '新建项目', onClick: openCreate } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -16,7 +16,7 @@ interface PageHeaderProps {
 
 export default function PageHeader({ title, description, children, breadcrumbs }: PageHeaderProps) {
   return (
-    <div className="flex items-start justify-between gap-4 pb-6">
+    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
       <div className="min-w-0">
         {breadcrumbs && breadcrumbs.length > 0 && (
           <Breadcrumb className="mb-2">
@@ -38,12 +38,12 @@ export default function PageHeader({ title, description, children, breadcrumbs }
             </BreadcrumbList>
           </Breadcrumb>
         )}
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {description && (
-          <div className="mt-1 text-sm text-muted-foreground">{description}</div>
+          <div className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</div>
         )}
       </div>
-      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
+      {children && <div className="flex max-w-full flex-wrap items-center gap-2">{children}</div>}
     </div>
   )
 }

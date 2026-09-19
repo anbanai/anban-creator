@@ -104,7 +104,7 @@ export default function LoginPage() {
                   <FormItem>
                     <FormLabel>邮箱</FormLabel>
                     <FormControl>
-                      <Input type="email" placeholder="请输入邮箱地址" {...field} />
+                      <Input type="email" autoComplete="email" placeholder="请输入邮箱地址" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -117,7 +117,7 @@ export default function LoginPage() {
                   <FormItem>
                     <FormLabel>密码</FormLabel>
                     <FormControl>
-                      <PasswordInput placeholder="请输入密码" {...field} />
+                      <PasswordInput autoComplete="current-password" placeholder="请输入密码" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -140,7 +140,7 @@ export default function LoginPage() {
                   <FormItem>
                     <FormLabel>邮箱</FormLabel>
                     <FormControl>
-                      <Input type="email" placeholder="请输入邮箱地址" {...field} />
+                      <Input type="email" autoComplete="email" placeholder="请输入邮箱地址" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -154,7 +154,7 @@ export default function LoginPage() {
                     <FormLabel>验证码</FormLabel>
                     <div className="flex gap-2">
                       <FormControl>
-                        <Input placeholder="请输入验证码" className="flex-1" {...field} />
+                        <Input inputMode="numeric" autoComplete="one-time-code" placeholder="请输入验证码" className="flex-1" {...field} />
                       </FormControl>
                       <Button
                         type="button"
@@ -183,7 +183,7 @@ export default function LoginPage() {
       {/* Divider */}
       <div className="my-4 flex items-center gap-3">
         <div className="h-px flex-1 bg-border" />
-        <span className="text-xs text-muted-foreground/60">其他方式</span>
+        <span className="text-xs text-muted-foreground">其他方式</span>
         <div className="h-px flex-1 bg-border" />
       </div>
 

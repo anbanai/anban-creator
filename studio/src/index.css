@@ -61,18 +61,18 @@
     --card-foreground: oklch(0.12 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.12 0 0);
-    --primary: oklch(0.67 0.17 60);
-    --primary-foreground: oklch(0.98 0 0);
+    --primary: oklch(0.52 0.163 49);
+    --primary-foreground: oklch(1 0 0);
     --secondary: oklch(0.95 0.01 90);
     --secondary-foreground: oklch(0.15 0.01 60);
     --muted: oklch(0.95 0.008 90);
     --muted-foreground: oklch(0.50 0 0);
     --accent: oklch(0.93 0.015 90);
     --accent-foreground: oklch(0.15 0.01 60);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.88 0.01 90);
+    --destructive: oklch(0.50 0.245 27.325);
+    --border: oklch(0.90 0.008 90);
     --input: oklch(0.88 0.01 90);
-    --ring: oklch(0.67 0.17 60);
+    --ring: oklch(0.555 0.163 49);
     --chart-1: oklch(0.67 0.17 60);
     --chart-2: oklch(0.55 0.15 170);
     --chart-3: oklch(0.65 0.15 60);
@@ -81,12 +81,12 @@
     --radius: 0.5rem;
     --sidebar: oklch(0.98 0.005 90);
     --sidebar-foreground: oklch(0.12 0 0);
-    --sidebar-primary: oklch(0.67 0.17 60);
-    --sidebar-primary-foreground: oklch(0.98 0 0);
-    --sidebar-accent: oklch(0.93 0.015 90);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: oklch(0.945 0.025 65);
     --sidebar-accent-foreground: oklch(0.15 0.01 60);
     --sidebar-border: oklch(0.90 0.01 90);
-    --sidebar-ring: oklch(0.67 0.17 60);
+    --sidebar-ring: oklch(0.555 0.163 49);
     --success: oklch(0.62 0.19 160);
     --danger: oklch(0.577 0.245 27.325);
     --warning: oklch(0.72 0.17 75);
@@ -101,7 +101,7 @@
     --popover: oklch(0.18 0.01 60);
     --popover-foreground: oklch(0.96 0 0);
     --primary: oklch(0.72 0.17 60);
-    --primary-foreground: oklch(0.98 0 0);
+    --primary-foreground: oklch(0.18 0.01 60);
     --secondary: oklch(0.23 0.01 60);
     --secondary-foreground: oklch(0.96 0 0);
     --muted: oklch(0.23 0.01 60);
@@ -120,7 +120,7 @@
     --sidebar: oklch(0.125 0.01 60);
     --sidebar-foreground: oklch(0.96 0 0);
     --sidebar-primary: oklch(0.72 0.17 60);
-    --sidebar-primary-foreground: oklch(0.98 0 0);
+    --sidebar-primary-foreground: var(--primary-foreground);
     --sidebar-accent: oklch(0.22 0.01 60);
     --sidebar-accent-foreground: oklch(0.96 0 0);
     --sidebar-border: oklch(0.25 0.01 60);
@@ -202,4 +202,31 @@
 
 @utility animate-glow-pulse {
     animation: glow-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Shared interaction defaults also cover native controls outside the UI library. */
+@layer base {
+    body { -webkit-font-smoothing: antialiased; }
+    button:not(:disabled), summary, [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }
+    :where(a, button, summary, select, [tabindex]):focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 3px;
+    }
+    :where([id]) { scroll-margin-top: 5rem; }
+    ::selection { background: color-mix(in oklch, var(--primary) 20%, transparent); }
+}
+
+@media (pointer: coarse) {
+    [data-slot="button"], [data-slot="input"], [data-slot="select-trigger"], [data-slot="tabs-trigger"] {
+        min-height: 2.75rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

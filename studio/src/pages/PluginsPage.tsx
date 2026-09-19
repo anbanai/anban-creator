@@ -71,14 +71,14 @@ export default function PluginsPage() {
       <div className="mx-auto grid max-w-5xl gap-12 px-5 py-14 sm:px-8 sm:py-20 lg:grid-cols-[minmax(0,1.45fr)_minmax(260px,0.75fr)] lg:gap-16">
         <section>
           <div className="mb-8">
-            <p className="mb-4 flex items-center gap-2 text-sm font-medium text-[#c2413b]">
+            <p className="mb-4 flex items-center gap-2 text-sm font-medium text-[#c2413b] dark:text-[#ef8a84]">
               <TerminalSquare className="h-4 w-4" aria-hidden="true" />
               Agent Plugin
             </p>
             <h1 className="max-w-2xl text-4xl font-semibold leading-[1.08] tracking-normal sm:text-5xl">
               Anban Creator
             </h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-black/58 dark:text-white/58">
+            <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
               把公众号、种草笔记、Montage 视频生产与发布流程接入你正在使用的 Agent。
             </p>
           </div>
@@ -117,7 +117,7 @@ export default function PluginsPage() {
               <p className="font-mono text-sm leading-7 text-white/92 sm:text-[15px]">{content.prompt}</p>
             </div>
           </div>
-          <p className="mt-4 text-sm leading-6 text-black/48 dark:text-white/48">{content.detail}</p>
+          <p className="mt-4 text-sm leading-6 text-muted-foreground">{content.detail}</p>
           <a href={guidePath} className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-[#a93631] hover:text-[#7f2925] dark:text-[#ef8a84]">
             查看给 {content.label} 的完整说明
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
@@ -129,11 +129,11 @@ export default function PluginsPage() {
             <KeyRound className="h-5 w-5" aria-hidden="true" />
           </div>
           <h2 className="text-lg font-semibold">获取 ANBAN_API_KEY</h2>
-          <ol className="mt-6 space-y-5 text-sm leading-6 text-black/58 dark:text-white/58">
-            <li><span className="mr-2 font-mono text-xs text-black/35 dark:text-white/35">01</span>注册或登录 Anban Creator。</li>
-            <li><span className="mr-2 font-mono text-xs text-black/35 dark:text-white/35">02</span>在设置页创建一个平台密钥。</li>
-            <li><span className="mr-2 font-mono text-xs text-black/35 dark:text-white/35">03</span>立即保存完整密钥，它只展示一次。</li>
-            <li><span className="mr-2 font-mono text-xs text-black/35 dark:text-white/35">04</span>仅在 Agent 安装过程询问时提供。</li>
+          <ol className="mt-6 space-y-5 text-sm leading-6 text-muted-foreground">
+            <li><span className="mr-2 font-mono text-xs text-muted-foreground">01</span>注册或登录 Anban Creator。</li>
+            <li><span className="mr-2 font-mono text-xs text-muted-foreground">02</span>在设置页创建一个平台密钥。</li>
+            <li><span className="mr-2 font-mono text-xs text-muted-foreground">03</span>立即保存完整密钥，它只展示一次。</li>
+            <li><span className="mr-2 font-mono text-xs text-muted-foreground">04</span>仅在 Agent 安装过程询问时提供。</li>
           </ol>
           <Link
             to="/settings#api-key-settings"
@@ -142,7 +142,7 @@ export default function PluginsPage() {
             获取 API Key
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
           </Link>
-          <p className="mt-3 text-xs leading-5 text-black/42 dark:text-white/42">不要把密钥写进聊天记录、截图、代码仓库或公开日志。</p>
+          <p className="mt-3 text-xs leading-5 text-muted-foreground">不要把密钥写进聊天记录、截图、代码仓库或公开日志。</p>
         </aside>
       </div>
     </main>

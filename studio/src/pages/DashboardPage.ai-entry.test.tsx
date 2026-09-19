@@ -697,7 +697,7 @@ describe('DashboardPage AI entry', () => {
 
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
     const projectControl = await screen.findByRole('combobox', { name: '项目：未选择' })
     expect(projectControl).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /创建第一个项目/ })).not.toBeInTheDocument()
@@ -737,7 +737,7 @@ describe('DashboardPage AI entry', () => {
 
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
     expect(await screen.findByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号项目')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
@@ -886,7 +886,7 @@ describe('DashboardPage AI entry', () => {
 
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
@@ -931,7 +931,7 @@ describe('DashboardPage AI entry', () => {
 
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('heading', { name: '首页' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
     expect(await screen.findByRole('combobox', { name: '项目：电商项目' })).toHaveTextContent('电商项目')
     expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()

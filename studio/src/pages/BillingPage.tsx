@@ -236,7 +236,7 @@ export default function BillingPage() {
                       <TableRow key={entry.id}>
                         <TableCell className="px-4 py-3"><Badge variant={entry.event_kind === 'charge' || entry.event_kind === 'debt_created' ? 'outline' : 'secondary'}>{entryLabel(entry)}</Badge></TableCell>
                         <TableCell className="px-4 py-3">
-                          <p className={`font-semibold tabular-nums ${delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                          <p className={`font-semibold tabular-nums ${delta > 0 ? 'text-emerald-700 dark:text-emerald-400' : delta < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
                             {delta > 0 ? '+' : ''}{delta.toLocaleString()}
                           </p>
                           <p className="mt-0.5 text-xs text-muted-foreground">可用余额变化</p>

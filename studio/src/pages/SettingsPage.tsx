@@ -100,7 +100,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="接入就绪中心" description="按执行、密钥、发布和账号安全检查 Studio 是否可以顺畅创作。" />
+      <PageHeader title="设置" description="管理账号、平台接入和发布渠道。下方接入就绪中心可快速定位需要完善的设置。" />
 
       <Card>
         <CardContent>
@@ -115,12 +115,12 @@ export default function SettingsPage() {
       <SettingsGroupTitle
         id="execution-settings"
         title="执行环境"
-        description="所有任务统一由云端 Agent 执行，Studio 不再提供本机执行器。"
+        description="任务在云端执行，关闭浏览器后仍会继续。"
       />
       <Card>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            任务会由服务器调度到受控的 Agent 运行时，执行结果和生成文件继续在 Studio 中查看。
+            创建任务后，可在「任务」中查看进度、下载文件并处理发布。
           </p>
         </CardContent>
       </Card>
@@ -261,7 +261,7 @@ export default function SettingsPage() {
             <h2 className="text-sm font-semibold text-foreground">平台密钥</h2>
             <p className="text-xs text-muted-foreground mt-0.5">用于 Claude Code 插件或第三方工具访问你的账号。</p>
             <p className="text-xs text-muted-foreground mt-1">
-              不知道如何使用密钥？<Link to="/plugins" className="text-primary hover:underline">查看插件接入 →</Link>
+              不知道如何使用密钥？<Link to="/plugins" className="text-primary underline underline-offset-4">查看插件接入 →</Link>
             </p>
           </div>
           <Button size="sm" onClick={() => setShowCreate(true)} disabled={showCreate}>
@@ -274,7 +274,7 @@ export default function SettingsPage() {
             <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 space-y-2">
               <p className="text-xs font-medium text-green-600">密钥创建成功！请立即复制，此密钥只显示一次。</p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 rounded bg-muted px-2 py-1.5 text-xs font-mono break-all select-all">
+                <code className="min-w-0 flex-1 rounded bg-muted px-2 py-1.5 text-xs font-mono break-all select-all">
                   {newKeyData.key}
                 </code>
                 <Button size="sm" variant="outline" onClick={() => handleCopy(newKeyData.key)}>
@@ -299,6 +299,8 @@ export default function SettingsPage() {
           {showCreate && (
             <div className="flex items-center gap-2">
               <Input
+                aria-label="密钥名称"
+                autoFocus
                 placeholder="密钥名称（如：我的 Mac）"
                 value={keyName}
                 onChange={(e) => setKeyName(e.target.value)}
@@ -318,7 +320,7 @@ export default function SettingsPage() {
           {isLoading ? (
             <p className="text-xs text-muted-foreground">加载中...</p>
           ) : isError ? (
-            <p className="text-xs text-muted-foreground">加载密钥失败，<button onClick={() => refetch()} className="text-primary hover:underline">点击重试</button></p>
+            <p className="text-xs text-muted-foreground">加载密钥失败，<button onClick={() => refetch()} className="text-primary underline underline-offset-4">点击重试</button></p>
           ) : apiKeys.length === 0 ? (
             <p className="text-xs text-muted-foreground">暂无密钥。创建一个新密钥后，可以直接继续去完成 Claude Code 或 Codex 的接入。</p>
           ) : (
@@ -328,9 +330,9 @@ export default function SettingsPage() {
                   key={key.id}
                   className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2"
                 >
-                  <div className="space-y-0.5">
+                  <div className="min-w-0 space-y-0.5">
                     <p className="text-sm font-medium text-foreground">{key.name || '未命名'}</p>
-                    <p className="text-xs text-muted-foreground font-mono">{key.key_prefix}{'*'.repeat(20)}</p>
+                    <p className="break-all text-xs text-muted-foreground font-mono">{key.key_prefix}{'*'.repeat(20)}</p>
                     <p className="text-xs text-muted-foreground">
                       创建于 {new Date(key.created_at).toLocaleDateString('zh-CN')}
                       {key.last_used_at && (

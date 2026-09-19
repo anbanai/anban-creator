@@ -108,7 +108,7 @@ export default function IlinkBindingSection() {
               添加平台微信助手后，可直接发消息创建任务，并及时接收任务成功或失败提醒。
             </p>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => refetch()} disabled={isFetching}>
+          <Button aria-label="刷新微信绑定状态" variant="secondary" size="sm" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
           </Button>
         </div>

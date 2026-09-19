@@ -456,7 +456,7 @@ export function AgentPromptInput({
 
         <InputGroup
           data-slot="agent-prompt-surface"
-          className="min-h-40 h-auto max-h-[min(42rem,calc(100dvh-8rem))] flex-col overflow-hidden"
+          className="min-h-40 h-auto rounded-xl bg-card max-h-[min(42rem,calc(100dvh-8rem))] flex-col overflow-hidden"
         >
           <div data-slot="agent-prompt-content" className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
             {value.attachments.length > 0 ? (

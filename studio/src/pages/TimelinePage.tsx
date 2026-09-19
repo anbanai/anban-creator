@@ -215,8 +215,8 @@ export default function TimelinePage() {
 
           {/* Item Type Filter */}
           <Select value={itemType} onValueChange={(v) => updateFilter('item_type', v ?? '')}>
-            <SelectTrigger size="sm" className="min-w-[100px]">
-              <SelectValue placeholder="全部类型" />
+            <SelectTrigger aria-label="条目类型" size="sm" className="min-w-[100px]">
+              <SelectValue>{timelineItemTypeOptions.find((option) => option.value === itemType)?.label ?? '全部类型'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {timelineItemTypeOptions.map((opt) => (
@@ -227,8 +227,8 @@ export default function TimelinePage() {
 
           {/* Content Type Filter */}
           <Select value={contentType} onValueChange={(v) => updateFilter('content_type', v ?? '')}>
-            <SelectTrigger size="sm" className="min-w-[110px]">
-              <SelectValue placeholder="全部内容" />
+            <SelectTrigger aria-label="内容类型" size="sm" className="min-w-[110px]">
+              <SelectValue>{contentTypeFilterOptions.find((option) => option.value === contentType)?.label ?? '全部内容'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {contentTypeFilterOptions.map((opt) => (
@@ -239,8 +239,8 @@ export default function TimelinePage() {
 
           {/* Status Filter */}
           <Select value={status} onValueChange={(v) => updateFilter('status', v ?? '')}>
-            <SelectTrigger size="sm" className="min-w-[100px]">
-              <SelectValue placeholder="全部状态" />
+            <SelectTrigger aria-label="状态" size="sm" className="min-w-[100px]">
+              <SelectValue>{timelineStatusOptions.find((option) => option.value === status)?.label ?? '全部状态'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {timelineStatusOptions.map((opt) => (
@@ -259,8 +259,8 @@ export default function TimelinePage() {
 
           {/* Sort */}
           <Select value={sort} onValueChange={(v) => updateFilter('sort', v ?? '')}>
-            <SelectTrigger size="sm" className="min-w-[100px]">
-              <SelectValue placeholder="日期 ↓" />
+            <SelectTrigger aria-label="排序方式" size="sm" className="min-w-[100px]">
+              <SelectValue>{timelineSortOptions.find((option) => option.value === sort)?.label ?? '日期 ↓'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {timelineSortOptions.map((opt) => (
