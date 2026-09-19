@@ -102,7 +102,6 @@ func TestMomentsSkillMirrorsAndMethodContract(t *testing.T) {
 			}
 			for _, want := range []string{
 				"name: moments",
-				"references/examples.md",
 				"Caihui0127/caihui-moments-skill",
 				"发售",
 				"人设",

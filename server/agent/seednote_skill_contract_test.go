@@ -70,7 +70,7 @@ func TestSeednoteWorkflowAnalyzesRequestBeforeReferenceImages(t *testing.T) {
 
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
-			body := readRepoFile(t, path)
+			body := readSeednoteVisualContract(t, path)
 			for _, artifact := range artifacts {
 				if !strings.Contains(body, artifact) {
 					t.Fatalf("%s missing required trace artifact %q", path, artifact)
@@ -139,16 +139,16 @@ func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.
 
 	for _, path := range visualSkills {
 		t.Run(path, func(t *testing.T) {
-			body := readRepoFile(t, path)
+			body := readSeednoteVisualContract(t, path)
 			for _, term := range []string{
 				selectionRule,
 				"对每张输出图独立决定使用 0、1 或多张附件",
 				"不得把所有素材传给所有页面",
 				"只传当前输出图相关的原始路径",
-				"内容质量审核由 Agent/Skill 决定",
+				"内容质量审核是 Agent/Skill 的独立工作流决策",
 				"`analyze_image`",
 				"“审核不可用” warning",
-				"不创建失败态、不阻止继续生成，也不单独影响最终交付",
+				"不能阻止继续生成后续计划图片，也不能单独导致最终交付失败",
 				"每张输出图最多 3 次生成尝试",
 				"`quality_status=failed`",
 				"必须继续生成剩余计划图片",
@@ -163,7 +163,7 @@ func TestSeednoteVisualWorkflowSelectsAndVerifiesReferencesPerOutput(t *testing.
 
 	for _, path := range append(visualSkills, contentReferences...) {
 		t.Run(path+"/removed-bans", func(t *testing.T) {
-			body := readRepoFile(t, path)
+			body := readSeednoteVisualContract(t, path)
 			if !strings.Contains(body, selectionRule) {
 				t.Fatalf("%s missing neutral per-page reference selection rule", path)
 			}
@@ -210,7 +210,7 @@ func TestSeednoteReferenceRolesSeparateStyleAnalysisFromTaskReferences(t *testin
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
-			body := readRepoFile(t, path)
+			body := readSeednoteVisualContract(t, path)
 			for _, term := range required {
 				if !strings.Contains(body, term) {
 					t.Fatalf("%s missing reference role contract term %q", path, term)
@@ -234,26 +234,18 @@ func TestSeednoteReferenceRolesSeparateStyleAnalysisFromTaskReferences(t *testin
 
 func TestSeednoteAgentsShareReferenceContract(t *testing.T) {
 	root := repoRoot(t)
-	paths := []string{
-		filepath.Join(root, "harness", "agents", "seednote.md"),
-		filepath.Join(root, "harness", "agents", "seednote.toml"),
+	for _, name := range []string{"seednote.md", "seednote.toml"} {
+		body := readRepoFile(t, filepath.Join(root, "harness", "agents", name))
+		if !strings.Contains(body, "seednote-visual-design/references/reference-contract.md") {
+			t.Fatalf("%s must delegate to the canonical visual reference", name)
+		}
+		if strings.Contains(body, "seednote-reference-contract:start") {
+			t.Fatalf("%s must not embed a duplicate visual reference", name)
+		}
 	}
-
-	var reference string
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			contract := extractSeednoteReferenceContract(t, readRepoFile(t, path))
-			if strings.Contains(contract, "mcp__") {
-				t.Fatalf("%s reference contract must use bare tool names", path)
-			}
-			if reference == "" {
-				reference = contract
-				return
-			}
-			if contract != reference {
-				t.Fatalf("%s Seednote reference contract differs from the first runtime distribution", path)
-			}
-		})
+	body := readRepoFile(t, filepath.Join(root, "harness/skills/seednote-visual-design/references/reference-contract.md"))
+	if strings.Contains(extractSeednoteReferenceContract(t, body), "mcp__") {
+		t.Fatal("shared reference must stay host-neutral")
 	}
 }
 
@@ -288,7 +280,7 @@ func TestSeednoteWorkflowDocumentsReferenceUsageSchemaAndFailurePolicy(t *testin
 
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
-			body := readRepoFile(t, path)
+			body := readSeednoteVisualContract(t, path)
 			for _, term := range required {
 				if !strings.Contains(body, term) {
 					t.Fatalf("%s missing reference summary schema/failure term %q", path, term)
@@ -363,11 +355,7 @@ func TestSeednoteVisualMethodologyIsDistributed(t *testing.T) {
 
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
-			body := string(data)
+			body := readSeednoteVisualContract(t, path)
 			for _, term := range required {
 				if !strings.Contains(body, term) {
 					t.Fatalf("%s missing Seednote visual methodology term %q", path, term)
@@ -407,7 +395,7 @@ func TestSeednoteAgentsTreatImageFailuresAsRecoverableFailedState(t *testing.T) 
 
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
-			body := readRepoFile(t, path)
+			body := readSeednoteVisualContract(t, path)
 			for _, term := range required {
 				if !strings.Contains(body, term) {
 					t.Fatalf("%s missing recoverable image failure term %q", path, term)
@@ -693,4 +681,14 @@ func TestSeednoteAgentsPreserveReadOnlyResearchBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Follow the actual declared dependency rather than requiring repeated domain prose in each host.
+func readSeednoteVisualContract(t *testing.T, path string) string {
+	t.Helper()
+	body := readRepoFile(t, path)
+	if strings.Contains(body, "references/reference-contract.md") {
+		body += "\n" + readRepoFile(t, filepath.Join(repoRoot(t), "harness/skills/seednote-visual-design/references/reference-contract.md"))
+	}
+	return body
 }

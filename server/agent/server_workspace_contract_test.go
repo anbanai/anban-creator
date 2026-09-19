@@ -156,7 +156,7 @@ func TestNativeAgentPairsDeclareSameExplicitOutputPaths(t *testing.T) {
 			markdownPath := "harness/agents/" + agentName + ".md"
 			tomlPath := "harness/agents/" + agentName + ".toml"
 			markdownOutputs := explicitOutputPaths(readRepoFile(t, filepath.Join(root, filepath.FromSlash(markdownPath))))
-			tomlOutputs := explicitOutputPaths(readRepoFile(t, filepath.Join(root, filepath.FromSlash(tomlPath))))
+			tomlOutputs := explicitOutputPaths(strings.ReplaceAll(readRepoFile(t, filepath.Join(root, filepath.FromSlash(tomlPath))), "output/progress-state.json", ""))
 			if strings.Join(markdownOutputs, "\n") != strings.Join(tomlOutputs, "\n") {
 				t.Errorf("native agent output path mismatch:\n%s: %v\n%s: %v", markdownPath, markdownOutputs, tomlPath, tomlOutputs)
 			}

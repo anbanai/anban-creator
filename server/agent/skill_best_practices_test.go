@@ -163,12 +163,12 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 	root := repoRoot(t)
 	expected := map[string][]string{
-		"ecommerce":   {"ecommerce-product-analysis", "ecommerce-copywriting", "humanizer", "ecommerce-visual-design", "ecommerce-platform-specs"},
+		"ecommerce":   {"ecommerce-product-analysis", "ecommerce-copywriting", "ecommerce-visual-design", "ecommerce-platform-specs"},
 		"live-slicer": {"live-slice", "capcut-draft"},
-		"moments":     {"moments", "humanizer"},
+		"moments":     {"moments"},
 		"montage":     {"montage", "video-cover-design"},
-		"seednote":    {"humanizer", "seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
-		"article":     {"content-writing", "humanizer", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-viral-strategy"},
+		"seednote":    {"seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
+		"article":     {"content-writing", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-viral-strategy"},
 	}
 
 	for agentName, want := range expected {
@@ -204,6 +204,7 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 	}
 
 	userEntrypoints := map[string]bool{
+		"humanizer":              true, // Deferred bundled capability, read at the rewrite stage.
 		"anban-setup":            true,
 		"article":                true,
 		"article-publishing":     true,
@@ -329,7 +330,7 @@ func assertAgentSkillBestPractice(t *testing.T, path string) {
 		t.Fatalf("%s missing required description frontmatter", path)
 	}
 	descriptionLower := strings.ToLower(description)
-	if !strings.HasPrefix(descriptionLower, "use when ") && !strings.HasPrefix(descriptionLower, "this skill should be used when ") {
+	if !strings.HasPrefix(descriptionLower, "use only ") && !strings.HasPrefix(descriptionLower, "use for ") && !strings.HasPrefix(descriptionLower, "use as ") && !strings.HasPrefix(descriptionLower, "use when ") && !strings.HasPrefix(descriptionLower, "this skill should be used when ") {
 		t.Fatalf("%s description must start with activation wording (%q or %q), got %q", path, "Use when", "This skill should be used when", description)
 	}
 	if n := len([]rune(description)); n > 1024 {

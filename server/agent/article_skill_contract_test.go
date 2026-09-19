@@ -153,7 +153,7 @@ func TestArticleAgentsBindMarketingScanToFinalMarkdown(t *testing.T) {
 		{filepath.Join(root, "harness", "packs", "article", "agent.dsh.yml"), "$DSH_HOME/.agent-presets/article/skills/content-writing/scripts/scan-article-marketing.mjs"},
 	}
 	for _, tc := range cases {
-			t.Run(tc.path, func(t *testing.T) {
+		t.Run(tc.path, func(t *testing.T) {
 			text := readArticleContractFile(t, tc.path)
 			if strings.Count(text, tc.scannerPath) < 2 {
 				t.Fatalf("%s must invoke its host scanner for initial and final scans", tc.path)
@@ -394,6 +394,12 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 	} {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
+			if strings.Contains(path, "/agents/") {
+				if !strings.Contains(text, "article-cover-design") {
+					t.Fatal("Agent must delegate cover rules")
+				}
+				text += readArticleContractFile(t, filepath.Join(root, "harness/skills/article-cover-design/SKILL.md"))
+			}
 			for _, term := range []string{
 				"cover_strategy",
 				"target_reader",
@@ -574,7 +580,7 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 				"cover_quality_gate",
 				"visual_quality_scorecard",
 				"viral-audit.md",
-				"缺 `viral-audit.md` 不得交付",
+				"缺 `viral-audit.md` 不得标记 ready",
 				"仅有旧的 6 维视觉评分全为 high 不得通过",
 			} {
 				if !strings.Contains(text, term) {
