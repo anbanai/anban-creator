@@ -1672,7 +1672,11 @@ func (s *WechatPublicationService) Poll(ctx context.Context, publicationID strin
 		s.scheduleNextPollOrReconcile(publication, now)
 		if code, ok := publicationWechatErrCode(getErr); ok && code == 48001 {
 			s.recordCapability(ctx, publication.ProjectID, model.WechatCapabilityFreePublishQuery, model.WechatCapabilityDenied, code)
-			publication.Status, publication.WechatStatusCode, publication.NextCheckAt = model.WechatPublicationStatusUnsupported, code, nil
+			// A successful submit followed by a query permission failure is
+			// still actionable: the account has a durable draft and the user
+			// can finish publication from the official-account console. Keep the
+			// publication bindable instead of leaving it in an unsupported state.
+			applyWechatManualPublishFallback(publication, code)
 		} else {
 			s.recordCapability(ctx, publication.ProjectID, model.WechatCapabilityFreePublishQuery, model.WechatCapabilityTemporarilyUnavailable, 0)
 		}

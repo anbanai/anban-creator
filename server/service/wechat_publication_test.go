@@ -1864,6 +1864,38 @@ func TestBindManualPublicationCompletesDraftWithoutCallingProvider(t *testing.T)
 	}
 }
 
+func TestPoll48001FallsBackToManualPublicationAndCanBeBound(t *testing.T) {
+	f := newPublicationFixture(t)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusPublishing
+	publication.PublishID = "publish-query-denied"
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+	f.api.getError = &appwechat.WechatAPIError{ErrCode: 48001, UserMsg: "api unauthorized"}
+
+	polled, err := f.svc.Poll(context.Background(), publication.ID)
+	if !errors.Is(err, ErrWechatPublicationPending) {
+		t.Fatalf("Poll error = %v, want pending", err)
+	}
+	if polled.Status != model.WechatPublicationStatusAwaitingManual || !polled.ManualPublishRequired ||
+		polled.WechatStatusCode != 48001 || polled.NextCheckAt != nil {
+		t.Fatalf("polled = %#v, want awaiting manual publication", polled)
+	}
+
+	bound, err := f.svc.BindManualPublication(context.Background(), f.userID, f.taskID, "https://mp.weixin.qq.com/s/query-denied")
+	if err != nil {
+		t.Fatalf("BindManualPublication: %v", err)
+	}
+	if bound.Status != model.WechatPublicationStatusPublished || bound.Source != model.WechatPublicationSourceWechatConsole ||
+		bound.ArticleURL != "https://mp.weixin.qq.com/s/query-denied" || bound.ManualPublishRequired {
+		t.Fatalf("bound = %#v, want published manual publication", bound)
+	}
+	if f.api.submitCalls != 0 {
+		t.Fatalf("submit calls = %d, want 0", f.api.submitCalls)
+	}
+}
+
 func TestPublishPersists48001FromPreflightAsAwaitingManual(t *testing.T) {
 	f := newPublicationFixture(t)
 	f.seedDrafted(t)
