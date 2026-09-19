@@ -23,8 +23,8 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 		}
 		pack := pack
 		t.Run(pack.ID, func(t *testing.T) {
-			if pack.Version != "2.0.0" {
-				t.Fatalf("Pack version = %q, want 2.0.0", pack.Version)
+			if pack.Version != "2.0.1" {
+				t.Fatalf("Pack version = %q, want 2.0.1", pack.Version)
 			}
 
 			claudePaths := []string{

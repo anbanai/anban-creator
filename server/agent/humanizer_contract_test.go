@@ -127,7 +127,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 	}
 }
 
-func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
+func TestHumanizerIsDeferredUntilAgentsNeedIt(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
 		"harness/agents/article.md",
@@ -137,8 +137,8 @@ func TestHumanizerIsPreloadedOnlyByAgentsThatUseIt(t *testing.T) {
 	} {
 		body := readRepoFile(t, filepath.Join(root, filepath.FromSlash(relPath)))
 		frontmatter := frontmatterBlock(t, body)
-		if !strings.Contains(frontmatter, "\n  - humanizer") {
-			t.Fatalf("%s must preload its Humanizer capability", relPath)
+		if strings.Contains(frontmatter, "\n  - humanizer") || !strings.Contains(body, "skills/humanizer/SKILL.md") {
+			t.Fatalf("%s must defer the bundled Humanizer capability to the rewrite phase", relPath)
 		}
 	}
 

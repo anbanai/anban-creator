@@ -72,8 +72,8 @@ func TestGeneratingAgentsUseBusinessAspectRatios(t *testing.T) {
 func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := generatingSkillContractPaths(t, root)
-	if len(paths) != 9 {
-		t.Fatalf("generating Skill count = %d (%v), want 9", len(paths), paths)
+	if len(paths) != 8 {
+		t.Fatalf("generating Skill count = %d (%v), want 8 direct generating Skills (article is a router)", len(paths), paths)
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {

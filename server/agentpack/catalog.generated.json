@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -15,8 +15,8 @@
           "article-cover-design",
           "topic-research",
           "seo-optimization",
-          "article-publishing",
-          "article-viral-strategy"
+          "article-viral-strategy",
+          "article-publishing"
         ],
         "max_turns": 300
       },
@@ -103,11 +103,11 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "09ba5e0660e060d41f8d7424b2e2886f556e0ec9219a3dba1a9d10f2a3947fb4"
+      "digest": "7d353a688757a7137a08d75249bb0fc699622cd713618c44e66c82b2412b0a33"
     },
     {
       "id": "ecommerce",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "kind": "managed",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -207,11 +207,11 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "d34b7a0901817490876444619be454bbb775754806715ef255ad57c64a29646b"
+      "digest": "b090cf07dd854b8daf25ddb5b21c0b89e0972f247e6c8ba655c7341678f2bd00"
     },
     {
       "id": "live-slicer",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "kind": "managed",
       "display_name": "直播切片",
       "description": "从直播视频转写、规划并批量导出短视频切片。",
@@ -283,11 +283,11 @@
         }
       ],
       "ui": {},
-      "digest": "a459841d5a308f1ee0701d7cad641111adeaf4cac30b93b059b24a7805bc21fd"
+      "digest": "ae441aab79ade840b35bdb56eb185d5dd3d41b90ed0b701aeb659568d3d56822"
     },
     {
       "id": "moments",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "kind": "managed",
       "display_name": "朋友圈素材包",
       "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
@@ -370,11 +370,11 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "b502fb85a1a642792ea01cdf1759d60620a150133d6491d9adf61d8ab1827a60"
+      "digest": "590a87a75e4a465a8912d3bd0770bbac07e72d4eb0ec9b84f24482599688a135"
     },
     {
       "id": "montage",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "kind": "managed",
       "display_name": "Montage 视频",
       "description": "使用 OpenMontage 从素材和业务输入生产最终视频与交付清单。",
@@ -453,11 +453,11 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "999de46013aabe9390c8b9d3432806cdddbe8a7da4e715ed0e3034583293f946"
+      "digest": "dd65c6b1e1146f43054b4dd4f71ff41678b7ebd251c67fd7332caaa01e871848"
     },
     {
       "id": "seednote",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -576,7 +576,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "3d8024f07cc32de81f7133e7cde7bb1232aad3bebea80584460841d1272ad5b5"
+      "digest": "4fbf5d45aa2af0c02d1534438945700df4f449a5dc6c51c168c7c3841f2b19ec"
     }
   ]
 }

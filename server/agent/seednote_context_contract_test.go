@@ -33,7 +33,6 @@ func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *t
 	body := readRepoFile(t, path)
 	frontmatter := frontmatterBlock(t, body)
 	for _, want := range []string{
-		"  - humanizer",
 		"  - seednote-research",
 		"  - seednote-viral-analysis",
 		"  - seednote-writing",
