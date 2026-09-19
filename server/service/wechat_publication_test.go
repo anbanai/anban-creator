@@ -1846,6 +1846,10 @@ func TestBindManualPublicationCompletesDraftWithoutCallingProvider(t *testing.T)
 	if bound.Status != model.WechatPublicationStatusPublished || bound.Source != model.WechatPublicationSourceWechatConsole || bound.ArticleURL != "https://mp.weixin.qq.com/s?mid=1" || bound.ManualPublishRequired {
 		t.Fatalf("bound = %#v", bound)
 	}
+	tracking, err := f.repo.WechatTrackings().FindByTaskID(context.Background(), f.taskID)
+	if err != nil || tracking.Source != model.WechatPublicationSourceWechatConsole || tracking.ArticleURL != bound.ArticleURL || tracking.NextFetchAt == nil {
+		t.Fatalf("manual analytics tracking = %#v, %v", tracking, err)
+	}
 	if f.api.submitCalls != 0 {
 		t.Fatalf("submit calls = %d, want 0", f.api.submitCalls)
 	}
@@ -1861,6 +1865,32 @@ func TestBindManualPublicationCompletesDraftWithoutCallingProvider(t *testing.T)
 	bound, err = f.svc.BindManualPublication(context.Background(), f.userID, f.taskID, "")
 	if err != nil || bound.Status != model.WechatPublicationStatusPublished || bound.ArticleURL != "" {
 		t.Fatalf("empty URL manual bind = %#v, %v", bound, err)
+	}
+}
+
+func TestBindManualPublicationCanAttachURLAfterConfirmation(t *testing.T) {
+	f := newPublicationFixture(t)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusAwaitingManual
+	publication.ManualPublishRequired = true
+	publication.WechatStatusCode = 48001
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+
+	bound, err := f.svc.BindManualPublication(context.Background(), f.userID, f.taskID, "")
+	if err != nil || bound.Status != model.WechatPublicationStatusPublished || bound.ArticleURL != "" {
+		t.Fatalf("initial manual bind = %#v, %v", bound, err)
+	}
+	confirmedAt := bound.PublishedAt
+
+	bound, err = f.svc.BindManualPublication(context.Background(), f.userID, f.taskID, "https://mp.weixin.qq.com/s/later-url")
+	if err != nil || bound.Status != model.WechatPublicationStatusPublished || bound.ArticleURL != "https://mp.weixin.qq.com/s/later-url" || bound.PublishedAt == nil || confirmedAt == nil || !bound.PublishedAt.Equal(*confirmedAt) {
+		t.Fatalf("later URL bind = %#v, %v", bound, err)
+	}
+	tracking, err := f.repo.WechatTrackings().FindByTaskID(context.Background(), f.taskID)
+	if err != nil || tracking.ArticleURL != bound.ArticleURL {
+		t.Fatalf("later URL tracking = %#v, %v", tracking, err)
 	}
 }
 

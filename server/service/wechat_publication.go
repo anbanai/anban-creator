@@ -337,20 +337,59 @@ func (s *WechatPublicationService) BindManualPublication(ctx context.Context, us
 	if publication.Status == model.WechatPublicationStatusPublished && publication.ArticleURL == articleURL {
 		return publication, nil
 	}
-	if publication.DraftMediaID == "" || (publication.Status != model.WechatPublicationStatusAwaitingManual && publication.Status != model.WechatPublicationStatusDrafted) {
+	canAttachURLToManualPublication := publication.Status == model.WechatPublicationStatusPublished &&
+		publication.Source == model.WechatPublicationSourceWechatConsole && publication.ArticleURL == ""
+	if publication.DraftMediaID == "" || (!canAttachURLToManualPublication &&
+		publication.Status != model.WechatPublicationStatusAwaitingManual && publication.Status != model.WechatPublicationStatusDrafted) {
 		return publication, ErrWechatPublicationConflict
 	}
 	now := s.now()
+	publishedAt := now
+	if publication.PublishedAt != nil {
+		publishedAt = *publication.PublishedAt
+	}
 	publication.Source = model.WechatPublicationSourceWechatConsole
 	publication.Status = model.WechatPublicationStatusPublished
 	publication.ArticleURL = articleURL
-	publication.PublishedAt = &now
+	publication.PublishedAt = &publishedAt
 	publication.ManualPublishRequired = false
 	publication.LastError = ""
 	publication.NextCheckAt = nil
 	publication.WechatStatusCode = 0
-	if err := s.repo.WechatPublications().Update(ctx, publication); err != nil {
+	trackingID := ""
+	if articleURL != "" {
+		publication.AnalyticsStatus = "official_fetching"
+	}
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.WechatPublications().Update(ctx, publication); err != nil {
+			return err
+		}
+		if articleURL == "" {
+			return nil
+		}
+		tracking, findErr := tx.WechatTrackings().FindByTaskID(ctx, taskID)
+		if findErr == nil {
+			trackingID = tracking.ID
+			return nil
+		}
+		if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return findErr
+		}
+		trackingID = uuid.NewString()
+		return tx.WechatTrackings().Create(ctx, &model.WechatArticleTracking{
+			ID: trackingID, TaskID: publication.TaskID, UserID: publication.UserID, ProjectID: publication.ProjectID,
+			PublicationID: publication.ID, Source: model.WechatPublicationSourceWechatConsole,
+			Status: model.WechatTrackingStatusWaitingData, ArticleURL: articleURL,
+			PublishedAt: publishedAt, ExpiresAt: publishedAt.Add(model.WechatTrackingWindow), NextFetchAt: &now,
+		})
+	}); err != nil {
 		return nil, err
+	}
+	if s.enqueuer != nil && trackingID != "" {
+		payload, _ := json.Marshal(map[string]string{"tracking_id": trackingID})
+		if err := s.enqueuer.Enqueue(WechatCaptureMetricsTaskType, payload); err != nil && s.logger != nil {
+			s.logger.Warn().Err(err).Str("tracking_id", trackingID).Msg("enqueue initial manual WeChat analytics capture failed; database recovery will retry when due")
+		}
 	}
 	return publication, nil
 }
