@@ -1113,6 +1113,34 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('交付成果 (1)')).toBeInTheDocument()
   })
 
+  it('shows upload failure separately without blaming unfinished research', async () => {
+    mockTask(taskWith({
+      status: 'failed', type: 'seednote', error_message: 'delivery validation failed',
+      outcome: {
+        core_delivery: { status: 'none' }, visual: { status: 'complete' },
+        review: { status: 'unavailable' }, publication: { status: 'not_requested' }, warnings: [],
+        diagnostic: { code: 'artifact_upload_failed', stage: 'artifact_upload', recoverable: true,
+          summary: '产物上传失败，已成功上传的文件已保留。' },
+      },
+      lifecycle: { version: 1, revision: 1, execution_id: 'execution-1', updated_at: '2026-09-20T00:54:05Z', stages: [
+        { id: 'research', title: '选题研究', kind: 'work', source: 'agent', state: 'active' },
+        { id: 'writing', title: '内容创作', kind: 'work', source: 'agent', state: 'pending' },
+      ] },
+    }))
+    vi.mocked(api.tasks.files).mockResolvedValue(Array.from({ length: 15 }, (_, index) => ({
+      id: `retained-${index}`, task_id: 'task-1', execution_id: 'execution-1', state: 'retained' as const,
+      role: 'other', file_name: `artifact-${index}.md`, mime_type: 'text/markdown', file_size: 128,
+      url: '', is_deliverable: false, created_at: '2026-09-20T00:54:05Z',
+    })))
+    render(<TaskDetailPage />)
+    expect(await screen.findByRole('heading', { name: '产物上传失败' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '选题研究，进度未确认' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选题研究，失败' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选题研究，进行中' })).not.toBeInTheDocument()
+    expect(await screen.findByText('已保留产物 (15)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '继续执行' })).toBeInTheDocument()
+  })
+
   it('separates collected failure artifacts from generated files', async () => {
     mockTask(taskWith({
       status: 'failed',
@@ -1882,7 +1910,7 @@ describe('TaskDetailPage', () => {
         visual_style: '柔光生活摄影',
         image_ratio: '16:9',
         reference_image_asset_id: '44444444-4444-4444-8444-444444444444',
-        author: '案板',
+        author: 'Anban',
         writer: 'dan-koe',
         theme: 'autumn-warm',
       },
@@ -1904,7 +1932,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('图片比例')).toBeInTheDocument()
     expect(screen.getByText('图像能力')).toBeInTheDocument()
-    expect(screen.getByText('案板')).toBeInTheDocument()
+    expect(screen.getByText('Anban')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()
 

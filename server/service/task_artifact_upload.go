@@ -50,6 +50,21 @@ type TaskArtifactPrepareRequest struct {
 	SHA256       string `json:"sha256"`
 }
 
+type TaskArtifactUploadConfig struct {
+	ExpiresSeconds int
+	Now            func() time.Time
+}
+
+type TaskArtifactPrepareResult struct {
+	UploadRequired bool              `json:"upload_required"`
+	Key            string            `json:"key"`
+	UploadURL      string            `json:"upload_url,omitempty"`
+	Method         string            `json:"method,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
+	MaxSize        int64             `json:"max_size,omitempty"`
+}
+
 type TaskArtifactManifestRequest struct {
 	TaskID      string                     `json:"task_id"`
 	ExecutionID string                     `json:"execution_id,omitempty"`
@@ -65,7 +80,7 @@ type TaskArtifactManifestFile struct {
 	Role         string `json:"role"`
 }
 
-func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, authenticatedUserID, authenticatedExecutionID string, cfg DirectUploadConfig, req TaskArtifactPrepareRequest) (*DirectUploadPrepareResult, error) {
+func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, authenticatedUserID, authenticatedExecutionID string, cfg TaskArtifactUploadConfig, req TaskArtifactPrepareRequest) (*TaskArtifactPrepareResult, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("%w: storage provider is not available", ErrTaskArtifactUnavailable)
 	}
@@ -114,25 +129,16 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	}
 	switch {
 	case statErr == nil && stat != nil && stat.Size == req.Size && strings.EqualFold(strings.TrimSpace(stat.SHA256), req.SHA256):
-		return &DirectUploadPrepareResult{
+		return &TaskArtifactPrepareResult{
 			UploadRequired: false,
-			ETag:           stat.ETag,
-			StagingKey:     finalKey,
 			Key:            finalKey,
-			PublicURL:      s.store.GetURL(finalKey),
-			Method:         "PUT",
-			Headers: map[string]string{
-				"Content-Type":           contentType,
-				taskArtifactSHA256Header: req.SHA256,
-			},
-			MaxSize: maxTaskArtifactUploadBytes,
 		}, nil
 	case statErr == nil:
 		return nil, taskArtifactInvalidf("immutable final object metadata mismatch for %s", relPath)
 	case errors.Is(statErr, storage.ErrObjectNotFound):
 		// Missing immutable content is uploaded through a fresh staging object.
 	default:
-		return nil, fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, finalKey, statErr)
+		return nil, fmt.Errorf("%w: stat task artifact %s: %w", ErrTaskArtifactUnavailable, finalKey, statErr)
 	}
 	execution, err := s.repo.TaskExecutions().FindByID(ctx, executionID)
 	if err != nil {
@@ -147,7 +153,7 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	if cfg.Now != nil {
 		now = cfg.Now
 	}
-	expiresSeconds := cfg.Storage.DirectUploadExpiresSeconds
+	expiresSeconds := cfg.ExpiresSeconds
 	if expiresSeconds <= 0 {
 		expiresSeconds = defaultDirectUploadTTLSeconds
 	}
@@ -160,29 +166,9 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 		storage.ObjectMetadataSHA256: req.SHA256,
 	}, expiresSeconds)
 	if err != nil {
-		return nil, fmt.Errorf("%w: create signed upload URL: %v", ErrTaskArtifactUnavailable, err)
+		return nil, fmt.Errorf("%w: create signed upload URL: %w", ErrTaskArtifactUnavailable, err)
 	}
 
-	issuer := cfg.CredentialIssuer
-	if issuer == nil {
-		issuer = NewAliyunUploadCredentialIssuer(cfg.Storage)
-	}
-	cred, err := issuer.IssueUploadCredential(ctx, UploadCredentialRequest{
-		RoleArn:     cfg.Storage.STSRoleArn,
-		SessionName: firstNonEmptyString(cfg.Storage.STSSessionName, "agent-task-artifact-upload"),
-		Policy:      directUploadPolicyJSON(cfg.Storage.BucketName, stagingKey),
-		Expires:     expiresSeconds,
-		STSEndpoint: cfg.Storage.STSEndpoint,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("%w: issue upload credential: %v", ErrTaskArtifactUnavailable, err)
-	}
-	if cred == nil {
-		return nil, fmt.Errorf("%w: upload credential issuer returned no credential", ErrTaskArtifactUnavailable)
-	}
-	if cred.ExpiresAt.IsZero() {
-		cred.ExpiresAt = expiresAt
-	}
 	session := &model.UploadSession{
 		ID:          uploadID,
 		UserID:      task.UserID,
@@ -198,27 +184,17 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 		return nil, fmt.Errorf("%w: record task artifact upload session: %v", ErrTaskArtifactPersistence, err)
 	}
 
-	return &DirectUploadPrepareResult{
-		UploadRequired:  true,
-		UploadSessionID: uploadID,
-		UploadID:        uploadID,
-		StagingKey:      stagingKey,
-		Key:             stagingKey,
-		PublicURL:       s.store.GetURL(stagingKey),
-		UploadURL:       uploadURL,
-		Method:          "PUT",
+	return &TaskArtifactPrepareResult{
+		UploadRequired: true,
+		Key:            stagingKey,
+		UploadURL:      uploadURL,
+		Method:         "PUT",
 		Headers: map[string]string{
 			"Content-Type":           contentType,
 			taskArtifactSHA256Header: req.SHA256,
 		},
-		Region:             ossBrowserRegion(cfg.Storage.Region, cfg.Storage.Endpoint),
-		Bucket:             cfg.Storage.BucketName,
-		Endpoint:           cfg.Storage.Endpoint,
-		STSAccessKeyID:     cred.AccessKeyID,
-		STSAccessKeySecret: cred.AccessKeySecret,
-		STSSecurityToken:   cred.SecurityToken,
-		ExpiresAt:          minTime(expiresAt, cred.ExpiresAt),
-		MaxSize:            maxTaskArtifactUploadBytes,
+		ExpiresAt: &expiresAt,
+		MaxSize:   maxTaskArtifactUploadBytes,
 	}, nil
 }
 
@@ -336,9 +312,9 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 				}
 				if _, promoteErr := artifactStore.PromoteObject(ctx, objectKey, finalKey, sourceETag); promoteErr != nil && !errors.Is(promoteErr, storage.ErrObjectAlreadyExists) {
 					if errors.Is(promoteErr, storage.ErrPromotionPreconditionFailed) {
-						return fmt.Errorf("%w: task artifact %s promotion source changed: %v", ErrTaskArtifactUnavailable, relPath, promoteErr)
+						return fmt.Errorf("%w: task artifact %s promotion source changed: %w", ErrTaskArtifactUnavailable, relPath, promoteErr)
 					}
-					return fmt.Errorf("%w: promote task artifact %s: %v", ErrTaskArtifactUnavailable, relPath, promoteErr)
+					return fmt.Errorf("%w: promote task artifact %s: %w", ErrTaskArtifactUnavailable, relPath, promoteErr)
 				}
 				stat, err = statTaskArtifactObject(ctx, artifactStore, finalKey)
 				if err != nil {
@@ -348,7 +324,7 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 					return err
 				}
 			default:
-				return fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, finalKey, finalErr)
+				return fmt.Errorf("%w: stat task artifact %s: %w", ErrTaskArtifactUnavailable, finalKey, finalErr)
 			}
 			stagingKeys = append(stagingKeys, objectKey)
 		default:
@@ -523,7 +499,7 @@ func deleteTaskArtifactStagingObjects(ctx context.Context, store storage.Provide
 func statTaskArtifactObject(ctx context.Context, statProvider storage.ObjectStatProvider, key string) (*storage.ObjectInfo, error) {
 	stat, err := statProvider.StatObject(ctx, key)
 	if err != nil || stat == nil {
-		return nil, fmt.Errorf("%w: stat task artifact %s: %v", ErrTaskArtifactUnavailable, key, err)
+		return nil, fmt.Errorf("%w: stat task artifact %s: %w", ErrTaskArtifactUnavailable, key, err)
 	}
 	return stat, nil
 }

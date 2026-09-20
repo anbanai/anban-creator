@@ -532,7 +532,7 @@ func TestFinalizeCloudTaskWithArtifactsRejectsTaskStatusThatContradictsExecution
 	err = repo.WithTx(ctx, func(tx Repository) error {
 		_, finalizeErr := tx.Tasks().FinalizeCloudTaskWithArtifactsInTx(
 			ctx, "t1", "e1", model.TaskStatusCancelled, "failed", `{"success":false}`,
-			nil, "unreconciled", CloudTaskArtifactsRetain,
+			nil, "unreconciled", CloudTaskArtifactsRetain, model.LifecycleTerminalWork,
 		)
 		return finalizeErr
 	})

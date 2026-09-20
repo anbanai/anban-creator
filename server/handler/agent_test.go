@@ -26,7 +26,6 @@ import (
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
-	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
@@ -941,9 +940,7 @@ func setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(t
 	}
 	h := NewAgentHandler(taskSvc, apiKeys, &logger)
 	h.SetExecutionTokenService(tokens)
-	h.SetDirectUploadConfig(service.DirectUploadConfig{Storage: config.StorageConfig{Provider: "oss", BucketName: "bucket", STSRoleArn: "role"}, CredentialIssuer: service.StaticUploadCredentialIssuer(func(context.Context, service.UploadCredentialRequest) (*service.UploadCredential, error) {
-		return &service.UploadCredential{AccessKeyID: "ak", AccessKeySecret: "secret", SecurityToken: "token", ExpiresAt: time.Now().Add(time.Minute)}, nil
-	})})
+	h.SetTaskArtifactUploadConfig(service.TaskArtifactUploadConfig{ExpiresSeconds: 900})
 	app := fiber.New(fiber.Config{StreamRequestBody: true})
 	app.Post("/agent/progress-plan", h.ExecutionAuthMiddleware, h.ProgressPlan)
 	app.Post("/agent/progress", h.ExecutionAuthMiddleware, h.Progress)
@@ -1307,6 +1304,13 @@ func TestAgentStructuredProgressRejectsUnknownFrozenPackStage(t *testing.T) {
 		responseBody, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unknown stage status/body = %d/%s, want 4xx", resp.StatusCode, responseBody)
 	}
+	var rejected Response
+	if err := json.NewDecoder(resp.Body).Decode(&rejected); err != nil {
+		t.Fatal(err)
+	}
+	if rejected.ErrorCode != "progress_unknown_stage" {
+		t.Fatalf("unknown stage error code = %q, want progress_unknown_stage", rejected.ErrorCode)
+	}
 	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -1320,6 +1324,44 @@ func TestAgentStructuredProgressRejectsUnknownFrozenPackStage(t *testing.T) {
 	}
 	if lifecycle := persisted.Lifecycle.Data(); lifecycle.Revision != 1 || lifecycle.Stages[0].State != model.TaskLifecycleStatePending || persisted.ProgressLog != "" {
 		t.Fatalf("unknown stage changed lifecycle: %#v/%q", lifecycle, persisted.ProgressLog)
+	}
+}
+
+func TestAgentStructuredProgressReturnsStableProtocolErrorCodes(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		stage    string
+		state    string
+		wantCode string
+	}{
+		{name: "out of order", stage: "delivery", state: "active", wantCode: "progress_out_of_order"},
+		{name: "invalid state", stage: "writing", state: "pending", wantCode: "progress_invalid_state"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			app, _, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
+			plan := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
+			planReq := agentJSONRequest("/agent/progress-plan", plan)
+			planReq.Header.Set("Authorization", "Bearer "+token)
+			planResp, err := app.Test(planReq)
+			if err != nil || planResp.StatusCode != fiber.StatusOK {
+				t.Fatalf("progress plan status/error = %v/%v", planResp.StatusCode, err)
+			}
+
+			body := `{"task_id":"` + task.ID + `","stage":"` + tt.stage + `","state":"` + tt.state + `"}`
+			req := agentJSONRequest("/agent/progress", body)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rejected Response
+			if err := json.NewDecoder(resp.Body).Decode(&rejected); err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusBadRequest || rejected.ErrorCode != tt.wantCode {
+				t.Fatalf("status/error_code = %d/%q, want 400/%q", resp.StatusCode, rejected.ErrorCode, tt.wantCode)
+			}
+		})
 	}
 }
 
@@ -1478,9 +1520,7 @@ func setupAgentArtifactApp(t *testing.T) (*fiber.App, repository.Repository, *mo
 		t.Fatal(err)
 	}
 	h := NewAgentHandler(taskSvc, apiKeySvc, &logger)
-	h.SetDirectUploadConfig(service.DirectUploadConfig{Storage: config.StorageConfig{Provider: "oss", BucketName: "anban-test", Region: "oss-cn-hangzhou", STSRoleArn: "acs:ram::1:role/upload"}, CredentialIssuer: service.StaticUploadCredentialIssuer(func(context.Context, service.UploadCredentialRequest) (*service.UploadCredential, error) {
-		return &service.UploadCredential{AccessKeyID: "sts-ak", AccessKeySecret: "sts-secret", SecurityToken: "sts-token", ExpiresAt: time.Now().Add(15 * time.Minute)}, nil
-	})})
+	h.SetTaskArtifactUploadConfig(service.TaskArtifactUploadConfig{ExpiresSeconds: 900})
 	app := fiber.New()
 	app.Post("/agent/artifacts/prepare", h.ExecutionAuthMiddleware, h.PrepareArtifactUpload)
 	app.Post("/agent/artifacts/manifest", h.ExecutionAuthMiddleware, h.ReportArtifactManifest)
@@ -1540,6 +1580,9 @@ func TestAgentArtifactPrepareAndManifest(t *testing.T) {
 		t.Fatalf("decode prepare: %v", err)
 	}
 	stagingKey := env.Data.Key
+	if env.Data.STSAccessKeyID != "" || env.Data.STSAccessKeySecret != "" || env.Data.STSSecurityToken != "" {
+		t.Fatalf("managed artifact response exposed STS credentials: %#v", env.Data)
+	}
 	if store.uploadKey != stagingKey || store.uploadContentType != "text/markdown" || store.uploadMetadata[storage.ObjectMetadataSHA256] != hash {
 		t.Fatalf("prepared upload = %#v", store)
 	}

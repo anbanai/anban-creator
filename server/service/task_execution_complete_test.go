@@ -268,7 +268,7 @@ func TestCompleteCloudExecutionBuildsIndependentArticleOutcome(t *testing.T) {
 		ProviderCode: "content_exists_risk", HTTPStatus: 400,
 		ContentDirection: "unknown", Recoverable: true, ResumeFrom: "provider_request",
 		FailureStage: "writing", RequestID: "request-400", RemoteArtifacts: true,
-		ArtifactUploadFailures: []agent.ArtifactUploadFailure{{Path: "output/img_01.png", Reason: "direct artifact upload returned HTTP 503"}},
+		ArtifactUploadFailures: []agent.ArtifactUploadFailure{{Path: "output/img_01.png", ArtifactTransferFailure: agent.ArtifactTransferFailure{Operation: "put", Code: "service_unavailable", HTTPStatus: 503, Attempts: 4, Retryable: true}}},
 	}
 	if err := svc.CompleteCloudExecution(ctx, execution.ID, result); err != nil {
 		t.Fatal(err)
@@ -999,7 +999,7 @@ func TestCompleteCloudExecutionSanitizesPublicExecutorDiagnostics(t *testing.T) 
 		FailureStage: "writing:" + secret, ResumeFrom: "delivery:" + secret,
 		RequestID: secret, RemoteArtifacts: true,
 		ArtifactUploadFailures: []agent.ArtifactUploadFailure{{
-			Path: "../../" + secret, Reason: "authorization failed: " + secret,
+			Path: "../../" + secret, ArtifactTransferFailure: agent.ArtifactTransferFailure{Code: "authorization failed: " + secret},
 		}},
 	}
 	if err := svc.CompleteCloudExecution(context.Background(), execution.ID, result); err != nil {
@@ -1233,31 +1233,6 @@ func TestCompleteCloudExecutionRejectsConflictingDuplicateResult(t *testing.T) {
 	}
 	if foundTask.Status != model.TaskStatusCompleted || foundTask.Result == nil || !strings.Contains(*foundTask.Result, `"log_text":"first"`) {
 		t.Fatalf("conflicting retry changed task evidence: status=%q result=%v", foundTask.Status, foundTask.Result)
-	}
-}
-
-func TestSemanticJSONEqualRequiresExactlyOneJSONValue(t *testing.T) {
-	tests := []struct {
-		name      string
-		left      string
-		right     string
-		wantEqual bool
-		wantErr   bool
-	}{
-		{name: "whitespace and object key order", left: "  {\"large\":9007199254740993,\"nested\":{\"a\":1}}\n", right: "{\"nested\":{\"a\":1},\"large\":9007199254740993}", wantEqual: true},
-		{name: "UseNumber preserves numeric spelling", left: "{\"value\":1}", right: "{\"value\":1.0}"},
-		{name: "left trailing garbage", left: "{\"value\":1} trailing", right: "{\"value\":1}", wantErr: true},
-		{name: "right trailing garbage", left: "{\"value\":1}", right: "{\"value\":1} trailing", wantErr: true},
-		{name: "left second JSON value", left: "{\"value\":1} {\"second\":true}", right: "{\"value\":1}", wantErr: true},
-		{name: "right second JSON value", left: "{\"value\":1}", right: "{\"value\":1} {\"second\":true}", wantErr: true},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			equal, err := semanticJSONEqual([]byte(test.left), []byte(test.right))
-			if equal != test.wantEqual || (err != nil) != test.wantErr {
-				t.Fatalf("semanticJSONEqual = %v, %v; want equal=%v error=%v", equal, err, test.wantEqual, test.wantErr)
-			}
-		})
 	}
 }
 

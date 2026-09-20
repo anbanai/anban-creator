@@ -66,7 +66,7 @@ describe("scanWorkspaceArtifacts", () => {
     expect(manifested).toEqual([{ content_type: "image/gif; verified=true", object_key: "artifacts/preview.bin", relative_path: "output/preview.bin", sha256: expect.any(String), size: 6 }]);
   });
 
-  test("uploads from the hashed file handle when the visible path is replaced", async () => {
+  test("resnapshots when the visible path is replaced before an upload attempt", async () => {
     const root = await mkdtemp(join(tmpdir(), "anban-ts-artifacts-"));
     roots.push(root);
     const artifactPath = join(root, "output", "content.md");
@@ -75,13 +75,17 @@ describe("scanWorkspaceArtifacts", () => {
     await writeFile(artifactPath, "first");
     await writeFile(replacementPath, "second");
     const uploaded: string[] = [];
+    let replaced = false;
     let manifested: Array<{ sha256: string }> = [];
     const reporter = {
       progress: async () => {},
       prepareArtifactUpload: async () => { throw new Error("unexpected direct upload"); },
-      streamArtifactContent: async (metadata: { content_type: string; size: number; sha256: string }, body: ReadableStream<Uint8Array>) => {
-        if (uploaded.length === 0) await rename(replacementPath, artifactPath);
-        const contents = await new Response(body).text();
+      streamArtifactContent: async (metadata: { content_type: string; size: number; sha256: string }, body: (signal: AbortSignal) => ReadableStream<Uint8Array>) => {
+        if (!replaced) {
+          await rename(replacementPath, artifactPath);
+          replaced = true;
+        }
+        const contents = await new Response(await body(new AbortController().signal)).text();
         uploaded.push(contents);
         expect(createHash("sha256").update(contents).digest("hex")).toBe(metadata.sha256);
         return { object_key: `artifacts/content-${uploaded.length}.md`, content_type: metadata.content_type, size: metadata.size, sha256: metadata.sha256 };
@@ -91,7 +95,7 @@ describe("scanWorkspaceArtifacts", () => {
     const bootstrap = { artifact_transport: { mode: "stream" } } as BootstrapResponse;
 
     expect(await uploadWorkspaceArtifacts(root, bootstrap, reporter)).toEqual({ uploaded: 1, failures: [] });
-    expect(uploaded).toEqual(["first", "second"]);
+    expect(uploaded).toEqual(["second"]);
     expect(manifested[0]?.sha256).toBe(createHash("sha256").update("second").digest("hex"));
   });
 
@@ -115,10 +119,10 @@ describe("scanWorkspaceArtifacts", () => {
 
     expect(await uploadWorkspaceArtifacts(root, { artifact_transport: { mode: "stream" } } as BootstrapResponse, reporter)).toEqual({
       uploaded: 1,
-      failures: [{ path: "output/broken.md", reason: "upload artifact output/broken.md: storage unavailable" }],
+      failures: [{ path: "output/broken.md", operation: "stream", code: "protocol_error", attempts: 1, retryable: false }],
     });
     expect(manifested.map((file) => file.relative_path)).toEqual(["output/kept.md"]);
-    expect(progress).toContain("artifact upload failed: output/broken.md: upload artifact output/broken.md: storage unavailable");
+    expect(progress).toContain("artifact upload failed: output/broken.md: protocol_error");
     expect(progress).toContain("uploaded 1 workspace artifact(s)");
     expect(progress.some((message) => message.includes("collected"))).toBe(false);
   });
@@ -163,11 +167,11 @@ describe("scanWorkspaceArtifacts", () => {
           upload_url: "https://oss.example.test/content.md",
           method: "PUT",
           headers: { "X-Oss-Meta-Sha256": request.sha256 },
-          max_size: 1024,
+          expires_at: new Date(Date.now() + 60_000).toISOString(), max_size: 1024,
         } }), { status: 200 });
       }
       if (url === "https://oss.example.test/content.md") {
-        expect(init?.signal).toBe(controller.signal);
+        expect(init?.signal).not.toBe(controller.signal);
         controller.abort(new Error("shutdown"));
         throw controller.signal.reason;
       }
@@ -183,7 +187,7 @@ describe("scanWorkspaceArtifacts", () => {
         allowHTTPServer: false,
       }, "execution-token", "task-1");
       const bootstrap = { artifact_transport: { mode: "direct" } } as BootstrapResponse;
-      await expect(uploadWorkspaceArtifacts(root, bootstrap, reporter, controller.signal)).rejects.toThrow("shutdown");
+      await expect(uploadWorkspaceArtifacts(root, bootstrap, reporter, controller.signal)).rejects.toThrow("put failed: cancelled");
       expect(manifested).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;

@@ -30,13 +30,13 @@ type agentBootstrapper interface {
 
 // AgentHandler handles agent-to-server communication endpoints.
 type AgentHandler struct {
-	taskSvc          *service.TaskService
-	apiKeySvc        *service.APIKeyService
-	directUploadCfg  service.DirectUploadConfig
-	executionTokens  *auth.ExecutionTokenService
-	workloadVerifier serveragent.WorkloadVerifier
-	bootstrapper     agentBootstrapper
-	logger           *zerolog.Logger
+	taskSvc           *service.TaskService
+	apiKeySvc         *service.APIKeyService
+	artifactUploadCfg service.TaskArtifactUploadConfig
+	executionTokens   *auth.ExecutionTokenService
+	workloadVerifier  serveragent.WorkloadVerifier
+	bootstrapper      agentBootstrapper
+	logger            *zerolog.Logger
 }
 
 func (h *AgentHandler) SetExecutionTokenService(tokens *auth.ExecutionTokenService) {
@@ -56,10 +56,8 @@ func NewAgentHandler(taskSvc *service.TaskService, apiKeySvc *service.APIKeyServ
 	}
 }
 
-// SetDirectUploadConfig configures server-issued OSS STS credentials for agent
-// artifact uploads.
-func (h *AgentHandler) SetDirectUploadConfig(cfg service.DirectUploadConfig) {
-	h.directUploadCfg = cfg
+func (h *AgentHandler) SetTaskArtifactUploadConfig(cfg service.TaskArtifactUploadConfig) {
+	h.artifactUploadCfg = cfg
 }
 
 // ExecutionAuthMiddleware is used by execution-scoped agent routes. It never
@@ -220,13 +218,13 @@ func (h *AgentHandler) PrepareArtifactUpload(c fiber.Ctx) error {
 	if err := h.authorizeExecutionScope(c, req.TaskID); err != nil {
 		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
-	result, err := h.taskSvc.PrepareTaskArtifactUpload(c.Context(), req.TaskID, h.authenticatedUserID(c), h.authenticatedExecutionID(c), h.directUploadCfg, req)
+	result, err := h.taskSvc.PrepareTaskArtifactUpload(c.Context(), req.TaskID, h.authenticatedUserID(c), h.authenticatedExecutionID(c), h.artifactUploadCfg, req)
 	if err != nil {
 		if isAgentTaskAccessError(err) {
 			return Error(c, fiber.StatusForbidden, "task access denied")
 		}
 		if errors.Is(err, service.ErrTaskArtifactUnavailable) {
-			h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("prepare agent artifact upload unavailable")
+			h.logArtifactFailure("prepare", req.TaskID, h.authenticatedExecutionID(c), req.RelativePath, err)
 			return Error(c, fiber.StatusServiceUnavailable, "task artifact storage temporarily unavailable")
 		}
 		if errors.Is(err, service.ErrTaskArtifactExecutionConflict) {
@@ -235,10 +233,22 @@ func (h *AgentHandler) PrepareArtifactUpload(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrTaskArtifactInvalid) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("prepare agent artifact upload failed")
+		h.logArtifactFailure("prepare", req.TaskID, h.authenticatedExecutionID(c), req.RelativePath, err)
 		return Error(c, fiber.StatusInternalServerError, "failed to prepare task artifact upload")
 	}
 	return Success(c, result)
+}
+
+func (h *AgentHandler) logArtifactFailure(operation, taskID, executionID, relativePath string, err error) {
+	if h.logger == nil {
+		return
+	}
+	diagnostic := service.NewArtifactDiagnosticFields(operation, err)
+	h.logger.Warn().Str("operation", diagnostic.Operation).Str("error_code", diagnostic.Code).
+		Int("http_status", diagnostic.HTTPStatus).Str("request_id", diagnostic.RequestID).
+		Str("network_code", diagnostic.NetworkCode).Str("task_id", taskID).
+		Str("execution_id", executionID).Str("relative_path", relativePath).
+		Msg("agent artifact operation failed")
 }
 
 // ReportArtifactManifest handles POST /api/v1/agent/artifacts/manifest.
@@ -264,13 +274,13 @@ func (h *AgentHandler) ReportArtifactManifest(c fiber.Ctx) error {
 		case errors.Is(err, service.ErrTaskArtifactExecutionConflict):
 			return Error(c, fiber.StatusConflict, "task execution is no longer current")
 		case errors.Is(err, service.ErrTaskArtifactInvalid):
-			h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("agent artifact manifest rejected")
+			h.logArtifactFailure("manifest", req.TaskID, h.authenticatedExecutionID(c), "", err)
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		case errors.Is(err, service.ErrTaskArtifactUnavailable):
-			h.logger.Warn().Err(err).Str("task_id", req.TaskID).Msg("agent artifact storage unavailable")
+			h.logArtifactFailure("manifest", req.TaskID, h.authenticatedExecutionID(c), "", err)
 			return Error(c, fiber.StatusServiceUnavailable, "task artifact storage temporarily unavailable")
 		default:
-			h.logger.Error().Err(err).Str("task_id", req.TaskID).Msg("agent artifact manifest failed")
+			h.logArtifactFailure("manifest", req.TaskID, h.authenticatedExecutionID(c), "", err)
 			return Error(c, fiber.StatusInternalServerError, "failed to persist task artifact manifest")
 		}
 	}
@@ -406,7 +416,7 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		stage := strings.TrimSpace(*req.Stage)
 		state := strings.TrimSpace(*req.State)
 		if state != "active" && state != "complete" {
-			return Error(c, fiber.StatusBadRequest, "structured progress state must be active or complete")
+			return ErrorWithCode(c, fiber.StatusBadRequest, "progress_invalid_state", "structured progress state must be active or complete")
 		}
 		description := ""
 		if req.Description != nil {
@@ -415,8 +425,12 @@ func (h *AgentHandler) Progress(c fiber.Ctx) error {
 		lifecycle, err := h.taskSvc.UpdateTaskProgress(c.Context(), req.TaskID, executionID, stage, state, description)
 		if err != nil {
 			switch {
-			case errors.Is(err, service.ErrTaskLifecycleUnknownStage), errors.Is(err, service.ErrTaskLifecycleInvalidState), errors.Is(err, service.ErrTaskLifecycleOutOfOrder):
-				return Error(c, fiber.StatusBadRequest, "invalid structured progress event")
+			case errors.Is(err, service.ErrTaskLifecycleUnknownStage):
+				return ErrorWithCode(c, fiber.StatusBadRequest, "progress_unknown_stage", "unknown task progress stage")
+			case errors.Is(err, service.ErrTaskLifecycleOutOfOrder):
+				return ErrorWithCode(c, fiber.StatusBadRequest, "progress_out_of_order", "task progress event is out of order")
+			case errors.Is(err, service.ErrTaskLifecycleInvalidState):
+				return ErrorWithCode(c, fiber.StatusBadRequest, "progress_invalid_state", "invalid task progress state")
 			case errors.Is(err, service.ErrStaleTaskExecution):
 				return Error(c, fiber.StatusConflict, "task execution is no longer current")
 			default:

@@ -45,6 +45,7 @@ type TaskOutcomeWarning struct {
 // ExecutionDiagnostic is the sanitized provider/runtime diagnostic exposed to
 // task owners. Raw execution results and contexts remain internal.
 type ExecutionDiagnostic struct {
+	Code             string `json:"code,omitempty"`
 	Provider         string `json:"provider,omitempty"`
 	ProviderCode     string `json:"provider_code,omitempty"`
 	HTTPStatus       int    `json:"http_status,omitempty"`

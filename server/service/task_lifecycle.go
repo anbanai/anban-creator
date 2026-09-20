@@ -146,7 +146,7 @@ func (s *TaskService) UpdateTaskProgress(ctx context.Context, taskID, executionI
 // FinalizeTaskLifecycle normalizes work stages when an execution reaches a
 // terminal outcome. Publication stages remain pending after successful content
 // delivery and are driven independently by the Server publication lifecycle.
-func (s *TaskService) FinalizeTaskLifecycle(ctx context.Context, taskID, executionID, taskStatus, description string) (*model.TaskLifecycle, error) {
+func (s *TaskService) FinalizeTaskLifecycle(ctx context.Context, taskID, executionID, taskStatus, description string, scope model.LifecycleTerminalScope) (*model.TaskLifecycle, error) {
 	description = strings.TrimSpace(description)
 	var result model.TaskLifecycle
 	var changed bool
@@ -170,7 +170,7 @@ func (s *TaskService) FinalizeTaskLifecycle(ctx context.Context, taskID, executi
 			return nil
 		}
 		now := time.Now().UTC()
-		next, normalized := model.NormalizeTaskLifecycleTerminal(current, taskStatus, description, now)
+		next, normalized := model.NormalizeTaskLifecycleTerminal(current, taskStatus, description, now, scope)
 		changed = normalized
 		if !changed {
 			result = current
@@ -521,8 +521,9 @@ func advanceTaskLifecycle(current model.TaskLifecycle, stageID, state, descripti
 		stage.LatestUpdate = description
 		return next, true, nil
 	}
-	if stage.State == model.TaskLifecycleStateComplete && stage.LatestUpdate == description {
-		return current, false, nil
+	if stage.State == model.TaskLifecycleStateComplete {
+		stage.LatestUpdate = description
+		return next, true, nil
 	}
 	if stage.State != model.TaskLifecycleStateActive {
 		return model.TaskLifecycle{}, false, ErrTaskLifecycleOutOfOrder

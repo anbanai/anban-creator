@@ -4,12 +4,13 @@ import { type FileHandle, lstat, open, readdir } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 
-import OSS from "ali-oss";
-
 import type { BootstrapResponse } from "./bootstrap.js";
 import type { ArtifactManifestFile, ArtifactPrepareResponse, Reporter } from "./reporter.js";
+import { asTransferFailure, retryRequest, transportErrorFromResponse, TypedTransportError, type TransferFailure } from "./transport.js";
 
 const SNAPSHOT_ATTEMPTS = 3;
+const MINIMUM_SIGNATURE_LIFETIME_MS = 5_000;
+const MAX_PUT_ERROR_RESPONSE_BYTES = 8 * 1024;
 const MAX_ARTIFACT_MANIFEST_FILES = 256;
 const SKIPPED_DIRECTORIES = new Set([
   ".anban-creator", ".anban-runtime-home", ".claude", ".git",
@@ -26,10 +27,7 @@ export interface WorkspaceArtifact {
   filename: string;
 }
 
-export interface ArtifactUploadFailure {
-  path: string;
-  reason: string;
-}
+export interface ArtifactUploadFailure extends TransferFailure { path: string }
 
 export interface ArtifactUploadSummary {
   uploaded: number;
@@ -48,29 +46,36 @@ interface ArtifactSnapshot {
   inode: number;
 }
 
-export async function uploadWorkspaceArtifacts(workspace: string, bootstrap: BootstrapResponse, reporter: ArtifactReporter, signal?: AbortSignal): Promise<ArtifactUploadSummary> {
+export async function uploadWorkspaceArtifacts(workspace: string, bootstrap: BootstrapResponse, reporter: ArtifactReporter, signal?: AbortSignal, deadlineAt?: number): Promise<ArtifactUploadSummary> {
   let artifacts: WorkspaceArtifact[];
   try {
     artifacts = await scanWorkspaceArtifacts(workspace, signal);
   } catch (error) {
+    throwIfTransferAborted(bootstrap.artifact_transport.mode === "stream" ? "stream" : "put", signal);
     throw contextualError("scan workspace artifacts", error);
   }
   const files: ArtifactManifestFile[] = [];
   const failures: ArtifactUploadFailure[] = [];
   for (const artifact of artifacts) {
-    signal?.throwIfAborted();
+    throwIfTransferAborted(bootstrap.artifact_transport.mode === "stream" ? "stream" : "put", signal);
     try {
-      files.push(await uploadArtifact(artifact, bootstrap.artifact_transport.mode, reporter, signal));
+      files.push(await uploadArtifact(artifact, bootstrap.artifact_transport.mode, reporter, signal, deadlineAt));
     } catch (error) {
-      signal?.throwIfAborted();
-      const message = error instanceof Error ? error.message : "unknown error";
-      failures.push({ path: artifact.relativePath, reason: message.slice(0, 1000) });
-      await reporter.progress(`artifact upload failed: ${artifact.relativePath}: ${message}`, signal).catch(() => {});
+      if (signal?.aborted && error instanceof TypedTransportError) throw error;
+      throwIfTransferAborted(bootstrap.artifact_transport.mode === "stream" ? "stream" : "put", signal);
+      const failure = asTransferFailure(bootstrap.artifact_transport.mode === "stream" ? "stream" : "put", error);
+      failures.push({ path: artifact.relativePath, ...failure });
+      await reporter.progress(`artifact upload failed: ${artifact.relativePath}: ${failure.code}`, signal).catch(() => {});
     }
   }
   try {
-    await reporter.reportArtifactManifest(files, signal);
+    await reporter.reportArtifactManifest(files, signal, deadlineAt);
   } catch (error) {
+    if (error instanceof TypedTransportError) throw error;
+    if (signal?.aborted) {
+      const code = signal.reason instanceof Error && signal.reason.message.toLowerCase().includes("deadline") ? "deadline_exceeded" : "cancelled";
+      throw new TypedTransportError({ operation: "manifest", code, attempts: 1, retryable: false });
+    }
     throw contextualError("report artifact manifest", error);
   }
   try {
@@ -79,6 +84,12 @@ export async function uploadWorkspaceArtifacts(workspace: string, bootstrap: Boo
     // The acknowledged manifest is authoritative; progress is best-effort.
   }
   return { uploaded: files.length, failures };
+}
+
+function throwIfTransferAborted(operation: "put" | "stream", signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const code = signal.reason instanceof Error && signal.reason.message.toLowerCase().includes("deadline") ? "deadline_exceeded" : "cancelled";
+  throw new TypedTransportError({ operation, code, attempts: 1, retryable: false });
 }
 
 export async function scanWorkspaceArtifacts(workspace: string, signal?: AbortSignal): Promise<WorkspaceArtifact[]> {
@@ -117,7 +128,7 @@ async function scanDirectory(root: string, directory: string, artifacts: Workspa
   }
 }
 
-async function uploadArtifact(artifact: WorkspaceArtifact, mode: "direct" | "stream", reporter: ArtifactReporter, signal?: AbortSignal): Promise<ArtifactManifestFile> {
+async function uploadArtifact(artifact: WorkspaceArtifact, mode: "direct" | "stream", reporter: ArtifactReporter, signal?: AbortSignal, deadlineAt?: number): Promise<ArtifactManifestFile> {
   for (let attempt = 0; attempt < SNAPSHOT_ATTEMPTS; attempt += 1) {
     signal?.throwIfAborted();
     let snapshot: ArtifactSnapshot;
@@ -131,36 +142,40 @@ async function uploadArtifact(artifact: WorkspaceArtifact, mode: "direct" | "str
       let contentType = snapshot.contentType;
       if (mode === "stream") {
         let streamed: Awaited<ReturnType<ArtifactReporter["streamArtifactContent"]>>;
-        const source = snapshotReadStream(snapshot, signal);
-        try {
-          streamed = await reporter.streamArtifactContent({ relative_path: artifact.relativePath, content_type: snapshot.contentType, size: snapshot.size, sha256: snapshot.sha256 }, Readable.toWeb(source) as ReadableStream<Uint8Array>, signal);
-        } catch (error) {
-          throw contextualError(`upload artifact ${artifact.relativePath}`, error);
-        } finally {
-          if (!source.readableEnded) source.destroy();
-        }
+        streamed = await reporter.streamArtifactContent(
+          { relative_path: artifact.relativePath, content_type: snapshot.contentType, size: snapshot.size, sha256: snapshot.sha256 },
+          async (requestSignal) => Readable.toWeb(await snapshotReadStream(artifact.localPath, snapshot, "stream", requestSignal)) as ReadableStream<Uint8Array>, signal, deadlineAt,
+        );
         if (streamed.size !== snapshot.size || streamed.sha256.toLowerCase() !== snapshot.sha256 || !streamed.object_key) throw new Error(`stream upload response does not match artifact ${artifact.relativePath}`);
         objectKey = streamed.object_key;
         contentType = streamed.content_type || snapshot.contentType;
       } else {
-        let prepared: ArtifactPrepareResponse;
-        try {
-          prepared = await reporter.prepareArtifactUpload({ relative_path: artifact.relativePath, filename: artifact.filename, content_type: snapshot.contentType, size: snapshot.size, sha256: snapshot.sha256 }, signal);
-        } catch (error) {
-          throw contextualError(`prepare artifact upload ${artifact.relativePath}`, error);
+        const prepare = () => reporter.prepareArtifactUpload({ relative_path: artifact.relativePath, filename: artifact.filename, content_type: snapshot.contentType, size: snapshot.size, sha256: snapshot.sha256 }, signal, deadlineAt);
+        let prepared: ArtifactPrepareResponse = await prepare();
+        if (!prepared.key || (prepared.upload_required && snapshot.size > prepared.max_size)) throw new Error(`prepare artifact upload rejected ${artifact.relativePath}`);
+        let signatureRefreshed = false;
+        if (prepared.upload_required && Date.parse(prepared.expires_at) - Date.now() < MINIMUM_SIGNATURE_LIFETIME_MS) {
+          signal?.throwIfAborted();
+          prepared = await prepare();
+          signatureRefreshed = true;
         }
-        if (!prepared.key || (prepared.max_size !== undefined && snapshot.size > prepared.max_size)) throw new Error(`prepare artifact upload rejected ${artifact.relativePath}`);
         if (prepared.upload_required) {
           try {
-            await uploadDirectArtifact(prepared, snapshot, snapshot.contentType, snapshot.sha256, signal);
+            await uploadDirectArtifact(prepared, artifact.localPath, snapshot, snapshot.sha256, signal, deadlineAt);
           } catch (error) {
-            throw contextualError(`upload artifact ${artifact.relativePath}`, error);
+            if (!(error instanceof TypedTransportError) || error.failure.code !== "signature_expired" || signatureRefreshed) throw error;
+            signal?.throwIfAborted();
+            prepared = await prepare();
+            signatureRefreshed = true;
+            if (prepared.upload_required) await uploadDirectArtifact(prepared, artifact.localPath, snapshot, snapshot.sha256, signal, deadlineAt);
           }
         }
         objectKey = prepared.key;
-        contentType = headerValue(prepared.headers, "Content-Type") || snapshot.contentType;
+        contentType = prepared.upload_required ? headerValue(prepared.headers, "Content-Type") || snapshot.contentType : snapshot.contentType;
       }
       if (await snapshotIsStable(artifact.localPath, snapshot, signal)) return { relative_path: artifact.relativePath, object_key: objectKey, content_type: contentType, size: snapshot.size, sha256: snapshot.sha256 };
+    } catch (error) {
+      if (!(error instanceof TypedTransportError) || error.failure.code !== "integrity_mismatch" || attempt === SNAPSHOT_ATTEMPTS - 1) throw error;
     } finally {
       await snapshot.handle.close();
     }
@@ -203,38 +218,62 @@ async function snapshotIsStable(path: string, snapshot: ArtifactSnapshot, signal
   } catch { return false; }
 }
 
-async function uploadDirectArtifact(prepared: ArtifactPrepareResponse, snapshot: ArtifactSnapshot, contentType: string, sha256: string, signal?: AbortSignal): Promise<void> {
+async function uploadDirectArtifact(prepared: ArtifactPrepareResponse, path: string, snapshot: ArtifactSnapshot, sha256: string, signal?: AbortSignal, deadlineAt?: number): Promise<void> {
   signal?.throwIfAborted();
-  const headers = { ...(prepared.headers ?? {}) };
+  if (!prepared.upload_required) return;
+  const headers = { ...prepared.headers };
   if (headerValue(headers, "X-Oss-Meta-Sha256")?.toLowerCase() !== sha256) throw new Error("direct artifact upload is missing SHA-256 metadata");
-  const stream = snapshotReadStream(snapshot, signal);
-  if (prepared.upload_url) {
+  await retryRequest("put", async (requestSignal) => {
+    const stream = await snapshotReadStream(path, snapshot, "put", requestSignal);
     try {
-      const response = await fetch(prepared.upload_url, { method: prepared.method || "PUT", headers: { ...headers, "Content-Type": headerValue(headers, "Content-Type") || contentType }, body: Readable.toWeb(stream) as ReadableStream<Uint8Array>, signal, duplex: "half" } as RequestInit);
-      if (!response.ok) throw new Error(`direct artifact upload returned HTTP ${response.status}`);
-      return;
+      const response = await fetch(prepared.upload_url, { method: "PUT", headers, body: Readable.toWeb(stream) as ReadableStream<Uint8Array>, signal: requestSignal, duplex: "half", redirect: "error" } as RequestInit);
+      if (!response.ok) {
+        let code: string | undefined;
+        if (response.status === 403) {
+          const raw = await boundedResponseText(response, MAX_PUT_ERROR_RESPONSE_BYTES);
+          if (response.headers.get("X-Anban-Error-Code") === "signature_expired" || /<Code>(RequestHasExpired|ExpiredToken)<\/Code>/.test(raw)) code = "signature_expired";
+        } else {
+          await response.body?.cancel().catch(() => {});
+        }
+        throw transportErrorFromResponse("put", response, code);
+      }
     } finally {
       if (!stream.readableEnded) stream.destroy();
     }
-  }
-  if (!prepared.endpoint || !prepared.bucket || !prepared.sts_access_key_id || !prepared.sts_access_key_secret || !prepared.sts_security_token || !prepared.key) throw new Error("direct artifact upload is missing OSS STS credentials");
-  const client = new OSS({ endpoint: prepared.endpoint, bucket: prepared.bucket, accessKeyId: prepared.sts_access_key_id, accessKeySecret: prepared.sts_access_key_secret, stsToken: prepared.sts_security_token });
-  const abortUpload = () => stream.destroy(signal?.reason instanceof Error ? signal.reason : new Error("artifact upload aborted"));
-  if (signal?.aborted) abortUpload();
-  else signal?.addEventListener("abort", abortUpload, { once: true });
-  try {
-    await client.put(prepared.key, stream, {
-      headers: { ...headers, "Content-Type": headerValue(headers, "Content-Type") || contentType },
-      timeout: 60_000,
-    });
-  } finally {
-    signal?.removeEventListener("abort", abortUpload);
-    if (!stream.readableEnded) stream.destroy();
-  }
+  }, { signal: signal ?? new AbortController().signal, deadlineAt, maxAttempts: 4 });
 }
 
-function snapshotReadStream(snapshot: ArtifactSnapshot, signal?: AbortSignal): ReadStream {
-  return snapshot.handle.createReadStream({ autoClose: false, start: 0, signal });
+async function boundedResponseText(response: Response, maximum: number): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size <= maximum) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maximum) return "";
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function snapshotReadStream(path: string, snapshot: ArtifactSnapshot, operation: "put" | "stream", signal?: AbortSignal): Promise<ReadStream> {
+  const handle = await open(path, "r");
+  try {
+    const opened = await handle.stat();
+    if (opened.size !== snapshot.size || opened.mtimeMs !== snapshot.modifiedAt || opened.dev !== snapshot.device || opened.ino !== snapshot.inode) {
+      throw new TypedTransportError({ operation, code: "integrity_mismatch", attempts: 1, retryable: false });
+    }
+    return handle.createReadStream({ autoClose: true, start: 0, signal });
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
 }
 
 function contextualError(prefix: string, error: unknown): Error {

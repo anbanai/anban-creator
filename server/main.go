@@ -590,8 +590,8 @@ func main() {
 		agentProfileHandler = handler.NewAgentProfileHandler(repo, agentProfiles, log)
 		agentHandler.SetExecutionTokenService(executionTokens)
 		agentHandler.SetBootstrap(workloadVerifier, bootstrapSvc)
-		agentHandler.SetDirectUploadConfig(service.DirectUploadConfig{
-			Storage: cfg.Storage,
+		agentHandler.SetTaskArtifactUploadConfig(service.TaskArtifactUploadConfig{
+			ExpiresSeconds: cfg.Storage.DirectUploadExpiresSeconds,
 		})
 		if store != nil {
 			fileHandler = handler.NewFileHandler(store, log)

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -42,93 +41,77 @@ func (s *TaskService) CompleteCloudExecution(ctx context.Context, executionID st
 	if !isTerminalExecution(execution.Status) && task.Status != model.TaskStatusRunning {
 		return ErrTaskCompletionConflict
 	}
+	inputDigest, err := completionInputDigest(result)
+	if err != nil {
+		return err
+	}
+	if isTerminalExecution(execution.Status) {
+		if err := ensureCompletionInputMatches(execution, inputDigest); err != nil {
+			return err
+		}
+		return s.finalizeTaskFromExecution(ctx, task, execution)
+	}
 	terminal, reason, normalized, err := s.cloudTerminalOutcome(ctx, task, execution, result)
 	if err != nil {
 		return err
 	}
-
-	if !isTerminalExecution(execution.Status) {
-		encoded, err := json.Marshal(normalized)
+	encoded, err := json.Marshal(cloudCompletionRecord{ExecutionResult: normalized, CompletionInputDigest: inputDigest})
+	if err != nil {
+		return fmt.Errorf("marshal cloud execution result: %w", err)
+	}
+	won, err := s.repo.TaskExecutions().Transition(ctx, execution.ID,
+		[]string{model.TaskExecutionStarting, model.TaskExecutionRunning}, terminal,
+		model.ExecutionTransition{
+			TerminalReason:     reason,
+			Result:             encoded,
+			FinalizationStatus: model.TaskExecutionFinalizationTerminal,
+		})
+	if err != nil {
+		return fmt.Errorf("terminalize cloud execution: %w", err)
+	}
+	if !won {
+		execution, task, err = s.currentExecution(ctx, executionID)
 		if err != nil {
-			return fmt.Errorf("marshal cloud execution result: %w", err)
+			return err
 		}
-		won, err := s.repo.TaskExecutions().Transition(ctx, execution.ID,
-			[]string{model.TaskExecutionStarting, model.TaskExecutionRunning}, terminal,
-			model.ExecutionTransition{
-				TerminalReason:     reason,
-				Result:             encoded,
-				FinalizationStatus: model.TaskExecutionFinalizationTerminal,
-			})
-		if err != nil {
-			return fmt.Errorf("terminalize cloud execution: %w", err)
+		if !isTerminalExecution(execution.Status) {
+			return fmt.Errorf("cloud execution terminal transition lost from status %s", execution.Status)
 		}
-		if !won {
-			execution, task, err = s.currentExecution(ctx, executionID)
-			if err != nil {
-				return err
-			}
-			if !isTerminalExecution(execution.Status) {
-				return fmt.Errorf("cloud execution terminal transition lost from status %s", execution.Status)
-			}
-			if err := ensureCompletionOutcomeMatches(execution, terminal, reason, normalized); err != nil {
-				return err
-			}
-		} else {
-			execution.Status = terminal
-			execution.TerminalReason = reason
-			execution.Result = encoded
-			execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
+		if err := ensureCompletionInputMatches(execution, inputDigest); err != nil {
+			return err
 		}
-	} else if err := ensureCompletionOutcomeMatches(execution, terminal, reason, normalized); err != nil {
-		return err
+	} else {
+		execution.Status = terminal
+		execution.TerminalReason = reason
+		execution.Result = encoded
+		execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
 	}
 	return s.finalizeTaskFromExecution(ctx, task, execution)
 }
 
-func ensureCompletionOutcomeMatches(execution *model.TaskExecution, terminal, reason string, result *agent.ExecutionResult) error {
-	if execution == nil || execution.Status != terminal || execution.TerminalReason != reason {
-		return ErrTaskCompletionConflict
-	}
+// This server-owned receipt is stored atomically with the normalized outcome.
+// Replays compare the original request, never validation against mutable file state.
+// Embedding preserves the result shape consumed by the durable finalizer.
+type cloudCompletionRecord struct {
+	*agent.ExecutionResult
+	CompletionInputDigest string `json:"completion_input_digest"`
+}
+
+func completionInputDigest(result *agent.ExecutionResult) (string, error) {
 	encoded, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("marshal completion retry result: %w", err)
+		return "", fmt.Errorf("marshal completion input: %w", err)
 	}
-	equal, err := semanticJSONEqual(execution.Result, encoded)
-	if err != nil {
-		return ErrTaskCompletionConflict
-	}
-	if !equal {
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func ensureCompletionInputMatches(execution *model.TaskExecution, inputDigest string) error {
+	var stored cloudCompletionRecord
+	if execution == nil || json.Unmarshal(execution.Result, &stored) != nil || stored.ExecutionResult == nil || stored.CompletionInputDigest != inputDigest {
 		return ErrTaskCompletionConflict
 	}
 	return nil
-}
-
-func semanticJSONEqual(left, right []byte) (bool, error) {
-	decode := func(data []byte) (any, error) {
-		var value any
-		decoder := json.NewDecoder(strings.NewReader(string(data)))
-		decoder.UseNumber()
-		if err := decoder.Decode(&value); err != nil {
-			return nil, err
-		}
-		var trailing any
-		if err := decoder.Decode(&trailing); err != io.EOF {
-			if err == nil {
-				return nil, fmt.Errorf("multiple JSON values")
-			}
-			return nil, err
-		}
-		return value, nil
-	}
-	leftValue, err := decode(left)
-	if err != nil {
-		return false, err
-	}
-	rightValue, err := decode(right)
-	if err != nil {
-		return false, err
-	}
-	return reflect.DeepEqual(leftValue, rightValue), nil
 }
 
 func (s *TaskService) currentExecution(ctx context.Context, executionID string) (*model.TaskExecution, *model.Task, error) {
@@ -202,11 +185,42 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 				result.TerminalReason = model.TaskBillingTerminalPlatformError
 			}
 			failureReason = "deliverable_validation_failed"
+			if failure := missingRequiredUploadFailure(execution, files, validation.Missing, result.ArtifactUploadFailures); failure != nil {
+				result.RootErrorCode = "artifact_upload_failed"
+				result.FailureStage = "artifact_upload"
+				result.Error = "产物上传失败，已成功上传的文件已保留。"
+				result.TerminalReason = model.TaskBillingTerminalPlatformError
+				result.HTTPStatus = safePublicHTTPStatus(failure.HTTPStatus)
+				result.RequestID = failure.RequestID
+				result.Recoverable = failure.Retryable
+				failureReason = "artifact_upload_failed"
+			}
 		} else {
 			deliveryAccepted = true
 		}
 	}
+	if !execution.ManifestSealed {
+		if code := artifactFailureCode(result); code != "" {
+			result.Error = "产物清单提交失败，交付尚未确认。"
+			if code == "artifact_upload_failed" {
+				result.Error = "产物上传失败，交付尚未确认。"
+			}
+			result.FailureStage = "artifact_upload"
+			result.TerminalReason = model.TaskBillingTerminalPlatformError
+			failureReason = code
+			if failure := result.ArtifactFinalizationFailure; validArtifactTransferFailure(failure) && validArtifactOperation(failure.Operation) {
+				result.HTTPStatus = safePublicHTTPStatus(failure.HTTPStatus)
+				result.RequestID = failure.RequestID
+				result.Recoverable = failure.Retryable
+			}
+		}
+	}
 	if result.Success || deliveryAccepted {
+		if artifactFailureCode(result) != "" {
+			result.Success, result.Error, result.RootErrorCode = true, "", ""
+			result.FailureStage, result.HTTPStatus, result.RequestID = "", 0, ""
+			result.Recoverable = false
+		}
 		return model.TaskExecutionSucceeded, "completed", result, nil
 	}
 	if strings.TrimSpace(result.Error) == "" {
@@ -416,7 +430,7 @@ func (s *TaskService) finalizeCloudExecutionCore(ctx context.Context, task *mode
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		_, finalizeErr := tx.Tasks().FinalizeCloudTaskWithArtifactsInTx(
 			ctx, task.ID, execution.ID, target, errMsg, resultJSON,
-			result.ModelUsage, result.CostStatus, artifactAction,
+			result.ModelUsage, result.CostStatus, artifactAction, executionTerminalScope(result),
 		)
 		if errors.Is(finalizeErr, repository.ErrCloudTaskExecutionCASLost) {
 			return ErrStaleTaskExecution
@@ -936,12 +950,12 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 	}
 	if result != nil {
 		for _, failure := range result.ArtifactUploadFailures {
-			if strings.TrimSpace(failure.Path) == "" || strings.TrimSpace(failure.Reason) == "" {
+			if strings.TrimSpace(failure.Path) == "" || strings.TrimSpace(failure.Code) == "" {
 				continue
 			}
 			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
 				Code: "artifact_upload_failed", Stage: "artifact_upload",
-				Message: fmt.Sprintf("文件 %s 上传失败：%s", safePublicArtifactPath(failure.Path), safePublicArtifactUploadReason(failure.Reason)),
+				Message: fmt.Sprintf("文件 %s 上传失败：%s", safePublicArtifactPath(failure.Path), safePublicArtifactUploadReason(failure.Code)),
 			})
 		}
 	}
@@ -1114,6 +1128,15 @@ func publicExecutionDiagnostic(execution *model.TaskExecution, result *agent.Exe
 	if execution == nil || result == nil {
 		return nil
 	}
+	if code := artifactFailureCode(result); code != "" {
+		summary := "产物上传失败，已成功上传的文件已保留。"
+		if code == "artifact_manifest_failed" {
+			summary = "产物清单提交失败，交付尚未确认。"
+		}
+		return &model.ExecutionDiagnostic{Code: code, Stage: "artifact_upload", Summary: summary,
+			HTTPStatus: safePublicHTTPStatus(result.HTTPStatus), Recoverable: result.Recoverable,
+			RequestID: safePublicRequestID(result.RequestID)}
+	}
 	providerFailure := result.ErrorCode != "" || result.ProviderCode != "" || result.HTTPStatus != 0 || result.TerminalReason == model.TaskBillingTerminalProviderError
 	if !providerFailure {
 		return nil
@@ -1181,17 +1204,18 @@ func safePublicRequestID(value string) string {
 	return fmt.Sprintf("sha256:%x", fingerprint)
 }
 
-func safePublicArtifactUploadReason(value string) string {
-	lower := strings.ToLower(value)
-	switch {
-	case strings.Contains(lower, "timeout"), strings.Contains(lower, "deadline"), strings.Contains(lower, "aborted"):
+func safePublicArtifactUploadReason(code string) string {
+	switch code {
+	case "network_timeout", "deadline_exceeded":
 		return "上传超时。"
-	case strings.Contains(lower, "413"), strings.Contains(lower, "too large"), strings.Contains(lower, "size limit"):
-		return "文件超过上传大小限制。"
-	case strings.Contains(lower, "checksum"), strings.Contains(lower, "content hash"), strings.Contains(lower, "integrity"):
+	case "integrity_mismatch":
 		return "文件完整性校验失败。"
-	case strings.Contains(lower, "401"), strings.Contains(lower, "403"), strings.Contains(lower, "unauthorized"), strings.Contains(lower, "forbidden"), strings.Contains(lower, "authorization"):
+	case "unauthorized", "signature_expired":
 		return "上传授权失败。"
+	case "connection_reset", "network_unavailable", "service_unavailable", "rate_limited":
+		return "上传服务暂时不可用。"
+	case "cancelled":
+		return "上传已取消。"
 	default:
 		return "上传失败，底层错误未公开。"
 	}

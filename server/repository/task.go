@@ -250,7 +250,7 @@ func jsonValuesEqual(left, right string) bool {
 // FinalizeCloudTaskWithArtifactsInTx owns the atomic cloud terminal state:
 // current-execution authority, artifact visibility, terminal evidence, and
 // task status. The caller persists billing in the same outer transaction.
-func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction) (bool, error) {
+func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction, scope model.LifecycleTerminalScope) (bool, error) {
 	task, execution, err := lockCurrentArtifactExecution(r.db.WithContext(ctx), id, executionID)
 	if errors.Is(err, ErrTaskFileExecutionNotCurrent) {
 		return false, ErrCloudTaskExecutionCASLost
@@ -293,7 +293,7 @@ func (r *taskRepository) FinalizeCloudTaskWithArtifactsInTx(ctx context.Context,
 	}
 
 	now := time.Now()
-	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(task.Lifecycle.Data(), status, errorMsg, now)
+	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(task.Lifecycle.Data(), status, errorMsg, now, scope)
 	updates := map[string]any{
 		"status": status, "error_message": errorMsg, "completed_at": now, "result": result,
 		"terminal_model_usage": datatypes.NewJSONType(usage), "cost_status": costStatus,
@@ -342,7 +342,7 @@ func cloudTaskTerminalStateMatches(task *model.Task, execution *model.TaskExecut
 	}
 }
 
-func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error) {
+func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string, scope model.LifecycleTerminalScope) (bool, error) {
 	var current model.Task
 	if err := r.db.WithContext(ctx).Select("id", "lifecycle").Where("id = ? AND status = ? AND current_execution_id = ?", id, model.TaskStatusRunning, executionID).Take(&current).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -351,7 +351,7 @@ func (r *taskRepository) FinalizeTaskForExecution(ctx context.Context, id, execu
 		return false, err
 	}
 	now := time.Now()
-	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(current.Lifecycle.Data(), status, errorMsg, now)
+	lifecycle, lifecycleChanged := model.NormalizeTaskLifecycleTerminal(current.Lifecycle.Data(), status, errorMsg, now, scope)
 	updates := map[string]any{
 		"status": status, "error_message": errorMsg, "completed_at": now,
 	}

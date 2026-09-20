@@ -55,6 +55,7 @@ export interface TaskOutcome {
   }
   warnings: Array<{ code: string; message: string; stage?: string }>
   diagnostic?: {
+    code?: string
     provider?: string
     provider_code?: string
     http_status?: number

@@ -31,7 +31,7 @@ func TestFinalizeTaskForExecutionNormalizesLifecycleAtomically(t *testing.T) {
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	won, err := repo.Tasks().FinalizeTaskForExecution(context.Background(), task.ID, executionID, model.TaskStatusCompleted, "")
+	won, err := repo.Tasks().FinalizeTaskForExecution(context.Background(), task.ID, executionID, model.TaskStatusCompleted, "", model.LifecycleTerminalWork)
 	if err != nil || !won {
 		t.Fatalf("finalize = %v, %v", won, err)
 	}

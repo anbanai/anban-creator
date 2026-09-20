@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 
 import { uploadWorkspaceArtifacts } from "../src/artifacts.js";
+import { retryRequest, TypedTransportError } from "../src/transport.js";
 import type { ResolvedBootstrapResponse } from "../src/bootstrap.js";
 import {
   CompletionReportError,
@@ -88,6 +89,8 @@ function runJobHarness() {
   let progressImpl = async (_message: string, _signal?: AbortSignal) => {};
   let stageProgressImpl = async (_event: StageProgressEvent, _signal?: AbortSignal) => {};
   let completeImpl = async (_result: ExecutionResult, _signal?: AbortSignal) => {};
+  let reportArtifactManifestImpl = async (_files: ArtifactManifestFile[], _signal?: AbortSignal) => {};
+  let prepareArtifactUploadImpl = async (request: { relative_path: string }, _signal?: AbortSignal) => ({ upload_required: false as const, key: `existing/${request.relative_path}` });
   const reporter = {
     progress: async (message: string, signal?: AbortSignal) => {
       progressAttempts.push(message);
@@ -101,11 +104,12 @@ function runJobHarness() {
       await stageProgressImpl(event, signal);
       stageProgressEvents.push(event);
     },
-    prepareArtifactUpload: async (request: { relative_path: string }) => ({ upload_required: false, key: `existing/${request.relative_path}` }),
+    prepareArtifactUpload: async (request: { relative_path: string }, signal?: AbortSignal) => prepareArtifactUploadImpl(request, signal),
     streamArtifactContent: async () => ({ object_key: "existing", content_type: "text/plain", size: 0, sha256: "0".repeat(64) }),
-    reportArtifactManifest: async (files: ArtifactManifestFile[]) => {
+    reportArtifactManifest: async (files: ArtifactManifestFile[], signal?: AbortSignal) => {
       finalizationOrder.push("artifact-manifest");
       artifactManifest = files;
+      await reportArtifactManifestImpl(files, signal);
     },
     complete: async (result: ExecutionResult, signal?: AbortSignal) => {
       completeCalls += 1;
@@ -141,6 +145,8 @@ function runJobHarness() {
     set progress(value: typeof progressImpl) { progressImpl = value; },
     set stageProgress(value: typeof stageProgressImpl) { stageProgressImpl = value; },
     set complete(value: typeof completeImpl) { completeImpl = value; },
+    set reportArtifactManifest(value: typeof reportArtifactManifestImpl) { reportArtifactManifestImpl = value; },
+    set prepareArtifactUpload(value: typeof prepareArtifactUploadImpl) { prepareArtifactUploadImpl = value; },
   };
 }
 
@@ -556,6 +562,90 @@ describe("runJob finalization", () => {
     const result = await runJob(jobArgs(), harness.stdout, harness.stderr, harness.dependencies);
     expect(result.success).toBe(false);
     expect(harness.completeCalls).toBe(1);
+  });
+
+  test("preserves the execution result and reports a structured manifest failure", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-managed-finalization-"));
+    const harness = runJobHarness();
+    let generationCalls = 0;
+    try {
+      await mkdir(join(workspace, "output"));
+      await writeFile(join(workspace, "output", "final.md"), "complete");
+      harness.dependencies.runClaude = async () => {
+        generationCalls += 1;
+        return { success: true, work_dir: workspace, session_id: "session-1" };
+      };
+      harness.dependencies.uploadWorkspaceArtifacts = uploadWorkspaceArtifacts;
+      harness.reportArtifactManifest = async () => {
+        throw new TypedTransportError({ operation: "manifest", code: "service_unavailable", http_status: 503, attempts: 4, retryable: true, request_id: "request-1" });
+      };
+
+      const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+      expect(result).toMatchObject({
+        success: false,
+        work_dir: workspace,
+        session_id: "session-1",
+        root_error_code: "artifact_manifest_failed",
+        failure_stage: "artifact_upload",
+        terminal_reason: "platform_error",
+        artifact_finalization_failure: { operation: "manifest", code: "service_unavailable", http_status: 503, attempts: 4, retryable: true, request_id: "request-1" },
+      });
+      expect(harness.completed).toEqual(result);
+      expect(generationCalls).toBe(1);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("reports an artifact phase deadline without collapsing it to a protocol error", async () => {
+    process.env.ANBAN_JOB_ARTIFACT_TIMEOUT = "10ms";
+    const workspace = await mkdtemp(join(tmpdir(), "anban-managed-finalization-"));
+    const harness = runJobHarness();
+    try {
+      await mkdir(join(workspace, "output"));
+      await writeFile(join(workspace, "output", "final.md"), "complete");
+      harness.dependencies.runClaude = async () => ({ success: true, work_dir: workspace });
+      harness.dependencies.uploadWorkspaceArtifacts = uploadWorkspaceArtifacts;
+      harness.reportArtifactManifest = async (_files, signal) => new Promise<void>((_resolve, reject) => {
+        if (signal?.aborted) reject(signal.reason);
+        else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+
+      const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+      expect(result).toMatchObject({
+        success: false,
+        root_error_code: "artifact_manifest_failed",
+        failure_stage: "artifact_upload",
+        artifact_finalization_failure: { operation: "manifest", code: "deadline_exceeded", attempts: 1, retryable: false },
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves a typed prepare deadline through artifact finalization", async () => {
+    process.env.ANBAN_JOB_ARTIFACT_TIMEOUT = "10ms";
+    const workspace = await mkdtemp(join(tmpdir(), "anban-managed-finalization-"));
+    const harness = runJobHarness();
+    try {
+      await mkdir(join(workspace, "output"));
+      await writeFile(join(workspace, "output", "final.md"), "complete");
+      harness.dependencies.runClaude = async () => ({ success: true, work_dir: workspace });
+      harness.dependencies.uploadWorkspaceArtifacts = uploadWorkspaceArtifacts;
+      harness.prepareArtifactUpload = async (_request, signal) => retryRequest("prepare", async (requestSignal) => new Promise<never>((_resolve, reject) => {
+        requestSignal.addEventListener("abort", () => reject(requestSignal.reason), { once: true });
+      }), { signal: signal!, timeoutMs: 15_000, maxAttempts: 4 });
+
+      const result = await runJob(jobArgs(workspace), harness.stdout, harness.stderr, harness.dependencies);
+      expect(result).toMatchObject({
+        success: false,
+        root_error_code: "artifact_upload_failed",
+        failure_stage: "artifact_upload",
+        artifact_finalization_failure: { operation: "prepare", code: "deadline_exceeded", attempts: 1, retryable: false },
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   test("cancels artifact work on shutdown and still reports completion", async () => {

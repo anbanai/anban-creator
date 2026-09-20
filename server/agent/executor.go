@@ -223,9 +223,18 @@ type CostDiagnostic struct {
 	RawModel string `json:"raw_model,omitempty"`
 }
 
+type ArtifactTransferFailure struct {
+	Operation  string `json:"operation"`
+	Code       string `json:"code"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	Attempts   int    `json:"attempts"`
+	Retryable  bool   `json:"retryable"`
+	RequestID  string `json:"request_id,omitempty"`
+}
+
 type ArtifactUploadFailure struct {
-	Path   string `json:"path"`
-	Reason string `json:"reason"`
+	Path string `json:"path"`
+	ArtifactTransferFailure
 }
 
 // ExecutionResult captures the outcome of an agent execution.
@@ -258,15 +267,16 @@ type ExecutionResult struct {
 	CostDiagnostics []CostDiagnostic  `json:"cost_diagnostics,omitempty"`
 
 	// Post-execution diagnostics.
-	NoOutputFiles          bool                    `json:"no_output_files,omitempty"`
-	AgentLikelyFailed      bool                    `json:"agent_likely_failed,omitempty"`
-	ToolUseCount           int                     `json:"tool_use_count,omitempty"`
-	ToolUseSummary         map[string]int          `json:"tool_use_summary,omitempty"`
-	ToolErrorCount         int                     `json:"tool_error_count,omitempty"`
-	LastToolErrorTool      string                  `json:"last_tool_error_tool,omitempty"`
-	LastToolError          string                  `json:"last_tool_error,omitempty"`
-	Model                  string                  `json:"model,omitempty"` // Claude Code agent model (from claude.models.default)
-	ArtifactUploadFailures []ArtifactUploadFailure `json:"artifact_upload_failures,omitempty"`
+	NoOutputFiles               bool                     `json:"no_output_files,omitempty"`
+	AgentLikelyFailed           bool                     `json:"agent_likely_failed,omitempty"`
+	ToolUseCount                int                      `json:"tool_use_count,omitempty"`
+	ToolUseSummary              map[string]int           `json:"tool_use_summary,omitempty"`
+	ToolErrorCount              int                      `json:"tool_error_count,omitempty"`
+	LastToolErrorTool           string                   `json:"last_tool_error_tool,omitempty"`
+	LastToolError               string                   `json:"last_tool_error,omitempty"`
+	Model                       string                   `json:"model,omitempty"` // Claude Code agent model (from claude.models.default)
+	ArtifactUploadFailures      []ArtifactUploadFailure  `json:"artifact_upload_failures,omitempty"`
+	ArtifactFinalizationFailure *ArtifactTransferFailure `json:"artifact_finalization_failure,omitempty"`
 }
 
 func writeMontageInputJSON(workDir string, task *model.Task) error {

@@ -557,6 +557,16 @@ describe("managed progress hooks", () => {
       await callback(taskHookInput("TaskUpdate", {
         taskId: "stage-task",
         status: "in_progress",
+      }, { success: true }), "tool-mapped", hookOptions);
+      expect(stageProgress).toHaveBeenCalledWith({
+        stage: "source_review",
+        state: "active",
+        description: undefined,
+      }, hookOptions.signal);
+      stageProgress.mockClear();
+      await callback(taskHookInput("TaskUpdate", {
+        taskId: "stage-task",
+        status: "in_progress",
         metadata: { anban_stage_id: "writing" },
       }, { success: true }), "tool-conflict", hookOptions);
 

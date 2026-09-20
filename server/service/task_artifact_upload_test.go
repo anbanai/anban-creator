@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -22,7 +23,6 @@ import (
 	"gorm.io/gorm"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
-	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
@@ -293,30 +293,9 @@ func newTaskArtifactTestService(t *testing.T) (*TaskService, repository.Reposito
 	return svc, repo, store, task
 }
 
-func taskArtifactDirectUploadConfig(t *testing.T) DirectUploadConfig {
+func taskArtifactDirectUploadConfig(t *testing.T) TaskArtifactUploadConfig {
 	t.Helper()
-	return DirectUploadConfig{
-		Storage: config.StorageConfig{
-			Provider:       "oss",
-			Endpoint:       "oss-cn-hangzhou.aliyuncs.com",
-			BucketName:     "anban-test",
-			Region:         "oss-cn-hangzhou",
-			STSRoleArn:     "acs:ram::1:role/upload",
-			STSSessionName: "agent-artifact-upload",
-		},
-		CredentialIssuer: StaticUploadCredentialIssuer(func(_ context.Context, req UploadCredentialRequest) (*UploadCredential, error) {
-			if !strings.Contains(req.Policy, "uploads/users/") || !strings.Contains(req.Policy, "/artifacts/staging/sha256/") || !strings.Contains(req.Policy, "/output/article.md") {
-				t.Fatalf("policy = %s, want task artifact staging key", req.Policy)
-			}
-			return &UploadCredential{
-				AccessKeyID:     "sts-ak",
-				AccessKeySecret: "sts-secret",
-				SecurityToken:   "sts-token",
-				ExpiresAt:       time.Now().Add(15 * time.Minute),
-			}, nil
-		}),
-		Now: time.Now,
-	}
+	return TaskArtifactUploadConfig{ExpiresSeconds: 900, Now: time.Now}
 }
 
 func expectedTaskArtifactFinalKey(task *model.Task, executionID, hash, relPath string) string {
@@ -340,6 +319,20 @@ func assertTaskArtifactStagingKey(t *testing.T, task *model.Task, executionID, h
 	}
 }
 
+func taskArtifactPreparedUploadID(t *testing.T, key string) string {
+	t.Helper()
+	marker := "/staging/sha256/"
+	_, remainder, ok := strings.Cut(key, marker)
+	if !ok {
+		t.Fatalf("prepared key %q has no staging marker", key)
+	}
+	parts := strings.SplitN(remainder, "/", 3)
+	if len(parts) != 3 {
+		t.Fatalf("prepared key %q has no upload ID", key)
+	}
+	return parts[1]
+}
+
 func taskArtifactManifestEntry(relPath, objectKey string, size int64, hash string) TaskArtifactManifestFile {
 	return TaskArtifactManifestFile{
 		RelativePath: relPath,
@@ -347,6 +340,34 @@ func taskArtifactManifestEntry(relPath, objectKey string, size int64, hash strin
 		ContentType:  normalizeTaskArtifactContentType("", relPath),
 		Size:         size,
 		SHA256:       hash,
+	}
+}
+
+func TestPrepareTaskArtifactUploadUsesDedicatedSignedPUTContract(t *testing.T) {
+	svc, repo, _, task := newTaskArtifactTestService(t)
+	executionID := startTaskArtifactExecution(t, repo, task)
+
+	result, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, executionID, TaskArtifactUploadConfig{
+		ExpiresSeconds: 900,
+		Now:            time.Now,
+	}, TaskArtifactPrepareRequest{
+		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md",
+		ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UploadRequired || result.Method != "PUT" || result.UploadURL == "" || result.Key == "" || result.ExpiresAt == nil || result.ExpiresAt.IsZero() || result.MaxSize != maxTaskArtifactUploadBytes {
+		t.Fatalf("prepare result = %#v, want complete signed PUT contract", result)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"sts_access_key_id", "sts_access_key_secret", "sts_security_token", "endpoint", "bucket", "region", "public_url", "upload_id", "upload_session_id"} {
+		if bytes.Contains(raw, []byte(`"`+forbidden+`"`)) {
+			t.Fatalf("managed prepare response contains browser-only field %q: %s", forbidden, raw)
+		}
 	}
 }
 
@@ -380,15 +401,9 @@ func seedTaskArtifactUploadSession(t *testing.T, repo repository.Repository, tas
 	return session
 }
 
-func taskArtifactDirectUploadConfigWithCredentialCounter(t *testing.T, calls *int) DirectUploadConfig {
+func taskArtifactDirectUploadConfigWithCredentialCounter(t *testing.T, calls *int) TaskArtifactUploadConfig {
 	t.Helper()
-	cfg := taskArtifactDirectUploadConfig(t)
-	issuer := cfg.CredentialIssuer
-	cfg.CredentialIssuer = StaticUploadCredentialIssuer(func(ctx context.Context, req UploadCredentialRequest) (*UploadCredential, error) {
-		*calls++
-		return issuer.IssueUploadCredential(ctx, req)
-	})
-	return cfg
+	return taskArtifactDirectUploadConfig(t)
 }
 
 func TestPrepareTaskArtifactUploadTargetsUniqueStagingKey(t *testing.T) {
@@ -399,13 +414,7 @@ func TestPrepareTaskArtifactUploadTargetsUniqueStagingKey(t *testing.T) {
 		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md",
 		ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
 	}
-	var policy string
 	cfg := taskArtifactDirectUploadConfig(t)
-	issuer := cfg.CredentialIssuer
-	cfg.CredentialIssuer = StaticUploadCredentialIssuer(func(ctx context.Context, req UploadCredentialRequest) (*UploadCredential, error) {
-		policy = req.Policy
-		return issuer.IssueUploadCredential(ctx, req)
-	})
 
 	result, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, request)
 	if err != nil {
@@ -416,17 +425,15 @@ func TestPrepareTaskArtifactUploadTargetsUniqueStagingKey(t *testing.T) {
 	if result.Key == finalKey || store.uploadKey != result.Key || !strings.Contains(result.UploadURL, result.Key) {
 		t.Fatalf("prepare = %#v upload key=%q, want signed staging key distinct from %q", result, store.uploadKey, finalKey)
 	}
-	if !strings.Contains(policy, result.Key) || strings.Contains(policy, finalKey) {
-		t.Fatalf("policy = %s, want only staging key %q and never final key %q", policy, result.Key, finalKey)
-	}
 	if len(store.statKeys) != 1 || store.statKeys[0] != finalKey {
 		t.Fatalf("stat keys = %#v, want immutable final key %q", store.statKeys, finalKey)
 	}
-	session, err := repo.UploadSessions().FindByID(ctx, result.UploadID)
+	resultUploadID := taskArtifactPreparedUploadID(t, result.Key)
+	session, err := repo.UploadSessions().FindByID(ctx, resultUploadID)
 	if err != nil {
 		t.Fatalf("find task artifact upload session: %v", err)
 	}
-	if result.UploadSessionID != result.UploadID || session.UserID != task.UserID || session.Purpose != DirectUploadPurposeTaskArtifact ||
+	if session.UserID != task.UserID || session.Purpose != DirectUploadPurposeTaskArtifact ||
 		session.StagingKey != result.Key || session.FileName != "article.md" || session.ContentType != "text/markdown" ||
 		session.Size != request.Size || session.Status != model.UploadSessionPending || session.NextCleanupAt != nil || !session.ExpiresAt.After(cfg.Now()) {
 		t.Fatalf("task artifact upload session = %#v result=%#v", session, result)
@@ -570,8 +577,19 @@ func TestPrepareTaskArtifactUploadReusesOnlyExactImmutableFinal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.UploadRequired || result.Key != finalKey || result.ETag != "final-etag" || credentialCalls != 0 || store.uploadURLCalls != 0 {
+			if result.UploadRequired || result.Key != finalKey || credentialCalls != 0 || store.uploadURLCalls != 0 {
 				t.Fatalf("matching final prepare = %#v urls=%d credentials=%d", result, store.uploadURLCalls, credentialCalls)
+			}
+			wire, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			var fields map[string]any
+			if unmarshalErr := json.Unmarshal(wire, &fields); unmarshalErr != nil {
+				t.Fatal(unmarshalErr)
+			}
+			if len(fields) != 2 || fields["upload_required"] != false || fields["key"] != finalKey {
+				t.Fatalf("reused artifact response = %s, want only upload_required and key", wire)
 			}
 		})
 	}
@@ -590,7 +608,7 @@ func TestFinalizeTaskArtifactManifestPromotesStagingAndPersistsImmutableFinal(t 
 	store.stats = make(map[string]*storage.ObjectInfo)
 	store.stats[prepared.Key] = &storage.ObjectInfo{Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging-etag"}
 	store.beforePromote = func(_, _ string) {
-		claimed, findErr := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+		claimed, findErr := repo.UploadSessions().FindByID(ctx, taskArtifactPreparedUploadID(t, prepared.Key))
 		if findErr != nil {
 			t.Fatalf("find claimed task artifact session: %v", findErr)
 		}
@@ -615,7 +633,7 @@ func TestFinalizeTaskArtifactManifestPromotesStagingAndPersistsImmutableFinal(t 
 	if rows[0].OSSKey != finalKey || rows[0].OSSURL != store.GetURL(finalKey) || rows[0].ContentHash != taskArtifactTestSHA256 {
 		t.Fatalf("persisted row = %#v, want immutable final key", rows[0])
 	}
-	found, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	found, err := repo.UploadSessions().FindByID(ctx, taskArtifactPreparedUploadID(t, prepared.Key))
 	if err != nil || found.Status != model.UploadSessionPending || found.FinalizationToken != "" || found.FinalizationClaimedAt != nil {
 		t.Fatalf("released task artifact session = %#v, err=%v", found, err)
 	}
@@ -635,7 +653,8 @@ func TestFinalizeTaskArtifactManifestRejectsActiveClaimAndRetriesAfterRelease(t 
 		prepared.Key: {Key: prepared.Key, Size: 7, ContentType: "text/markdown", SHA256: taskArtifactTestSHA256, ETag: "staging"},
 	}
 	now := time.Now()
-	claimed, err := repo.UploadSessions().ClaimFinalization(ctx, prepared.UploadID, "concurrent-claim", now, now.Add(-uploadFinalizationLease))
+	preparedUploadID := taskArtifactPreparedUploadID(t, prepared.Key)
+	claimed, err := repo.UploadSessions().ClaimFinalization(ctx, preparedUploadID, "concurrent-claim", now, now.Add(-uploadFinalizationLease))
 	if err != nil || !claimed {
 		t.Fatalf("ClaimFinalization = %v, %v", claimed, err)
 	}
@@ -646,7 +665,7 @@ func TestFinalizeTaskArtifactManifestRejectsActiveClaimAndRetriesAfterRelease(t 
 	if !errors.Is(err, ErrTaskArtifactUnavailable) || len(store.promoteCalls) != 0 || len(store.deletedKeys) != 0 {
 		t.Fatalf("active-claim finalize = %v promote=%#v delete=%#v; want retryable unavailable", err, store.promoteCalls, store.deletedKeys)
 	}
-	released, err := repo.UploadSessions().ReleaseFinalization(ctx, prepared.UploadID, "concurrent-claim")
+	released, err := repo.UploadSessions().ReleaseFinalization(ctx, preparedUploadID, "concurrent-claim")
 	if err != nil || !released {
 		t.Fatalf("ReleaseFinalization = %v, %v", released, err)
 	}
@@ -702,7 +721,7 @@ func TestFinalizeTaskArtifactManifestAllowsOnlyOneConcurrentClaim(t *testing.T) 
 	if len(store.promoteCalls) != 1 {
 		t.Fatalf("concurrent promotions = %#v, want one", store.promoteCalls)
 	}
-	found, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	found, err := repo.UploadSessions().FindByID(ctx, taskArtifactPreparedUploadID(t, prepared.Key))
 	if err != nil || found.Status != model.UploadSessionPending || found.FinalizationToken != "" {
 		t.Fatalf("concurrent finalization session = %#v, err=%v", found, err)
 	}
@@ -715,14 +734,14 @@ func TestTaskArtifactStagingCleanupAndFinalExistingRetry(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	cfg := taskArtifactDirectUploadConfig(t)
 	cfg.Now = func() time.Time { return now }
-	cfg.Storage.DirectUploadExpiresSeconds = 60
+	cfg.ExpiresSeconds = 60
 	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
 		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	session, err := repo.UploadSessions().FindByID(ctx, taskArtifactPreparedUploadID(t, prepared.Key))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -799,14 +818,14 @@ func TestCleanupExpiredAbandonedTaskArtifactSessionNeverDeletesFinal(t *testing.
 	now := time.Now().UTC().Truncate(time.Second)
 	cfg := taskArtifactDirectUploadConfig(t)
 	cfg.Now = func() time.Time { return now }
-	cfg.Storage.DirectUploadExpiresSeconds = 60
+	cfg.ExpiresSeconds = 60
 	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
 		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	session, err := repo.UploadSessions().FindByID(ctx, taskArtifactPreparedUploadID(t, prepared.Key))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -831,14 +850,14 @@ func TestCleanupExpiredTaskArtifactWaitsForFreshFinalizationClaim(t *testing.T) 
 	now := time.Now().UTC().Truncate(time.Second)
 	cfg := taskArtifactDirectUploadConfig(t)
 	cfg.Now = func() time.Time { return now }
-	cfg.Storage.DirectUploadExpiresSeconds = 60
+	cfg.ExpiresSeconds = 60
 	prepared, err := svc.PrepareTaskArtifactUpload(ctx, task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
 		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md", ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
+	session, err := repo.UploadSessions().FindByID(ctx, taskArtifactPreparedUploadID(t, prepared.Key))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1001,8 +1020,9 @@ func TestFinalizeTaskArtifactManifestRetainsStagingWhenPersistenceFails(t *testi
 	if store.stats[prepared.Key] == nil || len(store.deletedKeys) != 0 {
 		t.Fatalf("failed persistence cleaned staging: object=%#v deleted=%#v", store.stats[prepared.Key], store.deletedKeys)
 	}
-	found, findErr := repo.UploadSessions().FindByID(ctx, prepared.UploadID)
-	if findErr != nil || found.Status != model.UploadSessionPending || found.FinalizationToken != "" || len(sessions.releasedIDs) != 1 || sessions.releasedIDs[0] != prepared.UploadID {
+	preparedUploadID := taskArtifactPreparedUploadID(t, prepared.Key)
+	found, findErr := repo.UploadSessions().FindByID(ctx, preparedUploadID)
+	if findErr != nil || found.Status != model.UploadSessionPending || found.FinalizationToken != "" || len(sessions.releasedIDs) != 1 || sessions.releasedIDs[0] != preparedUploadID {
 		t.Fatalf("failed persistence claim release: session=%#v err=%v releases=%#v", found, findErr, sessions.releasedIDs)
 	}
 }
@@ -1282,9 +1302,6 @@ func TestPrepareTaskArtifactUploadScopesKeyToUserProjectTask(t *testing.T) {
 	if store.uploadMetadata[storage.ObjectMetadataSHA256] != taskArtifactTestSHA256 {
 		t.Fatalf("signed upload metadata = %#v, want sha256 %q", store.uploadMetadata, taskArtifactTestSHA256)
 	}
-	if result.STSAccessKeyID != "sts-ak" || result.STSSecurityToken != "sts-token" {
-		t.Fatalf("sts fields = %#v", result)
-	}
 }
 
 func TestPrepareTaskArtifactUploadSkipsOnlyMatchingStoredObject(t *testing.T) {
@@ -1298,19 +1315,15 @@ func TestPrepareTaskArtifactUploadSkipsOnlyMatchingStoredObject(t *testing.T) {
 	}
 
 	for _, tt := range []struct {
-		name            string
-		info            storage.ObjectInfo
-		uploadRequired  bool
-		wantStoredETag  string
-		wantCredentials bool
-		wantError       bool
+		name           string
+		info           storage.ObjectInfo
+		uploadRequired bool
+		wantError      bool
 	}{
 		{
-			name:            "matching size and hash",
-			info:            storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown", ETag: "etag-1", SHA256: taskArtifactTestSHA256},
-			uploadRequired:  false,
-			wantStoredETag:  "etag-1",
-			wantCredentials: false,
+			name:           "matching size and hash",
+			info:           storage.ObjectInfo{Key: key, Size: 7, ContentType: "text/markdown", ETag: "etag-1", SHA256: taskArtifactTestSHA256},
+			uploadRequired: false,
 		},
 		{
 			name:      "wrong hash",
@@ -1350,12 +1363,6 @@ func TestPrepareTaskArtifactUploadSkipsOnlyMatchingStoredObject(t *testing.T) {
 			}
 			if result.UploadRequired != tt.uploadRequired {
 				t.Fatalf("UploadRequired = %v, want %v", result.UploadRequired, tt.uploadRequired)
-			}
-			if result.ETag != tt.wantStoredETag {
-				t.Fatalf("ETag = %q, want %q", result.ETag, tt.wantStoredETag)
-			}
-			if gotCredentials := result.STSAccessKeyID != "" || result.STSAccessKeySecret != "" || result.STSSecurityToken != ""; gotCredentials != tt.wantCredentials {
-				t.Fatalf("credentials present = %v, want %v", gotCredentials, tt.wantCredentials)
 			}
 			if !tt.uploadRequired {
 				if store.uploadURLCalls != 0 {
@@ -2243,24 +2250,20 @@ func TestPrepareTaskArtifactUploadRejectsWrongUserAndNonOSSStorage(t *testing.T)
 	}
 }
 
-func TestPrepareTaskArtifactUploadRejectsMissingSTSRole(t *testing.T) {
+func TestPrepareTaskArtifactUploadDoesNotRequireSTSRole(t *testing.T) {
 	svc, repo, _, task := newTaskArtifactTestService(t)
 	executionID := startTaskArtifactExecution(t, repo, task)
 	cfg := taskArtifactDirectUploadConfig(t)
-	cfg.Storage.STSRoleArn = ""
-	cfg.CredentialIssuer = nil
-	cfg.Storage.AccessKeyID = "ak"
-	cfg.Storage.AccessKeySecret = "secret"
 
-	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
+	result, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, executionID, cfg, TaskArtifactPrepareRequest{
 		ExecutionID:  executionID,
 		RelativePath: "output/article.md",
 		ContentType:  "text/markdown",
 		Size:         12,
 		SHA256:       taskArtifactTestSHA256,
 	})
-	if err == nil || !strings.Contains(err.Error(), "storage.sts_role_arn") {
-		t.Fatalf("PrepareTaskArtifactUpload missing STS role error = %v, want sts_role_arn rejection", err)
+	if err != nil || result == nil || !result.UploadRequired {
+		t.Fatalf("PrepareTaskArtifactUpload without STS = %#v, %v; want signed PUT", result, err)
 	}
 }
 

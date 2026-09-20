@@ -121,8 +121,8 @@ type TaskRepository interface {
 	UpdateLifecycle(ctx context.Context, id, executionID string, lifecycle model.TaskLifecycle) (bool, error)
 	UpdateExecutionEvidence(ctx context.Context, id, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
 	UpdateExecutionEvidenceForExecution(ctx context.Context, id, executionID, result string, usage []model.ModelTokenUsage, costStatus string) (bool, error)
-	FinalizeCloudTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction) (bool, error)
-	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string) (bool, error)
+	FinalizeCloudTaskWithArtifactsInTx(ctx context.Context, id, executionID, status, errorMsg, result string, usage []model.ModelTokenUsage, costStatus string, artifactAction CloudTaskArtifactAction, scope model.LifecycleTerminalScope) (bool, error)
+	FinalizeTaskForExecution(ctx context.Context, id, executionID, status, errorMsg string, scope model.LifecycleTerminalScope) (bool, error)
 	UpdateBillingTerminalReason(ctx context.Context, id, reason string) error
 	Update(ctx context.Context, task *model.Task) error
 	UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error

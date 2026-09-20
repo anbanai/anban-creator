@@ -51,7 +51,7 @@ describe('PersonaBlock', () => {
 
     renderWithClient(
       <PersonaBlock
-        author="案板"
+        author="Anban"
         onAuthor={onAuthor}
         writer="dan-koe"
         onWriter={onWriter}
@@ -61,7 +61,7 @@ describe('PersonaBlock', () => {
     expect(screen.getByText('发布署名')).toBeInTheDocument()
     expect(screen.getByText('写作风格')).toBeInTheDocument()
     expect(screen.queryByText('发布署名 · 写作风格')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('公众号发布署名')).toHaveValue('案板')
+    expect(screen.getByLabelText('公众号发布署名')).toHaveValue('Anban')
     expect(screen.getByLabelText('公众号发布署名').closest('section')?.parentElement).toHaveClass('space-y-3')
     expect(screen.getByLabelText('公众号发布署名').closest('section')?.parentElement).not.toHaveClass('sm:grid-cols-2')
 

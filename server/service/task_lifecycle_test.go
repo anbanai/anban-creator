@@ -314,7 +314,7 @@ func TestTaskLifecycleRejectsStaleExecutionAndNormalizesTerminalState(t *testing
 		t.Fatalf("stale execution error = %v", err)
 	}
 
-	failed, err := svc.FinalizeTaskLifecycle(ctx, task.ID, execution.ID, model.TaskStatusFailed, "执行失败")
+	failed, err := svc.FinalizeTaskLifecycle(ctx, task.ID, execution.ID, model.TaskStatusFailed, "执行失败", model.LifecycleTerminalWork)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestTaskLifecycleResumePreservesCompletedPrefix(t *testing.T) {
 	if _, err := svc.UpdateTaskProgress(ctx, task.ID, execution.ID, "writing", model.TaskLifecycleStateActive, "writing"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.FinalizeTaskLifecycle(ctx, task.ID, execution.ID, model.TaskStatusCancelled, "已取消"); err != nil {
+	if _, err := svc.FinalizeTaskLifecycle(ctx, task.ID, execution.ID, model.TaskStatusCancelled, "已取消", model.LifecycleTerminalWork); err != nil {
 		t.Fatal(err)
 	}
 

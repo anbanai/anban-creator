@@ -411,16 +411,16 @@ export function createTaskProgressHook(
       return {};
     }
 
-    const stage = progressStageMetadata(input.tool_input.metadata);
-    if (!stage) return {};
+    const explicitStage = progressStageMetadata(input.tool_input.metadata);
 
     if (input.tool_name === "TaskCreate") {
+      if (!explicitStage) return {};
       const taskID = taskCreateResponseID(input.tool_response);
       if (!taskID) {
         diagnostic("TaskCreate response is missing task.id");
         return {};
       }
-      taskStages.set(taskID, stage);
+      taskStages.set(taskID, explicitStage);
       return {};
     }
 
@@ -435,10 +435,12 @@ export function createTaskProgressHook(
       return {};
     }
     const createdStage = taskStages.get(taskID);
-    if (createdStage && createdStage !== stage) {
-      diagnostic(`TaskUpdate stage ${stage} does not match TaskCreate stage ${createdStage} for task ${taskID}`);
+    if (explicitStage && createdStage && createdStage !== explicitStage) {
+      diagnostic(`TaskUpdate stage ${explicitStage} does not match TaskCreate stage ${createdStage} for task ${taskID}`);
       return {};
     }
+    const stage = explicitStage ?? createdStage;
+    if (!stage) return {};
 
     const status = input.tool_input.status;
     if (status !== "in_progress" && status !== "completed") return {};

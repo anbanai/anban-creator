@@ -38,7 +38,7 @@ func TestNormalizeTaskLifecycleTerminalMarksTheNextPendingStageAsTheFailurePoint
 				{ID: "review", Source: TaskLifecycleSourceAgent, Kind: TaskLifecycleKindWork, State: TaskLifecycleStatePending},
 			}}
 
-			normalized, changed := NormalizeTaskLifecycleTerminal(lifecycle, tt.taskStatus, "执行已终止", now)
+			normalized, changed := NormalizeTaskLifecycleTerminal(lifecycle, tt.taskStatus, "执行已终止", now, LifecycleTerminalWork)
 
 			if !changed {
 				t.Fatal("terminal normalization reported no change")
@@ -50,5 +50,17 @@ func TestNormalizeTaskLifecycleTerminalMarksTheNextPendingStageAsTheFailurePoint
 				t.Fatalf("tail stage = %#v, want skipped", normalized.Stages[2])
 			}
 		})
+	}
+}
+
+func TestInfrastructureFailurePreservesAgentProgress(t *testing.T) {
+	now := time.Now()
+	current := TaskLifecycle{Version: TaskLifecycleVersion, Revision: 3, Stages: []TaskLifecycleStage{
+		{ID: "research", Source: TaskLifecycleSourceAgent, Kind: TaskLifecycleKindWork, State: TaskLifecycleStateActive},
+		{ID: "writing", Source: TaskLifecycleSourceAgent, Kind: TaskLifecycleKindWork, State: TaskLifecycleStatePending},
+	}}
+	got, changed := NormalizeTaskLifecycleTerminal(current, TaskStatusFailed, "产物上传失败", now, LifecycleTerminalInfrastructure)
+	if changed || got.Stages[0].State != TaskLifecycleStateActive || got.Stages[1].State != TaskLifecycleStatePending {
+		t.Fatalf("infrastructure failure falsely changed work evidence: %#v", got)
 	}
 }

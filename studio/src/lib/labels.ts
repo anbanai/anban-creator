@@ -97,7 +97,16 @@ const taskErrorMessageCodes: Record<string, string> = {
   '执行环境未建立，暂时无法生成或结算图片。': 'execution_identity_unavailable',
 }
 
-export function taskFailurePresentation(task: Pick<Task, 'error_message'>): { code?: string; title: string; message: string; recovery?: string; raw?: string } | null {
+export function taskFailurePresentation(task: Pick<Task, 'error_message'> & Partial<Pick<Task, 'outcome'>>): { code?: string; title: string; message: string; recovery?: string; raw?: string } | null {
+  const diagnostic = task.outcome?.diagnostic
+  if (diagnostic?.code === 'artifact_upload_failed' || diagnostic?.code === 'artifact_manifest_failed') {
+    return {
+      code: diagnostic.code,
+      title: diagnostic.code === 'artifact_upload_failed' ? '产物上传失败' : '产物清单提交失败',
+      message: diagnostic.summary,
+      recovery: '已保留文件可查看或下载；继续执行会复用可用上下文。',
+    }
+  }
   const raw = task.error_message?.trim()
   if (!raw) return null
   let code: string | undefined = taskErrorLabels[raw] ? raw : taskErrorMessageCodes[raw]

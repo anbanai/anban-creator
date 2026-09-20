@@ -162,9 +162,10 @@ export function TaskExecutionRail({
     .join('|')
   const previousPublicationStageSignature = useRef(publicationStageSignature)
   const lastWorkStageId = [...stages].reverse().find((stage) => stage.kind === 'work')?.id
-  const currentIndex = currentStageIndex(stages, status)
+  const infrastructureFailure = status === 'failed' && ['artifact_upload_failed', 'artifact_manifest_failed'].includes(outcome?.diagnostic?.code ?? '')
+  const currentIndex = infrastructureFailure ? -1 : currentStageIndex(stages, status)
   const currentStage = stages[currentIndex]
-  const failure = taskFailurePresentation({ error_message: errorMessage })
+  const failure = taskFailurePresentation({ error_message: errorMessage, outcome })
 
   const groupedFiles = useMemo(() => groupTaskStageFiles(files, lifecycle, workflow), [files, lifecycle, workflow])
   const expandedStages = automaticallyExpandedStageIds(stages, status, currentStage)
@@ -235,6 +236,15 @@ export function TaskExecutionRail({
     ? `${currentStage.title}，${lifecycleStatePresentation[currentStage.state].label}`
     : status === 'running' ? '正在制定执行计划' : ''
 
+  const infrastructureError = infrastructureFailure && failure && (
+    <div className="mx-4 mt-4 rounded-lg border border-destructive/20 bg-destructive/5 p-4" role="alert">
+      <h3 className="text-sm font-semibold text-destructive">{failure.title}</h3>
+      <p className="mt-1 text-sm">{failure.message}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p>
+      {onResume && <Button size="xs" variant="outline" className="mt-3" onClick={onResume}><Send className="size-3" />继续执行</Button>}
+    </div>
+  )
+
   if (stages.length === 0) {
     const emptyState = status === 'running'
       ? { title: '正在制定执行计划', description: 'Agent 声明阶段后会在这里持续更新', icon: CircleDashed, iconClassName: 'border-primary/30 bg-primary/10 text-primary' }
@@ -249,7 +259,8 @@ export function TaskExecutionRail({
     return (
       <section className="rounded-xl border border-border/70 bg-card py-4" aria-labelledby="task-execution-heading">
         {heading}
-        <div className="mx-4 mt-4 flex min-h-14 items-start gap-3 border-l border-border pl-5">
+        {infrastructureError}
+        {!infrastructureFailure && <div className="mx-4 mt-4 flex min-h-14 items-start gap-3 border-l border-border pl-5">
           <span className={cn('flex size-7 shrink-0 items-center justify-center rounded-full border', emptyState.iconClassName)}>
             <EmptyStateIcon className={cn('size-4', status === 'running' && 'animate-spin')} />
           </span>
@@ -265,6 +276,7 @@ export function TaskExecutionRail({
             )}
           </div>
         </div>
+        }
         {fileFallback}
       </section>
     )
@@ -274,9 +286,13 @@ export function TaskExecutionRail({
     <section className="rounded-xl border border-border/70 bg-card py-4 sm:py-5" aria-labelledby="task-execution-heading">
       <div className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
       {heading}
+      {infrastructureError}
       <ol className="mx-4 mt-5 sm:mx-5" aria-label="任务执行阶段">
         {stages.map((stage, index) => {
-          const presentation = lifecycleStatePresentation[stage.state]
+          const unconfirmed = infrastructureFailure && stage.source === 'agent' && (stage.state === 'active' || stage.state === 'pending')
+          const presentation = unconfirmed
+            ? { ...lifecycleStatePresentation.pending, label: '进度未确认' }
+            : lifecycleStatePresentation[stage.state]
           const Icon = presentation.icon
           const stageFiles = groupedFiles.byStage.get(stage.id) ?? []
           const isExpanded = manualExpansion[stage.id] ?? (expandedStages.has(stage.id) || stageFiles.length > 0)
@@ -284,14 +300,14 @@ export function TaskExecutionRail({
             stage.goal || stage.latest_update || stage.id === lastWorkStageId || stage.source === 'server',
           ))
           const isCurrent = index === currentIndex
-          const isTerminalRecoveryPoint = isCurrent && stage.kind === 'work' && (status === 'failed' || status === 'cancelled')
+          const isTerminalRecoveryPoint = !infrastructureFailure && isCurrent && stage.kind === 'work' && (status === 'failed' || status === 'cancelled')
           const duplicatesFailure = isTerminalRecoveryPoint && status === 'failed' && failure && stage.latest_update?.trim().replace(/[。.!！]+$/, '') === failure.message.trim().replace(/[。.!！]+$/, '')
           const time = formatStageTime(stage.completed_at || stage.started_at)
           return (
             <li key={stage.id} className="relative grid grid-cols-[28px_minmax(0,1fr)] gap-3 pb-3 last:pb-0 sm:gap-4">
               {index < stages.length - 1 && <span aria-hidden="true" className="absolute left-[13px] top-9 bottom-0 w-px bg-border/70" />}
               <span className={cn('relative z-10 mt-2 flex size-7 items-center justify-center rounded-full border', presentation.iconClassName)}>
-                <Icon className={cn('size-3.5', stage.state === 'active' && 'animate-spin')} />
+                <Icon className={cn('size-3.5', status === 'running' && stage.state === 'active' && 'animate-spin')} />
               </span>
               <div className="min-w-0 py-2.5">
                 <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

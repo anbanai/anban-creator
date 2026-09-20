@@ -9,6 +9,7 @@ import { CompletionReportError, exitCodeForError } from "./errors.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
 import { runWithProviderPolicyRecovery } from "./policy-recovery.js";
 import { runClaude, type RunnerReporter } from "./runner.js";
+import { asTransferFailure } from "./transport.js";
 import { materializeBootstrapFiles, prepareWorkspace } from "./workspace.js";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -35,7 +36,7 @@ export interface RunJobDependencies {
   createReporter(config: JobConfig, data: Pick<BootstrapResponse, "execution_token" | "execution_id" | "task_id">): JobReporter;
   startHeartbeat(reporter: JobReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void;
   runClaude(config: JobConfig, data: ResolvedBootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
-  uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal): Promise<ArtifactUploadSummary>;
+  uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal, deadlineAt?: number): Promise<ArtifactUploadSummary>;
   subscribeShutdown(onSignal: () => void): () => void;
 }
 
@@ -133,14 +134,22 @@ export async function runJob(
     const artifactAbort = abortAfter(timeouts.artifact, shutdown.signal);
     try {
       stderr.write(`artifact finalization started: timeout_ms=${timeouts.artifact}\n`);
-      const summary = await dependencies.uploadWorkspaceArtifacts(config.workspace, data, reporter, artifactAbort.signal);
+      const summary = await dependencies.uploadWorkspaceArtifacts(config.workspace, data, reporter, artifactAbort.signal, artifactStartedAt + timeouts.artifact);
       if (summary.failures.length > 0) result = { ...result, artifact_upload_failures: summary.failures };
       stderr.write(`artifact finalization completed: files=${summary.uploaded} failures=${summary.failures.length} duration_ms=${Date.now() - artifactStartedAt}\n`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "artifact finalization failed";
-      stderr.write(`artifact finalization failed: duration_ms=${Date.now() - artifactStartedAt} error=${message}\n`);
-      void reporter.progress(`artifact upload failed: ${message}`, artifactAbort.signal).catch(() => {});
-      if (result.success) result = failure(config.workspace, new Error(`artifact upload failed: ${message}`));
+      const manifestFailure = asTransferFailure("manifest", error);
+      stderr.write(`artifact finalization failed: duration_ms=${Date.now() - artifactStartedAt} operation=${manifestFailure.operation} code=${manifestFailure.code} attempts=${manifestFailure.attempts}\n`);
+      void reporter.progress(`artifact upload failed: ${manifestFailure.code}`, artifactAbort.signal).catch(() => {});
+      result = {
+        ...result,
+        success: false,
+        error: "artifact manifest delivery failed",
+        root_error_code: manifestFailure.operation === "manifest" ? "artifact_manifest_failed" : "artifact_upload_failed",
+        failure_stage: "artifact_upload",
+        terminal_reason: "platform_error",
+        artifact_finalization_failure: manifestFailure,
+      };
     } finally {
       artifactAbort.abort();
     }

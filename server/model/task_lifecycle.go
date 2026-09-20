@@ -17,10 +17,20 @@ func (lifecycle TaskLifecycle) MarshalJSON() ([]byte, error) {
 	return json.Marshal(lifecycleJSON(snapshot))
 }
 
+type LifecycleTerminalScope string
+
+const (
+	LifecycleTerminalWork           LifecycleTerminalScope = "work"
+	LifecycleTerminalInfrastructure LifecycleTerminalScope = "infrastructure"
+)
+
 // NormalizeTaskLifecycleTerminal applies a task terminal outcome to the
 // current lifecycle snapshot. Successful creative delivery does not finalize
 // Server-owned publication stages; failed and cancelled tasks skip them.
-func NormalizeTaskLifecycleTerminal(lifecycle TaskLifecycle, taskStatus, description string, now time.Time) (TaskLifecycle, bool) {
+func NormalizeTaskLifecycleTerminal(lifecycle TaskLifecycle, taskStatus, description string, now time.Time, scope LifecycleTerminalScope) (TaskLifecycle, bool) {
+	if scope == LifecycleTerminalInfrastructure {
+		return lifecycle, false
+	}
 	if lifecycle.Version != TaskLifecycleVersion || len(lifecycle.Stages) == 0 {
 		return lifecycle, false
 	}

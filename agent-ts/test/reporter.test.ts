@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { Reporter, postJSONWithRetry } from "../src/reporter.js";
+import { Reporter } from "../src/reporter.js";
 
-describe("postJSONWithRetry", () => {
+describe("Reporter", () => {
   test("submits completion metadata through a session-capable MCP request", async () => {
     const requests: Array<{ body: unknown; headers: Headers }> = [];
     const originalFetch = globalThis.fetch;
@@ -20,36 +20,6 @@ describe("postJSONWithRetry", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
-  });
-
-  test("retries a transient terminal failure three times", async () => {
-    let attempts = 0;
-    await postJSONWithRetry(
-      async () => {
-        attempts += 1;
-        if (attempts < 3) throw new Error("temporary failure");
-      },
-      async () => {},
-    );
-    expect(attempts).toBe(3);
-  });
-
-  test("stops retry backoff when the completion deadline is cancelled", async () => {
-    const controller = new AbortController();
-    let attempts = 0;
-    const pending = postJSONWithRetry(
-      async () => {
-        attempts += 1;
-        throw new Error("temporary failure");
-      },
-      undefined,
-      controller.signal,
-    );
-    await Bun.sleep(10);
-    controller.abort(new Error("completion deadline exceeded"));
-
-    await expect(pending).rejects.toThrow("completion deadline exceeded");
-    expect(attempts).toBe(1);
   });
 
   test("reports progress with the server task and execution identity", async () => {
@@ -117,6 +87,32 @@ describe("postJSONWithRetry", () => {
     }
   });
 
+  test("rejects malformed and legacy prepare responses without retrying", async () => {
+    const responses = [
+      { upload_required: true, key: "staging/file", upload_url: "not a url", method: "PUT", headers: {}, expires_at: new Date().toISOString(), max_size: 10 },
+      { upload_required: true, key: "staging/file", upload_url: "https://oss.test/file", method: "POST", headers: {}, expires_at: new Date().toISOString(), max_size: 10 },
+      { upload_required: true, key: "staging/file", upload_url: "https://oss.test/file", method: "PUT", headers: {}, expires_at: new Date().toISOString() },
+      { upload_required: false, key: "final/file", sts_access_key_id: "legacy-secret" },
+    ];
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const data of responses) {
+        let attempts = 0;
+        globalThis.fetch = async () => {
+          attempts += 1;
+          return Response.json({ code: 0, data });
+        };
+        const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1" }, "execution-token", "task-1");
+        const error = await reporter.prepareArtifactUpload({ relative_path: "output/file", filename: "file", content_type: "text/plain", size: 1, sha256: "0".repeat(64) }).catch((caught) => caught as Error & { failure?: { code: string } });
+        expect(attempts).toBe(1);
+        expect(error.failure?.code).toBe("protocol_error");
+        expect(JSON.stringify(error)).not.toContain("legacy-secret");
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("retries the identical completion body after the server commits but the response is lost", async () => {
     const requests: unknown[] = [];
     let durableCompletions = 0;
@@ -126,7 +122,7 @@ describe("postJSONWithRetry", () => {
       requests.push(body);
       if (durableCompletions === 0) {
         durableCompletions += 1;
-        throw new Error("response lost after commit");
+        throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
       }
       return new Response("{}", { status: 200 });
     };
@@ -160,6 +156,25 @@ describe("postJSONWithRetry", () => {
     }
   });
 
+  test("does not retry a progress 400 and retains only its allowlisted server code", async () => {
+    let attempts = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return Response.json({ code: 40000, error_code: "progress_out_of_order", msg: "signed-url-secret" }, { status: 400 });
+    };
+    try {
+      const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1" }, "execution-token", "task-1");
+      const error = await reporter.stageProgress({ stage: "writing", state: "active" }).catch((caught) => caught as Error & { serverCode?: string });
+      expect(attempts).toBe(1);
+      expect(error.serverCode).toBe("progress_out_of_order");
+      expect(error.message).toBe("progress failed: progress_out_of_order");
+      expect(JSON.stringify(error)).not.toContain("signed-url-secret");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("aborts structured progress during retry backoff", async () => {
     let attempts = 0;
     const controller = new AbortController();
@@ -174,7 +189,7 @@ describe("postJSONWithRetry", () => {
       await Bun.sleep(10);
       controller.abort(new Error("progress deadline exceeded"));
 
-      await expect(pending).rejects.toThrow("progress deadline exceeded");
+      await expect(pending).rejects.toThrow("progress failed: deadline_exceeded");
       expect(attempts).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;
