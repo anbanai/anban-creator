@@ -33,6 +33,14 @@ describe('WechatAnalyticsPanel', () => {
     expect(api.wechatAnalytics.getByTask).not.toHaveBeenCalled()
   })
 
+  it('opens an imported article URL even without an official tracking record', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'wechat_console', status: 'published', article_url: 'https://mp.weixin.qq.com/s/imported',
+    })
+    render(<WechatAnalyticsPanel taskId="task-1" />)
+    expect(await screen.findByRole('link', { name: '查看原文' })).toHaveAttribute('href', 'https://mp.weixin.qq.com/s/imported')
+  })
+
   it('loads the independent analytics region only after publication', async () => {
     vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
       id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'published', article_url: 'https://mp.weixin.qq.com/s/example',

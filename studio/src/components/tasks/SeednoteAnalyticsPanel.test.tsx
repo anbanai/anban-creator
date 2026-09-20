@@ -50,6 +50,7 @@ describe('SeednoteAnalyticsPanel', () => {
     expect(screen.getByText('尚未关联公开笔记，请补充笔记链接或 ID')).toBeInTheDocument()
     expect(screen.queryByText(/自动识别|加载中/)).not.toBeInTheDocument()
     fireEvent.change(input, { target: { value: 'https://www.xiaohongshu.com/explore/note-1' } })
+    expect(screen.getByRole('link', { name: '查看原文' })).toHaveAttribute('href', 'https://www.xiaohongshu.com/explore/note-1')
     fireEvent.click(screen.getByRole('button', { name: '关联公开笔记' }))
 
     await waitFor(() => {

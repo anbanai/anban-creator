@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   Bookmark,
-  ExternalLink,
   Eye,
   Heart,
   Link2,
@@ -30,6 +29,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import ContentSourceLink from '@/components/common/ContentSourceLink'
 
 interface SeednoteAnalyticsPanelProps {
   taskId: string
@@ -195,28 +195,13 @@ function SeednoteAnalyticsContent({
             )}
           </div>
         </div>
-        {tracking.note_url && (
-          <Button size="sm" variant="outline" nativeButton={false} render={<a href={tracking.note_url} target="_blank" rel="noreferrer" />}>
-            <ExternalLink className="h-4 w-4" />
-            打开笔记
-          </Button>
-        )}
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
           <div className="space-y-3">
             <div>
               <p className="text-sm font-medium text-foreground">{tracking.note_title || '等待绑定公开笔记'}</p>
-              {tracking.note_url && (
-                <a
-                  href={tracking.note_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 block truncate text-xs text-blue-400 hover:text-blue-300 hover:underline"
-                >
-                  {tracking.note_url}
-                </a>
-              )}
+              <ContentSourceLink url={tracking.note_url} className="mt-1" />
               <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                 <span>最近采集：{formatDateTime(tracking.last_run_at)}</span>
                 <span>下次采集：{formatDateTime(tracking.next_run_at)}</span>
@@ -319,6 +304,7 @@ function SeednoteBindForm({
           {pending ? '验证中' : '关联公开笔记'}
         </Button>
       </form>
+      <ContentSourceLink url={value.trim().startsWith('http') ? value : undefined} noteId={value.trim()} />
       {error && <p className="text-xs text-destructive">链接无法读取，请确认笔记为公开状态。</p>}
     </div>
   )

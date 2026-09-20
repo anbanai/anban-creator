@@ -60,6 +60,17 @@ describe('WechatDataPage', () => {
     vi.mocked(uploadToOSS).mockResolvedValue({ uploadSessionId: 'upload-1', uploadId: 'upload-1', key: 'file.xls', previewUrl: '', publicUrl: '', contentType: 'application/vnd.ms-excel', size: 100 })
   })
 
+  it('opens the imported URL from the article details and prefills manual confirmation', async () => {
+    vi.mocked(api.wechatAnalyticsImport.articles).mockResolvedValue({ items: [{ publication: { ...awaitingArticle.publication, article_url: 'https://mp.weixin.qq.com/s/imported' } }] })
+    render(<WechatDataPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '秋天喝茶别急着买' }))
+    const details = await screen.findByRole('dialog')
+    expect(within(details).getByRole('link', { name: '查看原文' })).toHaveAttribute('href', 'https://mp.weixin.qq.com/s/imported')
+    fireEvent.click(within(details).getByRole('button', { name: '已在公众号后台发布' }))
+    expect(screen.getByRole('textbox', { name: '文章 URL（可选）' })).toHaveValue('https://mp.weixin.qq.com/s/imported')
+    expect(within(screen.getByRole('dialog')).getByRole('link', { name: '查看原文' })).toHaveAttribute('target', '_blank')
+  })
+
   it('renders 48001 as an actionable manual publication state', async () => {
     render(<WechatDataPage />)
 

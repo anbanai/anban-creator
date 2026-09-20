@@ -61,6 +61,23 @@ describe('SeednoteDataPage import flow', () => {
     vi.mocked(uploadToOSS).mockResolvedValue({ uploadSessionId: 'session-1', uploadId: 'asset-1', key: 'key', previewUrl: '', publicUrl: '', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: 10 })
   })
 
+  it('opens full note URLs and falls back to public note IDs without using internal IDs', async () => {
+    const summaries = [
+      { id: 'post-1', title: '完整链接', note_id: 'note-one', note_url: 'https://www.xiaohongshu.com/explore/note-one?xsec_token=example' },
+      { id: 'post-2', title: '只有笔记ID', note_id: 'note-two' },
+      { id: 'internal-only', title: '未关联' },
+    ]
+    vi.mocked(api.seednoteImport.overview).mockResolvedValue({ dates: [], series: [], posts: [], post_summaries: summaries })
+    render(<SeednoteDataPage />)
+    fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+    const links = await screen.findAllByRole('link', { name: '查看原文' })
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      'https://www.xiaohongshu.com/explore/note-one?xsec_token=example',
+      'https://www.xiaohongshu.com/explore/note-two',
+    ])
+    expect(links.every((link) => link.getAttribute('target') === '_blank')).toBe(true)
+  })
+
   it('does not choose an account or load account data until the user explicitly selects one', async () => {
     render(<SeednoteDataPage />)
 

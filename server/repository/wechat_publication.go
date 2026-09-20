@@ -13,6 +13,24 @@ import (
 
 type wechatPublicationRepository struct{ db *gorm.DB }
 
+// RecordImportedAnalytics fills missing identity without saving a stale publication
+// or overwriting its independently managed publishing state.
+func (r *wechatPublicationRepository) RecordImportedAnalytics(ctx context.Context, projectID, id, articleURL string) error {
+	if err := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+		Where("project_id = ? AND id = ?", projectID, id).
+		Updates(map[string]any{
+			"analytics_status": "import_available",
+			"article_url":      gorm.Expr("CASE WHEN article_url = '' THEN ? ELSE article_url END", articleURL),
+		}).Error; err != nil {
+		return err
+	}
+	// Reuse the saved URL, including an existing canonical URL, for tracking.
+	publicationURL := r.db.Model(&model.WechatPublication{}).Select("article_url").Where("project_id = ? AND id = ?", projectID, id)
+	return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
+		Where("project_id = ? AND publication_id = ? AND article_url = ''", projectID, id).
+		Update("article_url", publicationURL).Error
+}
+
 func newWechatPublicationRepository(db *gorm.DB) WechatPublicationRepository {
 	return &wechatPublicationRepository{db: db}
 }

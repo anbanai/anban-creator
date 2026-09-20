@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query'
 import {
   Bookmark,
   CheckCircle2,
-  ExternalLink,
   Eye,
   Loader2,
   MessageCircle,
@@ -27,7 +26,7 @@ import {
 import { api } from '@/lib/api'
 import type { WechatAnalytics } from '@/types'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import ContentSourceLink from '@/components/common/ContentSourceLink'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function WechatAnalyticsPanel({
@@ -43,10 +42,10 @@ export default function WechatAnalyticsPanel({
   })
 
   if (!publicationQuery.data || publicationQuery.data.status !== 'published') return null
-  return <WechatAnalyticsContent taskId={taskId} />
+  return <WechatAnalyticsContent taskId={taskId} articleURL={publicationQuery.data.article_url} />
 }
 
-function WechatAnalyticsContent({ taskId }: { taskId: string }) {
+function WechatAnalyticsContent({ taskId, articleURL }: { taskId: string; articleURL?: string }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['wechat-analytics', taskId],
     queryFn: () => api.wechatAnalytics.getByTask(taskId),
@@ -65,14 +64,14 @@ function WechatAnalyticsContent({ taskId }: { taskId: string }) {
   if (isError || !data?.tracking) {
     return (
       <Card>
-        <CardContent className="text-sm text-muted-foreground">文章已识别，微信数据将在次日可查询后显示。</CardContent>
+        <CardContent className="space-y-2 text-sm text-muted-foreground"><p>文章已识别，微信数据将在次日可查询后显示。</p><ContentSourceLink url={articleURL} /></CardContent>
       </Card>
     )
   }
-  return <AnalyticsContent analytics={data} />
+  return <AnalyticsContent analytics={data} articleURL={articleURL} />
 }
 
-function AnalyticsContent({ analytics }: { analytics: WechatAnalytics }) {
+function AnalyticsContent({ analytics, articleURL }: { analytics: WechatAnalytics; articleURL?: string }) {
   const tracking = analytics.tracking!
   const latest = analytics.metrics ?? analytics.latest
   const trend = analytics.trend ?? analytics.series ?? []
@@ -97,12 +96,7 @@ function AnalyticsContent({ analytics }: { analytics: WechatAnalytics }) {
             <span className="text-xs text-muted-foreground">追踪至发表后 30 天</span>
           </div>
         </div>
-        {tracking.article_url && (
-          <Button size="sm" variant="outline" nativeButton={false} render={<a href={tracking.article_url} target="_blank" rel="noreferrer" />}>
-            <ExternalLink className="h-4 w-4" />
-            打开文章
-          </Button>
-        )}
+        <ContentSourceLink url={tracking.article_url || articleURL} />
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -137,10 +138,6 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 		return nil, fmt.Errorf("list WeChat publications: %w", err)
 	}
 	rows := make([]*model.WechatAnalyticsImportRow, 0, len(parsed.Rows))
-	publicationsByID := make(map[string]*model.WechatPublication, len(publications))
-	for _, publication := range publications {
-		publicationsByID[publication.ID] = publication
-	}
 	for _, parsedRow := range parsed.Rows {
 		row := &model.WechatAnalyticsImportRow{
 			ID: uuid.NewString(), BatchID: batch.ID, ProjectID: project.ID, SourceRow: parsedRow.SourceRow,
@@ -189,11 +186,8 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 			if err := tx.WechatAnalyticsImports().CreateSnapshot(ctx, snapshotFromWechatImport(batch, row, now)); err != nil {
 				return err
 			}
-			if publication := publicationsByID[row.PublicationID]; publication != nil && publication.AnalyticsStatus != "import_available" {
-				publication.AnalyticsStatus = "import_available"
-				if err := tx.WechatPublications().Update(ctx, publication); err != nil {
-					return err
-				}
+			if err := tx.WechatPublications().RecordImportedAnalytics(ctx, project.ID, row.PublicationID, row.ArticleURL); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -344,9 +338,33 @@ func (s *WechatAnalyticsImportService) ListArticles(ctx context.Context, userID,
 		if len(snapshots) > 0 {
 			latest = snapshots[0]
 		}
+		if publication.ArticleURL == "" {
+			publication.ArticleURL = historicalWechatArticleURL(snapshots)
+		}
 		views = append(views, WechatAnalyticsArticleView{Publication: publication, Latest: latest, Snapshots: snapshots})
 	}
 	return views, nil
+}
+
+// Older imports retained their URLs only in the immutable observations. Expose
+// an unambiguous URL on reads without changing publication state or stored history.
+func historicalWechatArticleURL(snapshots []*model.WechatAnalyticsSnapshot) string {
+	var candidate string
+	for _, snapshot := range snapshots {
+		var raw map[string]string
+		if json.Unmarshal([]byte(snapshot.RawData), &raw) != nil {
+			continue
+		}
+		articleURL := normalizeWechatArticleURL(raw["内容url"])
+		if articleURL == "" {
+			continue
+		}
+		if candidate != "" && candidate != articleURL {
+			return ""
+		}
+		candidate = articleURL
+	}
+	return candidate
 }
 
 type WechatAnalyticsOverview struct {
@@ -438,9 +456,7 @@ func (s *WechatAnalyticsImportService) Resolve(ctx context.Context, userID, proj
 				if err := tx.WechatAnalyticsImports().CreateSnapshot(ctx, snapshotFromWechatImport(batch, row, now)); err != nil {
 					return err
 				}
-				publication := byID[row.PublicationID]
-				publication.AnalyticsStatus = "import_available"
-				if err := tx.WechatPublications().Update(ctx, publication); err != nil {
+				if err := tx.WechatPublications().RecordImportedAnalytics(ctx, projectID, row.PublicationID, normalizeWechatArticleURL(row.ArticleURL)); err != nil {
 					return err
 				}
 			}

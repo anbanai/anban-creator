@@ -273,6 +273,7 @@ type TaskFeedbackRepository interface {
 // SeednoteTrackingRepository provides access to Seednote post tracking records.
 type SeednoteTrackingRepository interface {
 	Create(ctx context.Context, tracking *model.SeednotePostTracking) error
+	FindByTaskIDs(ctx context.Context, userID, projectID string, taskIDs []string) ([]*model.SeednotePostTracking, error)
 	FindByTaskID(ctx context.Context, taskID string) (*model.SeednotePostTracking, error)
 	FindByID(ctx context.Context, id string) (*model.SeednotePostTracking, error)
 	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.SeednotePostTracking, error)
@@ -334,6 +335,7 @@ type WechatTrackingRepository interface {
 
 // WechatPublicationRepository persists the one-per-task WeChat lifecycle.
 type WechatPublicationRepository interface {
+	RecordImportedAnalytics(ctx context.Context, projectID, id, articleURL string) error
 	Create(ctx context.Context, publication *model.WechatPublication) error
 	FindByID(ctx context.Context, id string) (*model.WechatPublication, error)
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatPublication, error)

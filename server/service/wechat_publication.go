@@ -254,6 +254,13 @@ func (s *WechatPublicationService) Get(ctx context.Context, userID, taskID strin
 	if err != nil {
 		return nil, err
 	}
+	if publication.ArticleURL == "" {
+		snapshots, err := s.repo.WechatAnalyticsImports().FindSnapshotsByPublicationID(ctx, publication.ProjectID, publication.ID)
+		if err != nil {
+			return nil, err
+		}
+		publication.ArticleURL = historicalWechatArticleURL(snapshots)
+	}
 	s.syncTaskLifecycle(ctx, taskID)
 	return publication, nil
 }

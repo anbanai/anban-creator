@@ -197,6 +197,8 @@ type SeednoteImportOverview struct {
 type SeednotePostSummary struct {
 	ID                string     `json:"id"`
 	Title             string     `json:"title"`
+	NoteID            string     `json:"note_id,omitempty"`
+	NoteURL           string     `json:"note_url,omitempty"`
 	FirstPublishedAt  *time.Time `json:"first_published_at,omitempty"`
 	ExposureCount     int64      `json:"exposure_count"`
 	ViewCount         int64      `json:"view_count"`
@@ -363,7 +365,14 @@ func (s *SeednoteImportService) ListPosts(ctx context.Context, userID, projectID
 	if err := s.checkProject(ctx, userID, projectID); err != nil {
 		return nil, 0, err
 	}
-	return s.repo.SeednotePosts().ListByProject(ctx, projectID, search, offset, limit)
+	posts, total, err := s.repo.SeednotePosts().ListByProject(ctx, projectID, search, offset, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.populatePostPublicIdentities(ctx, userID, projectID, posts); err != nil {
+		return nil, 0, err
+	}
+	return posts, total, nil
 }
 func (s *SeednoteImportService) GetPost(ctx context.Context, userID, projectID, postID string, from, to *time.Time) (*model.SeednotePost, []*model.SeednoteMetricVersion, error) {
 	if err := s.checkProject(ctx, userID, projectID); err != nil {
@@ -377,7 +386,40 @@ func (s *SeednoteImportService) GetPost(ctx context.Context, userID, projectID, 
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := s.populatePostPublicIdentities(ctx, userID, projectID, []*model.SeednotePost{post}); err != nil {
+		return nil, nil, err
+	}
 	return post, versions, nil
+}
+
+// Imported posts and task tracking retain separate lifecycles. Only an explicit
+// task association may supply a missing public identity; titles are not identity.
+func (s *SeednoteImportService) populatePostPublicIdentities(ctx context.Context, userID, projectID string, posts []*model.SeednotePost) error {
+	var taskIDs []string
+	for _, post := range posts {
+		if post.TaskID != "" && post.NoteURL == "" {
+			taskIDs = append(taskIDs, post.TaskID)
+		}
+	}
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	trackings, err := s.repo.SeednoteTrackings().FindByTaskIDs(ctx, userID, projectID, taskIDs)
+	if err != nil {
+		return err
+	}
+	byTask := make(map[string]*model.SeednotePostTracking, len(trackings))
+	for _, tracking := range trackings {
+		byTask[tracking.TaskID] = tracking
+	}
+	for _, post := range posts {
+		tracking := byTask[post.TaskID]
+		if tracking == nil || post.NoteURL != "" || (post.NoteID != "" && post.NoteID != tracking.NoteID) {
+			continue
+		}
+		post.NoteID, post.NoteURL = tracking.NoteID, tracking.NoteURL
+	}
+	return nil
 }
 func (s *SeednoteImportService) Overview(ctx context.Context, userID, projectID string, from, to *time.Time) (*SeednoteImportOverview, error) {
 	if err := s.checkProject(ctx, userID, projectID); err != nil {
@@ -447,6 +489,9 @@ func (s *SeednoteImportService) Overview(ctx context.Context, userID, projectID 
 			return nil, postsErr
 		}
 	}
+	if err := s.populatePostPublicIdentities(ctx, userID, projectID, posts); err != nil {
+		return nil, err
+	}
 	// The overview's post list is used as a ranking in Studio. Rank by the
 	// selected range's exposure total, with newest posts as a stable tie-break.
 	sort.SliceStable(posts, func(i, j int) bool {
@@ -485,7 +530,7 @@ func aggregateSeednotePostSummaries(posts []*model.SeednotePost, versions []*mod
 	}
 	byPost := make(map[string]*postSummaryAccumulator, len(posts))
 	for _, post := range posts {
-		byPost[post.ID] = &postSummaryAccumulator{SeednotePostSummary: SeednotePostSummary{ID: post.ID, Title: post.Title, FirstPublishedAt: post.FirstPublishedAt}, createdAt: post.CreatedAt}
+		byPost[post.ID] = &postSummaryAccumulator{SeednotePostSummary: SeednotePostSummary{ID: post.ID, Title: post.Title, NoteID: post.NoteID, NoteURL: post.NoteURL, FirstPublishedAt: post.FirstPublishedAt}, createdAt: post.CreatedAt}
 	}
 	for _, version := range latest {
 		item := byPost[version.PostID]

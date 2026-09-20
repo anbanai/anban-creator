@@ -22,6 +22,15 @@ func (r *seednoteTrackingRepository) Create(ctx context.Context, tracking *model
 	return r.db.WithContext(ctx).Create(tracking).Error
 }
 
+func (r *seednoteTrackingRepository) FindByTaskIDs(ctx context.Context, userID, projectID string, taskIDs []string) ([]*model.SeednotePostTracking, error) {
+	var trackings []*model.SeednotePostTracking
+	if len(taskIDs) == 0 {
+		return trackings, nil
+	}
+	err := r.db.WithContext(ctx).Where("user_id = ? AND project_id = ? AND task_id IN ?", userID, projectID, taskIDs).Find(&trackings).Error
+	return trackings, err
+}
+
 func (r *seednoteTrackingRepository) FindByTaskID(ctx context.Context, taskID string) (*model.SeednotePostTracking, error) {
 	var tracking model.SeednotePostTracking
 	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).First(&tracking).Error; err != nil {

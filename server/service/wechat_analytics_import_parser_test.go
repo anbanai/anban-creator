@@ -49,6 +49,16 @@ func TestParseWechatAnalyticsWorkbookXLSX(t *testing.T) {
 	}
 }
 
+func TestWechatImportedURLMustBeWebLink(t *testing.T) {
+	for _, value := range []string{"javascript://example.com/alert", "ftp://mp.weixin.qq.com/s/one", "https://user:password@mp.weixin.qq.com/s/one"} {
+		t.Run(value, func(t *testing.T) {
+			if got := normalizeWechatArticleURL(value); got != "" {
+				t.Fatalf("unsafe import link accepted: %q", got)
+			}
+		})
+	}
+}
+
 func TestWechatAnalyticsImportReceiptUsesPublicBatchContract(t *testing.T) {
 	summary := &WechatAnalyticsImportSummary{Batch: &model.WechatAnalyticsImportBatch{
 		ID: "batch-1", FileName: "total.xls", TotalRows: 120, MatchedRows: 108,

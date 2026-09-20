@@ -1,6 +1,9 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
+	"github.com/google/uuid"
 	"testing"
 	"time"
 
@@ -39,5 +42,88 @@ func TestAggregateSeednotePostSummariesUsesLatestDailyVersionsAndSortsByExposure
 	}
 	if got[1].CoverClickRate != 0.25 || got[1].AvgWatchDuration != 8 {
 		t.Fatalf("post-low averages = click %.2f duration %.1f, want .25 and 8", got[1].CoverClickRate, got[1].AvgWatchDuration)
+	}
+}
+
+func TestSeednotePostSummaryIncludesPublicIdentity(t *testing.T) {
+	summaries := aggregateSeednotePostSummaries([]*model.SeednotePost{{ID: "internal-id", NoteID: "public-note", NoteURL: "https://www.xiaohongshu.com/explore/public-note?xsec_token=example"}}, []*model.SeednoteMetricVersion{{PostID: "internal-id", DataAsOfAt: time.Now()}})
+	raw, err := json.Marshal(summaries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got[0]["note_id"] != "public-note" || got[0]["note_url"] != "https://www.xiaohongshu.com/explore/public-note?xsec_token=example" {
+		t.Fatalf("public identity missing: %s", raw)
+	}
+}
+
+func TestSeednoteImportReadsReuseExplicitlyLinkedTaskIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, noteID, noteURL string
+		linked, foreign       bool
+	}{
+		{name: "bound task supplies full public URL", linked: true},
+		{name: "post URL takes precedence", linked: true, noteID: "own-note", noteURL: "https://www.xiaohongshu.com/explore/own-note"},
+		{name: "different note ID cannot take task URL", linked: true, noteID: "own-note"},
+		{name: "unlinked post does not infer identity"},
+		{name: "cross project tracking is not reused", linked: true, foreign: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			trackingService, repo, _ := setupSeednoteTrackingServiceTest(t)
+			userID, projectID, taskID := createSeednoteTrackingFixtures(t, repo)
+			publicURL := "https://www.xiaohongshu.com/explore/note-1?xsec_token=example"
+			if err := trackingService.BindTask(ctx, userID, taskID, SeednotePublicationIdentity{NoteURL: publicURL}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.foreign {
+				tracking, err := repo.SeednoteTrackings().FindByTaskID(ctx, taskID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tracking.ProjectID = "another-project"
+				if err := repo.SeednoteTrackings().Update(ctx, tracking); err != nil {
+					t.Fatal(err)
+				}
+			}
+			post := &model.SeednotePost{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Title: "笔记", NoteID: tc.noteID, NoteURL: tc.noteURL}
+			if tc.linked {
+				post.TaskID = taskID
+			}
+			if err := repo.SeednotePosts().Create(ctx, post); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.SeednoteMetricVersions().Create(ctx, &model.SeednoteMetricVersion{ID: uuid.NewString(), PostID: post.ID, BatchID: uuid.NewString(), ImportRowID: uuid.NewString(), DataAsOfAt: time.Now(), ImportedAt: time.Now(), RawData: "{}"}); err != nil {
+				t.Fatal(err)
+			}
+			svc := NewSeednoteImportService(repo, nil)
+			wantID, wantURL := tc.noteID, tc.noteURL
+			if tc.linked && !tc.foreign && tc.noteID == "" && tc.noteURL == "" {
+				wantID, wantURL = "note-1", publicURL
+			}
+			posts, _, err := svc.ListPosts(ctx, userID, projectID, "", 0, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			detail, _, err := svc.GetPost(ctx, userID, projectID, post.ID, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			overview, err := svc.Overview(ctx, userID, projectID, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, got := range []*model.SeednotePost{posts[0], detail, overview.Posts[0]} {
+				if got.NoteID != wantID || got.NoteURL != wantURL {
+					t.Fatalf("identity = (%q, %q), want (%q, %q)", got.NoteID, got.NoteURL, wantID, wantURL)
+				}
+			}
+			if overview.PostSummaries[0].NoteID != wantID || overview.PostSummaries[0].NoteURL != wantURL {
+				t.Fatalf("summary identity = %+v", overview.PostSummaries[0])
+			}
+		})
 	}
 }

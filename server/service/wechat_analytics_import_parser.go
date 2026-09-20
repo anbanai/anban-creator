@@ -257,7 +257,7 @@ func normalizeWechatArticleURL(value string) string {
 		return ""
 	}
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
 		return ""
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
