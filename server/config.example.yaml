@@ -395,7 +395,7 @@ email:
   smtp_username: "${ANBAN_SMTP_USERNAME}"
   smtp_password: "${ANBAN_SMTP_PASSWORD}"
   from_address: "${ANBAN_SMTP_FROM_ADDRESS}"
-  from_name: "Anban 智能创作助手"
+  from_name: "Anban 自媒体智能创作助手"
   code_ttl: 5m
   code_length: 6
 

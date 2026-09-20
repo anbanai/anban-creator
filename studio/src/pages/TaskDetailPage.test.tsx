@@ -1882,7 +1882,7 @@ describe('TaskDetailPage', () => {
         visual_style: '柔光生活摄影',
         image_ratio: '16:9',
         reference_image_asset_id: '44444444-4444-4444-8444-444444444444',
-        author: '安般',
+        author: '案板',
         writer: 'dan-koe',
         theme: 'autumn-warm',
       },
@@ -1904,7 +1904,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('图片比例')).toBeInTheDocument()
     expect(screen.getByText('图像能力')).toBeInTheDocument()
-    expect(screen.getByText('安般')).toBeInTheDocument()
+    expect(screen.getByText('案板')).toBeInTheDocument()
     expect(screen.getByText('dan-koe')).toBeInTheDocument()
     expect(screen.getByText('autumn-warm')).toBeInTheDocument()
 

@@ -110,7 +110,7 @@ func (s *EmailService) SendVerificationCode(ctx context.Context, email string) e
 
 	fromName := s.cfg.FromName
 	if fromName == "" {
-		fromName = "Anban 智能创作助手"
+		fromName = "Anban 自媒体智能创作助手"
 	}
 	fromAddr := s.cfg.FromAddress
 
@@ -123,7 +123,7 @@ func (s *EmailService) SendVerificationCode(ctx context.Context, email string) e
 		s.rdb.Del(ctx, s.codeKey(email))
 		return fmt.Errorf("set to: %w", err)
 	}
-	m.Subject("Anban 智能创作助手 验证码")
+	m.Subject("Anban 自媒体智能创作助手 验证码")
 	m.SetBodyString(mail.TypeTextPlain,
 		fmt.Sprintf("您的验证码是：%s（%d 分钟内有效）\r\n\r\n如非本人操作，请忽略此邮件。", code, int(ttl.Minutes())),
 	)

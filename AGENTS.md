@@ -4,7 +4,7 @@ This file provides guidance to AI coding assistants when working in this reposit
 
 ## Project Overview
 
-**Anban 智能创作助手** is a Studio-first content creation platform for WeChat articles, Seednote-style notes, live slicing, AI image work, and agent-assisted publishing workflows.
+**Anban 自媒体智能创作助手** is a Studio-first content creation platform for WeChat articles, Seednote-style notes, live slicing, AI image work, and agent-assisted publishing workflows.
 
 The current repository is not a standalone Cobra CLI. It has three main surfaces:
 

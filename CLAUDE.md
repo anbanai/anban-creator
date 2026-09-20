@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Anban 智能创作助手** (anban-creator) is a content creation platform. Core components:
+**Anban 自媒体智能创作助手** (anban-creator) is a content creation platform. Core components:
 - **Agent** (`agent-ts/`): TypeScript runtime for containerized Claude Code task execution
 - **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
 - **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management

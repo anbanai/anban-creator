@@ -1,12 +1,12 @@
 #!/bin/bash
-# Anban 智能创作助手 自动安装脚本
+# Anban 自媒体智能创作助手 自动安装脚本
 # 适用于：macOS / Linux
 # 使用方法：DOWNLOAD_URL/main/scripts/install.sh | bash
 
 set -e
 
 echo "========================================"
-echo "   Anban 智能创作助手 安装向导"
+echo "   Anban 自媒体智能创作助手 安装向导"
 echo "========================================"
 echo ""
 

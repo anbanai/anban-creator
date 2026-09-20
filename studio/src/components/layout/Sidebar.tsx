@@ -52,8 +52,8 @@ export default function Sidebar() {
         ) : (
           <>
             <div className="min-w-0 flex-1">
-              <p className="text-xl font-semibold tracking-tight">Anban<span className="ml-1.5 text-primary">安般</span></p>
-              <p className="mt-0.5 text-xs text-muted-foreground">智能创作助手</p>
+              <p className="text-xl font-semibold tracking-tight">Anban<span className="ml-1.5 text-primary">AI</span></p>
+              <p className="mt-0.5 text-xs text-muted-foreground">自媒体智能创作助手</p>
             </div>
             {mobile ? (
               <SheetClose render={<Button variant="ghost" size="icon" aria-label="关闭菜单" />}><X /></SheetClose>

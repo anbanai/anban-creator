@@ -1,4 +1,4 @@
-# Anban 智能创作助手
+# Anban 自媒体智能创作助手
 
 Anban is a Studio-first content creation platform for WeChat articles and Seednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude Code agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
 
