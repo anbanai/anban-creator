@@ -21,7 +21,7 @@ recorded by the removed submodule:
 
 ```text
 repository=https://github.com/calesthio/OpenMontage.git
-commit=4eab34c5cfcccaa4f1970554928feccce73ee930
+commit=08e2151fa02de28a5d6a312b3d575692bf147ad7
 ```
 
 Build the Agent image:
@@ -45,7 +45,7 @@ MONTAGE_AGENT_REF=chengdu.personal.cr.aliyuncs.com/bx_anbanai/creator-agent-mont
 docker build --pull \
   -f deploy/docker/Dockerfile.agent-montage \
   --build-arg OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git \
-  --build-arg OPENMONTAGE_REF=4eab34c5cfcccaa4f1970554928feccce73ee930 \
+  --build-arg OPENMONTAGE_REF=08e2151fa02de28a5d6a312b3d575692bf147ad7 \
   -t "$MONTAGE_AGENT_REF" .
 docker push "$MONTAGE_AGENT_REF"
 ```
