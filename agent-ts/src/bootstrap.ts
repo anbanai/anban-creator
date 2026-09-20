@@ -299,8 +299,20 @@ export function validateAgentPackCatalog(data: BootstrapResponse, catalog: Agent
   const matches = catalog.packs.filter((pack) => Array.isArray(pack.bindings?.task_types) && pack.bindings.task_types.includes(data.task_type));
   if (matches.length !== 1) throw new Error("bootstrap task type does not resolve to exactly one Agent Pack");
   const pack = matches[0]!;
-  if (pack.id !== data.agent_pack_id || pack.version !== data.agent_pack_version || pack.digest !== data.agent_pack_digest || pack.runtime?.profile !== data.runtime_profile || pack.runtime?.adapter !== data.runtime_adapter || data.agent_flag !== `anban:${pack.agent?.name}`) {
-    throw new Error("bootstrap Agent Pack identity does not match runtime Catalog");
+  // Report only Pack identity fields; bootstrap also contains credentials and input files.
+  const runtimeIdentity = {
+    agent_pack_id: pack.id,
+    agent_pack_version: pack.version,
+    agent_pack_digest: pack.digest,
+    runtime_profile: pack.runtime?.profile,
+    runtime_adapter: pack.runtime?.adapter,
+    agent_flag: `anban:${pack.agent?.name}`,
+  };
+  const mismatches = (Object.keys(runtimeIdentity) as Array<keyof typeof runtimeIdentity>)
+    .filter((field) => data[field] !== runtimeIdentity[field])
+    .map((field) => `${field}: execution=${JSON.stringify(data[field])}, runtime=${JSON.stringify(runtimeIdentity[field])}`);
+  if (mismatches.length > 0) {
+    throw new Error(`bootstrap Agent Pack identity does not match runtime Catalog (${mismatches.join("; ")}). Deploy Server and Agent images built from the same Agent Pack Catalog. If the execution predates that deployment, start a new task to refresh its frozen Pack identity.`);
   }
   return resolveAgentPackForTaskType(pack, data.task_type);
 }

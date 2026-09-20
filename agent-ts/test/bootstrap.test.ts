@@ -131,9 +131,16 @@ describe("validateBootstrapResponse", () => {
     expect(validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog).id).toBe("article");
   });
 
-  test("rejects a frozen runtime profile that differs from the generated Catalog", () => {
+  test.each([
+    ["agent_pack_id", "montage", "article"],
+    ["agent_pack_version", "2.0.0", "1.0.0"],
+    ["agent_pack_digest", "b".repeat(64), "a".repeat(64)],
+    ["runtime_profile", "montage", "article"],
+    ["runtime_adapter", "openmontage", "standard"],
+    ["agent_flag", "anban:montage", "anban:article"],
+  ] as const)("identifies %s drift between the frozen execution and runtime Catalog", (field, frozen, runtime) => {
     const response = validResponse();
-    response.runtime_profile = "montage";
+    Object.assign(response, { [field]: frozen });
     const catalog: AgentPackCatalog = { packs: [{
       id: "article", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "article" }, bindings: { task_types: ["article"] },
@@ -141,7 +148,18 @@ describe("validateBootstrapResponse", () => {
       artifacts: [{ role: "final", path: "output/final.md", required: true }],
     }] };
 
-    expect(() => validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog)).toThrow("Agent Pack identity");
+    let failure: unknown;
+    try {
+      validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain("Agent Pack identity does not match runtime Catalog");
+    expect(message).toContain(`${field}: execution=${JSON.stringify(frozen)}, runtime=${JSON.stringify(runtime)}`);
+    expect(message).not.toContain(response.execution_token);
+    expect(message).not.toContain(response.execution_profile.envs.ANTHROPIC_AUTH_TOKEN!);
   });
 
   test("rejects malformed Agent Pack artifact contracts", () => {
