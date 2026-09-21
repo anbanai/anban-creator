@@ -29,10 +29,15 @@ describe('ProjectMemorySheet', () => {
     expect(await screen.findByRole('heading', { name: 'Main' })).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
     expect(screen.getByText('内容已按安全限制截断')).toBeInTheDocument()
+    expect(screen.getByText('MEMORY.md', { selector: 'h2' })).toBeInTheDocument()
+    expect(screen.getByText('项目记忆文件')).toBeInTheDocument()
+    expect(screen.getByRole('main')).toHaveClass('min-w-0')
+    expect(screen.getByRole('article')).toHaveClass('max-w-3xl')
 
     fireEvent.click(screen.getByRole('button', { name: 'notes/preferences.md' }))
     expect(screen.getByText('second file')).toBeInTheDocument()
     expect(screen.getByText('此文件已截断')).toBeInTheDocument()
+    expect(screen.getByText('notes/preferences.md', { selector: 'h2' })).toBeInTheDocument()
     rerender(<div />)
   })
 
