@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/lib/api'
 import { shouldApplyLifecycleRevision } from '@/lib/task-lifecycle'
 import { render } from '@/test/test-utils'
-import type { TaskLifecycle } from '@/types'
+import type { TaskLifecycle, TaskOutcome } from '@/types'
 import { TaskExecutionRail } from './TaskExecutionRail'
 
 vi.mock('@/lib/api', async () => {
@@ -221,6 +221,43 @@ describe('TaskExecutionRail', () => {
     await waitFor(() => expect(api.tasks.reconcileWechat).toHaveBeenCalledWith('task-1'))
     expect(api.tasks.retryWechatPublish).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '重试发布' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['retry_draft', '重试创建草稿'],
+    ['retry_visuals', '补齐图片并重试'],
+    ['review_content', undefined],
+    ['fix_project_config', undefined],
+  ] as const)('uses the server recovery action for a blocked draft: %s', async (action, label) => {
+    const outcome: TaskOutcome = {
+      core_delivery: { status: 'complete' }, visual: { status: 'complete' }, review: { status: 'passed' }, warnings: [],
+      publication: { status: 'blocked', attempted: false, action, message: '发布前检查未通过，微信尚未收到请求。' },
+    }
+    render(<TaskExecutionRail taskId="task-1" status="completed" outcome={outcome} lifecycle={{
+      ...lifecycle,
+      stages: [...lifecycle.stages, { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'blocked' }],
+    }} onOpenLogs={vi.fn()} />)
+    if (label) {
+      fireEvent.click(screen.getByRole('button', { name: label }))
+      await waitFor(() => expect(api.tasks.recoverWechatPublication).toHaveBeenCalledWith('task-1'))
+    } else {
+      expect(screen.queryByRole('button', { name: '重试创建草稿' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '补齐图片并重试' })).not.toBeInTheDocument()
+    }
+  })
+
+  it('offers artifact repair for an invalid package that never reached WeChat', async () => {
+    const outcome: TaskOutcome = {
+      core_delivery: { status: 'complete' }, visual: { status: 'complete' }, review: { status: 'passed' }, warnings: [],
+      publication: { status: 'failed', attempted: false, action: 'review_content', code: 'publication_package_invalid' },
+    }
+    render(<TaskExecutionRail taskId="task-1" status="completed" outcome={outcome} lifecycle={{
+      ...lifecycle,
+      stages: [...lifecycle.stages, { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'blocked' }],
+    }} onOpenLogs={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '修复交付并重试' }))
+    await waitFor(() => expect(api.tasks.recoverWechatPublication).toHaveBeenCalledWith('task-1'))
+    expect(api.tasks.publishWechat).not.toHaveBeenCalled()
   })
 
   it('refreshes publication details when a server-owned stage changes', async () => {

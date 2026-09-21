@@ -28,6 +28,11 @@ func (s *TaskService) RecoverWechatPublication(ctx context.Context, userID, task
 		return s.retryServerOwnedArticlePublication(ctx, task)
 	case "retry_visuals":
 		return s.enqueueArticleVisualRecovery(ctx, task)
+	case "review_content":
+		if !canRepairArticlePublicationPackage(task.Outcome.Publication) {
+			return model.TaskPublicationOutcome{}, ErrWechatPublicationRecoveryUnavailable
+		}
+		return s.enqueueArticleVisualRecovery(ctx, task)
 	case "check_wechat":
 		if s.wechatPublicationSvc == nil {
 			return model.TaskPublicationOutcome{}, ErrWechatPublicationRecoveryUnavailable
@@ -46,6 +51,12 @@ func (s *TaskService) RecoverWechatPublication(ctx context.Context, userID, task
 	default:
 		return model.TaskPublicationOutcome{}, ErrWechatPublicationRecoveryUnavailable
 	}
+}
+
+// A malformed package can be regenerated from the delivered article. Semantic
+// review blocks and requests that may have reached WeChat are not retry grants.
+func canRepairArticlePublicationPackage(outcome model.TaskPublicationOutcome) bool {
+	return outcome.Action == "review_content" && outcome.Code == "publication_package_invalid" && !outcome.Attempted
 }
 
 func (s *TaskService) retryServerOwnedArticlePublication(ctx context.Context, task *model.Task) (model.TaskPublicationOutcome, error) {
@@ -110,7 +121,8 @@ func (s *TaskService) enqueueArticleVisualRecovery(ctx context.Context, task *mo
 		if current.Status == model.TaskStatusPending || current.Status == model.TaskStatusRunning {
 			return nil
 		}
-		if current.Status != model.TaskStatusCompleted || current.Outcome == nil || current.Outcome.Publication.Action != "retry_visuals" {
+		if current.Status != model.TaskStatusCompleted || current.Outcome == nil ||
+			(current.Outcome.Publication.Action != "retry_visuals" && !canRepairArticlePublicationPackage(current.Outcome.Publication)) {
 			return ErrWechatPublicationRecoveryUnavailable
 		}
 		if current.CurrentExecutionID == nil || strings.TrimSpace(*current.CurrentExecutionID) == "" {

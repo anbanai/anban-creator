@@ -10,6 +10,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -205,6 +206,25 @@ type wechatPublicationLifecycleProjection struct {
 	Publication taskLifecycleStageProjection
 }
 
+// RefreshTaskPublicationLifecycle repairs a completed task's read model only
+// after ownership has been verified. A failed projection must not hide the task.
+func (s *TaskService) RefreshTaskPublicationLifecycle(ctx context.Context, userID string, task *model.Task) {
+	if task == nil || userID == "" || task.UserID != userID || task.Type != model.PlatformArticle ||
+		task.Status != model.TaskStatusCompleted || task.Lifecycle.Data().Version != model.TaskLifecycleVersion {
+		return
+	}
+	lifecycle, err := s.SyncWechatPublicationLifecycle(ctx, task.ID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("refresh task publication lifecycle")
+		}
+		return
+	}
+	if task.CurrentExecutionID != nil && lifecycle.ExecutionID == *task.CurrentExecutionID {
+		task.Lifecycle = datatypes.NewJSONType(*lifecycle)
+	}
+}
+
 // SyncWechatPublicationLifecycle projects durable draft/publication evidence
 // onto the two Server-owned stages. Provider rows remain the source of truth;
 // the lifecycle is the compact user-facing read model.
@@ -252,6 +272,11 @@ func (s *TaskService) SyncWechatPublicationLifecycle(ctx context.Context, taskID
 		now := time.Now().UTC()
 		next := cloneTaskLifecycle(current)
 		projection := deriveWechatPublicationLifecycle(execution.DraftDeliveryStatus, publication)
+		if publication == nil && projection.Draft.State == model.TaskLifecycleStateBlocked {
+			if outcome := publicationTaskOutcome(execution); outcome.Message != "" {
+				projection.Draft.LatestUpdate = outcome.Message
+			}
+		}
 		stageChanged := applyTaskLifecycleStageProjection(&next, "system_draft", projection.Draft, now)
 		stageChanged = applyTaskLifecycleStageProjection(&next, "system_publication", projection.Publication, now) || stageChanged
 		if !stageChanged {
@@ -295,6 +320,9 @@ func deriveWechatPublicationLifecycle(deliveryStatus string, publication *model.
 			projection.Draft = taskLifecycleStageProjection{State: model.TaskLifecycleStateBlocked, LatestUpdate: "创建结果待确认，请先检测公众号状态"}
 		case model.TaskExecutionDraftDeliveryBlocked, model.TaskExecutionDraftDeliveryFailed:
 			projection.Draft = taskLifecycleStageProjection{State: model.TaskLifecycleStateBlocked, LatestUpdate: "创建草稿暂时受阻，可在修复后重试"}
+		case model.TaskExecutionDraftDeliveryNotRequested, model.TaskExecutionDraftDeliverySkipped:
+			projection.Draft = taskLifecycleStageProjection{State: model.TaskLifecycleStateSkipped, LatestUpdate: "本次未创建公众号草稿"}
+			projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateSkipped, LatestUpdate: "本次未请求正式发布"}
 		}
 		if publication != nil {
 			switch publication.Status {

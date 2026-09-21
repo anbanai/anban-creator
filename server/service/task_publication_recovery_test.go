@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -149,6 +150,46 @@ func TestRecoverWechatPublicationRetryDraftFinalizesWithoutAgentStart(t *testing
 	}
 	if found.Outcome.Publication.Action == "retry_draft" {
 		t.Fatal("draft recovery left retry_draft action after server finalization")
+	}
+}
+
+func TestRecoverWechatPublicationRepairsInvalidPackageButNotSemanticRejection(t *testing.T) {
+	for _, tc := range []struct {
+		code      string
+		attempted bool
+		allowed   bool
+	}{
+		{"publication_package_invalid", false, true},
+		{"publication_package_invalid", true, false},
+		{"marketing_scan_blocked", false, false},
+		{"semantic_review_blocked", false, false},
+	} {
+		t.Run(fmt.Sprintf("%s_attempted_%t", tc.code, tc.attempted), func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, _, enqueuer := makeCompletedPublicationRecoveryFixture(t, "review_content")
+			task.Outcome.Publication.Code = tc.code
+			task.Outcome.Publication.Attempted = tc.attempted
+			if err := repo.Tasks().Update(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			_, err := svc.RecoverWechatPublication(ctx, task.UserID, task.ID)
+			if !tc.allowed {
+				if !errors.Is(err, ErrWechatPublicationRecoveryUnavailable) || len(enqueuer.enqueued) != 0 {
+					t.Fatalf("unsafe recovery: err=%v enqueues=%d", err, len(enqueuer.enqueued))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			found, err := repo.Tasks().FindByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found.Status != model.TaskStatusPending || len(enqueuer.enqueued) != 1 || found.AgentInput.Data()["publication_recovery"] != true {
+				t.Fatalf("package repair did not queue existing-task recovery: status=%s enqueues=%d", found.Status, len(enqueuer.enqueued))
+			}
+		})
 	}
 }
 

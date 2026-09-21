@@ -466,7 +466,15 @@ func (s *TaskService) syncCloudSlot(ctx context.Context, task *model.Task) error
 	return nil
 }
 
-func (s *TaskService) finalizeCloudDraftDelivery(ctx context.Context, task *model.Task, execution *model.TaskExecution, _ *agent.ExecutionResult) error {
+func (s *TaskService) finalizeCloudDraftDelivery(ctx context.Context, task *model.Task, execution *model.TaskExecution, _ *agent.ExecutionResult) (err error) {
+	// Preflight failures do not reach WechatPublicationService, so its lifecycle
+	// callback cannot project them. Sync after recording every delivery result,
+	// including replays after an interrupted finalization.
+	defer func() {
+		if err == nil && task.Type == model.PlatformArticle {
+			_, err = s.SyncWechatPublicationLifecycle(ctx, task.ID)
+		}
+	}()
 	latestExecution, err := s.repo.TaskExecutions().FindByID(ctx, execution.ID)
 	if err != nil {
 		return err

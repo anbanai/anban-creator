@@ -702,6 +702,7 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 	if task.UserID != userID {
 		return Forbidden(c, "you do not have access to this task")
 	}
+	h.service.RefreshTaskPublicationLifecycle(c.Context(), userID, task)
 	if _, err := h.presentTaskReference(c.Context(), userID, task); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}

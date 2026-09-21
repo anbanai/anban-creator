@@ -356,6 +356,18 @@ describe("validateBootstrapResponse", () => {
     expect(() => validateBootstrapResponse("execution-1", arbitrary)).toThrow("cannot replace existing workspace content");
   });
 
+  test("accepts every publication recovery replacement emitted by the server", async () => {
+    const server = await readFile(new URL("../../server/service/agent_bootstrap.go", import.meta.url), "utf8");
+    const specs = server.split("var publicationRecoveryArtifactSpecs = []publicationRecoveryArtifactSpec{")[1]?.split("\n}")[0];
+    expect(specs).toBeDefined();
+    const paths = [...specs!.matchAll(/path: "([^"]+)"/g)].map((match) => match[1]!);
+    expect(paths).toContain("output/images.json");
+    expect(paths).toContain("output/cover-quality.json");
+    const response = validResponse();
+    response.files = paths.map((path) => ({ path, download_url: "https://bootstrap.example/source", content_sha256: "a".repeat(64), expected_size: 2, max_bytes: 4 << 20, mode: 0o644, replace_existing: true }));
+    expect(validateBootstrapResponse("execution-1", response).files).toHaveLength(paths.length);
+  });
+
   test("requires an execution-scoped resume context path", () => {
     const accepted = validResponse();
     accepted.resume_session_id = "session-1";

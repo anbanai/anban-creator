@@ -85,6 +85,8 @@ const PUBLICATION_RECOVERY_REPLACE_PATHS = new Set([
   "output/cover-plan.md",
   "output/cover-prompt.md",
   "output/image-plan.md",
+  "output/images.json",
+  "output/cover-quality.json",
   "output/05-article.html",
   "output/final-review.md",
   "output/viral-audit.md",

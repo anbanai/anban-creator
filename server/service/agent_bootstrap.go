@@ -74,6 +74,7 @@ type AgentBootstrapResponse struct {
 	Env                 map[string]string   `json:"env,omitempty"`
 	Files               []BootstrapFile     `json:"files"`
 	ArtifactTransport   ArtifactTransport   `json:"artifact_transport"`
+	recoveryImages      []*model.TaskFile
 }
 
 type AgentBootstrapConfig struct {
@@ -118,6 +119,8 @@ var publicationRecoveryArtifactSpecs = []publicationRecoveryArtifactSpec{
 	{path: "output/cover-plan.md", mimeType: "text/markdown", maxBytes: 4 << 20},
 	{path: "output/cover-prompt.md", mimeType: "text/markdown", maxBytes: 4 << 20},
 	{path: "output/image-plan.md", mimeType: "text/markdown", maxBytes: 4 << 20},
+	{path: "output/images.json", mimeType: "application/json", maxBytes: 4 << 20},
+	{path: "output/cover-quality.json", mimeType: "application/json", maxBytes: 4 << 20},
 	{path: "output/05-article.html", mimeType: "text/html", maxBytes: 8 << 20, required: true},
 	{path: "output/final-review.md", mimeType: "text/markdown", maxBytes: 4 << 20},
 	{path: "output/viral-audit.md", mimeType: "text/markdown", maxBytes: 4 << 20},
@@ -184,6 +187,13 @@ func (s *AgentBootstrapService) Bootstrap(ctx context.Context, identity *servera
 				}
 				if refreshed.Status != model.TaskExecutionRunning {
 					return fmt.Errorf("%w: execution bootstrap state changed concurrently", ErrAgentBootstrapConflict)
+				}
+			}
+			if won {
+				for _, file := range response.recoveryImages {
+					if _, err := tx.TaskFiles().UpsertPendingCurrentExecution(ctx, task.ID, execution.ID, file); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -353,6 +363,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, recoveryFiles...)
+	recoveryImageFiles, recoveryImages, err := s.buildPublicationRecoveryImages(ctx, execution, task, credentialDeadline)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, recoveryImageFiles...)
 	if err := ValidateBootstrapFiles(files); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 	}
@@ -370,11 +385,17 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage,
 		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,
 	})
-	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
+	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery && task.Outcome != nil && canRepairArticlePublicationPackage(task.Outcome.Publication) {
+		prompt += "\n\n发布包修复：\n" +
+			"- Server 已恢复原执行的文章、图片与审核产物；保持正文不变，复用已经成功且可验证的图片，只补齐缺失或失败的已请求图片。\n" +
+			"- 原发布包未通过校验。必须重新执行内容质量、营销合规、最终审核和爆款审核，更新对应证据文件；不得直接沿用或强行改写 readiness 为 ready。审核仍有阻断时保留 blocked 及实际原因。\n" +
+			"- 依据本次审核结果重建 output/draft.json 并校验最终 HTML 哈希、标题、摘要及证据路径。1.0 顶层只能包含 schema_version、article、readiness；article 只能包含 title、digest、content_path、content_sha256；readiness 只能包含 status、code、evidence_paths。不得添加 cover、images 或其他字段，图片元数据由 Server 管理。"
+	} else if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
 		prompt += "\n\n视觉生成恢复：\n" +
 			"- 从 image_generation 阶段继续；Server 已恢复并校验原执行的文章、SEO、视觉规划、HTML 和审核产物。\n" +
 			"- 不得重新执行选题、正文创作、SEO 或语义审核，也不得改写已恢复的文章内容。\n" +
-			"- 只重新生成缺失或失败的已请求图片，然后更新图片引用、最终 HTML 和 output/draft.json；已成功且可验证的图片不得重复生成。"
+			"- 只重新生成缺失或失败的已请求图片，然后更新图片引用、最终 HTML 和 output/draft.json；已成功且可验证的图片不得重复生成。\n" +
+			"- 重新校验并修复 output/draft.json 的 1.0 结构：顶层只能包含 schema_version、article、readiness；article 只能包含 title、digest、content_path、content_sha256；readiness 只能包含 status、code、evidence_paths。不得添加 cover、images 或其他字段，图片元数据由 Server 管理。"
 	}
 	resumeContextPath := ""
 	for _, attachment := range attachments {
@@ -414,6 +435,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task),
 		AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
 		Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
+		recoveryImages: recoveryImages,
 	}, nil
 }
 

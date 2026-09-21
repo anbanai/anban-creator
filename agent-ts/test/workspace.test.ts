@@ -12,21 +12,21 @@ afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root,
 
 describe("materializeBootstrapFiles", () => {
 
-  test("atomically replaces an allowlisted publication recovery artifact after hash verification", async () => {
+  test.each(["04-article-final.md", "images.json", "cover-quality.json"])("atomically restores publication recovery %s after hash verification", async (filename) => {
     const workspace = await mkdtemp(join(tmpdir(), "anban-workspace-"));
     roots.push(workspace);
     await mkdir(join(workspace, "output"));
-    await writeFile(join(workspace, "output", "04-article-final.md"), "stale article");
+    await writeFile(join(workspace, "output", filename), "stale artifact");
     const content = "verified source article";
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response(content, { status: 200 });
     try {
       await materializeBootstrapFiles(workspace, [{
-        path: "output/04-article-final.md", download_url: "https://bootstrap.example/source",
+        path: `output/${filename}`, download_url: "https://bootstrap.example/source",
         expected_size: Buffer.byteLength(content), max_bytes: 1024, mode: 0o644, replace_existing: true,
         content_sha256: createHash("sha256").update(content).digest("hex"),
       }]);
-      expect(await readFile(join(workspace, "output", "04-article-final.md"), "utf8")).toBe(content);
+      expect(await readFile(join(workspace, "output", filename), "utf8")).toBe(content);
     } finally {
       globalThis.fetch = originalFetch;
     }

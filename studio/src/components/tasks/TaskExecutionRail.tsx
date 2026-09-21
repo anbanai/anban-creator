@@ -460,9 +460,12 @@ function PublicationStageActions({
         </div>
       )
     }
+    const action = outcome?.publication.action
+    const repairPackage = action === 'review_content' && outcome?.publication.code === 'publication_package_invalid' && outcome.publication.attempted === false
+    if (action !== 'retry_draft' && action !== 'retry_visuals' && !repairPackage) return null
     return (
       <Button size="xs" variant="outline" loading={pending} onClick={onRecoverDraft}>
-        <RefreshCw className="size-3" />重试创建草稿
+        <RefreshCw className="size-3" />{repairPackage ? '修复交付并重试' : action === 'retry_visuals' ? '补齐图片并重试' : '重试创建草稿'}
       </Button>
     )
   }
