@@ -76,6 +76,18 @@ func (r *wechatAnalyticsImportRepository) CreateSnapshot(ctx context.Context, sn
 
 func (r *wechatAnalyticsImportRepository) FindSnapshotsByPublicationID(ctx context.Context, projectID, publicationID string) ([]*model.WechatAnalyticsSnapshot, error) {
 	var snapshots []*model.WechatAnalyticsSnapshot
-	err := r.db.WithContext(ctx).Where("project_id = ? AND publication_id = ?", projectID, publicationID).Order("data_as_of_at DESC, imported_at DESC").Find(&snapshots).Error
+	err := r.db.WithContext(ctx).Where("project_id = ? AND publication_id = ?", projectID, publicationID).
+		Where("batch_id NOT IN (?)", r.db.Model(&model.WechatAnalyticsImportBatch{}).Select("id").Where("revoked_at IS NOT NULL")).Order("data_as_of_at DESC, imported_at DESC").Find(&snapshots).Error
 	return snapshots, err
+}
+
+// LockBatch serializes resolution and revocation. A no-op write also acquires
+// the write lock in SQLite, where SELECT FOR UPDATE is unsupported.
+func (r *wechatAnalyticsImportRepository) LockBatch(ctx context.Context, projectID, id string) error {
+	return r.db.WithContext(ctx).Model(&model.WechatAnalyticsImportBatch{}).Where("project_id = ? AND id = ?", projectID, id).UpdateColumn("updated_at", gorm.Expr("updated_at")).Error
+}
+
+// LockProject serializes link ownership changes across different import batches.
+func (r *wechatAnalyticsImportRepository) LockProject(ctx context.Context, projectID string) error {
+	return r.db.WithContext(ctx).Model(&model.Project{}).Where("id = ?", projectID).UpdateColumn("updated_at", gorm.Expr("updated_at")).Error
 }

@@ -23,10 +23,11 @@ type WechatArticleTracking struct {
 	Source        string `gorm:"type:varchar(32);index;not null;check:chk_wechat_tracking_source,source IN ('anban_api','wechat_console')" json:"source"`
 	Status        string `gorm:"type:varchar(32);index;not null;check:chk_wechat_tracking_status,status IN ('waiting_data','tracking','expired','unsupported','error')" json:"status"`
 
-	ArticleID  string `gorm:"type:varchar(191);index;not null;default:''" json:"article_id,omitempty"`
-	MsgDataID  string `gorm:"type:varchar(191);index;not null;default:''" json:"msg_data_id,omitempty"`
-	MsgID      string `gorm:"type:varchar(191);index;not null;default:''" json:"msg_id,omitempty"`
-	ArticleURL string `gorm:"type:varchar(1000);not null;default:''" json:"article_url,omitempty"`
+	ArticleID               string `gorm:"type:varchar(191);index;not null;default:''" json:"article_id,omitempty"`
+	MsgDataID               string `gorm:"type:varchar(191);index;not null;default:''" json:"msg_data_id,omitempty"`
+	MsgID                   string `gorm:"type:varchar(191);index;not null;default:''" json:"msg_id,omitempty"`
+	ArticleURL              string `gorm:"type:varchar(1000);not null;default:''" json:"article_url,omitempty"`
+	ArticleURLImportBatchID string `gorm:"type:char(36);not null;default:'';index" json:"-"`
 
 	PublishedAt        time.Time  `gorm:"index;not null" json:"published_at"`
 	ExpiresAt          time.Time  `gorm:"index;not null" json:"expires_at"`

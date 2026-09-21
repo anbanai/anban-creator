@@ -10,6 +10,7 @@ export interface SeednoteImportBatch {
   data_as_of_at: string
   timezone: string
   status: string
+  revoked_at?: string
   total_rows: number
   resolved_rows: number
   review_rows: number

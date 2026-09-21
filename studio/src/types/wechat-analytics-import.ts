@@ -9,6 +9,7 @@ export interface WechatAnalyticsImportBatch {
   data_as_of_at: string
   parser_version: string
   status: string
+  revoked_at?: string
   total_rows: number
   matched_rows: number
   review_rows: number

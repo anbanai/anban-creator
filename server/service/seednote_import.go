@@ -235,6 +235,17 @@ func (s *SeednoteImportService) Resolve(ctx context.Context, userID, projectID, 
 	}
 	now := s.now()
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.SeednoteImports().LockBatch(ctx, projectID, batchID); err != nil {
+			return err
+		}
+		locked, err := tx.SeednoteImports().FindBatchByID(ctx, projectID, batchID)
+		if err != nil {
+			return err
+		}
+		if locked.RevokedAt != nil {
+			return ErrAnalyticsImportRevoked
+		}
+		batch = locked
 		for _, action := range actions {
 			row, findErr := tx.SeednoteImports().FindRowByID(ctx, projectID, batchID, action.RowID)
 			if findErr != nil {
@@ -292,30 +303,27 @@ func (s *SeednoteImportService) Resolve(ctx context.Context, userID, projectID, 
 				return err
 			}
 		}
-		return nil
+		rows, err := tx.SeednoteImports().FindRowsByBatchID(ctx, projectID, batchID)
+		if err != nil {
+			return err
+		}
+		batch.ReviewRows, batch.ResolvedRows = 0, 0
+		for _, row := range rows {
+			if row.MatchStatus == model.SeednoteImportRowStatusNeedsReview {
+				batch.ReviewRows++
+			}
+			if row.MatchStatus == model.SeednoteImportRowStatusMatched || row.MatchStatus == model.SeednoteImportRowStatusCreated || row.MatchStatus == model.SeednoteImportRowStatusAutoMatched {
+				batch.ResolvedRows++
+			}
+		}
+		if batch.ReviewRows == 0 {
+			batch.Status = model.SeednoteImportBatchStatusCompleted
+		}
+		return tx.SeednoteImports().UpdateBatch(ctx, batch)
 	}); err != nil {
 		return nil, err
 	}
-	rows, err := s.repo.SeednoteImports().FindRowsByBatchID(ctx, projectID, batchID)
-	if err != nil {
-		return nil, err
-	}
-	batch.ReviewRows, batch.ResolvedRows = 0, 0
-	for _, row := range rows {
-		if row.MatchStatus == model.SeednoteImportRowStatusNeedsReview {
-			batch.ReviewRows++
-		}
-		if row.MatchStatus == model.SeednoteImportRowStatusMatched || row.MatchStatus == model.SeednoteImportRowStatusCreated || row.MatchStatus == model.SeednoteImportRowStatusAutoMatched {
-			batch.ResolvedRows++
-		}
-	}
-	if batch.ReviewRows == 0 {
-		batch.Status = model.SeednoteImportBatchStatusCompleted
-	}
-	if err := s.repo.SeednoteImports().UpdateBatch(ctx, batch); err != nil {
-		return nil, err
-	}
-	return &SeednoteImportSummary{Batch: batch, Rows: rows}, nil
+	return s.GetBatch(ctx, userID, projectID, batchID)
 }
 
 func (s *SeednoteImportService) createMetricVersion(ctx context.Context, tx repository.Repository, batch *model.SeednoteImportBatch, row *model.SeednoteImportRow, now time.Time) error {

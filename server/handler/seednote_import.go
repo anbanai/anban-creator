@@ -15,6 +15,7 @@ import (
 )
 
 type SeednoteImportAPI interface {
+	Revoke(context.Context, string, string, string) (*service.SeednoteImportSummary, error)
 	Import(ctx context.Context, req service.SeednoteImportRequest) (*service.SeednoteImportSummary, error)
 	ListBatches(ctx context.Context, userID, projectID string, offset, limit int) ([]*model.SeednoteImportBatch, int64, error)
 	GetBatch(ctx context.Context, userID, projectID, batchID string) (*service.SeednoteImportSummary, error)
@@ -167,6 +168,9 @@ func (h *SeednoteImportHandler) respond(c fiber.Ctx, value any, err error) error
 	if err == nil {
 		return Success(c, value)
 	}
+	if errors.Is(err, service.ErrAnalyticsImportRevoked) {
+		return Error(c, fiber.StatusConflict, err.Error())
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return Error(c, 404, "not found")
 	}
@@ -177,4 +181,21 @@ func (h *SeednoteImportHandler) respond(c fiber.Ctx, value any, err error) error
 		h.logger.Error().Err(err).Msg("seednote import request failed")
 	}
 	return Error(c, 400, err.Error())
+}
+
+func (h *SeednoteImportHandler) Revoke(c fiber.Ctx) error {
+	projectID, err := validateUUIDParam(c, "id")
+	if err != nil || projectID == "" {
+		return err
+	}
+	batchID, err := validateUUIDParam(c, "batchId")
+	if err != nil || batchID == "" {
+		return err
+	}
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	result, err := h.service.Revoke(c.Context(), userID, projectID, batchID)
+	return h.respond(c, result, err)
 }

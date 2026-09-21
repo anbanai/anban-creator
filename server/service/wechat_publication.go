@@ -342,7 +342,22 @@ func (s *WechatPublicationService) BindManualPublication(ctx context.Context, us
 		return nil, err
 	}
 	if publication.Status == model.WechatPublicationStatusPublished && publication.ArticleURL == articleURL {
-		return publication, nil
+		err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+			if err := tx.WechatAnalyticsImports().LockProject(ctx, publication.ProjectID); err != nil {
+				return err
+			}
+			latest, err := tx.WechatPublications().FindByID(ctx, publication.ID)
+			if err != nil {
+				return err
+			}
+			if latest.Status != model.WechatPublicationStatusPublished || latest.ArticleURL != articleURL {
+				return ErrWechatPublicationConflict
+			}
+			publication = latest
+			return tx.WechatPublications().ConfirmArticleURL(ctx, publication.ProjectID, publication.ID, articleURL)
+		})
+		publication.ArticleURLImportBatchID = ""
+		return publication, err
 	}
 	canAttachURLToManualPublication := publication.Status == model.WechatPublicationStatusPublished &&
 		publication.Source == model.WechatPublicationSourceWechatConsole && publication.ArticleURL == ""
@@ -358,6 +373,7 @@ func (s *WechatPublicationService) BindManualPublication(ctx context.Context, us
 	publication.Source = model.WechatPublicationSourceWechatConsole
 	publication.Status = model.WechatPublicationStatusPublished
 	publication.ArticleURL = articleURL
+	publication.ArticleURLImportBatchID = ""
 	publication.PublishedAt = &publishedAt
 	publication.ManualPublishRequired = false
 	publication.LastError = ""
@@ -368,6 +384,16 @@ func (s *WechatPublicationService) BindManualPublication(ctx context.Context, us
 		publication.AnalyticsStatus = "official_fetching"
 	}
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.WechatAnalyticsImports().LockProject(ctx, publication.ProjectID); err != nil {
+			return err
+		}
+		latest, err := tx.WechatPublications().FindByID(ctx, publication.ID)
+		if err != nil {
+			return err
+		}
+		if !latest.UpdatedAt.Equal(publication.UpdatedAt) {
+			return ErrWechatPublicationConflict
+		}
 		if err := tx.WechatPublications().Update(ctx, publication); err != nil {
 			return err
 		}
@@ -377,7 +403,7 @@ func (s *WechatPublicationService) BindManualPublication(ctx context.Context, us
 		tracking, findErr := tx.WechatTrackings().FindByTaskID(ctx, taskID)
 		if findErr == nil {
 			trackingID = tracking.ID
-			return nil
+			return tx.WechatPublications().ConfirmArticleURL(ctx, publication.ProjectID, publication.ID, publication.ArticleURL)
 		}
 		if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 			return findErr
@@ -2628,6 +2654,7 @@ func (s *WechatPublicationService) bindPublished(ctx context.Context, publicatio
 	publication.Status, publication.Source = model.WechatPublicationStatusPublished, source
 	publication.AnalyticsStatus = "official_fetching"
 	publication.ArticleID, publication.ArticleURL, publication.ArticleIndex = article.ArticleID, article.URL, 1
+	publication.ArticleURLImportBatchID = ""
 	publication.PublishedAt, publication.NextCheckAt, publication.LastError, publication.Candidates = &article.PublishedAt, nil, "", nil
 	if publication.MsgDataID != "" {
 		publication.MsgID = publication.MsgDataID + "_1"
@@ -2665,7 +2692,7 @@ func (s *WechatPublicationService) bindPublished(ctx context.Context, publicatio
 		}
 		if tracking, err := tx.WechatTrackings().FindByTaskID(ctx, publication.TaskID); err == nil {
 			trackingID = tracking.ID
-			return nil
+			return tx.WechatPublications().ConfirmArticleURL(ctx, publication.ProjectID, publication.ID, publication.ArticleURL)
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}

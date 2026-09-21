@@ -128,7 +128,7 @@ func (r *seednoteMetricVersionRepository) UpdatePostID(ctx context.Context, id, 
 	return r.db.WithContext(ctx).Model(&model.SeednoteMetricVersion{}).Where("id = ?", id).Update("post_id", postID).Error
 }
 func (r *seednoteMetricVersionRepository) FindByPostID(ctx context.Context, postID string, from, to *time.Time) ([]*model.SeednoteMetricVersion, error) {
-	q := r.db.WithContext(ctx).Where("post_id = ?", postID)
+	q := r.db.WithContext(ctx).Where("post_id = ?", postID).Where("batch_id NOT IN (?)", r.db.Model(&model.SeednoteImportBatch{}).Select("id").Where("revoked_at IS NOT NULL"))
 	if from != nil {
 		q = q.Where("data_as_of_at >= ?", *from)
 	}
@@ -140,7 +140,7 @@ func (r *seednoteMetricVersionRepository) FindByPostID(ctx context.Context, post
 	return versions, err
 }
 func (r *seednoteMetricVersionRepository) FindByProject(ctx context.Context, projectID string, from, to *time.Time) ([]*model.SeednoteMetricVersion, error) {
-	q := r.db.WithContext(ctx).Table("seednote_metric_versions AS v").Joins("JOIN seednote_posts AS p ON p.id = v.post_id").Where("p.project_id = ?", projectID)
+	q := r.db.WithContext(ctx).Table("seednote_metric_versions AS v").Joins("JOIN seednote_posts AS p ON p.id = v.post_id").Where("p.project_id = ?", projectID).Where("v.batch_id NOT IN (?)", r.db.Model(&model.SeednoteImportBatch{}).Select("id").Where("revoked_at IS NOT NULL"))
 	if from != nil {
 		q = q.Where("v.data_as_of_at >= ?", *from)
 	}
@@ -155,4 +155,10 @@ func (r *seednoteMetricVersionRepository) FindByImportRowID(ctx context.Context,
 	var version model.SeednoteMetricVersion
 	err := r.db.WithContext(ctx).Where("import_row_id = ?", rowID).Order("imported_at DESC").First(&version).Error
 	return &version, err
+}
+
+// LockBatch serializes resolution and revocation. A no-op write also acquires
+// the write lock in SQLite, where SELECT FOR UPDATE is unsupported.
+func (r *seednoteImportRepository) LockBatch(ctx context.Context, projectID, id string) error {
+	return r.db.WithContext(ctx).Model(&model.SeednoteImportBatch{}).Where("project_id = ? AND id = ?", projectID, id).UpdateColumn("updated_at", gorm.Expr("updated_at")).Error
 }

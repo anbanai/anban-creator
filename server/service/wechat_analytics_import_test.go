@@ -88,6 +88,25 @@ func TestWechatAnalyticsImportReusesArticleURL(t *testing.T) {
 			if got.Status != model.WechatPublicationStatusPublished || got.Source != model.WechatPublicationSourceWechatConsole {
 				t.Fatalf("publication state changed: %+v", got)
 			}
+			if _, err := svc.Revoke(ctx, f.userID, f.projectID, result.Batch.ID); err != nil {
+				t.Fatal(err)
+			}
+			reimported, err := svc.Import(ctx, WechatAnalyticsImportRequest{UserID: f.userID, ProjectID: f.projectID, UploadID: asset.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reimported.Batch.ID == result.Batch.ID || reimported.Batch.RevokedAt != nil || len(reimported.Rows) != 1 {
+				t.Fatalf("reimport did not create a fresh batch: %+v", reimported)
+			}
+			if tc.resolve {
+				if _, err := svc.Resolve(ctx, f.userID, f.projectID, reimported.Batch.ID, []WechatAnalyticsResolveAction{{RowID: reimported.Rows[0].ID, Action: "link_existing", PublicationID: f.publication.ID}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err = f.repo.WechatPublications().FindByID(ctx, f.publication.ID)
+			if err != nil || got.ArticleURL != tc.wantURL {
+				t.Fatalf("reimport URL = %q, want %q, err=%v", got.ArticleURL, tc.wantURL, err)
+			}
 		})
 	}
 }

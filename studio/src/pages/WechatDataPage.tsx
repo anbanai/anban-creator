@@ -25,9 +25,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import PageHeader from '@/components/layout/PageHeader'
+import RevokeImportDialog from '@/components/common/RevokeImportDialog'
 import ContentSourceLink from '@/components/common/ContentSourceLink'
 import type {
   WechatAnalyticsArticleView,
+  WechatAnalyticsImportBatch,
   WechatAnalyticsImportPreview,
   WechatAnalyticsImportRow,
 } from '@/types/wechat-analytics-import'
@@ -125,6 +127,7 @@ function ImportPreview({ preview }: { preview: WechatAnalyticsImportPreview }) {
 export default function WechatDataPage() {
   const queryClient = useQueryClient()
   const [projectId, setProjectId] = useState('')
+  const [revokeTarget, setRevokeTarget] = useState<{ projectId: string; batch: WechatAnalyticsImportBatch } | null>(null)
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [importOpen, setImportOpen] = useState(false)
   const [stagedFile, setStagedFile] = useState<File | null>(null)
@@ -179,6 +182,23 @@ export default function WechatDataPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.wechatAnalyticsImport.batch(activeProjectId, selectedBatch) })
       queryClient.invalidateQueries({ queryKey: queryKeys.wechatAnalyticsImport.articles(activeProjectId) })
       queryClient.invalidateQueries({ queryKey: queryKeys.wechatAnalyticsImport.overview(activeProjectId) })
+    },
+  })
+  const revokeMutation = useMutation({
+    mutationFn: ({ projectId, batch }: { projectId: string; batch: WechatAnalyticsImportBatch }) => api.wechatAnalyticsImport.revoke(projectId, batch.id),
+    onSuccess: async (summary, { projectId }) => {
+      queryClient.setQueryData(queryKeys.wechatAnalyticsImport.batch(projectId, summary.batch.id), summary)
+      setSelectedArticle(null)
+      setBindOpen(false)
+      setUrl('')
+      setResolveSelections({})
+      setRevokeTarget(null)
+      await queryClient.invalidateQueries({ predicate: ({ queryKey }) =>
+        typeof queryKey[0] === 'string' && queryKey[0].startsWith('wechat-import-') && queryKey[1] === projectId,
+      })
+      void queryClient.invalidateQueries({ predicate: ({ queryKey }) =>
+        ['task', 'tasks', 'wechat-publication', 'wechat-analytics'].includes(String(queryKey[0])),
+      })
     },
   })
   const bindMutation = useMutation({
@@ -240,7 +260,7 @@ export default function WechatDataPage() {
 
     <section className="border-y bg-card/40 py-4">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <label className="grid gap-2 text-sm" htmlFor="wechat-account"><span className="font-medium">公众号项目</span><select id="wechat-account" className="h-10 min-w-64 rounded-md border border-input bg-background px-3" value={activeProjectId} onChange={(event) => { setProjectId(event.target.value); setSelectedBatch('') }}><option value="">请选择项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+        <label className="grid gap-2 text-sm" htmlFor="wechat-account"><span className="font-medium">公众号项目</span><select id="wechat-account" className="h-10 min-w-64 rounded-md border border-input bg-background px-3" value={activeProjectId} disabled={revokeMutation.isPending} onChange={(event) => { setProjectId(event.target.value); setSelectedBatch(''); setSelectedArticle(null); setBindOpen(false); setRevokeTarget(null); revokeMutation.reset() }}><option value="">请选择项目</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
           {overviewQuery.data && <><span>文章 <strong className="font-medium text-foreground">{overviewQuery.data.articles}</strong></span><span>已发布 <strong className="font-medium text-foreground">{overviewQuery.data.published}</strong></span><span>有数据 <strong className="font-medium text-foreground">{overviewQuery.data.with_data}</strong></span><span>阅读 <strong className="font-medium text-foreground">{formatNumber(overviewQuery.data.read_users)}</strong></span></>}
           <span>数据截至 <strong className="font-medium text-foreground">{dataAsOf}</strong></span>
@@ -276,9 +296,15 @@ export default function WechatDataPage() {
       {!visibleArticles.length && <p className="py-14 text-center text-sm text-muted-foreground">当前筛选下没有文章。</p>}
     </section>}
 
-    {selectedBatch && batchQuery.data && <Card><CardHeader><CardTitle>批次异常 <span className="text-sm font-normal text-muted-foreground">{reviewRows.length}</span></CardTitle><CardDescription>正常行已自动入库，只需处理歧义、未匹配和格式错误。</CardDescription></CardHeader><CardContent>{reviewRows.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>源行</TableHead><TableHead>标题</TableHead><TableHead>状态</TableHead><TableHead>匹配文章</TableHead><TableHead className="text-right">处理</TableHead></TableRow></TableHeader><TableBody>{reviewRows.map((row) => <TableRow key={row.id}><TableCell>{row.source_row}</TableCell><TableCell className="min-w-64 max-w-[360px]"><p className="truncate">{row.title}</p><ContentSourceLink url={row.article_url} className="mt-1" />{row.parse_error && <p className="mt-1 text-xs text-destructive">{row.parse_error}</p>}</TableCell><TableCell><Badge variant={row.match_status === 'invalid' ? 'destructive' : 'outline'}>{row.match_status === 'needs_review' ? '需复核' : row.match_status === 'invalid' ? '格式错误' : '未匹配'}</Badge></TableCell><TableCell>{row.match_status !== 'invalid' ? <select aria-label={`匹配文章 ${row.source_row}`} className="h-9 max-w-72 rounded-md border bg-background px-2 text-sm" value={resolveSelections[row.id] ?? ''} onChange={(event) => setResolveSelections((current) => ({ ...current, [row.id]: event.target.value }))}><option value="">选择现有文章</option>{articles.map((article) => <option key={article.publication.id} value={article.publication.id}>{article.publication.draft_title || '未命名文章'}</option>)}</select> : '—'}</TableCell><TableCell>{row.match_status === 'invalid' ? <p className="text-right text-xs text-muted-foreground">修正源文件后重新导入</p> : <div className="flex justify-end gap-1"><Button size="sm" disabled={!resolveSelections[row.id] || resolveMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'link_existing', publication_id: resolveSelections[row.id] }])}>确认匹配</Button><Button size="sm" variant="ghost" disabled={resolveMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'skip' }])}>跳过</Button></div>}</TableCell></TableRow>)}</TableBody></Table></div> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="text-primary" />此批次没有待处理行</div>}</CardContent></Card>}
+    {selectedBatch && batchQuery.data && (batchQuery.data.batch.status === 'revoked' ? <Alert><AlertTitle>已撤销</AlertTitle><AlertDescription>此批次仅保留导入历史，不再计入统计。请修改文件后重新导入。</AlertDescription></Alert> : <Card><CardHeader><CardTitle>批次异常 <span className="text-sm font-normal text-muted-foreground">{reviewRows.length}</span></CardTitle><CardDescription>正常行已自动入库，只需处理歧义、未匹配和格式错误。</CardDescription></CardHeader><CardContent>{reviewRows.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>源行</TableHead><TableHead>标题</TableHead><TableHead>状态</TableHead><TableHead>匹配文章</TableHead><TableHead className="text-right">处理</TableHead></TableRow></TableHeader><TableBody>{reviewRows.map((row) => <TableRow key={row.id}><TableCell>{row.source_row}</TableCell><TableCell className="min-w-64 max-w-[360px]"><p className="truncate">{row.title}</p><ContentSourceLink url={row.article_url} className="mt-1" />{row.parse_error && <p className="mt-1 text-xs text-destructive">{row.parse_error}</p>}</TableCell><TableCell><Badge variant={row.match_status === 'invalid' ? 'destructive' : 'outline'}>{row.match_status === 'needs_review' ? '需复核' : row.match_status === 'invalid' ? '格式错误' : '未匹配'}</Badge></TableCell><TableCell>{row.match_status !== 'invalid' ? <select aria-label={`匹配文章 ${row.source_row}`} className="h-9 max-w-72 rounded-md border bg-background px-2 text-sm" value={resolveSelections[row.id] ?? ''} onChange={(event) => setResolveSelections((current) => ({ ...current, [row.id]: event.target.value }))}><option value="">选择现有文章</option>{articles.map((article) => <option key={article.publication.id} value={article.publication.id}>{article.publication.draft_title || '未命名文章'}</option>)}</select> : '—'}</TableCell><TableCell>{row.match_status === 'invalid' ? <p className="text-right text-xs text-muted-foreground">修正源文件后重新导入</p> : <div className="flex justify-end gap-1"><Button size="sm" disabled={!resolveSelections[row.id] || resolveMutation.isPending || revokeMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'link_existing', publication_id: resolveSelections[row.id] }])}>确认匹配</Button><Button size="sm" variant="ghost" disabled={resolveMutation.isPending || revokeMutation.isPending} onClick={() => resolveMutation.mutate([{ row_id: row.id, action: 'skip' }])}>跳过</Button></div>}</TableCell></TableRow>)}</TableBody></Table></div> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="text-primary" />此批次没有待处理行</div>}</CardContent></Card>)}
 
-    {batchesQuery.data?.items?.length ? <details className="rounded-md border bg-card px-4 py-3"><summary className="cursor-pointer text-sm font-medium">历史导入 {batchesQuery.data.total}</summary><div className="mt-3 grid gap-2 sm:grid-cols-2">{batchesQuery.data.items.map((batch) => <button key={batch.id} type="button" className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-left text-sm ${selectedBatch === batch.id ? 'border-primary bg-primary/5' : ''}`} onClick={() => setSelectedBatch(batch.id)}><span className="truncate"><FileSpreadsheet className="mr-2 inline h-4 w-4" />{batch.file_name}</span><span className="shrink-0 text-xs text-muted-foreground">{batch.matched_rows}/{batch.total_rows} 已匹配</span></button>)}</div></details> : null}
+    {batchesQuery.data?.items?.length ? <details className="rounded-md border bg-card px-4 py-3"><summary className="cursor-pointer text-sm font-medium">历史导入 {batchesQuery.data.total}</summary><div className="mt-3 grid gap-2 sm:grid-cols-2">{batchesQuery.data.items.map((batch) => <div key={batch.id} className={`rounded-md border px-3 py-2 text-sm ${selectedBatch === batch.id ? 'border-primary bg-primary/5' : ''}`}>
+      <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setSelectedBatch(batch.id)}><span className="truncate"><FileSpreadsheet className="mr-2 inline h-4 w-4" />{batch.file_name}</span><span className="shrink-0 text-xs text-muted-foreground">{batch.status === 'revoked' ? '已撤销' : `${batch.matched_rows}/${batch.total_rows} 已匹配`}</span></button>
+      {batch.revoked_at && <time className="mt-1 block text-xs text-muted-foreground" dateTime={batch.revoked_at}>{new Date(batch.revoked_at).toLocaleString('zh-CN')}</time>}
+      {batch.status !== 'revoked' && <Button variant="ghost" size="sm" className="mt-1 text-destructive" disabled={revokeMutation.isPending || resolveMutation.isPending || importMutation.isPending} onClick={() => { revokeMutation.reset(); setRevokeTarget({ projectId: activeProjectId, batch }) }}>撤销本次导入</Button>}
+    </div>)}</div></details> : null}
+
+    <RevokeImportDialog fileName={revokeTarget?.batch.file_name} pending={revokeMutation.isPending} error={revokeMutation.error} onCancel={() => { setRevokeTarget(null); revokeMutation.reset() }} onConfirm={() => revokeTarget && revokeMutation.mutate(revokeTarget)} />
 
     <Sheet open={Boolean(selectedArticle) && !bindOpen} onOpenChange={(open) => { if (!open) setSelectedArticle(null) }}><SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl"><SheetHeader className="border-b pr-14"><SheetTitle>{selectedArticle?.publication.draft_title || '文章详情'}</SheetTitle><SheetDescription>发布与数据时间线</SheetDescription></SheetHeader>{selectedArticle && <div className="space-y-5 px-5 pb-6">
       <ContentSourceLink url={selectedArticle.publication.article_url} />

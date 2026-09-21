@@ -16,28 +16,29 @@ const (
 
 // WechatAnalyticsImportBatch is an immutable import of a WeChat console export.
 type WechatAnalyticsImportBatch struct {
-	ID            string    `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID        string    `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID     string    `gorm:"type:char(36);index;not null" json:"project_id"`
-	AssetID       string    `gorm:"type:char(36);index;not null" json:"asset_id"`
-	FileName      string    `gorm:"type:varchar(255);not null" json:"file_name"`
-	ContentType   string    `gorm:"type:varchar(120);not null" json:"content_type"`
-	FileSize      int64     `gorm:"not null" json:"file_size"`
-	SHA256        string    `gorm:"type:char(64);index;not null" json:"sha256"`
-	Source        string    `gorm:"type:varchar(255);not null;default:''" json:"source,omitempty"`
-	ReceivedAt    time.Time `gorm:"index;not null" json:"received_at"`
-	DataAsOfAt    time.Time `gorm:"index;not null" json:"data_as_of_at"`
-	Timezone      string    `gorm:"type:varchar(64);not null" json:"timezone"`
-	ParserVersion string    `gorm:"type:varchar(32);not null" json:"parser_version"`
-	Status        string    `gorm:"type:varchar(32);index;not null" json:"status"`
-	TotalRows     int       `json:"total_rows"`
-	MatchedRows   int       `json:"matched_rows"`
-	ReviewRows    int       `json:"review_rows"`
-	UnmatchedRows int       `json:"unmatched_rows"`
-	InvalidRows   int       `json:"invalid_rows"`
-	ErrorSummary  string    `gorm:"type:text" json:"error_summary,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string     `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID        string     `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID     string     `gorm:"type:char(36);index;not null" json:"project_id"`
+	AssetID       string     `gorm:"type:char(36);index;not null" json:"asset_id"`
+	FileName      string     `gorm:"type:varchar(255);not null" json:"file_name"`
+	ContentType   string     `gorm:"type:varchar(120);not null" json:"content_type"`
+	FileSize      int64      `gorm:"not null" json:"file_size"`
+	SHA256        string     `gorm:"type:char(64);index;not null" json:"sha256"`
+	Source        string     `gorm:"type:varchar(255);not null;default:''" json:"source,omitempty"`
+	ReceivedAt    time.Time  `gorm:"index;not null" json:"received_at"`
+	DataAsOfAt    time.Time  `gorm:"index;not null" json:"data_as_of_at"`
+	Timezone      string     `gorm:"type:varchar(64);not null" json:"timezone"`
+	ParserVersion string     `gorm:"type:varchar(32);not null" json:"parser_version"`
+	Status        string     `gorm:"type:varchar(32);index;not null" json:"status"`
+	TotalRows     int        `json:"total_rows"`
+	MatchedRows   int        `json:"matched_rows"`
+	ReviewRows    int        `json:"review_rows"`
+	UnmatchedRows int        `json:"unmatched_rows"`
+	InvalidRows   int        `json:"invalid_rows"`
+	RevokedAt     *time.Time `gorm:"index" json:"revoked_at,omitempty"`
+	ErrorSummary  string     `gorm:"type:text" json:"error_summary,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func (WechatAnalyticsImportBatch) TableName() string { return "wechat_analytics_import_batches" }

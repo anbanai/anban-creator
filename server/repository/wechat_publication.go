@@ -13,22 +13,57 @@ import (
 
 type wechatPublicationRepository struct{ db *gorm.DB }
 
-// RecordImportedAnalytics fills missing identity without saving a stale publication
-// or overwriting its independently managed publishing state.
-func (r *wechatPublicationRepository) RecordImportedAnalytics(ctx context.Context, projectID, id, articleURL string) error {
-	if err := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
-		Where("project_id = ? AND id = ?", projectID, id).
-		Updates(map[string]any{
-			"analytics_status": "import_available",
-			"article_url":      gorm.Expr("CASE WHEN article_url = '' THEN ? ELSE article_url END", articleURL),
-		}).Error; err != nil {
+// RecordImportedAnalytics is called inside the import transaction. URL ownership
+// is recorded only when the import fills a blank value, never for existing links.
+func (r *wechatPublicationRepository) RecordImportedAnalytics(ctx context.Context, projectID, id, batchID, articleURL string) error {
+	if articleURL != "" {
+		if err := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("project_id = ? AND id = ? AND article_url = ''", projectID, id).
+			Updates(map[string]any{"article_url": articleURL, "article_url_import_batch_id": batchID}).Error; err != nil {
+			return err
+		}
+	}
+	if err := r.db.WithContext(ctx).Model(&model.WechatPublication{}).Where("project_id = ? AND id = ?", projectID, id).
+		Update("analytics_status", "import_available").Error; err != nil {
 		return err
 	}
-	// Reuse the saved URL, including an existing canonical URL, for tracking.
-	publicationURL := r.db.Model(&model.WechatPublication{}).Select("article_url").Where("project_id = ? AND id = ?", projectID, id)
+	publication, err := r.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
 		Where("project_id = ? AND publication_id = ? AND article_url = ''", projectID, id).
-		Update("article_url", publicationURL).Error
+		Updates(map[string]any{"article_url": publication.ArticleURL, "article_url_import_batch_id": publication.ArticleURLImportBatchID}).Error
+}
+
+// RevokeImportedAnalytics never clears a URL without a durable import source.
+func (r *wechatPublicationRepository) RevokeImportedAnalytics(ctx context.Context, projectID, id, batchID, replacementURL, replacementBatchID, analyticsStatus string) error {
+	updates := map[string]any{"article_url": replacementURL, "article_url_import_batch_id": replacementBatchID}
+	if err := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+		Where("project_id = ? AND id = ? AND article_url_import_batch_id = ?", projectID, id, batchID).Updates(updates).Error; err != nil {
+		return err
+	}
+	if err := r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
+		Where("project_id = ? AND publication_id = ? AND article_url_import_batch_id = ?", projectID, id, batchID).Updates(updates).Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+		Where("project_id = ? AND id = ? AND analytics_status = ?", projectID, id, "import_available").Update("analytics_status", analyticsStatus).Error
+}
+
+// ConfirmArticleURL transfers ownership to an explicit user/provider confirmation.
+// The caller serializes manual confirmation with imports/revocation, or uses the
+// publication transition CAS. Existing unowned tracking identities are retained.
+func (r *wechatPublicationRepository) ConfirmArticleURL(ctx context.Context, projectID, id, articleURL string) error {
+	if err := r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+		Where("project_id = ? AND id = ? AND article_url = ?", projectID, id, articleURL).
+		Update("article_url_import_batch_id", "").Error; err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Model(&model.WechatArticleTracking{}).
+		Where("project_id = ? AND publication_id = ?", projectID, id).
+		Where("article_url = '' OR article_url = ? OR article_url_import_batch_id <> ''", articleURL).
+		Updates(map[string]any{"article_url": articleURL, "article_url_import_batch_id": ""}).Error
 }
 
 func newWechatPublicationRepository(db *gorm.DB) WechatPublicationRepository {
@@ -268,21 +303,22 @@ func (r *wechatPublicationRepository) TransitionToPublished(ctx context.Context,
 		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
 			Where("id = ? AND status = ? AND updated_at = ?", publication.ID, expectedStatus, expectedUpdatedAt).
 			Updates(map[string]any{
-				"status":                  publication.Status,
-				"source":                  publication.Source,
-				"msg_id":                  publication.MsgID,
-				"article_id":              publication.ArticleID,
-				"article_url":             publication.ArticleURL,
-				"article_index":           publication.ArticleIndex,
-				"wechat_status_code":      publication.WechatStatusCode,
-				"published_at":            publication.PublishedAt,
-				"next_check_at":           publication.NextCheckAt,
-				"last_checked_at":         publication.LastCheckedAt,
-				"check_attempts":          publication.CheckAttempts,
-				"last_error":              publication.LastError,
-				"candidates":              publication.Candidates,
-				"manual_publish_required": publication.ManualPublishRequired,
-				"analytics_status":        publication.AnalyticsStatus,
+				"status":                      publication.Status,
+				"source":                      publication.Source,
+				"msg_id":                      publication.MsgID,
+				"article_id":                  publication.ArticleID,
+				"article_url":                 publication.ArticleURL,
+				"article_url_import_batch_id": "",
+				"article_index":               publication.ArticleIndex,
+				"wechat_status_code":          publication.WechatStatusCode,
+				"published_at":                publication.PublishedAt,
+				"next_check_at":               publication.NextCheckAt,
+				"last_checked_at":             publication.LastCheckedAt,
+				"check_attempts":              publication.CheckAttempts,
+				"last_error":                  publication.LastError,
+				"candidates":                  publication.Candidates,
+				"manual_publish_required":     publication.ManualPublishRequired,
+				"analytics_status":            publication.AnalyticsStatus,
 			})
 	})
 	return rows == 1, err
@@ -496,4 +532,8 @@ func (r *wechatPublicationRepository) UpdateClaimed(ctx context.Context, publica
 		Where("id = ? AND claim_token = ? AND status = ?", publication.ID, token, model.WechatPublicationStatusPublishSubmitting).
 		Updates(updates)
 	return result.RowsAffected == 1, result.Error
+}
+
+func (r *wechatPublicationRepository) SetAnalyticsStatus(ctx context.Context, id, status string) error {
+	return r.db.WithContext(ctx).Model(&model.WechatPublication{}).Where("id = ?", id).Update("analytics_status", status).Error
 }

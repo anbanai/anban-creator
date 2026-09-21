@@ -14,6 +14,7 @@ import (
 )
 
 type WechatAnalyticsImportAPI interface {
+	Revoke(context.Context, string, string, string) (*service.WechatAnalyticsImportSummary, error)
 	Preview(context.Context, service.WechatAnalyticsImportRequest) (*service.WechatAnalyticsImportPreview, error)
 	Import(context.Context, service.WechatAnalyticsImportRequest) (*service.WechatAnalyticsImportSummary, error)
 	ListBatches(context.Context, string, string, int, int) ([]*model.WechatAnalyticsImportBatch, int64, error)
@@ -192,6 +193,9 @@ func (h *WechatAnalyticsImportHandler) respond(c fiber.Ctx, value any, err error
 	if err == nil {
 		return Success(c, value)
 	}
+	if errors.Is(err, service.ErrAnalyticsImportRevoked) {
+		return Error(c, fiber.StatusConflict, err.Error())
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return Error(c, fiber.StatusNotFound, "not found")
 	}
@@ -202,4 +206,21 @@ func (h *WechatAnalyticsImportHandler) respond(c fiber.Ctx, value any, err error
 		h.logger.Error().Err(err).Msg("WeChat analytics import request failed")
 	}
 	return Error(c, fiber.StatusBadRequest, err.Error())
+}
+
+func (h *WechatAnalyticsImportHandler) Revoke(c fiber.Ctx) error {
+	projectID, err := validateUUIDParam(c, "id")
+	if err != nil || projectID == "" {
+		return err
+	}
+	batchID, err := validateUUIDParam(c, "batchId")
+	if err != nil || batchID == "" {
+		return err
+	}
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	result, err := h.service.Revoke(c.Context(), userID, projectID, batchID)
+	return h.respond(c, result, err)
 }

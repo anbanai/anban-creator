@@ -89,7 +89,9 @@ func (r *wechatTrackingRepository) TryClaimDailyFetch(ctx context.Context, id st
 }
 
 func (r *wechatTrackingRepository) Update(ctx context.Context, tracking *model.WechatArticleTracking) error {
-	return r.db.WithContext(ctx).Save(tracking).Error
+	// Capture/recovery updates must not restore an identity revoked while a
+	// provider request was in flight. URL writes belong to publication/import binding.
+	return r.db.WithContext(ctx).Omit("ArticleURL", "ArticleURLImportBatchID").Save(tracking).Error
 }
 
 type wechatMetricSnapshotRepository struct{ db *gorm.DB }

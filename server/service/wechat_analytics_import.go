@@ -133,46 +133,49 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 		ParserVersion: WechatAnalyticsImportParserVersion, Status: model.WechatAnalyticsImportBatchProcessing,
 		TotalRows: len(parsed.Rows),
 	}
-	publications, err := s.repo.WechatPublications().ListByProject(ctx, project.ID)
-	if err != nil {
-		return nil, fmt.Errorf("list WeChat publications: %w", err)
-	}
 	rows := make([]*model.WechatAnalyticsImportRow, 0, len(parsed.Rows))
-	for _, parsedRow := range parsed.Rows {
-		row := &model.WechatAnalyticsImportRow{
-			ID: uuid.NewString(), BatchID: batch.ID, ProjectID: project.ID, SourceRow: parsedRow.SourceRow,
-			RawData: marshalWechatRaw(parsedRow), Source: parsedRow.Source, Title: parsedRow.Title,
-			NormalizedTitle: parsedRow.NormalizedTitle, PublishedDate: parsedRow.PublishedDate,
-			ArticleURL: parsedRow.ArticleURL, ReadUsers: parsedRow.ReadUsers, ShareUsers: parsedRow.ShareUsers,
-			ReadToFollowUsers: parsedRow.ReadToFollowUsers, DeliveredUsers: parsedRow.DeliveredUsers,
-			DeliveryCompletionRate: parsedRow.DeliveryCompletionRate, ReadCompletionRate: parsedRow.ReadCompletionRate,
-			ParseError: parsedRow.ParseError, MatchStatus: model.WechatAnalyticsImportRowUnmatched,
-		}
-		if parsedRow.ParseError != "" {
-			row.MatchStatus = model.WechatAnalyticsImportRowInvalid
-			batch.InvalidRows++
-		} else {
-			match, ambiguous := matchWechatAnalyticsPublication(parsedRow, publications)
-			switch {
-			case match != nil:
-				row.PublicationID = match.ID
-				row.MatchStatus = model.WechatAnalyticsImportRowMatched
-				batch.MatchedRows++
-			case ambiguous:
-				row.MatchStatus = model.WechatAnalyticsImportRowNeedsReview
-				batch.ReviewRows++
-			default:
-				batch.UnmatchedRows++
-			}
-		}
-		rows = append(rows, row)
-	}
-	if batch.ReviewRows > 0 || batch.UnmatchedRows > 0 || batch.InvalidRows > 0 {
-		batch.Status = model.WechatAnalyticsImportBatchNeedsReview
-	} else {
-		batch.Status = model.WechatAnalyticsImportBatchCompleted
-	}
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.WechatAnalyticsImports().LockProject(ctx, project.ID); err != nil {
+			return err
+		}
+		publications, err := tx.WechatPublications().ListByProject(ctx, project.ID)
+		if err != nil {
+			return fmt.Errorf("list WeChat publications: %w", err)
+		}
+		for _, parsedRow := range parsed.Rows {
+			row := &model.WechatAnalyticsImportRow{
+				ID: uuid.NewString(), BatchID: batch.ID, ProjectID: project.ID, SourceRow: parsedRow.SourceRow,
+				RawData: marshalWechatRaw(parsedRow), Source: parsedRow.Source, Title: parsedRow.Title,
+				NormalizedTitle: parsedRow.NormalizedTitle, PublishedDate: parsedRow.PublishedDate,
+				ArticleURL: parsedRow.ArticleURL, ReadUsers: parsedRow.ReadUsers, ShareUsers: parsedRow.ShareUsers,
+				ReadToFollowUsers: parsedRow.ReadToFollowUsers, DeliveredUsers: parsedRow.DeliveredUsers,
+				DeliveryCompletionRate: parsedRow.DeliveryCompletionRate, ReadCompletionRate: parsedRow.ReadCompletionRate,
+				ParseError: parsedRow.ParseError, MatchStatus: model.WechatAnalyticsImportRowUnmatched,
+			}
+			if parsedRow.ParseError != "" {
+				row.MatchStatus = model.WechatAnalyticsImportRowInvalid
+				batch.InvalidRows++
+			} else {
+				match, ambiguous := matchWechatAnalyticsPublication(parsedRow, publications)
+				switch {
+				case match != nil:
+					row.PublicationID = match.ID
+					row.MatchStatus = model.WechatAnalyticsImportRowMatched
+					batch.MatchedRows++
+				case ambiguous:
+					row.MatchStatus = model.WechatAnalyticsImportRowNeedsReview
+					batch.ReviewRows++
+				default:
+					batch.UnmatchedRows++
+				}
+			}
+			rows = append(rows, row)
+		}
+		if batch.ReviewRows > 0 || batch.UnmatchedRows > 0 || batch.InvalidRows > 0 {
+			batch.Status = model.WechatAnalyticsImportBatchNeedsReview
+		} else {
+			batch.Status = model.WechatAnalyticsImportBatchCompleted
+		}
 		if err := tx.WechatAnalyticsImports().CreateBatch(ctx, batch); err != nil {
 			return err
 		}
@@ -186,7 +189,7 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 			if err := tx.WechatAnalyticsImports().CreateSnapshot(ctx, snapshotFromWechatImport(batch, row, now)); err != nil {
 				return err
 			}
-			if err := tx.WechatPublications().RecordImportedAnalytics(ctx, project.ID, row.PublicationID, row.ArticleURL); err != nil {
+			if err := tx.WechatPublications().RecordImportedAnalytics(ctx, project.ID, row.PublicationID, batch.ID, row.ArticleURL); err != nil {
 				return err
 			}
 		}
@@ -428,6 +431,20 @@ func (s *WechatAnalyticsImportService) Resolve(ctx context.Context, userID, proj
 	}
 	now := s.now()
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if err := tx.WechatAnalyticsImports().LockProject(ctx, projectID); err != nil {
+			return err
+		}
+		if err := tx.WechatAnalyticsImports().LockBatch(ctx, projectID, batchID); err != nil {
+			return err
+		}
+		locked, err := tx.WechatAnalyticsImports().FindBatchByID(ctx, projectID, batchID)
+		if err != nil {
+			return err
+		}
+		if locked.RevokedAt != nil {
+			return ErrAnalyticsImportRevoked
+		}
+		batch = locked
 		for _, action := range actions {
 			row, findErr := tx.WechatAnalyticsImports().FindRowByID(ctx, projectID, batchID, action.RowID)
 			if findErr != nil {
@@ -456,7 +473,7 @@ func (s *WechatAnalyticsImportService) Resolve(ctx context.Context, userID, proj
 				if err := tx.WechatAnalyticsImports().CreateSnapshot(ctx, snapshotFromWechatImport(batch, row, now)); err != nil {
 					return err
 				}
-				if err := tx.WechatPublications().RecordImportedAnalytics(ctx, projectID, row.PublicationID, normalizeWechatArticleURL(row.ArticleURL)); err != nil {
+				if err := tx.WechatPublications().RecordImportedAnalytics(ctx, projectID, row.PublicationID, batch.ID, normalizeWechatArticleURL(row.ArticleURL)); err != nil {
 					return err
 				}
 			}

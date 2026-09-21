@@ -291,6 +291,7 @@ type SeednoteMetricSnapshotRepository interface {
 }
 
 type SeednoteImportRepository interface {
+	LockBatch(ctx context.Context, projectID, id string) error
 	CreateBatch(ctx context.Context, batch *model.SeednoteImportBatch) error
 	FindBatchByID(ctx context.Context, projectID, id string) (*model.SeednoteImportBatch, error)
 	ListBatches(ctx context.Context, projectID string, offset, limit int) ([]*model.SeednoteImportBatch, int64, error)
@@ -335,7 +336,10 @@ type WechatTrackingRepository interface {
 
 // WechatPublicationRepository persists the one-per-task WeChat lifecycle.
 type WechatPublicationRepository interface {
-	RecordImportedAnalytics(ctx context.Context, projectID, id, articleURL string) error
+	SetAnalyticsStatus(ctx context.Context, id, status string) error
+	RecordImportedAnalytics(ctx context.Context, projectID, id, batchID, articleURL string) error
+	RevokeImportedAnalytics(ctx context.Context, projectID, id, batchID, replacementURL, replacementBatchID, analyticsStatus string) error
+	ConfirmArticleURL(ctx context.Context, projectID, id, articleURL string) error
 	Create(ctx context.Context, publication *model.WechatPublication) error
 	FindByID(ctx context.Context, id string) (*model.WechatPublication, error)
 	FindByTaskID(ctx context.Context, taskID string) (*model.WechatPublication, error)
@@ -377,6 +381,8 @@ type WechatMetricSnapshotRepository interface {
 }
 
 type WechatAnalyticsImportRepository interface {
+	LockProject(ctx context.Context, projectID string) error
+	LockBatch(ctx context.Context, projectID, id string) error
 	CreateBatch(ctx context.Context, batch *model.WechatAnalyticsImportBatch) error
 	FindBatchByID(ctx context.Context, projectID, id string) (*model.WechatAnalyticsImportBatch, error)
 	FindBatchByIDAnyProject(ctx context.Context, id string) (*model.WechatAnalyticsImportBatch, error)

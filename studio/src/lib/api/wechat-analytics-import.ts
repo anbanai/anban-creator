@@ -18,6 +18,8 @@ export const wechatAnalyticsImportApi = {
     unwrap<{ items: WechatAnalyticsImportBatch[]; total: number }>(http.get(`/projects/${projectId}/wechat-analytics/imports`)),
   getBatch: (projectId: string, batchId: string) =>
     unwrap<WechatAnalyticsImportSummary>(http.get(`/projects/${projectId}/wechat-analytics/imports/${batchId}`)),
+  revoke: (projectId: string, batchId: string) =>
+    unwrap<WechatAnalyticsImportSummary>(http.post(`/projects/${projectId}/wechat-analytics/imports/${batchId}/revoke`)),
   resolve: (projectId: string, batchId: string, actions: Array<{ row_id: string; action: string; publication_id?: string }>) =>
     unwrap<WechatAnalyticsImportSummary>(http.post(`/projects/${projectId}/wechat-analytics/imports/${batchId}/resolve`, { actions })),
   overview: (projectId: string) =>

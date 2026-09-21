@@ -120,10 +120,7 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 			if updateErr := s.repo.WechatTrackings().Update(ctx, tracking); updateErr != nil {
 				return updateErr
 			}
-			if publication, findErr := s.repo.WechatPublications().FindByID(ctx, tracking.PublicationID); findErr == nil {
-				publication.AnalyticsStatus = "unsupported"
-				_ = s.repo.WechatPublications().Update(ctx, publication)
-			}
+			_ = s.repo.WechatPublications().SetAnalyticsStatus(ctx, tracking.PublicationID, "unsupported")
 			nowChecked := now
 			_ = s.repo.WechatCapabilities().Upsert(ctx, &model.WechatAccountCapability{ProjectID: tracking.ProjectID, Capability: model.WechatCapabilityDataCubeArticleStats, Status: model.WechatCapabilityDenied, LastCheckedAt: &nowChecked, LastWechatCode: code})
 			return nil
@@ -185,16 +182,11 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 		if err := tx.WechatTrackings().Update(ctx, &updatedTracking); err != nil {
 			return err
 		}
-		publication, err := tx.WechatPublications().FindByID(ctx, tracking.PublicationID)
-		if err != nil {
-			return err
-		}
+		analyticsStatus := "official_fetching"
 		if len(snapshots) > 0 {
-			publication.AnalyticsStatus = "official_available"
-		} else {
-			publication.AnalyticsStatus = "official_fetching"
+			analyticsStatus = "official_available"
 		}
-		if err := tx.WechatPublications().Update(ctx, publication); err != nil {
+		if err := tx.WechatPublications().SetAnalyticsStatus(ctx, tracking.PublicationID, analyticsStatus); err != nil {
 			return err
 		}
 		checkedAt := now

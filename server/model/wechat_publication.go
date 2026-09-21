@@ -58,15 +58,16 @@ type WechatPublication struct {
 	DraftContentFingerprint string `gorm:"type:char(64);not null;default:'';index" json:"draft_content_fingerprint,omitempty"`
 	DraftRequestFingerprint string `gorm:"type:char(64);not null;default:''" json:"draft_request_fingerprint,omitempty"`
 
-	Source           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_source,source IN ('anban_api','wechat_console')" json:"source"`
-	Status           string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_status,status IN ('drafting','drafted','awaiting_manual_publish','ambiguous','publishing','published','needs_selection','publish_failed','unsupported')" json:"status"`
-	PublishID        string `gorm:"type:varchar(191);not null;default:'';index" json:"publish_id,omitempty"`
-	MsgDataID        string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_data_id,omitempty"`
-	MsgID            string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_id,omitempty"`
-	ArticleID        string `gorm:"type:varchar(191);not null;default:'';index" json:"article_id,omitempty"`
-	ArticleURL       string `gorm:"type:varchar(1000);not null;default:''" json:"article_url,omitempty"`
-	ArticleIndex     int    `gorm:"not null;default:1" json:"article_index"`
-	WechatStatusCode int    `gorm:"not null;default:0" json:"wechat_status_code"`
+	Source                  string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_source,source IN ('anban_api','wechat_console')" json:"source"`
+	Status                  string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_status,status IN ('drafting','drafted','awaiting_manual_publish','ambiguous','publishing','published','needs_selection','publish_failed','unsupported')" json:"status"`
+	PublishID               string `gorm:"type:varchar(191);not null;default:'';index" json:"publish_id,omitempty"`
+	MsgDataID               string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_data_id,omitempty"`
+	MsgID                   string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_id,omitempty"`
+	ArticleID               string `gorm:"type:varchar(191);not null;default:'';index" json:"article_id,omitempty"`
+	ArticleURL              string `gorm:"type:varchar(1000);not null;default:''" json:"article_url,omitempty"`
+	ArticleURLImportBatchID string `gorm:"type:char(36);not null;default:'';index" json:"-"`
+	ArticleIndex            int    `gorm:"not null;default:1" json:"article_index"`
+	WechatStatusCode        int    `gorm:"not null;default:0" json:"wechat_status_code"`
 	// ManualPublishRequired is set when draft creation succeeded but the
 	// account is not allowed to call freepublish/submit (for example 48001).
 	// The publication remains durable and can be completed by binding the URL

@@ -39,6 +39,7 @@ type SeednoteImportBatch struct {
 	ResolvedRows       int        `json:"resolved_rows"`
 	ReviewRows         int        `json:"review_rows"`
 	InvalidRows        int        `json:"invalid_rows"`
+	RevokedAt          *time.Time `gorm:"index" json:"revoked_at,omitempty"`
 	ErrorSummary       string     `gorm:"type:text" json:"error_summary,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
