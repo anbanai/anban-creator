@@ -128,7 +128,6 @@ describe('createTaskSchema', () => {
       project_id: 'ch-1',
       type: 'article',
       prompt: '测试主题',
-      use_portrait_reference: true,
     }
 
     expect(createTaskSchema.safeParse({ ...base, article_with_cover: true }).success).toBe(true)
@@ -461,7 +460,6 @@ describe('planSchema', () => {
     const base = {
       type: 'article',
       cron_expr: '0 9 * * 1',
-      use_portrait_reference: true,
     }
 
     expect(planSchema.safeParse({ ...base, article_with_cover: true }).success).toBe(true)

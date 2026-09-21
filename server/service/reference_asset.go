@@ -78,6 +78,19 @@ func projectStyleReferenceAssetID(task *model.Task) string {
 	return strings.TrimSpace(task.ProjectSnapshot.Data().ReferenceImageAssetID)
 }
 
+func projectPortraitReferenceAssetID(task *model.Task) string {
+	if task == nil || task.Type != model.PlatformArticle {
+		return ""
+	}
+	return strings.TrimSpace(task.ProjectSnapshot.Data().PortraitReferenceImageAssetID)
+}
+
+func resolveProjectPortraitReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
+	return resolveOwnedReferenceAsset(ctx, repo, task, projectPortraitReferenceAssetID(task), []string{
+		DirectUploadPurposeProjectPortraitReference,
+	}, "project portrait reference")
+}
+
 func resolveTaskReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
 	return resolveOwnedReferenceAsset(ctx, repo, task, taskReferenceAssetID(task), []string{
 		DirectUploadPurposeTaskReference,

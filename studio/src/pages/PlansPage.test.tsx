@@ -221,7 +221,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
   })
 
-  it('keeps the article plan portrait choice project-owned', async () => {
+  it('automatically supplies the plan project portrait as optional input', async () => {
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
 
@@ -229,9 +229,10 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
     fireEvent.submit(document.getElementById('plan-form')!)
 
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
-      use_portrait_reference: true,
-    })))
+    expect(within(dialog).getByText('已作为输入提供，由 Agent 按内容决定是否用于封面')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('switch', { name: '使用人物图' })).not.toBeInTheDocument()
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalled())
+    expect(vi.mocked(api.plans.create).mock.calls[0][0]).not.toHaveProperty('use_portrait_reference')
   })
 
   it('disables a plan portrait when the project has no configured image', async () => {
@@ -242,7 +243,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(within(dialog).getByRole('switch', { name: '使用人物图' })).toHaveAttribute('aria-disabled', 'true')
+    expect(within(dialog).getByText('项目尚未设置人物参考图')).toBeInTheDocument()
   })
 
   it('creates a plan with the selected server-backed execution profile and exact price', async () => {

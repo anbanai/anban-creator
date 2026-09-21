@@ -836,7 +836,7 @@ export default function ProjectsPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">人物参考</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">封面需要本人出镜时，系统会把这张人物参考图提供给 Agent。</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">自动提供给任务和计划，由 Agent 按内容决定是否用于封面。</p>
                   </div>
                   <ReferenceAssetUpload
                     value={referenceImage ?? null}
@@ -893,7 +893,7 @@ export default function ProjectsPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">默认人物参考</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">公众号封面需要人物出镜时，任务和计划可直接使用这张图。</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">自动提供给任务和计划，由 Agent 按内容决定是否用于封面。</p>
                     </div>
                     <ReferenceAssetUpload
                       value={portraitReferenceImage ?? null}

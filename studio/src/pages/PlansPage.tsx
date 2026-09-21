@@ -49,7 +49,6 @@ import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameter
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
-import { explicitlyRejectsReferenceImages } from '@/lib/image-capability'
 
 function isPlanType(value: string | undefined): value is PlanType {
   return value === 'seednote' || value === 'article' || value === 'montage'
@@ -65,7 +64,6 @@ function planToFormValues(plan: Plan): PlanFormValues {
     image_capability_key: plan.image_capability_key || '',
     image_ratio: normalizeImageRatio(plan.image_ratio),
     skip_reference_image: plan.skip_reference_image || false,
-    use_portrait_reference: plan.use_portrait_reference ?? false,
     input_attachments: plan.input_attachments ?? [],
     agent_input: plan.agent_input ?? {},
     watermark: plan.watermark || false,
@@ -128,7 +126,6 @@ export default function PlansPage() {
       prompt: '',
       image_capability_key: '',
       image_ratio: 'auto',
-      use_portrait_reference: false,
       input_attachments: [],
       agent_input: {},
       has_content_image: true,
@@ -178,7 +175,6 @@ export default function PlansPage() {
 	const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' })
 	const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
 	const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
-	const usePortraitReference = useWatch({ control: form.control, name: 'use_portrait_reference' }) ?? false
 	const isMontagePlan = watchedType === 'montage'
 	const usesImageSettings = true
 	const {
@@ -205,8 +201,6 @@ export default function PlansPage() {
 				? '正在加载图像能力，请稍候。'
 				: imageCapabilityUnavailable
 					? '当前图像能力不可用，请重新选择。'
-					: watchedType === 'article' && usePortraitReference && explicitlyRejectsReferenceImages(selectedImageCapability)
-						? '当前图像能力不支持人物参考，请更换图像能力。'
 					: null
 	const selectedAgentPack = useMemo(
 		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_types?.includes(watchedType)),
@@ -401,7 +395,6 @@ export default function PlansPage() {
       prompt: '',
       image_capability_key: '',
       image_ratio: normalizeImageRatio(selectedIntentProject?.image_ratio),
-      use_portrait_reference: Boolean(selectedIntentProject?.portrait_reference_image),
       input_attachments: [],
       agent_input: {},
       has_content_image: true,
@@ -477,7 +470,6 @@ export default function PlansPage() {
       prompt: '',
       image_capability_key: '',
 		image_ratio: 'auto',
-      use_portrait_reference: false,
       input_attachments: [],
       has_content_image: true,
       has_tail_image: false,
@@ -536,7 +528,6 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      ...(values.type === 'article' ? { use_portrait_reference: values.article_with_cover && values.use_portrait_reference } : {}),
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
@@ -576,7 +567,6 @@ export default function PlansPage() {
         form.setValue('type', nextType, { shouldDirty: true })
         form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
         form.setValue('agent_input', {}, { shouldDirty: true })
-        form.setValue('use_portrait_reference', Boolean(fullProject?.portrait_reference_image), { shouldDirty: true })
         form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
       }}
       ariaLabel={selectedProject ? `项目：${selectedProject.name}` : '项目：未选择'}
@@ -943,9 +933,6 @@ export default function PlansPage() {
                             </div>
                             <Switch aria-label="生成封面图" checked={!!field.value} onCheckedChange={(checked) => {
                               field.onChange(checked)
-                              if (!checked) {
-                                form.setValue('use_portrait_reference', false, { shouldDirty: true })
-                              }
                             }} />
                           </div>
                           <div className="py-2">
@@ -953,23 +940,15 @@ export default function PlansPage() {
                               <div className="flex min-w-0 items-start gap-2">
                                 <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                                 <div className="min-w-0">
-                                  <p className="text-sm font-medium text-foreground">使用人物图</p>
-                                  <p className="mt-0.5 text-xs text-muted-foreground">每次生成封面时使用，不传给正文配图</p>
+                                  <p className="text-sm font-medium text-foreground">人物参考</p>
+                                  <p className="mt-0.5 text-xs text-muted-foreground">每次执行自动提供项目人物参考，由 Agent 判断用途</p>
                                 </div>
                               </div>
-                              <Switch
-                                aria-label="使用人物图"
-                                checked={usePortraitReference}
-                                disabled={!field.value || !selectedProject?.portrait_reference_image}
-                                onCheckedChange={(checked) => {
-                                  form.setValue('use_portrait_reference', checked, { shouldDirty: true, shouldValidate: true })
-                                }}
-                              />
                             </div>
                             {selectedProject?.portrait_reference_image ? (
                               <div className="mt-3 flex items-center gap-3 rounded-md border border-border bg-muted/30 p-2">
                                 <img src={selectedProject.portrait_reference_image.download_url} alt="项目人物参考" className="h-14 w-14 rounded-md border object-cover" />
-                                <span className="text-xs text-muted-foreground">{usePortraitReference ? '已选择项目人物' : '可用于封面的人物'}</span>
+                                <span className="text-xs text-muted-foreground">已作为输入提供，由 Agent 按内容决定是否用于封面</span>
                               </div>
                             ) : (
                               <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed border-border p-2 text-xs text-muted-foreground">

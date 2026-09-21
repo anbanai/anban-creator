@@ -310,63 +310,25 @@ describe('TaskFormDialog', () => {
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
   })
 
-  it('keeps the article portrait opt-in and submits the project reference choice', async () => {
+  it('automatically supplies the configured portrait as optional Agent input', async () => {
     renderDialog()
-
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    const portraitSwitch = await within(dialog).findByRole('switch', { name: '使用人物图' })
-    expect(portraitSwitch).toHaveAttribute('aria-checked', 'true')
-    fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
-      target: { value: '使用作者人物图生成文章封面' },
-    })
+    expect(await within(dialog).findByText('已作为输入提供，由 Agent 按内容决定是否用于封面')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('switch', { name: '使用人物图' })).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('switch', { name: '生成封面图' }))
+    expect(within(dialog).getByAltText('项目人物参考')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), { target: { value: '写文章' } })
     fireEvent.submit(document.getElementById('task-create-form')!)
-
-    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
-      use_portrait_reference: true,
-    })))
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
+    expect(vi.mocked(api.tasks.create).mock.calls[0][0]).not.toHaveProperty('use_portrait_reference')
   })
 
-  it('disables article portrait when the project has no configured image', async () => {
+  it('shows the missing project portrait without requiring one', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, portrait_reference_image: null }])
     renderDialog()
-
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    expect(await within(dialog).findByRole('switch', { name: '使用人物图' })).toHaveAttribute('aria-disabled', 'true')
-  })
-
-  it('clears the article portrait when cover generation is turned off', async () => {
-    renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    const portraitSwitch = await within(dialog).findByRole('switch', { name: '使用人物图' })
-
-    expect(portraitSwitch).toHaveAttribute('aria-checked', 'true')
-    fireEvent.click(within(dialog).getByRole('switch', { name: '生成封面图' }))
-
-    expect(portraitSwitch).toHaveAttribute('aria-disabled', 'true')
-    expect(portraitSwitch).toHaveAttribute('aria-checked', 'false')
-  })
-
-  it('blocks an article portrait when the selected image capability has no reference slots', async () => {
-    vi.mocked(api.imageCapabilities.list).mockResolvedValueOnce({
-      tier: 'pro',
-      default_capability: 'standard',
-      items: [{
-        key: 'standard',
-        display_name: '标准图像',
-        enabled: true,
-        price_available: true,
-        generation_features: { quality_levels: [], size_presets: ['1:1'], default_size: '1:1', max_batch: 1, max_reference_images: 0, supports_reference: true, supports_mask: false, output_formats: ['png'], has_background: false, has_compression: false, watermark: false },
-      }],
-    })
-    renderDialog()
-
-    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    const portraitSwitch = await within(dialog).findByRole('switch', { name: '使用人物图' })
-    fireEvent.click(portraitSwitch)
-    fireEvent.click(portraitSwitch)
-
-    expect(within(dialog).getByText('当前图像能力不支持人物参考，请更换图像能力。')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+    expect(await within(dialog).findByText('项目尚未设置人物参考图')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('switch', { name: '使用人物图' })).not.toBeInTheDocument()
   })
 
   it('在任务创建和克隆时用模板覆盖非空 Prompt 且保留附件', async () => {

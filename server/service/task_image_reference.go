@@ -48,6 +48,16 @@ func (s *TaskService) materializeAuthorizedTaskImageReference(
 	if cleanPath == serveragent.TaskReferenceImagePath {
 		return s.materializeTaskReferenceAsset(ctx, task, maxBytes)
 	}
+	if cleanPath == serveragent.ProjectPortraitReferenceImagePath {
+		asset, err := resolveProjectPortraitReferenceAsset(ctx, s.repo, task)
+		if err != nil {
+			return "", nil, err
+		}
+		if asset == nil {
+			return "", nil, errors.New("task has no project portrait reference image")
+		}
+		return s.materializeAuthorizedImageObject(ctx, asset.StorageKey, asset.ContentType, asset.Size, cleanPath, maxBytes)
+	}
 	if cleanPath == serveragent.ProjectStyleReferenceImagePath {
 		if use != taskImageReferenceAnalysis {
 			return "", nil, errors.New("project style reference is prompt-only and cannot be passed to image generation or transforms")
@@ -151,7 +161,7 @@ func (s *TaskService) materializeFrozenImageAttachment(ctx context.Context, task
 
 func (s *TaskService) materializeTaskReferenceAsset(ctx context.Context, task *model.Task, maxBytes int64) (string, func(), error) {
 	assetID := strings.TrimSpace(task.ReferenceImageAssetID)
-	allowed := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment}
+	allowed := []string{DirectUploadPurposeTaskReference, DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeProjectPortraitReference}
 	if assetID == "" {
 		return "", nil, errors.New("task has no direct task reference image")
 	}

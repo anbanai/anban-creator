@@ -121,6 +121,9 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	if hasProjectStyleReference {
 		resolvedProfile["project_style_reference_path"] = serveragent.ProjectStyleReferenceImagePath
 	}
+	if projectPortraitReferenceAssetID(task) != "" {
+		resolvedProfile["project_portrait_reference_path"] = serveragent.ProjectPortraitReferenceImagePath
+	}
 	profile["resolved_profile"] = resolvedProfile
 
 	switch project.Platform {

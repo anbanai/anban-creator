@@ -356,7 +356,6 @@ type CreateManualParams struct {
 	frozenImageCapabilitySnapshot *model.ImageCapabilitySnapshot
 	SkipRefImage                  *bool
 	ReferenceImageAssetID         string
-	UsePortraitReference          *bool
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
@@ -514,12 +513,6 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	taskType := project.Platform
 	effectiveReferenceImageAssetID := p.ReferenceImageAssetID
-	if taskType == model.PlatformArticle && p.UsePortraitReference != nil && *p.UsePortraitReference {
-		effectiveReferenceImageAssetID = project.PortraitReferenceImageAssetID
-		if effectiveReferenceImageAssetID == "" {
-			return nil, fmt.Errorf("公众号项目未配置人物参考图，请先在项目设置中上传")
-		}
-	}
 	if err := s.validateTaskCreationReferences(ctx, p.UserID, effectiveReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
 		return nil, err
 	}
@@ -972,12 +965,6 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
 	}
 	effectiveReferenceImageAssetID := plan.ReferenceImageAssetID
-	if taskType == model.PlatformArticle && plan.UsePortraitReference {
-		if project == nil || project.PortraitReferenceImageAssetID == "" {
-			return nil, fmt.Errorf("公众号项目未配置人物参考图，请先在项目设置中上传")
-		}
-		effectiveReferenceImageAssetID = project.PortraitReferenceImageAssetID
-	}
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, effectiveReferenceImageAssetID, project, nil); err != nil {
 		return nil, err
 	}

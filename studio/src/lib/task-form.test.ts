@@ -728,52 +728,10 @@ describe('task form mapping', () => {
     })
   })
 
-  it('submits an article portrait only when the portrait parameter is enabled', () => {
-    const enabled = {
-      ...createTaskFormDefaults(project({
-        platform: 'article',
-        portrait_reference_image: {
-          asset_id: '11111111-1111-4111-8111-111111111111',
-          file_name: 'portrait.png',
-          content_type: 'image/png',
-          size: 8,
-          download_url: 'https://cdn.example/portrait.png',
-          download_expires_at: '2026-09-13T12:00:00Z',
-        },
-      })),
-      use_portrait_reference: true,
-    }
-    const disabled = {
-      ...enabled,
-      use_portrait_reference: false,
-    }
-
-    expect(taskFormValuesToRequest(enabled).use_portrait_reference).toBe(true)
-    expect(taskFormValuesToRequest(disabled).use_portrait_reference).toBe(false)
-  })
-
-  it('does not restore or submit an article portrait when cover generation is disabled', () => {
-    const reference = { asset_id: '11111111-1111-4111-8111-111111111111' } as const
-    const cloned = cloneTaskFormDefaults(task({
-      type: 'article',
-      article_with_cover: false,
-      reference_image: {
-        ...reference,
-        file_name: 'portrait.png',
-        content_type: 'image/png',
-        size: 8,
-        download_url: 'https://cdn.example/portrait.png',
-        download_expires_at: '2026-09-13T12:00:00Z',
-      },
-    }))
-    const request = taskFormValuesToRequest({
-      ...createTaskFormDefaults(project({ platform: 'article' })),
-      article_with_cover: false,
-      use_portrait_reference: true,
-    })
-
-    expect(cloned.use_portrait_reference).toBe(false)
-    expect(request.use_portrait_reference).toBe(false)
+  it('leaves project portrait inheritance to the server without an opt-in parameter', () => {
+    const values = createTaskFormDefaults(project({ platform: 'article' }))
+    expect(taskFormValuesToRequest(values)).not.toHaveProperty('use_portrait_reference')
+    expect(taskFormValuesToRequest({ ...values, article_with_cover: false })).not.toHaveProperty('use_portrait_reference')
   })
 
   it('keeps a cloned article portrait out of general input attachments', () => {
@@ -792,7 +750,6 @@ describe('task form mapping', () => {
       },
     }))
 
-    expect(cloned.use_portrait_reference).toBe(true)
     expect(cloned.reference_image).toEqual({ asset_id: '11111111-1111-4111-8111-111111111111' })
     expect(cloned.input_attachments).toEqual([{ type: 'document', key: 'brief', role: 'brief' }])
   })

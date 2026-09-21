@@ -19,7 +19,6 @@ import (
 var (
 	ErrUnsupportedPlanPlatform = errors.New("plans are not supported for this project platform")
 	ErrPlanUpdateConflict      = errors.New("plan changed concurrently")
-	ErrPlanPortraitReference   = errors.New("公众号项目未配置人物参考图，请先在项目设置中上传")
 )
 
 // PlanService handles plan CRUD and lifecycle operations.
@@ -83,7 +82,6 @@ type CreatePlanParams struct {
 	ImageRatio            string
 	SkipReferenceImage    *bool
 	ReferenceImageAssetID string
-	UsePortraitReference  bool
 	Watermark             *bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to plan model defaults (content on, tail off);
@@ -133,11 +131,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		return nil, err
 	}
 	p.ExecutionProfile = profile.ID
-	if p.UsePortraitReference && project.Platform == model.PlatformArticle {
-		if project.PortraitReferenceImageAssetID == "" {
-			return nil, ErrPlanPortraitReference
-		}
-	}
 	if p.ReferenceImageAssetID != "" {
 		if s.referenceAssets == nil {
 			return nil, ErrReferenceAssetUnavailable
@@ -242,7 +235,6 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		ImageCapabilityKey:       effectiveImageCapabilityKey,
 		ImageRatio:               effectiveImageRatio,
 		ReferenceImageAssetID:    p.ReferenceImageAssetID,
-		UsePortraitReference:     p.UsePortraitReference,
 		SkipReferenceImage:       p.SkipReferenceImage != nil && *p.SkipReferenceImage,
 		Watermark:                p.Watermark != nil && *p.Watermark,
 		HasContentImage:          hasContent,
@@ -321,7 +313,6 @@ type UpdatePlanParams struct {
 	ImageRatio               *string
 	SkipReferenceImage       *bool
 	ReferenceImageAssetID    *string
-	UsePortraitReference     *bool
 	Watermark                *bool
 	HasContentImage          *bool
 	HasTailImage             *bool
@@ -396,18 +387,6 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 			}
 		}
 		plan.ReferenceImageAssetID = *p.ReferenceImageAssetID
-	}
-	if p.UsePortraitReference != nil {
-		plan.UsePortraitReference = *p.UsePortraitReference
-		if *p.UsePortraitReference && plan.Type == model.PlatformArticle {
-			project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
-			if err != nil {
-				return nil, fmt.Errorf("find project: %w", err)
-			}
-			if project.PortraitReferenceImageAssetID == "" {
-				return nil, ErrPlanPortraitReference
-			}
-		}
 	}
 	if p.ImageRatio != nil {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)

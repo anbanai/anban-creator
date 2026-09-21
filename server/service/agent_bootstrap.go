@@ -282,6 +282,20 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("resolve reference asset: %w", err)
 	}
 	var files []BootstrapFile
+	portraitAsset, err := resolveProjectPortraitReferenceAsset(ctx, s.repo, task)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project portrait reference: %w", err)
+	}
+	if portraitAsset != nil {
+		signed, err := s.signedReferenceAssetURL(ctx, portraitAsset, credentialDeadline)
+		if err != nil {
+			return nil, fmt.Errorf("sign project portrait reference: %w", err)
+		}
+		files = append(files, BootstrapFile{
+			Path: serveragent.ProjectPortraitReferenceImagePath, DownloadURL: signed, Mode: 0644,
+			ExpectedSize: portraitAsset.Size, MaxBytes: 10 << 20,
+		})
+	}
 	appCfg, err := serveragent.BuildAppConfig(effective, resolver.ResolveStyle(effective, task), s.cfg.ImageAPIConfig, task.ImageRatio, taskReferenceAsset != nil)
 	if err != nil {
 		return nil, fmt.Errorf("build runtime settings: %w", err)

@@ -29,11 +29,12 @@ import (
 const maxReferenceImageBytes int64 = 10 << 20 // 10 MB
 
 const (
-	referenceImageDirName          = ".anban-creator"
-	taskReferenceImageFileName     = "task-reference.png"
-	projectStyleReferenceFileName  = "project-style-reference.png"
-	TaskReferenceImagePath         = referenceImageDirName + "/" + taskReferenceImageFileName
-	ProjectStyleReferenceImagePath = referenceImageDirName + "/" + projectStyleReferenceFileName
+	referenceImageDirName             = ".anban-creator"
+	taskReferenceImageFileName        = "task-reference.png"
+	projectStyleReferenceFileName     = "project-style-reference.png"
+	TaskReferenceImagePath            = referenceImageDirName + "/" + taskReferenceImageFileName
+	ProjectStyleReferenceImagePath    = referenceImageDirName + "/" + projectStyleReferenceFileName
+	ProjectPortraitReferenceImagePath = referenceImageDirName + "/project-portrait-reference.png"
 )
 
 var referenceMaterializeBeforeCommitHook func() error

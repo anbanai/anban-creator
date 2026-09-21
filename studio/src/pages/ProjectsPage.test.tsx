@@ -467,7 +467,7 @@ describe('ProjectsPage', () => {
 
     expect(await screen.findByText('视频默认设置')).toBeInTheDocument()
     expect(screen.getByText('人物参考')).toBeInTheDocument()
-    expect(screen.getByText('封面需要本人出镜时，系统会把这张人物参考图提供给 Agent。')).toBeInTheDocument()
+    expect(screen.getByText('自动提供给任务和计划，由 Agent 按内容决定是否用于封面。')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: 'Launch montage' } })
     fireEvent.click(screen.getByRole('radio', { name: /口播精剪/ }))
     fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '45' } })

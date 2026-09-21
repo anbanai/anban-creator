@@ -31,7 +31,6 @@ type Plan struct {
 	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
 	SkipReferenceImage    bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
-	UsePortraitReference  bool       `gorm:"default:false;not null" json:"use_portrait_reference,omitempty"`
 	Watermark             bool       `gorm:"default:false" json:"watermark,omitempty"`
 	// HasContentImage / HasTailImage are plan-level seednote image composition
 	// flags copied to Task on CreateFromPlan. Cover is always on; content defaults

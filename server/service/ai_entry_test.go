@@ -338,6 +338,11 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 				t.Fatal(err)
 			}
 			project.ReferenceImageAssetID = projectAsset.ID
+			if platform == model.PlatformArticle {
+				portrait := referenceAssetFixture("project-portrait", userID, DirectUploadPurposeProjectPortraitReference)
+				seedReferenceAsset(t, repo, portrait)
+				project.PortraitReferenceImageAssetID = portrait.ID
+			}
 			if err := repo.Projects().Update(ctx, project); err != nil {
 				t.Fatal(err)
 			}

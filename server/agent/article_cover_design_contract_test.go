@@ -87,7 +87,8 @@ func TestArticleCoverDesignDefinesPortraitReferenceContract(t *testing.T) {
 	body := readRepoFile(t, filepath.Join(root, "harness", "skills", "article-cover-design", "references", "portrait-reference.md"))
 
 	for _, want := range []string{
-		"默认关闭",
+		"portrait_decision",
+		"project_portrait_reference_path",
 		".anban-creator/task-reference.png",
 		".anban-creator/project-style-reference.png",
 		"只用于封面",
@@ -127,7 +128,7 @@ func TestArticleAgentWiresPortraitReferenceOnlyIntoCoverStep(t *testing.T) {
 		for _, want := range []string{
 			"task_reference_path",
 			"project_style_reference_path",
-			"人物参考默认关闭",
+			"project_portrait_reference_path",
 			"output/cover-plan.md",
 			"ref_image_paths=$COVER_REFERENCE_PATHS",
 			"正文配图不得使用人物参考图",

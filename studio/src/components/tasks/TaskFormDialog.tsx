@@ -34,7 +34,6 @@ import { cheapestAvailableExecutionProfile } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
 import { createTaskSchema } from '@/lib/schemas'
 import { taskCreationCostPreview } from '@/lib/studio-ux'
-import { explicitlyRejectsReferenceImages } from '@/lib/image-capability'
 import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, taskFormValuesToRequest, type TaskFormDefaults } from '@/lib/task-form'
 import type { CreateTaskRequest, PlatformConfig, Project, Task, TaskType } from '@/types'
 import { TaskComposerParameters } from './TaskComposerParameters'
@@ -169,7 +168,6 @@ export function TaskFormDialog({
   const hasTailImage = useWatch({ control: form.control, name: 'has_tail_image' }) ?? false
   const articleWithCover = useWatch({ control: form.control, name: 'article_with_cover' }) ?? true
   const articleWithContentImages = useWatch({ control: form.control, name: 'article_with_content_images' }) ?? true
-  const usePortraitReference = useWatch({ control: form.control, name: 'use_portrait_reference' }) ?? false
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
@@ -385,8 +383,6 @@ export function TaskFormDialog({
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageCapabilityUnavailable
                 ? { message: '当前图像能力不可用，请重新选择。', href: '' }
-                : watchedType === 'article' && usePortraitReference && explicitlyRejectsReferenceImages(selectedImageCapability)
-                  ? { message: '当前图像能力不支持人物参考，请更换图像能力。', href: '' }
                   : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
                     ? { message: '电商出图需要先上传产品图。', href: '' }
                     : null
@@ -620,9 +616,6 @@ export function TaskFormDialog({
                         </div>
                         <Switch aria-label="生成封面图" checked={articleWithCover} onCheckedChange={(checked) => {
                           setFormValue('article_with_cover', checked)
-                          if (!checked) {
-                            setFormValue('use_portrait_reference', false)
-                          }
                         }} />
                       </div>
                       <div className="py-2">
@@ -630,23 +623,15 @@ export function TaskFormDialog({
                           <div className="flex min-w-0 items-start gap-2">
                             <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                             <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground">使用人物</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">使用项目设置中的默认人物，仅用于封面</p>
+                            <p className="text-sm font-medium text-foreground">人物参考</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">项目人物参考会自动提供给 Agent</p>
                             </div>
                           </div>
-                          <Switch
-                            aria-label="使用人物图"
-                            checked={usePortraitReference}
-                            disabled={!articleWithCover || !selectedProject?.portrait_reference_image}
-                            onCheckedChange={(checked) => {
-                              setFormValue('use_portrait_reference', checked)
-                            }}
-                          />
                         </div>
                         {selectedProject?.portrait_reference_image ? (
                           <div className="mt-3 flex items-center gap-3 rounded-md border border-border bg-muted/30 p-2">
                             <img src={selectedProject.portrait_reference_image.download_url} alt="项目人物参考" className="h-14 w-14 rounded-md border object-cover" />
-                            <span className="text-xs text-muted-foreground">{usePortraitReference ? '已选择项目人物' : '可用于封面的人物'}</span>
+                            <span className="text-xs text-muted-foreground">已作为输入提供，由 Agent 按内容决定是否用于封面</span>
                           </div>
                         ) : (
                           <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed border-border p-2 text-xs text-muted-foreground">
