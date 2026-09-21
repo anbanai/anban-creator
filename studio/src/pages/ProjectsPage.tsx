@@ -5,8 +5,9 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Inbox, Minus } from 'lucide-react'
+import { Plus, Inbox, Minus, CircleHelp } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import QueryErrorState from '@/components/QueryErrorState'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
@@ -763,7 +764,19 @@ export default function ProjectsPage() {
 
               <FormField control={form.control} name="instructions" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>项目定位</FormLabel>
+                  <FormLabel>
+                    <span className="flex items-center gap-1">
+                      项目定位
+                      <Tooltip>
+                        <TooltipTrigger render={<span tabIndex={0} className="inline-flex cursor-help text-muted-foreground" aria-label="关于项目定位"><CircleHelp className="h-3.5 w-3.5" /></span>}>
+                          <CircleHelp className="h-3.5 w-3.5" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          写入 AGENTS.md，Agent 创作时会自动遵循此定位。
+                        </TooltipContent>
+                      </Tooltip>
+                    </span>
+                  </FormLabel>
                   <FormControl>
                     <Textarea
                       placeholder="例如 面向开发者的实用 AI 教程"
