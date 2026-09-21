@@ -4,7 +4,7 @@ import { registeredAgentPackForm } from './agent-pack-renderers'
 
 describe('registeredAgentPackForm', () => {
   it('registers every existing typed business form by key', () => {
-    for (const key of ['article', 'seednote', 'moments', 'ecommerce', 'montage']) {
+    for (const key of ['article', 'seednote', 'moments', 'ecommerce', 'montage', 'hypit']) {
       expect(registeredAgentPackForm(`custom:${key}`)).toBe(key)
     }
   })

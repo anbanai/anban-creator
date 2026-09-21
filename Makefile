@@ -8,6 +8,9 @@ BINDIR      := bin
 AGENT_IMAGE := creator-agent-article:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
+HYPIT_AGENT_IMAGE ?= creator-agent-hypit:latest
+HYPIT_SOURCE_REPO ?= https://github.com/hypit-ai/hypit.git
+HYPIT_SOURCE_REF ?= 5d257c5a50291398d2bca34afb93c22f1ab5c295
 OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git
 OPENMONTAGE_SOURCE_REF ?= 08e2151fa02de28a5d6a312b3d575692bf147ad7
 SERVER_IMAGE := anban-creator-server:latest
@@ -27,9 +30,9 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
+        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
 
-.PHONY: docker-runtime-smoke
+.PHONY: docker-runtime-smoke docker-hypit-smoke
 
 # Default target
 all: server-build
@@ -191,6 +194,16 @@ docker-montage-agent-image:
 		-t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
 
+# Build official source and prepare its tools without modifying upstream code.
+docker-hypit-agent-image:
+	docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-hypit \
+		--build-arg HYPIT_REPO="$(HYPIT_SOURCE_REPO)" \
+		--build-arg HYPIT_REF="$(HYPIT_SOURCE_REF)" \
+		-t $(HYPIT_AGENT_IMAGE) .
+
+docker-hypit-smoke:
+	@deploy/docker/hypit-smoke.sh "$(HYPIT_AGENT_IMAGE)" "$(HYPIT_SOURCE_REF)"
+
 # The script owns its Docker availability check and all isolated smoke builds.
 docker-runtime-smoke:
 	@deploy/docker/runtime-smoke.sh
@@ -225,7 +238,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
+docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-agent-image
@@ -273,6 +286,8 @@ help:
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build independent Seednote workflow image"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
+	@echo "  make docker-hypit-agent-image - Build video replication runtime from official source"
+	@echo "  make docker-hypit-smoke - Verify official runtime and local render without paid generation"
 	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-sidecar-ilink-image - Build latest upstream iLink sidecar image"

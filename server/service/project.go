@@ -87,6 +87,7 @@ type ProjectService struct {
 	logger              *zerolog.Logger
 	templateSvc         *TemplateService
 	memory              ProjectMemoryLifecycle
+	hypitCapabilities   *HypitCapabilityService
 	montageCapabilities *MontageCapabilityService
 	imageAnalyses       *ImageAnalysisService
 }
@@ -130,6 +131,9 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if !validProjectPlatform(ch.Platform) {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
 	}
+	if err := validateHypitProject(ch, s.hypitCapabilities); err != nil {
+		return nil, err
+	}
 	if err := validateProjectMontageDefaults(ch, s.montageCapabilities); err != nil {
 		return nil, err
 	}
@@ -165,7 +169,7 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 		ch.VisualStyleSource = model.ImageAnalysisSourceManual
 	}
 
-	if s.imageAnalyses != nil && ch.Platform != model.PlatformMontage && ch.ReferenceImageAssetID != "" && strings.TrimSpace(ch.VisualStyle) == "" {
+	if s.imageAnalyses != nil && ch.Platform != model.PlatformMontage && ch.Platform != model.PlatformHypit && ch.ReferenceImageAssetID != "" && strings.TrimSpace(ch.VisualStyle) == "" {
 		job, err := s.imageAnalyses.CreateProjectWithJob(ctx, ch)
 		if err != nil {
 			return nil, fmt.Errorf("create project: %w", err)
@@ -367,6 +371,13 @@ func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
 	}
 	if ch.EcommerceDefaultsSet {
 		existing.EcommerceDefaults = ch.EcommerceDefaults
+	}
+	if ch.HypitDefaultsSet {
+		existing.HypitDefaults = ch.HypitDefaults
+		existing.HypitDefaultsSet = true
+	}
+	if err := validateHypitProject(existing, s.hypitCapabilities); err != nil {
+		return err
 	}
 	if ch.MontageDefaultsSet {
 		existing.MontageDefaults = ch.MontageDefaults

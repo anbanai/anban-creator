@@ -140,6 +140,7 @@ type createPlanRequest struct {
 	ArticleWithCover         *bool                   `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
 	MontageInput             *model.MontageInput     `json:"montage_input,omitempty"`
+	HypitInput               *model.HypitInput       `json:"hypit_input,omitempty"`
 	InputAttachments         []model.EntryAttachment `json:"input_attachments,omitempty"`
 	AgentInput               map[string]any          `json:"agent_input,omitempty"`
 }
@@ -159,6 +160,7 @@ type updatePlanRequest struct {
 	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
 	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
+	HypitInput               *model.HypitInput                `json:"hypit_input,omitempty"`
 	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
 	AgentInput               *map[string]any                  `json:"agent_input,omitempty"`
 }
@@ -228,6 +230,13 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 	req.InputAttachments = validatedAttachments
 	if h.repo != nil {
+		if req.HypitInput != nil {
+			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeHypitAsset, hypitAssetURLs(req.HypitInput))
+			if err != nil {
+				return respondUploadSessionFinalizeError(c, h.logger, err)
+			}
+			rewriteHypitAssetURLs(req.HypitInput, rewrites)
+		}
 		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
 			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
@@ -253,6 +262,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		MontageInput:             req.MontageInput,
+		HypitInput:               req.HypitInput,
 		InputAttachments:         req.InputAttachments,
 		AgentInput:               req.AgentInput,
 	})
@@ -264,7 +274,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
-		if errors.Is(err, service.ErrMontageInput) {
+		if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
@@ -430,6 +440,13 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		req.InputAttachments = &validatedAttachments
 	}
 	if h.repo != nil {
+		if model.IsHypitPlatform(existing.Type) {
+			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeHypitAsset, hypitAssetURLs(req.HypitInput))
+			if err != nil {
+				return respondUploadSessionFinalizeError(c, h.logger, err)
+			}
+			rewriteHypitAssetURLs(req.HypitInput, rewrites)
+		}
 		if model.IsMontagePlatform(existing.Type) {
 			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
@@ -454,6 +471,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
 		MontageInput:             req.MontageInput,
+		HypitInput:               req.HypitInput,
 		InputAttachments:         req.InputAttachments,
 		AgentInput:               req.AgentInput,
 	}
@@ -498,7 +516,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 			return Error(c, fiber.StatusConflict, "plan changed concurrently; please retry")
 		}
 		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
-		if errors.Is(err, service.ErrMontageInput) {
+		if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")

@@ -192,3 +192,5 @@ export type {
 
 // Shared input attachments
 export type { InputAttachment, InputAttachmentType } from './input-attachment'
+
+export type { HypitAsset, HypitPreferences, HypitInput, HypitDefaults, HypitLimits, HypitCapabilities } from './hypit'

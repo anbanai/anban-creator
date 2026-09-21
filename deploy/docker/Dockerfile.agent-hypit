@@ -1,0 +1,90 @@
+FROM node:24-bookworm-slim AS builder
+
+WORKDIR /app/anban-agent
+COPY agent-ts/package.json agent-ts/package-lock.json ./
+RUN npm ci
+COPY agent-ts/ ./
+RUN npm run build && npm prune --omit=dev && test -d node_modules/@anthropic-ai/claude-agent-sdk
+
+FROM node:24-bookworm-slim
+
+ARG HYPIT_REPO=https://github.com/hypit-ai/hypit.git
+ARG HYPIT_REF=5d257c5a50291398d2bca34afb93c22f1ab5c295
+ARG PNPM_VERSION=10.33.0
+ARG UV_VERSION=0.10.4
+
+USER root
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl git jq ffmpeg fontconfig fonts-noto-cjk fonts-noto-color-emoji \
+      libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2 \
+      libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1 \
+      libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2 \
+      python3 python3-venv tini; \
+    getent passwd 1000 >/dev/null || { echo >&2 "Node base must provide UID 1000"; exit 1; }; \
+    getent group 1000 >/dev/null || { echo >&2 "Node base must provide GID 1000"; exit 1; }; \
+    install -d -m 0755 -o 1000 -g 1000 /home/node; \
+    install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/hypit
+RUN git init . \
+    && git remote add origin "$HYPIT_REPO" \
+    && git fetch --depth 1 origin "$HYPIT_REF" \
+    && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "$HYPIT_REF" \
+    && printf '%s\n' "$HYPIT_REF" > /opt/hypit/.anban-source-revision \
+    && rm -rf .git \
+    && find . -type f -exec sha256sum {} + > /tmp/hypit-source.sha256 \
+    && mv /tmp/hypit-source.sha256 /opt/hypit/.anban-source-files.sha256
+
+# Provision the exact upstream dependencies and tools once, outside task execution.
+ENV HOME=/home/node
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate \
+    && python3 -m venv /opt/uv \
+    && /opt/uv/bin/pip install --no-cache-dir uv==${UV_VERSION}
+ENV PATH="/opt/uv/bin:${PATH}"
+RUN pnpm install --frozen-lockfile \
+    && pnpm build:public-types \
+    && ln -s /opt/hypit/bin/hypit.mjs /usr/local/bin/hypit \
+    && hypit media prepare-fetch
+# Fetch the upstream-recommended browser with bounded retries. This only provisions
+# Puppeteer's standard cache; the official preparation command validates it below.
+RUN browser_version="$(node -p "require('./packages/provider-hyperframes-local/package.json').hypit.renderBrowser.version")" \
+    && browser_cache="/home/node/.cache/hyperframes/chrome/chrome-headless-shell/linux-${browser_version}" \
+    && curl --fail --location --retry 3 --connect-timeout 20 --max-time 600 \
+      "https://storage.googleapis.com/chrome-for-testing-public/${browser_version}/linux64/chrome-headless-shell-linux64.zip" \
+      --output /tmp/chrome.zip \
+    && python3 -m zipfile -e /tmp/chrome.zip "$browser_cache" \
+    && chmod 0755 "$browser_cache/chrome-headless-shell-linux64/chrome-headless-shell" \
+    && find "$browser_cache" -name chrome_crashpad_handler -exec chmod 0755 {} + \
+    && rm /tmp/chrome.zip
+COPY deploy/docker/hypit-build-profile.json /tmp/runtime-profile.json
+RUN (hypit programs prepare --runtime /tmp/runtime-profile.json --endpoint hyperframes.local || { cat /home/node/.cache/hyperframes/chrome/.hypit-render-program/install.log; exit 1; }) \
+    && hypit --version \
+    && sha256sum --quiet -c /opt/hypit/.anban-source-files.sha256 \
+    && rm -rf /tmp/runtime-profile.json /tmp/.hypit-build /home/node/.cache/uv \
+    && chown -R root:root /opt/hypit /opt/uv \
+    && chmod -R a=rX /opt/hypit /opt/uv \
+    && chown -R 1000:1000 /home/node
+
+COPY --from=builder /app/anban-agent/node_modules /app/anban-agent/node_modules
+COPY --from=builder /app/anban-agent/dist /app/anban-agent/dist
+COPY harness/ /anbanai/
+COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban
+RUN set -eux; \
+    if [ -n "$(find /anbanai -type l -print -quit)" ]; then echo >&2 "/anbanai must not contain symlinks"; exit 1; fi; \
+    chown -R root:root /anbanai /app/anban-agent; \
+    chmod -R a=rX /anbanai /app/anban-agent; \
+    chmod 0755 /usr/local/bin/anban
+
+ENV CLAUDE_PLUGIN_ROOT=/anbanai
+ENV ANBAN_HYPIT_ROOT=/opt/hypit
+ENV HOME=/home/node
+
+USER 1000:1000
+WORKDIR /workspace
+ENTRYPOINT ["tini", "--", "anban"]
+CMD ["job"]

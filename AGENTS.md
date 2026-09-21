@@ -79,6 +79,8 @@ make docker-down
 make docker-agent-image
 make docker-seednote-agent-image
 make docker-montage-agent-image
+make docker-hypit-agent-image
+make docker-hypit-smoke
 make docker-server-image
 ```
 
@@ -88,9 +90,10 @@ the repository root as the build context. Agent profiles use independent
 `Dockerfile.agent-montage` files rather than stages inherited from one business
 image.
 
-The managed runtime is split into three images: `creator-agent-article` for the
+The managed runtime uses four independent images: `creator-agent-article` for the
 minimal Article runtime, `creator-agent-seednote` for the independent Seednote
-workflow, and `creator-agent-montage` for OpenMontage/Remotion/ffmpeg. Seednote
+workflow, `creator-agent-montage` for OpenMontage/Remotion/ffmpeg, and
+`creator-agent-hypit` for video replication from unmodified official Hypit source. Seednote
 Xiaohongshu research flows through authenticated Anban Server MCP tools backed by
 the separately deployed `sidecar-seednote`. Keep the canonical
 plugin tree intact in every image; image selection controls system dependencies,
@@ -100,11 +103,13 @@ Managed execution is server-scheduled and one-shot. Every execution receives a
 fresh container (or Kubernetes Job), and the runtime owns its workspace and
 output. Do not add a persistent Agent service, a shared host workspace mount, or
 Server-side execution of Agent workflow steps. Montage always runs from the
-runtime-provided `/workspace/openmontage` project root.
+runtime-provided `/workspace/openmontage` project root. Video replication keeps
+its official distribution read-only under `/opt/hypit` and its independent
+project at `/workspace/project`; its profile and credentials are Server-configured.
 
 Configure dispatch with `ANBAN_AGENT_EXECUTOR`,
 `ANBAN_AGENT_IMAGE_ARTICLE`, `ANBAN_AGENT_IMAGE_SEEDNOTE`,
-`ANBAN_AGENT_IMAGE_MONTAGE`, and `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`. The
+`ANBAN_AGENT_IMAGE_MONTAGE`, `ANBAN_AGENT_IMAGE_HYPIT`, and `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`. The
 Server never builds a missing runtime image; build or publish all selected
 images before dispatch and prefer immutable digests outside local development.
 The Compose Docker executor requires the Docker daemon socket mounted at

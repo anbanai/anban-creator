@@ -1,3 +1,4 @@
+import { HypitCreationPanel } from '@/components/hypit/HypitCreationPanel'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
@@ -51,9 +52,10 @@ const platformOptions: { value: ProjectPlatform; label: string }[] = [
   { value: 'moments', label: '朋友圈' },
   { value: 'ecommerce', label: '电商出图' },
   { value: 'montage', label: 'Montage' },
+  { value: 'hypit', label: '视频复刻' },
 ]
 
-const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce'])
+const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
 function canViewPlatform(platform: ProjectPlatform, isAdmin: boolean) {
   return isAdmin || !adminOnlyPlatforms.has(platform)
@@ -106,6 +108,7 @@ function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): 
     case 'seednote':
     case 'montage':
       return type
+    case 'hypit':
     case 'moments':
     case 'ecommerce':
       return isAdmin ? type : CHANNEL_FORM_DEFAULTS.platform
@@ -133,6 +136,7 @@ function projectToForm(ch: Project): ProjectFormValues {
     ecommerce_target_platform: ch.ecommerce_defaults?.target_platform || '',
     ecommerce_brand_brief: ch.ecommerce_defaults?.brand_brief || '',
     ecommerce_image_capability_key: ch.ecommerce_defaults?.image_capability_key || '',
+    hypit_defaults: ch.hypit_defaults,
     montage_defaults: {
       ...CHANNEL_FORM_DEFAULTS.montage_defaults,
       ...(ch.montage_defaults || {}),
@@ -185,7 +189,7 @@ export default function ProjectsPage() {
   const isSeednote = selectedPlatform === 'seednote'
   const isMoments = selectedPlatform === 'moments'
 	const isEcommerce = selectedPlatform === 'ecommerce'
-	const isMontage = selectedPlatform === 'montage'
+	const isMontage = selectedPlatform === 'montage' || selectedPlatform === 'hypit'
 	const supportsVisualReference = true
   const profileUrl = useWatch({ control: form.control, name: 'profile_url' })
   const enablePublishing = isWechat
@@ -517,6 +521,7 @@ export default function ProjectsPage() {
         image_capability_key: values.ecommerce_image_capability_key || undefined,
       }
     }
+    if (values.platform === 'hypit') payload.hypit_defaults = values.hypit_defaults
     if (values.platform === 'montage') {
       payload.montage_defaults = {
         default_pipeline: values.montage_defaults?.default_pipeline?.trim() || undefined,
@@ -832,7 +837,7 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
-              {supportsVisualReference && isMontage ? (
+              {supportsVisualReference && selectedPlatform === 'montage' ? (
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">人物参考</p>
@@ -906,7 +911,7 @@ export default function ProjectsPage() {
                 </div>
               )}
 
-			  <FormField control={form.control} name="image_ratio" render={({ field }) => (
+			  {selectedPlatform !== 'hypit' && <FormField control={form.control} name="image_ratio" render={({ field }) => (
 				  <FormItem>
 					<FormLabel>{isMontage ? '默认视频比例' : '默认图像比例'}</FormLabel>
                     <FormControl>
@@ -920,9 +925,9 @@ export default function ProjectsPage() {
 					<FormDescription>{isMontage ? '视频与封面使用同一个比例。' : '选择智能适配时，每个任务可再明确指定，或由创作流程按产物决定。'}</FormDescription>
 					<FormMessage />
 				  </FormItem>
-			  )} />
+			  )} />}
 
-              {isMontage && <MontageProjectDefaultsPanel form={form} onReadyChange={setMontageDefaultsReady} />}
+              {selectedPlatform === 'hypit' ? <HypitCreationPanel form={form} defaults onReadyChange={setMontageDefaultsReady} /> : isMontage && <MontageProjectDefaultsPanel form={form} onReadyChange={setMontageDefaultsReady} />}
 
               {isEcommerce && (
                 <>

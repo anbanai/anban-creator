@@ -40,6 +40,7 @@ export const taskTypeLabelCN: Record<string, string> = {
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
   montage: 'Montage',
+  hypit: '视频复刻',
 }
 
 // --- Content Types ---
@@ -54,6 +55,7 @@ export const contentTypeLabel: Record<string, string> = {
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
   montage: 'Montage',
+  hypit: '视频复刻',
 }
 
 // Pipeline stage → 中文标签。stage 取值来自 server/service/task_progress_stages.go
@@ -123,6 +125,7 @@ export const contentTypeOptions = [
   { value: 'article', label: '公众号文章' },
   { value: 'moments', label: '朋友圈' },
   { value: 'montage', label: 'Montage' },
+  { value: 'hypit', label: '视频复刻' },
   { value: 'ecommerce', label: '电商出图' },
 ]
 
@@ -132,6 +135,7 @@ export const platformLabels: Record<string, string> = {
   moments: '朋友圈',
   ecommerce: '电商出图',
   montage: 'Montage',
+  hypit: '视频复刻',
 }
 
 export const platformDefaultRatio: Record<string, string> = {
@@ -140,6 +144,7 @@ export const platformDefaultRatio: Record<string, string> = {
   moments: '3:4',
   ecommerce: '1:1',
   montage: '9:16',
+  hypit: '9:16',
 }
 
 export const platformRatioLabel: Record<string, string> = {

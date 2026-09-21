@@ -210,6 +210,118 @@
       "digest": "b090cf07dd854b8daf25ddb5b21c0b89e0972f247e6c8ba655c7341678f2bd00"
     },
     {
+      "id": "hypit",
+      "version": "2.0.1",
+      "kind": "managed",
+      "display_name": "视频复刻",
+      "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
+      "agent": {
+        "name": "hypit",
+        "max_turns": 180
+      },
+      "bindings": {
+        "project_platforms": [
+          "hypit"
+        ],
+        "task_types": [
+          "hypit"
+        ]
+      },
+      "runtime": {
+        "profile": "hypit",
+        "adapter": "standard",
+        "max_turns": 180
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task",
+        "plan"
+      ],
+      "features": [
+        "video-replication",
+        "source-assets",
+        "editable-video"
+      ],
+      "billing_operations": {
+        "hypit": "task.hypit"
+      },
+      "artifacts": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
+          "role": "project_manifest",
+          "path": "output/project.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "project_archive",
+          "path": "output/project.zip",
+          "mime_type": "application/zip",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json",
+          "required": true
+        }
+      ],
+      "delivery": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "project_manifest",
+          "path": "output/project.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "project_archive",
+          "path": "output/project.zip",
+          "mime_type": "application/zip"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:hypit"
+      },
+      "digest": "a041f8fc889907d6e985521381baf951e20eaa7bdd5de2584015c947b714cb37"
+    },
+    {
       "id": "live-slicer",
       "version": "2.0.1",
       "kind": "managed",

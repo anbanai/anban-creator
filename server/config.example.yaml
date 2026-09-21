@@ -141,6 +141,40 @@ model_routes:
           has_background: true
           has_compression: true
           watermark: false
+# 默认关闭。内部验证并确认上游许可后才开放。配置原生 provider，不固定平台。
+hypit:
+  enabled: false
+  runtime_profile: {}
+  # 原生配置示例（启用前配置实际 Provider，bindings 可省略以使用官方自动路由）：
+  # runtime_profile:
+  #   format: hypit.runtime-local@1
+  #   credentials:
+  #     env: { use: "@hypit/credential-store-env" }
+  #   endpoints:
+  #     media.local: { use: "@hypit/provider-media-local" }
+  #     hyperframes.local:
+  #       use: "@hypit/provider-hyperframes-local"
+  #       config: { workers: 2, defaultConcurrency: 1, browserGpu: software }
+  #     configured.provider:
+  #       use: "@hypit/provider-hypihub"
+  #       config:
+  #         baseUrl: "https://hypit.ai"
+  #         apiKey: { store: env, key: HYPIT_PROVIDER_TOKEN }
+  #   bindings: { "@hypit/gpt-image@1#gpt-image-2": configured.provider }
+  # 只在执行 bootstrap 中下发；不写入 task snapshot/产物。
+  env: {}
+  # env: { HYPIT_PROVIDER_TOKEN: "${HYPIT_PROVIDER_TOKEN}" }
+  limits:
+    max_duration_seconds: 180
+    max_assets: 20
+    max_asset_bytes: 268435456
+    max_input_bytes: 536870912
+    max_project_bytes: 2147483648
+    max_expanded_bytes: 8589934592
+    max_project_files: 10000
+    max_video_bytes: 536870912
+    timeout_minutes: 90
+
 # Montage 视频工作流配置。
 # 生产建议：
 # - 保持 enabled=true。
@@ -316,6 +350,7 @@ claude:
     article: "${ANBAN_AGENT_IMAGE_ARTICLE}"
     seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"
     montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"
+    hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
   # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
   execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
   # 是否启用 agent 沙箱隔离。生产建议 true。
@@ -380,6 +415,9 @@ claude:
       ecommerce:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
+      hypit:
+        requests: { cpu: "4", memory: "8Gi" }
+        limits: { cpu: "4", memory: "8Gi" }
       montage:
         requests: { cpu: "2", memory: "4Gi" }
         limits: { cpu: "4", memory: "7Gi" }

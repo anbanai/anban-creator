@@ -149,7 +149,7 @@ func (s *TaskService) validateStoredDeliveryObject(ctx context.Context, task *mo
 	if !owned {
 		return fmt.Errorf("%w: %s storage object is outside its task execution namespace", ErrTaskDeliveryObjectInvalid, file.FilePath)
 	}
-	if file.FileSize <= 0 || file.FileSize > maxTaskArtifactUploadBytes {
+	if file.FileSize <= 0 || file.FileSize > taskArtifactByteLimit(task, file.FilePath) {
 		return fmt.Errorf("%w: %s has invalid size %d", ErrTaskDeliveryObjectInvalid, file.FilePath, file.FileSize)
 	}
 	expectedMIME := normalizedMediaType(spec.MIMEType)

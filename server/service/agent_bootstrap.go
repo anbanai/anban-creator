@@ -86,6 +86,7 @@ type AgentBootstrapConfig struct {
 	ImageAPIConfig          *srvconfig.ImageAPIConfig
 	MontageToolPolicy       map[string]srvconfig.MontageToolCapabilityPolicy
 	MontagePipelineDefaults map[string]map[string]any
+	Hypit                   srvconfig.HypitConfig
 	MontageEnv              map[string]string
 	Registry                *AgentProfileRegistry
 }
@@ -276,7 +277,14 @@ func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo reposi
 
 func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *model.TaskExecution, task *model.Task, project *model.Project, workloadDeadline time.Time) (*AgentBootstrapResponse, error) {
 	issuedAt := s.currentTime()
-	credentialDeadline := issuedAt.Add(s.cfg.TokenTTL)
+	tokenTTL := s.cfg.TokenTTL
+	if task != nil && model.IsHypitPlatform(task.Type) {
+		required := time.Duration(readHypitSnapshot(task).Limits.TimeoutMinutes) * time.Minute
+		if tokenTTL < required {
+			tokenTTL = required
+		}
+	}
+	credentialDeadline := issuedAt.Add(tokenTTL)
 	if workloadDeadline.Before(credentialDeadline) {
 		credentialDeadline = workloadDeadline
 	}
@@ -358,6 +366,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, montageFiles...)
+	hypitFiles, err := s.buildHypitFiles(ctx, task, credentialDeadline, workloadDeadline)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, hypitFiles...)
 	recoveryFiles, err := s.buildPublicationRecoveryFiles(ctx, execution, task, credentialDeadline)
 	if err != nil {
 		return nil, err
@@ -368,7 +381,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, recoveryImageFiles...)
-	if err := ValidateBootstrapFiles(files); err != nil {
+	if err := validateBootstrapFilesForTask(files, task); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAgentBootstrapConflict, err)
 	}
 	tokenIssuedAt := s.currentTime()
@@ -579,6 +592,15 @@ func (s *AgentBootstrapService) signedReferenceAssetURL(ctx context.Context, ass
 }
 
 func (s *AgentBootstrapService) montageEnv(task *model.Task) map[string]string {
+	if task != nil && model.IsHypitPlatform(task.Type) {
+		env := map[string]string{}
+		for k, v := range s.cfg.Hypit.Env {
+			if v != "" {
+				env[k] = v
+			}
+		}
+		return env
+	}
 	if task == nil || !model.IsMontagePlatform(task.Type) {
 		return nil
 	}
@@ -828,6 +850,14 @@ func (s *AgentBootstrapService) buildAttachmentFiles(ctx context.Context, execut
 }
 
 func ValidateBootstrapFiles(files []BootstrapFile) error {
+	return validateBootstrapFilesForTask(files, nil)
+}
+func validateBootstrapFilesForTask(files []BootstrapFile, task *model.Task) error {
+	totalLimit := int64(agentBootstrapTotalMaxBytes)
+	if task != nil && model.IsHypitPlatform(task.Type) {
+		l := readHypitSnapshot(task).Limits
+		totalLimit = l.MaxProjectBytes + l.MaxInputBytes + agentBootstrapTotalMaxBytes
+	}
 	seen := make(map[string]struct{}, len(files))
 	totalBytes := int64(0)
 	for i := range files {
@@ -874,11 +904,20 @@ func ValidateBootstrapFiles(files []BootstrapFile) error {
 			if declaredBytes == 0 {
 				declaredBytes = agentBootstrapFileMaxBytes
 			}
-			if declaredBytes > agentBootstrapFileMaxBytes || (file.MaxBytes > 0 && file.ExpectedSize > file.MaxBytes) {
+			fileLimit := int64(agentBootstrapFileMaxBytes)
+			if task != nil && model.IsHypitPlatform(task.Type) {
+				l := readHypitSnapshot(task).Limits
+				if clean == ".anban-creator/project.zip" {
+					fileLimit = l.MaxProjectBytes
+				} else if strings.HasPrefix(clean, "project/assets/") {
+					fileLimit = l.MaxAssetBytes
+				}
+			}
+			if declaredBytes > fileLimit || (file.MaxBytes > 0 && file.ExpectedSize > file.MaxBytes) {
 				return fmt.Errorf("bootstrap file %q exceeds the runtime file size limit", clean)
 			}
 		}
-		if declaredBytes > agentBootstrapTotalMaxBytes-totalBytes {
+		if declaredBytes > totalLimit-totalBytes {
 			return errors.New("bootstrap files exceed the runtime total size limit")
 		}
 		totalBytes += declaredBytes

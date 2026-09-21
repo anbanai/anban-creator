@@ -154,6 +154,7 @@ services:
       ANBAN_AGENT_IMAGE_ARTICLE: "creator-agent-article:latest"
       ANBAN_AGENT_IMAGE_SEEDNOTE: "creator-agent-seednote:latest"
       ANBAN_AGENT_IMAGE_MONTAGE: "creator-agent-montage:latest"
+      ANBAN_AGENT_IMAGE_HYPIT: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
       ANBAN_AGENT_DOCKER_NETWORK: "creator-runtime-network"
       ANBAN_AGENT_PROJECT_MEMORY_VOLUME: "creator-project-memory"
       ANBAN_SEEDNOTE_BASE_URL: "http://sidecar-seednote:18060"

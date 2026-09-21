@@ -109,8 +109,8 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	if req.Size <= 0 {
 		return nil, taskArtifactInvalidf("file size is required")
 	}
-	if req.Size > maxTaskArtifactUploadBytes {
-		return nil, taskArtifactInvalidf("file size exceeds the %d MB limit", maxTaskArtifactUploadBytes/(1024*1024))
+	if req.Size > taskArtifactByteLimit(task, relPath) {
+		return nil, taskArtifactInvalidf("file size exceeds the %d MB limit", taskArtifactByteLimit(task, relPath)/(1024*1024))
 	}
 	if !validTaskArtifactSHA256(req.SHA256) {
 		return nil, taskArtifactInvalidf("sha256 must be a 64-character hex string")
@@ -194,7 +194,7 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 			taskArtifactSHA256Header: req.SHA256,
 		},
 		ExpiresAt: &expiresAt,
-		MaxSize:   maxTaskArtifactUploadBytes,
+		MaxSize:   taskArtifactByteLimit(task, relPath),
 	}, nil
 }
 
@@ -224,8 +224,8 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		return err
 	}
 	for _, file := range req.Files {
-		if file.Size > maxTaskArtifactUploadBytes {
-			return taskArtifactInvalidf("task artifact %s exceeds the %d MB limit", strings.TrimSpace(file.RelativePath), maxTaskArtifactUploadBytes/(1024*1024))
+		if file.Size > taskArtifactByteLimit(task, strings.TrimSpace(file.RelativePath)) {
+			return taskArtifactInvalidf("task artifact %s exceeds the %d MB limit", strings.TrimSpace(file.RelativePath), taskArtifactByteLimit(task, strings.TrimSpace(file.RelativePath))/(1024*1024))
 		}
 	}
 	artifactStore, ok := s.store.(taskArtifactPromotionStorage)
@@ -264,8 +264,8 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 		if file.Size <= 0 {
 			return taskArtifactInvalidf("file size is required for %s", relPath)
 		}
-		if file.Size > maxTaskArtifactUploadBytes {
-			return taskArtifactInvalidf("task artifact %s exceeds the %d MB limit", relPath, maxTaskArtifactUploadBytes/(1024*1024))
+		if file.Size > taskArtifactByteLimit(task, strings.TrimSpace(file.RelativePath)) {
+			return taskArtifactInvalidf("task artifact %s exceeds the %d MB limit", relPath, taskArtifactByteLimit(task, relPath)/(1024*1024))
 		}
 		hash := strings.ToLower(strings.TrimSpace(file.SHA256))
 		finalKey := buildTaskArtifactFinalStorageKey(task, executionID, hash, relPath)

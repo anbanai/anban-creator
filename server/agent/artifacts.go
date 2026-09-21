@@ -107,6 +107,15 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		result.Valid = true
 		return result
 	}
+	if task != nil && model.IsHypitPlatform(task.Type) {
+		for _, p := range []string{"output/final.mp4", "output/cover.png", "output/project.json", "output/project.zip", "output/delivery-manifest.json", "output/quality-report.json"} {
+			if !files[p] {
+				result.Missing = append(result.Missing, p)
+			}
+		}
+		result.Valid = len(result.Missing) == 0
+		return result
+	}
 	if task != nil && model.IsMontagePlatform(task.Type) {
 		var missing []string
 		if !files["final.mp4"] && !files["final_video.mp4"] && !files["final-video.mp4"] {

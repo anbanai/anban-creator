@@ -84,6 +84,7 @@ const (
 	PlatformMoments   = "moments"
 	PlatformEcommerce = "ecommerce"
 	PlatformMontage   = "montage"
+	PlatformHypit     = "hypit"
 )
 
 // IsProjectPlatform reports whether value is an explicitly implemented
@@ -91,7 +92,7 @@ const (
 // identities, but must not create new business identities by themselves.
 func IsProjectPlatform(value string) bool {
 	switch value {
-	case PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage:
+	case PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformHypit:
 		return true
 	default:
 		return false
@@ -101,7 +102,7 @@ func IsProjectPlatform(value string) bool {
 // IsAdminOnlyProjectPlatform reports project types that are still in internal validation.
 func IsAdminOnlyProjectPlatform(value string) bool {
 	switch value {
-	case PlatformMoments, PlatformEcommerce:
+	case PlatformMoments, PlatformEcommerce, PlatformHypit:
 		return true
 	default:
 		return false

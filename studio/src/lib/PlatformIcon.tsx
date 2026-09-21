@@ -9,6 +9,7 @@ export const platformIcon: Record<TaskType, LucideIcon> = {
   ecommerce: ShoppingBag,
   viral_analysis: BookOpen,
   montage: Clapperboard,
+  hypit: Clapperboard,
 }
 
 export const platformIconColor: Record<TaskType, string> = {
@@ -18,6 +19,7 @@ export const platformIconColor: Record<TaskType, string> = {
   ecommerce: 'text-[#FF6A00]',
   viral_analysis: 'text-[#7C3AED]',
   montage: 'text-[#9333EA]',
+  hypit: 'text-[#9333EA]',
 }
 
 export const platformBorderColor: Record<string, string> = {
@@ -27,6 +29,7 @@ export const platformBorderColor: Record<string, string> = {
   ecommerce: 'border-l-[#FF6A00]',
   viral_analysis: 'border-l-[#7C3AED]',
   montage: 'border-l-[#9333EA]',
+  hypit: 'border-l-[#9333EA]',
 }
 
 export const platformHoverBorderColor: Record<string, string> = {
@@ -36,6 +39,7 @@ export const platformHoverBorderColor: Record<string, string> = {
   ecommerce: 'hover:border-l-[#FF6A00]/50',
   viral_analysis: 'hover:border-l-[#7C3AED]/50',
   montage: 'hover:border-l-[#9333EA]/50',
+  hypit: 'hover:border-l-[#9333EA]/50',
 }
 
 export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -45,6 +49,7 @@ export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'des
   ecommerce: 'default',
   viral_analysis: 'outline',
   montage: 'outline',
+  hypit: 'outline',
 }
 
 export const platformBgColor: Record<string, string> = {
@@ -54,6 +59,7 @@ export const platformBgColor: Record<string, string> = {
   ecommerce: 'bg-[#FF6A00]/10',
   viral_analysis: 'bg-[#7C3AED]/10',
   montage: 'bg-[#9333EA]/10',
+  hypit: 'bg-[#9333EA]/10',
 }
 
 export function renderPlatformIcon(type: string) {

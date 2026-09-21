@@ -26,6 +26,8 @@ type TaskArtifactStreamRequest struct {
 	Size         int64
 	SHA256       string
 	Body         io.Reader
+	// SetReadDeadline is a transport hook invoked only after task/execution/path/size validation.
+	SetReadDeadline func(time.Time) error
 }
 
 type TaskArtifactStreamResult struct {
@@ -60,9 +62,6 @@ func (s *TaskService) StreamTaskArtifact(ctx context.Context, taskID, authentica
 	if req.Size <= 0 {
 		return nil, taskArtifactInvalidf("file size is required")
 	}
-	if req.Size > maxTaskArtifactUploadBytes {
-		return nil, taskArtifactInvalidf("file size exceeds the %d MB limit", maxTaskArtifactUploadBytes/(1024*1024))
-	}
 	wantSHA256 := strings.ToLower(strings.TrimSpace(req.SHA256))
 	if !validTaskArtifactSHA256(wantSHA256) {
 		return nil, taskArtifactInvalidf("sha256 must be a 64-character hex string")
@@ -79,6 +78,20 @@ func (s *TaskService) StreamTaskArtifact(ctx context.Context, taskID, authentica
 	relativePath, err := cleanTaskArtifactRelativePath(task, req.RelativePath)
 	if err != nil {
 		return nil, taskArtifactInvalidf("%v", err)
+	}
+	if req.Size > taskArtifactByteLimit(task, relativePath) {
+		return nil, taskArtifactInvalidf("file size exceeds scoped artifact limit")
+	}
+	if model.IsHypitPlatform(task.Type) && (relativePath == "output/project.zip" || relativePath == "output/final.mp4") {
+		boundedCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+		defer cancel()
+		ctx = boundedCtx
+		deadline, _ := ctx.Deadline()
+		if req.SetReadDeadline != nil {
+			if err := req.SetReadDeadline(deadline); err != nil {
+				return nil, fmt.Errorf("%w: set scoped artifact stream deadline", ErrTaskArtifactUnavailable)
+			}
+		}
 	}
 	contentType := normalizeTaskArtifactContentType(req.ContentType, relativePath)
 	attemptID := uuid.NewString()

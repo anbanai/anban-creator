@@ -98,6 +98,7 @@ func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {
 			ChannelsAnalyticsHandler: channelsAnalyticsHandler,
 			TimelineHandler:          timelineHandler,
 			MontageCapabilityHandler: montageCapabilityHandler,
+			HypitCapabilityHandler:   handler.NewHypitCapabilityHandler(service.NewHypitCapabilityService(cfg.Hypit)),
 		}
 	} else {
 		svcs = &Services{

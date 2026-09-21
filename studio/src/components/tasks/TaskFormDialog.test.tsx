@@ -169,6 +169,7 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.imageCapabilities,
         list: vi.fn(),
       },
+      hypitCapabilities: { list: vi.fn() },
       montageCapabilities: {
         ...actual.api.montageCapabilities,
         list: vi.fn(),
@@ -258,6 +259,7 @@ beforeEach(() => {
       { id: 'task.viral-analysis.effective', operation: 'task.viral_analysis', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
       { id: 'task.viral-analysis.balanced', operation: 'task.viral_analysis', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
       { id: 'task.viral-analysis.quality', operation: 'task.viral_analysis', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
+      { id: 'task.hypit.effective', operation: 'task.hypit', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'hypit_artifacts_verified' },
       { id: 'task.montage.effective', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
     ],
   })
@@ -1024,5 +1026,85 @@ describe('TaskFormDialog', () => {
     expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(45)
     expect(screen.queryByText('正文配图')).not.toBeInTheDocument()
     expect(screen.queryByText('任务参考图')).not.toBeInTheDocument()
+  })
+})
+
+
+describe('video replication task integration', () => {
+  const hypitProject = { ...fixtures.montageProject, platform: 'hypit', id: 'hypit-project', hypit_defaults: { preferences: { aspect_ratio: '16:9', duration_seconds: 25 } } } as Project
+  beforeEach(() => {
+    vi.mocked(api.projects.list).mockResolvedValue([hypitProject])
+    vi.mocked(api.hypitCapabilities.list).mockResolvedValue({ enabled: true, configured: true, missing_configuration: [], limits: { max_assets: 20, max_duration_seconds: 180, max_asset_bytes: 100000, max_input_bytes: 200000 } })
+  })
+  it('keeps a valid same-type project switch ready and retains the reference', async () => {
+    const second = { ...hypitProject, id: 'hypit-two', name: '第二复刻项目', hypit_defaults: { preferences: { duration_seconds: 40 } } } as Project
+    vi.mocked(api.projects.list).mockResolvedValue([hypitProject, second])
+    renderDialog({ initialProjectId: hypitProject.id, initialType: 'hypit' })
+    await screen.findByLabelText('参考视频链接')
+    fireEvent.change(screen.getByLabelText('复刻要求'), { target: { value: '保留参考节奏' } })
+    fireEvent.change(screen.getByLabelText('参考视频链接'), { target: { value: 'https://example.com/ref.mp4' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('combobox', { name: /^项目：/ }))
+    fireEvent.click(await screen.findByRole('option', { name: /第二复刻项目/ }))
+    await waitFor(() => expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(40))
+    expect(screen.getByLabelText('参考视频链接')).toHaveValue('https://example.com/ref.mp4')
+    expect(screen.getByRole('button', { name: '创建' })).toBeEnabled()
+  })
+
+  it('blocks paid submission while a selected supplemental upload has failed until removed', async () => {
+    uploadToOSSMock.mockRejectedValueOnce(new Error('补充素材上传失败'))
+    renderDialog({ initialProjectId: hypitProject.id, initialType: 'hypit' })
+    await screen.findByLabelText('参考视频链接')
+    fireEvent.change(screen.getByLabelText('复刻要求'), { target: { value: '使用上传产品' } })
+    fireEvent.change(screen.getByLabelText('参考视频链接'), { target: { value: 'https://example.com/ref.mp4' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.change(screen.getAllByLabelText('添加参考素材')[1], { target: { files: [new File(['product'], 'product.png', { type: 'image/png' })] } })
+    await screen.findByText('补充素材上传失败')
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '删除 product.png' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    expect(api.tasks.create).not.toHaveBeenCalled()
+  })
+
+  it('requires a fresh reference when cloning a failed task without a verified project', async () => {
+    const source = { ...fixtures.sourceTask, type: 'hypit', status: 'failed', project_id: hypitProject.id, hypit_input: { brief: 'old' } } as Task
+    renderDialog({ mode: 'clone', sourceTask: source, initialProjectId: undefined })
+    await screen.findByLabelText('参考视频链接')
+    await screen.findByText('请上传参考视频或填写参考视频链接')
+    expect(screen.getByRole('button', { name: '再次改编' })).toBeDisabled()
+  })
+
+  it('creates from video link and inherited defaults without image capability controls', async () => {
+    renderDialog({ initialProjectId: hypitProject.id, initialType: 'hypit' })
+    await screen.findByLabelText('参考视频链接')
+    fireEvent.change(screen.getByLabelText('复刻要求'), { target: { value: '替换为新品，保留镜头节奏' } })
+    fireEvent.change(screen.getByLabelText('参考视频链接'), { target: { value: 'https://example.com/reference.mp4' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'hypit', hypit_input: { brief: '替换为新品，保留镜头节奏', reference: { type: 'video_url', url: 'https://example.com/reference.mp4' }, source_assets: [], preferences: { aspect_ratio: '16:9', duration_seconds: 25 } } })))
+  })
+  it('uses frozen source capabilities when global duration limits have been reduced', async () => {
+    vi.mocked(api.hypitCapabilities.list).mockImplementation(async (sourceTaskId?: string) => ({ enabled: true, configured: true, missing_configuration: [], limits: { max_assets: 20, max_duration_seconds: sourceTaskId ? 180 : 60, max_asset_bytes: 100000, max_input_bytes: 200000 } }))
+    const source = { ...fixtures.sourceTask, type: 'hypit', project_id: hypitProject.id, hypit_input: { brief: 'old', preferences: { duration_seconds: 180 } } } as Task
+    renderDialog({ mode: 'clone', sourceTask: source, initialProjectId: undefined })
+    await screen.findByLabelText('目标时长（秒）')
+    await waitFor(() => expect(screen.getByRole('button', { name: '再次改编' })).toBeEnabled())
+    expect(api.hypitCapabilities.list).toHaveBeenCalledWith(source.id)
+    expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(180)
+    fireEvent.change(screen.getByLabelText('目标时长（秒）'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '再次改编' }))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith(source.id, expect.objectContaining({ hypit_input: expect.objectContaining({ preferences: { duration_seconds: 0 } }) })))
+  })
+
+  it('remixes using existing clone lineage with a new brief and no reference', async () => {
+    const source = { ...fixtures.sourceTask, type: 'hypit', project_id: hypitProject.id, hypit_input: { brief: 'old' } } as Task
+    renderDialog({ mode: 'clone', sourceTask: source, initialProjectId: undefined })
+    await screen.findByLabelText('复刻要求')
+    fireEvent.change(screen.getByLabelText('复刻要求'), { target: { value: '改为春节主题' } })
+    const submit = screen.getByRole('button', { name: '再次改编' })
+    await waitFor(() => expect(submit).toBeEnabled())
+    fireEvent.click(submit)
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith(source.id, expect.objectContaining({ hypit_input: expect.objectContaining({ brief: '改为春节主题' }) })))
   })
 })

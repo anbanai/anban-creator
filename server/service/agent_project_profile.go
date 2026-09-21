@@ -65,6 +65,14 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		}
 	}
 
+	if model.IsHypitPlatform(project.Platform) {
+		in := model.HypitInput{}
+		if task != nil {
+			in = task.HypitInput.Data()
+		}
+		p := AgentProjectProfile{"name": project.Name, "platform": project.Platform, "instructions": project.Instructions, "hypit": map[string]any{"defaults": project.HypitDefaults.Data(), "input": in, "workspace_input_file": "input.json", "runtime_profile_file": "runtime-profile.json", "project_root": "/workspace/project", "required_artifacts": []string{"output/final.mp4", "output/cover.png", "output/project.json", "output/project.zip", "output/delivery-manifest.json", "output/quality-report.json"}}}
+		return &p, nil
+	}
 	style := ResolveStyle(project, task)
 	effectiveImageRatio := strings.TrimSpace(project.ImageRatio)
 	if task != nil && strings.TrimSpace(task.ImageRatio) != "" {

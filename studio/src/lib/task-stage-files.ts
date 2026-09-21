@@ -21,6 +21,9 @@ const roleStages: Record<string, RegExp> = {
   subtitles: /字幕|subtitles/i,
   timeline: /剪辑|编排|管线|editing|montage/i,
   source_manifest: /素材|asset/i,
+  project_manifest: /工程|交付|project|delivery/i,
+  project_archive: /归档|交付|archive|delivery/i,
+  quality_report: /审核|验收|质检|review|quality/i,
   delivery_manifest: /交付|归档|delivery/i,
 }
 

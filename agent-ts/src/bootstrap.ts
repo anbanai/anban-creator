@@ -1,3 +1,4 @@
+import { validateHypitEnvironment } from "./hypit.js";
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -290,9 +291,10 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
     const expected = `.anban-creator/resume/executions/${executionID}/latest.md`;
     if (data.resume_context_path !== expected) throw new Error("bootstrap resume context path is invalid");
   }
-  if (data.task_type !== "montage" && Object.keys(data.env ?? {}).length > 0) throw new Error("bootstrap environment is only valid for Montage tasks");
-  for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, "Montage");
-  preflightBootstrapFiles(data.files ?? []);
+  if (!["montage", "hypit"].includes(data.task_type) && Object.keys(data.env ?? {}).length > 0) throw new Error("bootstrap environment is only valid for Montage or Hypit tasks");
+  for (const [key, value] of Object.entries(data.env ?? {})) validateEnvironmentEntry(key, value, data.task_type === "hypit" ? "Hypit" : "Montage");
+  if (data.task_type === "hypit") validateHypitEnvironment(data.env ?? {});
+  preflightBootstrapFiles(data.files ?? [], data.task_type);
   return data;
 }
 
@@ -472,7 +474,7 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean
   return keys.length <= allowed.length && keys.every((key) => allowed.includes(key));
 }
 
-export function preflightBootstrapFiles(files: BootstrapFile[]): BootstrapFile[] {
+export function preflightBootstrapFiles(files: BootstrapFile[], taskType?: string): BootstrapFile[] {
   if (files.length > MAX_BOOTSTRAP_FILES) throw new Error("bootstrap file count exceeds limit");
   const seen = new Map<string, string>();
   for (const file of files) {
@@ -496,8 +498,10 @@ export function preflightBootstrapFiles(files: BootstrapFile[]): BootstrapFile[]
       && (!PUBLICATION_RECOVERY_REPLACE_PATHS.has(key) || !remote || !file.content_sha256)) {
       throw new Error(`bootstrap file ${relative} cannot replace existing workspace content`);
     }
+    const hypitLimit = relative === ".anban-creator/project.zip" ? 2147483648 : relative.startsWith("project/assets/") ? 268435456 : MAX_BOOTSTRAP_FILE_BYTES;
     const maxBytes = file.max_bytes ?? MAX_BOOTSTRAP_FILE_BYTES;
-    if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BOOTSTRAP_FILE_BYTES || (file.expected_size !== undefined && (!Number.isInteger(file.expected_size) || file.expected_size < 0 || file.expected_size > maxBytes))) throw new Error(`bootstrap file ${relative} has invalid size limits`);
+    if (taskType === "hypit" && remote && (relative === ".anban-creator/project.zip" || relative.startsWith("project/assets/")) && (!file.content_sha256 || file.expected_size === undefined)) throw new Error("Hypit input requires hash and expected size");
+    if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > (taskType === "hypit" ? hypitLimit : MAX_BOOTSTRAP_FILE_BYTES) || (file.expected_size !== undefined && (!Number.isInteger(file.expected_size) || file.expected_size < 0 || file.expected_size > maxBytes))) throw new Error(`bootstrap file ${relative} has invalid size limits`);
     if (!Number.isInteger(file.mode) || ![0o600, 0o644].includes(file.mode)) throw new Error(`unsafe bootstrap file mode ${file.mode}`);
     if (inline && Buffer.byteLength(file.text ?? "") > maxBytes) throw new Error(`bootstrap file ${relative} exceeds size limit`);
     if (remote) validateBootstrapDownloadURL(file.download_url!);

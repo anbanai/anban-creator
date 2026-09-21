@@ -171,7 +171,7 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrProjectUpdateConflict) {
 		return Error(c, fiber.StatusConflict, "project reference changed concurrently; retry the update")
 	}
-	if errors.Is(err, service.ErrProjectMontageDefaults) {
+	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if errors.Is(err, service.ErrInvalidAgentConfig) {
@@ -229,6 +229,7 @@ type projectRequest struct {
 	InstructionsSet               bool                             `json:"-"`
 	EcommerceDefaults             *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
 	MontageDefaults               *model.MontageDefaults           `json:"montage_defaults,omitempty"`
+	HypitDefaults                 *model.HypitDefaults             `json:"hypit_defaults,omitempty"`
 	AgentConfig                   map[string]any                   `json:"agent_config,omitempty"`
 	AgentConfigSet                bool                             `json:"-"`
 	// Config fields for platform-specific credentials.
@@ -278,6 +279,10 @@ func (req *projectRequest) toProject() *model.Project {
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
 		p.EcommerceDefaultsSet = true
+	}
+	if req.HypitDefaults != nil {
+		p.SetHypitDefaults(*req.HypitDefaults)
+		p.HypitDefaultsSet = true
 	}
 	if req.MontageDefaults != nil {
 		p.SetMontageDefaults(*req.MontageDefaults)
@@ -460,7 +465,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrProjectMontageDefaults) {
+		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrInvalidAgentConfig) {

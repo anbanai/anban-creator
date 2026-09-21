@@ -9,6 +9,7 @@ export type DirectUploadPurpose =
   | 'ecommerce_product_photo'
   | 'ai_entry_attachment'
   | 'montage_asset'
+  | 'hypit_asset'
   | 'seednote_analytics_import'
   | 'wechat_analytics_import'
 

@@ -90,6 +90,10 @@ function fileDeliveryStatus(file: TaskFile) {
 
 const montageRoleLabel: Record<string, string> = {
   final_video: '最终视频',
+  cover: '封面',
+  project_manifest: '工程说明',
+  project_archive: '复刻工程 ZIP',
+  quality_report: '质量报告',
   delivery_manifest: '交付清单',
   source_manifest: '素材清单',
   timeline: '时间线',
@@ -100,7 +104,7 @@ const montageRoleLabel: Record<string, string> = {
 }
 
 function taskFileRoleLabel(file: TaskFile, taskType?: string) {
-  if (taskType === 'montage') {
+  if (taskType === 'montage' || taskType === 'hypit') {
     return montageRoleLabel[file.delivery_role || file.role] ?? ''
   }
   return ''

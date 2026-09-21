@@ -63,6 +63,7 @@ type TaskService struct {
 	pubsubCancel             context.CancelFunc // stops the listenCancelEvents goroutine
 	cancelFuncs              sync.Map           // taskID → context.CancelFunc
 	montageCfg               srvconfig.MontageConfig
+	hypitCapabilities        *HypitCapabilityService
 	montageCapabilities      *MontageCapabilityService
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
@@ -396,6 +397,7 @@ type CreateManualParams struct {
 	// MontageInput carries the Montage-specific creation contract.
 	// It is only valid for montage projects.
 	MontageInput *model.MontageInput
+	HypitInput   *model.HypitInput
 	// MontageSourceTaskID is an internal clone authorization for task-file
 	// locators that originate from the source task rather than the destination
 	// project.
@@ -593,6 +595,33 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		effectiveImageCapabilityKey = effectiveImageCapabilitySnapshot.Key
 	}
+	if p.HypitInput != nil && !model.IsHypitPlatform(taskType) {
+		return nil, fmt.Errorf("%w: hypit_input only valid on hypit", ErrHypitInput)
+	}
+	if model.IsHypitPlatform(taskType) {
+		quantity = 1
+		capabilities, err := s.hypitAdmissionCapabilities(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		defaults := project.HypitDefaults.Data()
+		if p.PreserveFrozenConfig {
+			defaults = model.HypitDefaults{}
+		}
+		if err := capabilities.NormalizeAndValidateInput(p.HypitInput, defaults, p.InputSourceTaskID != ""); err != nil {
+			return nil, err
+		}
+		if err := validateHypitUploadInputs(ctx, s.repo, s.store, p.UserID, p.HypitInput, capabilities.config.Limits); err != nil {
+			return nil, err
+		}
+		trust, err := hypitSourceTrust(ctx, s.repo, p.UserID, p.InputSourceTaskID)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateHypitTaskFiles(ctx, s.repo, p.UserID, p.ProjectID, s.StorageProviderName(), p.HypitInput, capabilities.config.Limits, trust...); err != nil {
+			return nil, err
+		}
+	}
 	if isMontageTask {
 		quantity = 1
 		if !p.PreserveFrozenConfig && s.montageCapabilities != nil {
@@ -722,6 +751,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		if agentInput != nil {
 			task.SetAgentInput(agentInput)
+		}
+		if model.IsHypitPlatform(taskType) && p.HypitInput != nil {
+			task.SetHypitInput(*p.HypitInput)
+			if err := s.freezeHypitTask(ctx, task); err != nil {
+				return nil, err
+			}
 		}
 		if isMontageTask && p.MontageInput != nil {
 			task.SetMontageInput(*p.MontageInput)
@@ -981,6 +1016,24 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		effectiveImageCapabilitySnapshot = resolved
 		effectiveImageCapabilityKey = resolved.Key
 	}
+	var planHypitInput *model.HypitInput
+	if model.IsHypitPlatform(taskType) {
+		in := plan.HypitInput.Data()
+		d := model.HypitDefaults{}
+		if project != nil {
+			d = project.HypitDefaults.Data()
+		}
+		if err := s.hypitCapabilities.NormalizeAndValidateInput(&in, d, false); err != nil {
+			return nil, err
+		}
+		if err := validateHypitUploadInputs(ctx, s.repo, s.store, plan.UserID, &in, s.hypitCapabilities.config.Limits); err != nil {
+			return nil, err
+		}
+		if err := validateHypitTaskFiles(ctx, s.repo, plan.UserID, plan.ProjectID, s.StorageProviderName(), &in, s.hypitCapabilities.config.Limits); err != nil {
+			return nil, err
+		}
+		planHypitInput = &in
+	}
 	var planMontageInput *model.MontageInput
 	if isMontageTask {
 		input := plan.MontageInput.Data()
@@ -1040,6 +1093,12 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
 	if project != nil {
 		task.SetProjectSnapshot(model.SnapshotProject(project))
+	}
+	if planHypitInput != nil {
+		task.SetHypitInput(*planHypitInput)
+		if err := s.freezeHypitTask(ctx, task); err != nil {
+			return nil, err
+		}
 	}
 	if planMontageInput != nil {
 		task.SetMontageInput(*planMontageInput)

@@ -1,0 +1,13 @@
+{
+  "format": "hypit.runtime-local@1",
+  "dataRoot": "/tmp/.hypit-build",
+  "credentials": {"env": {"use": "@hypit/credential-store-env"}},
+  "endpoints": {
+    "media.local": {"use": "@hypit/provider-media-local"},
+    "hyperframes.local": {
+      "use": "@hypit/provider-hyperframes-local",
+      "config": {"workers": 2, "defaultConcurrency": 1, "browserGpu": "software"}
+    }
+  },
+  "bindings": {}
+}

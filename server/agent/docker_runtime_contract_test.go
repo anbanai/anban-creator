@@ -783,6 +783,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	got := trackedDockerfiles(t, root)
 	want := []string{
 		"deploy/docker/Dockerfile.agent-article",
+		"deploy/docker/Dockerfile.agent-hypit",
 		"deploy/docker/Dockerfile.agent-montage",
 		"deploy/docker/Dockerfile.agent-seednote",
 		"deploy/docker/Dockerfile.server",
@@ -940,7 +941,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-sidecar-ilink-image:",
 		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
+		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
 		"docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",

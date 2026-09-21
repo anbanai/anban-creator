@@ -1,9 +1,10 @@
+import type { HypitInput } from './hypit'
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID } from './agent-profile'
 
-export type PlanType = 'seednote' | 'article' | 'montage'
+export type PlanType = 'seednote' | 'article' | 'montage' | 'hypit'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export interface Plan {
@@ -31,6 +32,7 @@ export interface Plan {
   // toggleable. Both default true; spawned article tasks inherit them.
   article_with_cover?: boolean
   article_with_content_images?: boolean
+  hypit_input?: HypitInput
   montage_input?: MontageInput
   created_at: string
   updated_at: string
@@ -56,6 +58,7 @@ export interface CreatePlanRequest {
   // toggleable; both default true. Server ignores for non-article plans.
   article_with_cover?: boolean
   article_with_content_images?: boolean
+  hypit_input?: HypitInput
   montage_input?: MontageInput
 }
 
@@ -75,5 +78,6 @@ export interface UpdatePlanRequest {
   // Article image toggles (公众号文章): leave-unchanged when omitted.
   article_with_cover?: boolean
   article_with_content_images?: boolean
+  hypit_input?: HypitInput
   montage_input?: MontageInput
 }

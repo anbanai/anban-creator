@@ -68,7 +68,7 @@ export interface NextBestAction {
 const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const LOW_CREDIT_THRESHOLD = 200
 const CRITICAL_CREDIT_THRESHOLD = 50
-const taskTypes = new Set<TaskType>(['seednote', 'article', 'moments', 'viral_analysis', 'ecommerce', 'montage'])
+const taskTypes = new Set<TaskType>(['seednote', 'article', 'moments', 'viral_analysis', 'ecommerce', 'montage', 'hypit'])
 const creationIntents = new Set(['new', 'retry', 'schedule'])
 
 function readinessStatus(ready?: boolean | null, legacyKnown?: boolean): ReadinessStatus {

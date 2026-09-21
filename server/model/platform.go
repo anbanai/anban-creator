@@ -26,6 +26,7 @@ type PlatformConfig struct {
 
 // PlatformConfigs defines all supported platforms and their form configurations.
 var PlatformConfigs = map[string]*PlatformConfig{
+	PlatformHypit: {ID: PlatformHypit, Label: "视频复刻", BadgeVariant: "secondary", DefaultImageRatio: "9:16", SupportedImageRatios: []string{"9:16", "16:9", "1:1"}, Fields: []PlatformFieldConfig{{Key: "name", Label: "项目名称", Type: "text", Group: "basic", Required: true}, {Key: "instructions", Label: "创作要求", Type: "textarea", Group: "basic"}}},
 	PlatformArticle: {
 		ID:                   PlatformArticle,
 		Label:                "公众号",
@@ -126,7 +127,7 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce, PlatformMontage}
+	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce, PlatformMontage, PlatformHypit}
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {

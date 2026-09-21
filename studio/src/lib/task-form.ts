@@ -1,5 +1,6 @@
 import type { AgentExecutionProfileID, CreateTaskRequest, Project, ReferenceImageSelection, Task } from '@/types'
 import type { CreateTaskFormValues } from '@/lib/schemas'
+import { initialHypitInput } from '@/lib/hypit-form'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 
@@ -55,6 +56,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     target_platform: defaults.targetPlatform,
     selling_points: '',
     language: '',
+    hypit_input: project?.platform === 'hypit' ? initialHypitInput('', undefined, project.hypit_defaults) : undefined,
     montage_input: projectMontageInput(project),
   }
 }
@@ -78,6 +80,7 @@ export function switchTaskFormDefaults(
       switched.target_platform = defaults.target_platform
     }
 
+    if (current.type === 'hypit') switched.hypit_input = initialHypitInput(current.prompt, { ...current.hypit_input, preferences: project.hypit_defaults?.preferences }, project.hypit_defaults)
     if (current.type === 'montage') {
       const montageDefaults = projectMontageInput(project, current.prompt)
       if (montageDefaults) {
@@ -104,6 +107,7 @@ export function switchTaskFormDefaults(
     reference_image: cloneValue(current.reference_image),
     input_attachments: cloneValue(current.input_attachments),
     watermark: current.watermark,
+    hypit_input: project?.platform === 'hypit' ? initialHypitInput(current.prompt, undefined, project.hypit_defaults) : undefined,
     montage_input: projectMontageInput(project, current.prompt),
   }
 }
@@ -135,7 +139,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     execution_profile: task.execution_profile,
     type: task.type,
     topic: task.topic,
-    prompt: task.prompt,
+    prompt: task.type === 'hypit' ? task.hypit_input?.brief || task.prompt : task.prompt,
     quantity: 1,
     image_ratio: (task.image_ratio || 'auto') as TaskFormDefaults['image_ratio'],
     image_capability_key: task.image_capability_key ?? '',
@@ -153,6 +157,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     target_platform: ecommerce?.target_platform ?? '',
     selling_points: ecommerce?.selling_points ?? '',
     language: ecommerce?.language ?? '',
+    hypit_input: task.hypit_input ? cloneValue(task.hypit_input) : undefined,
     montage_input: task.montage_input
       ? cloneValue(initialMontageInput(task.prompt, task.montage_input))
       : undefined,
@@ -209,6 +214,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
           ...(values.language ? { language: values.language } : {}),
         }
       : {}),
+    ...(values.type === 'hypit' ? { hypit_input: { ...cloneValue(values.hypit_input), brief: prompt ?? '' } } : {}),
     ...(values.type === 'montage'
       ? { montage_input: cloneValue(buildMontageInputForSubmit(values.prompt, values.montage_input)) }
       : {}),

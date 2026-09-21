@@ -131,7 +131,7 @@ func (s *ChannelsTrackingService) BindTask(ctx context.Context, userID, taskID, 
 	if task.UserID != userID {
 		return fmt.Errorf("task does not belong to user")
 	}
-	if task.Type != model.PlatformMontage && task.Type != model.TaskTypeLiveSlicer {
+	if task.Type != model.PlatformMontage && task.Type != model.PlatformHypit && task.Type != model.TaskTypeLiveSlicer {
 		return fmt.Errorf("task is not a video task")
 	}
 	project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)

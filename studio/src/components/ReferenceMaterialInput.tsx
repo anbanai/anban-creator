@@ -25,11 +25,13 @@ export interface ReferenceMaterialInputProps {
   onChange: (value: InputAttachment[]) => void
   allowedTypes: InputAttachmentType[]
   maxCount?: number
+  maxFileBytes?: number
   instructionEnabled?: boolean
   instructionMaxLength?: number
   compact?: boolean
   hint?: string
   onUploadingChange?: (uploading: boolean) => void
+  onFailuresChange?: (hasFailures: boolean) => void
   uploadPurpose?: DirectUploadPurpose
 }
 
@@ -107,11 +109,13 @@ export function ReferenceMaterialInput({
   onChange,
   allowedTypes,
   maxCount,
+  maxFileBytes,
   instructionEnabled = false,
   instructionMaxLength = 1000,
   compact = false,
   hint = DEFAULT_HINT,
   onUploadingChange,
+  onFailuresChange,
   uploadPurpose = 'ai_entry_attachment',
 }: ReferenceMaterialInputProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -130,7 +134,8 @@ export function ReferenceMaterialInput({
   useEffect(() => {
     rowsRef.current = rows
     onUploadingChange?.(rows.some((row) => row.status === 'uploading'))
-  }, [rows, onUploadingChange])
+    onFailuresChange?.(rows.some((row) => row.status === 'failed'))
+  }, [rows, onUploadingChange, onFailuresChange])
 
   const updateRows = (updater: (current: UploadRow[]) => UploadRow[]) => {
     setRows((current) => {
@@ -223,7 +228,7 @@ export function ReferenceMaterialInput({
         setValidationError(`当前不支持添加 ${type} 类型的参考素材`)
         continue
       }
-      const maxBytes = maxBytesForType(type)
+      const maxBytes = maxFileBytes ?? maxBytesForType(type)
       if (file.size > maxBytes) {
         setValidationError(`${file.name} 不能超过 ${Math.round(maxBytes / 1024 / 1024)}MB`)
         continue

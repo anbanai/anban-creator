@@ -54,6 +54,9 @@ func taskAPIResponse(task *model.Task, store storage.Provider) map[string]any {
 	}
 	resp := modelAPIMap(task)
 	resp["billing_total_credits"] = task.BillingPriceCredits
+	if model.IsHypitPlatform(task.Type) {
+		resp["input_source_task_id"] = task.InputSourceTaskID
+	}
 	rewriteMontageAPIField(resp, task.Type, task.MontageInput.Data())
 	enrichOwnedObjectKeys(resp, store)
 	sanitizeTaskAPIResponse(resp, task)

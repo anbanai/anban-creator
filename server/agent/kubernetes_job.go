@@ -43,6 +43,9 @@ type kubernetesJobConfig struct {
 func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution, task *model.Task) *batchv1.Job {
 	backoffLimit := int32(0)
 	activeDeadline := cfg.ActiveDeadlineSeconds
+	if task != nil && model.IsHypitPlatform(task.Type) {
+		activeDeadline = int64(task.HypitTimeout().Seconds())
+	}
 	ttl := cfg.TTLSecondsAfterFinished
 	suspend := true
 	automountToken := false
@@ -59,6 +62,10 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	resources := cfg.ResourcesForTask(taskType(task))
 	runtimeImage := strings.TrimSpace(execution.RuntimeImage)
 
+	var nodeSelector map[string]string
+	if task != nil && model.IsHypitPlatform(task.Type) {
+		nodeSelector = map[string]string{"kubernetes.io/os": "linux", "kubernetes.io/arch": "amd64"}
+	}
 	labels := kubernetesExecutionLabels(execution, task)
 	job := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
@@ -75,6 +82,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: copyLabels(labels)},
 				Spec: corev1.PodSpec{
+					NodeSelector:                  nodeSelector,
 					RestartPolicy:                 corev1.RestartPolicyNever,
 					ServiceAccountName:            cfg.ServiceAccount,
 					AutomountServiceAccountToken:  &automountToken,
@@ -239,7 +247,11 @@ func buildTaskWorkspacePVC(cfg kubernetesJobConfig, task *model.Task) *corev1.Pe
 
 func buildExecutionTaskWorkspacePVC(cfg kubernetesJobConfig, execution *model.TaskExecution, task *model.Task) *corev1.PersistentVolumeClaim {
 	storageClass := cfg.NASStorageClass
-	quantity := resource.MustParse(cfg.TaskWorkspaceSize)
+	workspaceSize := cfg.TaskWorkspaceSize
+	if task != nil && model.IsHypitPlatform(task.Type) {
+		workspaceSize = "20Gi"
+	}
+	quantity := resource.MustParse(workspaceSize)
 	labels := kubernetesAgentLabels(task)
 	labels["app.kubernetes.io/component"] = "task-workspace"
 	if execution != nil && execution.Purpose == model.TaskExecutionPurposePublicationRecovery {

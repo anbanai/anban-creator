@@ -1,8 +1,9 @@
+import type { HypitDefaults } from './hypit'
 import type { MontagePreferences } from './montage'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { ImageAnalysis } from './image-analysis'
 
-export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage'
+export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'hypit'
 export type ProjectStatus = 'active' | 'archived'
 export interface ProjectConfig {
   wechat_app_id?: string
@@ -31,6 +32,7 @@ export interface Project {
   portrait_reference_image?: ReferenceAssetView | null
   image_ratio: string
   ecommerce_defaults?: EcommerceProjectDefaults
+  hypit_defaults?: HypitDefaults
   montage_defaults?: MontageProjectDefaults
   agent_config?: Record<string, unknown>
   max_concurrent_tasks: number
@@ -103,6 +105,7 @@ export interface CreateProjectRequest {
   portrait_reference_image?: ReferenceImageSelection | null
   image_ratio?: string
   ecommerce_defaults?: EcommerceProjectDefaults
+  hypit_defaults?: HypitDefaults
   montage_defaults?: MontageProjectDefaults
   agent_config?: Record<string, unknown>
   max_concurrent_tasks?: number

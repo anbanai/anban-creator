@@ -422,6 +422,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		{"moments", "task.moments", "moments_artifacts_verified", 3000},
 		{"ecommerce", "task.ecommerce", "ecommerce_artifacts_verified", 3000},
 		{"montage", "task.montage", "montage_artifacts_verified", 2000},
+		{"hypit", "task.hypit", "hypit_artifacts_verified", 2000},
 	}
 	profiles := []struct {
 		id        string

@@ -235,6 +235,19 @@ describe('ReferenceMaterialInput', () => {
     expect(screen.getByText('最多 1 个字符')).toBeInTheDocument()
   })
 
+  it('reports unresolved failures until retry succeeds', async () => {
+    const onFailuresChange = vi.fn()
+    vi.mocked(uploadToOSS).mockRejectedValueOnce(new Error('network failed'))
+    render(<ReferenceMaterialInput value={[]} onChange={vi.fn()} allowedTypes={['image']} uploadPurpose="hypit_asset" onFailuresChange={onFailuresChange} />)
+    fireEvent.change(screen.getByLabelText('添加参考素材'), { target: { files: [imageFile('product.png')] } })
+    await waitFor(() => expect(onFailuresChange).toHaveBeenLastCalledWith(true))
+    expect(screen.getByText('network failed')).toBeInTheDocument()
+    vi.mocked(uploadToOSS).mockResolvedValueOnce(uploadResult('product.png'))
+    fireEvent.click(screen.getByRole('button', { name: '重试 product.png' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重试 product.png' })).not.toBeInTheDocument())
+    await waitFor(() => expect(onFailuresChange).toHaveBeenLastCalledWith(false))
+  })
+
   it('shows a failed upload and retries it without losing successful attachments', async () => {
     vi.mocked(uploadToOSS).mockImplementation(async ({ file }) => {
       if (file.name === 'bad.png') throw new Error('网络失败')

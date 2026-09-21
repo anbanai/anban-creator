@@ -37,7 +37,7 @@ describe('ProjectsPage layout contracts', () => {
     const analyzedField = source.indexOf('<AnalyzedImageField')
 
     expect(source).toContain('supportsVisualReference')
-    expect(source).toContain('supportsVisualReference && isMontage')
+    expect(source).toContain("supportsVisualReference && selectedPlatform === 'montage'")
     expect(montageGuard).toBeGreaterThan(-1)
     expect(analyzedField).toBeGreaterThan(montageGuard)
     expect(source).not.toContain("selectedPlatform !== 'seednote'")
@@ -56,10 +56,10 @@ describe('ProjectsPage layout contracts', () => {
     expect(pageSource).not.toContain('deleteMutation')
   })
 
-  it('keeps only unfinished project platforms behind the admin gate', () => {
+  it('keeps unfinished and internal-validation project platforms behind the admin gate', () => {
     const source = readFileSync(join(here, 'ProjectsPage.tsx'), 'utf8')
 
-    expect(source).toContain("new Set<ProjectPlatform>(['moments', 'ecommerce'])")
+    expect(source).toContain("new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])")
     expect(source).toContain("case 'montage':")
     expect(source).toContain('user?.is_admin === true')
     expect(source).toContain('canViewPlatform(project.platform, isAdmin)')

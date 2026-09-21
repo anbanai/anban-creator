@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -34,11 +35,12 @@ func (h *AgentHandler) StreamArtifactContent(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "valid artifact size is required")
 	}
 	result, err := h.taskSvc.StreamTaskArtifact(c.Context(), taskID, userID, executionID, service.TaskArtifactStreamRequest{
-		RelativePath: strings.TrimSpace(c.Get(agentArtifactPathHeader)),
-		ContentType:  strings.TrimSpace(c.Get("Content-Type")),
-		Size:         declaredSize,
-		SHA256:       strings.TrimSpace(c.Get(agentArtifactSHA256Header)),
-		Body:         c.Request().BodyStream(),
+		RelativePath:    strings.TrimSpace(c.Get(agentArtifactPathHeader)),
+		ContentType:     strings.TrimSpace(c.Get("Content-Type")),
+		Size:            declaredSize,
+		SHA256:          strings.TrimSpace(c.Get(agentArtifactSHA256Header)),
+		Body:            c.Request().BodyStream(),
+		SetReadDeadline: func(deadline time.Time) error { return c.RequestCtx().Conn().SetReadDeadline(deadline) },
 	})
 	if err == nil {
 		return Success(c, result)

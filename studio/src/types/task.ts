@@ -1,9 +1,10 @@
+import type { HypitInput } from './hypit'
 import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
 
-export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'montage'
+export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'ecommerce' | 'montage' | 'hypit'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection
@@ -131,6 +132,8 @@ export interface Task {
   project_snapshot?: ProjectSnapshot
   // E-commerce package config (only present for platform=ecommerce tasks).
   ecommerce?: EcommerceTaskConfig
+  input_source_task_id?: string
+  hypit_input?: HypitInput
   montage_input?: MontageInput
   billing_quote_id?: string
   billing_catalog_id?: string
@@ -256,6 +259,8 @@ export interface CreateTaskRequest {
   target_platform?: string
   selling_points?: string
   language?: string
+  input_source_task_id?: string
+  hypit_input?: HypitInput
   montage_input?: MontageInput
 }
 

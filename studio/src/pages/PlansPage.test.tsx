@@ -75,6 +75,7 @@ vi.mock('@/lib/api', async () => {
             { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, peak_price_credits: 4000, off_peak_price_credits: 3200, delivery: 'seednote_artifacts_verified' },
             { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
             { id: 'task.seednote.quality', operation: 'task.seednote', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 15000, delivery: 'seednote_artifacts_verified' },
+            { id: 'task.hypit.effective', operation: 'task.hypit', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'hypit_artifacts_verified' },
             { id: 'task.montage.effective', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'montage_artifacts_verified' },
             { id: 'task.montage.balanced', operation: 'task.montage', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
             { id: 'task.montage.quality', operation: 'task.montage', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 6000, delivery: 'montage_artifacts_verified' },
@@ -102,6 +103,7 @@ vi.mock('@/lib/api', async () => {
           items: [{ key: 'standard', display_name: '标准图像', price_available: true, enabled: true }],
         }),
       },
+      hypitCapabilities: { list: vi.fn().mockResolvedValue({ enabled: true, configured: true, missing_configuration: [], limits: { max_duration_seconds: 180, max_assets: 20, max_asset_bytes: 1000000, max_input_bytes: 2000000 } }) },
       montageCapabilities: {
         ...actual.api.montageCapabilities,
         list: vi.fn().mockResolvedValue({
@@ -970,6 +972,62 @@ describe('PlansPage Montage input', () => {
         },
       ],
     })
+  })
+
+  it('edits saved video replication input without replacing it with project defaults', async () => {
+    const project = { ...montageProject, platform: 'hypit', hypit_defaults: { preferences: { duration_seconds: 80 } } } as Project
+    const plan = { ...savedMontagePlan, type: 'hypit', hypit_input: { brief: '已有复刻要求', reference: { type: 'video_url', url: 'https://example.com/saved.mp4' }, preferences: { duration_seconds: 12, aspect_ratio: '1:1' } } } as Plan
+    vi.mocked(api.projects.list).mockResolvedValue([project])
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    await screen.findByLabelText('复刻要求')
+    expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(12)
+    expect(screen.getByLabelText('参考视频链接')).toHaveValue('https://example.com/saved.mp4')
+    fireEvent.change(screen.getByLabelText('复刻要求'), { target: { value: '修改后复刻要求' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ hypit_input: expect.objectContaining({ brief: '修改后复刻要求', preferences: { duration_seconds: 12, aspect_ratio: '1:1' } }) })))
+  })
+
+  it('blocks plan creation while supplemental media has unresolved upload failures', async () => {
+    const project = { ...montageProject, platform: 'hypit' } as Project
+    const second = { ...project, id: 'second-hypit-plan-project', name: '第二复刻计划项目' } as Project
+    vi.mocked(api.projects.list).mockResolvedValue([project, second])
+    window.history.pushState({}, '', `/plans?create=true&type=hypit&project_id=${project.id}&intent=schedule`)
+    render(<PlansPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    await within(dialog).findByLabelText('参考视频链接')
+    fireEvent.change(within(dialog).getByLabelText('复刻要求'), { target: { value: '使用产品素材' } })
+    fireEvent.change(within(dialog).getByLabelText('参考视频链接'), { target: { value: 'https://example.com/story.mp4' } })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    act(() => referenceMaterialInputHarness.props?.onUploadingChange?.(true))
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^项目：/ }))
+    fireEvent.click(await screen.findByRole('option', { name: /第二复刻计划项目/ }))
+    expect(within(dialog).getByLabelText('参考视频链接')).toHaveValue('https://example.com/story.mp4')
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+    act(() => {
+      referenceMaterialInputHarness.props?.onUploadingChange?.(false)
+      referenceMaterialInputHarness.props?.onFailuresChange?.(true)
+    })
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+    act(() => referenceMaterialInputHarness.props?.onFailuresChange?.(false))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    expect(api.plans.create).not.toHaveBeenCalled()
+  })
+
+  it('creates a video replication plan with reference, brief and inherited preferences', async () => {
+    const project = { ...montageProject, platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '9:16', language: '中文' } } } as Project
+    vi.mocked(api.projects.list).mockResolvedValue([project])
+    window.history.pushState({}, '', `/plans?create=true&type=hypit&project_id=${project.id}&intent=schedule`)
+    render(<PlansPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    await within(dialog).findByLabelText('参考视频链接')
+    fireEvent.change(within(dialog).getByLabelText('复刻要求'), { target: { value: '每周复刻品牌故事' } })
+    fireEvent.change(within(dialog).getByLabelText('参考视频链接'), { target: { value: 'https://example.com/story.mp4' } })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'hypit', hypit_input: expect.objectContaining({ brief: '每周复刻品牌故事', reference: { type: 'video_url', url: 'https://example.com/story.mp4' }, preferences: { aspect_ratio: '9:16', language: '中文' } }) })))
   })
 
   it('uses the preselected project platform when the URL type conflicts', async () => {

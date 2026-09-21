@@ -70,6 +70,11 @@ const inputAttachmentSchema = z.object({
   ).optional(),
 })
 
+export const hypitAssetSchema = z.object({
+  type: z.enum(['image', 'video', 'video_url', 'audio']), url: z.string().optional(), task_file_id: z.string().optional(), file_name: z.string().optional(), mime_type: z.string().optional(), file_size: z.number().nonnegative().optional(),
+})
+export const hypitPreferencesSchema = z.object({ duration_seconds: z.number().int().min(0).optional(), aspect_ratio: z.enum(['source', '9:16', '16:9', '1:1']).optional(), language: z.string().optional() }).optional()
+export const hypitInputSchema = z.object({ brief: promptSchema, reference: hypitAssetSchema.optional(), source_assets: z.array(hypitAssetSchema).optional(), preferences: hypitPreferencesSchema }).optional()
 const montageAssetSchema = z.object({
   type: z.enum(["text", "image_url", "video", "video_url", "audio", "audio_url", "document_url"]),
   url: z.string().optional(),
@@ -115,7 +120,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "montage"]),
+  type: z.enum(["seednote", "article", "moments", "viral_analysis", "ecommerce", "montage", "hypit"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -147,6 +152,7 @@ export const createTaskSchema = z.object({
   target_platform: z.string().optional(),
   selling_points: z.string().max(2000, "卖点不能超过 2000 个字符").optional(),
   language: z.string().optional(),
+  hypit_input: hypitInputSchema,
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
   if (!data.project_id?.trim()) {
@@ -188,6 +194,7 @@ export const createTaskSchema = z.object({
     }
   }
 
+  if (data.type === "hypit" && !(data.hypit_input?.brief?.trim() || data.prompt?.trim())) ctx.addIssue({ code: "custom", message: "请填写视频复刻要求", path: ["prompt"] })
   if (data.type === "montage") {
     const brief = data.montage_input?.brief?.trim() || ""
     if (!brief) {
@@ -205,7 +212,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 export const planSchema = z.object({
   project_id: z.string().optional(),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "article", "montage"]),
+  type: z.enum(["seednote", "article", "montage", "hypit"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_capability_key: z.string().max(50).optional(),
@@ -224,8 +231,10 @@ export const planSchema = z.object({
   // article tasks inherit them; non-article plans ignore them server-side.
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
+  hypit_input: hypitInputSchema,
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {
+  if (data.type === "hypit" && !(data.hypit_input?.brief?.trim() || data.prompt?.trim())) ctx.addIssue({ code: "custom", message: "请填写视频复刻要求", path: ["prompt"] })
   if (data.type === "montage") {
     const brief = data.montage_input?.brief?.trim() || ""
     if (!brief) {
@@ -241,7 +250,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "article", "moments", "ecommerce", "montage"]),
+  platform: z.enum(["seednote", "article", "moments", "ecommerce", "montage", "hypit"]),
   agent_config: z.record(z.string(), z.unknown()).default({}),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
@@ -258,6 +267,7 @@ export const projectSchema = z.object({
   ecommerce_target_platform: z.string().optional(),
   ecommerce_brand_brief: z.string().max(2000, "品牌 brief 不能超过 2000 个字符").optional(),
   ecommerce_image_capability_key: z.string().max(50).optional(),
+  hypit_defaults: z.object({ preferences: hypitPreferencesSchema, asset_guidance: z.string().optional() }).optional(),
   montage_defaults: z.object({
     default_pipeline: z.string().max(100).optional(),
     preferences: montagePreferencesSchema,

@@ -176,6 +176,7 @@ type createTaskRequest struct {
 	SellingPoints   string              `json:"selling_points,omitempty"`
 	Language        string              `json:"language,omitempty"`
 	MontageInput    *model.MontageInput `json:"montage_input,omitempty"`
+	HypitInput      *model.HypitInput   `json:"hypit_input,omitempty"`
 }
 
 type cloneTaskRequest struct {
@@ -200,6 +201,7 @@ type cloneTaskRequest struct {
 	SellingPoints            string                           `json:"selling_points,omitempty"`
 	Language                 string                           `json:"language,omitempty"`
 	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
+	HypitInput               *model.HypitInput                `json:"hypit_input,omitempty"`
 }
 
 type resumeTaskRequest struct {
@@ -547,6 +549,13 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 				Instruction: fmt.Sprintf("电商产品参考图 %d", i+1),
 			})
 		}
+		if model.IsHypitPlatform(project.Platform) {
+			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeHypitAsset, hypitAssetURLs(req.HypitInput))
+			if err != nil {
+				return nil, respondUploadSessionFinalizeError(c, h.logger, err)
+			}
+			rewriteHypitAssetURLs(req.HypitInput, rewrites)
+		}
 		if model.IsMontagePlatform(project.Platform) {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
@@ -593,6 +602,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			ArticleWithContentImages: req.ArticleWithContentImages,
 			Ecommerce:                ecommerceCfg,
 			MontageInput:             req.MontageInput,
+			HypitInput:               req.HypitInput,
 		},
 	}, nil
 }
@@ -614,7 +624,7 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	h.logger.Error().Err(err).Str("user_id", userID).Msg(logMessage)
-	if errors.Is(err, service.ErrMontageInput) {
+	if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -935,6 +945,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			SellingPoints:            req.SellingPoints,
 			Language:                 req.Language,
 			MontageInput:             req.MontageInput,
+			HypitInput:               req.HypitInput,
 		}
 		if req.AgentInput != nil {
 			creationReq.AgentInput = *req.AgentInput
@@ -962,6 +973,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			ArticleWithContentImages: prepared.params.ArticleWithContentImages,
 			Ecommerce:                prepared.params.Ecommerce,
 			MontageInput:             prepared.params.MontageInput,
+			HypitInput:               prepared.params.HypitInput,
 		}})
 		if err != nil {
 			return h.respondTaskCreationServiceError(c, userID, err, "editable clone task failed", "克隆任务失败")

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -46,6 +48,7 @@ var contentTypes = map[string]string{
 	".webp": "image/webp",
 	".svg":  "image/svg+xml",
 	".pdf":  "application/pdf",
+	".zip":  "application/zip",
 	".mp4":  "video/mp4",
 	".mov":  "video/quicktime",
 	".webm": "video/webm",
@@ -82,22 +85,35 @@ func (h *FileHandler) ServeFile(c fiber.Ctx) error {
 		return Forbidden(c, "you do not have access to this file")
 	}
 
-	data, err := h.store.Read(c.Context(), cleanKey)
+	var body io.ReadCloser
+	var err error
+	if streamer, ok := h.store.(storage.ObjectStreamProvider); ok {
+		body, err = streamer.OpenObject(c.Context(), cleanKey)
+	} else {
+		// Legacy providers may serve small previews through an explicitly bounded
+		// reader; never fall back to an unbounded whole-object read.
+		var data []byte
+		data, err = storage.ReadObject(c.Context(), h.store, cleanKey, 8<<20)
+		if err == nil {
+			body = io.NopCloser(bytes.NewReader(data))
+		}
+	}
 	if err != nil {
 		h.logger.Error().Err(err).Str("key", cleanKey).Msg("failed to read file from storage")
 		return Error(c, fiber.StatusNotFound, "file not found")
 	}
 
-	ext := filepath.Ext(cleanKey)
-	if ct, ok := contentTypes[strings.ToLower(ext)]; ok {
+	ext := strings.ToLower(filepath.Ext(cleanKey))
+	c.Set("X-Content-Type-Options", "nosniff")
+	if ct, ok := contentTypes[ext]; ok {
 		c.Set("Content-Type", ct)
 		if ext == ".svg" {
 			c.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
-			c.Set("X-Content-Type-Options", "nosniff")
 		}
 	}
 
-	return c.Send(data)
+	// Fiber owns and closes the stream after writing the response.
+	return c.SendStream(body)
 }
 
 func (h *FileHandler) validatePendingFileAccess(c fiber.Ctx, userID, cleanKey string) error {
@@ -107,6 +123,7 @@ func (h *FileHandler) validatePendingFileAccess(c fiber.Ctx, userID, cleanKey st
 		service.DirectUploadPurposeTaskReference,
 		service.DirectUploadPurposeEcommercePhoto,
 		service.DirectUploadPurposeMontageAsset,
+		service.DirectUploadPurposeHypitAsset,
 		service.DirectUploadPurposeAIEntryAttachment,
 	}, cleanKey, time.Now())
 	if err != nil {

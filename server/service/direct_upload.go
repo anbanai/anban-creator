@@ -29,6 +29,7 @@ const (
 	DirectUploadPurposeTaskReference            = "task_reference"
 	DirectUploadPurposeEcommercePhoto           = "ecommerce_product_photo"
 	DirectUploadPurposeMontageAsset             = "montage_asset"
+	DirectUploadPurposeHypitAsset               = "hypit_asset"
 	DirectUploadPurposeAIEntryAttachment        = "ai_entry_attachment"
 	DirectUploadPurposeTaskArtifact             = "task_artifact"
 	DirectUploadPurposeSeednoteImport           = "seednote_analytics_import"
@@ -160,6 +161,7 @@ var directUploadPolicies = map[string]directUploadPurposePolicy{
 	DirectUploadPurposeTemplateThumbnail:        {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeTaskReference:            {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
 	DirectUploadPurposeEcommercePhoto:           {maxSize: maxUploadImageBytes, validate: isDirectUploadImage},
+	DirectUploadPurposeHypitAsset:               {maxSize: 256 << 20, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeMontageAsset:             {maxSize: 50 * 1024 * 1024, validate: isDirectUploadMontageAsset},
 	DirectUploadPurposeAIEntryAttachment:        {maxSize: 50 * 1024 * 1024, maxSizeFor: aiEntryAttachmentMaxSize, validate: isDirectUploadAIEntryAttachment},
 	DirectUploadPurposeSeednoteImport:           {maxSize: 20 * 1024 * 1024, validate: isDirectUploadSeednoteImport},

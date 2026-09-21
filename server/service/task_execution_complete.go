@@ -159,6 +159,14 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 		}
 		var validation agent.ArtifactValidation
 		switch {
+		case model.IsHypitPlatform(task.Type):
+			validation = validateHypitCompletionArtifacts(files)
+			if validation.Valid {
+				if reportErr := s.validateHypitReports(ctx, task, files); reportErr != nil {
+					validation.Valid = false
+					validation.Reason = reportErr.Error()
+				}
+			}
 		case model.IsMontagePlatform(task.Type):
 			validation = validateMontageCompletionArtifacts(files)
 		default:

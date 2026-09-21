@@ -293,7 +293,7 @@ func taskOwnsStorageKey(task *model.Task, store storage.Provider, key string) bo
 			return true
 		}
 	}
-	return montageOwnsStorageKey(task.MontageInput.Data(), store, key)
+	return hypitOwnsStorageKey(task.HypitInput.Data(), store, key, task.UserID) || montageOwnsStorageKey(task.MontageInput.Data(), store, key)
 }
 
 func planOwnsStorageKey(plan *model.Plan, store storage.Provider, key string) bool {
@@ -301,7 +301,7 @@ func planOwnsStorageKey(plan *model.Plan, store storage.Provider, key string) bo
 		return false
 	}
 	return attachmentsOwnStorageKey(plan.InputAttachments.Data(), store, key) ||
-		montageOwnsStorageKey(plan.MontageInput.Data(), store, key)
+		hypitOwnsStorageKey(plan.HypitInput.Data(), store, key, plan.UserID) || montageOwnsStorageKey(plan.MontageInput.Data(), store, key)
 }
 
 func attachmentsOwnStorageKey(attachments []model.EntryAttachment, store storage.Provider, key string) bool {
@@ -325,4 +325,17 @@ func montageOwnsStorageKey(montage model.MontageInput, store storage.Provider, k
 func ownedURLHasKey(store storage.Provider, rawURL, key string) bool {
 	ownedKey, ok := ownedStorageKey(store, rawURL)
 	return ok && ownedKey == key
+}
+
+func hypitOwnsStorageKey(in model.HypitInput, store storage.Provider, key, userID string) bool {
+	parsed, err := storage.ParseRuntimeStorageKey(key)
+	if err != nil || parsed.FinalizedUpload == nil || parsed.ValidateFinalizedUploadIdentity(userID, "") != nil {
+		return false
+	}
+	for _, u := range hypitAssetURLs(&in) {
+		if ownedURLHasKey(store, u, key) {
+			return true
+		}
+	}
+	return false
 }

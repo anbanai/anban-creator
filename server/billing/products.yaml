@@ -83,6 +83,25 @@ skus:
     price_credits: 9000
     delivery: "ecommerce_artifacts_verified"
 
+  - id: "task.hypit.effective"
+    operation: "task.hypit"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1600
+    delivery: "hypit_artifacts_verified"
+  - id: "task.hypit.balanced"
+    operation: "task.hypit"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 2000
+    delivery: "hypit_artifacts_verified"
+  - id: "task.hypit.quality"
+    operation: "task.hypit"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 6000
+    delivery: "hypit_artifacts_verified"
+
   - id: "task.montage.effective"
     operation: "task.montage"
     execution_profile: "effective"

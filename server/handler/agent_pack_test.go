@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -25,7 +26,9 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 		Code int `json:"code"`
 		Data struct {
 			Packs []struct {
-				ID       string `json:"id"`
+				ID       string   `json:"id"`
+				Kind     string   `json:"kind"`
+				Surfaces []string `json:"surfaces"`
 				Bindings struct {
 					TaskTypes []string `json:"task_types"`
 				} `json:"bindings"`
@@ -35,10 +38,19 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || len(envelope.Data.Packs) != 6 {
+	if envelope.Code != 0 || len(envelope.Data.Packs) != 7 {
 		t.Fatalf("catalog response = %#v", envelope)
 	}
 	if envelope.Data.Packs[0].ID != "article" {
 		t.Fatalf("first Pack = %q, want deterministic article", envelope.Data.Packs[0].ID)
 	}
+	for _, pack := range envelope.Data.Packs {
+		if pack.ID == "hypit" {
+			if pack.Kind != "managed" || !slices.Equal(pack.Surfaces, []string{"plugin", "project", "task", "plan"}) || !slices.Equal(pack.Bindings.TaskTypes, []string{"hypit"}) {
+				t.Fatalf("video replication must expose the managed Studio task route: %#v", pack)
+			}
+			return
+		}
+	}
+	t.Fatal("catalog must expose the video replication Pack")
 }

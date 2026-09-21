@@ -16,6 +16,7 @@ import { viralAnalysesApi } from './viral-analyses'
 import { resourcesApi } from './resources'
 import { topicPoolApi } from './topic-pool'
 import { imageCapabilitiesApi } from './image-capabilities'
+import { hypitCapabilitiesApi } from './hypit-capabilities'
 import { montageCapabilitiesApi } from './montage-capabilities'
 import { ilinkApi } from './ilink'
 import { aiEntryApi } from './ai-entry'
@@ -46,6 +47,7 @@ export const api = {
   resources: resourcesApi,
   topicPool: topicPoolApi,
   imageCapabilities: imageCapabilitiesApi,
+  hypitCapabilities: hypitCapabilitiesApi,
   montageCapabilities: montageCapabilitiesApi,
   ilink: ilinkApi,
   aiEntry: aiEntryApi,

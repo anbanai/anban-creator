@@ -162,6 +162,7 @@ type ProjectSnapshot struct {
 	Theme                         string                   `json:"theme,omitempty"`
 	Author                        string                   `json:"author,omitempty"`
 	EcommerceDefaults             EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
+	HypitDefaults                 HypitDefaults            `json:"hypit_defaults,omitempty"`
 	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
 	AgentConfig                   map[string]any           `json:"agent_config,omitempty"`
 }
@@ -214,6 +215,8 @@ type Task struct {
 	// tasks. Read by the agent via get_project_profile(task_id, scope="ecommerce").
 	Ecommerce            datatypes.JSONType[EcommerceConfig]   `gorm:"type:json" json:"ecommerce"`
 	InputAttachments     datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
+	HypitRuntimeSnapshot datatypes.JSON                        `gorm:"type:json" json:"-"`
+	HypitInput           datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
 	MontageInput         datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
 	AgentInput           datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
 	ProgressLog          string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
@@ -315,6 +318,7 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		Author:                        p.Author,
 		EcommerceDefaults:             p.EcommerceDefaults.Data(),
 		MontageDefaults:               p.MontageDefaults.Data(),
+		HypitDefaults:                 p.HypitDefaults.Data(),
 		AgentConfig:                   cloneAgentExtensionMap(p.AgentConfig.Data()),
 	}
 }
@@ -342,6 +346,7 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.Author = snap.Author
 	p.SetEcommerceDefaults(snap.EcommerceDefaults)
 	p.SetMontageDefaults(snap.MontageDefaults)
+	p.SetHypitDefaults(snap.HypitDefaults)
 	p.SetAgentConfig(cloneAgentExtensionMap(snap.AgentConfig))
 	return &p
 }

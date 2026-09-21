@@ -83,6 +83,8 @@ type Project struct {
 	MontageDefaults      datatypes.JSONType[MontageDefaults]          `gorm:"type:json" json:"montage_defaults"`
 	AgentConfig          datatypes.JSONType[map[string]any]           `gorm:"type:json" json:"agent_config"`
 	AgentConfigSet       bool                                         `gorm:"-" json:"-"`
+	HypitDefaults        datatypes.JSONType[HypitDefaults]            `gorm:"type:json" json:"hypit_defaults"`
+	HypitDefaultsSet     bool                                         `gorm:"-" json:"-"`
 	MontageDefaultsSet   bool                                         `gorm:"-" json:"-"`
 	Status               string                                       `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
 	DeletingAt           *time.Time                                   `gorm:"index" json:"-"`

@@ -95,6 +95,8 @@ spec:
               value: ${seednote_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_MONTAGE
               value: ${montage_agent_image_repo}
+            - name: ANBAN_AGENT_IMAGE_HYPIT
+              value: ${hypit_agent_image_repo}
             - name: ANBAN_AGENT_SERVICE_ACCOUNT
               value: creator-agent-runner
             - name: ANBAN_AGENT_SERVER_CA_SECRET

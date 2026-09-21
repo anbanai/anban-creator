@@ -1,8 +1,9 @@
+import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, open, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
-import { cleanBootstrapPath, preflightBootstrapFiles, readBoundedText, workspacePath, type BootstrapResponse } from "./bootstrap.js";
+import { cleanBootstrapPath, preflightBootstrapFiles, workspacePath, type BootstrapResponse } from "./bootstrap.js";
 
 const MAX_BOOTSTRAP_FILE_BYTES = 64 << 20;
 const MAX_BOOTSTRAP_TOTAL_BYTES = 512 << 20;
@@ -90,9 +91,9 @@ async function makeWritableTree(path: string): Promise<void> {
   throw new Error(`unsupported file type ${path}`);
 }
 
-export async function materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void> {
+export async function materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal, taskType?: string): Promise<void> {
   await ensureRealDirectory(workspace, "workspace root", false);
-  const prepared = preflightBootstrapFiles(files ?? []);
+  const prepared = preflightBootstrapFiles(files ?? [], taskType);
   const stagingRoot = await mkdtemp(join(workspace, ".anban-bootstrap-"));
   const incoming = join(stagingRoot, "incoming");
   const backups = join(stagingRoot, "backups");
@@ -103,25 +104,33 @@ export async function materializeBootstrapFiles(workspace: string, files: Bootst
   let preserveStaging = false;
   try {
     let totalBytes = 0;
+    let mediaBytes = 0;
     for (const file of prepared) {
       signal?.throwIfAborted();
       const staged = workspacePath(incoming, file.path);
       await mkdir(dirname(staged), { recursive: true, mode: 0o750 });
-      let contents: Uint8Array;
-      if (file.text !== undefined) {
-        contents = Buffer.from(file.text);
-      } else {
-        const response = await fetch(file.download_url!, { signal, redirect: "error" });
-        if (!response.ok) throw new Error(`download bootstrap file ${file.path} failed: HTTP ${response.status}`);
-        contents = await readBoundedBytes(response, Math.min(file.max_bytes ?? MAX_BOOTSTRAP_FILE_BYTES, MAX_BOOTSTRAP_FILE_BYTES), `bootstrap file ${file.path}`);
-        if (file.content_sha256 !== undefined && createHash("sha256").update(contents).digest("hex") !== file.content_sha256) {
-          throw new Error(`bootstrap file ${file.path} SHA-256 mismatch`);
+      const handle = await open(staged, "wx", file.mode);
+      let size = 0;
+      const hash = createHash("sha256");
+      const maxBytes = file.max_bytes ?? MAX_BOOTSTRAP_FILE_BYTES;
+      const accept = async (chunk: Uint8Array) => {
+        size += chunk.byteLength; totalBytes += chunk.byteLength;
+        if (taskType === "hypit" && file.path.startsWith("project/assets/")) { mediaBytes += chunk.byteLength; if (mediaBytes > 536870912) throw new Error("Hypit assets exceed total size limit"); }
+        if (size > maxBytes || totalBytes > (taskType === "hypit" ? 2684354560 : MAX_BOOTSTRAP_TOTAL_BYTES)) throw new Error("bootstrap files exceed size limit");
+        hash.update(chunk); await handle.writeFile(chunk);
+      };
+      try {
+        if (file.text !== undefined) await accept(Buffer.from(file.text));
+        else {
+          const response = await fetch(file.download_url!, { signal, redirect: "error" });
+          if (!response.ok) throw new Error(`download bootstrap file ${file.path} failed: HTTP ${response.status}`);
+          const reader = response.body?.getReader();
+          try { if (reader) while (true) { signal?.throwIfAborted(); const {done,value} = await reader.read(); if (done) break; await accept(value); } }
+          finally { await reader?.cancel().catch(() => {}); }
         }
-      }
-      totalBytes += contents.byteLength;
-      if (totalBytes > MAX_BOOTSTRAP_TOTAL_BYTES) throw new Error("bootstrap files exceed total size limit");
-      if (file.expected_size !== undefined && contents.byteLength !== file.expected_size) throw new Error(`bootstrap file ${file.path} size mismatch`);
-      await writeFile(staged, contents, { mode: file.mode, flag: "wx" });
+        if (file.expected_size !== undefined && size !== file.expected_size) throw new Error(`bootstrap file ${file.path} size mismatch`);
+        if (file.content_sha256 !== undefined && hash.digest("hex") !== file.content_sha256) throw new Error(`bootstrap file ${file.path} SHA-256 mismatch`);
+      } finally { await handle.close(); }
       await chmod(staged, file.mode);
     }
 
@@ -211,24 +220,10 @@ async function ensureRealParent(workspace: string, parent: string): Promise<void
   }
 }
 
-async function readBoundedBytes(response: Response, limit: number, label: string): Promise<Uint8Array> {
-  const reader = response.body?.getReader();
-  if (!reader) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) throw new Error(`${label} exceeds size limit`);
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks);
-}
-
 async function filesEqual(first: string, second: string): Promise<boolean> {
-  const [left, right] = await Promise.all([readFile(first), readFile(second)]);
-  return left.equals(right);
+  const digest = async (path: string) => { const hash = createHash("sha256"); for await (const chunk of createReadStream(path)) hash.update(chunk); return hash.digest("hex"); };
+  const [left, right] = await Promise.all([lstat(first), lstat(second)]);
+  return left.size === right.size && await digest(first) === await digest(second);
 }
 
 async function mergeWritableEntry(source: string, target: string): Promise<void> {

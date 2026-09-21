@@ -348,6 +348,7 @@ func main() {
 		MontageToolPolicy:       cfg.Montage.ToolPolicy,
 		MontagePipelineDefaults: cfg.Montage.PipelineDefaults,
 		MontageEnv:              cfg.Montage.Env,
+		Hypit:                   cfg.Hypit,
 		Registry:                agentProfiles,
 	}, *log)
 
@@ -367,10 +368,13 @@ func main() {
 	var referenceAssetSvc *service.ReferenceAssetService
 	var imageAnalysisSvc *service.ImageAnalysisService
 	var asynqClient *scheduler.AsynqClient
+	hypitCapabilitySvc := service.NewHypitCapabilityService(cfg.Hypit)
 	montageCapabilitySvc := service.NewMontageCapabilityService(cfg.Montage)
 	if repo != nil {
 		planSvc = service.NewPlanService(repo, log)
 		projectSvc = service.NewProjectService(repo, log)
+		planSvc.SetHypitCapabilityService(hypitCapabilitySvc)
+		projectSvc.SetHypitCapabilityService(hypitCapabilitySvc)
 		planSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		projectSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		feedbackSvc = service.NewFeedbackService(repo, log)
@@ -403,6 +407,7 @@ func main() {
 		taskSvc.SetBillingWalletService(fixedBilling.Wallet)
 		taskSvc.SetBillingCatalogService(fixedBilling.Catalog)
 		planSvc.SetBillingWalletService(fixedBilling.Wallet)
+		taskSvc.SetHypitConfig(cfg.Hypit)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
@@ -626,6 +631,8 @@ func main() {
 		imageCatalog = fixedBilling.Catalog
 	}
 	imageCapabilityHandler = handler.NewImageCapabilityHandler(cfg.ModelRoutes.ImageGeneration, repo, imageCatalog, log)
+	hypitCapabilityHandler := handler.NewHypitCapabilityHandler(hypitCapabilitySvc)
+	hypitCapabilityHandler.SetTaskService(taskSvc)
 	montageCapabilityHandler = handler.NewMontageCapabilityHandler(montageCapabilitySvc)
 	// Wire capability routing + repo into task/plan handlers for tier-gated validation.
 	if taskHandler != nil {
@@ -821,6 +828,7 @@ func main() {
 		FeedbackHandler:              feedbackHandler,
 		ImageCapabilityHandler:       imageCapabilityHandler,
 		MontageCapabilityHandler:     montageCapabilityHandler,
+		HypitCapabilityHandler:       hypitCapabilityHandler,
 		TemplateHandler:              templateHandler,
 		ImageAnalysisHandler:         imageAnalysisHandler,
 		ViralAnalysisHandler:         viralAnalysisHandler,

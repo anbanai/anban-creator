@@ -1,3 +1,4 @@
+import { validateHypitEnvironment } from "./hypit.js";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -297,7 +298,10 @@ export function buildQueryOptions(
 ): Options {
   const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai";
-  const pack = data.resolved_agent_pack;
+  const pack = data.task_type === "hypit" ? { ...data.resolved_agent_pack, artifacts: [
+    ...data.resolved_agent_pack.artifacts.filter(a => !["output/project.json", "output/project.zip", "output/quality-report.json"].includes(a.path)),
+    { role: "semantic_report", path: "output/semantic-report.json", required: true },
+  ] } : data.resolved_agent_pack;
   const diagnostic: ProgressDiagnostic = (message) => {
     void reporter.progress(`progress hook: ${message}`, controller.signal).catch(() => {});
   };
@@ -591,6 +595,15 @@ function denyManagedAgent(reason: string): HookJSONOutput {
   };
 }
 
+// Hypit provider authentication is explicitly server-configured. Do not infer host
+// credential names: even innocuous-looking environment variables may carry secrets.
+const HYPIT_INHERITED_ENV_KEYS = new Set([
+  "PATH", "HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "TZ",
+  "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LC_COLLATE", "LC_NUMERIC",
+  "LC_TIME", "LC_MONETARY", "TMPDIR", "TMP", "TEMP",
+  "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS",
+]);
+
 export function buildExecutionEnvironment(
   processEnvironment: NodeJS.ProcessEnv,
   data: Pick<BootstrapResponse, "task_type" | "env" | "project_id" | "task_id" | "execution_id" | "execution_profile">,
@@ -598,9 +611,12 @@ export function buildExecutionEnvironment(
   _token: string,
   workspace = "/workspace",
 ): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = { ...processEnvironment, ...(data.env ?? {}) };
+  const environment: NodeJS.ProcessEnv = data.task_type === "hypit"
+    ? Object.fromEntries(Object.entries(processEnvironment).filter(([key]) => HYPIT_INHERITED_ENV_KEYS.has(key)))
+    : { ...processEnvironment, ...(data.env ?? {}) };
   for (const key of CLAUDE_ENVIRONMENT_KEYS_TO_UNSET) delete environment[key];
   sanitizeCredentialEnvironment(environment);
+  if (data.task_type === "hypit") { validateHypitEnvironment(data.env ?? {}); Object.assign(environment, data.env); }
   const managed: NodeJS.ProcessEnv = {
     ...environment,
     ANBAN_DEFAULT_PROJECT: data.project_id,
@@ -611,6 +627,7 @@ export function buildExecutionEnvironment(
   };
   if (managedParallelWorkersEnabled(data.task_type)) managed.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
   if (data.task_type === "montage") managed.ANBAN_MONTAGE_SUBMODULE_PATH = `${workspace}/openmontage`;
+  if (data.task_type === "hypit") { managed.CLAUDE_PLUGIN_ROOT = "/anbanai"; managed.ANBAN_HYPIT_ROOT = "/opt/hypit"; managed.ANBAN_HYPIT_RUNTIME_PROFILE = `${workspace}/runtime-profile.json`; managed.ANBAN_HYPIT_PROJECT_ROOT = `${workspace}/project`; }
   return managed;
 }
 

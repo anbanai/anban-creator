@@ -187,7 +187,7 @@ func (s *ImageAnalysisService) UpdateProject(ctx context.Context, project *model
 func (s *ImageAnalysisService) updateProjectTx(ctx context.Context, tx repository.Repository, current, project *model.Project) (*model.ImageAnalysisJob, error) {
 	referenceChanged := current.ReferenceImageAssetID != project.ReferenceImageAssetID
 	generatedStyleFollowsReference := referenceChanged && !project.VisualStyleSet && current.VisualStyleSource == model.ImageAnalysisSourceAnalysis
-	startAnalysis := project.Platform != model.PlatformMontage &&
+	startAnalysis := project.Platform != model.PlatformMontage && project.Platform != model.PlatformHypit &&
 		strings.TrimSpace(project.ReferenceImageAssetID) != "" &&
 		((strings.TrimSpace(project.VisualStyle) == "" && (project.VisualStyleSet || referenceChanged)) || generatedStyleFollowsReference)
 	if project.VisualStyleSet {
@@ -200,7 +200,7 @@ func (s *ImageAnalysisService) updateProjectTx(ctx context.Context, tx repositor
 			project.VisualStyleSource = ""
 		}
 	}
-	if (referenceChanged || project.Platform == model.PlatformMontage) && !startAnalysis {
+	if (referenceChanged || project.Platform == model.PlatformMontage || project.Platform == model.PlatformHypit) && !startAnalysis {
 		if err := supersedeImageAnalysisTx(ctx, tx, model.ImageAnalysisSubjectProject, project.ID, model.ImageAnalysisKindProjectVisualStyle); err != nil {
 			return nil, err
 		}

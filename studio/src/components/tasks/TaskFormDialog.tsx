@@ -1,3 +1,5 @@
+import { HypitCreationPanel } from '@/components/hypit/HypitCreationPanel'
+import { initialHypitInput } from '@/lib/hypit-form'
 import { useEffect, useMemo, useRef, useState, type BaseSyntheticEvent } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -75,6 +77,7 @@ function createInitialDefaults(project?: Project, initialType?: TaskType): TaskF
   return {
     ...defaults,
     type: initialType,
+    hypit_input: initialType === 'hypit' ? initialHypitInput('') : undefined,
     montage_input: initialType === 'montage'
       ? initialMontageInput('')
       : undefined,
@@ -171,9 +174,9 @@ export function TaskFormDialog({
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
-  const isMontageTask = watchedType === 'montage'
+  const isMontageTask = watchedType === 'montage' || watchedType === 'hypit'
   const isViralAnalysisTask = watchedType === 'viral_analysis'
-	const usesImageSettings = !isViralAnalysisTask
+	const usesImageSettings = !isViralAnalysisTask && watchedType !== 'hypit'
   const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
@@ -311,9 +314,11 @@ export function TaskFormDialog({
   }
 
   function changeProject(id: string | null) {
-    setMontageUploading(false)
-    setMontageReady(false)
     const project = id ? projectMap.get(id) : undefined
+    if (form.getValues('type') !== 'hypit' || project?.platform !== 'hypit') {
+      setMontageUploading(false)
+      setMontageReady(false)
+    }
     const current = {
       ...form.getValues(),
       input_attachments: attachmentController.toInputAttachments(),
@@ -440,13 +445,13 @@ export function TaskFormDialog({
     />
   )
 
-  const promptComposer = isViralAnalysisTask ? (
+  const promptComposer = isViralAnalysisTask || watchedType === 'hypit' ? (
     <div data-slot="viral-analysis-prompt" className="flex flex-col gap-2">
       <Textarea
-        aria-label="源笔记链接或分享文本"
+        aria-label={watchedType === 'hypit' ? '复刻要求' : '源笔记链接或分享文本'}
         value={watchedPrompt}
-        onChange={(event) => setFormValue('prompt', event.target.value)}
-        placeholder="粘贴种草笔记链接或分享文本..."
+        onChange={(event) => { setFormValue('prompt', event.target.value); if (watchedType === 'hypit') form.setValue('hypit_input.brief', event.target.value, { shouldDirty: true, shouldValidate: true }) }}
+        placeholder={watchedType === 'hypit' ? '描述希望保留的镜头、节奏及需要替换的内容…' : '粘贴种草笔记链接或分享文本...'}
         className="min-h-32 resize-y"
       />
       <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -480,14 +485,14 @@ export function TaskFormDialog({
     />
   )
 
-  const submitLabel = mode === 'clone' ? '克隆' : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'
+  const submitLabel = mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆') : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'
 
   return (
     <>
       <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !isSubmitting) requestClose() }}>
         <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-5xl">
           <DialogHeader className="border-b border-border px-4 py-3">
-            <DialogTitle>{mode === 'clone' ? '克隆任务' : '新建任务'}</DialogTitle>
+            <DialogTitle>{mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆任务') : '新建任务'}</DialogTitle>
             <DialogDescription>
               {mode === 'clone'
                 ? '编辑完整配置并创建一份新任务。'
@@ -539,7 +544,7 @@ export function TaskFormDialog({
               <div className="space-y-4 pt-1">
                 {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">{isMontageTask ? '视频设置' : '图片/高级'}</p> : null}
 
-                {isMontageTask ? (
+                {watchedType === 'hypit' ? <HypitCreationPanel form={form} onReadyChange={setMontageReady} onUploadingChange={setMontageUploading} briefField={promptComposer} remix={mode === 'clone' && sourceTask?.status === 'completed'} sourceTaskId={mode === 'clone' ? sourceTask?.id : undefined} /> : isMontageTask ? (
                   <MontageCreationPanel
                     form={form}
                     fieldRoot="montage_input"

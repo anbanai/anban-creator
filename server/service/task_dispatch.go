@@ -389,6 +389,12 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 			}
 		} else {
 			runtime = s.runtimeDispatcher.ResolveRuntime(dispatchTask.Type)
+			if model.IsHypitPlatform(dispatchTask.Type) {
+				if snap := readHypitSnapshot(dispatchTask); snap.Image != "" {
+					runtime.Image = snap.Image
+					runtime.Profile = model.PlatformHypit
+				}
+			}
 			runtime.Profile = strings.TrimSpace(runtime.Profile)
 			runtime.Image = strings.TrimSpace(runtime.Image)
 			if runtime.Profile == "" || runtime.Image == "" {
@@ -405,6 +411,13 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 			resumeSessionID = ""
 			if err := applyAgentPackIdentity(execution, dispatchTask.Type); err != nil {
 				return err
+			}
+		}
+		if model.IsHypitPlatform(dispatchTask.Type) && parent == nil {
+			if snap := readHypitSnapshot(dispatchTask); snap.SourceExecution != nil {
+				if !inheritAgentPackIdentity(execution, snap.SourceExecution.execution()) {
+					return fmt.Errorf("hypit frozen Pack contract is incomplete")
+				}
 			}
 		}
 		if execution.RuntimeProfile != runtime.Profile {

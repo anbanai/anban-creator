@@ -125,7 +125,7 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
     ? '配置无效（图像能力未固化）'
     : knownImageCapabilityName(imageCapabilityKey) || '已停用能力'
   const platform = hasSnapshot ? snapshot?.platform || task.type : project?.platform || task.type
-  const ratioLabel = platform === 'montage' ? '视频比例' : '图片比例'
+  const ratioLabel = (platform === 'montage' || platform === 'hypit') ? '视频比例' : '图片比例'
 
   return (
     <div className="flex flex-col gap-5">
@@ -141,16 +141,17 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
           <Detail label="项目" value={projectName} />
           <Detail label="内容类型" value={contentTypeLabel[platform] || platform} />
           <Detail label="视觉风格" value={visualStyle} wide />
-          <Detail label={ratioLabel} value={imageRatio} />
-          <div className="flex min-w-0 flex-col gap-1">
+          <Detail label={ratioLabel} value={task.type === 'hypit' ? task.hypit_input?.preferences?.aspect_ratio || '跟随参考视频' : imageRatio} />
+          {task.type !== 'hypit' && <div className="flex min-w-0 flex-col gap-1">
             <dt className="text-xs text-muted-foreground">图像能力</dt>
             <dd className="flex min-w-0 flex-col gap-1 break-words text-sm text-foreground">
               <ImageCapabilityDisplay option={imageCapability} fallback={imageCapabilityFallback} />
             </dd>
-          </div>
+          </div>}
         </dl>
       </section>
 
+      {task.type === 'hypit' && <section className="space-y-3"><h3 className="text-sm font-semibold">视频复刻要求</h3><dl className="grid gap-3"><Detail label="来源任务" value={task.input_source_task_id || '全新复刻'} /><Detail label="复刻要求" value={task.hypit_input?.brief || task.prompt} /><Detail label="参考视频" value={task.hypit_input?.reference?.file_name || task.hypit_input?.reference?.url || '沿用原工程'} /><Detail label="语言" value={task.hypit_input?.preferences?.language || '跟随参考视频'} /><Detail label="目标时长" value={task.hypit_input?.preferences?.duration_seconds ? `${task.hypit_input.preferences.duration_seconds} 秒` : '跟随参考视频'} /></dl></section>}
       {task.type === 'article' ? (
         <>
           <Separator />

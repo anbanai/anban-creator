@@ -28,6 +28,7 @@ type PlanService struct {
 	referenceAssets     *ReferenceAssetService
 	agentProfiles       *AgentProfileRegistry
 	billingWalletSvc    *BillingWalletService
+	hypitCapabilities   *HypitCapabilityService
 	montageCapabilities *MontageCapabilityService
 }
 
@@ -94,6 +95,7 @@ type CreatePlanParams struct {
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
 	MontageInput             *model.MontageInput
+	HypitInput               *model.HypitInput
 	InputAttachments         []model.EntryAttachment
 	AgentInput               map[string]any
 }
@@ -147,6 +149,20 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		return nil, fmt.Errorf("plans are not supported for e-commerce projects: %w", ErrUnsupportedPlanPlatform)
 	case model.PlatformMoments:
 		return nil, fmt.Errorf("plans are not supported for moments projects: %w", ErrUnsupportedPlanPlatform)
+	}
+	if p.HypitInput != nil && !model.IsHypitPlatform(project.Platform) {
+		return nil, ErrHypitInput
+	}
+	if model.IsHypitPlatform(project.Platform) {
+		if err := s.hypitCapabilities.NormalizeAndValidateInput(p.HypitInput, project.HypitDefaults.Data(), false); err != nil {
+			return nil, err
+		}
+		if err := s.validateHypitPlanUploads(ctx, p.UserID, p.HypitInput); err != nil {
+			return nil, err
+		}
+		if err := validateHypitTaskFiles(ctx, s.repo, p.UserID, p.ProjectID, s.montageStorageProviderName(), p.HypitInput, s.hypitCapabilities.config.Limits); err != nil {
+			return nil, err
+		}
 	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(project.Platform) {
 		return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
@@ -246,6 +262,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if agentInput != nil {
 		plan.SetAgentInput(agentInput)
 	}
+	if p.HypitInput != nil {
+		plan.SetHypitInput(*p.HypitInput)
+	}
 	if model.IsMontagePlatform(project.Platform) && p.MontageInput != nil {
 		plan.SetMontageInput(*p.MontageInput)
 	}
@@ -319,6 +338,7 @@ type UpdatePlanParams struct {
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
 	MontageInput             *model.MontageInput
+	HypitInput               *model.HypitInput
 	InputAttachments         *[]model.EntryAttachment
 	AgentInput               *map[string]any
 }
@@ -434,6 +454,29 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 			return nil, err
 		}
 		plan.SetAgentInput(agentInput)
+	}
+	if p.HypitInput != nil || model.IsHypitPlatform(plan.Type) {
+		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if !model.IsHypitPlatform(project.Platform) {
+			return nil, ErrHypitInput
+		}
+		in := plan.HypitInput.Data()
+		if p.HypitInput != nil {
+			in = *p.HypitInput
+		}
+		if err := s.hypitCapabilities.NormalizeAndValidateInput(&in, project.HypitDefaults.Data(), false); err != nil {
+			return nil, err
+		}
+		if err := s.validateHypitPlanUploads(ctx, plan.UserID, &in); err != nil {
+			return nil, err
+		}
+		if err := validateHypitTaskFiles(ctx, s.repo, plan.UserID, plan.ProjectID, s.montageStorageProviderName(), &in, s.hypitCapabilities.config.Limits); err != nil {
+			return nil, err
+		}
+		plan.SetHypitInput(in)
 	}
 	if p.MontageInput != nil || (model.IsMontagePlatform(plan.Type) && s.montageCapabilities != nil) {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)

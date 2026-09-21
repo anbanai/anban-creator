@@ -81,7 +81,8 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.imageCapabilities,
         list: vi.fn().mockResolvedValue({ items: [], tier: 'pro' }),
       },
-		montageCapabilities: {
+		hypitCapabilities: { list: vi.fn().mockResolvedValue({ enabled: true, configured: true, missing_configuration: [], limits: { max_assets: 20, max_duration_seconds: 180, max_asset_bytes: 100000, max_input_bytes: 200000 } }) },
+      montageCapabilities: {
 			...actual.api.montageCapabilities,
 			list: vi.fn(),
 		},
@@ -160,6 +161,7 @@ describe('ProjectsPage', () => {
       projectWithReference,
       { ...projectWithReference, id: 'moments-1', name: '内部朋友圈', platform: 'moments' },
       { ...projectWithReference, id: 'ecommerce-1', name: '内部电商', platform: 'ecommerce' },
+      { ...projectWithReference, id: 'hypit-1', name: '内部复刻', platform: 'hypit' },
       { ...projectWithReference, id: 'montage-1', name: '内部剪辑', platform: 'montage' },
     ])
 
@@ -168,6 +170,7 @@ describe('ProjectsPage', () => {
     expect(await screen.findByText('测试项目')).toBeInTheDocument()
     expect(screen.queryByText('内部朋友圈')).not.toBeInTheDocument()
     expect(screen.queryByText('内部电商')).not.toBeInTheDocument()
+    expect(screen.queryByText('内部复刻')).not.toBeInTheDocument()
     expect(screen.getByText('内部剪辑')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
@@ -177,7 +180,17 @@ describe('ProjectsPage', () => {
     expect(screen.getByRole('option', { name: '种草笔记' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '朋友圈' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '视频复刻' })).not.toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Montage' })).toBeInTheDocument()
+  })
+
+  it('does not open internal replication defaults from an ordinary-user deep link', async () => {
+    authState.isAdmin = false
+    window.history.pushState({}, '', '/projects?create=true&type=hypit&intent=new')
+    render(<ProjectsPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    expect(within(dialog).getAllByRole('combobox')[0]).not.toHaveTextContent('视频复刻')
+    expect(within(dialog).queryByRole('region', { name: '视频复刻默认设置' })).not.toBeInTheDocument()
   })
 
   it('opens Montage project creation from a deep link for ordinary users', async () => {
@@ -436,6 +449,20 @@ describe('ProjectsPage', () => {
     expect(screen.queryByRole('button', { name: /归藏社交卡/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/Guizang|归藏|社交卡片/)).not.toBeInTheDocument()
     expect((styleField as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('creates a video replication project with typed defaults', async () => {
+    window.history.pushState({}, '', '/projects?create=true&type=hypit&intent=new')
+    vi.mocked(api.projects.create).mockResolvedValue({ project: { ...projectWithReference, platform: 'hypit' } })
+    render(<ProjectsPage />)
+    await screen.findByRole('region', { name: '视频复刻默认设置' })
+    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '视频复刻项目' } })
+    fireEvent.change(screen.getByLabelText('复刻视频比例'), { target: { value: '16:9' } })
+    fireEvent.change(screen.getByLabelText('目标时长（秒）'), { target: { value: '30' } })
+    fireEvent.change(screen.getByLabelText('语言'), { target: { value: '中文' } })
+    fireEvent.change(screen.getByLabelText('素材使用说明'), { target: { value: '使用品牌素材' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({ platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '16:9', duration_seconds: 30, language: '中文' }, asset_guidance: '使用品牌素材' } })))
   })
 
   it('creates a Montage project with every project default', async () => {

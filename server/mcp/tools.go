@@ -131,7 +131,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"status":   map[string]any{"type": "string", "enum": []any{"active", "archived"}, "description": "Filter by status"},
-				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage"}, "description": "Filter by platform type"},
+				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage", "hypit"}, "description": "Filter by platform type"},
 			},
 		},
 	}, projectListHandler)
@@ -155,7 +155,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage"}, "description": "Optional legacy output-shape hint."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage", "hypit"}, "description": "Optional legacy output-shape hint."},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID for resolving its frozen project_snapshot; it must belong to the same project and user."},
 			},
 			"required": []any{"project_id"},

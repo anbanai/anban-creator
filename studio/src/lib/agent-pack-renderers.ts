@@ -4,6 +4,7 @@ const customRendererKeys = new Set([
   'moments',
   'ecommerce',
   'montage',
+  'hypit',
 ])
 
 export function registeredAgentPackForm(renderer?: string): string | null {

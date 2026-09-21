@@ -30,6 +30,7 @@ type Config struct {
 	WeChat             WeChatConfig                    `yaml:"wechat"`
 	Storage            StorageConfig                   `yaml:"storage"`
 	MCP                MCPConfig                       `yaml:"mcp"`
+	Hypit              HypitConfig                     `yaml:"hypit"`
 	Montage            MontageConfig                   `yaml:"montage"`
 	ServerInternal     ModelRuntimeConfig              `yaml:"-"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
@@ -652,7 +653,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != model.PlatformArticle && profile != model.PlatformSeednote && profile != model.PlatformMontage {
+		if profile != model.PlatformArticle && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformHypit {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -790,6 +791,10 @@ type KubernetesResourceConfig struct {
 // the task-specific profile. Profiles may override individual resource keys.
 func (c KubernetesConfig) ResourcesForTask(taskType string) KubernetesResourceConfig {
 	profile := c.ResourceProfiles[strings.TrimSpace(taskType)]
+	if model.IsHypitPlatform(taskType) {
+		profile.Requests = mergeKubernetesResourceValues(map[string]string{"cpu": "4", "memory": "8Gi"}, profile.Requests)
+		profile.Limits = mergeKubernetesResourceValues(map[string]string{"cpu": "4", "memory": "8Gi"}, profile.Limits)
+	}
 	return KubernetesResourceConfig{
 		Requests: mergeKubernetesResourceValues(c.Resources.Requests, profile.Requests),
 		Limits:   mergeKubernetesResourceValues(c.Resources.Limits, profile.Limits),
@@ -932,6 +937,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"storage":         true,
 		"mcp":             true,
 		"montage":         true,
+		"hypit":           true,
 		"model_providers": true,
 		"model_routes":    true,
 		"billing_runtime": true,
@@ -1064,6 +1070,7 @@ func (c *Config) applyDefaults() {
 		}
 	}
 	c.Montage.ApplyDefaults()
+	c.Hypit.ApplyDefaults()
 	// Asynq defaults.
 	if c.Asynq.Concurrency == 0 {
 		c.Asynq.Concurrency = 3
@@ -1592,6 +1599,12 @@ func (c *Config) Validate() error {
 		errs = append(errs, "claude.project_memory.max_preview_bytes must not exceed max_project_bytes")
 	}
 
+	if err := c.Hypit.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if c.Hypit.Enabled && strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformHypit]) == "" {
+		errs = append(errs, "claude.runtime_images.hypit is required when hypit is enabled")
+	}
 	if err := c.Montage.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}

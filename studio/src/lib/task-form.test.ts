@@ -49,6 +49,18 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 describe('task form mapping', () => {
+  it('maps replication defaults and new remix brief without mutating source', () => {
+    const defaults = createTaskFormDefaults(project({ platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '16:9', language: '中文' } } }))
+    expect(defaults.hypit_input?.preferences).toEqual({ aspect_ratio: '16:9', language: '中文' })
+    const source = task({ type: 'hypit', hypit_input: { brief: 'original', reference: { type: 'video_url', url: 'https://example.com/ref.mp4' } } })
+    const clone = cloneTaskFormDefaults(source)
+    clone.prompt = 'replace the product'
+    const request = taskFormValuesToRequest(clone)
+    expect(request.hypit_input?.brief).toBe('replace the product')
+    expect(request.hypit_input?.reference?.url).toBe('https://example.com/ref.mp4')
+    expect(source.hypit_input?.brief).toBe('original')
+  })
+
   /* Agent Pack extension snapshots remain separate from typed business fields. */
   it('preserves agent_input through clone defaults and request mapping', () => {
     const defaults = cloneTaskFormDefaults(task({ agent_input: {} }))

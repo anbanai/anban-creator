@@ -1,3 +1,6 @@
+import { Textarea } from '@/components/ui/textarea'
+import { HypitCreationPanel } from '@/components/hypit/HypitCreationPanel'
+import { initialHypitInput } from '@/lib/hypit-form'
 import { useState, useEffect, useMemo, useRef, useCallback, type BaseSyntheticEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch } from 'react-hook-form'
@@ -51,7 +54,7 @@ import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
 function isPlanType(value: string | undefined): value is PlanType {
-  return value === 'seednote' || value === 'article' || value === 'montage'
+  return value === 'seednote' || value === 'article' || value === 'montage' || value === 'hypit'
 }
 
 function planToFormValues(plan: Plan): PlanFormValues {
@@ -60,7 +63,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     execution_profile: plan.execution_profile,
     type: plan.type,
     cron_expr: plan.cron_expr,
-    prompt: plan.prompt || '',
+    prompt: plan.type === 'hypit' ? plan.hypit_input?.brief || plan.prompt || '' : plan.prompt || '',
     image_capability_key: plan.image_capability_key || '',
     image_ratio: normalizeImageRatio(plan.image_ratio),
     skip_reference_image: plan.skip_reference_image || false,
@@ -71,6 +74,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
+    hypit_input: plan.type === 'hypit' ? initialHypitInput(plan.prompt || '', plan.hypit_input) : undefined,
     montage_input: plan.type === 'montage' ? initialMontageInput(plan.prompt || '', plan.montage_input) : undefined,
   }
 }
@@ -132,6 +136,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      hypit_input: undefined,
       montage_input: undefined,
     },
   })
@@ -175,8 +180,8 @@ export default function PlansPage() {
 	const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' })
 	const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
 	const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
-	const isMontagePlan = watchedType === 'montage'
-	const usesImageSettings = true
+	const isMontagePlan = watchedType === 'montage' || watchedType === 'hypit'
+	const usesImageSettings = watchedType !== 'hypit'
 	const {
 		items: imageCapabilityOptions,
 		defaultCapability: defaultImageCapability,
@@ -368,7 +373,7 @@ export default function PlansPage() {
   })
 
   const openCreate = useCallback(() => {
-    const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'montage'
+    const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'montage' || createIntent.type === 'hypit'
       ? createIntent.type
       : 'seednote'
     const intentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
@@ -401,6 +406,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      hypit_input: initialType === 'hypit' ? initialHypitInput('', undefined, selectedIntentProject?.hypit_defaults) : undefined,
       montage_input: initialType === 'montage'
         ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
         : undefined,
@@ -475,6 +481,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      hypit_input: undefined,
       montage_input: undefined,
     })
   }
@@ -487,11 +494,11 @@ export default function PlansPage() {
 	const submittedImageCapability = imageCapabilityOptions.find(
 		(option) => option.key === (values.image_capability_key || defaultImageCapability),
 	)
-	if (
+	if (values.type !== 'hypit' && (
 		!submittedImageCapability
 		|| submittedImageCapability.enabled !== true
 		|| submittedImageCapability.price_available !== true
-	) {
+	)) {
 		toast.error('该图像能力已停用，请重新选择')
 		return
 	}
@@ -528,6 +535,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
+      hypit_input: values.type === 'hypit' ? { ...values.hypit_input, brief: values.prompt || '' } : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
@@ -558,8 +566,11 @@ export default function PlansPage() {
       placeholder="选择项目"
       disabled={isSubmitting}
       onValueChange={(id, project) => {
-        setMontageUploading(false)
-        setMontageReady(false)
+        const preserveHypitInput = form.getValues('type') === 'hypit' && project?.platform === 'hypit'
+        if (!preserveHypitInput) {
+          setMontageUploading(false)
+          setMontageReady(false)
+        }
         form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
         if (!id || !isPlanType(project?.platform)) return
         const nextType = project.platform
@@ -567,13 +578,14 @@ export default function PlansPage() {
         form.setValue('type', nextType, { shouldDirty: true })
         form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
         form.setValue('agent_input', {}, { shouldDirty: true })
+        form.setValue('hypit_input', nextType === 'hypit' ? initialHypitInput(form.getValues('prompt') || '', preserveHypitInput ? { ...form.getValues('hypit_input'), preferences: fullProject?.hypit_defaults?.preferences } : undefined, fullProject?.hypit_defaults) : undefined, { shouldDirty: false })
         form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
       }}
       ariaLabel={selectedProject ? `项目：${selectedProject.name}` : '项目：未选择'}
       compact
     />
   )
-  const promptComposer = (
+  const promptComposer = watchedType === 'hypit' ? <div className="space-y-3"><Textarea aria-label="复刻要求" value={form.watch('prompt') ?? ''} placeholder="描述每次复刻需要保留和替换的内容" onChange={event => { form.setValue('prompt', event.target.value, { shouldDirty: true }); form.setValue('hypit_input.brief', event.target.value, { shouldDirty: true, shouldValidate: true }) }} />{projectControl}<TaskComposerParameters execution={{ profiles: executionProfilesQuery.data ?? [], value: watchedExecutionProfile, onChange: value => form.setValue('execution_profile', value, { shouldDirty: true }), loading: executionProfilesQuery.isLoading, disabled: executionProfilesQuery.isError, catalog: billingCatalog, taskType: watchedType, priceUnit: 'run' }} /></div> : (
     <>
       <AgentPromptInput
       value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
@@ -817,7 +829,7 @@ export default function PlansPage() {
 
               {!isMontagePlan ? promptComposer : null}
 
-              {isMontagePlan && (
+              {watchedType === 'hypit' ? <HypitCreationPanel form={form} onReadyChange={setMontageReady} onUploadingChange={setMontageUploading} briefField={promptComposer} /> : isMontagePlan && (
                 <MontageCreationPanel
                   form={form}
                   fieldRoot="montage_input"

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"gopkg.in/yaml.v3"
 )
 
@@ -603,17 +604,17 @@ func TestClaudeCodePluginAgentsUseOnlySupportedFrontmatterFields(t *testing.T) {
 	}
 }
 
-func TestClaudeCodePluginAgentsDeclareAutonomousExecution(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "harness", "agents")
-	entries, err := os.ReadDir(root)
+func TestClaudeCodeManagedAgentsDeclareAutonomousExecution(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "harness")
+	catalog, err := agentpack.LoadCatalog(root)
 	if err != nil {
-		t.Fatalf("read claudecode agents: %v", err)
+		t.Fatalf("load Agent Packs: %v", err)
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+	for _, pack := range catalog.Packs {
+		if pack.Kind != agentpack.KindManaged {
 			continue
 		}
-		path := filepath.Join(root, entry.Name())
+		path := filepath.Join(root, "agents", pack.Agent.Name+".md")
 		body := readRepoFile(t, path)
 		for _, want := range []string{
 			"全自动执行契约",

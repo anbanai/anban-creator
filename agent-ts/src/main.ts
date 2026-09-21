@@ -1,14 +1,40 @@
+import { validateFinalArtifacts } from "./artifact-validator.js";
+import {
+  cleanupHypit,
+  hypitCredentialKeys,
+  hypitExecutionBudget,
+  hypitFailureDetails,
+  prepareHypitUpload,
+  finalizeHypit,
+  prepareHypitWorkspace,
+  type HypitRestoreContext,
+} from "./hypit.js";
 import { pathToFileURL } from "node:url";
 import { constants } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 
-import { uploadWorkspaceArtifacts, type ArtifactReporter, type ArtifactUploadSummary } from "./artifacts.js";
-import { BootstrapResponseError, bootstrap, readWorkloadToken, type BootstrapIdentity, type BootstrapResponse, type ResolvedBootstrapResponse } from "./bootstrap.js";
+import {
+  uploadWorkspaceArtifacts,
+  type ArtifactReporter,
+  type ArtifactUploadSummary,
+} from "./artifacts.js";
+import {
+  BootstrapResponseError,
+  bootstrap,
+  readWorkloadToken,
+  type BootstrapIdentity,
+  type BootstrapResponse,
+  type ResolvedBootstrapResponse,
+} from "./bootstrap.js";
 import { parseJobConfig, type JobConfig } from "./config.js";
 import { CompletionReportError, exitCodeForError } from "./errors.js";
 import { Reporter, type ExecutionResult } from "./reporter.js";
 import { runWithProviderPolicyRecovery } from "./policy-recovery.js";
-import { runClaude, type RunnerReporter } from "./runner.js";
+import {
+  buildExecutionEnvironment,
+  runClaude,
+  type RunnerReporter,
+} from "./runner.js";
 import { asTransferFailure } from "./transport.js";
 import { materializeBootstrapFiles, prepareWorkspace } from "./workspace.js";
 
@@ -18,10 +44,14 @@ const COMPLETION_TIMEOUT_MS = 20_000;
 const MAX_ARTIFACT_TIMEOUT_MS = 300_000;
 const MAX_COMPLETION_TIMEOUT_MS = 60_000;
 const WORKFLOW_FAILURE_MESSAGE = "任务执行未完成，已有产物已保留。";
-const EXECUTION_IDENTITY_FAILURE_MESSAGE = "执行环境未建立，暂时无法生成或结算图片。";
+const EXECUTION_IDENTITY_FAILURE_MESSAGE =
+  "执行环境未建立，暂时无法生成或结算图片。";
 
 type HeartbeatReporter = Pick<Reporter, "heartbeat">;
-type JobReporter = ArtifactReporter & RunnerReporter & HeartbeatReporter & Pick<Reporter, "complete" | "submitCompletionMetadata">;
+type JobReporter = ArtifactReporter &
+  RunnerReporter &
+  HeartbeatReporter &
+  Pick<Reporter, "complete" | "submitCompletionMetadata">;
 
 export interface FinalizationTimeouts {
   artifact: number;
@@ -29,27 +59,78 @@ export interface FinalizationTimeouts {
 }
 
 export interface RunJobDependencies {
+  prepareHypitWorkspace?: typeof prepareHypitWorkspace;
+  finalizeHypit?: typeof finalizeHypit;
+  cleanupHypit?: typeof cleanupHypit;
   readWorkloadToken(path: string): Promise<string>;
-  bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse>;
-  materializeBootstrapFiles(workspace: string, files: BootstrapResponse["files"], signal?: AbortSignal): Promise<void>;
-  prepareWorkspace(workspace: string, taskType: string, adapter: BootstrapResponse["runtime_adapter"]): Promise<void>;
-  createReporter(config: JobConfig, data: Pick<BootstrapResponse, "execution_token" | "execution_id" | "task_id">): JobReporter;
-  startHeartbeat(reporter: JobReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void;
-  runClaude(config: JobConfig, data: ResolvedBootstrapResponse, reporter: JobReporter, signal: AbortSignal): Promise<ExecutionResult>;
-  uploadWorkspaceArtifacts(workspace: string, data: BootstrapResponse, reporter: JobReporter, signal?: AbortSignal, deadlineAt?: number): Promise<ArtifactUploadSummary>;
+  bootstrap(
+    config: JobConfig,
+    token: string,
+    signal?: AbortSignal,
+  ): Promise<ResolvedBootstrapResponse>;
+  materializeBootstrapFiles(
+    workspace: string,
+    files: BootstrapResponse["files"],
+    signal?: AbortSignal,
+    taskType?: string,
+  ): Promise<void>;
+  prepareWorkspace(
+    workspace: string,
+    taskType: string,
+    adapter: BootstrapResponse["runtime_adapter"],
+  ): Promise<void>;
+  createReporter(
+    config: JobConfig,
+    data: Pick<
+      BootstrapResponse,
+      "execution_token" | "execution_id" | "task_id"
+    >,
+  ): JobReporter;
+  startHeartbeat(
+    reporter: JobReporter,
+    stderr: NodeJS.WritableStream,
+    signal: AbortSignal,
+  ): () => void;
+  runClaude(
+    config: JobConfig,
+    data: ResolvedBootstrapResponse,
+    reporter: JobReporter,
+    signal: AbortSignal,
+  ): Promise<ExecutionResult>;
+  uploadWorkspaceArtifacts(
+    workspace: string,
+    data: BootstrapResponse,
+    reporter: JobReporter,
+    signal?: AbortSignal,
+    deadlineAt?: number,
+  ): Promise<ArtifactUploadSummary>;
   subscribeShutdown(onSignal: () => void): () => void;
 }
 
 export { CompletionReportError, exitCodeForError } from "./errors.js";
 
-export function finalizationTimeouts(env: NodeJS.ProcessEnv = process.env): FinalizationTimeouts {
+export function finalizationTimeouts(
+  env: NodeJS.ProcessEnv = process.env,
+): FinalizationTimeouts {
   return {
-    artifact: parsePhaseTimeout(env.ANBAN_JOB_ARTIFACT_TIMEOUT, ARTIFACT_TIMEOUT_MS, MAX_ARTIFACT_TIMEOUT_MS),
-    completion: parsePhaseTimeout(env.ANBAN_JOB_COMPLETION_TIMEOUT, COMPLETION_TIMEOUT_MS, MAX_COMPLETION_TIMEOUT_MS),
+    artifact: parsePhaseTimeout(
+      env.ANBAN_JOB_ARTIFACT_TIMEOUT,
+      ARTIFACT_TIMEOUT_MS,
+      MAX_ARTIFACT_TIMEOUT_MS,
+    ),
+    completion: parsePhaseTimeout(
+      env.ANBAN_JOB_COMPLETION_TIMEOUT,
+      COMPLETION_TIMEOUT_MS,
+      MAX_COMPLETION_TIMEOUT_MS,
+    ),
   };
 }
 
-function parsePhaseTimeout(raw: string | undefined, fallback: number, maximum: number): number {
+function parsePhaseTimeout(
+  raw: string | undefined,
+  fallback: number,
+  maximum: number,
+): number {
   if (!raw) return fallback;
   const match = /^(\d+(?:\.\d+)?)(ms|s|m)$/.exec(raw.trim());
   if (!match) return fallback;
@@ -63,10 +144,22 @@ const defaultRunJobDependencies: RunJobDependencies = {
   bootstrap,
   materializeBootstrapFiles,
   prepareWorkspace,
-  createReporter: (config, data) => new Reporter({ ...config, executionID: data.execution_id }, data.execution_token, data.task_id),
+  createReporter: (config, data) =>
+    new Reporter(
+      { ...config, executionID: data.execution_id },
+      data.execution_token,
+      data.task_id,
+    ),
   startHeartbeat,
   runClaude: (config, data, reporter, signal) =>
-    runClaude(config.workspace, data, config.serverURL, data.execution_token, reporter, signal),
+    runClaude(
+      config.workspace,
+      data,
+      config.serverURL,
+      data.execution_token,
+      reporter,
+      signal,
+    ),
   uploadWorkspaceArtifacts,
   subscribeShutdown: (onSignal) => {
     process.once("SIGINT", onSignal);
@@ -86,24 +179,114 @@ export async function runJob(
 ): Promise<ExecutionResult> {
   const config = parseJobConfig(args);
   const shutdown = new AbortController();
-  const stopShutdown = dependencies.subscribeShutdown(() => shutdown.abort(new Error("agent shutdown: received termination signal")));
+  const stopShutdown = dependencies.subscribeShutdown(() =>
+    shutdown.abort(new Error("agent shutdown: received termination signal")),
+  );
   let stopHeartbeat: (() => void) | undefined;
+  let hypitEnvironment: NodeJS.ProcessEnv | undefined;
+  let hypitKeys: string[] = [];
+  let hypitTimer: ReturnType<typeof setTimeout> | undefined;
+  let hypitReceipt: Record<string, string> | undefined;
+  let hypitFailureReason: unknown;
+  let hypitUpload: Awaited<ReturnType<typeof prepareHypitUpload>> | undefined;
+  let hypitRestoreContext: HypitRestoreContext | undefined;
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanupOwnedHypit = (): Promise<void> => {
+    if (!hypitEnvironment) return Promise.resolve();
+    return (cleanupPromise ??= (dependencies.cleanupHypit ?? cleanupHypit)(
+      config.workspace,
+      hypitEnvironment,
+    ).catch(() => {
+      stderr.write(
+        "Hypit cleanup could not finish; executor termination remains required\n",
+      );
+    }));
+  };
+  const cleanupOnShutdown = () => {
+    void cleanupOwnedHypit();
+  };
+  shutdown.signal.addEventListener("abort", cleanupOnShutdown);
   try {
-    const workloadToken = await dependencies.readWorkloadToken(config.workloadTokenFile);
+    const workloadToken = await dependencies.readWorkloadToken(
+      config.workloadTokenFile,
+    );
     let data: ResolvedBootstrapResponse | undefined;
     try {
-      data = await dependencies.bootstrap(config, workloadToken, shutdown.signal);
-      await dependencies.materializeBootstrapFiles(config.workspace, data.files, shutdown.signal);
-      await dependencies.prepareWorkspace(config.workspace, data.task_type, data.runtime_adapter);
+      data = await dependencies.bootstrap(
+        config,
+        workloadToken,
+        shutdown.signal,
+      );
+      if (data.task_type === "hypit") {
+        const inputText = data.files?.find(
+          (file) => file.path === "input.json",
+        )?.text;
+        const frozenInput = inputText ? JSON.parse(inputText) : {};
+        const profileText = data.files?.find(
+          (file) => file.path === "runtime-profile.json",
+        )?.text;
+        hypitRestoreContext = {
+          profile: profileText ? JSON.parse(profileText) : {},
+          runtime: frozenInput.runtime,
+          input: frozenInput,
+        };
+        hypitTimer = setTimeout(
+          () => shutdown.abort(new Error("Hypit execution deadline exceeded")),
+          hypitExecutionBudget(frozenInput),
+        );
+      }
+      await dependencies.materializeBootstrapFiles(
+        config.workspace,
+        data.files,
+        shutdown.signal,
+        data.task_type,
+      );
+      await dependencies.prepareWorkspace(
+        config.workspace,
+        data.task_type,
+        data.runtime_adapter,
+      );
+      if (data.task_type === "hypit") {
+        hypitEnvironment = buildExecutionEnvironment(
+          process.env,
+          data,
+          config.serverURL,
+          data.execution_token,
+          config.workspace,
+        );
+        hypitKeys = hypitCredentialKeys(hypitRestoreContext!.profile, data.env);
+        for (const key of Object.keys(hypitEnvironment))
+          if (
+            /TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL/i.test(key) &&
+            !hypitKeys.includes(key)
+          )
+            hypitKeys.push(key);
+        await (dependencies.prepareHypitWorkspace ?? prepareHypitWorkspace)(
+          config.workspace,
+          hypitEnvironment,
+          shutdown.signal,
+          Boolean(data.resume_session_id),
+          hypitKeys,
+        );
+      }
     } catch (error) {
-      const identity: BootstrapIdentity | undefined = data ?? (error instanceof BootstrapResponseError ? error.identity : undefined);
+      const identity: BootstrapIdentity | undefined =
+        data ??
+        (error instanceof BootstrapResponseError ? error.identity : undefined);
       if (identity) {
         const reporter = dependencies.createReporter(config, identity);
         const completionAbort = abortAfter(finalizationTimeouts().completion);
         try {
-          await reporter.complete(failure(config.workspace, error), completionAbort.signal);
+          await reporter.complete(
+            failure(config.workspace, error),
+            completionAbort.signal,
+          );
         } catch (completeError) {
-          throw new CompletionReportError(completeError instanceof Error ? completeError : new Error("completion report failed"));
+          throw new CompletionReportError(
+            completeError instanceof Error
+              ? completeError
+              : new Error("completion report failed"),
+          );
         } finally {
           completionAbort.abort();
         }
@@ -111,14 +294,35 @@ export async function runJob(
       throw error;
     }
     const reporter = dependencies.createReporter(config, data);
-    stopHeartbeat = dependencies.startHeartbeat(reporter, stderr, shutdown.signal);
+    stopHeartbeat = dependencies.startHeartbeat(
+      reporter,
+      stderr,
+      shutdown.signal,
+    );
     let result: ExecutionResult;
     result = await runWithProviderPolicyRecovery(
       config.workspace,
       data,
       async (sessionData) => {
         try {
-          return await dependencies.runClaude(config, sessionData, reporter, shutdown.signal);
+          if (data.task_type !== "hypit")
+            return await dependencies.runClaude(
+              config,
+              sessionData,
+              reporter,
+              shutdown.signal,
+            );
+          shutdown.signal.throwIfAborted();
+          return await new Promise<ExecutionResult>((resolve, reject) => {
+            const aborted = () => reject(shutdown.signal.reason);
+            shutdown.signal.addEventListener("abort", aborted, { once: true });
+            void dependencies
+              .runClaude(config, sessionData, reporter, shutdown.signal)
+              .then(resolve, reject)
+              .finally(() =>
+                shutdown.signal.removeEventListener("abort", aborted),
+              );
+          });
         } catch (error) {
           return failure(config.workspace, error);
         }
@@ -126,57 +330,189 @@ export async function runJob(
       (message) => reporter.progress(message, shutdown.signal),
       shutdown.signal,
     );
+    if (data.task_type === "hypit") await cleanupOwnedHypit();
+    if (data.task_type === "hypit" && result.success) {
+      try {
+        hypitReceipt = await (dependencies.finalizeHypit ?? finalizeHypit)(
+          config.workspace,
+          buildExecutionEnvironment(
+            process.env,
+            data,
+            config.serverURL,
+            data.execution_token,
+            config.workspace,
+          ),
+          shutdown.signal,
+          undefined,
+          hypitKeys,
+          hypitRestoreContext,
+        );
+        const validated = await validateFinalArtifacts(
+          data.resolved_agent_pack,
+          config.workspace,
+        );
+        if (!validated.ok)
+          throw new Error("Hypit required delivery artifacts are missing");
+      } catch (error) {
+        hypitFailureReason = error;
+        result = {
+          ...result,
+          success: false,
+          terminal_reason: "workflow_error",
+          failure_stage: "quality_validation",
+          error: "Hypit delivery validation failed",
+        };
+      }
+    }
+    await cleanupOwnedHypit();
     result = await applyFailureState(config.workspace, result);
-    if (shutdown.signal.aborted && !result.success && !result.error) result.error = "agent shutdown: received termination signal";
+    if (shutdown.signal.aborted && !result.success && !result.error)
+      result.error = "agent shutdown: received termination signal";
 
     const timeouts = finalizationTimeouts();
+    if (data.task_type === "hypit") timeouts.artifact = 30 * 60_000;
     const artifactStartedAt = Date.now();
     const artifactAbort = abortAfter(timeouts.artifact, shutdown.signal);
     try {
-      stderr.write(`artifact finalization started: timeout_ms=${timeouts.artifact}\n`);
-      const summary = await dependencies.uploadWorkspaceArtifacts(config.workspace, data, reporter, artifactAbort.signal, artifactStartedAt + timeouts.artifact);
-      if (summary.failures.length > 0) result = { ...result, artifact_upload_failures: summary.failures };
-      stderr.write(`artifact finalization completed: files=${summary.uploaded} failures=${summary.failures.length} duration_ms=${Date.now() - artifactStartedAt}\n`);
+      stderr.write(
+        `artifact finalization started: timeout_ms=${timeouts.artifact}\n`,
+      );
+      if (data.task_type === "hypit") {
+        const secrets = hypitKeys
+          .map((key) => hypitEnvironment?.[key])
+          .filter((value): value is string => Boolean(value));
+        if (result.success && !hypitReceipt)
+          throw new Error("Hypit finalization produced no verified receipt");
+        hypitUpload = await prepareHypitUpload(
+          config.workspace,
+          secrets,
+          result.success ? hypitReceipt : undefined,
+          artifactAbort.signal,
+          hypitFailureDetails(
+            hypitFailureReason ?? result.error,
+            result.failure_stage,
+          ),
+        );
+      }
+      const summary = await dependencies.uploadWorkspaceArtifacts(
+        hypitUpload?.workspace ?? config.workspace,
+        data,
+        reporter,
+        artifactAbort.signal,
+        artifactStartedAt + timeouts.artifact,
+      );
+      if (summary.failures.length > 0)
+        result = {
+          ...result,
+          ...(data.task_type === "hypit"
+            ? { success: false, failure_stage: "artifact_upload" }
+            : {}),
+          artifact_upload_failures: summary.failures,
+        };
+      stderr.write(
+        `artifact finalization completed: files=${summary.uploaded} failures=${summary.failures.length} duration_ms=${Date.now() - artifactStartedAt}\n`,
+      );
     } catch (error) {
       const manifestFailure = asTransferFailure("manifest", error);
-      stderr.write(`artifact finalization failed: duration_ms=${Date.now() - artifactStartedAt} operation=${manifestFailure.operation} code=${manifestFailure.code} attempts=${manifestFailure.attempts}\n`);
-      void reporter.progress(`artifact upload failed: ${manifestFailure.code}`, artifactAbort.signal).catch(() => {});
+      stderr.write(
+        `artifact finalization failed: duration_ms=${Date.now() - artifactStartedAt} operation=${manifestFailure.operation} code=${manifestFailure.code} attempts=${manifestFailure.attempts}\n`,
+      );
+      void reporter
+        .progress(
+          `artifact upload failed: ${manifestFailure.code}`,
+          artifactAbort.signal,
+        )
+        .catch(() => {});
       result = {
         ...result,
         success: false,
         error: "artifact manifest delivery failed",
-        root_error_code: manifestFailure.operation === "manifest" ? "artifact_manifest_failed" : "artifact_upload_failed",
+        root_error_code:
+          manifestFailure.operation === "manifest"
+            ? "artifact_manifest_failed"
+            : "artifact_upload_failed",
         failure_stage: "artifact_upload",
         terminal_reason: "platform_error",
         artifact_finalization_failure: manifestFailure,
       };
     } finally {
       artifactAbort.abort();
+      await hypitUpload?.dispose();
     }
 
     const completionStartedAt = Date.now();
     const completionAbort = abortAfter(timeouts.completion);
     let completionError: Error | undefined;
     try {
-      stderr.write(`completion report started: timeout_ms=${timeouts.completion}\n`);
+      stderr.write(
+        `completion report started: timeout_ms=${timeouts.completion}\n`,
+      );
       try {
-        const metadata = JSON.parse(await readFile(`${config.workspace}/output/completion-metadata.json`, "utf8"));
-        await reporter.submitCompletionMetadata(metadata, completionAbort.signal);
+        if (data.task_type === "hypit")
+          throw new Error("Hypit uses validated delivery metadata");
+        const metadata = JSON.parse(
+          await readFile(
+            `${config.workspace}/output/completion-metadata.json`,
+            "utf8",
+          ),
+        );
+        await reporter.submitCompletionMetadata(
+          metadata,
+          completionAbort.signal,
+        );
       } catch (metadataError) {
-        stderr.write(`completion metadata upload skipped: ${(metadataError as Error).message}\n`);
+        stderr.write(
+          `completion metadata upload skipped: ${(metadataError as Error).message}\n`,
+        );
+      }
+      if (data.task_type === "hypit") {
+        if (!result.success) {
+          const details = hypitFailureDetails(
+            shutdown.signal.aborted
+              ? shutdown.signal.reason
+              : (hypitFailureReason ?? result.error),
+            result.failure_stage,
+          );
+          result = {
+            ...result,
+            error: details.message,
+            workflow_error_code: details.error_code,
+            failure_stage: details.stage,
+            resume_from: details.resume_from,
+          };
+        }
+        let encoded = JSON.stringify(result);
+        for (const key of hypitKeys) {
+          const value = hypitEnvironment?.[key];
+          if (value)
+            encoded = encoded
+              .split(JSON.stringify(value).slice(1, -1))
+              .join("[redacted]");
+        }
+        result = JSON.parse(encoded);
       }
       await reporter.complete(result, completionAbort.signal);
-      stderr.write(`completion report acknowledged: duration_ms=${Date.now() - completionStartedAt}\n`);
+      stderr.write(
+        `completion report acknowledged: duration_ms=${Date.now() - completionStartedAt}\n`,
+      );
     } catch (error) {
-      completionError = error instanceof Error ? error : new Error("completion report failed");
-      stderr.write(`completion report exhausted: duration_ms=${Date.now() - completionStartedAt} error=${completionError.message}\n`);
+      completionError =
+        error instanceof Error ? error : new Error("completion report failed");
+      stderr.write(
+        `completion report exhausted: duration_ms=${Date.now() - completionStartedAt} error=${completionError.message}\n`,
+      );
     } finally {
       completionAbort.abort();
     }
     stdout.write(`${JSON.stringify(result)}\n`);
-    if (completionError) throw new CompletionReportError(completionError, result);
+    if (completionError)
+      throw new CompletionReportError(completionError, result);
     return result;
   } finally {
+    if (hypitTimer) clearTimeout(hypitTimer);
+    await hypitUpload?.dispose();
+    await cleanupOwnedHypit();
+    shutdown.signal.removeEventListener("abort", cleanupOnShutdown);
     stopHeartbeat?.();
     stopShutdown();
   }
@@ -191,26 +527,61 @@ function failure(workspace: string, error: unknown): ExecutionResult {
   };
 }
 
-async function applyFailureState(workspace: string, result: ExecutionResult): Promise<ExecutionResult> {
+async function applyFailureState(
+  workspace: string,
+  result: ExecutionResult,
+): Promise<ExecutionResult> {
   const path = `${workspace}/output/failure-state.json`;
   let file: Awaited<ReturnType<typeof open>> | undefined;
   try {
     file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const info = await file.stat();
     if (!info.isFile() || info.size > 64 * 1024) return result;
-    const value = JSON.parse(await file.readFile("utf8")) as Record<string, unknown>;
-    const code = typeof value.error_code === "string" && /^[a-z0-9_]{1,64}$/.test(value.error_code) ? value.error_code : undefined;
-    const stage = typeof value.stage === "string" && /^[a-z0-9_]{1,64}$/.test(value.stage) ? value.stage : undefined;
-    const resumeFrom = typeof value.resume_from === "string" && /^[a-z0-9_]{1,64}$/.test(value.resume_from) ? value.resume_from : undefined;
-    if (value.version !== "1.0" || value.status !== "recoverable_failure" || !code || !stage || !resumeFrom) return result;
-    if (typeof value.message !== "string" || !value.message.trim()) return result;
-    const trustedIdentityFailure = result.success === false && result.terminal_reason === "platform_error" && result.root_error_code === "execution_identity_unavailable";
-    if (trustedIdentityFailure && code !== "execution_identity_unavailable") return result;
+    const value = JSON.parse(await file.readFile("utf8")) as Record<
+      string,
+      unknown
+    >;
+    const code =
+      typeof value.error_code === "string" &&
+      /^[a-z0-9_]{1,64}$/.test(value.error_code)
+        ? value.error_code
+        : undefined;
+    const stage =
+      typeof value.stage === "string" && /^[a-z0-9_]{1,64}$/.test(value.stage)
+        ? value.stage
+        : undefined;
+    const resumeFrom =
+      typeof value.resume_from === "string" &&
+      /^[a-z0-9_]{1,64}$/.test(value.resume_from)
+        ? value.resume_from
+        : undefined;
+    if (
+      value.version !== "1.0" ||
+      value.status !== "recoverable_failure" ||
+      !code ||
+      !stage ||
+      !resumeFrom
+    )
+      return result;
+    if (typeof value.message !== "string" || !value.message.trim())
+      return result;
+    const trustedIdentityFailure =
+      result.success === false &&
+      result.terminal_reason === "platform_error" &&
+      result.root_error_code === "execution_identity_unavailable";
+    if (trustedIdentityFailure && code !== "execution_identity_unavailable")
+      return result;
     return {
       ...result,
       success: false,
-      error: trustedIdentityFailure ? EXECUTION_IDENTITY_FAILURE_MESSAGE : WORKFLOW_FAILURE_MESSAGE,
-      terminal_reason: trustedIdentityFailure ? "platform_error" : (result.success ? "workflow_error" : result.terminal_reason ?? "workflow_error"),
+      error: trustedIdentityFailure
+        ? EXECUTION_IDENTITY_FAILURE_MESSAGE
+        : WORKFLOW_FAILURE_MESSAGE,
+      terminal_reason: trustedIdentityFailure
+        ? "platform_error"
+        : result.success
+          ? "workflow_error"
+          : (result.terminal_reason ?? "workflow_error"),
       ...(trustedIdentityFailure
         ? { root_error_code: "execution_identity_unavailable" }
         : { workflow_error_code: code }),
@@ -224,11 +595,23 @@ async function applyFailureState(workspace: string, result: ExecutionResult): Pr
   }
 }
 
-function startHeartbeat(reporter: HeartbeatReporter, stderr: NodeJS.WritableStream, signal: AbortSignal): () => void {
+function startHeartbeat(
+  reporter: HeartbeatReporter,
+  stderr: NodeJS.WritableStream,
+  signal: AbortSignal,
+): () => void {
   let failures = 0;
   const report = async (): Promise<void> => {
-    try { await reporter.heartbeat(signal); failures = 0; }
-    catch (error) { failures += 1; if (failures === 1 || failures % 5 === 0) stderr.write(`agent heartbeat failed (${failures} consecutive): ${(error as Error).message}\n`); }
+    try {
+      await reporter.heartbeat(signal);
+      failures = 0;
+    } catch (error) {
+      failures += 1;
+      if (failures === 1 || failures % 5 === 0)
+        stderr.write(
+          `agent heartbeat failed (${failures} consecutive): ${(error as Error).message}\n`,
+        );
+    }
   };
   void report();
   const interval = setInterval(() => void report(), HEARTBEAT_INTERVAL_MS);
@@ -237,24 +620,38 @@ function startHeartbeat(reporter: HeartbeatReporter, stderr: NodeJS.WritableStre
 
 function abortAfter(timeout: number, parent?: AbortSignal): AbortController {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error("phase deadline exceeded")), timeout);
+  const timer = setTimeout(
+    () => controller.abort(new Error("phase deadline exceeded")),
+    timeout,
+  );
   const abortFromParent = () => controller.abort(parent?.reason);
   if (parent?.aborted) abortFromParent();
   else parent?.addEventListener("abort", abortFromParent, { once: true });
-  controller.signal.addEventListener("abort", () => {
-    clearTimeout(timer);
-    parent?.removeEventListener("abort", abortFromParent);
-  }, { once: true });
+  controller.signal.addEventListener(
+    "abort",
+    () => {
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", abortFromParent);
+    },
+    { once: true },
+  );
   return controller;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const args = process.argv.slice(2);
   const execute = runJob(args);
   execute
-    .then((result) => { if (!result.success) process.exitCode = 1; })
+    .then((result) => {
+      if (!result.success) process.exitCode = 1;
+    })
     .catch((error) => {
-      process.stderr.write(`${error instanceof Error ? error.message : "agent job failed"}\n`);
+      process.stderr.write(
+        `${error instanceof Error ? error.message : "agent job failed"}\n`,
+      );
       process.exitCode = exitCodeForError(error);
     });
 }

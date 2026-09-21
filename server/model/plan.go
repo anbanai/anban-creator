@@ -43,6 +43,7 @@ type Plan struct {
 	ArticleWithCover         *bool                                 `gorm:"default:true;not null" json:"article_with_cover"`
 	ArticleWithContentImages *bool                                 `gorm:"default:true;not null" json:"article_with_content_images"`
 	InputAttachments         datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
+	HypitInput               datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
 	MontageInput             datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
 	AgentInput               datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
 

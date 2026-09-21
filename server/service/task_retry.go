@@ -40,6 +40,7 @@ type CloneTaskOverrides struct {
 	ArticleWithContentImages *bool
 	Ecommerce                *model.EcommerceConfig
 	MontageInput             *model.MontageInput
+	HypitInput               *model.HypitInput
 }
 
 func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
@@ -65,6 +66,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	}
 
 	inputSourceTaskID, inputSourceProjectID := ResolveCloneInputSource(src)
+	if model.IsHypitPlatform(src.Type) {
+		inputSourceTaskID = src.ID
+		inputSourceProjectID = src.ProjectID
+	}
 
 	if cloneParams.Overrides != nil {
 		override := cloneParams.Overrides
@@ -116,6 +121,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			ArticleWithContentImages: override.ArticleWithContentImages,
 			Ecommerce:                override.Ecommerce,
 			MontageInput:             override.MontageInput,
+			HypitInput:               override.HypitInput,
 			MontageSourceTaskID:      src.ID,
 		}
 		tasks, err := s.CreateManual(ctx, params)
@@ -200,6 +206,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		if err != nil {
 			return nil, err
 		}
+	}
+	if model.IsHypitPlatform(src.Type) {
+		in := src.HypitInput.Data()
+		params.HypitInput = &in
 	}
 	if model.IsMontagePlatform(src.Type) {
 		input := src.MontageInput.Data()

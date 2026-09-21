@@ -659,7 +659,7 @@ export default function TaskDetailPage() {
           {canClone ? (
             <Button variant="outline" size="sm" onClick={openCloneDialog}>
               <RefreshCw className="h-4 w-4" />
-              克隆任务
+              {task.type === 'hypit' ? '再次改编' : '克隆任务'}
             </Button>
           ) : null}
           {canClone ? (

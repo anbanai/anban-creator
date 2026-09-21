@@ -53,6 +53,15 @@ type dockerRuntimeSpec struct {
 }
 
 func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecution, task *model.Task) dockerRuntimeSpec {
+	if task != nil && model.IsHypitPlatform(task.Type) {
+		if cfg.CPUCores < 4 {
+			cfg.CPUCores = 4
+		}
+		if cfg.MemoryMB < 8192 {
+			cfg.MemoryMB = 8192
+		}
+		cfg.TimeoutSec = int(task.HypitTimeout().Seconds())
+	}
 	pidsLimit := cfg.PidsLimit
 	memoryBytes := cfg.MemoryMB * 1024 * 1024
 	networkName := strings.TrimSpace(cfg.Network)

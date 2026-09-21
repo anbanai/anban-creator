@@ -246,7 +246,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
 	projectIDs := make(map[string]string)
-	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage} {
+	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformHypit} {
 		projectID := uuid.NewString()
 		if err := repo.Projects().Create(t.Context(), &model.Project{
 			ID: projectID, UserID: userID, Platform: platform,
@@ -316,8 +316,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("admin platform configs status = %d, want 200", resp.StatusCode)
 	}
-	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 5 {
-		t.Fatalf("admin platform configs = %#v, want all five configured platforms", configs)
+	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 6 {
+		t.Fatalf("admin platform configs = %#v, want all six configured platforms", configs)
 	}
 }
 
