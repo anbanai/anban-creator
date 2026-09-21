@@ -17,12 +17,12 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
-export const AGENT_RUNTIME_CONTRACT_VERSION = 2;
+export const AGENT_RUNTIME_CONTRACT_VERSION = 3;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "execution_id", "task_id", "task_type", "project_id", "prompt",
   "agent_pack_id", "agent_pack_version", "agent_pack_digest", "runtime_profile", "runtime_adapter",
-  "execution_profile", "max_turns", "agent_flag", "auto_memory_directory",
+  "execution_profile", "max_turns", "agent_flag", "agent_memory_directory",
   "resume_session_id", "resume_context_path", "env", "files", "artifact_transport",
 ];
 
@@ -119,7 +119,7 @@ export interface BootstrapResponse {
   execution_profile: ExecutionProfile;
   max_turns: number;
   agent_flag: string;
-  auto_memory_directory?: string;
+  agent_memory_directory?: string;
   resume_session_id?: string;
   resume_context_path?: string;
   env?: Record<string, string>;
@@ -283,7 +283,7 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
   if (!cleanString(data.prompt) || Buffer.byteLength(data.prompt) > MAX_BOOTSTRAP_PROMPT_BYTES) throw new Error("bootstrap prompt is invalid");
   if (!Number.isInteger(data.max_turns) || data.max_turns < 1 || data.max_turns > MAX_BOOTSTRAP_TURNS) throw new Error("bootstrap max turns is invalid");
   if (!/^anban:[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_flag)) throw new Error("bootstrap agent flag is invalid");
-  if (data.auto_memory_directory !== ".claude/memory") throw new Error("bootstrap auto memory directory is invalid");
+  if (data.agent_memory_directory !== ".claude/agent-memory") throw new Error("bootstrap Agent memory directory is invalid");
   validateExecutionProfile(data.execution_profile);
   if (data.resume_session_id && (!cleanString(data.resume_session_id) || data.resume_session_id.length > 128 || /[\s\x00-\x1f]/.test(data.resume_session_id))) throw new Error("bootstrap resume session ID is invalid");
   if (data.resume_session_id && !data.resume_context_path) throw new Error("bootstrap resume session requires resume context");
@@ -488,7 +488,7 @@ export function preflightBootstrapFiles(files: BootstrapFile[], taskType?: strin
     const relative = cleanBootstrapPath(file.path);
     const key = relative.toLowerCase();
     if (seen.has(key)) throw new Error(`duplicate bootstrap path ${relative} conflicts with ${seen.get(key)}`);
-    if (key === ".claude/memory" || key.startsWith(".claude/memory/")) throw new Error(`bootstrap path ${relative} targets protected auto memory`);
+    if ([".claude/agent-memory", "openmontage/.claude/agent-memory"].some(root => key === root || key.startsWith(`${root}/`))) throw new Error(`bootstrap path ${relative} targets protected Agent memory`);
     seen.set(key, relative);
     const inline = file.text !== undefined;
     const remote = cleanString(file.download_url ?? "");

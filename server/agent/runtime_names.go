@@ -29,6 +29,14 @@ const (
 
 var dockerNameUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
 
+// containerAgentMemoryMountPath follows the frozen adapter's Claude Code CWD.
+func containerAgentMemoryMountPath(runtimeAdapter string) string {
+	if strings.TrimSpace(runtimeAdapter) == agentpack.AdapterOpenMontage {
+		return "/workspace/" + MontageRuntimeDirName + "/.claude/agent-memory"
+	}
+	return "/workspace/.claude/agent-memory"
+}
+
 func containerRuntimePath(taskType string) string {
 	pack, ok := agentpack.Default().ForTaskType(taskType)
 	if !ok {

@@ -26,7 +26,6 @@ const (
 	kubernetesServerCAVolumeName               = "server-ca"
 	kubernetesServerCAMountPath                = "/var/run/secrets/anban-server-ca"
 	kubernetesServerCAFile                     = kubernetesServerCAMountPath + "/ca.crt"
-	kubernetesMemoryMountPath                  = "/workspace/.claude/memory"
 	kubernetesRuntimeHomePath                  = "/workspace/" + RuntimeHomeDirName
 	kubernetesTokenMountPath                   = "/var/run/secrets/anban"
 	kubernetesTokenFile                        = kubernetesTokenMountPath + "/token"
@@ -153,7 +152,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: kubernetesWorkspaceMountName, MountPath: "/workspace"},
-							{Name: kubernetesMemoryMountName, MountPath: kubernetesMemoryMountPath, SubPath: "projects/" + projectID(task)},
+							{Name: kubernetesMemoryMountName, MountPath: containerAgentMemoryMountPath(execution.RuntimeAdapter), SubPath: "projects/" + projectID(task)},
 							{Name: kubernetesTmpVolumeName, MountPath: "/tmp"},
 							{Name: kubernetesTokenVolumeName, MountPath: kubernetesTokenMountPath, ReadOnly: true},
 							{Name: kubernetesServerCAVolumeName, MountPath: kubernetesServerCAMountPath, ReadOnly: true},
@@ -193,6 +192,9 @@ func kubernetesWorkspaceInitScript(runtimeAdapter string) string {
 		"set -eu",
 		"chown 1000:1000 /workspace",
 		"chmod 0770 /workspace",
+		"claude=/workspace/.claude",
+		`if [ -L "$claude" ] || { [ -e "$claude" ] && [ ! -d "$claude" ]; }; then echo "runtime .claude must be a real directory" >&2; exit 1; fi`,
+		`install -d -m 0750 -o 1000 -g 1000 "$claude"`,
 		"output=/workspace/output",
 		`if [ -L "$output" ] || { [ -e "$output" ] && [ ! -d "$output" ]; }; then echo "runtime output must be a real directory" >&2; exit 1; fi`,
 		`install -d -m 0750 -o 1000 -g 1000 "$output"`,
@@ -221,6 +223,9 @@ func kubernetesMontageInitScript(templatePath, runtimePath, stagingPath, outputP
 		`  cp -a "$template/." "$staging/"`,
 		`  mv "$staging" "$runtime"`,
 		"fi",
+		`claude="$runtime/.claude"`,
+		`if [ -L "$claude" ] || { [ -e "$claude" ] && [ ! -d "$claude" ]; }; then echo "runtime .claude must be a real directory" >&2; exit 1; fi`,
+		`install -d -m 0750 -o 1000 -g 1000 "$claude"`,
 		`chown -R 1000:1000 "$runtime"`,
 		`chmod -R u+rwX "$runtime"`,
 		`if [ -L "$runtime/output" ]; then [ "$(readlink "$runtime/output")" = "$output" ] || { echo "Montage output must link to canonical output" >&2; exit 1; }; elif [ -e "$runtime/output" ]; then echo "Montage output must link to canonical output" >&2; exit 1; else ln -s "$output" "$runtime/output"; fi`,

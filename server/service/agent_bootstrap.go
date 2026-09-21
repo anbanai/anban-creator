@@ -54,27 +54,27 @@ type AgentRuntimeProfile struct {
 }
 
 type AgentBootstrapResponse struct {
-	ExecutionToken      string              `json:"execution_token"`
-	ExecutionID         string              `json:"execution_id"`
-	TaskID              string              `json:"task_id"`
-	TaskType            string              `json:"task_type"`
-	AgentPackID         string              `json:"agent_pack_id"`
-	AgentPackVersion    string              `json:"agent_pack_version"`
-	AgentPackDigest     string              `json:"agent_pack_digest"`
-	RuntimeAdapter      string              `json:"runtime_adapter"`
-	RuntimeProfile      string              `json:"runtime_profile"`
-	ProjectID           string              `json:"project_id"`
-	Prompt              string              `json:"prompt"`
-	ExecutionProfile    AgentRuntimeProfile `json:"execution_profile"`
-	MaxTurns            int                 `json:"max_turns"`
-	AgentFlag           string              `json:"agent_flag"`
-	AutoMemoryDirectory string              `json:"auto_memory_directory"`
-	ResumeSessionID     string              `json:"resume_session_id,omitempty"`
-	ResumeContextPath   string              `json:"resume_context_path,omitempty"`
-	Env                 map[string]string   `json:"env,omitempty"`
-	Files               []BootstrapFile     `json:"files"`
-	ArtifactTransport   ArtifactTransport   `json:"artifact_transport"`
-	recoveryImages      []*model.TaskFile
+	ExecutionToken       string              `json:"execution_token"`
+	ExecutionID          string              `json:"execution_id"`
+	TaskID               string              `json:"task_id"`
+	TaskType             string              `json:"task_type"`
+	AgentPackID          string              `json:"agent_pack_id"`
+	AgentPackVersion     string              `json:"agent_pack_version"`
+	AgentPackDigest      string              `json:"agent_pack_digest"`
+	RuntimeAdapter       string              `json:"runtime_adapter"`
+	RuntimeProfile       string              `json:"runtime_profile"`
+	ProjectID            string              `json:"project_id"`
+	Prompt               string              `json:"prompt"`
+	ExecutionProfile     AgentRuntimeProfile `json:"execution_profile"`
+	MaxTurns             int                 `json:"max_turns"`
+	AgentFlag            string              `json:"agent_flag"`
+	AgentMemoryDirectory string              `json:"agent_memory_directory"`
+	ResumeSessionID      string              `json:"resume_session_id,omitempty"`
+	ResumeContextPath    string              `json:"resume_context_path,omitempty"`
+	Env                  map[string]string   `json:"env,omitempty"`
+	Files                []BootstrapFile     `json:"files"`
+	ArtifactTransport    ArtifactTransport   `json:"artifact_transport"`
+	recoveryImages       []*model.TaskFile
 }
 
 type AgentBootstrapConfig struct {
@@ -446,7 +446,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			Envs: model.CloneClaudeProfileEnvs(runtimeEnv), ModelUsageAliases: aliases,
 		},
 		MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task),
-		AutoMemoryDirectory: ".claude/memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
+		AgentMemoryDirectory: ".claude/agent-memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
 		Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
 		recoveryImages: recoveryImages,
 	}, nil

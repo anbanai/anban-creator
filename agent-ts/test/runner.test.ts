@@ -421,16 +421,31 @@ describe("buildQueryOptions", () => {
     expect(runner.buildQueryOptions({ ...data, runtime_adapter: "openmontage" }, "/workspace").cwd).toBe("/workspace/openmontage");
   });
 
-  test("loads project settings, auto memory, and the writable Montage root", () => {
-    const data = { ...validBootstrap(), task_type: "montage", runtime_adapter: "openmontage", auto_memory_directory: ".claude/memory" };
+  test("loads the native Agent prompt and uses the same directory for Agent and auto memory", () => {
+    const data = { ...validBootstrap(), agent_flag: "anban:montage", task_type: "montage", runtime_adapter: "openmontage", agent_memory_directory: ".claude/agent-memory" };
     const options = runner.buildQueryOptions(data, "/tasks/task-1");
+    expect(options.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
     expect(options.settingSources).toEqual(["user", "project"]);
-    expect(options.settings).toEqual({ autoMemoryEnabled: true, autoMemoryDirectory: "/tasks/task-1/.claude/memory" });
+    expect(options.settings).toEqual({ autoMemoryEnabled: true, autoMemoryDirectory: "/tasks/task-1/openmontage/.claude/agent-memory/anban-montage" });
     expect(options.env?.ANBAN_MONTAGE_SUBMODULE_PATH).toBe("/tasks/task-1/openmontage");
   });
 
-  test("does not enable project auto memory when the bootstrap omits its directory", () => {
-    expect(runner.buildQueryOptions(validBootstrap(), "/workspace").settings).toBeUndefined();
+  test("disables both Agent and auto memory in a clean policy recovery session", () => {
+    const data = validBootstrap();
+    data.execution_profile.envs.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "0";
+    const options = runner.buildQueryOptions(data, "/workspace");
+    expect(options.settings).toEqual({ autoMemoryEnabled: false });
+    expect(options.env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
+  });
+
+  test("reports missing shared memory as a platform error before calling the SDK", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "anban-missing-memory-"));
+    try {
+      const result = await runner.runClaude(workspace, { ...validBootstrap(), agent_memory_directory: ".claude/agent-memory" },
+        "https://server.invalid", "test-token", { progress: async () => {}, stageProgress: async () => {} }, new AbortController().signal);
+      expect(result).toMatchObject({ success: false, terminal_reason: "platform_error", root_error_code: "project_memory_unavailable", tool_use_count: 0 });
+      expect(result.error).toContain("project_memory_unavailable");
+    } finally { await rm(workspace, { recursive: true, force: true }); }
   });
 
   test("keeps the managed tool allowlist fail-closed", async () => {

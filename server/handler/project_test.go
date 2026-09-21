@@ -1272,13 +1272,21 @@ func TestProjectHandlerMemoryPreviewRequiresOwnershipAndDoesNotCache(t *testing.
 	if err := memoryStore.EnsureProject(ctx, projectID); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "projects", projectID, "MEMORY.md"), []byte("# Remember me"), 0o600); err != nil {
+	agentMemoryDir := filepath.Join(root, "projects", projectID, "anban-article")
+	if err := os.Mkdir(agentMemoryDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentMemoryDir, "MEMORY.md"), []byte("# Remember me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	resp = doRequest(t, app, http.MethodGet, "/api/v1/projects/"+projectID+"/memory", ownerID, nil)
 	data = decodeBody(t, resp)["data"].(map[string]any)
 	if data["status"] != projectmemory.StatusReady || len(data["files"].([]any)) != 1 {
 		t.Fatalf("ready memory = %#v", data)
+	}
+	file := data["files"].([]any)[0].(map[string]any)
+	if file["path"] != "anban-article/MEMORY.md" || file["content"] != "# Remember me" {
+		t.Fatalf("native Agent memory preview = %#v", file)
 	}
 
 	resp = doRequest(t, app, http.MethodGet, "/api/v1/projects/"+projectID+"/memory", uuid.NewString(), nil)

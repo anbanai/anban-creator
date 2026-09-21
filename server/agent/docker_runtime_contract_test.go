@@ -432,6 +432,10 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 		"registry.discover()",
 		"load_pipeline",
 		"ENV ANBAN_MONTAGE_TEMPLATE_PATH=/opt/montage-template",
+		"cp -a /opt/montage-template /workspace/openmontage",
+		"chown -R 1000:1000 /workspace/openmontage",
+		"chmod -R u+rwX /workspace/openmontage",
+		"install -d -m 0750 -o 1000 -g 1000 /workspace/openmontage/.claude",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("%s missing %q", path, want)
@@ -569,13 +573,15 @@ func TestDockerRuntimeAgentImageAndKubernetesJobAgreeOnNumericIdentity(t *testin
 		t.Fatalf("Job identity = %d:%d, want numeric 1000:1000", kubernetesAgentUID, kubernetesAgentGID)
 	}
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage", "Dockerfile.agent-hypit"} {
 		path := filepath.Join(root, "deploy", "docker", name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
 			`getent passwd 1000 >/dev/null`,
 			`getent group 1000 >/dev/null`,
 			`install -d -m 0755 -o 1000 -g 1000 /home/node`,
+			`install -d -m 0770 -o 1000 -g 1000 /workspace`,
+			`install -d -m 0750 -o 1000 -g 1000 /workspace/.claude`,
 			"ENV HOME=/home/node",
 			"USER 1000:1000",
 		} {

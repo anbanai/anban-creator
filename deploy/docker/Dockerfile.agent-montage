@@ -23,6 +23,8 @@ RUN set -eux; \
     getent passwd 1000 >/dev/null || { echo >&2 "Node base must provide UID 1000"; exit 1; }; \
     getent group 1000 >/dev/null || { echo >&2 "Node base must provide GID 1000"; exit 1; }; \
     install -d -m 0755 -o 1000 -g 1000 /home/node; \
+    install -d -m 0770 -o 1000 -g 1000 /workspace; \
+    install -d -m 0750 -o 1000 -g 1000 /workspace/.claude; \
     install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban; \
     rm -rf /var/lib/apt/lists/*
 
@@ -50,6 +52,14 @@ RUN set -eux; \
     rm -rf /root/.npm; \
     chown -R root:root /opt/montage-template "$OPENMONTAGE_VENV"; \
     chmod -R a=rX /opt/montage-template "$OPENMONTAGE_VENV"
+
+# Docker copies this writable project into a fresh task volume before mounting
+# project memory below its native Claude Code CWD. Kubernetes uses the template.
+RUN set -eux; \
+    cp -a /opt/montage-template /workspace/openmontage; \
+    chown -R 1000:1000 /workspace/openmontage; \
+    chmod -R u+rwX /workspace/openmontage; \
+    install -d -m 0750 -o 1000 -g 1000 /workspace/openmontage/.claude
 
 COPY --from=builder /app/anban-agent/node_modules /app/anban-agent/node_modules
 COPY --from=builder /app/anban-agent/dist /app/anban-agent/dist

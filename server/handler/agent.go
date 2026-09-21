@@ -341,7 +341,7 @@ type agentCompleteRequest struct {
 	Result      *serveragent.ExecutionResult `json:"result"`
 }
 
-const agentRuntimeContractVersion = 2
+const agentRuntimeContractVersion = 3
 
 // ProgressPlan handles POST /api/v1/agent/progress-plan.
 func (h *AgentHandler) ProgressPlan(c fiber.Ctx) error {

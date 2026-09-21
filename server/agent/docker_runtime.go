@@ -19,7 +19,6 @@ import (
 
 const (
 	dockerTaskWorkspaceMountPath = "/workspace"
-	dockerProjectMemoryMountPath = "/workspace/.claude/memory"
 	dockerWorkloadTokenFile      = "/run/secrets/anban/token"
 	dockerVolumeDriver           = "local"
 	dockerRuntimeName            = "runc"
@@ -133,7 +132,7 @@ func buildDockerRuntimeSpec(cfg dockerRuntimeConfig, execution *model.TaskExecut
 			},
 			Mounts: []mount.Mount{
 				{Type: mount.TypeVolume, Source: taskVolume.Name, Target: dockerTaskWorkspaceMountPath},
-				{Type: mount.TypeVolume, Source: cfg.ProjectMemoryVolume, Target: dockerProjectMemoryMountPath, VolumeOptions: &mount.VolumeOptions{Subpath: "projects/" + projectID(task)}},
+				{Type: mount.TypeVolume, Source: cfg.ProjectMemoryVolume, Target: containerAgentMemoryMountPath(execution.RuntimeAdapter), VolumeOptions: &mount.VolumeOptions{Subpath: "projects/" + projectID(task)}},
 			},
 		},
 		Timeout: time.Duration(cfg.TimeoutSec) * time.Second,

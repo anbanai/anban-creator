@@ -55,7 +55,7 @@ const validResponse = (): BootstrapResponse => {
     },
     max_turns: 10,
     agent_flag: "anban:article",
-    auto_memory_directory: ".claude/memory",
+    agent_memory_directory: ".claude/agent-memory",
     artifact_transport: { mode: "stream" },
   };
   response.execution_profile.profile_fingerprint = executionProfileFingerprint(response.execution_profile);
@@ -91,7 +91,7 @@ describe("validateBootstrapResponse", () => {
         allowHTTPServer: false,
       };
       await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
-      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("2");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("3");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -469,12 +469,20 @@ describe("validateBootstrapResponse", () => {
   });
 
   test("rejects protected memory files and unknown response fields", () => {
-    const fileResponse = validResponse();
-    fileResponse.files = [{ path: ".claude/memory/session.md", text: "unsafe", mode: 0o600 }];
-    expect(() => validateBootstrapResponse("execution-1", fileResponse)).toThrow("protected auto memory");
+    for (const path of [".claude/agent-memory/session.md", "openmontage/.claude/agent-memory/session.md"]) {
+      const fileResponse = validResponse();
+      fileResponse.files = [{ path, text: "unsafe", mode: 0o600 }];
+      expect(() => validateBootstrapResponse("execution-1", fileResponse)).toThrow("protected Agent memory");
+    }
 
     const unknown = validResponse() as ReturnType<typeof validResponse> & Record<string, unknown>;
     unknown.unexpected = true;
     expect(() => validateBootstrapResponse("execution-1", unknown)).toThrow("unknown fields");
+  });
+
+  test.each([undefined, ".claude/memory", "../memory"])("rejects a missing or noncanonical Agent memory root: %s", (directory) => {
+    const response = validResponse();
+    response.agent_memory_directory = directory;
+    expect(() => validateBootstrapResponse("execution-1", response)).toThrow("Agent memory directory is invalid");
   });
 });

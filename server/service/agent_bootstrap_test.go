@@ -724,8 +724,19 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wireJSON, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(wireJSON, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["agent_memory_directory"] != ".claude/agent-memory" || wire["auto_memory_directory"] != nil {
+		t.Fatalf("bootstrap must expose only native agent memory directory; got agent=%v auto=%v", wire["agent_memory_directory"], wire["auto_memory_directory"])
+	}
 	resumeContextPath, _ := serveragent.ExecutionResumeContextPath(executionID)
-	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AutoMemoryDirectory != ".claude/memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
+	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AgentMemoryDirectory != ".claude/agent-memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
 	if first.AgentPackID != "seednote" || first.AgentPackVersion != "2.0.1" || len(first.AgentPackDigest) != 64 || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {

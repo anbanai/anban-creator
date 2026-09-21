@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,7 +134,7 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 		t.Fatalf("capabilities = %#v, want ALL dropped", c.SecurityContext.Capabilities)
 	}
 	assertMount(t, c, kubernetesWorkspaceMountName, "/workspace", false)
-	assertMount(t, c, kubernetesMemoryMountName, "/workspace/.claude/memory", false)
+	assertMount(t, c, kubernetesMemoryMountName, "/workspace/.claude/agent-memory", false)
 	assertMountSubPath(t, c, kubernetesMemoryMountName, "projects/"+testTask().ProjectID)
 	memoryVolume := requireTestVolume(t, job, kubernetesMemoryMountName)
 	if memoryVolume.PersistentVolumeClaim == nil || memoryVolume.PersistentVolumeClaim.ClaimName != "creator-project-memory" {
@@ -188,10 +189,88 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	}
 }
 
+func TestRuntimeMemoryMountUsesFrozenAdapterCWD(t *testing.T) {
+	for _, tc := range []struct{ adapter, taskType, want string }{
+		{agentpack.AdapterStandard, model.PlatformMontage, "/workspace/.claude/agent-memory"},
+		{agentpack.AdapterOpenMontage, model.PlatformArticle, "/workspace/openmontage/.claude/agent-memory"},
+	} {
+		t.Run(tc.adapter, func(t *testing.T) {
+			execution := testExecution()
+			execution.RuntimeAdapter = tc.adapter
+			task := testTask()
+			task.Type = tc.taskType
+			job := buildKubernetesJob(testJobConfig(), execution, task)
+			assertMount(t, job.Spec.Template.Spec.Containers[0], kubernetesMemoryMountName, tc.want, false)
+			assertMountSubPath(t, job.Spec.Template.Spec.Containers[0], kubernetesMemoryMountName, "projects/"+task.ProjectID)
+			spec := buildDockerRuntimeSpec(dockerRuntimeConfig{ProjectMemoryVolume: "project-memory"}, execution, task)
+			found := false
+			for _, m := range spec.HostConfig.Mounts {
+				if m.Source != "project-memory" {
+					continue
+				}
+				found = true
+				if m.Target != tc.want || m.VolumeOptions == nil || m.VolumeOptions.Subpath != "projects/"+task.ProjectID {
+					t.Fatalf("memory mount = %#v, want adapter CWD %s and project subpath", m, tc.want)
+				}
+			}
+			if !found {
+				t.Fatal("Docker project memory mount missing")
+			}
+		})
+	}
+}
+
+func TestMontageWorkspaceInitPreparesClaudeDirectory(t *testing.T) {
+	for _, kind := range []string{"missing", "directory", "symlink", "dangling symlink", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			runtimePath := filepath.Join(root, "runtime")
+			if err := os.Mkdir(runtimePath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			claudePath := filepath.Join(runtimePath, ".claude")
+			var err error
+			switch kind {
+			case "directory":
+				err = os.Mkdir(claudePath, 0o755)
+			case "symlink":
+				err = os.Symlink(t.TempDir(), claudePath)
+			case "dangling symlink":
+				err = os.Symlink(filepath.Join(root, "missing"), claudePath)
+			case "file":
+				err = os.WriteFile(claudePath, []byte("unsafe"), 0o600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := "set -eu\n" + kubernetesMontageInitScript(filepath.Join(root, "template"), runtimePath, filepath.Join(root, "staging"), filepath.Join(root, "output"))
+			script = strings.ReplaceAll(script, "1000:1000", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()))
+			script = strings.ReplaceAll(script, "-o 1000 -g 1000", fmt.Sprintf("-o %d -g %d", os.Getuid(), os.Getgid()))
+			output, err := exec.Command("/bin/sh", "-c", script).CombinedOutput()
+			if kind == "symlink" || kind == "dangling symlink" || kind == "file" {
+				if err == nil || !strings.Contains(string(output), "runtime .claude must be a real directory") {
+					t.Fatalf("unsafe .claude: err=%v output=%s", err, output)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("init failed: %v: %s", err, output)
+			}
+			info, err := os.Lstat(claudePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !info.IsDir() || info.Mode().Perm() != 0o750 {
+				t.Fatalf(".claude mode = %v, want directory 0750", info.Mode())
+			}
+		})
+	}
+}
+
 func TestKubernetesWorkspaceInitPreservesServerOwnedProjectMemoryPermissions(t *testing.T) {
 	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
 	init := job.Spec.Template.Spec.InitContainers[0]
-	if strings.Contains(kubernetesWorkspaceInitScript("standard"), kubernetesMemoryMountPath) {
+	if strings.Contains(kubernetesWorkspaceInitScript("standard"), "/.claude/agent-memory") {
 		t.Fatal("workspace init script must not chmod or chown the Server-owned project memory directory")
 	}
 	for _, mount := range init.VolumeMounts {
@@ -203,7 +282,7 @@ func TestKubernetesWorkspaceInitPreservesServerOwnedProjectMemoryPermissions(t *
 
 func TestWorkspaceInitScript(t *testing.T) {
 	content := kubernetesWorkspaceInitScript(agentpack.AdapterStandard)
-	for _, want := range []string{"set -eu", "chown 1000:1000 /workspace", kubernetesRuntimeHomePath, "/workspace/output"} {
+	for _, want := range []string{"set -eu", "chown 1000:1000 /workspace", kubernetesRuntimeHomePath, "/workspace/output", "claude=/workspace/.claude", `install -d -m 0750 -o 1000 -g 1000 "$claude"`} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("content init script missing %q: %s", want, content)
 		}
@@ -230,6 +309,55 @@ func TestWorkspaceInitScript(t *testing.T) {
 	}
 	if liveSlicer := kubernetesWorkspaceInitScript(agentpack.AdapterStandard); strings.Contains(liveSlicer, "runtime=/workspace/openmontage") {
 		t.Fatal("standard live-slicer adapter received OpenMontage workspace initialization")
+	}
+}
+
+func TestWorkspaceInitPreparesClaudeDirectoryAndRejectsUnsafePaths(t *testing.T) {
+	for _, kind := range []string{"missing", "directory", "symlink", "dangling symlink", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			workspace := t.TempDir()
+			claudePath := filepath.Join(workspace, ".claude")
+			target := t.TempDir()
+			var err error
+			switch kind {
+			case "directory":
+				err = os.Mkdir(claudePath, 0o755)
+			case "symlink":
+				err = os.Symlink(target, claudePath)
+			case "dangling symlink":
+				err = os.Symlink(filepath.Join(target, "missing"), claudePath)
+			case "file":
+				err = os.WriteFile(claudePath, []byte("unsafe"), 0o600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Execute the generated script with ownership mapped to the current user,
+			// so its actual directory operations run without requiring root in tests.
+			script := strings.ReplaceAll(kubernetesWorkspaceInitScript(agentpack.AdapterStandard), "/workspace", workspace)
+			script = strings.ReplaceAll(script, "1000:1000", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()))
+			script = strings.ReplaceAll(script, "-o 1000 -g 1000", fmt.Sprintf("-o %d -g %d", os.Getuid(), os.Getgid()))
+			output, err := exec.Command("/bin/sh", "-c", script).CombinedOutput()
+			if kind == "symlink" || kind == "dangling symlink" || kind == "file" {
+				if err == nil {
+					t.Fatalf("unsafe .claude path accepted: %s", output)
+				}
+				if !strings.Contains(string(output), "runtime .claude must be a real directory") {
+					t.Fatalf("unexpected error: %v: %s", err, output)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("init failed: %v: %s", err, output)
+			}
+			info, err := os.Lstat(claudePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !info.IsDir() || info.Mode().Perm() != 0o750 {
+				t.Fatalf(".claude mode = %v, want real directory mode 0750", info.Mode())
+			}
+		})
 	}
 }
 
@@ -352,7 +480,8 @@ func TestMontageWorkspaceInitScriptPreservesExistingRuntime(t *testing.T) {
 	}
 
 	script := "set -eu\n" + kubernetesMontageInitScript(template, runtimePath, staging, filepath.Join(root, "output"))
-	script = strings.Replace(script, `chown -R 1000:1000 "$runtime"`, ":", 1)
+	script = strings.ReplaceAll(script, "1000:1000", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()))
+	script = strings.ReplaceAll(script, "-o 1000 -g 1000", fmt.Sprintf("-o %d -g %d", os.Getuid(), os.Getgid()))
 	run := func() ([]byte, error) {
 		return exec.Command("/bin/sh", "-c", script).CombinedOutput()
 	}

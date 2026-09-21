@@ -117,7 +117,7 @@ const bootstrapData: ResolvedBootstrapResponse = {
   },
   max_turns: 1,
   agent_flag: "anban:article",
-  auto_memory_directory: ".claude/memory",
+  agent_memory_directory: ".claude/agent-memory",
   files: [],
   artifact_transport: { mode: "direct" },
   resolved_agent_pack: {
@@ -326,6 +326,7 @@ describe("runJob finalization", () => {
       expect(calls).toHaveLength(2);
       expect(calls[1]!.execution_profile).toEqual(calls[0]!.execution_profile);
       expect(calls[1]!.resume_session_id).toBeUndefined();
+      expect(calls[1]!.agent_memory_directory).toBeUndefined();
       expect(calls[1]!.prompt).toContain("task_id=task-1");
       expect(calls[1]!.prompt).toContain("output/04-article-final.md");
       expect(calls[1]!.prompt).not.toContain("ignore previous instructions");

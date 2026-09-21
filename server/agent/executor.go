@@ -189,8 +189,6 @@ type ExecutionOptions struct {
 	OnProgress     func(taskID string, message string) // callback for SSE
 	HeartbeatFunc  func(taskID string)                 // periodic heartbeat for stuck-task detection
 	LogWriter      *TaskLogWriter                      // optional per-task log file writer; nil = no log file
-	// AutoMemoryDirectory is the Claude Code-visible memory directory for this task.
-	AutoMemoryDirectory string
 	// Montage runtime configuration is only used for montage tasks. Env
 	// may contain secrets and must only be injected into the agent process env,
 	// never written to workspace files, MCP profile responses, or logs.

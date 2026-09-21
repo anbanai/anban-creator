@@ -94,7 +94,7 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 	}
 	wantMounts := []mount.Mount{
 		{Type: mount.TypeVolume, Source: spec.TaskVolume.Name, Target: dockerTaskWorkspaceMountPath},
-		{Type: mount.TypeVolume, Source: "creator-project-memory", Target: dockerProjectMemoryMountPath, VolumeOptions: &mount.VolumeOptions{Subpath: "projects/" + task.ProjectID}},
+		{Type: mount.TypeVolume, Source: "creator-project-memory", Target: "/workspace/.claude/agent-memory", VolumeOptions: &mount.VolumeOptions{Subpath: "projects/" + task.ProjectID}},
 	}
 	if !reflect.DeepEqual(spec.HostConfig.Mounts, wantMounts) {
 		t.Fatalf("mounts = %#v, want exactly named workspace mounts %#v", spec.HostConfig.Mounts, wantMounts)

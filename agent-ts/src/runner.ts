@@ -1,6 +1,5 @@
 import { validateHypitEnvironment } from "./hypit.js";
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
 
 import { query, type HookCallback, type HookJSONOutput, type ModelUsage, type Options, type SDKMessage, type SDKSystemMessage } from "@anthropic-ai/claude-agent-sdk";
 
@@ -10,6 +9,7 @@ import { collectGeneratedImageDescriptors, materializeGeneratedImage } from "./d
 import { ProgressEmitter, type ProgressDiagnostic } from "./progress.js";
 import type { ExecutionResult, Reporter } from "./reporter.js";
 import { appendResumeContextToPrompt } from "./resume.js";
+import { agentMemoryPath, prepareProjectMemory, ProjectMemoryError } from "./project-memory.js";
 
 // Keep this list aligned with server/agent/claude_runtime_env.go and the
 // authentication, provider-routing, and model inputs in SDK 0.3.220.
@@ -222,6 +222,7 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
   const toolCalls = new Map<string, TrackedToolCall>();
   const toolUseDiagnostics: ToolUseDiagnostics = { tool_use_count: 0, tool_use_summary: {}, tool_error_count: 0 };
   try {
+    await prepareProjectMemory(workspace, data);
     for await (const message of query({ prompt: buildManagedPrompt(data), options })) {
       const consumed = await consumeMessage(message, reporter, logText, toolCalls, toolUseDiagnostics, cwd, serverURL, token, controller.signal, data.task_type, data.execution_profile.model_usage_aliases);
       logText = consumed.logText;
@@ -258,7 +259,8 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
     return {
       success: false,
       error: error instanceof Error ? error.message : "agent execution failed",
-      terminal_reason: error instanceof RuntimeArtifactMaterializationError ? "platform_error" : "provider_error",
+      terminal_reason: error instanceof RuntimeArtifactMaterializationError || error instanceof ProjectMemoryError ? "platform_error" : "provider_error",
+      ...(error instanceof ProjectMemoryError ? { root_error_code: "project_memory_unavailable" } : {}),
       work_dir: cwd,
       log_text: logText,
       cost_status: "unreconciled",
@@ -339,6 +341,7 @@ export function buildQueryOptions(
     cwd,
     maxTurns: data.max_turns,
     agent: data.agent_flag,
+    systemPrompt: { type: "preset", preset: "claude_code" },
     resume: data.resume_session_id,
     permissionMode: "default",
     allowedTools: managedParallelWorkers ? [...MANAGED_ALLOWED_TOOLS, "Agent"] : MANAGED_ALLOWED_TOOLS,
@@ -358,10 +361,13 @@ export function buildQueryOptions(
     plugins: [{ type: "local", path: pluginRoot, skipMcpDiscovery: true }],
     mcpServers: { anban: { type: "http", url: `${serverURL}/mcp`, headers: { Authorization: `Bearer ${token}` }, timeout: 900000 } },
     strictMcpConfig: true,
-    env: buildExecutionEnvironment(process.env, data, serverURL, token, workspace),
-    settings: data.auto_memory_directory
-      ? { autoMemoryEnabled: true, autoMemoryDirectory: resolve(workspace, data.auto_memory_directory) }
-      : undefined,
+    env: {
+      ...buildExecutionEnvironment(process.env, data, serverURL, token, workspace),
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: data.agent_memory_directory ? "0" : "1",
+    },
+    settings: data.agent_memory_directory
+      ? { autoMemoryEnabled: true, autoMemoryDirectory: agentMemoryPath(cwd, data.agent_flag) }
+      : { autoMemoryEnabled: false },
     settingSources: ["user", "project"],
     includePartialMessages: false,
     stderr: (line) => {

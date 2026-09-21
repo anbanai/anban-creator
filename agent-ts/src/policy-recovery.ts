@@ -49,7 +49,7 @@ async function cleanRecoveryBootstrap(data: ResolvedBootstrapResponse, workspace
     ].join("\n"),
     resume_session_id: undefined,
     resume_context_path: undefined,
-    auto_memory_directory: undefined,
+    agent_memory_directory: undefined,
   };
 }
 
