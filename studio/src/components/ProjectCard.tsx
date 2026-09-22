@@ -7,7 +7,7 @@ import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
-import { ProjectMemorySheet } from '@/components/projects/ProjectMemorySheet'
+import { ProjectMemoryDialog } from '@/components/projects/ProjectMemoryDialog'
 import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBadge'
 
 interface ProjectCardProps {
@@ -102,7 +102,7 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
         </div>
       </div>
       <TopicPoolDialog project={project} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
-      <ProjectMemorySheet projectId={project.id} projectName={project.name} open={memoryOpen} onOpenChange={setMemoryOpen} />
+      <ProjectMemoryDialog projectId={project.id} projectName={project.name} open={memoryOpen} onOpenChange={setMemoryOpen} />
     </div>
   )
 }
