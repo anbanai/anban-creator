@@ -117,6 +117,25 @@ func TestValidateRuntimeImagesRequiresExactCanonicalProfiles(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresHypitRuntimeImageWhenEnabled(t *testing.T) {
+	claude := validClaudeConfigForTest()
+	cfg := Config{
+		Database: DatabaseConfig{DSN: "dsn"},
+		JWT:      JWTConfig{SecretKey: "secret"},
+		Claude:   claude,
+		Hypit:    HypitConfig{Enabled: true},
+	}
+	cfg.applyDefaults()
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.runtime_images.hypit is required when hypit is enabled") {
+		t.Fatalf("Config.Validate() error = %v, want actionable Hypit runtime image error", err)
+	}
+	if !strings.Contains(err.Error(), "hypit.enabled=false") || !strings.Contains(err.Error(), "ANBAN_AGENT_IMAGE_HYPIT") {
+		t.Fatalf("Config.Validate() error = %v, want disable and image configuration guidance", err)
+	}
+}
+
 func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	cfg := Config{}
 	cfg.applyDefaults()

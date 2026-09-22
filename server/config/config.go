@@ -1603,7 +1603,7 @@ func (c *Config) Validate() error {
 		errs = append(errs, err.Error())
 	}
 	if c.Hypit.Enabled && strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformHypit]) == "" {
-		errs = append(errs, "claude.runtime_images.hypit is required when hypit is enabled")
+		errs = append(errs, "claude.runtime_images.hypit is required when hypit is enabled (set hypit.enabled=false or configure claude.runtime_images.hypit, typically via ANBAN_AGENT_IMAGE_HYPIT)")
 	}
 	if err := c.Montage.Validate(); err != nil {
 		errs = append(errs, err.Error())
