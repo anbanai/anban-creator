@@ -36,7 +36,7 @@ const {
     user_id: 'user-1',
     platform: 'article',
     name: '公众号项目',
-    description: '品牌公众号内容',
+    description: '品牌公众号数据',
     avatar_url: '',
     profile_url: '',
     keywords: '',
@@ -896,17 +896,17 @@ describe('DashboardPage AI entry', () => {
     expect(screen.getByRole('combobox', { name: '项目：种草项目' })).toHaveTextContent('种草项目')
 
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
-      target: { value: '写一篇小红书种草笔记' },
+      target: { value: '写一篇种草笔记' },
     })
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 'project-2',
-      text: '写一篇小红书种草笔记',
+      text: '写一篇种草笔记',
     })))
   })
 
-  it('选择小红书项目后用模板覆盖 Prompt 并保留附件', async () => {
+  it('选择种草笔记项目后用模板覆盖 Prompt 并保留附件', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ ...seednoteProject }])
     render(<DashboardPage />)
 

@@ -32,7 +32,7 @@ for (const platform of ['seednote', 'article'] as const) {
     const importApi = platform === 'seednote' ? api.seednoteImport : api.wechatAnalyticsImport
     async function openPage() {
       render(<QueryClientProvider client={client}>{platform === 'seednote' ? <SeednoteDataPage /> : <WechatDataPage />}</QueryClientProvider>)
-      if (platform === 'seednote') fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'project-1' } })
+      if (platform === 'seednote') fireEvent.change(await screen.findByRole('combobox', { name: '种草笔记账号' }), { target: { value: 'project-1' } })
       fireEvent.click(await screen.findByText(/历史导入/))
       return screen.findByRole('button', { name: /导错账号.xlsx/ })
     }

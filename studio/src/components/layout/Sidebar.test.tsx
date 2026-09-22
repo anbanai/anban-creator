@@ -81,8 +81,8 @@ describe('Sidebar', () => {
       '钱包',
       '插件',
       '设置',
-      '小红书数据',
-      '公众号内容',
+      '种草笔记数据',
+      '公众号数据',
     ])
     expect(navigation.queryByText('创作')).not.toBeInTheDocument()
     expect(navigation.queryByText('自动化')).not.toBeInTheDocument()

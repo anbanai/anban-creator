@@ -48,15 +48,15 @@ export default function SeednoteAdminPage() {
       setQrCode(null)
       setShowLogoutDialog(false)
       await queryClient.invalidateQueries({ queryKey: queryKeys.seednoteAdmin.loginStatus })
-      toast.success('已退出小红书登录')
+      toast.success('已退出种草笔记登录')
     },
-    onError: (error) => toast.error(getApiErrorMessage(error, '退出小红书登录失败')),
+    onError: (error) => toast.error(getApiErrorMessage(error, '退出种草笔记登录失败')),
   })
 
   useEffect(() => {
     if (qrCode && statusQuery.data?.logged_in) {
       setQrCode(null)
-      toast.success('小红书登录成功')
+      toast.success('种草笔记登录成功')
     }
   }, [qrCode, statusQuery.data?.logged_in])
 
@@ -67,7 +67,7 @@ export default function SeednoteAdminPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="小红书账号" description="管理小红书数据研究所使用的后台会话。">
+      <PageHeader title="种草笔记账号" description="管理种草笔记数据研究所使用的后台会话。">
         <Button
           variant="outline"
           onClick={() => void statusQuery.refetch()}
@@ -82,7 +82,7 @@ export default function SeednoteAdminPage() {
         <Alert variant="destructive">
           <CircleX />
           <AlertTitle>状态获取失败</AlertTitle>
-          <AlertDescription>{getApiErrorMessage(statusQuery.error, '暂时无法获取小红书登录状态')}</AlertDescription>
+          <AlertDescription>{getApiErrorMessage(statusQuery.error, '暂时无法获取种草笔记登录状态')}</AlertDescription>
         </Alert>
       )}
 
@@ -122,7 +122,7 @@ export default function SeednoteAdminPage() {
             <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row sm:items-center">
               <img
                 src={`data:image/png;base64,${qrCode}`}
-                alt="小红书登录二维码"
+                alt="种草笔记登录二维码"
                 className="aspect-square size-56 shrink-0 border bg-white object-contain p-2"
               />
               <div className="space-y-2">
@@ -155,8 +155,8 @@ export default function SeednoteAdminPage() {
       <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确定退出小红书登录？</AlertDialogTitle>
-            <AlertDialogDescription>退出后，小红书研究和数据采集会暂停，直到管理员重新登录。</AlertDialogDescription>
+            <AlertDialogTitle>确定退出种草笔记登录？</AlertDialogTitle>
+            <AlertDialogDescription>退出后，种草笔记研究和数据采集会暂停，直到管理员重新登录。</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>

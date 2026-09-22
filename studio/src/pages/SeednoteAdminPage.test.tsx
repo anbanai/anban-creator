@@ -40,7 +40,7 @@ describe('SeednoteAdminPage', () => {
     expect((await screen.findAllByText('未登录')).length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: '获取登录二维码' }))
 
-    const image = await screen.findByRole('img', { name: '小红书登录二维码' })
+    const image = await screen.findByRole('img', { name: '种草笔记登录二维码' })
     expect(image).toHaveAttribute('src', 'data:image/png;base64,cG5n')
     expect(api.seednoteAdmin.loginQRCode).toHaveBeenCalledTimes(1)
   })

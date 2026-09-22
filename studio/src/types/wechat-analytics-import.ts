@@ -20,6 +20,7 @@ export interface WechatAnalyticsImportBatch {
 export interface WechatAnalyticsImportRow {
   id: string
   source_row: number
+  source?: string
   title: string
   published_date?: string
   article_url?: string

@@ -66,9 +66,10 @@ describe('WechatDataPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '秋天喝茶别急着买' }))
     const details = await screen.findByRole('dialog')
     expect(within(details).getByRole('link', { name: '查看原文' })).toHaveAttribute('href', 'https://mp.weixin.qq.com/s/imported')
-    fireEvent.click(within(details).getByRole('button', { name: '已在公众号后台发布' }))
+    fireEvent.click(within(details).getByRole('button', { name: '确认已在公众号发布' }))
     expect(screen.getByRole('textbox', { name: '文章 URL（可选）' })).toHaveValue('https://mp.weixin.qq.com/s/imported')
     expect(within(screen.getByRole('dialog')).getByRole('link', { name: '查看原文' })).toHaveAttribute('target', '_blank')
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })
 
   it('renders 48001 as an actionable manual publication state', async () => {
@@ -76,7 +77,7 @@ describe('WechatDataPage', () => {
 
     expect(await screen.findByText('待人工发布')).toBeInTheDocument()
     expect(screen.queryByText('发布失败')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '已发布，去绑定' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认已在公众号发布' })).toBeInTheDocument()
   })
 
   it('keeps publication state and the next action visible in a narrow article row', async () => {
@@ -88,22 +89,28 @@ describe('WechatDataPage', () => {
     expect(row).toHaveClass('max-md:grid', 'max-md:grid-cols-6')
     expect(within(row!).getByText('当前状态')).toBeInTheDocument()
     expect(within(row!).getByText('下一步')).toBeInTheDocument()
-    expect(within(row!).getByRole('button', { name: '已发布，去绑定' })).toBeInTheDocument()
+    expect(within(row!).getByRole('button', { name: '确认已在公众号发布' })).toBeInTheDocument()
   })
 
   it('allows confirming manual publication without a URL', async () => {
     render(<WechatDataPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '已发布，去绑定' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认已发布' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认已在公众号发布' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存发布状态' }))
 
     await waitFor(() => expect(api.tasks.bindManualWechatPublication).toHaveBeenCalledWith('task-1', ''))
   })
 
-  it('previews the workbook before creating an immutable import batch', async () => {
+  it('automatically previews the workbook and classifies article content before importing', async () => {
     vi.mocked(api.wechatAnalyticsImport.preview).mockResolvedValue({
       source: '数据来源概况', file_name: 'total.xls', total_rows: 120, parser_version: 'wechat-xls-v1',
       field_mapping: [{ excel_field: '内容标题', internal_field: 'title' }],
-      rows: [{ source_row: 4, source: '数据来源概况', title: '白茶到底分几类？', read_users: 642 }],
+      rows: [
+        { source_row: 4, source: '文章', title: '白茶到底分几类？', read_users: 642, article_url: 'https://mp.weixin.qq.com/s/article' },
+        { source_row: 5, source: '贴图', title: '夏日茶席', read_users: 120, article_url: 'https://mp.weixin.qq.com/s/sticker' },
+      ],
+    })
+    vi.mocked(api.wechatAnalyticsImport.articles).mockResolvedValue({
+      items: [{ publication: { ...awaitingArticle.publication, article_url: 'https://mp.weixin.qq.com/s/article' } }],
     })
     vi.mocked(api.wechatAnalyticsImport.import).mockResolvedValue({
       batch_id: 'batch-1', source_file: 'total.xls', parser_version: 'wechat-xls-v1',
@@ -116,9 +123,12 @@ describe('WechatDataPage', () => {
     const fileInput = dialog.querySelector<HTMLInputElement>('input[type="file"]')
     expect(fileInput).not.toBeNull()
     fireEvent.change(fileInput!, { target: { files: [file] } })
-    fireEvent.click(screen.getByRole('button', { name: '预览数据' }))
 
     expect(await screen.findByText('白茶到底分几类？')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('文章').length).toBeGreaterThan(0)
+    expect(within(dialog).getByText('贴图')).toBeInTheDocument()
+    expect(within(dialog).getAllByText(/自动匹配/).length).toBeGreaterThan(0)
+    expect(within(dialog).queryByRole('button', { name: '预览数据' })).not.toBeInTheDocument()
     expect(api.wechatAnalyticsImport.import).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '确认导入' }))
     await waitFor(() => expect(api.wechatAnalyticsImport.import).toHaveBeenCalledWith(project.id, expect.objectContaining({ upload_id: 'upload-1', timezone: 'Asia/Shanghai' })))

@@ -69,7 +69,7 @@ describe('SeednoteDataPage import flow', () => {
     ]
     vi.mocked(api.seednoteImport.overview).mockResolvedValue({ dates: [], series: [], posts: [], post_summaries: summaries })
     render(<SeednoteDataPage />)
-    fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+    fireEvent.change(await screen.findByRole('combobox', { name: '种草笔记账号' }), { target: { value: 'account-1' } })
     const links = await screen.findAllByRole('link', { name: '查看原文' })
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
       'https://www.xiaohongshu.com/explore/note-one?xsec_token=example',
@@ -81,7 +81,7 @@ describe('SeednoteDataPage import flow', () => {
   it('does not choose an account or load account data until the user explicitly selects one', async () => {
     render(<SeednoteDataPage />)
 
-    const accountSelect = await screen.findByRole('combobox', { name: '小红书账号' })
+    const accountSelect = await screen.findByRole('combobox', { name: '种草笔记账号' })
     expect(accountSelect).toHaveValue('')
     expect(screen.getByText('请选择账号后查看数据看板')).toBeInTheDocument()
     expect(api.seednoteImport.listBatches).not.toHaveBeenCalled()
@@ -98,7 +98,7 @@ describe('SeednoteDataPage import flow', () => {
     } as never)
     render(<SeednoteDataPage />)
 
-    fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+    fireEvent.change(await screen.findByRole('combobox', { name: '种草笔记账号' }), { target: { value: 'account-1' } })
 
     expect(await screen.findByText('数据看板')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '本周' })).toBeInTheDocument()
@@ -111,20 +111,18 @@ describe('SeednoteDataPage import flow', () => {
     expect(screen.queryByText('优先匹配帖子')).not.toBeInTheDocument()
   })
 
-  it('shows the selected file for review and waits for an explicit parse action', async () => {
+  it('uploads and imports immediately after selecting a valid file', async () => {
     render(<SeednoteDataPage />)
 
-    fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+    fireEvent.change(await screen.findByRole('combobox', { name: '种草笔记账号' }), { target: { value: 'account-1' } })
     fireEvent.click(await screen.findByRole('button', { name: '导入数据' }))
     const file = new File(['xlsx'], '日报.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     fireEvent.change(screen.getByLabelText('导入数据文件'), { target: { files: [file] } })
 
     expect(screen.getByText('日报.xlsx')).toBeInTheDocument()
-    expect(uploadToOSS).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: '导入数据' })).toBeInTheDocument()
-    expect(uploadToOSS).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
     await waitFor(() => expect(uploadToOSS).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.seednoteImport.import).toHaveBeenCalledWith('account-1', expect.objectContaining({ upload_id: 'session-1', timezone: 'Asia/Shanghai' })))
   })
 
   it('surfaces invalid import rows instead of showing a false completion state', async () => {
@@ -148,12 +146,11 @@ describe('SeednoteDataPage import flow', () => {
     })
     render(<SeednoteDataPage />)
 
-    fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+    fireEvent.change(await screen.findByRole('combobox', { name: '种草笔记账号' }), { target: { value: 'account-1' } })
     fireEvent.click(await screen.findByRole('button', { name: '导入数据' }))
     const file = new File(['xlsx'], '日报.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     fireEvent.change(screen.getByLabelText('导入数据文件'), { target: { files: [file] } })
-    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
-
+    await waitFor(() => expect(api.seednoteImport.import).toHaveBeenCalledTimes(1))
     expect(await screen.findByText('导入存在无法解析的行')).toBeInTheDocument()
     expect(screen.queryByText('导入完成')).not.toBeInTheDocument()
   })
@@ -161,7 +158,7 @@ describe('SeednoteDataPage import flow', () => {
   it('does not ask the user to choose priority posts before importing', async () => {
     render(<SeednoteDataPage />)
 
-    fireEvent.change(await screen.findByRole('combobox', { name: '小红书账号' }), { target: { value: 'account-1' } })
+    fireEvent.change(await screen.findByRole('combobox', { name: '种草笔记账号' }), { target: { value: 'account-1' } })
 
     expect(await screen.findByText('数据看板')).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '夏日穿搭' })).not.toBeInTheDocument()

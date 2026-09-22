@@ -33,7 +33,7 @@ function project(overrides: Partial<Project> = {}): Project {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'seednote',
-    name: '小红书账号',
+    name: '种草笔记账号',
     avatar_url: '',
     profile_url: '',
     keywords: '',

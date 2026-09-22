@@ -184,7 +184,7 @@ export const ecommerceTargetPlatformOptions = [
   { value: 'taobao', label: '淘宝 / 天猫' },
   { value: 'jd', label: '京东' },
   { value: 'douyin', label: '抖音电商' },
-  { value: 'xhs', label: '小红书电商' },
+  { value: 'xhs', label: '种草笔记电商' },
   { value: 'general', label: '通用' },
 ]
 

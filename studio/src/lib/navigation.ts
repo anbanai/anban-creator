@@ -28,13 +28,13 @@ export const mvpNavItems: NavItem[] = [
   { to: '/billing', label: '钱包', icon: Coins },
   { to: '/plugins', label: '插件', icon: PlugZap },
   { to: '/settings', label: '设置', icon: Settings },
-  { to: '/seednote-data', label: '小红书数据', icon: BarChart3 },
-  { to: '/wechat-data', label: '公众号内容', icon: BarChart3 },
+  { to: '/seednote-data', label: '种草笔记数据', icon: BarChart3 },
+  { to: '/wechat-data', label: '公众号数据', icon: BarChart3 },
 ]
 
 export const adminNavItems: NavItem[] = [
   { to: '/templates', label: '模板库', icon: LayoutGrid, adminOnly: true },
-  { to: '/admin/seednote', label: '小红书账号', icon: KeyRound, adminOnly: true },
+  { to: '/admin/seednote', label: '种草笔记账号', icon: KeyRound, adminOnly: true },
 ]
 
 export const allNavItems: NavItem[] = [

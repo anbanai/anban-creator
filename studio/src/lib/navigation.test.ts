@@ -18,8 +18,8 @@ describe('navigation IA', () => {
       '钱包',
       '插件',
       '设置',
-      '小红书数据',
-      '公众号内容',
+      '种草笔记数据',
+      '公众号数据',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
@@ -29,7 +29,7 @@ describe('navigation IA', () => {
   it('defines administrator navigation in approved order', () => {
     expect(adminNavItems.map((item) => item.label)).toEqual([
       '模板库',
-      '小红书账号',
+      '种草笔记账号',
     ])
     expect(adminNavItems.every((item) => item.adminOnly)).toBe(true)
   })
