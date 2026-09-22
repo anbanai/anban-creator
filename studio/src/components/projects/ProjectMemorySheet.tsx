@@ -56,7 +56,7 @@ export function ProjectMemorySheet({ projectId, projectName, open, onOpenChange 
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full gap-0 p-0 sm:w-[min(92vw,68rem)] sm:max-w-[min(92vw,68rem)]"
+        className="!w-full gap-0 p-0 sm:!w-[min(92vw,72rem)] sm:!max-w-[min(92vw,72rem)]"
       >
         <SheetHeader className="border-b bg-background/95 pr-14 backdrop-blur">
           <div className="flex min-w-0 items-center gap-2">

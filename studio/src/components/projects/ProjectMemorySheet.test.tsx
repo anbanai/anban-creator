@@ -33,6 +33,8 @@ describe('ProjectMemorySheet', () => {
     expect(screen.getByText('项目记忆文件')).toBeInTheDocument()
     expect(screen.getByRole('main')).toHaveClass('min-w-0')
     expect(screen.getByRole('article')).toHaveClass('max-w-3xl')
+    expect(screen.getByRole('dialog')).toHaveClass('!w-full')
+    expect(screen.getByRole('dialog')).toHaveClass('sm:!max-w-[min(92vw,72rem)]')
 
     fireEvent.click(screen.getByRole('button', { name: 'notes/preferences.md' }))
     expect(screen.getByText('second file')).toBeInTheDocument()
