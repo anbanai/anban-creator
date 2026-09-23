@@ -64,7 +64,7 @@ func openProjectPathNoSymlinks(projectDir, relativePath string, directory bool) 
 	if openErr != nil {
 		return nil, classifyProjectOpenError(openErr)
 	}
-	file := os.NewFile(uintptr(fd), relativePath)
+	file := os.NewFile(uintptr(fd), filepath.Join(projectDir, clean))
 	if file == nil {
 		_ = unix.Close(fd)
 		return nil, errors.New("open project memory file")

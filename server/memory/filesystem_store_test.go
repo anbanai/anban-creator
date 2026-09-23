@@ -70,6 +70,27 @@ func TestFilesystemStoreRejectsProjectOverQuota(t *testing.T) {
 	}
 }
 
+func TestFilesystemStoreRequiresProjectWithNestedMemoryFile(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewFilesystemStore(root, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := uuid.NewString()
+	projectDir := filepath.Join(root, "projects", projectID)
+	memoryDir := filepath.Join(projectDir, "anban-article")
+	if err := os.MkdirAll(memoryDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memoryDir, "MEMORY.md"), []byte("project memory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.RequireProject(context.Background(), projectID); err != nil {
+		t.Fatalf("RequireProject() with nested MEMORY.md = %v", err)
+	}
+}
+
 func TestFilesystemStoreRejectsTooManyEntriesEvenWhenTheyAreEmpty(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewFilesystemStore(root, testLimits())

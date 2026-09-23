@@ -875,6 +875,13 @@ func TestDispatchIncompleteIdentityFailsPermanently(t *testing.T) {
 	if execution.Status != model.TaskExecutionFailed || execution.DispatchClaimToken == "" || execution.DispatchClaimedAt == nil || execution.RuntimeScope != "" || execution.RuntimeWorkload != "" {
 		t.Fatalf("failed incomplete dispatch = %+v", execution)
 	}
+	storedTask, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedTask.CurrentExecutionID == nil || strings.TrimSpace(*storedTask.CurrentExecutionID) != execution.ID {
+		t.Fatalf("persisted task current execution = %v, want %s", storedTask.CurrentExecutionID, execution.ID)
+	}
 }
 
 func TestDispatchRuntimeIdentityConflictFailsPermanently(t *testing.T) {

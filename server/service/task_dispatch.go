@@ -75,6 +75,7 @@ func (s *TaskService) dispatchRuntime(ctx context.Context, task *model.Task) err
 		}
 	} else {
 		task.Status = model.TaskStatusRunning
+		task.CurrentExecutionID = &execution.ID
 	}
 	return s.dispatchCurrentExecution(ctx, task, execution)
 }
