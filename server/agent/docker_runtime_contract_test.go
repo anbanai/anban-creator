@@ -746,7 +746,7 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.studio"),
-			from: []string{"FROM oven/bun:latest AS build", "FROM nginx:alpine"},
+			from: []string{"FROM ${STUDIO_PREVIOUS_IMAGE} AS previous", "FROM oven/bun:latest AS build", "FROM nginx:alpine"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.sidecar-ilink"),
