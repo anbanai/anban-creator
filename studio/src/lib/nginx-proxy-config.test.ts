@@ -17,6 +17,24 @@ describe('Studio nginx backend proxy contract', () => {
     expect(deployment).toContain('- name: BACKEND_PORT\n              value: "8443"')
   })
 
+  it('pins the Studio Service to the active blue/green release', () => {
+    const deployment = readFileSync('Deployment.yaml', 'utf8')
+    const service = deployment.match(/kind: Service[\s\S]*?\n---/)?.[0]
+
+    expect(service).toContain('selector:')
+    expect(service).toContain('app: ${micro_service_name}')
+    expect(service).toContain('version: ${version_switch}')
+  })
+
+  it('revalidates HTML while keeping hashed assets immutable', () => {
+    const template = readFileSync('default.conf.template', 'utf8')
+    const htmlLocation = template.match(/location = \/index\.html \{([\s\S]*?)\n    \}/)?.[1]
+    const assetLocation = template.match(/location \/assets\/ \{([\s\S]*?)\n    \}/)?.[1]
+
+    expect(htmlLocation).toContain('add_header Cache-Control "no-store, must-revalidate" always;')
+    expect(assetLocation).toContain('add_header Cache-Control "public, immutable";')
+  })
+
   it('proxies the exact MCP endpoint to the backend as an unbuffered HTTP stream', () => {
     const template = readFileSync('default.conf.template', 'utf8')
     const mcpLocation = template.match(/location = \/mcp \{([\s\S]*?)\n    \}/)?.[1]

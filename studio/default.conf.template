@@ -27,9 +27,14 @@ server {
         application/xml
         image/svg+xml;
 
-    # Static frontend with SPA routing fallback. index.html is served here (not
-    # under /assets/), so it is NOT cached immutably — it must be re-fetched to
-    # pick up new content-hashed asset references.
+    # Keep the HTML shell revalidated so a release cutover picks up the current
+    # content-hashed asset references immediately.
+    location = /index.html {
+        root /usr/share/nginx/html;
+        add_header Cache-Control "no-store, must-revalidate" always;
+    }
+
+    # Static frontend with SPA routing fallback.
     location / {
         root /usr/share/nginx/html;
         index index.html;

@@ -14,24 +14,25 @@ import GlobalCommandPalette from '@/components/GlobalCommandPalette'
 import { AgentPromptDropProvider } from '@/components/agent-prompt/AgentPromptDropProvider'
 import AdminRoute from '@/components/auth/AdminRoute'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { lazyWithRecovery } from '@/lib/lazy-with-recovery'
 
 // Lazy-loaded pages
-const LoginPage = React.lazy(() => import('@/pages/LoginPage'))
-const RegisterPage = React.lazy(() => import('@/pages/RegisterPage'))
-const DashboardPage = React.lazy(() => import('@/pages/DashboardPage'))
-const TimelinePage = React.lazy(() => import('@/pages/TimelinePage'))
-const ProjectsPage = React.lazy(() => import('@/pages/ProjectsPage'))
-const PlansPage = React.lazy(() => import('@/pages/PlansPage'))
-const TasksPage = React.lazy(() => import('@/pages/TasksPage'))
-const TaskDetailPage = React.lazy(() => import('@/pages/TaskDetailPage'))
-const BillingPage = React.lazy(() => import('@/pages/BillingPage'))
-const UsagePage = React.lazy(() => import('@/pages/UsagePage'))
-const SettingsPage = React.lazy(() => import('@/pages/SettingsPage'))
-const TemplatesPage = React.lazy(() => import('@/pages/TemplatesPage'))
-const SeednoteAdminPage = React.lazy(() => import('@/pages/SeednoteAdminPage'))
-const PluginsPage = React.lazy(() => import('@/pages/PluginsPage'))
-const SeednoteDataPage = React.lazy(() => import('@/pages/SeednoteDataPage'))
-const WechatDataPage = React.lazy(() => import('@/pages/WechatDataPage'))
+const LoginPage = lazyWithRecovery(() => import('@/pages/LoginPage'))
+const RegisterPage = lazyWithRecovery(() => import('@/pages/RegisterPage'))
+const DashboardPage = lazyWithRecovery(() => import('@/pages/DashboardPage'))
+const TimelinePage = lazyWithRecovery(() => import('@/pages/TimelinePage'))
+const ProjectsPage = lazyWithRecovery(() => import('@/pages/ProjectsPage'))
+const PlansPage = lazyWithRecovery(() => import('@/pages/PlansPage'))
+const TasksPage = lazyWithRecovery(() => import('@/pages/TasksPage'))
+const TaskDetailPage = lazyWithRecovery(() => import('@/pages/TaskDetailPage'))
+const BillingPage = lazyWithRecovery(() => import('@/pages/BillingPage'))
+const UsagePage = lazyWithRecovery(() => import('@/pages/UsagePage'))
+const SettingsPage = lazyWithRecovery(() => import('@/pages/SettingsPage'))
+const TemplatesPage = lazyWithRecovery(() => import('@/pages/TemplatesPage'))
+const SeednoteAdminPage = lazyWithRecovery(() => import('@/pages/SeednoteAdminPage'))
+const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
+const SeednoteDataPage = lazyWithRecovery(() => import('@/pages/SeednoteDataPage'))
+const WechatDataPage = lazyWithRecovery(() => import('@/pages/WechatDataPage'))
 
 function LoadingSpinner() {
   return (
