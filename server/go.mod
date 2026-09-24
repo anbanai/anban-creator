@@ -1,12 +1,12 @@
 module github.com/anbanai/anban-creator/server
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.2.4
-	github.com/alibabacloud-go/tingwu-20230930/v2 v2.0.25
+	github.com/alibabacloud-go/tingwu-20230930/v2 v2.0.26
 	github.com/alicebob/miniredis/v2 v2.30.0
 	github.com/aliyun/aliyun-oss-go-sdk v3.0.2+incompatible
 	github.com/aliyun/credentials-go v1.4.13
@@ -14,6 +14,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
 	github.com/elazarl/goproxy v1.9.1
+	github.com/extrame/xls v0.0.1
 	github.com/fasthttp/websocket v1.5.12
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-sql-driver/mysql v1.10.1
@@ -26,13 +27,14 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/moby/docker-image-spec v1.3.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/openai/openai-go/v3 v3.62.0
+	github.com/openai/openai-go/v3 v3.65.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/rs/zerolog v1.35.1
 	github.com/silenceper/wechat/v2 v2.1.14
-	github.com/volcengine/volcengine-go-sdk v1.2.53
+	github.com/tealeg/xlsx/v3 v3.3.13
+	github.com/volcengine/volcengine-go-sdk v1.2.54
 	github.com/wneessen/go-mail v0.8.1
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.57.0
@@ -79,7 +81,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/extrame/ole2 v0.0.0-20160812065207-d69429661ad7 // indirect
-	github.com/extrame/xls v0.0.1 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/frankban/quicktest v1.14.6 // indirect
@@ -103,14 +104,14 @@ require (
 	github.com/go-openapi/swag/yamlutils v0.29.2 // indirect
 	github.com/go-redis/redis/v8 v8.11.5 // indirect
 	github.com/gofiber/schema v1.8.7 // indirect
-	github.com/gofiber/utils/v2 v2.5.2 // indirect
+	github.com/gofiber/utils/v2 v2.5.3 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/s2a-go v0.1.10 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.22 // indirect
-	github.com/googleapis/gax-go/v2 v2.24.1 // indirect
+	github.com/googleapis/gax-go/v2 v2.25.0 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -125,7 +126,7 @@ require (
 	github.com/moby/term v0.5.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
-	github.com/molecule-man/go-brrr v1.1.0 // indirect
+	github.com/molecule-man/go-brrr v1.1.1 // indirect
 	github.com/morikuni/aec v1.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -135,14 +136,13 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/fastuuid v1.2.0 // indirect
-	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/savsgio/gotils v0.0.0-20250924091648-bce9a52d7761 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
-	github.com/shabbyrobe/xmlwriter v0.0.0-20200208144257-9fca06d00ffa // indirect
+	github.com/shabbyrobe/xmlwriter v0.0.0-20251128030032-2fcb52763289 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/tealeg/xlsx/v3 v3.3.13 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
@@ -167,8 +167,8 @@ require (
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
-	google.golang.org/api v0.298.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260917231906-eeb232e0883d // indirect
+	google.golang.org/api v0.299.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260921155816-b14227669459 // indirect
 	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect

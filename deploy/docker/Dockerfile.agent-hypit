@@ -9,7 +9,7 @@ RUN npm run build && npm prune --omit=dev && test -d node_modules/@anthropic-ai/
 FROM node:24-bookworm-slim
 
 ARG HYPIT_REPO=https://github.com/hypit-ai/hypit.git
-ARG HYPIT_REF=5d257c5a50291398d2bca34afb93c22f1ab5c295
+ARG HYPIT_REF=5a568f4be485ab5e735fe95533cd5f77a85c66ee
 ARG PNPM_VERSION=10.33.0
 ARG UV_VERSION=0.10.4
 

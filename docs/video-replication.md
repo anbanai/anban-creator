@@ -76,7 +76,7 @@ Runner 的生产依赖 `npm audit --omit=dev` 为 0 条公告。官方基线锁�
 
 ## 本次实现验证（2026-09-21）
 
-官方基线为 `5d257c5a50291398d2bca34afb93c22f1ab5c295`，CLI 为 `0.2.11`。本地已构建 `creator-agent-hypit:latest`，镜像 ID 为 `sha256:479c8a7c6a79f49cbc4a93e169ac26006f245b3ba75994503b56173604facb7d`（本地 image ID，不是已发布的 registry digest）。
+当时验证的官方基线为 `5d257c5a50291398d2bca34afb93c22f1ab5c295`，CLI 为 `0.2.11`。本地已构建 `creator-agent-hypit:latest`，镜像 ID 为 `sha256:479c8a7c6a79f49cbc4a93e169ac26006f245b3ba75994503b56173604facb7d`（历史本地 image ID，不是已发布的 registry digest；不代表后续升级版本的验证结果）。
 
 | 验证 | 结果 |
 |---|---|
@@ -96,3 +96,16 @@ Runner 的生产依赖 `npm audit --omit=dev` 为 0 条公告。官方基线锁�
 **尚未完成真实业务验收。** 当前没有配置可执行真实托管任务的 Provider/平台账户，因此真实上传参考、链接参考、定时任务、中断恢复及再次改编的五类任务尚无端到端证据，真实业务成片的人工音画验收也未完成。功能继续默认关闭、限内部管理员验证；不能把上述本地 smoke 标记为业务链路已打通。
 
 本次实现已按默认关闭的授权边界合入本地 main（实现提交 `a99fc18a`，harness `f32cb752`）。合并后重新运行 Go 全量测试 / build / vet、Runner 192 项测试 / typecheck / build、Studio 913 项测试 / build 和 Pack / 工作流检查，全部通过。未推送远端，未部署或启用服务。
+
+## 依赖升级复核（2026-09-24）
+
+构建默认源码升级为 `5a568f4be485ab5e735fe95533cd5f77a85c66ee`（Hypit `0.2.12`），包含上游异步 Provider 轮询错误处理修复。新验证镜像为 `creator-agent-hypit:review-20260924`，本地 image ID 为 `sha256:7c23c68b3535fcd2a312cd75fc34571ad72bf234017b94839b2a4f72b24e15dc`，不是 registry digest；旧镜像的历史验证记录不作为新版本证据。
+
+- Go 全量测试、Server 构建、vet、模块校验和定向 MCP / 双宿主合同测试通过。
+- Runner 208 项测试、类型检查和构建通过；`npm ci` 审计报告 0 条漏洞。
+- Studio 961 项测试和构建通过。
+- harness 456 项测试通过、1 项跳过；类型检查、构建、打包验证及 article / seednote Profile smoke 通过。离线打包首次因本机缺少 pnpm 元数据缓存失败，补齐缓存后原检查通过。
+- Pack 生成一致性、工作流审计及其 9 项回归通过。
+- 新镜像构建、官方源码逐文件校验、断网 / 非 root / 只读根目录的 540×960 示例渲染、完整解码、归档重新导入及官方 check / plan 全部通过。首次构建下载 `uv` 文件中断并被哈希校验拒绝，原命令重试后成功，未绕过校验。
+
+本次只完成本地升级验证；未部署或启用业务，真实 Provider 任务的端到端验收仍未完成。

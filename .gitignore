@@ -67,6 +67,7 @@ studio/dist/
 
 # Local brainstorming/session artifacts
 .superpowers/
+.workbuddy-ai/
 
 # Local eval/scratch harnesses (not product code; contain compiled Python)
 eval-article-viral-strategy/
