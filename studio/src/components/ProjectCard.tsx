@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Archive, Brain, Lightbulb, Pencil, RotateCcw } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { platformLabels } from '@/lib/labels'
-import { renderPlatformIcon, platformBadgeVariant } from '@/lib/PlatformIcon'
+import { renderPlatformIcon, platformBadgeVariant, platformBadgeClassName } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,7 @@ export function ProjectCard({ project, stats, onEdit, archiving, restoring, onAr
           <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={project.platform} size="lg" />
           <div className="min-w-0">
             <h3 className="truncate text-sm font-semibold text-foreground">{project.name}</h3>
-            <Badge variant={platformBadge} className="mt-1 text-[10px] font-normal">
+            <Badge variant={platformBadge} className={`mt-1 text-[10px] font-normal ${platformBadgeClassName[project.platform] || ''}`}>
               {renderPlatformIcon(project.platform)}
               {platformLabel}
             </Badge>

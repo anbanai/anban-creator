@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
-import { platformBgColor, platformIconColor } from '@/lib/PlatformIcon'
+import { platformBadgeClassName, platformBgColor, platformIconColor } from '@/lib/PlatformIcon'
 import { platformLabels } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 
@@ -63,7 +63,7 @@ export function ProjectIdentity({
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
           {showType ? (
-            <Badge variant="secondary">{platformLabel}项目</Badge>
+            <Badge variant="secondary" className={project.platform ? platformBadgeClassName[project.platform] : undefined}>{platformLabel}项目</Badge>
           ) : null}
         </span>
         {!compact && project.description ? (

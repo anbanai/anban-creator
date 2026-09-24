@@ -1,6 +1,6 @@
-import type { AgentExecutionProfileID, CreateTaskRequest, Project, ReferenceImageSelection, Task } from '@/types'
+import type { AgentExecutionProfileID, CreateTaskRequest, HypitDefaults, Project, ReferenceImageSelection, Task } from '@/types'
 import type { CreateTaskFormValues } from '@/lib/schemas'
-import { initialHypitInput } from '@/lib/hypit-form'
+import { buildHypitInputForSubmit, initialHypitInput } from '@/lib/hypit-form'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 
@@ -157,14 +157,14 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     target_platform: ecommerce?.target_platform ?? '',
     selling_points: ecommerce?.selling_points ?? '',
     language: ecommerce?.language ?? '',
-    hypit_input: task.hypit_input ? cloneValue(task.hypit_input) : undefined,
+    hypit_input: task.hypit_input ? cloneValue(initialHypitInput(task.prompt, task.hypit_input)) : undefined,
     montage_input: task.montage_input
       ? cloneValue(initialMontageInput(task.prompt, task.montage_input))
       : undefined,
   }
 }
 
-export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskRequest {
+export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?: HypitDefaults): CreateTaskRequest {
   const prompt = values.prompt?.trim() || undefined
   if (values.type === 'viral_analysis') {
     return {
@@ -214,7 +214,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults): CreateTaskReq
           ...(values.language ? { language: values.language } : {}),
         }
       : {}),
-    ...(values.type === 'hypit' ? { hypit_input: { ...cloneValue(values.hypit_input), brief: prompt ?? '' } } : {}),
+    ...(values.type === 'hypit' ? { hypit_input: buildHypitInputForSubmit(prompt ?? '', cloneValue(values.hypit_input), hypitDefaults) } : {}),
     ...(values.type === 'montage'
       ? { montage_input: cloneValue(buildMontageInputForSubmit(values.prompt, values.montage_input)) }
       : {}),

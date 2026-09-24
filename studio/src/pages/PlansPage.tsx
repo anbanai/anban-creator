@@ -1,6 +1,5 @@
-import { Textarea } from '@/components/ui/textarea'
 import { HypitCreationPanel } from '@/components/hypit/HypitCreationPanel'
-import { initialHypitInput } from '@/lib/hypit-form'
+import { buildHypitInputForSubmit, initialHypitInput } from '@/lib/hypit-form'
 import { useState, useEffect, useMemo, useRef, useCallback, type BaseSyntheticEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch } from 'react-hook-form'
@@ -29,7 +28,7 @@ import SchedulePicker from '@/components/SchedulePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
-import { platformBadgeVariant, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
+import { platformBadgeVariant, platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { normalizeImageRatio, planSchema, type PlanFormValues } from '@/lib/schemas'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
@@ -535,7 +534,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      hypit_input: values.type === 'hypit' ? { ...values.hypit_input, brief: values.prompt || '' } : undefined,
+      hypit_input: values.type === 'hypit' ? buildHypitInputForSubmit(values.prompt || '', values.hypit_input, selectedProject?.hypit_defaults) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
 
@@ -585,12 +584,15 @@ export default function PlansPage() {
       compact
     />
   )
-  const promptComposer = watchedType === 'hypit' ? <div className="space-y-3"><Textarea aria-label="复刻要求" value={form.watch('prompt') ?? ''} placeholder="描述每次复刻需要保留和替换的内容" onChange={event => { form.setValue('prompt', event.target.value, { shouldDirty: true }); form.setValue('hypit_input.brief', event.target.value, { shouldDirty: true, shouldValidate: true }) }} />{projectControl}<TaskComposerParameters execution={{ profiles: executionProfilesQuery.data ?? [], value: watchedExecutionProfile, onChange: value => form.setValue('execution_profile', value, { shouldDirty: true }), loading: executionProfilesQuery.isLoading, disabled: executionProfilesQuery.isError, catalog: billingCatalog, taskType: watchedType, priceUnit: 'run' }} /></div> : (
+  const promptComposer = (
     <>
       <AgentPromptInput
-      value={{ prompt: form.watch('prompt') ?? '', attachments: promptAttachments }}
+      value={{ prompt: form.watch('prompt') ?? '', attachments: watchedType === 'hypit' ? [] : promptAttachments }}
       onChange={(value) => {
         form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
+        if (watchedType === 'hypit') {
+          form.setValue('hypit_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        }
         if (watchedType === 'montage') {
           form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
         }
@@ -599,8 +601,10 @@ export default function PlansPage() {
       onSubmit={() => handlePlanSubmit()}
       attachmentController={attachmentController}
       attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+      attachmentsEnabled={watchedType !== 'hypit'}
+      ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
       submitMode="external"
-      placeholder="描述每次计划的创作方向、内容要求和素材使用方式..."
+      placeholder={watchedType === 'hypit' ? '描述每次复刻需要保留和替换的内容' : '描述每次计划的创作方向、内容要求和素材使用方式...'}
       submitLabel={editingPlan ? '更新计划' : '创建计划'}
       submitting={isSubmitting}
       submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (isMontagePlan && !montageReady)}
@@ -741,7 +745,7 @@ export default function PlansPage() {
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
                     )}
                     <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <Badge variant={platformBadge} className="text-[10px]">
+                      <Badge variant={platformBadge} className={cn("text-[10px]", platformBadgeClassName[plan.type])}>
                         {contentTypeLabel[plan.type] || plan.type}
                       </Badge>
                       <span>{cronToHuman(plan.cron_expr)}</span>

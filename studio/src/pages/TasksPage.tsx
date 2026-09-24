@@ -16,7 +16,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
-import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
+import { platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
@@ -521,7 +521,7 @@ export default function TasksPage() {
                           <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
                         )}
                         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className={`text-[10px] ${platformBadgeClassName[task.type] || ''}`}>
                             {contentTypeLabel[task.type] || task.type}
                           </Badge>
                           <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>

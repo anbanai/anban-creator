@@ -512,6 +512,26 @@ describe('TaskDetailsSheet', () => {
 })
 
 describe('TaskConfigurationDetails', () => {
+  it('uses the same Hypit field names and follow-source duration as creation', () => {
+    render(<TaskConfigurationDetails task={{
+      ...articleTask,
+      type: 'hypit',
+      project_snapshot: { platform: 'hypit' },
+      hypit_input: {
+        brief: '保留原视频节奏',
+        reference: { type: 'video', task_file_id: 'source-file' },
+        source_assets: [{ type: 'image', file_name: 'product.png', url: '/product.png' }],
+        preferences: {},
+      },
+    }} />)
+    expect(screen.getByText('主参考视频')).toBeInTheDocument()
+    expect(screen.getByText('source-file')).toBeInTheDocument()
+    expect(screen.getByText('补充素材（可选）')).toBeInTheDocument()
+    expect(screen.getByText('product.png')).toBeInTheDocument()
+    const duration = screen.getByText('目标时长（可选）').parentElement!
+    expect(within(duration).getByText('跟随参考视频')).toBeInTheDocument()
+  })
+
   it('labels the frozen ratio as a video setting for Montage', () => {
     const montageTask: Task = {
       ...articleTask,

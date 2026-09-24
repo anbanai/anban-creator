@@ -99,6 +99,8 @@ export interface AgentPromptInputProps {
   /** Operations and upload lifecycle only; value.attachments is the render/submit source. */
   attachmentController: Omit<PromptAttachmentsController, 'move'> & Partial<Pick<PromptAttachmentsController, 'move'>>
   attachmentPolicy: AttachmentAdmissionPolicy
+  /** Use a dedicated media uploader while reusing the prompt composer. */
+  attachmentsEnabled?: boolean
   contextBar?: ReactNode
   leadingTools?: ReactNode
   trailingTools?: ReactNode
@@ -305,6 +307,7 @@ export function AgentPromptInput({
   onSubmit,
   attachmentController,
   attachmentPolicy,
+  attachmentsEnabled = true,
   contextBar,
   leadingTools,
   trailingTools,
@@ -360,15 +363,15 @@ export function AgentPromptInput({
   }, [attachmentPolicy.allowedTypes])
 
   const addFiles = useCallback((files: readonly File[]) => {
-    if (disabled || files.length === 0) return
+    if (!attachmentsEnabled || disabled || files.length === 0) return
     const result = attachmentController.addFiles(files)
     const announcement = rejectionAnnouncement(result.rejected)
     setRejectionStatus(announcement)
     if (result.rejected.length > 0) onAttachmentRejected?.(result.rejected)
-  }, [attachmentController, disabled, onAttachmentRejected])
+  }, [attachmentController, attachmentsEnabled, disabled, onAttachmentRejected])
 
   const dropTarget = useAgentPromptDropTarget({
-    enabled: !disabled,
+    enabled: attachmentsEnabled && !disabled,
     remainingCapacity,
     acceptedTypesLabel: typesLabel,
     acceptsFile,
@@ -409,6 +412,7 @@ export function AgentPromptInput({
   }
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!attachmentsEnabled) return
     const files = Array.from(event.clipboardData.files ?? [])
     if (files.length === 0) return
     event.preventDefault()
@@ -435,7 +439,7 @@ export function AgentPromptInput({
     event.currentTarget.value = ''
   }
 
-  const pickerDisabled = disabled || remainingCapacity === 0
+  const pickerDisabled = !attachmentsEnabled || disabled || remainingCapacity === 0
   const openPreview = useCallback((attachmentId: string, trigger: HTMLButtonElement) => {
     previewTriggerRef.current = trigger
     setPreviewAttachmentId(attachmentId)
@@ -497,31 +501,35 @@ export function AgentPromptInput({
           </div>
 
           <InputGroupAddon align="block-end" className="shrink-0 gap-1.5">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="sr-only"
-              aria-label="选择附件文件"
-              accept={allowedTypes.map((type) => INPUT_ACCEPT_BY_TYPE[type]).join(',')}
-              disabled={pickerDisabled}
-              onChange={handleFileSelection}
-            />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <InputGroupButton
-                    size="icon-xs"
-                    aria-label="添加附件"
-                    disabled={pickerDisabled}
-                    onClick={() => fileInputRef.current?.click()}
-                  />
-                }
-              >
-                <PlusIcon />
-              </TooltipTrigger>
-              <TooltipContent>添加附件</TooltipContent>
-            </Tooltip>
+            {attachmentsEnabled && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="sr-only"
+                  aria-label="选择附件文件"
+                  accept={allowedTypes.map((type) => INPUT_ACCEPT_BY_TYPE[type]).join(',')}
+                  disabled={pickerDisabled}
+                  onChange={handleFileSelection}
+                />
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <InputGroupButton
+                        size="icon-xs"
+                        aria-label="添加附件"
+                        disabled={pickerDisabled}
+                        onClick={() => fileInputRef.current?.click()}
+                      />
+                    }
+                  >
+                    <PlusIcon />
+                  </TooltipTrigger>
+                  <TooltipContent>添加附件</TooltipContent>
+                </Tooltip>
+              </>
+            )}
             {leadingTools}
 
             <div data-slot="agent-prompt-actions" className="ml-auto flex min-w-0 items-center gap-1.5">

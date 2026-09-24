@@ -181,7 +181,7 @@ describe('ProjectsPage', () => {
     expect(screen.queryByRole('option', { name: '朋友圈' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '视频复刻' })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Montage' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Montage 视频生成' })).toBeInTheDocument()
   })
 
   it('does not open internal replication defaults from an ordinary-user deep link', async () => {
@@ -200,7 +200,7 @@ describe('ProjectsPage', () => {
     render(<ProjectsPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('Montage')
+    expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('Montage 视频生成')
     expect(within(dialog).getByText('视频默认设置')).toBeInTheDocument()
   })
 
@@ -451,6 +451,34 @@ describe('ProjectsPage', () => {
     expect((styleField as HTMLTextAreaElement).value).toBe('')
   })
 
+  it('creates a video replication project without a fixed default duration', async () => {
+    window.history.pushState({}, '', '/projects?create=true&type=hypit&intent=new')
+    vi.mocked(api.projects.create).mockResolvedValue({ project: { ...projectWithReference, platform: 'hypit' } })
+    render(<ProjectsPage />)
+    await screen.findByRole('region', { name: '视频复刻默认设置' })
+    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '跟随参考视频的项目' } })
+    expect(screen.getByLabelText('默认时长（可选）')).toHaveValue(null)
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalled())
+    expect(vi.mocked(api.projects.create).mock.calls[0][0].hypit_defaults?.preferences?.duration_seconds).toBeUndefined()
+  })
+
+  it('clears an existing project default duration without serializing zero', async () => {
+    const project = { ...projectWithReference, platform: 'hypit', hypit_defaults: { preferences: { duration_seconds: 30, aspect_ratio: '16:9' } } } as Project
+    vi.mocked(api.projects.list).mockResolvedValue([project])
+    vi.mocked(api.projects.update).mockResolvedValue(project)
+    render(<ProjectsPage />)
+    await clickProjectAction(project.name, '编辑项目')
+    const duration = await screen.findByLabelText('默认时长（可选）')
+    expect(duration).toHaveValue(30)
+    fireEvent.change(duration, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.projects.update).toHaveBeenCalled())
+    const payload = vi.mocked(api.projects.update).mock.calls[0][1]
+    expect(JSON.parse(JSON.stringify(payload.hypit_defaults))).toEqual({ preferences: { aspect_ratio: '16:9' } })
+  })
+
   it('creates a video replication project with typed defaults', async () => {
     window.history.pushState({}, '', '/projects?create=true&type=hypit&intent=new')
     vi.mocked(api.projects.create).mockResolvedValue({ project: { ...projectWithReference, platform: 'hypit' } })
@@ -458,7 +486,7 @@ describe('ProjectsPage', () => {
     await screen.findByRole('region', { name: '视频复刻默认设置' })
     fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '视频复刻项目' } })
     fireEvent.change(screen.getByLabelText('复刻视频比例'), { target: { value: '16:9' } })
-    fireEvent.change(screen.getByLabelText('目标时长（秒）'), { target: { value: '30' } })
+    fireEvent.change(screen.getByLabelText('默认时长（可选）'), { target: { value: '30' } })
     fireEvent.change(screen.getByLabelText('语言'), { target: { value: '中文' } })
     fireEvent.change(screen.getByLabelText('素材使用说明'), { target: { value: '使用品牌素材' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))

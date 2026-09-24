@@ -343,7 +343,7 @@ export function TaskFormDialog({
       image_capability_key: usesImageSettings ? effectiveImageCapabilityKey : values.image_capability_key,
       input_attachments: attachmentController.toInputAttachments(),
     }
-    const request = taskFormValuesToRequest(submittedValues)
+    const request = taskFormValuesToRequest(submittedValues, selectedProject?.hypit_defaults)
     await submit(() => taskMutation.mutateAsync({ request, quantity: submittedValues.quantity })).catch(() => {})
   }
 
@@ -445,13 +445,13 @@ export function TaskFormDialog({
     />
   )
 
-  const promptComposer = isViralAnalysisTask || watchedType === 'hypit' ? (
+  const promptComposer = isViralAnalysisTask ? (
     <div data-slot="viral-analysis-prompt" className="flex flex-col gap-2">
       <Textarea
-        aria-label={watchedType === 'hypit' ? '复刻要求' : '源笔记链接或分享文本'}
+        aria-label="源笔记链接或分享文本"
         value={watchedPrompt}
-        onChange={(event) => { setFormValue('prompt', event.target.value); if (watchedType === 'hypit') form.setValue('hypit_input.brief', event.target.value, { shouldDirty: true, shouldValidate: true }) }}
-        placeholder={watchedType === 'hypit' ? '描述希望保留的镜头、节奏及需要替换的内容…' : '粘贴种草笔记链接或分享文本...'}
+        onChange={(event) => setFormValue('prompt', event.target.value)}
+        placeholder="粘贴种草笔记链接或分享文本..."
         className="min-h-32 resize-y"
       />
       <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -461,9 +461,12 @@ export function TaskFormDialog({
     </div>
   ) : (
     <AgentPromptInput
-      value={{ prompt: watchedPrompt, attachments: attachmentController.attachments }}
+      value={{ prompt: watchedPrompt, attachments: watchedType === 'hypit' ? [] : attachmentController.attachments }}
       onChange={(value) => {
         setFormValue('prompt', value.prompt)
+        if (watchedType === 'hypit') {
+          form.setValue('hypit_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        }
         if (watchedType === 'montage') {
           form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
         }
@@ -471,8 +474,10 @@ export function TaskFormDialog({
       onSubmit={() => handleSubmit()}
       attachmentController={attachmentController}
       attachmentPolicy={attachmentPolicy}
+      attachmentsEnabled={watchedType !== 'hypit'}
+      ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
       submitMode="external"
-      placeholder="描述创作目标、内容要求和素材使用方式..."
+      placeholder={watchedType === 'hypit' ? '描述希望保留的镜头、节奏及需要替换的内容…' : '描述创作目标、内容要求和素材使用方式...'}
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
       submitting={isSubmitting}
       submitDisabled={Boolean(creationBlocker) || (isMontageTask && !montageReady)}
@@ -526,7 +531,7 @@ export function TaskFormDialog({
                 executionProfile={watchedExecutionProfile || undefined}
               />
 
-              <div className="pt-1">
+              {watchedType !== 'hypit' && <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
                 {!isViralAnalysisTask ? (
                   <SeednoteTemplateGallery
@@ -539,7 +544,7 @@ export function TaskFormDialog({
                 {hasIncompatibleSeednoteAttachments ? (
                   <p role="alert" className="mt-2 text-sm font-medium text-red-500">{SEEDNOTE_ATTACHMENT_BLOCKER}</p>
                 ) : null}
-              </div>
+              </div>}
 
               <div className="space-y-4 pt-1">
                 {!isViralAnalysisTask ? <p className="text-xs font-medium uppercase text-muted-foreground">{isMontageTask ? '视频设置' : '图片/高级'}</p> : null}

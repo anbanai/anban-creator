@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { uploadToOSS, type DirectUploadPurpose, type UploadToOSSResult } from '@/lib/direct-upload'
@@ -11,6 +11,7 @@ vi.mock('@/lib/direct-upload', () => ({
 }))
 
 const imageFile = (name: string) => new File(['image'], name, { type: 'image/png' })
+const videoFile = (name: string) => new File(['video'], name, { type: 'video/mp4' })
 
 const uploadResult = (fileName: string, overrides: Partial<UploadToOSSResult> = {}): UploadToOSSResult => ({
   uploadId: `upload-${fileName}`,
@@ -37,18 +38,20 @@ function ControlledReferenceInput({
   onValueChange,
   instructionMaxLength = 1000,
   uploadPurpose,
+  assetAdapter = false,
 }: {
   initialValue?: InputAttachment[]
   onValueChange?: (value: InputAttachment[]) => void
   instructionMaxLength?: number
   uploadPurpose?: DirectUploadPurpose
+  assetAdapter?: boolean
 }) {
   const [value, setValue] = useState<InputAttachment[]>(initialValue)
   return (
     <ReferenceMaterialInput
       value={value}
       onChange={(nextValue) => {
-        setValue(nextValue)
+        setValue(assetAdapter ? nextValue.map(({ upload_id: _uploadId, key: _key, ...asset }) => asset) : nextValue)
         onValueChange?.(nextValue)
       }}
       allowedTypes={['image']}
@@ -115,8 +118,74 @@ describe('ReferenceMaterialInput', () => {
     ])
   })
 
+  it('renders video and audio previews for existing media attachments', () => {
+    render(
+      <ReferenceMaterialInput
+        value={[
+          { type: 'video', url: '/reference.mp4', file_name: 'reference.mp4' },
+          { type: 'audio', url: '/voice.mp3', file_name: 'voice.mp3' },
+        ]}
+        onChange={vi.fn()}
+        allowedTypes={['video', 'audio']}
+      />,
+    )
+    expect(screen.getByLabelText('reference.mp4 视频预览')).toHaveAttribute('src', '/reference.mp4')
+    expect(screen.getByLabelText('voice.mp3 音频预览')).toHaveAttribute('src', '/voice.mp3')
+  })
 
-  it('preserves the user-selected order when concurrent uploads finish out of order', async () => {
+
+  it('falls back on missing or failed media URLs and recovers with a new URL', () => {
+    const { rerender } = render(<ReferenceMaterialInput value={[
+      { type: 'video', file_name: 'task-file.mp4' },
+      { type: 'video', url: '/bad.mp4', file_name: 'bad.mp4' },
+      { type: 'audio', url: '/bad.mp3', file_name: 'bad.mp3' },
+      { type: 'image', url: '/bad.png', file_name: 'bad.png' },
+    ]} onChange={vi.fn()} allowedTypes={['video', 'audio', 'image']} />)
+    expect(screen.getByLabelText('task-file.mp4 文件卡片')).toBeInTheDocument()
+    fireEvent.error(screen.getByLabelText('bad.mp4 视频预览'))
+    fireEvent.error(screen.getByLabelText('bad.mp3 音频预览'))
+    fireEvent.error(screen.getByAltText('bad.png'))
+    for (const name of ['bad.mp4', 'bad.mp3', 'bad.png']) expect(screen.getByLabelText(`${name} 文件卡片`)).toBeInTheDocument()
+    rerender(<ReferenceMaterialInput value={[{ type: 'video', url: '/good.mp4', file_name: 'bad.mp4' }]} onChange={vi.fn()} allowedTypes={['video']} />)
+    expect(screen.getByLabelText('bad.mp4 视频预览')).toHaveAttribute('src', '/good.mp4')
+  })
+
+  it('shows local video during upload and failure, retries, and revokes its blob URL', async () => {
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local-video')
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const pending = deferred<UploadToOSSResult>()
+    vi.mocked(uploadToOSS).mockImplementation(({ onProgress }) => {
+      onProgress?.(42)
+      return pending.promise
+    })
+    const { unmount } = render(<ReferenceMaterialInput value={[]} onChange={vi.fn()} allowedTypes={['video']} maxCount={1} />)
+    fireEvent.change(screen.getByLabelText('添加参考素材'), { target: { files: [videoFile('local.mp4'), videoFile('extra.mp4')] } })
+    expect(screen.getByLabelText('添加参考素材')).not.toHaveAttribute('multiple')
+    expect(screen.getByText(/点击选择或拖放一个文件/)).toBeInTheDocument()
+    const preview = await screen.findByLabelText('local.mp4 视频预览')
+    expect(preview).toHaveAttribute('src', 'blob:local-video')
+    expect(preview).toHaveAttribute('controls')
+    expect(preview).toHaveAttribute('preload', 'metadata')
+    expect(preview).toHaveAttribute('playsinline')
+    Object.defineProperty(preview, 'duration', { value: 12 })
+    fireEvent.loadedMetadata(preview)
+    expect((preview as HTMLVideoElement).currentTime).toBeGreaterThan(0)
+    expect(screen.getByText('42%')).toBeInTheDocument()
+    expect(uploadToOSS).toHaveBeenCalledTimes(1)
+    await act(async () => pending.reject(new Error('上传失败')))
+    expect(screen.getByLabelText('local.mp4 视频预览')).toHaveAttribute('src', 'blob:local-video')
+    const retry = deferred<UploadToOSSResult>()
+    vi.mocked(uploadToOSS).mockReturnValueOnce(retry.promise)
+    fireEvent.click(screen.getByRole('button', { name: '重试 local.mp4' }))
+    await act(async () => retry.resolve(uploadResult('local.mp4')))
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:local-video'))
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    unmount()
+    createObjectURL.mockRestore()
+    revokeObjectURL.mockRestore()
+  })
+
+  it.each([false, true])('preserves selected order when uploads finish out of order (asset adapter: %s)', async (assetAdapter) => {
     const uploads = new Map<string, ReturnType<typeof deferred<UploadToOSSResult>>>()
     vi.mocked(uploadToOSS).mockImplementation(({ file }) => {
       const pending = deferred<UploadToOSSResult>()
@@ -125,7 +194,7 @@ describe('ReferenceMaterialInput', () => {
     })
     const onValueChange = vi.fn()
 
-    render(<ControlledReferenceInput onValueChange={onValueChange} />)
+    render(<ControlledReferenceInput onValueChange={onValueChange} assetAdapter={assetAdapter} />)
 
     fireEvent.change(screen.getByLabelText('添加参考素材'), {
       target: { files: [imageFile('first.png'), imageFile('second.png')] },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { contentTypeLabel, platformDefaultRatio, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
+import { contentTypeLabel, contentTypeOptions, platformDefaultRatio, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
 
 describe('statusBadgeVariant', () => {
   it('returns "outline" for running', () => {
@@ -63,5 +63,18 @@ describe('taskFailurePresentation', () => {
 
   it('maps completion report failures to a recoverable result message', () => {
     expect(taskFailurePresentation({ error_message: 'completion_report_failed' })?.title).toBe('结果提交失败（可恢复）')
+  })
+})
+
+
+describe('video platform labels', () => {
+  it.each([
+    ['montage', 'Montage 视频生成'],
+    ['hypit', '视频复刻'],
+  ])('uses one name for %s in cards, timelines and type selectors', (type, label) => {
+    expect(taskTypeLabelCN[type]).toBe(label)
+    expect(contentTypeLabel[type]).toBe(label)
+    expect(platformLabels[type]).toBe(label)
+    expect(contentTypeOptions.find(option => option.value === type)?.label).toBe(label)
   })
 })

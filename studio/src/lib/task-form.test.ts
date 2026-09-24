@@ -52,8 +52,10 @@ describe('task form mapping', () => {
   it('maps replication defaults and new remix brief without mutating source', () => {
     const defaults = createTaskFormDefaults(project({ platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '16:9', language: '中文' } } }))
     expect(defaults.hypit_input?.preferences).toEqual({ aspect_ratio: '16:9', language: '中文' })
-    const source = task({ type: 'hypit', hypit_input: { brief: 'original', reference: { type: 'video_url', url: 'https://example.com/ref.mp4' } } })
+    const source = task({ type: 'hypit', hypit_input: { brief: 'original', reference: { type: 'video_url', url: 'https://example.com/ref.mp4' }, preferences: { duration_seconds: 0 } } })
     const clone = cloneTaskFormDefaults(source)
+    expect(clone.hypit_input?.preferences?.duration_seconds).toBeUndefined()
+    expect(source.hypit_input?.preferences?.duration_seconds).toBe(0)
     clone.prompt = 'replace the product'
     const request = taskFormValuesToRequest(clone)
     expect(request.hypit_input?.brief).toBe('replace the product')

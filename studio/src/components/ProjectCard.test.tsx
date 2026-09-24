@@ -41,6 +41,16 @@ describe('ProjectCard', () => {
     unused_topics: 6,
   }
 
+  it.each([
+    ['montage', 'Montage 视频生成', 'text-purple-700', 'lucide-clapperboard'],
+    ['hypit', '视频复刻', 'text-orange-700', 'lucide-repeat-2'],
+  ] as const)('shows the %s platform identity on project cards', (platform, label, color, icon) => {
+    render(<ProjectCard project={project({ platform })} />)
+    const badge = screen.getByText(label)
+    expect(badge).toHaveClass(color)
+    expect(badge.querySelector('svg')).toHaveClass(icon)
+  })
+
   it('shows only basic project activity', () => {
     render(<ProjectCard project={project()} stats={stats} />)
 

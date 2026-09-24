@@ -133,6 +133,18 @@ function renderPrompt(overrides: Partial<AgentPromptInputProps> = {}) {
 }
 
 describe('AgentPromptInput', () => {
+  it('supports a prompt-only composer without a duplicate file picker or file admission', () => {
+    const { props } = renderPrompt({ attachmentsEnabled: false, ariaLabel: '复刻要求' })
+    const prompt = screen.getByLabelText('复刻要求')
+    expect(screen.queryByRole('button', { name: '添加附件' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('选择附件文件')).not.toBeInTheDocument()
+    fireEvent.change(prompt, { target: { value: '保留镜头节奏' } })
+    expect(props.onChange).toHaveBeenCalledWith({ prompt: '保留镜头节奏', attachments: [] })
+    fireEvent.paste(prompt, { clipboardData: { files: [image()] } })
+    fireEvent.drop(prompt, { dataTransfer: dragData([image()]) })
+    expect(props.attachmentController.addFiles).not.toHaveBeenCalled()
+  })
+
   it('offers every document and text extension accepted by the shared policy', () => {
     renderPrompt({ attachmentPolicy: GENERAL_AGENT_ATTACHMENT_POLICY })
 

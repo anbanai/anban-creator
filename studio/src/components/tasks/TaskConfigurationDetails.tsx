@@ -151,7 +151,19 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
         </dl>
       </section>
 
-      {task.type === 'hypit' && <section className="space-y-3"><h3 className="text-sm font-semibold">视频复刻要求</h3><dl className="grid gap-3"><Detail label="来源任务" value={task.input_source_task_id || '全新复刻'} /><Detail label="复刻要求" value={task.hypit_input?.brief || task.prompt} /><Detail label="参考视频" value={task.hypit_input?.reference?.file_name || task.hypit_input?.reference?.url || '沿用原工程'} /><Detail label="语言" value={task.hypit_input?.preferences?.language || '跟随参考视频'} /><Detail label="目标时长" value={task.hypit_input?.preferences?.duration_seconds ? `${task.hypit_input.preferences.duration_seconds} 秒` : '跟随参考视频'} /></dl></section>}
+      {task.type === 'hypit' && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold">视频复刻要求</h3>
+          <dl className="grid gap-3">
+            <Detail label="来源任务" value={task.input_source_task_id || '全新复刻'} />
+            <Detail label="复刻要求" value={task.hypit_input?.brief || task.prompt} />
+            <Detail label="主参考视频" value={task.hypit_input?.reference?.file_name || task.hypit_input?.reference?.url || task.hypit_input?.reference?.task_file_id || '沿用原工程'} />
+            <Detail label="补充素材（可选）" value={task.hypit_input?.source_assets?.map(asset => asset.file_name || asset.url || asset.task_file_id || '素材').join('、') || '未添加'} />
+            <Detail label="语言" value={task.hypit_input?.preferences?.language || '跟随参考视频'} />
+            <Detail label="目标时长（可选）" value={task.hypit_input?.preferences?.duration_seconds ? `${task.hypit_input.preferences.duration_seconds} 秒` : '跟随参考视频'} />
+          </dl>
+        </section>
+      )}
       {task.type === 'article' ? (
         <>
           <Separator />

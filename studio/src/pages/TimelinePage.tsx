@@ -23,7 +23,7 @@ import {
   getWeekRange,
   getBadgeVariant,
 } from '@/lib/labels'
-import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { platformBadgeClassName, renderPlatformIcon } from '@/lib/PlatformIcon'
 import { lifecycleStageStateLabel } from '@/lib/task-lifecycle'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -361,7 +361,7 @@ export default function TimelinePage() {
                                     <span className="text-xs text-muted-foreground">
                                       {formatTimeCN(getItemDate(item))}
                                     </span>
-                                    <Badge variant="outline" className="text-[10px]">
+                                    <Badge variant="outline" className={`text-[10px] ${platformBadgeClassName[item.content_type] || ''}`}>
                                       {renderPlatformIcon(item.content_type)}
                                       {contentTypeLabel[item.content_type] || item.content_type}
                                     </Badge>

@@ -32,7 +32,7 @@ import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachm
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { taskStatusLabel, contentTypeLabel, statusBadgeVariant } from '@/lib/labels'
-import { renderPlatformIcon } from '@/lib/PlatformIcon'
+import { platformBadgeClassName, renderPlatformIcon } from '@/lib/PlatformIcon'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 
@@ -592,7 +592,7 @@ export default function TaskDetailPage() {
             <h1 className="min-w-0 max-w-4xl text-xl font-bold leading-tight text-foreground">
               {task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}
             </h1>
-            <Badge variant="outline">
+            <Badge variant="outline" className={platformBadgeClassName[task.type]}>
                 {renderPlatformIcon(task.type)}
                 {contentTypeLabel[task.type] || task.type}
             </Badge>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { uploadToOSS } from '@/lib/direct-upload'
 import type { MontageAsset } from '@/types'
 import { MontageSourceAssetInput } from './MontageSourceAssetInput'
@@ -40,7 +40,11 @@ function ControlledAssets({
 describe('MontageSourceAssetInput', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:montage-video')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   })
+
+  afterEach(() => vi.restoreAllMocks())
 
   it.each([
     { fileName: 'source.png', contentType: 'image/png', expectedType: 'image_url' as const },

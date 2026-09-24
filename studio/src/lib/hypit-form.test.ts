@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { initialHypitInput, hypitReadinessError } from './hypit-form'
+import { buildHypitInputForSubmit, initialHypitInput, hypitReadinessError } from './hypit-form'
 
 describe('video replication input', () => {
   it('inherits preferences without losing explicit follow-source duration', () => {
-    expect(initialHypitInput('new brief', { preferences: { duration_seconds: 0 } }, { preferences: { duration_seconds: 30, aspect_ratio: '9:16' } }).preferences).toEqual({ duration_seconds: 0, aspect_ratio: '9:16' })
+    expect(initialHypitInput('new brief', { preferences: { duration_seconds: 0 } }, { preferences: { duration_seconds: 30, aspect_ratio: '9:16' } }).preferences).toEqual({ duration_seconds: undefined, aspect_ratio: '9:16' })
+  })
+  it('inherits duration unless the task explicitly clears it', () => {
+    const defaults = { preferences: { duration_seconds: 30, aspect_ratio: '9:16' as const } }
+    expect(initialHypitInput('', undefined, defaults).preferences?.duration_seconds).toBe(30)
+    const cleared = initialHypitInput('brief', { preferences: { duration_seconds: undefined } }, defaults)
+    expect(cleared.preferences?.duration_seconds).toBeUndefined()
+    expect(buildHypitInputForSubmit('brief', cleared, defaults).preferences?.duration_seconds).toBe(0)
+    expect(JSON.stringify(buildHypitInputForSubmit('brief', cleared))).not.toContain('duration_seconds')
+    expect(buildHypitInputForSubmit('brief', { preferences: { duration_seconds: 12 } }, defaults).preferences?.duration_seconds).toBe(12)
   })
   it('permits the supplemental asset limit plus reference while counting all bytes', () => {
     const limits = { max_duration_seconds: 180, max_assets: 20, max_asset_bytes: 100, max_input_bytes: 210 }

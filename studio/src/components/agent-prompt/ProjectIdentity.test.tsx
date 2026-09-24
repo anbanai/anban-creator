@@ -5,6 +5,14 @@ import { render } from '@/test/test-utils'
 import { ProjectIdentity } from './ProjectIdentity'
 
 describe('ProjectIdentity', () => {
+  it.each([
+    ['montage', 'Montage 视频生成项目', 'text-purple-700'],
+    ['hypit', '视频复刻项目', 'text-orange-700'],
+  ])('preserves the %s identity in the project selector', (platform, label, color) => {
+    render(<ProjectIdentity project={{ id: platform, name: '视频项目', platform }} />)
+    expect(screen.getByText(label)).toHaveClass(color)
+  })
+
   it('renders the project avatar, name, description, and localized type', () => {
     render(
       <ProjectIdentity

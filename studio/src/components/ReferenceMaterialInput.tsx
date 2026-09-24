@@ -104,6 +104,67 @@ const attachmentName = (attachment: InputAttachment, index: number) => (
   attachment.file_name || (attachment.type === 'image' ? `参考图 ${index + 1}` : `附件 ${index + 1}`)
 )
 
+function MediaPreview({ type, url, fileName, compact }: {
+  type: InputAttachmentType
+  url?: string
+  fileName: string
+  compact: boolean
+}) {
+  const [failedUrl, setFailedUrl] = useState<string>()
+  const thumbnailClass = cn('shrink-0 rounded-lg border bg-muted object-cover', compact ? 'size-16' : 'size-24')
+  if (!url || failedUrl === url) {
+    return (
+      <div aria-label={`${fileName} 文件卡片`} className={cn(thumbnailClass, 'flex items-center justify-center text-muted-foreground')}>
+        {iconForType(type, compact ? 'size-6' : 'size-8')}
+      </div>
+    )
+  }
+  if (type === 'image') {
+    return <img src={url} alt={fileName} onError={() => setFailedUrl(url)} className={thumbnailClass} />
+  }
+  if (type === 'video') {
+    return (
+      <video
+        aria-label={`${fileName} 视频预览`}
+        src={url}
+        controls
+        preload="metadata"
+        playsInline
+        onLoadedMetadata={(event) => {
+          // Seek just inside the stream so browsers paint a frame without autoplay.
+          const video = event.currentTarget
+          if (Number.isFinite(video.duration) && video.duration > 0) video.currentTime = Math.min(0.001, video.duration / 2)
+        }}
+        onError={() => setFailedUrl(url)}
+        className={cn('aspect-video w-full rounded-lg border bg-black object-contain', compact ? 'max-h-40' : 'max-h-64')}
+      />
+    )
+  }
+  if (type === 'audio') {
+    return (
+      <div className="flex w-full min-w-0 items-center gap-2 rounded-lg border bg-muted/40 p-2">
+        <Music2 className="size-5 shrink-0 text-muted-foreground" />
+        <audio aria-label={`${fileName} 音频预览`} src={url} controls preload="metadata" onError={() => setFailedUrl(url)} className="h-10 w-full min-w-0" />
+      </div>
+    )
+  }
+  return (
+    <div aria-label={`${fileName} 文件卡片`} className={cn(thumbnailClass, 'flex items-center justify-center text-muted-foreground')}>
+      {iconForType(type, compact ? 'size-6' : 'size-8')}
+    </div>
+  )
+}
+
+function LocalVideoPreview({ file, compact }: { file: File; compact: boolean }) {
+  const [url, setUrl] = useState<string>()
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(file)
+    setUrl(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [file])
+  return <MediaPreview type="video" url={url} fileName={file.name} compact={compact} />
+}
+
 export function ReferenceMaterialInput({
   value,
   onChange,
@@ -180,22 +241,19 @@ export function ReferenceMaterialInput({
         key: result.key,
         instruction: instructionEnabled ? '' : undefined,
       } satisfies InputAttachment
-      uploadOrderRef.current.set(result.uploadId, row.order)
+      // Hypit/Montage adapters retain the URL but omit transient upload IDs.
+      // Use that stable identity so controlled-value echoes still sort correctly.
+      const uploadIdentity = (item: InputAttachment) => item.url || item.upload_id || item.key || ''
+      const uploadOrder = (item: InputAttachment) => uploadOrderRef.current.get(uploadIdentity(item))
+      uploadOrderRef.current.set(uploadIdentity(attachment), row.order)
 
-      // Uploads run concurrently, but the controlled value must preserve the
-      // order in which the user selected files. Keep pre-existing attachments
-      // first and sort only attachments uploaded by this mounted component.
-      const existing = valueRef.current.filter((item) => (
-        !item.upload_id || !uploadOrderRef.current.has(item.upload_id)
-      ))
+      // Keep pre-existing attachments first, then files in selection order even
+      // when concurrent uploads finish out of order.
+      const existing = valueRef.current.filter((item) => uploadOrder(item) === undefined)
       const uploaded = [
-        ...valueRef.current.filter((item) => (
-          Boolean(item.upload_id) && uploadOrderRef.current.has(item.upload_id as string)
-        )),
+        ...valueRef.current.filter((item) => uploadOrder(item) !== undefined),
         attachment,
-      ].sort((left, right) => (
-        uploadOrderRef.current.get(left.upload_id as string)! - uploadOrderRef.current.get(right.upload_id as string)!
-      ))
+      ].sort((left, right) => uploadOrder(left)! - uploadOrder(right)!)
       emitValue([...existing, ...uploaded])
       updateRows((current) => current.filter((item) => item.id !== row.id))
     } catch (error) {
@@ -347,7 +405,7 @@ export function ReferenceMaterialInput({
             {isDragging ? '松开即可添加' : '添加参考素材'}
           </div>
           <div className={cn('mt-0.5 text-muted-foreground', compact ? 'text-[11px]' : 'text-xs')}>
-            点击选择或拖放多个文件 · 支持{allowedSummary || '指定类型'}
+            {maxCount === 1 ? '点击选择或拖放一个文件' : '点击选择或拖放多个文件'} · 支持{allowedSummary || '指定类型'}
           </div>
         </div>
         <div className="shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -357,7 +415,7 @@ export function ReferenceMaterialInput({
           ref={inputRef}
           aria-label="添加参考素材"
           type="file"
-          multiple
+          multiple={maxCount !== 1}
           accept={acceptForTypes(allowedTypes)}
           className="sr-only"
           onChange={handleInputChange}
@@ -385,24 +443,8 @@ export function ReferenceMaterialInput({
             const instructionLength = codePointLength(attachment.instruction ?? '')
             return (
               <div key={`${attachment.upload_id || attachment.key || attachment.url || name}-${index}`} className="rounded-xl border bg-card p-3 shadow-xs">
-                <div className="flex gap-3">
-                  {attachment.type === 'image' && attachment.url ? (
-                    <img
-                      src={attachment.url}
-                      alt={name}
-                      className={cn('shrink-0 rounded-lg border bg-muted object-cover', compact ? 'size-16' : 'size-24')}
-                    />
-                  ) : (
-                    <div
-                      aria-label={`${name} 文件卡片`}
-                      className={cn(
-                        'flex shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground',
-                        compact ? 'size-16' : 'size-24',
-                      )}
-                    >
-                      {iconForType(attachment.type, compact ? 'size-6' : 'size-8')}
-                    </div>
-                  )}
+                <div className={cn('flex gap-3', (attachment.type === 'video' || attachment.type === 'audio') && 'flex-col')}>
+                  <MediaPreview type={attachment.type} url={attachment.url} fileName={name} compact={compact} />
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start gap-2">
@@ -457,15 +499,11 @@ export function ReferenceMaterialInput({
               'rounded-xl border p-3',
               row.status === 'failed' ? 'border-destructive/35 bg-destructive/5' : 'bg-card',
             )}>
-              <div className="flex items-center gap-3">
-                <div className={cn(
+              <div className={cn('flex gap-3', row.file.type.startsWith('video/') ? 'flex-col' : 'items-center')}>
+                {row.file.type.startsWith('video/') ? <LocalVideoPreview file={row.file} compact={compact} /> : <div className={cn(
                   'flex shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground',
                   compact ? 'size-10' : 'size-12',
-                )}>
-                  {row.status === 'uploading'
-                    ? <Loader2 className="size-5 animate-spin" />
-                    : <AlertCircle className="size-5 text-destructive" />}
-                </div>
+                )}>{row.status === 'uploading' ? <Loader2 className="size-5 animate-spin" /> : <AlertCircle className="size-5 text-destructive" />}</div>}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium" title={row.file.name}>{row.file.name}</div>
                   {row.status === 'uploading' ? (
