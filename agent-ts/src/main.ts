@@ -330,7 +330,6 @@ export async function runJob(
       (message) => reporter.progress(message, shutdown.signal),
       shutdown.signal,
     );
-    if (data.task_type === "hypit") await cleanupOwnedHypit();
     if (data.task_type === "hypit" && result.success) {
       try {
         hypitReceipt = await (dependencies.finalizeHypit ?? finalizeHypit)(

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -1093,6 +1094,72 @@ afterEach(() => {
 });
 
 describe("Hypit managed finalization", () => {
+  test("keeps the runtime available until delivery verification finishes", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "hypit-runtime-order-"));
+    try {
+      const harness = runJobHarness();
+      const order: string[] = [];
+      const artifactNames = [
+        "final.mp4",
+        "cover.png",
+        "project.json",
+        "project.zip",
+        "delivery-manifest.json",
+        "quality-report.json",
+      ];
+      const receipt: Record<string, string> = {};
+      await mkdir(join(workspace, "output"));
+      for (const name of artifactNames) {
+        const content = name.endsWith(".json") ? "{}" : "verified fixture";
+        await writeFile(join(workspace, "output", name), content);
+        receipt[name] = createHash("sha256").update(content).digest("hex");
+      }
+      harness.dependencies.bootstrap = async () => ({
+        ...bootstrapData,
+        task_type: "hypit",
+        resolved_agent_pack: {
+          ...bootstrapData.resolved_agent_pack,
+          artifacts: artifactNames.map((name) => ({
+            role: "final",
+            path: `output/${name}`,
+            required: true,
+          })),
+        },
+      });
+      harness.dependencies.prepareHypitWorkspace = async () => {
+        order.push("prepare");
+      };
+      harness.dependencies.runClaude = async () => ({
+        success: true,
+        work_dir: workspace,
+      });
+      harness.dependencies.finalizeHypit = async () => {
+        order.push("verify");
+        return receipt;
+      };
+      harness.dependencies.cleanupHypit = async () => {
+        order.push("cleanup");
+      };
+      harness.dependencies.uploadWorkspaceArtifacts = async () => {
+        order.push("upload");
+        return { uploaded: 0, failures: [] };
+      };
+
+      const result = await runJob(
+        jobArgs(workspace),
+        harness.stdout,
+        harness.stderr,
+        harness.dependencies,
+      );
+
+      expect(order).toEqual(["prepare", "verify", "cleanup", "upload"]);
+      expect(result.success).toBe(true);
+      expect(harness.completed?.success).toBe(true);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   test("objective verification runs before upload and downgrades textual success", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "hypit-job-"));
     try {
@@ -1151,7 +1218,7 @@ test("Hypit trusted provider credentials are applied after host sanitization wit
   expect(env.ANBAN_HYPIT_PROJECT_ROOT).toBe("/workspace/project");
 });
 
-test.each(["failure", "verification_failure", "late_cancel"])(
+test.each(["failure", "verification_failure", "verification_cancel", "late_cancel"])(
   "Hypit cleanup precedes upload on %s",
   async (scenario) => {
     const root = await mkdtemp(join(tmpdir(), "hypit-cleanup-job-"));
@@ -1170,7 +1237,11 @@ test.each(["failure", "verification_failure", "late_cancel"])(
         success: scenario !== "failure",
         work_dir: root,
       });
-      h.dependencies.finalizeHypit = async () => {
+      h.dependencies.finalizeHypit = async (_workspace, _env, signal) => {
+        if (scenario === "verification_cancel") {
+          h.triggerShutdown();
+          signal?.throwIfAborted();
+        }
         throw new Error("verification failed");
       };
       h.dependencies.uploadWorkspaceArtifacts = async () => {
@@ -1178,9 +1249,9 @@ test.each(["failure", "verification_failure", "late_cancel"])(
         if (scenario === "late_cancel") h.triggerShutdown();
         return { uploaded: 0, failures: [] };
       };
-      await runJob(jobArgs(root), h.stdout, h.stderr, h.dependencies);
-      expect(order[0]).toBe("cleanup");
-      expect(order).toContain("upload");
+      const result = await runJob(jobArgs(root), h.stdout, h.stderr, h.dependencies);
+      expect(order).toEqual(["cleanup", "upload"]);
+      expect(result.success).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
