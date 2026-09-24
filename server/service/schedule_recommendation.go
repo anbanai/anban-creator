@@ -34,7 +34,7 @@ func NewScheduleRecommendationService(repo repository.Repository, catalogID stri
 }
 
 func (s *ScheduleRecommendationService) Recommend(ctx context.Context, userID string, now time.Time) ScheduleRecommendation {
-	slots := taskOffPeakSlots(s.rule.OffPeakWindows)
+	slots := preferredTaskOffPeakSlots(s.rule.OffPeakWindows)
 	result := ScheduleRecommendation{Timezone: s.rule.Timezone, GranularityMinutes: scheduleRecommendationGranularityMinutes}
 	if len(slots) == 0 {
 		return result
@@ -80,6 +80,33 @@ func (s *ScheduleRecommendationService) Recommend(ctx context.Context, userID st
 	result.Time = candidates[stableScheduleIndex(s.catalogID, userID, localDate, len(candidates))]
 	result.LoadBalanced = true
 	return result
+}
+
+// Prefer evening through early morning, but only where the billing policy
+// actually offers off-peak pricing. Balance within this pool before considering
+// daytime: an empty lunch slot must not displace a valid night slot.
+func preferredTaskOffPeakSlots(windows []billing.TimeWindow) []string {
+	var nightWindows []billing.TimeWindow
+	for _, window := range windows {
+		start, startOK := serviceClockMinute(window.Start)
+		end, endOK := serviceClockMinute(window.End)
+		if !startOK || !endOK || start >= end {
+			continue
+		}
+		for _, night := range [][2]int{{0, 9 * 60}, {18 * 60, 24 * 60}} {
+			nightStart, nightEnd := max(start, night[0]), min(end, night[1])
+			if nightStart < nightEnd {
+				nightWindows = append(nightWindows, billing.TimeWindow{
+					Start: fmt.Sprintf("%02d:%02d", nightStart/60, nightStart%60),
+					End:   fmt.Sprintf("%02d:%02d", nightEnd/60, nightEnd%60),
+				})
+			}
+		}
+	}
+	if slots := taskOffPeakSlots(nightWindows); len(slots) > 0 {
+		return slots
+	}
+	return taskOffPeakSlots(windows)
 }
 
 func taskOffPeakSlots(windows []billing.TimeWindow) []string {
