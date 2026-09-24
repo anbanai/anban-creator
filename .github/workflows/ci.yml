@@ -82,5 +82,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Type-check
         run: bunx tsc -b
+      - name: Test Studio deployment gate
+        run: python3 -m unittest discover -s . -p '*_test.py'
       - name: Test
         run: bun run test

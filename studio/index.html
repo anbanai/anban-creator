@@ -5,9 +5,29 @@
         <link rel="icon" type="image/svg+xml" href="/vite.svg" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Anban 自媒体智能创作助手</title>
+        <script>
+            // This fallback must run before the hashed entry module: React cannot
+            // recover when that entry itself is missing during traffic propagation.
+            window.addEventListener('error', function (event) {
+                if (!(event.target instanceof HTMLScriptElement) || event.target.type !== 'module') return;
+                function showFailure() {
+                    var notice = document.getElementById('studio-startup-error');
+                    if (notice) notice.hidden = false;
+                }
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', showFailure, { once: true });
+                } else {
+                    showFailure();
+                }
+            }, true);
+        </script>
     </head>
     <body>
         <div id="root"></div>
+        <div id="studio-startup-error" role="alert" hidden style="max-width: 32rem; margin: 4rem auto; padding: 1rem; font-family: system-ui; text-align: center;">
+            <p>页面资源加载失败，请检查网络后刷新页面。</p>
+            <button type="button" onclick="window.location.reload()">刷新页面</button>
+        </div>
         <script type="module" src="/src/main.tsx"></script>
     </body>
 </html>

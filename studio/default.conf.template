@@ -41,11 +41,11 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # Vite emits content-hashed filenames under /assets/ (e.g.
-    # AuthLayout-CVWgoRWt.js); a changed bundle ships under a new URL and the old
-    # one is never re-requested, so immutable caching is safe and optimal.
+    # Old tabs still request previous hashed URLs after a release. The image
+    # inherits previous assets; missing assets must return 404, never SPA HTML.
     location /assets/ {
         root /usr/share/nginx/html;
+        try_files $uri =404;
         expires 1y;
         add_header Cache-Control "public, immutable";
         access_log off;

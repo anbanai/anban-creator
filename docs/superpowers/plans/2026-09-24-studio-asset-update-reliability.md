@@ -1,5 +1,7 @@
 # Studio Asset Update Reliability Implementation Plan
 
+> Historical initial plan. The review found its success-clears-guard behavior unsafe and documentation-only retention insufficient. The final implementation supersedes those steps: verified HTML entry change, durable retry guard, actual inherited image assets, guarded candidate deployment, and explicit reload fallbacks. The current release contract is in `docs/deployment.md`; the original checkboxes below describe the initial proposal, not outstanding work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Prevent Studio blue/green releases from serving mismatched HTML and lazy route chunks, and recover once from transient stale chunk failures.

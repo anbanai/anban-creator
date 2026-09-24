@@ -9,6 +9,14 @@
 # + vite build -> dist/); stage 2 serves the static output with nginx and
 # reverse-proxies /api + /ws to the backend compose service.
 
+# Production updates MUST use the active Studio image digest here. Carry its
+# hashed assets forward so already-open tabs keep working after the cutover.
+# The default supports the first install/local builds (no previous Studio).
+ARG STUDIO_PREVIOUS_IMAGE=nginx:alpine
+FROM ${STUDIO_PREVIOUS_IMAGE} AS previous
+USER root
+RUN mkdir -p /usr/share/nginx/html/assets
+
 # Stage 1: build the production bundle.
 FROM oven/bun:latest AS build
 WORKDIR /app
@@ -37,7 +45,10 @@ ENV BACKEND_PORT=8080
 # nginx config reverse-proxies /api (incl. SSE) and /ws to the backend.
 COPY studio/default.conf.template /etc/nginx/templates/default.conf.template
 
+COPY --from=previous /usr/share/nginx/html/assets /usr/share/nginx/html/assets
 COPY --from=build /app/dist /usr/share/nginx/html
+ARG STUDIO_PREVIOUS_IMAGE
+RUN printf '%s\n' "$STUDIO_PREVIOUS_IMAGE" > /usr/share/nginx/html/previous-image.txt
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

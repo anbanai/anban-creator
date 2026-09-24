@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { isDynamicImportError } from '@/lib/lazy-with-recovery'
 
 interface Props {
   children: ReactNode
@@ -35,6 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) {
         return this.props.fallback
       }
+      const assetFailure = isDynamicImportError(this.state.error)
 
       return (
         <div role="alert" className="flex min-h-[200px] items-center justify-center px-4">
@@ -42,14 +44,18 @@ export class ErrorBoundary extends Component<Props, State> {
             <CardContent className="flex flex-col items-center gap-4 pt-6 text-center">
               <div className="text-4xl">!</div>
               <div>
-                <p className="text-sm font-medium text-foreground">页面出现了意外错误</p>
+                <p className="text-sm font-medium text-foreground">{assetFailure ? '页面资源加载失败' : '页面出现了意外错误'}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {this.state.error?.message || '未知错误'}
+                  {assetFailure ? '请检查网络后刷新页面。' : this.state.error?.message || '未知错误'}
                 </p>
               </div>
-              <Button variant="outline" size="sm" onClick={this.handleReset}>
+              {assetFailure ? (
+                <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                  刷新页面
+                </Button>
+              ) : <Button variant="outline" size="sm" onClick={this.handleReset}>
                 重试
-              </Button>
+              </Button>}
             </CardContent>
           </Card>
         </div>
