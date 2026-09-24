@@ -37,6 +37,7 @@ type ParsedWechatAnalyticsRow struct {
 	SourceRow              int               `json:"source_row"`
 	Source                 string            `json:"source"`
 	Title                  string            `json:"title"`
+	ContentType            string            `json:"content_type"`
 	NormalizedTitle        string            `json:"-"`
 	PublishedDate          *time.Time        `json:"published_date,omitempty"`
 	ArticleURL             string            `json:"article_url,omitempty"`
@@ -54,6 +55,8 @@ var wechatAnalyticsHeaders = []string{
 	"数据来源概况", "内容标题", "发表日期", "阅读人数", "分享人数",
 	"阅读后关注人数", "送达人数", "送达完成率", "阅读完成率", "内容url",
 }
+
+var wechatAnalyticsContentTypeHeaders = []string{"内容类型", "消息类型", "作品类型", "类型"}
 
 var wechatAnalyticsRequiredHeaders = wechatAnalyticsHeaders[1:]
 
@@ -132,7 +135,7 @@ func readWechatXLSX(data []byte) ([][]string, error) {
 		})
 		rows = append(rows, values)
 		return err
-	}, xlsx.SkipEmptyRows)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: read xlsx rows: %v", ErrWechatAnalyticsWorkbookInvalid, err)
 	}
@@ -178,6 +181,12 @@ func parseWechatAnalyticsRow(sourceRow int, row []string, columns map[string]int
 	for _, header := range wechatAnalyticsHeaders {
 		parsed.Raw[header] = value(header)
 	}
+	for _, header := range wechatAnalyticsContentTypeHeaders {
+		if _, ok := columns[header]; ok {
+			parsed.Raw[header] = value(header)
+		}
+	}
+	parsed.ContentType = wechatAnalyticsContentType(parsed.Raw)
 	if parsed.Title == "" {
 		parsed.ParseError = "内容标题不能为空"
 		return parsed
@@ -198,6 +207,26 @@ func parseWechatAnalyticsRow(sourceRow int, row []string, columns map[string]int
 	}
 	parsed.ParseError = strings.Join(errorsFound, "; ")
 	return parsed
+}
+
+// Treat source labels as provenance unless they explicitly name a supported type.
+// An unsupported explicit type must not be overridden by a source label.
+func wechatAnalyticsContentType(raw map[string]string) string {
+	value := raw["数据来源概况"]
+	for _, header := range wechatAnalyticsContentTypeHeaders {
+		if strings.TrimSpace(raw[header]) != "" {
+			value = raw[header]
+			break
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "图文", "图文消息", "文章", "article", "news":
+		return "article"
+	case "图片", "图片消息", "贴图", "图集", "image":
+		return "image"
+	default:
+		return "unknown"
+	}
 }
 
 func parseWechatDate(value string, location *time.Location) *time.Time {

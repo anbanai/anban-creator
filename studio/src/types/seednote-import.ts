@@ -40,15 +40,17 @@ export interface SeednoteImportRow {
   barrage_count?: number | null
 }
 export interface SeednoteImportSummary { batch: SeednoteImportBatch; rows: SeednoteImportRow[] }
-export interface SeednoteOverviewPoint { date: string; exposure_count: number; view_count: number; like_count: number; comment_count: number; collect_count: number; follower_gain_count: number; share_count: number; barrage_count: number; cover_click_rate?: number; avg_watch_duration?: number }
+export interface SeednoteOverviewPoint { date: string; exposure_count: number | null; view_count: number | null; like_count: number | null; comment_count: number | null; collect_count: number | null; follower_gain_count: number | null; share_count: number | null; barrage_count: number | null; cover_click_rate?: number | null; avg_watch_duration?: number | null }
 export interface SeednotePostIdentity {
   id: string
   title: string
+  genre?: string
   note_id?: string
   note_url?: string
   first_published_at?: string | null
 }
 export interface SeednotePostSummary extends SeednotePostIdentity {
+  data_as_of_at?: string
   exposure_count?: number | null
   view_count?: number | null
   cover_click_rate?: number | null

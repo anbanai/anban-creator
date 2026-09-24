@@ -15,7 +15,6 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 type SeednoteImportService struct {
@@ -29,6 +28,7 @@ func NewSeednoteImportService(repo repository.Repository, store storage.Provider
 }
 
 type SeednoteImportRequest struct {
+	Selections           []AnalyticsSelection `json:"selections"`
 	UserID               string
 	ProjectID            string
 	UploadID             string     `json:"upload_id"`
@@ -42,48 +42,53 @@ type SeednoteImportSummary struct {
 	Rows  []*model.SeednoteImportRow `json:"rows,omitempty"`
 }
 
-func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRequest) (*SeednoteImportSummary, error) {
+func (s *SeednoteImportService) loadWorkbook(ctx context.Context, req SeednoteImportRequest) (*model.Asset, []byte, *ParsedSeednoteWorkbook, *time.Location, error) {
 	if s.repo == nil || s.store == nil {
-		return nil, errors.New("seednote import unavailable")
+		return nil, nil, nil, nil, errors.New("seednote import unavailable")
 	}
-	project, err := s.repo.Projects().FindByID(ctx, strings.TrimSpace(req.ProjectID))
-	if err != nil {
-		return nil, fmt.Errorf("find project: %w", err)
-	}
-	if project.UserID != req.UserID {
-		return nil, errors.New("project does not belong to user")
-	}
-	if project.Platform != model.PlatformSeednote {
-		return nil, errors.New("project is not a seednote project")
+	if err := s.checkProject(ctx, req.UserID, req.ProjectID); err != nil {
+		return nil, nil, nil, nil, err
 	}
 	asset, err := s.repo.Assets().FindOwnedByID(ctx, strings.TrimSpace(req.UploadID), req.UserID)
 	if err != nil {
 		if session, sessionErr := s.repo.UploadSessions().FindByID(ctx, strings.TrimSpace(req.UploadID)); sessionErr == nil && session.UserID == req.UserID && session.Purpose == DirectUploadPurposeSeednoteImport {
 			finalStore, ok := s.store.(DirectUploadFinalizationStorage)
 			if !ok {
-				return nil, errors.New("storage does not support upload finalization")
+				return nil, nil, nil, nil, errors.New("storage does not support upload finalization")
 			}
 			asset, err = FinalizeUploadSession(ctx, finalStore, s.repo, FinalizeUploadRequest{SessionID: req.UploadID, UserID: req.UserID, AllowedPurposes: []string{DirectUploadPurposeSeednoteImport}})
 		}
 		if err != nil {
-			return nil, fmt.Errorf("find import asset: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("find import asset: %w", err)
 		}
 	}
 	if asset.Purpose != DirectUploadPurposeSeednoteImport || !strings.HasSuffix(strings.ToLower(asset.FileName), ".xlsx") {
-		return nil, errors.New("upload is not a seednote xlsx import")
+		return nil, nil, nil, nil, errors.New("upload is not a seednote xlsx import")
 	}
 	data, err := storage.ReadObject(ctx, s.store, asset.StorageKey, MaxSeednoteImportBytes)
 	if err != nil {
-		return nil, fmt.Errorf("read import asset: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("read import asset: %w", err)
 	}
 	location, err := time.LoadLocation(defaultSeednoteImportTimezone(req.Timezone))
 	if err != nil {
-		return nil, fmt.Errorf("invalid timezone: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("invalid timezone: %w", err)
 	}
 	parsed, err := ParseSeednoteWorkbook(data, location)
 	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return asset, data, parsed, location, nil
+}
+
+func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRequest) (*SeednoteImportSummary, error) {
+	if len(req.Selections) == 0 {
+		return nil, errors.New("select at least one content row to import")
+	}
+	asset, data, parsed, location, err := s.loadWorkbook(ctx, req)
+	if err != nil {
 		return nil, err
 	}
+
 	now := s.now()
 	dataAsOf := now
 	if parsed.Metadata.Modified != nil {
@@ -104,7 +109,7 @@ func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRe
 	metadataRaw, _ := json.Marshal(parsed.Metadata)
 	hash := sha256.Sum256(data)
 	batch := &model.SeednoteImportBatch{
-		ID: uuid.NewString(), UserID: req.UserID, ProjectID: project.ID, AssetID: asset.ID,
+		ID: uuid.NewString(), UserID: req.UserID, ProjectID: req.ProjectID, AssetID: asset.ID,
 		FileName: asset.FileName, ContentType: asset.ContentType, FileSize: int64(len(data)), SHA256: hex.EncodeToString(hash[:]),
 		ReceivedAt: now, ClientModifiedAt: req.ClientFileModifiedAt, SourceCreatedAt: parsed.Metadata.Created, SourceModifiedAt: parsed.Metadata.Modified,
 		SourceMetadataJSON: string(metadataRaw), DataAsOfAt: dataAsOf, Timezone: defaultSeednoteImportTimezone(req.Timezone),
@@ -113,46 +118,79 @@ func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRe
 	rows := make([]*model.SeednoteImportRow, 0, len(parsed.Rows))
 	for _, parsedRow := range parsed.Rows {
 		raw, _ := json.Marshal(parsedRow.Raw)
-		row := &model.SeednoteImportRow{ID: uuid.NewString(), BatchID: batch.ID, ProjectID: project.ID, SourceRow: parsedRow.SourceRow, RawData: string(raw), NormalizedTitle: parsedRow.NormalizedTitle, Title: parsedRow.Title, FirstPublishedAt: parsedRow.FirstPublishedAt, Genre: parsedRow.Genre, ExposureCount: parsedRow.Exposure, ViewCount: parsedRow.ViewCount, CoverClickRate: parsedRow.CoverClickRate, LikeCount: parsedRow.LikeCount, CommentCount: parsedRow.CommentCount, CollectCount: parsedRow.CollectCount, FollowerGainCount: parsedRow.FollowerGain, ShareCount: parsedRow.ShareCount, AvgWatchDuration: parsedRow.AvgWatchDuration, BarrageCount: parsedRow.BarrageCount, ParseError: parsedRow.ParseError, MatchStatus: model.SeednoteImportRowStatusNeedsReview}
+		row := &model.SeednoteImportRow{ID: uuid.NewString(), BatchID: batch.ID, ProjectID: req.ProjectID, SourceRow: parsedRow.SourceRow, RawData: string(raw), NormalizedTitle: parsedRow.NormalizedTitle, Title: parsedRow.Title, FirstPublishedAt: parsedRow.FirstPublishedAt, Genre: parsedRow.Genre, ExposureCount: parsedRow.Exposure, ViewCount: parsedRow.ViewCount, CoverClickRate: parsedRow.CoverClickRate, LikeCount: parsedRow.LikeCount, CommentCount: parsedRow.CommentCount, CollectCount: parsedRow.CollectCount, FollowerGainCount: parsedRow.FollowerGain, ShareCount: parsedRow.ShareCount, AvgWatchDuration: parsedRow.AvgWatchDuration, BarrageCount: parsedRow.BarrageCount, ParseError: parsedRow.ParseError, MatchStatus: model.SeednoteImportRowStatusNeedsReview}
 		if parsedRow.ParseError != "" {
 			row.MatchStatus = model.SeednoteImportRowStatusInvalid
 			batch.InvalidRows++
 		}
 		if row.ParseError == "" {
-			candidates, findErr := s.repo.SeednotePosts().FindBySignature(ctx, project.ID, row.NormalizedTitle, row.FirstPublishedAt)
-			if findErr != nil {
-				return nil, fmt.Errorf("find post candidates: %w", findErr)
-			}
-			if len(candidates) == 0 {
-				aliases, aliasErr := s.repo.SeednotePostAliases().FindBySignature(ctx, row.NormalizedTitle, row.FirstPublishedAt)
-				if aliasErr != nil {
-					return nil, fmt.Errorf("find post aliases: %w", aliasErr)
-				}
-				for _, alias := range aliases {
-					post, postErr := s.repo.SeednotePosts().FindByID(ctx, project.ID, alias.PostID)
-					if postErr == nil {
-						candidates = append(candidates, post)
-					}
-				}
-			}
-			if len(candidates) == 1 {
-				row.MatchStatus = model.SeednoteImportRowStatusAutoMatched
-				row.CandidatePostID = candidates[0].ID
-				row.PostID = candidates[0].ID
-				row.CandidateConfidence = 1
-				batch.ResolvedRows++
-			} else {
-				batch.ReviewRows++
-			}
+			row.MatchStatus = model.SeednoteImportRowStatusSkipped
 		}
+
 		rows = append(rows, row)
 	}
-	if batch.ReviewRows == 0 && batch.InvalidRows == 0 {
-		batch.Status = model.SeednoteImportBatchStatusCompleted
-	} else {
-		batch.Status = model.SeednoteImportBatchStatusNeedsReview
-	}
+	batch.Status = model.SeednoteImportBatchStatusCompleted
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		// Serialize creation of the analytics identity shared by a task.
+		if err := tx.WechatAnalyticsImports().LockProject(ctx, req.ProjectID); err != nil {
+			return err
+		}
+		candidates, err := loadAnalyticsCandidates(ctx, tx, req.UserID, req.ProjectID)
+		if err != nil {
+			return err
+		}
+		selected, err := resolveAnalyticsSelections(req.Selections, candidates)
+		if err != nil {
+			return err
+		}
+		byRow := make(map[int]*model.SeednoteImportRow, len(rows))
+		for _, row := range rows {
+			byRow[row.SourceRow] = row
+		}
+		for sourceRow := range selected {
+			row := byRow[sourceRow]
+			if row == nil {
+				return fmt.Errorf("source row %d does not exist", sourceRow)
+			}
+			if row.ParseError != "" {
+				return fmt.Errorf("source row %d is invalid: %s", sourceRow, row.ParseError)
+			}
+		}
+		selectedRows := make([]*model.SeednoteImportRow, 0, len(selected))
+		for _, row := range rows {
+			if _, ok := selected[row.SourceRow]; ok {
+				selectedRows = append(selectedRows, row)
+			}
+		}
+		rows = selectedRows
+		batch.TotalRows, batch.InvalidRows = len(rows), 0
+		for _, row := range rows {
+			candidate, ok := selected[row.SourceRow]
+			if !ok {
+				continue
+			}
+			post := candidate.Post
+			if post == nil {
+				if candidate.Task == nil {
+					return errors.New("seednote target must be a same-project task or post")
+				}
+				post = &model.SeednotePost{ID: uuid.NewString(), UserID: req.UserID, ProjectID: req.ProjectID, TaskID: candidate.Task.ID, FirstPublishedAtBatchID: batch.ID, Title: candidate.Title, NormalizedTitle: NormalizeSeednoteTitle(candidate.Title), FirstPublishedAt: row.FirstPublishedAt, Genre: row.Genre}
+				if err := tx.SeednotePosts().Create(ctx, post); err != nil {
+					return err
+				}
+			} else if post.Genre == "" && row.Genre != "" {
+				post.Genre = row.Genre
+				if err := tx.SeednotePosts().Update(ctx, post); err != nil {
+					return err
+				}
+			}
+			row.PostID, row.CandidatePostID = post.ID, post.ID
+			row.MatchStatus, row.CandidateConfidence = model.SeednoteImportRowStatusMatched, 1
+			batch.ResolvedRows++
+			if err := tx.SeednotePostAliases().Create(ctx, &model.SeednotePostAlias{ID: uuid.NewString(), PostID: post.ID, BatchID: batch.ID, NormalizedTitle: row.NormalizedTitle, FirstPublishedAt: row.FirstPublishedAt}); err != nil {
+				return err
+			}
+		}
 		if err := tx.SeednoteImports().CreateBatch(ctx, batch); err != nil {
 			return err
 		}
@@ -180,13 +218,6 @@ func defaultSeednoteImportTimezone(value string) string {
 	return strings.TrimSpace(value)
 }
 
-type SeednoteResolveAction struct {
-	RowID  string `json:"row_id"`
-	Action string `json:"action"`
-	PostID string `json:"post_id,omitempty"`
-	TaskID string `json:"task_id,omitempty"`
-}
-
 type SeednoteImportOverview struct {
 	Dates         []string                `json:"dates"`
 	Series        []SeednoteOverviewPoint `json:"series"`
@@ -195,135 +226,38 @@ type SeednoteImportOverview struct {
 }
 
 type SeednotePostSummary struct {
+	DataAsOfAt        *time.Time `json:"data_as_of_at"`
+	Genre             string     `json:"genre,omitempty"`
+	ContentType       string     `json:"content_type,omitempty"`
+	TaskID            string     `json:"task_id,omitempty"`
 	ID                string     `json:"id"`
 	Title             string     `json:"title"`
 	NoteID            string     `json:"note_id,omitempty"`
 	NoteURL           string     `json:"note_url,omitempty"`
 	FirstPublishedAt  *time.Time `json:"first_published_at,omitempty"`
-	ExposureCount     int64      `json:"exposure_count"`
-	ViewCount         int64      `json:"view_count"`
-	CoverClickRate    float64    `json:"cover_click_rate"`
-	LikeCount         int64      `json:"like_count"`
-	CommentCount      int64      `json:"comment_count"`
-	CollectCount      int64      `json:"collect_count"`
-	FollowerGainCount int64      `json:"follower_gain_count"`
-	ShareCount        int64      `json:"share_count"`
-	AvgWatchDuration  float64    `json:"avg_watch_duration"`
-	BarrageCount      int64      `json:"barrage_count"`
+	ExposureCount     *int64     `json:"exposure_count"`
+	ViewCount         *int64     `json:"view_count"`
+	CoverClickRate    *float64   `json:"cover_click_rate"`
+	LikeCount         *int64     `json:"like_count"`
+	CommentCount      *int64     `json:"comment_count"`
+	CollectCount      *int64     `json:"collect_count"`
+	FollowerGainCount *int64     `json:"follower_gain_count"`
+	ShareCount        *int64     `json:"share_count"`
+	AvgWatchDuration  *float64   `json:"avg_watch_duration"`
+	BarrageCount      *int64     `json:"barrage_count"`
 }
 type SeednoteOverviewPoint struct {
 	Date              string   `json:"date"`
-	ExposureCount     int64    `json:"exposure_count"`
-	ViewCount         int64    `json:"view_count"`
-	LikeCount         int64    `json:"like_count"`
-	CommentCount      int64    `json:"comment_count"`
-	CollectCount      int64    `json:"collect_count"`
-	FollowerGainCount int64    `json:"follower_gain_count"`
-	ShareCount        int64    `json:"share_count"`
-	BarrageCount      int64    `json:"barrage_count"`
-	CoverClickRate    *float64 `json:"cover_click_rate,omitempty"`
-	AvgWatchDuration  *float64 `json:"avg_watch_duration,omitempty"`
-}
-
-func (s *SeednoteImportService) Resolve(ctx context.Context, userID, projectID, batchID string, actions []SeednoteResolveAction) (*SeednoteImportSummary, error) {
-	batch, err := s.repo.SeednoteImports().FindBatchByID(ctx, projectID, batchID)
-	if err != nil {
-		return nil, err
-	}
-	if batch.UserID != userID {
-		return nil, errors.New("batch does not belong to user")
-	}
-	now := s.now()
-	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		if err := tx.SeednoteImports().LockBatch(ctx, projectID, batchID); err != nil {
-			return err
-		}
-		locked, err := tx.SeednoteImports().FindBatchByID(ctx, projectID, batchID)
-		if err != nil {
-			return err
-		}
-		if locked.RevokedAt != nil {
-			return ErrAnalyticsImportRevoked
-		}
-		batch = locked
-		for _, action := range actions {
-			row, findErr := tx.SeednoteImports().FindRowByID(ctx, projectID, batchID, action.RowID)
-			if findErr != nil {
-				return findErr
-			}
-			if row.ParseError != "" || strings.TrimSpace(action.Action) == "" {
-				continue
-			}
-			// Resolution requests are retried by the Studio client. Treat an
-			// already-resolved row as idempotent for create/skip actions, while
-			// still allowing an explicit relink to correct a prior choice.
-			if row.PostID != "" && (action.Action == "create_new" || action.Action == "skip") {
-				continue
-			}
-			previousPostID := row.PostID
-			var post *model.SeednotePost
-			switch action.Action {
-			case "skip":
-				row.MatchStatus = model.SeednoteImportRowStatusSkipped
-			case "link_existing":
-				post, err = tx.SeednotePosts().FindByID(ctx, projectID, action.PostID)
-				if err != nil {
-					return err
-				}
-				row.PostID = post.ID
-				row.MatchStatus = model.SeednoteImportRowStatusMatched
-			case "create_new":
-				post = &model.SeednotePost{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Title: row.Title, NormalizedTitle: row.NormalizedTitle, FirstPublishedAt: row.FirstPublishedAt, Genre: row.Genre, TaskID: action.TaskID}
-				if err := tx.SeednotePosts().Create(ctx, post); err != nil {
-					return err
-				}
-				if err := tx.SeednotePostAliases().Create(ctx, &model.SeednotePostAlias{ID: uuid.NewString(), PostID: post.ID, NormalizedTitle: row.NormalizedTitle, FirstPublishedAt: row.FirstPublishedAt}); err != nil {
-					return err
-				}
-				row.PostID = post.ID
-				row.MatchStatus = model.SeednoteImportRowStatusCreated
-			default:
-				return fmt.Errorf("unsupported resolve action %q", action.Action)
-			}
-			if row.PostID != "" && row.MatchStatus != model.SeednoteImportRowStatusSkipped {
-				version, versionErr := tx.SeednoteMetricVersions().FindByImportRowID(ctx, row.ID)
-				if versionErr == nil && previousPostID != "" && previousPostID != row.PostID {
-					if err := tx.SeednoteMetricVersions().UpdatePostID(ctx, version.ID, row.PostID); err != nil {
-						return err
-					}
-				} else if errors.Is(versionErr, gorm.ErrRecordNotFound) {
-					if err := s.createMetricVersion(ctx, tx, batch, row, now); err != nil {
-						return err
-					}
-				} else if versionErr != nil {
-					return versionErr
-				}
-			}
-			if err := tx.SeednoteImports().UpdateRow(ctx, row); err != nil {
-				return err
-			}
-		}
-		rows, err := tx.SeednoteImports().FindRowsByBatchID(ctx, projectID, batchID)
-		if err != nil {
-			return err
-		}
-		batch.ReviewRows, batch.ResolvedRows = 0, 0
-		for _, row := range rows {
-			if row.MatchStatus == model.SeednoteImportRowStatusNeedsReview {
-				batch.ReviewRows++
-			}
-			if row.MatchStatus == model.SeednoteImportRowStatusMatched || row.MatchStatus == model.SeednoteImportRowStatusCreated || row.MatchStatus == model.SeednoteImportRowStatusAutoMatched {
-				batch.ResolvedRows++
-			}
-		}
-		if batch.ReviewRows == 0 {
-			batch.Status = model.SeednoteImportBatchStatusCompleted
-		}
-		return tx.SeednoteImports().UpdateBatch(ctx, batch)
-	}); err != nil {
-		return nil, err
-	}
-	return s.GetBatch(ctx, userID, projectID, batchID)
+	ExposureCount     *int64   `json:"exposure_count"`
+	ViewCount         *int64   `json:"view_count"`
+	LikeCount         *int64   `json:"like_count"`
+	CommentCount      *int64   `json:"comment_count"`
+	CollectCount      *int64   `json:"collect_count"`
+	FollowerGainCount *int64   `json:"follower_gain_count"`
+	ShareCount        *int64   `json:"share_count"`
+	BarrageCount      *int64   `json:"barrage_count"`
+	CoverClickRate    *float64 `json:"cover_click_rate"`
+	AvgWatchDuration  *float64 `json:"avg_watch_duration"`
 }
 
 func (s *SeednoteImportService) createMetricVersion(ctx context.Context, tx repository.Repository, batch *model.SeednoteImportBatch, row *model.SeednoteImportRow, now time.Time) error {
@@ -405,6 +339,7 @@ func (s *SeednoteImportService) GetPost(ctx context.Context, userID, projectID, 
 func (s *SeednoteImportService) populatePostPublicIdentities(ctx context.Context, userID, projectID string, posts []*model.SeednotePost) error {
 	var taskIDs []string
 	for _, post := range posts {
+		post.ContentType = post.Genre
 		if post.TaskID != "" && post.NoteURL == "" {
 			taskIDs = append(taskIDs, post.TaskID)
 		}
@@ -429,6 +364,16 @@ func (s *SeednoteImportService) populatePostPublicIdentities(ctx context.Context
 	}
 	return nil
 }
+
+// Imported timestamps may be decoded in UTC by the database. Analytics buckets
+// use the same Shanghai calendar as the API's date filters, independently of
+// the timestamp's retained location.
+var seednoteAnalyticsLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
+func seednoteAnalyticsDate(at time.Time) string {
+	return at.In(seednoteAnalyticsLocation).Format("2006-01-02")
+}
+
 func (s *SeednoteImportService) Overview(ctx context.Context, userID, projectID string, from, to *time.Time) (*SeednoteImportOverview, error) {
 	if err := s.checkProject(ctx, userID, projectID); err != nil {
 		return nil, err
@@ -439,7 +384,7 @@ func (s *SeednoteImportService) Overview(ctx context.Context, userID, projectID 
 	}
 	latest := map[string]*model.SeednoteMetricVersion{}
 	for _, version := range versions {
-		key := version.PostID + "|" + version.DataAsOfAt.Format("2006-01-02")
+		key := version.PostID + "|" + seednoteAnalyticsDate(version.DataAsOfAt)
 		if current := latest[key]; current == nil || version.ImportedAt.After(current.ImportedAt) {
 			latest[key] = version
 		}
@@ -451,23 +396,23 @@ func (s *SeednoteImportService) Overview(ctx context.Context, userID, projectID 
 	durationSums := map[string]float64{}
 	durationCounts := map[string]int{}
 	for _, version := range latest {
-		date := version.DataAsOfAt.Format("2006-01-02")
+		date := seednoteAnalyticsDate(version.DataAsOfAt)
 		point := byDate[date]
 		if point == nil {
 			point = &SeednoteOverviewPoint{Date: date}
 			byDate[date] = point
 		}
-		addInt64(&point.ExposureCount, version.ExposureCount)
+		addSeednoteOptionalCount(&point.ExposureCount, version.ExposureCount)
 		if version.ExposureCount != nil {
 			postExposure[version.PostID] += *version.ExposureCount
 		}
-		addInt64(&point.ViewCount, version.ViewCount)
-		addInt64(&point.LikeCount, version.LikeCount)
-		addInt64(&point.CommentCount, version.CommentCount)
-		addInt64(&point.CollectCount, version.CollectCount)
-		addInt64(&point.FollowerGainCount, version.FollowerGainCount)
-		addInt64(&point.ShareCount, version.ShareCount)
-		addInt64(&point.BarrageCount, version.BarrageCount)
+		addSeednoteOptionalCount(&point.ViewCount, version.ViewCount)
+		addSeednoteOptionalCount(&point.LikeCount, version.LikeCount)
+		addSeednoteOptionalCount(&point.CommentCount, version.CommentCount)
+		addSeednoteOptionalCount(&point.CollectCount, version.CollectCount)
+		addSeednoteOptionalCount(&point.FollowerGainCount, version.FollowerGainCount)
+		addSeednoteOptionalCount(&point.ShareCount, version.ShareCount)
+		addSeednoteOptionalCount(&point.BarrageCount, version.BarrageCount)
 		if version.CoverClickRate != nil {
 			rateSums[date] += *version.CoverClickRate
 			rateCounts[date]++
@@ -531,14 +476,14 @@ type postSummaryAccumulator struct {
 func aggregateSeednotePostSummaries(posts []*model.SeednotePost, versions []*model.SeednoteMetricVersion) []SeednotePostSummary {
 	latest := map[string]*model.SeednoteMetricVersion{}
 	for _, version := range versions {
-		key := version.PostID + "|" + version.DataAsOfAt.Format("2006-01-02")
+		key := version.PostID + "|" + seednoteAnalyticsDate(version.DataAsOfAt)
 		if current := latest[key]; current == nil || version.ImportedAt.After(current.ImportedAt) {
 			latest[key] = version
 		}
 	}
 	byPost := make(map[string]*postSummaryAccumulator, len(posts))
 	for _, post := range posts {
-		byPost[post.ID] = &postSummaryAccumulator{SeednotePostSummary: SeednotePostSummary{ID: post.ID, Title: post.Title, NoteID: post.NoteID, NoteURL: post.NoteURL, FirstPublishedAt: post.FirstPublishedAt}, createdAt: post.CreatedAt}
+		byPost[post.ID] = &postSummaryAccumulator{SeednotePostSummary: SeednotePostSummary{ID: post.ID, Title: post.Title, Genre: post.Genre, ContentType: post.Genre, TaskID: post.TaskID, NoteID: post.NoteID, NoteURL: post.NoteURL, FirstPublishedAt: post.FirstPublishedAt}, createdAt: post.CreatedAt}
 	}
 	for _, version := range latest {
 		item := byPost[version.PostID]
@@ -546,14 +491,18 @@ func aggregateSeednotePostSummaries(posts []*model.SeednotePost, versions []*mod
 			continue
 		}
 		item.hasData = true
-		addInt64Value(&item.ExposureCount, version.ExposureCount)
-		addInt64Value(&item.ViewCount, version.ViewCount)
-		addInt64Value(&item.LikeCount, version.LikeCount)
-		addInt64Value(&item.CommentCount, version.CommentCount)
-		addInt64Value(&item.CollectCount, version.CollectCount)
-		addInt64Value(&item.FollowerGainCount, version.FollowerGainCount)
-		addInt64Value(&item.ShareCount, version.ShareCount)
-		addInt64Value(&item.BarrageCount, version.BarrageCount)
+		if item.DataAsOfAt == nil || version.DataAsOfAt.After(*item.DataAsOfAt) {
+			value := version.DataAsOfAt
+			item.DataAsOfAt = &value
+		}
+		addSeednoteOptionalCount(&item.ExposureCount, version.ExposureCount)
+		addSeednoteOptionalCount(&item.ViewCount, version.ViewCount)
+		addSeednoteOptionalCount(&item.LikeCount, version.LikeCount)
+		addSeednoteOptionalCount(&item.CommentCount, version.CommentCount)
+		addSeednoteOptionalCount(&item.CollectCount, version.CollectCount)
+		addSeednoteOptionalCount(&item.FollowerGainCount, version.FollowerGainCount)
+		addSeednoteOptionalCount(&item.ShareCount, version.ShareCount)
+		addSeednoteOptionalCount(&item.BarrageCount, version.BarrageCount)
 		if version.CoverClickRate != nil {
 			item.rateSum += *version.CoverClickRate
 			item.rateCount++
@@ -570,31 +519,36 @@ func aggregateSeednotePostSummaries(posts []*model.SeednotePost, versions []*mod
 			continue
 		}
 		if item.rateCount > 0 {
-			item.CoverClickRate = item.rateSum / float64(item.rateCount)
+			value := item.rateSum / float64(item.rateCount)
+			item.CoverClickRate = &value
 		}
 		if item.durationCount > 0 {
-			item.AvgWatchDuration = item.durationSum / float64(item.durationCount)
+			value := item.durationSum / float64(item.durationCount)
+			item.AvgWatchDuration = &value
 		}
 		result = append(result, item.SeednotePostSummary)
 	}
 	sort.SliceStable(result, func(i, j int) bool {
-		if result[i].ExposureCount != result[j].ExposureCount {
-			return result[i].ExposureCount > result[j].ExposureCount
+		left, right := result[i].ExposureCount, result[j].ExposureCount
+		if (left == nil) != (right == nil) {
+			return left != nil
+		}
+		if left != nil && *left != *right {
+			return *left > *right
 		}
 		return byPost[result[i].ID].createdAt.After(byPost[result[j].ID].createdAt)
 	})
 	return result
 }
 
-func addInt64Value(target *int64, value *int64) {
-	if value != nil {
-		*target += *value
+func addSeednoteOptionalCount(target **int64, value *int64) {
+	if value == nil {
+		return
 	}
-}
-func addInt64(target *int64, value *int64) {
-	if value != nil {
-		*target += *value
+	if *target == nil {
+		*target = new(int64)
 	}
+	**target += *value
 }
 func (s *SeednoteImportService) checkProject(ctx context.Context, userID, projectID string) error {
 	project, err := s.repo.Projects().FindByID(ctx, projectID)

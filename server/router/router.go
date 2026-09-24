@@ -27,6 +27,7 @@ import (
 
 // Services aggregates all service dependencies required by the router.
 type Services struct {
+	ContentAnalyticsHandler      *handler.ContentAnalyticsHandler
 	Config                       *config.Config
 	Logger                       *zerolog.Logger
 	DB                           *gorm.DB
@@ -348,12 +349,15 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/feedback", svc.FeedbackHandler.GetTaskFeedback)
 		apiV1.Put("/tasks/:id/feedback", svc.FeedbackHandler.UpsertTaskFeedback)
 	}
+	if svc.ContentAnalyticsHandler != nil {
+		apiV1.Get("/projects/:id/content-analytics/candidates", svc.ContentAnalyticsHandler.Candidates)
+	}
 	if svc.SeednoteImportHandler != nil {
+		apiV1.Post("/projects/:id/seednote-analytics/imports/preview", svc.SeednoteImportHandler.Preview)
 		apiV1.Post("/projects/:id/seednote-analytics/imports", svc.SeednoteImportHandler.Import)
 		apiV1.Get("/projects/:id/seednote-analytics/imports", svc.SeednoteImportHandler.List)
 		apiV1.Get("/projects/:id/seednote-analytics/imports/:batchId", svc.SeednoteImportHandler.Detail)
 		apiV1.Get("/projects/:id/seednote-analytics/imports/:batchId/file", svc.SeednoteImportHandler.File)
-		apiV1.Post("/projects/:id/seednote-analytics/imports/:batchId/resolve", svc.SeednoteImportHandler.Resolve)
 		apiV1.Post("/projects/:id/seednote-analytics/imports/:batchId/revoke", svc.SeednoteImportHandler.Revoke)
 		apiV1.Get("/projects/:id/seednote-analytics/overview", svc.SeednoteImportHandler.Overview)
 		apiV1.Get("/projects/:id/seednote-analytics/posts", svc.SeednoteImportHandler.Posts)
@@ -371,13 +375,13 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 	if svc.WechatAnalyticsImportHandler != nil {
 		apiV1.Get("/wechat-analytics/imports/:batchId", svc.WechatAnalyticsImportHandler.GlobalDetail)
-		apiV1.Post("/wechat-analytics/imports/:batchId/resolve", svc.WechatAnalyticsImportHandler.GlobalResolve)
+
 		apiV1.Get("/articles/:articleId/wechat-analytics", svc.WechatAnalyticsImportHandler.GlobalArticle)
 		apiV1.Post("/projects/:id/wechat-analytics/imports/preview", svc.WechatAnalyticsImportHandler.Preview)
 		apiV1.Post("/projects/:id/wechat-analytics/imports", svc.WechatAnalyticsImportHandler.Import)
 		apiV1.Get("/projects/:id/wechat-analytics/imports", svc.WechatAnalyticsImportHandler.List)
 		apiV1.Get("/projects/:id/wechat-analytics/imports/:batchId", svc.WechatAnalyticsImportHandler.Detail)
-		apiV1.Post("/projects/:id/wechat-analytics/imports/:batchId/resolve", svc.WechatAnalyticsImportHandler.Resolve)
+
 		apiV1.Post("/projects/:id/wechat-analytics/imports/:batchId/revoke", svc.WechatAnalyticsImportHandler.Revoke)
 		apiV1.Get("/projects/:id/wechat-analytics/overview", svc.WechatAnalyticsImportHandler.Overview)
 		apiV1.Get("/projects/:id/wechat-analytics/articles", svc.WechatAnalyticsImportHandler.Articles)

@@ -1,4 +1,5 @@
 import type { WechatPublication } from './wechat-publication'
+import type { AnalyticsTarget } from './content-analytics'
 
 export type WechatImportRowStatus = 'matched' | 'needs_review' | 'unmatched' | 'invalid' | string
 
@@ -64,6 +65,9 @@ export interface WechatAnalyticsImportPreview {
   field_mapping: WechatAnalyticsFieldMapping[]
   rows: Array<{
     source_row: number
+    content_type: 'article' | 'image' | 'unknown'
+    match_status: 'matched' | 'needs_review' | 'unmatched' | 'invalid'
+    publication_id?: string
     source: string
     title: string
     published_date?: string
@@ -79,7 +83,11 @@ export interface WechatAnalyticsImportPreview {
 }
 
 export interface WechatAnalyticsArticleView {
-  publication: WechatPublication
+  target?: AnalyticsTarget
+  task?: { id: string; title: string; status: string; created_at: string }
+  content_type?: string
+  url?: string
+  publication: WechatPublication | null
   latest?: WechatAnalyticsSnapshot
   snapshots?: WechatAnalyticsSnapshot[]
 }

@@ -381,6 +381,7 @@ type WechatMetricSnapshotRepository interface {
 }
 
 type WechatAnalyticsImportRepository interface {
+	FindSnapshotsByTaskID(ctx context.Context, projectID, taskID string) ([]*model.WechatAnalyticsSnapshot, error)
 	LockProject(ctx context.Context, projectID string) error
 	LockBatch(ctx context.Context, projectID, id string) error
 	CreateBatch(ctx context.Context, batch *model.WechatAnalyticsImportBatch) error

@@ -108,6 +108,9 @@ func (r *seednotePostAliasRepository) Create(ctx context.Context, alias *model.S
 }
 func (r *seednotePostAliasRepository) FindBySignature(ctx context.Context, normalizedTitle string, publishedAt *time.Time) ([]*model.SeednotePostAlias, error) {
 	q := r.db.WithContext(ctx).Where("normalized_title = ?", normalizedTitle)
+	// Only active imports may teach future matching; revoked or unproven
+	// associations remain historical records, not identity evidence.
+	q = q.Where("batch_id IN (?)", r.db.Model(&model.SeednoteImportBatch{}).Select("id").Where("revoked_at IS NULL"))
 	if publishedAt != nil {
 		q = q.Where("first_published_at = ? OR first_published_at IS NULL", *publishedAt)
 	}

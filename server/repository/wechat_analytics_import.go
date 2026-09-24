@@ -91,3 +91,9 @@ func (r *wechatAnalyticsImportRepository) LockBatch(ctx context.Context, project
 func (r *wechatAnalyticsImportRepository) LockProject(ctx context.Context, projectID string) error {
 	return r.db.WithContext(ctx).Model(&model.Project{}).Where("id = ?", projectID).UpdateColumn("updated_at", gorm.Expr("updated_at")).Error
 }
+
+func (r *wechatAnalyticsImportRepository) FindSnapshotsByTaskID(ctx context.Context, projectID, taskID string) ([]*model.WechatAnalyticsSnapshot, error) {
+	var snapshots []*model.WechatAnalyticsSnapshot
+	err := r.db.WithContext(ctx).Where("project_id = ? AND task_id = ?", projectID, taskID).Where("batch_id NOT IN (?)", r.db.Model(&model.WechatAnalyticsImportBatch{}).Select("id").Where("revoked_at IS NOT NULL")).Order("data_as_of_at DESC, imported_at DESC").Find(&snapshots).Error
+	return snapshots, err
+}

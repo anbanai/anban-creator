@@ -30,12 +30,13 @@ func NewWechatAnalyticsImportService(repo repository.Repository, store storage.P
 }
 
 type WechatAnalyticsImportRequest struct {
-	UserID               string     `json:"-"`
-	ProjectID            string     `json:"-"`
-	UploadID             string     `json:"upload_id"`
-	DataAsOfAt           *time.Time `json:"data_as_of_at,omitempty"`
-	Timezone             string     `json:"timezone,omitempty"`
-	ClientFileModifiedAt *time.Time `json:"client_file_modified_at,omitempty"`
+	UserID               string               `json:"-"`
+	ProjectID            string               `json:"-"`
+	UploadID             string               `json:"upload_id"`
+	Selections           []AnalyticsSelection `json:"selections"`
+	DataAsOfAt           *time.Time           `json:"data_as_of_at,omitempty"`
+	Timezone             string               `json:"timezone,omitempty"`
+	ClientFileModifiedAt *time.Time           `json:"client_file_modified_at,omitempty"`
 }
 
 type WechatAnalyticsImportSummary struct {
@@ -77,7 +78,15 @@ type WechatAnalyticsImportPreview struct {
 	TotalRows     int                           `json:"total_rows"`
 	ParserVersion string                        `json:"parser_version"`
 	FieldMapping  []WechatAnalyticsFieldMapping `json:"field_mapping"`
-	Rows          []ParsedWechatAnalyticsRow    `json:"rows"`
+	Rows          []WechatAnalyticsPreviewRow   `json:"rows"`
+}
+
+type WechatAnalyticsPreviewRow struct {
+	ParsedWechatAnalyticsRow
+	MatchStatus   string           `json:"match_status"`
+	PublicationID string           `json:"publication_id,omitempty"`
+	Target        *AnalyticsTarget `json:"target,omitempty"`
+	TargetTitle   string           `json:"target_title,omitempty"`
 }
 
 var wechatAnalyticsFieldMapping = []WechatAnalyticsFieldMapping{
@@ -94,13 +103,17 @@ var wechatAnalyticsFieldMapping = []WechatAnalyticsFieldMapping{
 }
 
 func (s *WechatAnalyticsImportService) Preview(ctx context.Context, req WechatAnalyticsImportRequest) (*WechatAnalyticsImportPreview, error) {
-	_, asset, parsed, _, err := s.readWorkbook(ctx, req)
+	project, asset, parsed, _, err := s.readWorkbook(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	rows := parsed.Rows
-	if len(rows) > 10 {
-		rows = rows[:10]
+	candidates, err := loadAnalyticsCandidates(ctx, s.repo, req.UserID, project.ID)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]WechatAnalyticsPreviewRow, 0, len(parsed.Rows))
+	for _, row := range parsed.Rows {
+		rows = append(rows, previewWechatCandidateRow(row, candidates))
 	}
 	return &WechatAnalyticsImportPreview{
 		Source: parsed.Source, FileName: asset.FileName, TotalRows: len(parsed.Rows),
@@ -114,6 +127,23 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 	project, asset, parsed, data, err := s.readWorkbook(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if len(req.Selections) == 0 {
+		return nil, errors.New("请至少选择一行可导入的数据")
+	}
+	requested := map[int]bool{}
+	for _, selection := range req.Selections {
+		requested[selection.SourceRow] = true
+	}
+	selectedRows := make([]ParsedWechatAnalyticsRow, 0, len(req.Selections))
+	for _, row := range parsed.Rows {
+		if requested[row.SourceRow] {
+			selectedRows = append(selectedRows, row)
+			delete(requested, row.SourceRow)
+		}
+	}
+	if len(requested) > 0 {
+		return nil, errors.New("选择包含不在当前文件中的行，请重新预览")
 	}
 	location, _ := time.LoadLocation(defaultWechatAnalyticsImportTimezone(req.Timezone))
 	now := s.now()
@@ -131,18 +161,26 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 		SHA256: hex.EncodeToString(hash[:]), Source: parsed.Source, ReceivedAt: now,
 		DataAsOfAt: dataAsOf, Timezone: defaultWechatAnalyticsImportTimezone(req.Timezone),
 		ParserVersion: WechatAnalyticsImportParserVersion, Status: model.WechatAnalyticsImportBatchProcessing,
-		TotalRows: len(parsed.Rows),
+		TotalRows: len(selectedRows),
 	}
-	rows := make([]*model.WechatAnalyticsImportRow, 0, len(parsed.Rows))
+	rows := make([]*model.WechatAnalyticsImportRow, 0, len(selectedRows))
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		if err := tx.WechatAnalyticsImports().LockProject(ctx, project.ID); err != nil {
 			return err
 		}
-		publications, err := tx.WechatPublications().ListByProject(ctx, project.ID)
+		candidates, err := loadAnalyticsCandidates(ctx, tx, req.UserID, project.ID)
 		if err != nil {
-			return fmt.Errorf("list WeChat publications: %w", err)
+			return err
 		}
-		for _, parsedRow := range parsed.Rows {
+		selected, err := resolveAnalyticsSelections(req.Selections, candidates)
+		if err != nil {
+			return err
+		}
+		for _, parsedRow := range selectedRows {
+			if parsedRow.ParseError != "" {
+				return fmt.Errorf("第 %d 行数据无效：%s", parsedRow.SourceRow, parsedRow.ParseError)
+			}
+			candidate := selected[parsedRow.SourceRow]
 			row := &model.WechatAnalyticsImportRow{
 				ID: uuid.NewString(), BatchID: batch.ID, ProjectID: project.ID, SourceRow: parsedRow.SourceRow,
 				RawData: marshalWechatRaw(parsedRow), Source: parsedRow.Source, Title: parsedRow.Title,
@@ -152,22 +190,22 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 				DeliveryCompletionRate: parsedRow.DeliveryCompletionRate, ReadCompletionRate: parsedRow.ReadCompletionRate,
 				ParseError: parsedRow.ParseError, MatchStatus: model.WechatAnalyticsImportRowUnmatched,
 			}
-			if parsedRow.ParseError != "" {
-				row.MatchStatus = model.WechatAnalyticsImportRowInvalid
+			row.MatchStatus = model.WechatAnalyticsImportRowMatched
+			if candidate.Task != nil {
+				row.TaskID = candidate.Task.ID
+			}
+			if candidate.Publication != nil {
+				row.PublicationID = candidate.Publication.ID
+			}
+			switch row.MatchStatus {
+			case model.WechatAnalyticsImportRowInvalid:
 				batch.InvalidRows++
-			} else {
-				match, ambiguous := matchWechatAnalyticsPublication(parsedRow, publications)
-				switch {
-				case match != nil:
-					row.PublicationID = match.ID
-					row.MatchStatus = model.WechatAnalyticsImportRowMatched
-					batch.MatchedRows++
-				case ambiguous:
-					row.MatchStatus = model.WechatAnalyticsImportRowNeedsReview
-					batch.ReviewRows++
-				default:
-					batch.UnmatchedRows++
-				}
+			case model.WechatAnalyticsImportRowMatched:
+				batch.MatchedRows++
+			case model.WechatAnalyticsImportRowNeedsReview:
+				batch.ReviewRows++
+			default:
+				batch.UnmatchedRows++
 			}
 			rows = append(rows, row)
 		}
@@ -183,13 +221,10 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 			return err
 		}
 		for _, row := range rows {
-			if row.MatchStatus != model.WechatAnalyticsImportRowMatched || row.PublicationID == "" {
+			if row.MatchStatus != model.WechatAnalyticsImportRowMatched {
 				continue
 			}
 			if err := tx.WechatAnalyticsImports().CreateSnapshot(ctx, snapshotFromWechatImport(batch, row, now)); err != nil {
-				return err
-			}
-			if err := tx.WechatPublications().RecordImportedAnalytics(ctx, project.ID, row.PublicationID, batch.ID, row.ArticleURL); err != nil {
 				return err
 			}
 		}
@@ -199,6 +234,26 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 		return nil, fmt.Errorf("persist WeChat analytics import: %w", err)
 	}
 	return &WechatAnalyticsImportSummary{Batch: batch, Rows: rows}, nil
+}
+
+func previewWechatCandidateRow(row ParsedWechatAnalyticsRow, candidates []AnalyticsCandidate) WechatAnalyticsPreviewRow {
+	preview := WechatAnalyticsPreviewRow{ParsedWechatAnalyticsRow: row, MatchStatus: model.WechatAnalyticsImportRowUnmatched}
+	if row.ParseError != "" {
+		preview.MatchStatus = model.WechatAnalyticsImportRowInvalid
+		return preview
+	}
+	match, ambiguous := matchAnalyticsCandidate(row.Title, row.PublishedDate, row.ArticleURL, candidates)
+	if match != nil {
+		preview.Target = &match.Target
+		preview.TargetTitle = match.Title
+		preview.MatchStatus = model.WechatAnalyticsImportRowMatched
+		if match.Publication != nil {
+			preview.PublicationID = match.Publication.ID
+		}
+	} else if ambiguous {
+		preview.MatchStatus = model.WechatAnalyticsImportRowNeedsReview
+	}
+	return preview
 }
 
 func (s *WechatAnalyticsImportService) readWorkbook(ctx context.Context, req WechatAnalyticsImportRequest) (*model.Project, *model.Asset, *ParsedWechatAnalyticsWorkbook, []byte, error) {
@@ -254,40 +309,6 @@ func defaultWechatAnalyticsImportTimezone(value string) string {
 	return strings.TrimSpace(value)
 }
 
-func matchWechatAnalyticsPublication(row ParsedWechatAnalyticsRow, publications []*model.WechatPublication) (*model.WechatPublication, bool) {
-	if row.ArticleURL != "" {
-		var matches []*model.WechatPublication
-		for _, publication := range publications {
-			if normalizeWechatArticleURLForMatch(publication.ArticleURL) == row.ArticleURL {
-				matches = append(matches, publication)
-			}
-		}
-		if len(matches) == 1 {
-			return matches[0], false
-		}
-		if len(matches) > 1 {
-			return nil, true
-		}
-	}
-	var matches []*model.WechatPublication
-	if row.PublishedDate == nil {
-		return nil, false
-	}
-	for _, publication := range publications {
-		if normalizeWechatAnalyticsTitle(publication.DraftTitle) != row.NormalizedTitle {
-			continue
-		}
-		if publication.PublishedAt == nil || publication.PublishedAt.In(row.PublishedDate.Location()).Format("2006-01-02") != row.PublishedDate.Format("2006-01-02") {
-			continue
-		}
-		matches = append(matches, publication)
-	}
-	if len(matches) == 1 {
-		return matches[0], false
-	}
-	return nil, len(matches) > 1
-}
-
 func normalizeWechatArticleURLForMatch(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -304,16 +325,20 @@ func normalizeWechatArticleURLForMatch(value string) string {
 }
 
 func snapshotFromWechatImport(batch *model.WechatAnalyticsImportBatch, row *model.WechatAnalyticsImportRow, importedAt time.Time) *model.WechatAnalyticsSnapshot {
-	return &model.WechatAnalyticsSnapshot{ID: uuid.NewString(), ProjectID: batch.ProjectID, PublicationID: row.PublicationID, BatchID: batch.ID, ImportRowID: row.ID, Source: row.Source, DataAsOfAt: batch.DataAsOfAt, ImportedAt: importedAt, ReadUsers: row.ReadUsers, ShareUsers: row.ShareUsers, ReadToFollowUsers: row.ReadToFollowUsers, DeliveredUsers: row.DeliveredUsers, DeliveryCompletionRate: row.DeliveryCompletionRate, ReadCompletionRate: row.ReadCompletionRate, RawData: row.RawData}
+	return &model.WechatAnalyticsSnapshot{ID: uuid.NewString(), ProjectID: batch.ProjectID, PublicationID: row.PublicationID, TaskID: row.TaskID, BatchID: batch.ID, ImportRowID: row.ID, Source: row.Source, DataAsOfAt: batch.DataAsOfAt, ImportedAt: importedAt, ReadUsers: row.ReadUsers, ShareUsers: row.ShareUsers, ReadToFollowUsers: row.ReadToFollowUsers, DeliveredUsers: row.DeliveredUsers, DeliveryCompletionRate: row.DeliveryCompletionRate, ReadCompletionRate: row.ReadCompletionRate, RawData: row.RawData}
 }
 
-type WechatAnalyticsResolveAction struct {
-	RowID         string `json:"row_id"`
-	Action        string `json:"action"`
-	PublicationID string `json:"publication_id,omitempty"`
+type AnalyticsTaskIdentity struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
-
 type WechatAnalyticsArticleView struct {
+	URL         string                           `json:"url,omitempty"`
+	Target      AnalyticsTarget                  `json:"target"`
+	Task        *AnalyticsTaskIdentity           `json:"task,omitempty"`
+	ContentType string                           `json:"content_type"`
 	Publication *model.WechatPublication         `json:"publication"`
 	Latest      *model.WechatAnalyticsSnapshot   `json:"latest,omitempty"`
 	Snapshots   []*model.WechatAnalyticsSnapshot `json:"snapshots,omitempty"`
@@ -327,24 +352,46 @@ func (s *WechatAnalyticsImportService) ListArticles(ctx context.Context, userID,
 	if project.UserID != userID {
 		return nil, errors.New("project does not belong to user")
 	}
-	publications, err := s.repo.WechatPublications().ListByProject(ctx, projectID)
+	candidates, err := loadAnalyticsCandidates(ctx, s.repo, userID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	views := make([]WechatAnalyticsArticleView, 0, len(publications))
-	for _, publication := range publications {
-		snapshots, snapshotErr := s.analyticsSnapshotsForPublication(ctx, publication)
-		if snapshotErr != nil {
-			return nil, snapshotErr
+	views := make([]WechatAnalyticsArticleView, 0, len(candidates))
+	for _, candidate := range candidates {
+		view := WechatAnalyticsArticleView{Target: candidate.Target, Publication: candidate.Publication, ContentType: candidate.ContentType, URL: candidate.URL}
+		if candidate.Task != nil {
+			task := candidate.Task
+			view.Task = &AnalyticsTaskIdentity{ID: task.ID, Title: candidate.Title, Status: task.Status, CreatedAt: task.CreatedAt}
 		}
-		var latest *model.WechatAnalyticsSnapshot
+		var snapshots []*model.WechatAnalyticsSnapshot
+		if candidate.Publication != nil {
+			snapshots, err = s.analyticsSnapshotsForPublication(ctx, candidate.Publication)
+		} else if candidate.Task != nil {
+			snapshots, err = s.repo.WechatAnalyticsImports().FindSnapshotsByTaskID(ctx, projectID, candidate.Task.ID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if candidate.Publication == nil && len(snapshots) == 0 {
+			continue
+		}
+		view.Snapshots = snapshots
 		if len(snapshots) > 0 {
-			latest = snapshots[0]
+			view.Latest = snapshots[0]
+			var raw map[string]string
+			if json.Unmarshal([]byte(view.Latest.RawData), &raw) == nil {
+				if importedType := wechatAnalyticsContentType(raw); importedType != "unknown" {
+					view.ContentType = importedType
+				}
+			}
 		}
-		if publication.ArticleURL == "" {
-			publication.ArticleURL = historicalWechatArticleURL(snapshots)
+		if view.URL == "" {
+			view.URL = historicalWechatArticleURL(snapshots)
 		}
-		views = append(views, WechatAnalyticsArticleView{Publication: publication, Latest: latest, Snapshots: snapshots})
+		if view.Publication != nil && view.Publication.ArticleURL == "" {
+			view.Publication.ArticleURL = historicalWechatArticleURL(snapshots)
+		}
+		views = append(views, view)
 	}
 	return views, nil
 }
@@ -362,7 +409,7 @@ func historicalWechatArticleURL(snapshots []*model.WechatAnalyticsSnapshot) stri
 		if articleURL == "" {
 			continue
 		}
-		if candidate != "" && candidate != articleURL {
+		if candidate != "" && analyticsPublicIdentity(candidate) != analyticsPublicIdentity(articleURL) {
 			return ""
 		}
 		candidate = articleURL
@@ -387,7 +434,7 @@ func (s *WechatAnalyticsImportService) Overview(ctx context.Context, userID, pro
 	}
 	overview := &WechatAnalyticsOverview{Articles: len(articles)}
 	for _, article := range articles {
-		if article.Publication.Status == model.WechatPublicationStatusPublished {
+		if article.Publication != nil && article.Publication.Status == model.WechatPublicationStatusPublished {
 			overview.Published++
 		}
 		if article.Latest == nil {
@@ -408,102 +455,6 @@ func (s *WechatAnalyticsImportService) Overview(ctx context.Context, userID, pro
 		}
 	}
 	return overview, nil
-}
-
-func (s *WechatAnalyticsImportService) Resolve(ctx context.Context, userID, projectID, batchID string, actions []WechatAnalyticsResolveAction) (*WechatAnalyticsImportSummary, error) {
-	batch, err := s.repo.WechatAnalyticsImports().FindBatchByID(ctx, projectID, batchID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, gorm.ErrRecordNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if batch.UserID != userID {
-		return nil, errors.New("import does not belong to user")
-	}
-	publications, err := s.repo.WechatPublications().ListByProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[string]*model.WechatPublication, len(publications))
-	for _, publication := range publications {
-		byID[publication.ID] = publication
-	}
-	now := s.now()
-	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		if err := tx.WechatAnalyticsImports().LockProject(ctx, projectID); err != nil {
-			return err
-		}
-		if err := tx.WechatAnalyticsImports().LockBatch(ctx, projectID, batchID); err != nil {
-			return err
-		}
-		locked, err := tx.WechatAnalyticsImports().FindBatchByID(ctx, projectID, batchID)
-		if err != nil {
-			return err
-		}
-		if locked.RevokedAt != nil {
-			return ErrAnalyticsImportRevoked
-		}
-		batch = locked
-		for _, action := range actions {
-			row, findErr := tx.WechatAnalyticsImports().FindRowByID(ctx, projectID, batchID, action.RowID)
-			if findErr != nil {
-				return findErr
-			}
-			if row.MatchStatus == model.WechatAnalyticsImportRowInvalid {
-				continue
-			}
-			switch action.Action {
-			case "link_existing":
-				if byID[action.PublicationID] == nil {
-					return fmt.Errorf("publication %q not found", action.PublicationID)
-				}
-				row.PublicationID = action.PublicationID
-				row.MatchStatus = model.WechatAnalyticsImportRowMatched
-			case "skip":
-				row.PublicationID = ""
-				row.MatchStatus = model.WechatAnalyticsImportRowUnmatched
-			default:
-				return fmt.Errorf("unsupported resolve action %q", action.Action)
-			}
-			if err := tx.WechatAnalyticsImports().UpdateRow(ctx, row); err != nil {
-				return err
-			}
-			if row.MatchStatus == model.WechatAnalyticsImportRowMatched {
-				if err := tx.WechatAnalyticsImports().CreateSnapshot(ctx, snapshotFromWechatImport(batch, row, now)); err != nil {
-					return err
-				}
-				if err := tx.WechatPublications().RecordImportedAnalytics(ctx, projectID, row.PublicationID, batch.ID, normalizeWechatArticleURL(row.ArticleURL)); err != nil {
-					return err
-				}
-			}
-		}
-		rows, err := tx.WechatAnalyticsImports().FindRowsByBatchID(ctx, projectID, batchID)
-		if err != nil {
-			return err
-		}
-		batch.MatchedRows, batch.ReviewRows, batch.UnmatchedRows = 0, 0, 0
-		for _, row := range rows {
-			switch row.MatchStatus {
-			case model.WechatAnalyticsImportRowMatched:
-				batch.MatchedRows++
-			case model.WechatAnalyticsImportRowNeedsReview:
-				batch.ReviewRows++
-			case model.WechatAnalyticsImportRowUnmatched:
-				batch.UnmatchedRows++
-			}
-		}
-		if batch.ReviewRows == 0 && batch.UnmatchedRows == 0 && batch.InvalidRows == 0 {
-			batch.Status = model.WechatAnalyticsImportBatchCompleted
-		} else {
-			batch.Status = model.WechatAnalyticsImportBatchNeedsReview
-		}
-		return tx.WechatAnalyticsImports().UpdateBatch(ctx, batch)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.GetBatch(ctx, userID, projectID, batchID)
 }
 
 func (s *WechatAnalyticsImportService) GetBatch(ctx context.Context, userID, projectID, batchID string) (*WechatAnalyticsImportSummary, error) {
@@ -532,17 +483,6 @@ func (s *WechatAnalyticsImportService) GetBatchByID(ctx context.Context, userID,
 	return s.GetBatch(ctx, userID, batch.ProjectID, batch.ID)
 }
 
-func (s *WechatAnalyticsImportService) ResolveByID(ctx context.Context, userID, batchID string, actions []WechatAnalyticsResolveAction) (*WechatAnalyticsImportSummary, error) {
-	batch, err := s.repo.WechatAnalyticsImports().FindBatchByIDAnyProject(ctx, batchID)
-	if err != nil {
-		return nil, err
-	}
-	if batch.UserID != userID {
-		return nil, errors.New("import does not belong to user")
-	}
-	return s.Resolve(ctx, userID, batch.ProjectID, batch.ID, actions)
-}
-
 func (s *WechatAnalyticsImportService) ListBatches(ctx context.Context, userID, projectID string, offset, limit int) ([]*model.WechatAnalyticsImportBatch, int64, error) {
 	project, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
@@ -563,6 +503,26 @@ func (s *WechatAnalyticsImportService) Snapshots(ctx context.Context, userID, pr
 		return nil, errors.New("project does not belong to user")
 	}
 	publication, err := s.repo.WechatPublications().FindByID(ctx, publicationID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		task, taskErr := s.repo.Tasks().FindByID(ctx, publicationID)
+		if taskErr != nil {
+			return nil, taskErr
+		}
+		if task.UserID != userID || task.ProjectID != projectID {
+			return nil, gorm.ErrRecordNotFound
+		}
+		linked, linkedErr := s.repo.WechatPublications().FindByTaskID(ctx, task.ID)
+		if linkedErr == nil {
+			if linked.ProjectID != projectID || linked.UserID != userID {
+				return nil, gorm.ErrRecordNotFound
+			}
+			return s.analyticsSnapshotsForPublication(ctx, linked)
+		}
+		if !errors.Is(linkedErr, gorm.ErrRecordNotFound) {
+			return nil, linkedErr
+		}
+		return s.repo.WechatAnalyticsImports().FindSnapshotsByTaskID(ctx, projectID, task.ID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -587,6 +547,21 @@ func (s *WechatAnalyticsImportService) analyticsSnapshotsForPublication(ctx cont
 	imported, err := s.repo.WechatAnalyticsImports().FindSnapshotsByPublicationID(ctx, publication.ProjectID, publication.ID)
 	if err != nil {
 		return nil, err
+	}
+	if publication.TaskID != "" {
+		taskSnapshots, taskErr := s.repo.WechatAnalyticsImports().FindSnapshotsByTaskID(ctx, publication.ProjectID, publication.TaskID)
+		if taskErr != nil {
+			return nil, taskErr
+		}
+		seen := map[string]bool{}
+		for _, v := range imported {
+			seen[v.ID] = true
+		}
+		for _, v := range taskSnapshots {
+			if !seen[v.ID] {
+				imported = append(imported, v)
+			}
+		}
 	}
 	official, err := s.repo.WechatMetricSnapshots().FindByTaskID(ctx, publication.TaskID)
 	if err != nil {

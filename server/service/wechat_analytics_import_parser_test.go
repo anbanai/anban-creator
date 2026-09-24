@@ -84,9 +84,9 @@ func TestMatchWechatAnalyticsPublicationPriority(t *testing.T) {
 	location := time.FixedZone("Asia/Shanghai", 8*60*60)
 	date := time.Date(2026, 9, 11, 0, 0, 0, 0, location)
 	otherDate := date.AddDate(0, 0, -1)
-	publications := []*model.WechatPublication{
-		{ID: "url", DraftTitle: "另一个标题", ArticleURL: "https://mp.weixin.qq.com/s/url#rd", PublishedAt: &otherDate},
-		{ID: "title-date", DraftTitle: "白茶到底分几类？", PublishedAt: &date},
+	candidates := []AnalyticsCandidate{
+		{Target: AnalyticsTarget{"wechat_publication", "url"}, Title: "另一个标题", URL: "https://mp.weixin.qq.com/s/url#rd", Date: &otherDate, matchDate: &otherDate},
+		{Target: AnalyticsTarget{"wechat_publication", "title-date"}, Title: "白茶到底分几类？", Date: &date, matchDate: &date},
 	}
 
 	tests := []struct {
@@ -97,19 +97,19 @@ func TestMatchWechatAnalyticsPublicationPriority(t *testing.T) {
 	}{
 		{name: "URL takes priority", row: ParsedWechatAnalyticsRow{ArticleURL: "https://mp.weixin.qq.com/s/url", NormalizedTitle: "不匹配", PublishedDate: &date}, wantID: "url"},
 		{name: "title and date fallback", row: ParsedWechatAnalyticsRow{NormalizedTitle: normalizeWechatAnalyticsTitle("白茶到底分几类？"), PublishedDate: &date}, wantID: "title-date"},
-		{name: "missing date stays unmatched", row: ParsedWechatAnalyticsRow{NormalizedTitle: normalizeWechatAnalyticsTitle("白茶到底分几类？")}},
+		{name: "unique title without date", row: ParsedWechatAnalyticsRow{NormalizedTitle: normalizeWechatAnalyticsTitle("白茶到底分几类？")}, wantID: "title-date"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			match, ambiguous := matchWechatAnalyticsPublication(tt.row, publications)
-			if ambiguous != tt.ambiguous || (match != nil && match.ID != tt.wantID) || (match == nil && tt.wantID != "") {
+			match, ambiguous := matchAnalyticsCandidate(tt.row.NormalizedTitle, tt.row.PublishedDate, tt.row.ArticleURL, candidates)
+			if ambiguous != tt.ambiguous || (match != nil && match.Target.ID != tt.wantID) || (match == nil && tt.wantID != "") {
 				t.Fatalf("match=%#v ambiguous=%v", match, ambiguous)
 			}
 		})
 	}
 
-	duplicate := append(publications, &model.WechatPublication{ID: "duplicate", DraftTitle: "白茶到底分几类？", PublishedAt: &date})
-	if match, ambiguous := matchWechatAnalyticsPublication(ParsedWechatAnalyticsRow{NormalizedTitle: normalizeWechatAnalyticsTitle("白茶到底分几类？"), PublishedDate: &date}, duplicate); match != nil || !ambiguous {
+	duplicate := append(candidates, AnalyticsCandidate{Target: AnalyticsTarget{"wechat_publication", "duplicate"}, Title: "白茶到底分几类？", Date: &date, matchDate: &date})
+	if match, ambiguous := matchAnalyticsCandidate("白茶到底分几类？", &date, "", duplicate); match != nil || !ambiguous {
 		t.Fatalf("same-title same-date match=%#v ambiguous=%v", match, ambiguous)
 	}
 }
@@ -130,5 +130,55 @@ func TestParseWechatAnalyticsRateAndMissingValues(t *testing.T) {
 	}
 	if row.DeliveryCompletionRate == nil || *row.DeliveryCompletionRate != 0.405 {
 		t.Fatalf("delivery rate = %#v", row.DeliveryCompletionRate)
+	}
+}
+
+func TestWechatAnalyticsContentTypeRequiresExplicitEvidence(t *testing.T) {
+	for _, tc := range []struct{ name, column, value, source, want string }{
+		{"article", "内容类型", "图文", "公众号后台", "article"},
+		{"image", "消息类型", "图片", "公众号后台", "image"},
+		{"sticker image type", "内容类型", "贴图", "公众号后台", "image"},
+		{"gallery image type", "作品类型", "图集", "公众号后台", "image"},
+		{"sticker image source", "", "", "贴图", "image"},
+		{"gallery image source", "", "", "图集", "image"},
+		{"alternate type", "作品类型", "文章", "公众号后台", "article"},
+		{"english type", "类型", "image", "公众号后台", "image"},
+		{"explicit source", "", "", "图文", "article"},
+		{"generic source", "", "", "数据来源概况", "unknown"},
+		{"missing type", "", "", "公众号后台", "unknown"},
+		{"unsupported explicit type", "内容类型", "视频", "图文", "unknown"},
+		{"explicit type wins", "内容类型", "图片", "图文", "image"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			columns := map[string]int{}
+			for i, header := range wechatAnalyticsHeaders {
+				columns[header] = i
+			}
+			values := []string{tc.source, "标题", "2026-09-11", "1", "0", "0", "10", "1", "0.5", ""}
+			if tc.column != "" {
+				columns[tc.column] = len(values)
+				values = append(values, tc.value)
+			}
+			row := parseWechatAnalyticsRow(2, values, columns, time.UTC)
+			raw, err := json.Marshal(row)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var contract struct {
+				ContentType string `json:"content_type"`
+			}
+			if err := json.Unmarshal(raw, &contract); err != nil {
+				t.Fatal(err)
+			}
+			if contract.ContentType != tc.want {
+				t.Errorf("content type = %q, want %q", contract.ContentType, tc.want)
+			}
+			if row.Source != tc.source {
+				t.Errorf("source changed: %q", row.Source)
+			}
+			if tc.column != "" && row.Raw[tc.column] != tc.value {
+				t.Errorf("explicit type evidence missing from raw data: %+v", row.Raw)
+			}
+		})
 	}
 }

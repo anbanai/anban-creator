@@ -20,8 +20,6 @@ type WechatAnalyticsImportAPI interface {
 	ListBatches(context.Context, string, string, int, int) ([]*model.WechatAnalyticsImportBatch, int64, error)
 	GetBatch(context.Context, string, string, string) (*service.WechatAnalyticsImportSummary, error)
 	GetBatchByID(context.Context, string, string) (*service.WechatAnalyticsImportSummary, error)
-	Resolve(context.Context, string, string, string, []service.WechatAnalyticsResolveAction) (*service.WechatAnalyticsImportSummary, error)
-	ResolveByID(context.Context, string, string, []service.WechatAnalyticsResolveAction) (*service.WechatAnalyticsImportSummary, error)
 	Overview(context.Context, string, string) (*service.WechatAnalyticsOverview, error)
 	ListArticles(context.Context, string, string) ([]service.WechatAnalyticsArticleView, error)
 	Snapshots(context.Context, string, string, string) ([]*model.WechatAnalyticsSnapshot, error)
@@ -34,21 +32,6 @@ func (h *WechatAnalyticsImportHandler) GlobalDetail(c fiber.Ctx) error {
 		return err
 	}
 	result, err := h.service.GetBatchByID(c.Context(), GetUserID(c), batchID)
-	return h.respond(c, result, err)
-}
-
-func (h *WechatAnalyticsImportHandler) GlobalResolve(c fiber.Ctx) error {
-	batchID, err := validateUUIDParam(c, "batchId")
-	if err != nil {
-		return err
-	}
-	var body struct {
-		Actions []service.WechatAnalyticsResolveAction `json:"actions"`
-	}
-	if err := c.Bind().Body(&body); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-	result, err := h.service.ResolveByID(c.Context(), GetUserID(c), batchID, body.Actions)
 	return h.respond(c, result, err)
 }
 
@@ -138,21 +121,6 @@ func (h *WechatAnalyticsImportHandler) Detail(c fiber.Ctx) error {
 		return err
 	}
 	result, err := h.service.GetBatch(c.Context(), GetUserID(c), projectID, strings.TrimSpace(c.Params("batchId")))
-	return h.respond(c, result, err)
-}
-
-func (h *WechatAnalyticsImportHandler) Resolve(c fiber.Ctx) error {
-	projectID, err := validateUUIDParam(c, "id")
-	if err != nil {
-		return err
-	}
-	var body struct {
-		Actions []service.WechatAnalyticsResolveAction `json:"actions"`
-	}
-	if err := c.Bind().Body(&body); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-	result, err := h.service.Resolve(c.Context(), GetUserID(c), projectID, c.Params("batchId"), body.Actions)
 	return h.respond(c, result, err)
 }
 

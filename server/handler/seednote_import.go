@@ -19,7 +19,7 @@ type SeednoteImportAPI interface {
 	Import(ctx context.Context, req service.SeednoteImportRequest) (*service.SeednoteImportSummary, error)
 	ListBatches(ctx context.Context, userID, projectID string, offset, limit int) ([]*model.SeednoteImportBatch, int64, error)
 	GetBatch(ctx context.Context, userID, projectID, batchID string) (*service.SeednoteImportSummary, error)
-	Resolve(ctx context.Context, userID, projectID, batchID string, actions []service.SeednoteResolveAction) (*service.SeednoteImportSummary, error)
+	Preview(ctx context.Context, req service.SeednoteImportRequest) (*service.SeednoteImportPreview, error)
 	Overview(ctx context.Context, userID, projectID string, from, to *time.Time) (*service.SeednoteImportOverview, error)
 	ListPosts(ctx context.Context, userID, projectID, search string, offset, limit int) ([]*model.SeednotePost, int64, error)
 	GetPost(ctx context.Context, userID, projectID, postID string, from, to *time.Time) (*model.SeednotePost, []*model.SeednoteMetricVersion, error)
@@ -81,18 +81,21 @@ func (h *SeednoteImportHandler) Detail(c fiber.Ctx) error {
 	result, err := h.service.GetBatch(c.Context(), GetUserID(c), projectID, batchID)
 	return h.respond(c, result, err)
 }
-func (h *SeednoteImportHandler) Resolve(c fiber.Ctx) error {
+func (h *SeednoteImportHandler) Preview(c fiber.Ctx) error {
 	projectID, err := h.projectID(c)
 	if err != nil {
 		return err
 	}
-	var body struct {
-		Actions []service.SeednoteResolveAction `json:"actions"`
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, 401, "unauthorized")
 	}
-	if err := c.Bind().Body(&body); err != nil {
+	var req service.SeednoteImportRequest
+	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	result, err := h.service.Resolve(c.Context(), GetUserID(c), projectID, c.Params("batchId"), body.Actions)
+	req.UserID, req.ProjectID = userID, projectID
+	result, err := h.service.Preview(c.Context(), req)
 	return h.respond(c, result, err)
 }
 func (h *SeednoteImportHandler) Overview(c fiber.Ctx) error {

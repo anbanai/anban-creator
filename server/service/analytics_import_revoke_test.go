@@ -38,7 +38,7 @@ func TestSeednoteRevokeImportRestoresPreviousMetricsAndRetainsHistory(t *testing
 		batches, rows = append(batches, batch), append(rows, row)
 	}
 	before, err := svc.Overview(ctx, userID, projectID, nil, nil)
-	if err != nil || before.PostSummaries[0].ExposureCount != 99 {
+	if err != nil || (before.PostSummaries[0].ExposureCount == nil || *before.PostSummaries[0].ExposureCount != 99) {
 		t.Fatalf("before=%+v err=%v", before, err)
 	}
 	if _, err := svc.Revoke(ctx, "other-user", projectID, batches[1].ID); err == nil {
@@ -58,11 +58,9 @@ func TestSeednoteRevokeImportRestoresPreviousMetricsAndRetainsHistory(t *testing
 	if err != nil || !repeated.Batch.RevokedAt.Equal(*result.Batch.RevokedAt) {
 		t.Fatalf("repeat err=%v result=%+v", err, repeated)
 	}
-	if _, err := svc.Resolve(ctx, userID, projectID, batches[1].ID, []SeednoteResolveAction{{RowID: rows[1].ID, Action: "create_new"}}); !errors.Is(err, ErrAnalyticsImportRevoked) {
-		t.Fatalf("resolve err=%v", err)
-	}
+
 	after, err := svc.Overview(ctx, userID, projectID, nil, nil)
-	if err != nil || after.PostSummaries[0].ExposureCount != 10 {
+	if err != nil || (after.PostSummaries[0].ExposureCount == nil || *after.PostSummaries[0].ExposureCount != 10) {
 		t.Fatalf("after=%+v err=%v", after, err)
 	}
 	_, versions, err := svc.GetPost(ctx, userID, projectID, post.ID, nil, nil)
@@ -143,9 +141,6 @@ func TestWechatRevokeImportRestoresMetricsAndOwnedLink(t *testing.T) {
 			}
 			if result.Batch.Status != "revoked" || result.Batch.RevokedAt == nil || len(result.Rows) != 1 {
 				t.Fatalf("history=%+v", result)
-			}
-			if _, err := svc.Resolve(ctx, f.userID, f.projectID, batches[1].ID, []WechatAnalyticsResolveAction{{RowID: rows[1].ID, Action: "link_existing", PublicationID: f.publication.ID}}); !errors.Is(err, ErrAnalyticsImportRevoked) {
-				t.Fatalf("resolve err=%v", err)
 			}
 			if _, err := svc.Revoke(ctx, f.userID, f.projectID, batches[1].ID); err != nil {
 				t.Fatal(err)

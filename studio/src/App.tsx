@@ -31,8 +31,7 @@ const SettingsPage = lazyWithRecovery(() => import('@/pages/SettingsPage'))
 const TemplatesPage = lazyWithRecovery(() => import('@/pages/TemplatesPage'))
 const SeednoteAdminPage = lazyWithRecovery(() => import('@/pages/SeednoteAdminPage'))
 const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
-const SeednoteDataPage = lazyWithRecovery(() => import('@/pages/SeednoteDataPage'))
-const WechatDataPage = lazyWithRecovery(() => import('@/pages/WechatDataPage'))
+const ContentDataPage = lazyWithRecovery(() => import('@/pages/ContentDataPage'))
 
 function LoadingSpinner() {
   return (
@@ -161,8 +160,7 @@ function AppRoutes() {
           <Route path="billing" element={<LazyPage component={BillingPage} />} />
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
-          <Route path="seednote-data" element={<LazyPage component={SeednoteDataPage} />} />
-          <Route path="wechat-data" element={<LazyPage component={WechatDataPage} />} />
+          <Route path="content-data" element={<LazyPage component={ContentDataPage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

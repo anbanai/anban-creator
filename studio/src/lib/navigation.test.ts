@@ -18,8 +18,7 @@ describe('navigation IA', () => {
       '钱包',
       '插件',
       '设置',
-      '种草笔记数据',
-      '公众号数据',
+      '内容数据',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
@@ -43,8 +42,7 @@ describe('navigation IA', () => {
       '/billing',
       '/plugins',
       '/settings',
-      '/seednote-data',
-      '/wechat-data',
+      '/content-data',
       '/templates',
       '/admin/seednote',
     ])

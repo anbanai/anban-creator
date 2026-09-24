@@ -79,23 +79,26 @@ type SeednoteImportRow struct {
 func (SeednoteImportRow) TableName() string { return "seednote_import_rows" }
 
 type SeednotePost struct {
-	ID               string     `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID           string     `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID        string     `gorm:"type:char(36);index;not null" json:"project_id"`
-	Title            string     `gorm:"type:varchar(500);not null" json:"title"`
-	NormalizedTitle  string     `gorm:"type:varchar(500);index;not null" json:"normalized_title"`
-	FirstPublishedAt *time.Time `gorm:"index" json:"first_published_at,omitempty"`
-	Genre            string     `gorm:"type:varchar(50)" json:"genre,omitempty"`
-	NoteID           string     `gorm:"type:varchar(100);index" json:"note_id,omitempty"`
-	NoteURL          string     `gorm:"type:varchar(500)" json:"note_url,omitempty"`
-	TaskID           string     `gorm:"type:char(36);index" json:"task_id,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	FirstPublishedAtBatchID string     `gorm:"type:char(36);index" json:"-"`
+	ContentType             string     `gorm:"-" json:"content_type,omitempty"`
+	ID                      string     `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID                  string     `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID               string     `gorm:"type:char(36);index;not null" json:"project_id"`
+	Title                   string     `gorm:"type:varchar(500);not null" json:"title"`
+	NormalizedTitle         string     `gorm:"type:varchar(500);index;not null" json:"normalized_title"`
+	FirstPublishedAt        *time.Time `gorm:"index" json:"first_published_at,omitempty"`
+	Genre                   string     `gorm:"type:varchar(50)" json:"genre,omitempty"`
+	NoteID                  string     `gorm:"type:varchar(100);index" json:"note_id,omitempty"`
+	NoteURL                 string     `gorm:"type:varchar(500)" json:"note_url,omitempty"`
+	TaskID                  string     `gorm:"type:char(36);index" json:"task_id,omitempty"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
 }
 
 func (SeednotePost) TableName() string { return "seednote_posts" }
 
 type SeednotePostAlias struct {
+	BatchID          string     `gorm:"type:char(36);index" json:"batch_id,omitempty"`
 	ID               string     `gorm:"type:char(36);primaryKey" json:"id"`
 	PostID           string     `gorm:"type:char(36);index;not null" json:"post_id"`
 	NormalizedTitle  string     `gorm:"type:varchar(500);index;not null" json:"normalized_title"`

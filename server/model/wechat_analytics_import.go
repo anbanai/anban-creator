@@ -44,6 +44,7 @@ type WechatAnalyticsImportBatch struct {
 func (WechatAnalyticsImportBatch) TableName() string { return "wechat_analytics_import_batches" }
 
 type WechatAnalyticsImportRow struct {
+	TaskID                 string     `gorm:"type:char(36);index" json:"task_id,omitempty"`
 	ID                     string     `gorm:"type:char(36);primaryKey" json:"id"`
 	BatchID                string     `gorm:"type:char(36);index;not null" json:"batch_id"`
 	ProjectID              string     `gorm:"type:char(36);index;not null" json:"project_id"`
@@ -72,6 +73,7 @@ func (WechatAnalyticsImportRow) TableName() string { return "wechat_analytics_im
 
 // WechatAnalyticsSnapshot preserves each imported point-in-time observation.
 type WechatAnalyticsSnapshot struct {
+	TaskID                 string    `gorm:"type:char(36);index" json:"task_id,omitempty"`
 	ID                     string    `gorm:"type:char(36);primaryKey" json:"id"`
 	ProjectID              string    `gorm:"type:char(36);index;not null" json:"project_id"`
 	PublicationID          string    `gorm:"type:char(36);index;not null" json:"publication_id"`
