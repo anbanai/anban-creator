@@ -39,6 +39,7 @@ type UploadRow = {
   id: string
   order: number
   file: File
+  previewURL?: string
   progress: number
   status: 'uploading' | 'failed'
   error?: string
@@ -155,16 +156,6 @@ function MediaPreview({ type, url, fileName, compact }: {
   )
 }
 
-function LocalVideoPreview({ file, compact }: { file: File; compact: boolean }) {
-  const [url, setUrl] = useState<string>()
-  useEffect(() => {
-    const objectUrl = URL.createObjectURL(file)
-    setUrl(objectUrl)
-    return () => URL.revokeObjectURL(objectUrl)
-  }, [file])
-  return <MediaPreview type="video" url={url} fileName={file.name} compact={compact} />
-}
-
 export function ReferenceMaterialInput({
   value,
   onChange,
@@ -183,6 +174,8 @@ export function ReferenceMaterialInput({
   const valueRef = useRef(value)
   const rowsRef = useRef<UploadRow[]>([])
   const uploadOrderRef = useRef(new Map<string, number>())
+  const localPreviewURLsRef = useRef(new Map<string, string>())
+  const localPreviewObjectURLsRef = useRef(new Set<string>())
   const [rows, setRows] = useState<UploadRow[]>([])
   const [validationError, setValidationError] = useState('')
   const [instructionErrors, setInstructionErrors] = useState<Record<number, boolean>>({})
@@ -191,6 +184,26 @@ export function ReferenceMaterialInput({
   useEffect(() => {
     valueRef.current = value
   }, [value])
+
+  useEffect(() => () => {
+    for (const url of localPreviewObjectURLsRef.current) URL.revokeObjectURL(url)
+    localPreviewObjectURLsRef.current.clear()
+    localPreviewURLsRef.current.clear()
+  }, [])
+
+  const createLocalPreviewURL = (file: File) => {
+    const url = URL.createObjectURL(file)
+    localPreviewObjectURLsRef.current.add(url)
+    return url
+  }
+
+  const releaseLocalPreviewURL = (url: string) => {
+    URL.revokeObjectURL(url)
+    localPreviewObjectURLsRef.current.delete(url)
+    for (const [identity, previewURL] of localPreviewURLsRef.current) {
+      if (previewURL === url) localPreviewURLsRef.current.delete(identity)
+    }
+  }
 
   useEffect(() => {
     rowsRef.current = rows
@@ -241,6 +254,14 @@ export function ReferenceMaterialInput({
         key: result.key,
         instruction: instructionEnabled ? '' : undefined,
       } satisfies InputAttachment
+      // The OSS URL may require signed access, while the file picker source is
+      // still available in memory. Keep a local preview for the lifetime of
+      // this form and preserve the storage URL for submission.
+      if ((type === 'image' || type === 'video') && row.previewURL && attachment.url) {
+        const previousURL = localPreviewURLsRef.current.get(attachment.url)
+        if (previousURL && previousURL !== row.previewURL) releaseLocalPreviewURL(previousURL)
+        localPreviewURLsRef.current.set(attachment.url, row.previewURL)
+      }
       // Hypit/Montage adapters retain the URL but omit transient upload IDs.
       // Use that stable identity so controlled-value echoes still sort correctly.
       const uploadIdentity = (item: InputAttachment) => item.url || item.upload_id || item.key || ''
@@ -301,6 +322,7 @@ export function ReferenceMaterialInput({
         id: `reference-upload-${nextUploadRowID}`,
         order: nextUploadRowID,
         file,
+        previewURL: type === 'image' || type === 'video' ? createLocalPreviewURL(file) : undefined,
         progress: 0,
         status: 'uploading',
       })
@@ -340,6 +362,12 @@ export function ReferenceMaterialInput({
   }
 
   const removeAttachment = (index: number) => {
+    const attachment = valueRef.current[index]
+    const previewURL = attachment?.url ? localPreviewURLsRef.current.get(attachment.url) : undefined
+    if (previewURL) {
+      releaseLocalPreviewURL(previewURL)
+      localPreviewURLsRef.current.delete(attachment.url!)
+    }
     emitValue(valueRef.current.filter((_, itemIndex) => itemIndex !== index))
     setInstructionErrors((current) => {
       const next: Record<number, boolean> = {}
@@ -444,7 +472,7 @@ export function ReferenceMaterialInput({
             return (
               <div key={`${attachment.upload_id || attachment.key || attachment.url || name}-${index}`} className="rounded-xl border bg-card p-3 shadow-xs">
                 <div className={cn('flex gap-3', (attachment.type === 'video' || attachment.type === 'audio') && 'flex-col')}>
-                  <MediaPreview type={attachment.type} url={attachment.url} fileName={name} compact={compact} />
+                  <MediaPreview type={attachment.type} url={localPreviewURLsRef.current.get(attachment.url ?? '') ?? attachment.url} fileName={name} compact={compact} />
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start gap-2">
@@ -500,7 +528,7 @@ export function ReferenceMaterialInput({
               row.status === 'failed' ? 'border-destructive/35 bg-destructive/5' : 'bg-card',
             )}>
               <div className={cn('flex gap-3', row.file.type.startsWith('video/') ? 'flex-col' : 'items-center')}>
-                {row.file.type.startsWith('video/') ? <LocalVideoPreview file={row.file} compact={compact} /> : <div className={cn(
+                {row.previewURL ? <MediaPreview type={row.file.type.startsWith('video/') ? 'video' : 'image'} url={row.previewURL} fileName={row.file.name} compact={compact} /> : <div className={cn(
                   'flex shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground',
                   compact ? 'size-10' : 'size-12',
                 )}>{row.status === 'uploading' ? <Loader2 className="size-5 animate-spin" /> : <AlertCircle className="size-5 text-destructive" />}</div>}
@@ -531,7 +559,10 @@ export function ReferenceMaterialInput({
                           size="icon-xs"
                           aria-label={`删除 ${row.file.name}`}
                           title={`删除 ${row.file.name}`}
-                          onClick={() => updateRows((current) => current.filter((item) => item.id !== row.id))}
+                          onClick={() => {
+                            if (row.previewURL) releaseLocalPreviewURL(row.previewURL)
+                            updateRows((current) => current.filter((item) => item.id !== row.id))
+                          }}
                         >
                           <Trash2 />
                         </Button>

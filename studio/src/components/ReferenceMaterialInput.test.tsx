@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { uploadToOSS, type DirectUploadPurpose, type UploadToOSSResult } from '@/lib/direct-upload'
 import type { InputAttachment } from '@/types/input-attachment'
@@ -12,6 +12,7 @@ vi.mock('@/lib/direct-upload', () => ({
 
 const imageFile = (name: string) => new File(['image'], name, { type: 'image/png' })
 const videoFile = (name: string) => new File(['video'], name, { type: 'video/mp4' })
+const localImagePreview = (name: string) => `blob:${name}`
 
 const uploadResult = (fileName: string, overrides: Partial<UploadToOSSResult> = {}): UploadToOSSResult => ({
   uploadId: `upload-${fileName}`,
@@ -76,9 +77,20 @@ function deferred<T>() {
 describe('ReferenceMaterialInput', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((file) => (
+      (file as File).type.startsWith('image/')
+        ? localImagePreview((file as File).name)
+        : `blob:${(file as File).name}`
+    ))
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('uploads multiple selected images, appends them, and renders previews', async () => {
+    const revokeObjectURL = vi.mocked(URL.revokeObjectURL)
     vi.mocked(uploadToOSS).mockImplementation(async ({ file }) => uploadResult(file.name))
     const existing: InputAttachment = {
       type: 'image',
@@ -88,14 +100,14 @@ describe('ReferenceMaterialInput', () => {
     }
     const onValueChange = vi.fn()
 
-    render(<ControlledReferenceInput initialValue={[existing]} onValueChange={onValueChange} />)
+    const { unmount } = render(<ControlledReferenceInput initialValue={[existing]} onValueChange={onValueChange} />)
 
     fireEvent.change(screen.getByLabelText('添加参考素材'), {
       target: { files: [imageFile('a.png'), imageFile('b.png')] },
     })
 
-    expect(await screen.findByAltText('a.png')).toHaveAttribute('src', '/a.png')
-    expect(await screen.findByAltText('b.png')).toHaveAttribute('src', '/b.png')
+    expect(await screen.findByAltText('a.png')).toHaveAttribute('src', localImagePreview('a.png'))
+    expect(await screen.findByAltText('b.png')).toHaveAttribute('src', localImagePreview('b.png'))
     expect(screen.getByAltText('existing.png')).toHaveAttribute('src', '/existing.png')
     expect(onValueChange).toHaveBeenLastCalledWith([
       existing,
@@ -116,6 +128,9 @@ describe('ReferenceMaterialInput', () => {
         instruction: '',
       }),
     ])
+    unmount()
+    expect(revokeObjectURL).toHaveBeenCalledWith(localImagePreview('a.png'))
+    expect(revokeObjectURL).toHaveBeenCalledWith(localImagePreview('b.png'))
   })
 
   it('renders video and audio previews for existing media attachments', () => {
@@ -178,9 +193,9 @@ describe('ReferenceMaterialInput', () => {
     vi.mocked(uploadToOSS).mockReturnValueOnce(retry.promise)
     fireEvent.click(screen.getByRole('button', { name: '重试 local.mp4' }))
     await act(async () => retry.resolve(uploadResult('local.mp4')))
-    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:local-video'))
     expect(createObjectURL).toHaveBeenCalledTimes(1)
     unmount()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:local-video')
     createObjectURL.mockRestore()
     revokeObjectURL.mockRestore()
   })
@@ -201,10 +216,11 @@ describe('ReferenceMaterialInput', () => {
     })
 
     uploads.get('second.png')?.resolve(uploadResult('second.png'))
-    expect(await screen.findByAltText('second.png')).toBeInTheDocument()
+    await waitFor(() => expect(onValueChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ file_name: 'second.png' }),
+    ]))
 
     uploads.get('first.png')?.resolve(uploadResult('first.png'))
-    expect(await screen.findByAltText('first.png')).toBeInTheDocument()
 
     await waitFor(() => expect(onValueChange).toHaveBeenLastCalledWith([
       expect.objectContaining({ file_name: 'first.png' }),
@@ -223,7 +239,7 @@ describe('ReferenceMaterialInput', () => {
       dataTransfer: { files: [imageFile('drop.png')] },
     })
 
-    expect(await screen.findByAltText('drop.png')).toHaveAttribute('src', '/drop.png')
+    expect(await screen.findByAltText('drop.png')).toHaveAttribute('src', localImagePreview('drop.png'))
     expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
       purpose: 'ai_entry_attachment',
       file: expect.objectContaining({ name: 'drop.png' }),
@@ -232,14 +248,17 @@ describe('ReferenceMaterialInput', () => {
 
   it('uses the caller supplied direct-upload purpose', async () => {
     vi.mocked(uploadToOSS).mockResolvedValue(uploadResult('montage.png'))
+    const onValueChange = vi.fn()
 
-    render(<ControlledReferenceInput uploadPurpose="montage_asset" />)
+    render(<ControlledReferenceInput uploadPurpose="montage_asset" onValueChange={onValueChange} />)
 
     fireEvent.change(screen.getByLabelText('添加参考素材'), {
       target: { files: [imageFile('montage.png')] },
     })
 
-    expect(await screen.findByAltText('montage.png')).toBeInTheDocument()
+    await waitFor(() => expect(onValueChange).toHaveBeenCalledWith([
+      expect.objectContaining({ file_name: 'montage.png' }),
+    ]))
     expect(uploadToOSS).toHaveBeenCalledWith(expect.objectContaining({
       purpose: 'montage_asset',
       file: expect.objectContaining({ name: 'montage.png' }),
@@ -318,24 +337,30 @@ describe('ReferenceMaterialInput', () => {
   })
 
   it('shows a failed upload and retries it without losing successful attachments', async () => {
+    const onValueChange = vi.fn()
     vi.mocked(uploadToOSS).mockImplementation(async ({ file }) => {
       if (file.name === 'bad.png') throw new Error('网络失败')
       return uploadResult(file.name)
     })
 
-    render(<ControlledReferenceInput />)
+    render(<ControlledReferenceInput onValueChange={onValueChange} />)
 
     fireEvent.change(screen.getByLabelText('添加参考素材'), {
       target: { files: [imageFile('good.png'), imageFile('bad.png')] },
     })
 
-    expect(await screen.findByAltText('good.png')).toBeInTheDocument()
     expect(await screen.findByText('网络失败')).toBeInTheDocument()
+    await waitFor(() => expect(onValueChange).toHaveBeenCalledWith([
+      expect.objectContaining({ file_name: 'good.png' }),
+    ]))
 
     vi.mocked(uploadToOSS).mockResolvedValueOnce(uploadResult('bad.png'))
     fireEvent.click(screen.getByRole('button', { name: '重试 bad.png' }))
 
-    expect(await screen.findByAltText('bad.png')).toBeInTheDocument()
+    await waitFor(() => expect(onValueChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ file_name: 'good.png' }),
+      expect.objectContaining({ file_name: 'bad.png' }),
+    ]))
     expect(screen.getByAltText('good.png')).toBeInTheDocument()
   })
 
