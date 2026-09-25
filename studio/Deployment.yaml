@@ -1,6 +1,5 @@
-# For updates, render this file and run studio/deploy.py. Applying this entire
-# file directly switches the Service before candidate readiness is established.
-# version_switch must be a NEW release ID, never a reused blue/green slot.
+# Temporary single-Deployment rollout: keep version_switch=base until the
+# release pipeline is migrated. The Deployment selector must remain app-only.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,7 +13,6 @@ spec:
   selector:
     matchLabels:
       app: ${micro_service_name}
-      version: ${version_switch}
   template:
     metadata:
       labels:
