@@ -158,6 +158,26 @@ describe('TaskContextSummary', () => {
     expect(logs).not.toHaveClass('lg:border-b-0')
   })
 
+  it('renders context actions as a vertical sidebar with row separators', () => {
+    renderSummary({ layout: 'sidebar' })
+
+    const grid = screen.getByTestId('task-context-grid')
+    const actions = [
+      screen.getByRole('button', { name: '打开任务概览' }),
+      screen.getByRole('button', { name: '打开创作配置' }),
+      screen.getByRole('button', { name: '打开参考素材' }),
+      screen.getByRole('button', { name: '打开执行日志' }),
+    ]
+
+    expect(screen.getByRole('heading', { name: '任务上下文', level: 2 })).toBeInTheDocument()
+    expect(grid).toHaveClass('grid-cols-1')
+    actions.slice(0, 3).forEach((action) => {
+      expect(action).toHaveClass('border-b', 'border-b-border')
+      expect(action).not.toHaveClass('border-r')
+    })
+    expect(actions[3]).not.toHaveClass('border-b', 'border-r')
+  })
+
   it('exposes visible overview and log summaries as accessible descriptions', () => {
     renderSummary({
       task: { ...snapshotTask, status: 'running' },

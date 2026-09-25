@@ -676,22 +676,52 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
-      <TaskExecutionRail
-        key={task.id}
-        taskId={task.id}
-        status={task.status}
-        lifecycle={displayLifecycle}
-        workflow={task.workflow_status}
-        outcome={task.outcome}
-        errorMessage={task.error_message}
-        onOpenLogs={() => openTaskDetails('logs')}
-        onResume={canResume ? () => setShowResumeDialog(true) : undefined}
-        files={files}
-        taskType={task.type}
-        filesLoading={filesLoading}
-        filesError={filesError}
-        onRetryFiles={() => void refetchFiles()}
-      />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
+        <div className="min-w-0 space-y-6">
+          <TaskExecutionRail
+            key={task.id}
+            taskId={task.id}
+            status={task.status}
+            lifecycle={displayLifecycle}
+            workflow={task.workflow_status}
+            outcome={task.outcome}
+            errorMessage={task.error_message}
+            onOpenLogs={() => openTaskDetails('logs')}
+            onResume={canResume ? () => setShowResumeDialog(true) : undefined}
+            files={files}
+            taskType={task.type}
+            filesLoading={filesLoading}
+            filesError={filesError}
+            onRetryFiles={() => void refetchFiles()}
+          />
+
+          {task.type === 'article' && task.status === 'completed' && project && (
+            <WechatAnalyticsPanel taskId={task.id} />
+          )}
+
+          {task.type === 'seednote' && task.status === 'completed' && (
+            <SeednoteAnalyticsPanel taskId={task.id} />
+          )}
+
+          {task.type === 'montage' && task.status === 'completed' && (
+            <ChannelsAnalyticsPanel taskId={task.id} />
+          )}
+        </div>
+
+        <aside className="min-w-0" aria-label="任务辅助信息">
+          <TaskContextSummary
+            compact
+            layout="sidebar"
+            task={task}
+            project={project}
+            files={deliveredFiles}
+            logs={displayLogs}
+            latestStageUpdate={currentLifecycleUpdate}
+            sseError={currentSseError}
+            onOpenTab={openTaskDetails}
+          />
+        </aside>
+      </div>
 
       <TaskDetailsSheet
         open={showTaskDetails}
@@ -717,29 +747,6 @@ export default function TaskDetailPage() {
           void connectSSE(task.id)
         }}
         logContainerRef={logContainerRef}
-      />
-
-      {task.type === 'article' && task.status === 'completed' && project && (
-        <WechatAnalyticsPanel taskId={task.id} />
-      )}
-
-      {task.type === 'seednote' && task.status === 'completed' && (
-        <SeednoteAnalyticsPanel taskId={task.id} />
-      )}
-
-      {task.type === 'montage' && task.status === 'completed' && (
-        <ChannelsAnalyticsPanel taskId={task.id} />
-      )}
-
-      <TaskContextSummary
-        compact
-        task={task}
-        project={project}
-        files={deliveredFiles}
-        logs={displayLogs}
-        latestStageUpdate={currentLifecycleUpdate}
-        sseError={currentSseError}
-        onOpenTab={openTaskDetails}
       />
 
       {showResumeDialog ? (
