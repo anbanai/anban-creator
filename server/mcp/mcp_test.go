@@ -250,6 +250,9 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 		taskID      = "task-1"
 		executionID = "execution-1"
 	)
+	oldServices := svcs
+	svcs = &Services{}
+	t.Cleanup(func() { svcs = oldServices })
 	tokens, err := serverauth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
 	if err != nil {
 		t.Fatal(err)
@@ -277,6 +280,8 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 		{name: "missing task scope", toolName: "get_task", arguments: `{}`},
 		{name: "missing project scope", toolName: "get_project", arguments: `{}`},
 		{name: "profile must bind task snapshot", toolName: "get_project_profile", arguments: `{"project_id":"project-1"}`},
+		{name: "progress plan cannot override token execution", toolName: "set_task_progress_plan", arguments: `{"task_id":"task-1","execution_id":"execution-2","stages":[{"id":"one","title":"One"},{"id":"two","title":"Two"}]}`},
+		{name: "progress update cannot override token execution", toolName: "update_task_progress", arguments: `{"task_id":"task-1","execution_id":"execution-2","stage":"one","state":"active"}`},
 		{name: "prepare upload must bind project", toolName: "prepare_file_upload", arguments: `{"project_id":"project-2","task_id":"task-1"}`},
 		{name: "prepare upload must name task", toolName: "prepare_file_upload", arguments: `{"project_id":"project-1"}`},
 		{name: "user-wide task enumeration is denied", toolName: "list_tasks", arguments: `{"project_id":"project-1"}`},
@@ -299,6 +304,14 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 	if authorizer.calls != 0 {
 		t.Fatalf("scope mismatch reached current-execution authorizer %d times", authorizer.calls)
 	}
+	plan := callMCPToolForScopeTest(handler, token, sessionID, "set_task_progress_plan", `{"task_id":"task-1","stages":[{"id":"one","title":"One"},{"id":"two","title":"Two"}]}`)
+	if plan.Code != http.StatusOK || strings.Contains(plan.Body.String(), "execution token cannot access requested execution_id") {
+		t.Fatalf("token-bound progress plan did not reach MCP dispatch: %d: %s", plan.Code, plan.Body.String())
+	}
+	progress := callMCPToolForScopeTest(handler, token, sessionID, "update_task_progress", `{"task_id":"task-1","stage":"one","state":"active"}`)
+	if progress.Code != http.StatusOK || strings.Contains(progress.Body.String(), "execution token cannot access requested execution_id") {
+		t.Fatalf("token-bound progress update did not reach MCP dispatch: %d: %s", progress.Code, progress.Body.String())
+	}
 
 	// A correctly scoped, task-bound request passes the central guard and reaches
 	// MCP dispatch. The service is intentionally absent, so the tool returns an
@@ -307,8 +320,8 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid scope did not reach MCP dispatch: %d: %s", rec.Code, rec.Body.String())
 	}
-	if authorizer.calls != 1 {
-		t.Fatalf("current-execution authorizer calls = %d, want 1", authorizer.calls)
+	if authorizer.calls != 3 {
+		t.Fatalf("current-execution authorizer calls = %d, want 3", authorizer.calls)
 	}
 }
 

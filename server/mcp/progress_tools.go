@@ -14,13 +14,12 @@ import (
 func registerProgressTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "set_task_progress_plan",
-		Description: "Declare or replan the current task execution's ordered work stages. Call once before starting work and only from the top-level agent. For each stage, list its expected task output files in artifact_paths (paths relative to the workspace, often under output/); these paths identify which stage produced each file.",
+		Description: "Declare or replan the current task execution's ordered work stages. Call once before starting work and only from the top-level agent. The execution identity is derived from the authenticated execution token; do not provide an execution_id. For each stage, list its expected task output files in artifact_paths (paths relative to the workspace, often under output/); these paths identify which stage produced each file.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"task_id":      map[string]any{"type": "string", "description": "Current task ID"},
-				"execution_id": map[string]any{"type": "string", "description": "Current execution ID"},
+				"task_id": map[string]any{"type": "string", "description": "Current task ID"},
 				"stages": map[string]any{
 					"type": "array", "minItems": 2, "maxItems": 7,
 					"items": map[string]any{
@@ -36,24 +35,23 @@ func registerProgressTools(server *mcp.Server) {
 					},
 				},
 			},
-			"required": []any{"task_id", "execution_id", "stages"},
+			"required": []any{"task_id", "stages"},
 		},
 	}, progressPlanHandler)
 
 	server.AddTool(&mcp.Tool{
 		Name:        "update_task_progress",
-		Description: "Mark one declared stage active or complete and optionally record its latest concise update.",
+		Description: "Mark one declared stage active or complete and optionally record its latest concise update. The execution identity is derived from the authenticated execution token; do not provide an execution_id.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"task_id":      map[string]any{"type": "string", "description": "Current task ID"},
-				"execution_id": map[string]any{"type": "string", "description": "Current execution ID"},
-				"stage":        map[string]any{"type": "string", "description": "Declared stable stage ID"},
-				"state":        map[string]any{"type": "string", "enum": []any{"active", "complete"}},
-				"description":  map[string]any{"type": "string", "description": "Latest concise user-facing update"},
+				"task_id":     map[string]any{"type": "string", "description": "Current task ID"},
+				"stage":       map[string]any{"type": "string", "description": "Declared stable stage ID"},
+				"state":       map[string]any{"type": "string", "enum": []any{"active", "complete"}},
+				"description": map[string]any{"type": "string", "description": "Latest concise user-facing update"},
 			},
-			"required": []any{"task_id", "execution_id", "stage", "state"},
+			"required": []any{"task_id", "stage", "state"},
 		},
 	}, progressUpdateHandler)
 }
@@ -61,13 +59,13 @@ func registerProgressTools(server *mcp.Server) {
 func progressPlanHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := parseArgs(req.Params.Arguments)
 	taskID := strings.TrimSpace(stringArg(args, "task_id"))
-	executionID := strings.TrimSpace(stringArg(args, "execution_id"))
-	if taskID == "" || executionID == "" {
-		return errorResult("task_id and execution_id are required"), nil
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
 	}
-	if result := requireMCPExecutionIdentity(ctx, "set_task_progress_plan", "", taskID, executionID); result != nil {
+	if result := requireMCPExecutionIdentity(ctx, "set_task_progress_plan", "", taskID, ""); result != nil {
 		return result, nil
 	}
+	executionID := getExecutionID(ctx)
 	rawStages, ok := args["stages"]
 	if !ok {
 		return errorResult("stages is required"), nil
@@ -93,12 +91,11 @@ func progressPlanHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 func progressUpdateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := parseArgs(req.Params.Arguments)
 	taskID := strings.TrimSpace(stringArg(args, "task_id"))
-	executionID := strings.TrimSpace(stringArg(args, "execution_id"))
 	stage := strings.TrimSpace(stringArg(args, "stage"))
 	state := strings.TrimSpace(stringArg(args, "state"))
 	description := strings.TrimSpace(stringArg(args, "description"))
-	if taskID == "" || executionID == "" {
-		return errorResult("task_id and execution_id are required"), nil
+	if taskID == "" {
+		return errorResult("task_id is required"), nil
 	}
 	if stage == "" {
 		return errorResult("stage is required"), nil
@@ -106,9 +103,10 @@ func progressUpdateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.
 	if state != model.TaskLifecycleStateActive && state != model.TaskLifecycleStateComplete {
 		return errorResult("state must be active or complete"), nil
 	}
-	if result := requireMCPExecutionIdentity(ctx, "update_task_progress", "", taskID, executionID); result != nil {
+	if result := requireMCPExecutionIdentity(ctx, "update_task_progress", "", taskID, ""); result != nil {
 		return result, nil
 	}
+	executionID := getExecutionID(ctx)
 	if svcs.TaskSvc == nil {
 		return errorResult("task service not available"), nil
 	}

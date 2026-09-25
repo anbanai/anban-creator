@@ -103,7 +103,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "e079820296935ed60009b010ed3fc282f14d4a3519220cd0b6e0e834bc42feb0"
+      "digest": "a574839700cfc5042b8cffd28a33aca3523edfda8244a6e53227811277d02da0"
     },
     {
       "id": "ecommerce",
@@ -207,7 +207,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "b090cf07dd854b8daf25ddb5b21c0b89e0972f247e6c8ba655c7341678f2bd00"
+      "digest": "d5324f2fe612b98d508120b632332efff0bd49fe7af00b13d18ceaec136763a4"
     },
     {
       "id": "hypit",
@@ -319,7 +319,7 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "a041f8fc889907d6e985521381baf951e20eaa7bdd5de2584015c947b714cb37"
+      "digest": "33cedc52e244abb55007ab0a55c5e31d89d308f28c5bc360a52c36776f0de451"
     },
     {
       "id": "live-slicer",
@@ -395,7 +395,7 @@
         }
       ],
       "ui": {},
-      "digest": "ae441aab79ade840b35bdb56eb185d5dd3d41b90ed0b701aeb659568d3d56822"
+      "digest": "0f81b531214af9f4cc634f9d4afa2b9a6cffb6491b00ab121125d4b3fd4d76f5"
     },
     {
       "id": "moments",
@@ -482,7 +482,7 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "590a87a75e4a465a8912d3bd0770bbac07e72d4eb0ec9b84f24482599688a135"
+      "digest": "40154689cdff1fe19e08ad5e66ed4f1ea464bc59008d1d11fe157325d2a6fe3c"
     },
     {
       "id": "montage",
@@ -565,7 +565,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "dd65c6b1e1146f43054b4dd4f71ff41678b7ebd251c67fd7332caaa01e871848"
+      "digest": "e78f23d896988ecf5925b90e8c618ee112b1297d94929dd05e2125fe10d95477"
     },
     {
       "id": "seednote",
@@ -688,7 +688,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "4fbf5d45aa2af0c02d1534438945700df4f449a5dc6c51c168c7c3841f2b19ec"
+      "digest": "f4d13bbd50336cefaa866ac1bd21654cac616916370ef816f8438be6578530f9"
     }
   ]
 }

@@ -31,16 +31,16 @@ func TestLifecycleProgressToolsExposeOnlyServerOwnedContract(t *testing.T) {
 		{
 			name: "set_task_progress_plan",
 			properties: map[string]string{
-				"task_id": "string", "execution_id": "string", "stages": "array",
+				"task_id": "string", "stages": "array",
 			},
-			required: map[string]bool{"task_id": true, "execution_id": true, "stages": true},
+			required: map[string]bool{"task_id": true, "stages": true},
 		},
 		{
 			name: "update_task_progress",
 			properties: map[string]string{
-				"task_id": "string", "execution_id": "string", "stage": "string", "state": "string", "description": "string",
+				"task_id": "string", "stage": "string", "state": "string", "description": "string",
 			},
-			required: map[string]bool{"task_id": true, "execution_id": true, "stage": true, "state": true},
+			required: map[string]bool{"task_id": true, "stage": true, "state": true},
 		},
 	}
 	for _, tt := range tests {
@@ -115,14 +115,14 @@ func TestLifecycleProgressHandlersPersistPlanAndSequentialUpdate(t *testing.T) {
 	ctx, taskID, executionID, cleanup := setupMCPTaskLifecycle(t)
 	defer cleanup()
 	planResult, err := progressPlanHandler(ctx, lifecycleToolRequest(t, map[string]any{
-		"task_id": taskID, "execution_id": executionID,
-		"stages": []map[string]string{{"id": "research", "title": "研究素材"}, {"id": "writing", "title": "撰写内容"}},
+		"task_id": taskID,
+		"stages":  []map[string]string{{"id": "research", "title": "研究素材"}, {"id": "writing", "title": "撰写内容"}},
 	}))
 	if err != nil || planResult.IsError {
 		t.Fatalf("set plan = %#v, %v", planResult, err)
 	}
 	updateResult, err := progressUpdateHandler(ctx, lifecycleToolRequest(t, map[string]any{
-		"task_id": taskID, "execution_id": executionID, "stage": "research", "state": "active", "description": "正在核验来源",
+		"task_id": taskID, "stage": "research", "state": "active", "description": "正在核验来源",
 	}))
 	if err != nil || updateResult.IsError {
 		t.Fatalf("update stage = %#v, %v", updateResult, err)
@@ -131,6 +131,9 @@ func TestLifecycleProgressHandlersPersistPlanAndSequentialUpdate(t *testing.T) {
 	lifecycle := data["lifecycle"].(map[string]any)
 	if lifecycle["revision"] != float64(2) {
 		t.Fatalf("lifecycle = %#v", lifecycle)
+	}
+	if data["execution_id"] != executionID {
+		t.Fatalf("execution_id = %#v, want token-bound %q", data["execution_id"], executionID)
 	}
 }
 
@@ -148,12 +151,8 @@ func TestLifecycleProgressHandlersRequireMatchingExecutionIdentity(t *testing.T)
 			args: map[string]any{"task_id": taskID, "execution_id": executionID, "stages": []map[string]string{{"id": "one", "title": "One"}, {"id": "two", "title": "Two"}}},
 		},
 		{
-			name: "execution mismatch", ctx: ctx, handler: progressPlanHandler,
-			args: map[string]any{"task_id": taskID, "execution_id": "wrong", "stages": []map[string]string{{"id": "one", "title": "One"}, {"id": "two", "title": "Two"}}},
-		},
-		{
-			name: "update mismatch", ctx: ctx, handler: progressUpdateHandler,
-			args: map[string]any{"task_id": taskID, "execution_id": "wrong", "stage": "one", "state": "active"},
+			name: "task mismatch", ctx: ctx, handler: progressPlanHandler,
+			args: map[string]any{"task_id": "wrong", "stages": []map[string]string{{"id": "one", "title": "One"}, {"id": "two", "title": "Two"}}},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
