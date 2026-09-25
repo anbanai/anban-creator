@@ -29,6 +29,7 @@ export interface TaskLifecycleStage {
   source: TaskLifecycleStageSource
   kind: TaskLifecycleStageKind
   state: TaskLifecycleStageState
+  artifact_paths?: string[]
   latest_update?: string
   started_at?: string
   completed_at?: string
@@ -223,6 +224,7 @@ export interface TaskFile {
   url: string
   is_deliverable?: boolean
   delivery_role?: string
+  producer_stage_id?: string
   preview_url?: string
   download_url?: string
   media_id?: string

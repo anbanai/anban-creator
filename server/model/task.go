@@ -74,21 +74,23 @@ const (
 // TaskLifecyclePlanStage is the agent-owned, host-neutral plan declaration.
 // Runtime state and timestamps are always assigned by the Server.
 type TaskLifecyclePlanStage struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Goal  string `json:"goal,omitempty"`
+	ID            string   `json:"id"`
+	Title         string   `json:"title"`
+	Goal          string   `json:"goal,omitempty"`
+	ArtifactPaths []string `json:"artifact_paths,omitempty"`
 }
 
 type TaskLifecycleStage struct {
-	ID           string     `json:"id"`
-	Title        string     `json:"title"`
-	Goal         string     `json:"goal,omitempty"`
-	Source       string     `json:"source"`
-	Kind         string     `json:"kind"`
-	State        string     `json:"state"`
-	LatestUpdate string     `json:"latest_update,omitempty"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	ID            string     `json:"id"`
+	Title         string     `json:"title"`
+	Goal          string     `json:"goal,omitempty"`
+	ArtifactPaths []string   `json:"artifact_paths,omitempty"`
+	Source        string     `json:"source"`
+	Kind          string     `json:"kind"`
+	State         string     `json:"state"`
+	LatestUpdate  string     `json:"latest_update,omitempty"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
 type TaskLifecycle struct {

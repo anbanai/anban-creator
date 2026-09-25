@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -411,6 +414,7 @@ func normalizeTaskLifecyclePlan(stages []model.TaskLifecyclePlanStage) ([]model.
 		return nil, ErrInvalidTaskLifecyclePlan
 	}
 	seen := make(map[string]struct{}, len(stages))
+	seenArtifacts := make(map[string]struct{})
 	normalized := make([]model.TaskLifecyclePlanStage, 0, len(stages))
 	for _, stage := range stages {
 		stage.ID = strings.TrimSpace(stage.ID)
@@ -423,6 +427,22 @@ func normalizeTaskLifecyclePlan(stages []model.TaskLifecyclePlanStage) ([]model.
 			return nil, ErrInvalidTaskLifecyclePlan
 		}
 		seen[stage.ID] = struct{}{}
+		if len(stage.ArtifactPaths) > 64 {
+			return nil, ErrInvalidTaskLifecyclePlan
+		}
+		stage.ArtifactPaths = append([]string(nil), stage.ArtifactPaths...)
+		for i, artifactPath := range stage.ArtifactPaths {
+			artifactPath = strings.TrimSpace(strings.ReplaceAll(artifactPath, "\\", "/"))
+			cleaned := path.Clean(artifactPath)
+			if len(artifactPath) > 500 || path.IsAbs(cleaned) || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+				return nil, ErrInvalidTaskLifecyclePlan
+			}
+			if _, exists := seenArtifacts[cleaned]; exists {
+				return nil, ErrInvalidTaskLifecyclePlan
+			}
+			seenArtifacts[cleaned] = struct{}{}
+			stage.ArtifactPaths[i] = cleaned
+		}
 		normalized = append(normalized, stage)
 	}
 	return normalized, nil
@@ -452,14 +472,14 @@ func replanTaskLifecycle(current model.TaskLifecycle, executionID string, plan [
 	for i, declaration := range plan {
 		if i < immutableCount {
 			old := current.Stages[i]
-			if old.ID != declaration.ID || old.Title != declaration.Title || old.Goal != declaration.Goal {
+			if old.ID != declaration.ID || old.Title != declaration.Title || old.Goal != declaration.Goal || !slices.Equal(old.ArtifactPaths, declaration.ArtifactPaths) {
 				return model.TaskLifecycle{}, false, ErrTaskLifecycleImmutablePrefix
 			}
 			nextStages = append(nextStages, old)
 			continue
 		}
 		nextStages = append(nextStages, model.TaskLifecycleStage{
-			ID: declaration.ID, Title: declaration.Title, Goal: declaration.Goal,
+			ID: declaration.ID, Title: declaration.Title, Goal: declaration.Goal, ArtifactPaths: append([]string(nil), declaration.ArtifactPaths...),
 			Source: model.TaskLifecycleSourceAgent, Kind: model.TaskLifecycleKindWork,
 			State: model.TaskLifecycleStatePending,
 		})
@@ -502,12 +522,7 @@ func equalTaskLifecyclePlan(left, right model.TaskLifecycle) bool {
 	if left.Version != right.Version || left.ExecutionID != right.ExecutionID || len(left.Stages) != len(right.Stages) {
 		return false
 	}
-	for i := range left.Stages {
-		if left.Stages[i] != right.Stages[i] {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(left.Stages, right.Stages)
 }
 
 func advanceTaskLifecycle(current model.TaskLifecycle, stageID, state, description string, now time.Time) (model.TaskLifecycle, bool, error) {

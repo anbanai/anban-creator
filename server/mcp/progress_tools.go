@@ -14,7 +14,7 @@ import (
 func registerProgressTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "set_task_progress_plan",
-		Description: "Declare or replan the current task execution's ordered work stages. Call once before starting work and only from the top-level agent.",
+		Description: "Declare or replan the current task execution's ordered work stages. Call once before starting work and only from the top-level agent. For each stage, list its expected task output files in artifact_paths (paths relative to the workspace, often under output/); these paths identify which stage produced each file.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -27,9 +27,10 @@ func registerProgressTools(server *mcp.Server) {
 						"type":                 "object",
 						"additionalProperties": false,
 						"properties": map[string]any{
-							"id":    map[string]any{"type": "string", "pattern": `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`},
-							"title": map[string]any{"type": "string", "minLength": 1},
-							"goal":  map[string]any{"type": "string"},
+							"id":             map[string]any{"type": "string", "pattern": `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`},
+							"title":          map[string]any{"type": "string", "minLength": 1},
+							"goal":           map[string]any{"type": "string"},
+							"artifact_paths": map[string]any{"type": "array", "maxItems": 64, "items": map[string]any{"type": "string", "maxLength": 500}, "description": "Expected workspace-relative output paths produced by this stage, usually under output/"},
 						},
 						"required": []any{"id", "title"},
 					},

@@ -33,6 +33,20 @@ function uniqueStage(stages: TaskLifecycleStage[]) {
   return stages.length === 1 ? stages[0] : undefined
 }
 
+function explicitlyProducesFile(stage: TaskLifecycleStage, fileName: string) {
+  const normalizedName = fileName.toLowerCase()
+  const hasProducerContext = (text: string) => {
+    const normalizedText = text.toLowerCase()
+    const fileIndex = normalizedText.lastIndexOf(normalizedName)
+    if (fileIndex < 0) return false
+    const before = normalizedText.slice(Math.max(0, fileIndex - 32), fileIndex)
+    const after = normalizedText.slice(fileIndex + normalizedName.length, fileIndex + normalizedName.length + 12)
+    return /(?:写入|写|生成|产出|输出|保存|创建|导出|制作)(?:文件|至|到|为)?\s*[:：`]*$/.test(before)
+      || /^\s*(?:已|已经)?(?:写入|写|生成|产出|输出|保存|创建|导出|制作)/.test(after)
+  }
+  return hasProducerContext(stage.goal ?? '') || hasProducerContext(stage.latest_update ?? '')
+}
+
 /** Presentation grouping only: never changes file state or download eligibility.
  * Upload timestamps are intentionally not used: artifacts may be uploaded in a
  * batch at completion. Ambiguous matches stay visible without invented provenance.
@@ -56,18 +70,40 @@ export function groupTaskStageFiles(
       continue
     }
     const name = basename(file.file_name)
+    const producerStage = file.producer_stage_id
+      ? stages.find((stage) => stage.id === file.producer_stage_id)
+      : undefined
+    if (producerStage) {
+      byStage.set(producerStage.id, [...(byStage.get(producerStage.id) ?? []), file])
+      continue
+    }
     const declarations = workflowStages.filter((stage) => stage.artifact_paths?.some((path) => basename(path) === name))
     const declaredMatches = stages.filter((stage) => declarations.some((declaration) =>
       normalize(declaration.key) === normalize(stage.id) || normalize(declaration.label) === normalize(stage.title),
     ))
+    if (declaredMatches.length) {
+      const stage = uniqueStage(declaredMatches)
+      if (stage) byStage.set(stage.id, [...(byStage.get(stage.id) ?? []), file])
+      else unassigned.push(file)
+      continue
+    }
+    const explicitProducerMatches = stages.filter((stage) => explicitlyProducesFile(stage, name))
+    const explicitProducer = uniqueStage(explicitProducerMatches)
+    if (explicitProducer) {
+      byStage.set(explicitProducer.id, [...(byStage.get(explicitProducer.id) ?? []), file])
+      continue
+    }
+    if (explicitProducerMatches.length > 1) {
+      unassigned.push(file)
+      continue
+    }
     const namedMatches = stages.filter((stage) => name && `${stage.goal ?? ''} ${stage.latest_update ?? ''}`.toLowerCase().includes(name))
     const pattern = roleStages[file.delivery_role ?? ''] ?? roleStages[file.role]
       ?? (name === 'montage-project.json' ? /剪辑|管线|montage|editing/i : undefined)
     const roleMatches = pattern ? stages.filter((stage) => pattern.test(`${stage.id} ${stage.title}`)) : []
-    // An ambiguous stronger match must not silently fall through to a weaker one.
-    // A review/update may mention a file it consumes. Keep the producing role
-    // ahead of free-text references so progress messages cannot move artifacts.
-    const candidates = declaredMatches.length ? declaredMatches : roleMatches.length ? roleMatches : namedMatches
+    // Keep broad role inference ahead of incidental filename mentions. Only
+    // explicit producer evidence above overrides it for legacy lifecycle data.
+    const candidates = roleMatches.length ? roleMatches : namedMatches
     const stage = candidates.length ? uniqueStage(candidates) : workStages.length === 1 ? uniqueStage(stages) : undefined
     if (stage) byStage.set(stage.id, [...(byStage.get(stage.id) ?? []), file])
     else unassigned.push(file)

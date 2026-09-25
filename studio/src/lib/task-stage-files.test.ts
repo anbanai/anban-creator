@@ -34,6 +34,45 @@ describe('groupTaskStageFiles', () => {
     expect(result.unassigned.map((item) => item.id)).toEqual(['unknown.json'])
   })
 
+  it('uses explicit producer wording to keep topic analysis in the research stage', () => {
+    const files = [file('topic-analysis.md', { role: 'markdown', delivery_role: 'content' })]
+    const plan: TaskLifecycle = {
+      ...lifecycle,
+      stages: [
+        { ...lifecycle.stages[0], title: '选题研究与遴选', latest_update: '基于素材研究选题，评分选出 Top1 并写 topic-analysis.md' },
+        { ...lifecycle.stages[1], title: '内容创作与标题锁定' },
+      ],
+    }
+    const result = groupTaskStageFiles(files, plan)
+
+    expect(result.byStage.get('research')).toEqual(files)
+    expect(result.byStage.has('writing')).toBe(false)
+    expect(result.unassigned).toEqual([])
+  })
+
+  it('uses the server producer stage id before file-role inference', () => {
+    const files = [file('topic-analysis.md', { role: 'markdown', delivery_role: 'content', producer_stage_id: 'research' })]
+    const result = groupTaskStageFiles(files, lifecycle)
+
+    expect(result.byStage.get('research')).toEqual(files)
+    expect(result.byStage.has('writing')).toBe(false)
+  })
+
+  it('leaves a file unassigned when multiple stages explicitly claim to produce it', () => {
+    const files = [file('topic-analysis.md', { role: 'markdown', delivery_role: 'content' })]
+    const plan: TaskLifecycle = {
+      ...lifecycle,
+      stages: [
+        { ...lifecycle.stages[0], goal: '研究选题并写 topic-analysis.md' },
+        { ...lifecycle.stages[1], goal: '再生成 topic-analysis.md' },
+      ],
+    }
+    const result = groupTaskStageFiles(files, plan)
+
+    expect(result.byStage.size).toBe(0)
+    expect(result.unassigned).toEqual(files)
+  })
+
   it('keeps the producer stable when a later review mentions the same file', () => {
     const files = [file('04-article-final.md', { role: 'markdown', delivery_role: 'final_markdown' })]
     const plan: TaskLifecycle = { ...lifecycle, stages: [lifecycle.stages[1], { ...lifecycle.stages[1], id: 'review', title: '质量复核', latest_update: '内容核验完成' }] }

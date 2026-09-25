@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1403,11 +1404,45 @@ func (s *TaskService) GetVisibleFiles(ctx context.Context, taskID string) ([]*mo
 		return nil, fmt.Errorf("get retained task files: %w", err)
 	}
 	files := append(delivered, retained...)
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("get task lifecycle for artifact stages: %w", err)
+	}
+	assignTaskFileProducerStages(task, files)
 	s.EnrichFilesWithURLs(ctx, files)
 	if err := s.EnrichFilesWithDeliveryMetadata(ctx, taskID, files); err != nil {
 		return nil, fmt.Errorf("enrich task file delivery metadata: %w", err)
 	}
 	return files, nil
+}
+
+func assignTaskFileProducerStages(task *model.Task, files []*model.TaskFile) {
+	if task == nil {
+		return
+	}
+	lifecycle := task.Lifecycle.Data()
+	if lifecycle.ExecutionID == "" {
+		return
+	}
+	stageByPath := make(map[string]string)
+	for _, stage := range lifecycle.Stages {
+		if stage.Source != model.TaskLifecycleSourceAgent || stage.Kind != model.TaskLifecycleKindWork {
+			continue
+		}
+		for _, artifactPath := range stage.ArtifactPaths {
+			cleaned := path.Clean(strings.ReplaceAll(strings.TrimSpace(artifactPath), "\\", "/"))
+			if cleaned != "." {
+				stageByPath[cleaned] = stage.ID
+			}
+		}
+	}
+	for _, file := range files {
+		if file == nil || file.ExecutionID != lifecycle.ExecutionID {
+			continue
+		}
+		cleaned := path.Clean(strings.ReplaceAll(strings.TrimSpace(file.FilePath), "\\", "/"))
+		file.ProducerStageID = stageByPath[cleaned]
+	}
 }
 
 func (s *TaskService) GetVisibleFilesForUser(ctx context.Context, userID, taskID string) ([]*model.TaskFile, error) {

@@ -23,6 +23,7 @@ type TaskFile struct {
 	URL             string    `gorm:"-" json:"url"`
 	IsDeliverable   bool      `gorm:"-" json:"is_deliverable"`
 	DeliveryRole    string    `gorm:"-" json:"delivery_role,omitempty"`
+	ProducerStageID string    `gorm:"-" json:"producer_stage_id,omitempty"`
 	PreviewURL      string    `gorm:"-" json:"preview_url"`
 	DownloadURL     string    `gorm:"-" json:"download_url,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -64,6 +65,8 @@ func TestSetTaskProgressPlanValidatesAgentStages(t *testing.T) {
 		{name: "reserved id", stages: []model.TaskLifecyclePlanStage{{ID: "system_prepare", Title: "Prepare"}, {ID: "write", Title: "Write"}}},
 		{name: "duplicate id", stages: []model.TaskLifecyclePlanStage{{ID: "write", Title: "Write"}, {ID: "write", Title: "Review"}}},
 		{name: "blank title", stages: []model.TaskLifecyclePlanStage{{ID: "write", Title: " "}, {ID: "review", Title: "Review"}}},
+		{name: "artifact path escapes workspace", stages: []model.TaskLifecyclePlanStage{{ID: "research", Title: "Research", ArtifactPaths: []string{"output/../../private.md"}}, {ID: "writing", Title: "Writing"}}},
+		{name: "artifact path claimed by multiple stages", stages: []model.TaskLifecyclePlanStage{{ID: "research", Title: "Research", ArtifactPaths: []string{"output/notes.md"}}, {ID: "writing", Title: "Writing", ArtifactPaths: []string{"output/notes.md"}}}},
 	}
 
 	for _, tt := range tests {
@@ -80,6 +83,45 @@ func TestSetTaskProgressPlanValidatesAgentStages(t *testing.T) {
 				t.Fatalf("invalid plan mutated lifecycle: %#v", persisted.Lifecycle.Data())
 			}
 		})
+	}
+}
+
+func TestSetTaskProgressPlanPersistsStageArtifactPaths(t *testing.T) {
+	ctx := context.Background()
+	svc, _, task, execution := setupTaskLifecycleTest(t, model.PlatformMoments)
+	plan := validLifecyclePlan()
+	plan[0].ArtifactPaths = []string{"output/topic-analysis.md"}
+
+	lifecycle, err := svc.SetTaskProgressPlan(ctx, task.ID, execution.ID, plan)
+	if err != nil {
+		t.Fatalf("SetTaskProgressPlan: %v", err)
+	}
+	if len(lifecycle.Stages[0].ArtifactPaths) != 1 || lifecycle.Stages[0].ArtifactPaths[0] != "output/topic-analysis.md" {
+		t.Fatalf("research artifact paths = %#v", lifecycle.Stages[0].ArtifactPaths)
+	}
+}
+
+func TestAssignTaskFileProducerStagesMatchesExactPathAndExecution(t *testing.T) {
+	task := &model.Task{Lifecycle: datatypes.NewJSONType(model.TaskLifecycle{
+		ExecutionID: "current",
+		Stages: []model.TaskLifecycleStage{{
+			ID: "research", Source: model.TaskLifecycleSourceAgent, Kind: model.TaskLifecycleKindWork,
+			ArtifactPaths: []string{"output/topic-analysis.md"},
+		}},
+	})}
+	files := []*model.TaskFile{
+		{ExecutionID: "current", FilePath: "output/topic-analysis.md"},
+		{ExecutionID: "current", FilePath: "output/archive/topic-analysis.md"},
+		{ExecutionID: "previous", FilePath: "output/topic-analysis.md"},
+	}
+
+	assignTaskFileProducerStages(task, files)
+
+	if files[0].ProducerStageID != "research" {
+		t.Fatalf("current exact-path producer stage = %q, want research", files[0].ProducerStageID)
+	}
+	if files[1].ProducerStageID != "" || files[2].ProducerStageID != "" {
+		t.Fatalf("unmatched files received producer stages: %#v", files)
 	}
 }
 
