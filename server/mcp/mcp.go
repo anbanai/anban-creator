@@ -313,6 +313,7 @@ type executionToolScope struct {
 	RequireProjectID bool
 	RequireTaskID    bool
 	RequireExecution bool
+	ForbidExecution  bool
 }
 
 var executionToolScopes = map[string]executionToolScope{
@@ -345,10 +346,10 @@ var executionToolScopes = map[string]executionToolScope{
 	"set_task_progress_plan":         {RequireTaskID: true},
 	"update_task_progress":           {RequireTaskID: true},
 	"submit_agent_feedback":          {RequireTaskID: true},
-	"submit_completion_metadata":     {RequireTaskID: true, RequireExecution: true},
-	"recompute_content_tags":         {RequireTaskID: true, RequireExecution: true},
-	"recompute_agent_feedback":       {RequireTaskID: true, RequireExecution: true},
-	"get_completion_metadata_status": {RequireTaskID: true, RequireExecution: true},
+	"submit_completion_metadata":     {RequireTaskID: true, ForbidExecution: true},
+	"recompute_content_tags":         {RequireTaskID: true},
+	"recompute_agent_feedback":       {RequireTaskID: true},
+	"get_completion_metadata_status": {RequireTaskID: true},
 	"create_draft":                   {Denied: true},
 	"generate_image":                 {RequireProjectID: true, RequireTaskID: true},
 	"crop_image":                     {RequireTaskID: true},
@@ -393,6 +394,9 @@ func validateExecutionToolScope(toolName string, arguments map[string]any, proje
 		{name: "execution_id", expected: executionID, required: rule.RequireExecution},
 	} {
 		requested, present := stringArgument(arguments, field.name)
+		if field.name == "execution_id" && rule.ForbidExecution && present {
+			return fmt.Errorf("execution-scoped MCP tool %q does not accept execution_id; identity is derived from the credential", toolName)
+		}
 		if field.required && (!present || strings.TrimSpace(requested) == "") {
 			return fmt.Errorf("execution-scoped MCP tool %q requires %s", toolName, field.name)
 		}

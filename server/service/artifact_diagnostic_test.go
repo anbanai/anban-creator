@@ -83,7 +83,7 @@ func TestPrepareTaskArtifactUploadPreservesWrappedConnectionReset(t *testing.T) 
 	store.statErr = &url.Error{Op: "HEAD", URL: "https://storage.invalid/object?Signature=SECRET", Err: syscall.ECONNRESET}
 
 	_, err := svc.PrepareTaskArtifactUpload(context.Background(), task.ID, task.UserID, executionID, TaskArtifactUploadConfig{}, TaskArtifactPrepareRequest{
-		TaskID: task.ID, ExecutionID: executionID, RelativePath: "output/article.md",
+		TaskID: task.ID, RelativePath: "output/article.md",
 		ContentType: "text/markdown", Size: 7, SHA256: taskArtifactTestSHA256,
 	})
 	if !errors.Is(err, syscall.ECONNRESET) {

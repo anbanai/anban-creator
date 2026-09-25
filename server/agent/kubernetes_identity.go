@@ -39,7 +39,7 @@ type WorkloadIdentity struct {
 // WorkloadVerifier authenticates a provider credential and resolves it to the
 // common runtime and execution ownership identity.
 type WorkloadVerifier interface {
-	Verify(context.Context, string, string) (*WorkloadIdentity, error)
+	Verify(context.Context, string) (*WorkloadIdentity, error)
 }
 
 type KubernetesWorkloadVerifier struct {
@@ -55,9 +55,9 @@ func NewKubernetesWorkloadVerifier(kube kubernetes.Interface, namespace, service
 	return &KubernetesWorkloadVerifier{kube: kube, namespace: namespace, serviceAccount: serviceAccount}, nil
 }
 
-func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requestedExecutionID string) (*WorkloadIdentity, error) {
-	if strings.TrimSpace(token) == "" || strings.TrimSpace(requestedExecutionID) == "" {
-		return nil, errors.New("workload token and execution ID are required")
+func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token string) (*WorkloadIdentity, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, errors.New("workload token is required")
 	}
 	review, err := v.kube.AuthenticationV1().TokenReviews().Create(ctx, &authv1.TokenReview{Spec: authv1.TokenReviewSpec{Token: token, Audiences: []string{KubernetesWorkloadAudience}}}, metav1.CreateOptions{})
 	if err != nil {
@@ -124,8 +124,12 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 		return nil, errors.New("owning Job active deadline has expired")
 	}
 	labels := job.Labels
+	executionID := strings.TrimSpace(labels[kubernetesExecutionIDLabel])
+	taskID := strings.TrimSpace(labels[kubernetesTaskIDLabel])
+	projectID := strings.TrimSpace(labels[kubernetesProjectIDLabel])
+	userID := strings.TrimSpace(labels[kubernetesUserIDLabel])
 	if labels["app.kubernetes.io/name"] != kubernetesAgentAppName || labels["app.kubernetes.io/component"] != "execution" ||
-		labels[kubernetesExecutionIDLabel] != kubernetesLabelValue(requestedExecutionID) || labels[kubernetesTaskIDLabel] == "" || labels[kubernetesProjectIDLabel] == "" || labels[kubernetesUserIDLabel] == "" {
+		executionID == "" || taskID == "" || projectID == "" || userID == "" {
 		return nil, errors.New("owning Job runtime identity labels mismatch")
 	}
 	for _, key := range []string{"app.kubernetes.io/name", "app.kubernetes.io/component", kubernetesExecutionIDLabel, kubernetesTaskIDLabel, kubernetesProjectIDLabel, kubernetesUserIDLabel} {
@@ -133,15 +137,22 @@ func (v *KubernetesWorkloadVerifier) Verify(ctx context.Context, token, requeste
 			return nil, errors.New("bound Pod and owning Job runtime identity labels conflict")
 		}
 	}
+	if !validRuntimeIdentityLabel(executionID) || !validRuntimeIdentityLabel(taskID) || !validRuntimeIdentityLabel(projectID) || !validRuntimeIdentityLabel(userID) {
+		return nil, errors.New("owning Job runtime identity labels are malformed")
+	}
 	return &WorkloadIdentity{
 		RuntimeIdentity: model.RuntimeIdentity{Scope: v.namespace, Workload: job.Name, InstanceID: string(job.UID)},
 		Target:          "kubernetes",
-		ExecutionID:     requestedExecutionID,
-		TaskID:          labels[kubernetesTaskIDLabel],
-		ProjectID:       labels[kubernetesProjectIDLabel],
-		UserID:          labels[kubernetesUserIDLabel],
+		ExecutionID:     executionID,
+		TaskID:          taskID,
+		ProjectID:       projectID,
+		UserID:          userID,
 		Deadline:        jobDeadline,
 	}, nil
+}
+
+func validRuntimeIdentityLabel(value string) bool {
+	return value != "" && value == kubernetesLabelValue(value) && len(value) <= 63
 }
 
 func terminalJobCondition(conditions []batchv1.JobCondition) bool {

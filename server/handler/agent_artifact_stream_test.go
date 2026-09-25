@@ -26,6 +26,15 @@ func TestAgentArtifactStreamUsesExecutionAuthAndStreamsBody(t *testing.T) {
 		req.Header.Set("X-Anban-Artifact-SHA256", hex.EncodeToString(sum[:]))
 		return req
 	}
+	legacyIdentityRequest := request(token)
+	legacyIdentityRequest.Header.Set("X-Anban-Execution-ID", "forged-execution")
+	legacyIdentityResponse, err := app.Test(legacyIdentityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyIdentityResponse.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("legacy execution header status = %d, want %d", legacyIdentityResponse.StatusCode, fiber.StatusBadRequest)
+	}
 
 	resp, err := app.Test(request(token))
 	if err != nil {

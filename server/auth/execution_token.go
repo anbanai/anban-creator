@@ -28,6 +28,23 @@ type ExecutionClaims struct {
 	jwt.RegisteredClaims
 }
 
+// ExecutionIdentity is the verified principal for one managed execution. It
+// is created only after validating an execution credential and carried as a
+// single unit through request handling.
+type ExecutionIdentity struct {
+	UserID      string
+	ProjectID   string
+	TaskID      string
+	ExecutionID string
+}
+
+func ExecutionIdentityFromClaims(claims ExecutionClaims) ExecutionIdentity {
+	return ExecutionIdentity{
+		UserID: claims.UserID, ProjectID: claims.ProjectID,
+		TaskID: claims.TaskID, ExecutionID: claims.ExecutionID,
+	}
+}
+
 // ExecutionTokenService issues and validates short-lived agent execution JWTs.
 type ExecutionTokenService struct {
 	secret []byte

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -42,12 +43,23 @@ type taskArtifactFinalizationClaim struct {
 
 type TaskArtifactPrepareRequest struct {
 	TaskID       string `json:"task_id"`
-	ExecutionID  string `json:"execution_id,omitempty"`
 	RelativePath string `json:"relative_path"`
 	Filename     string `json:"filename"`
 	ContentType  string `json:"content_type"`
 	Size         int64  `json:"size"`
 	SHA256       string `json:"sha256"`
+}
+
+func (r *TaskArtifactPrepareRequest) UnmarshalJSON(data []byte) error {
+	type wire TaskArtifactPrepareRequest
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	var value wire
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	*r = TaskArtifactPrepareRequest(value)
+	return nil
 }
 
 type TaskArtifactUploadConfig struct {
@@ -66,9 +78,20 @@ type TaskArtifactPrepareResult struct {
 }
 
 type TaskArtifactManifestRequest struct {
-	TaskID      string                     `json:"task_id"`
-	ExecutionID string                     `json:"execution_id,omitempty"`
-	Files       []TaskArtifactManifestFile `json:"files"`
+	TaskID string                     `json:"task_id"`
+	Files  []TaskArtifactManifestFile `json:"files"`
+}
+
+func (r *TaskArtifactManifestRequest) UnmarshalJSON(data []byte) error {
+	type wire TaskArtifactManifestRequest
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	var value wire
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	*r = TaskArtifactManifestRequest(value)
+	return nil
 }
 
 type TaskArtifactManifestFile struct {
@@ -98,7 +121,7 @@ func (s *TaskService) PrepareTaskArtifactUpload(ctx context.Context, taskID, aut
 	if err != nil {
 		return nil, err
 	}
-	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID, req.ExecutionID)
+	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +242,7 @@ func (s *TaskService) FinalizeTaskArtifactManifest(ctx context.Context, taskID, 
 	if err != nil {
 		return err
 	}
-	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID, req.ExecutionID)
+	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID)
 	if err != nil {
 		return err
 	}
@@ -514,14 +537,10 @@ func validateTaskArtifactObject(relPath string, size int64, hash string, stat *s
 	return nil
 }
 
-func (s *TaskService) validateTaskArtifactExecution(ctx context.Context, task *model.Task, userID, authenticatedExecutionID, requestedExecutionID string) (string, error) {
+func (s *TaskService) validateTaskArtifactExecution(ctx context.Context, task *model.Task, userID, authenticatedExecutionID string) (string, error) {
 	authenticatedExecutionID = strings.TrimSpace(authenticatedExecutionID)
-	requestedExecutionID = strings.TrimSpace(requestedExecutionID)
 	if authenticatedExecutionID == "" {
 		return "", fmt.Errorf("%w: execution identity requires an execution token", ErrTaskArtifactExecutionConflict)
-	}
-	if requestedExecutionID == "" || requestedExecutionID != authenticatedExecutionID {
-		return "", fmt.Errorf("%w: execution identity does not match request", ErrTaskArtifactExecutionConflict)
 	}
 	if err := s.ValidateAgentExecutionAccess(ctx, userID, task.ProjectID, task.ID, authenticatedExecutionID); err != nil {
 		return "", fmt.Errorf("%w: %v", ErrTaskArtifactExecutionConflict, err)

@@ -14,7 +14,7 @@ import (
 	ktesting "k8s.io/client-go/testing"
 )
 
-func TestWorkloadVerifierBindsTokenPodJobAndExecution(t *testing.T) {
+func TestWorkloadVerifierDerivesExecutionFromVerifiedPodAndJob(t *testing.T) {
 	job := workloadTestJob()
 	pod := workloadTestPod(job)
 	kube := fake.NewClientset(job, pod)
@@ -33,7 +33,7 @@ func TestWorkloadVerifierBindsTokenPodJobAndExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, err := verifier.Verify(context.Background(), "bound-token", "execution-1")
+	identity, err := verifier.Verify(context.Background(), "bound-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestWorkloadVerifierRejectsSpoofedIdentity(t *testing.T) {
 			kube := fake.NewClientset(j, p)
 			kube.PrependReactor("create", "tokenreviews", func(ktesting.Action) (bool, runtime.Object, error) { return true, r, nil })
 			v, _ := NewKubernetesWorkloadVerifier(kube, "anban", "runner")
-			if _, err := v.Verify(context.Background(), "token", "execution-1"); err == nil {
+			if _, err := v.Verify(context.Background(), "token"); err == nil {
 				t.Fatal("spoofed workload accepted")
 			}
 		})
@@ -204,7 +204,7 @@ func TestWorkloadVerifierRejectsMissingBoundObjects(t *testing.T) {
 				return true, &authv1.TokenReview{Status: authv1.TokenReviewStatus{Authenticated: true, Audiences: []string{KubernetesWorkloadAudience}, User: authv1.UserInfo{Username: "system:serviceaccount:anban:runner", Extra: map[string]authv1.ExtraValue{KubernetesPodNameExtra: {"pod-1"}, KubernetesPodUIDExtra: {"pod-uid-1"}}}}}, nil
 			})
 			v, _ := NewKubernetesWorkloadVerifier(kube, "anban", "runner")
-			if _, err := v.Verify(context.Background(), "token", "execution-1"); err == nil {
+			if _, err := v.Verify(context.Background(), "token"); err == nil {
 				t.Fatalf("missing %s accepted", missing)
 			}
 		})

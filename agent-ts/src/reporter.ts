@@ -88,8 +88,7 @@ export class Reporter {
   async submitCompletionMetadata(metadata: unknown, signal: AbortSignal = DEFAULT_SIGNAL): Promise<void> {
     await retryRequest("complete", (requestSignal) => this.callMCP("submit_completion_metadata", {
       task_id: this.taskID,
-      execution_id: this.config.executionID,
-      metadata: JSON.stringify(metadata),
+      metadata: JSON.stringify(stripMetadataIdentity(metadata)),
     }, requestSignal), { signal, timeoutMs: 30_000, maxAttempts: 4 });
   }
 
@@ -116,7 +115,6 @@ export class Reporter {
             "X-Anban-Artifact-Size": String(metadata.size),
             "X-Anban-Artifact-SHA256": metadata.sha256,
             "X-Anban-Task-ID": this.taskID,
-            "X-Anban-Execution-ID": this.config.executionID,
           },
           body: requestBody,
           signal: requestSignal,
@@ -135,8 +133,8 @@ export class Reporter {
     await this.postJSON("manifest", "/api/v1/agent/artifacts/manifest", this.identity({ files }), signal, 30_000, deadlineAt);
   }
 
-  private identity<T extends object>(body: T): T & { task_id: string; execution_id?: string } {
-    return { ...body, task_id: this.taskID, ...(this.config.executionID ? { execution_id: this.config.executionID } : {}) };
+  private identity<T extends object>(body: T): T & { task_id: string } {
+    return { ...body, task_id: this.taskID };
   }
 
   private async postJSON<T>(operation: TransferOperation, path: string, body: unknown, signal: AbortSignal, timeoutMs?: number, deadlineAt?: number): Promise<T> {
@@ -208,6 +206,20 @@ export class Reporter {
     if (envelope.code !== undefined && envelope.code !== 0) throw protocolFailure(operation);
     return envelope.data as T;
   }
+}
+
+function stripMetadataIdentity(metadata: unknown): unknown {
+  let value = metadata;
+  if (typeof metadata === "string") {
+    try {
+      value = JSON.parse(metadata) as unknown;
+    } catch {
+      return metadata;
+    }
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const { task_id: _taskID, execution_id: _executionID, ...payload } = value as Record<string, unknown>;
+  return payload;
 }
 
 async function responseError(operation: TransferOperation, response: Response): Promise<TypedTransportError> {

@@ -35,20 +35,16 @@ func NewDockerWorkloadVerifier(docker dockerContainerInspector, tokens *auth.Wor
 	return &DockerWorkloadVerifier{docker: docker, tokens: tokens}, nil
 }
 
-func (v *DockerWorkloadVerifier) Verify(ctx context.Context, rawToken, requestedExecutionID string) (*WorkloadIdentity, error) {
+func (v *DockerWorkloadVerifier) Verify(ctx context.Context, rawToken string) (*WorkloadIdentity, error) {
 	if v == nil || v.docker == nil || v.tokens == nil {
 		return nil, errors.New("Docker workload verifier is not configured")
 	}
-	requestedExecutionID = strings.TrimSpace(requestedExecutionID)
-	if strings.TrimSpace(rawToken) == "" || requestedExecutionID == "" {
-		return nil, errors.New("workload token and execution ID are required")
+	if strings.TrimSpace(rawToken) == "" {
+		return nil, errors.New("workload token is required")
 	}
 	claims, err := v.tokens.Validate(rawToken)
 	if err != nil {
 		return nil, err
-	}
-	if claims.ExecutionID != requestedExecutionID {
-		return nil, errors.New("workload token execution identity mismatch")
 	}
 	inspected, err := v.docker.ContainerInspect(ctx, claims.RuntimeWorkload)
 	if err != nil {

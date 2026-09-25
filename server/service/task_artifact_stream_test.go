@@ -152,7 +152,7 @@ func TestStreamTaskArtifactUploadsWithoutOSS(t *testing.T) {
 		t.Fatalf("stored body = %q, %v", stored, err)
 	}
 	if err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
-		TaskID: task.ID, ExecutionID: executionID,
+		TaskID: task.ID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: req.RelativePath, ObjectKey: got.ObjectKey, ContentType: req.ContentType,
 			Size: got.Size, SHA256: got.SHA256,
@@ -177,8 +177,8 @@ func TestFinalizeTaskArtifactManifestRejectsMalformedAttemptKey(t *testing.T) {
 	req := streamArtifactRequest("artifact-body")
 	malformed := buildTaskArtifactStoragePrefix(task, executionID) + "staging/sha256/" + req.SHA256 + "/not-a-uuid/" + req.RelativePath
 	err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
-		TaskID: task.ID, ExecutionID: executionID,
-		Files: []TaskArtifactManifestFile{{RelativePath: req.RelativePath, ObjectKey: malformed, Size: req.Size, SHA256: req.SHA256}},
+		TaskID: task.ID,
+		Files:  []TaskArtifactManifestFile{{RelativePath: req.RelativePath, ObjectKey: malformed, Size: req.Size, SHA256: req.SHA256}},
 	})
 	if !errors.Is(err, ErrTaskArtifactInvalid) {
 		t.Fatalf("malformed attempt key error = %v", err)
@@ -192,8 +192,8 @@ func TestFinalizeTaskArtifactManifestRejectsUnregisteredAttemptKey(t *testing.T)
 	req := streamArtifactRequest("artifact-body")
 	unregistered := buildTaskArtifactStagingStorageKey(task, executionID, req.SHA256, uuid.NewString(), req.RelativePath)
 	err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
-		TaskID: task.ID, ExecutionID: executionID,
-		Files: []TaskArtifactManifestFile{{RelativePath: req.RelativePath, ObjectKey: unregistered, Size: req.Size, SHA256: req.SHA256}},
+		TaskID: task.ID,
+		Files:  []TaskArtifactManifestFile{{RelativePath: req.RelativePath, ObjectKey: unregistered, Size: req.Size, SHA256: req.SHA256}},
 	})
 	if !errors.Is(err, ErrTaskArtifactInvalid) {
 		t.Fatalf("unregistered attempt key error = %v", err)
@@ -274,7 +274,7 @@ func TestTaskArtifactMutationsRejectDeletingTask(t *testing.T) {
 	if _, err := svc.StreamTaskArtifact(t.Context(), task.ID, task.UserID, executionID, streamArtifactRequest("artifact-body")); !errors.Is(err, ErrTaskDeleting) {
 		t.Fatalf("StreamTaskArtifact error = %v, want ErrTaskDeleting", err)
 	}
-	if err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{TaskID: task.ID, ExecutionID: executionID}); !errors.Is(err, ErrTaskDeleting) {
+	if err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{TaskID: task.ID}); !errors.Is(err, ErrTaskDeleting) {
 		t.Fatalf("FinalizeTaskArtifactManifest error = %v, want ErrTaskDeleting", err)
 	}
 }
@@ -591,7 +591,7 @@ func TestFinalizeTaskArtifactManifestReusesImmutableObjectAcrossStreamAttempts(t
 	}
 	manifest := func(result *TaskArtifactStreamResult) error {
 		return svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
-			TaskID: task.ID, ExecutionID: executionID,
+			TaskID: task.ID,
 			Files: []TaskArtifactManifestFile{{
 				RelativePath: firstReq.RelativePath, ObjectKey: result.ObjectKey, ContentType: result.ContentType,
 				Size: result.Size, SHA256: result.SHA256,
@@ -645,7 +645,7 @@ func TestTaskArtifactManifestPromotionKeepsImmutableObjectAfterStagingCleanup(t 
 		t.Fatal(err)
 	}
 	if err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
-		TaskID: task.ID, ExecutionID: executionID,
+		TaskID: task.ID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: req.RelativePath, ObjectKey: result.ObjectKey, ContentType: result.ContentType,
 			Size: result.Size, SHA256: result.SHA256,
@@ -685,7 +685,7 @@ func TestDeleteTaskSchedulesAdoptedStreamAttemptsForCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
-		TaskID: task.ID, ExecutionID: executionID,
+		TaskID: task.ID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: req.RelativePath, ObjectKey: result.ObjectKey, ContentType: result.ContentType,
 			Size: result.Size, SHA256: result.SHA256,
@@ -771,7 +771,7 @@ func TestTaskArtifactManifestCannotAdoptCleanupClaimedAttempt(t *testing.T) {
 	}
 
 	err = svc.FinalizeTaskArtifactManifest(t.Context(), task.ID, task.UserID, executionID, TaskArtifactManifestRequest{
-		TaskID: task.ID, ExecutionID: executionID,
+		TaskID: task.ID,
 		Files: []TaskArtifactManifestFile{{
 			RelativePath: req.RelativePath, ObjectKey: result.ObjectKey, ContentType: result.ContentType,
 			Size: result.Size, SHA256: result.SHA256,

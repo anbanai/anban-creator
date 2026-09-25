@@ -91,7 +91,8 @@ describe("validateBootstrapResponse", () => {
         allowHTTPServer: false,
       };
       await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
-      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("3");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("4");
+      expect(request?.body).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
     }

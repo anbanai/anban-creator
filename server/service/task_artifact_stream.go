@@ -71,7 +71,7 @@ func (s *TaskService) StreamTaskArtifact(ctx context.Context, taskID, authentica
 	if err != nil {
 		return nil, err
 	}
-	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID, authenticatedExecutionID)
+	executionID, err := s.validateTaskArtifactExecution(ctx, task, authenticatedUserID, authenticatedExecutionID)
 	if err != nil {
 		return nil, err
 	}

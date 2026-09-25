@@ -51,13 +51,13 @@ func (s *executionScopeTestStore) Upload(_ context.Context, key string, reader i
 }
 
 type testWorkloadVerifier struct {
-	gotToken, gotExecutionID string
-	identity                 *serveragent.WorkloadIdentity
-	err                      error
+	gotToken string
+	identity *serveragent.WorkloadIdentity
+	err      error
 }
 
-func (v *testWorkloadVerifier) Verify(_ context.Context, token, executionID string) (*serveragent.WorkloadIdentity, error) {
-	v.gotToken, v.gotExecutionID = token, executionID
+func (v *testWorkloadVerifier) Verify(_ context.Context, token string) (*serveragent.WorkloadIdentity, error) {
+	v.gotToken = token
 	return v.identity, v.err
 }
 
@@ -82,11 +82,12 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	}
 	h := NewAgentHandler(nil, nil, &logger)
 	h.SetExecutionTokenService(tokens)
-	verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, ExecutionID: "execution-1"}}
-	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1", TaskID: "task-1", ExecutionToken: "execution-token"}})
+	verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{Target: "docker", RuntimeIdentity: model.RuntimeIdentity{Scope: "docker", Workload: "exec-1", InstanceID: "container-id"}, UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}}
+	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1", TaskID: "task-1", ProjectID: "project-1", ExecutionToken: raw}})
 	app := fiber.New()
 	app.Post("/agent/scoped", h.ExecutionAuthMiddleware, func(c fiber.Ctx) error {
-		return c.JSON(fiber.Map{"user": c.Locals(agentUserIDContextKey), "project": c.Locals(agentProjectIDContextKey), "task": c.Locals(agentTaskIDContextKey), "execution": c.Locals(agentExecutionIDContextKey)})
+		identity := h.authenticatedExecutionIdentity(c)
+		return c.JSON(fiber.Map{"user": identity.UserID, "project": identity.ProjectID, "task": identity.TaskID, "execution": identity.ExecutionID})
 	})
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 
@@ -103,34 +104,101 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	if !strings.Contains(string(body), `"execution":"execution-1"`) || !strings.Contains(string(body), `"task":"task-1"`) {
 		t.Fatalf("locals body = %s", body)
 	}
-	req = httptest.NewRequest("POST", "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req = httptest.NewRequest("POST", "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("X-Anban-Agent-Contract-Version", "3")
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "4")
 	resp, err = app.Test(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != 200 || verifier.gotToken != "workload-token" || verifier.gotExecutionID != "execution-1" {
-		t.Fatalf("bootstrap status/token/id = %d/%q/%q", resp.StatusCode, verifier.gotToken, verifier.gotExecutionID)
+	if resp.StatusCode != 200 || verifier.gotToken != "workload-token" {
+		t.Fatalf("bootstrap status/token = %d/%q", resp.StatusCode, verifier.gotToken)
 	}
 	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("bootstrap Cache-Control = %q, want no-store", got)
 	}
 }
 
+func TestAgentBootstrapRejectsCallerSuppliedIdentity(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}}
+	h := NewAgentHandler(nil, nil, &logger)
+	h.SetBootstrap(verifier, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1", TaskID: "task-1", ProjectID: "project-1"}})
+	app := fiber.New()
+	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
+	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "4")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusBadRequest || verifier.gotToken != "" {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body/verifier token = %d/%s/%q, want rejected before identity lookup", resp.StatusCode, body, verifier.gotToken)
+	}
+}
+
+func TestAgentBootstrapRejectsResponseTokenOutsideWorkloadIdentity(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherToken, err := tokens.Issue(auth.ExecutionClaims{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-other"}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAgentHandler(nil, nil, &logger)
+	h.SetExecutionTokenService(tokens)
+	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}}, testBootstrapper{
+		response: &service.AgentBootstrapResponse{ExecutionID: "execution-1", TaskID: "task-1", ProjectID: "project-1", ExecutionToken: otherToken},
+	})
+	app := fiber.New()
+	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
+	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
+	req.Header.Set("Authorization", "Bearer workload-token")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "4")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusConflict {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want conflict for mismatched execution token", resp.StatusCode, body)
+	}
+}
+
+func TestAgentArtifactRequestsRejectCallerSuppliedExecutionID(t *testing.T) {
+	app, _, task, _, token, _, _ := setupExecutionScopedAgentApp(t)
+	for _, endpoint := range []struct{ path, body string }{
+		{"/agent/artifacts/prepare", `{"task_id":"` + task.ID + `","execution_id":"forged","relative_path":"output/content.md","filename":"content.md","content_type":"text/markdown","size":1,"sha256":"` + strings.Repeat("a", 64) + `"}`},
+		{"/agent/artifacts/manifest", `{"task_id":"` + task.ID + `","execution_id":"forged","files":[]}`},
+	} {
+		req := agentJSONRequest(endpoint.path, endpoint.body)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != fiber.StatusBadRequest {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("%s status/body = %d/%s, want 400 for removed execution_id field", endpoint.path, resp.StatusCode, body)
+		}
+	}
+}
+
 func TestAgentBootstrapRequiresRuntimeContractHeader(t *testing.T) {
-	for _, version := range []string{"", "0", "1", "2", "v3", "3.0"} {
+	for _, version := range []string{"", "0", "1", "2", "3", "v4", "4.0"} {
 		t.Run("version_"+version, func(t *testing.T) {
 			logger := zerolog.New(io.Discard)
 			h := NewAgentHandler(nil, nil, &logger)
-			h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1"}})
+			h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}}, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-1", TaskID: "task-1", ProjectID: "project-1"}})
 			app := fiber.New()
 			app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 
-			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 			req.Header.Set("Authorization", "Bearer workload-token")
-			req.Header.Set("Content-Type", "application/json")
 			if version != "" {
 				req.Header.Set("X-Anban-Agent-Contract-Version", version)
 			}
@@ -157,14 +225,13 @@ func TestAgentBootstrapRequiresRuntimeContractHeader(t *testing.T) {
 func TestAgentBootstrapRejectsMismatchedResponseExecutionID(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	h := NewAgentHandler(nil, nil, &logger)
-	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-2"}})
+	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}}, testBootstrapper{response: &service.AgentBootstrapResponse{ExecutionID: "execution-2", TaskID: "task-1", ProjectID: "project-1"}})
 	app := fiber.New()
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 
-	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("X-Anban-Agent-Contract-Version", "3")
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "4")
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -255,14 +322,14 @@ func TestAgentBootstrapRedactsInternalErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := zerolog.New(io.Discard)
-			verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}
+			verifier := &testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}}
 			h := NewAgentHandler(nil, nil, &logger)
 			h.SetBootstrap(verifier, testBootstrapper{err: tc.err})
 			app := fiber.New()
 			app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
-			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 			req.Header.Set("Authorization", "Bearer workload-token")
-			req.Header.Set("X-Anban-Agent-Contract-Version", "3")
+			req.Header.Set("X-Anban-Agent-Contract-Version", "4")
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
 			if err != nil {
@@ -289,10 +356,9 @@ func TestAgentBootstrapLogsWorkloadVerificationErrorWithoutLeakingIt(t *testing.
 	h.SetBootstrap(verifier, testBootstrapper{})
 	app := fiber.New()
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
-	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("X-Anban-Agent-Contract-Version", "3")
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Anban-Agent-Contract-Version", "4")
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -304,7 +370,7 @@ func TestAgentBootstrapLogsWorkloadVerificationErrorWithoutLeakingIt(t *testing.
 	if strings.Contains(string(body), "private pod uid") {
 		t.Fatalf("verification detail leaked in response: %s", body)
 	}
-	if !strings.Contains(logs.String(), "private pod uid") || !strings.Contains(logs.String(), "execution-1") {
+	if !strings.Contains(logs.String(), "private pod uid") {
 		t.Fatalf("verification failure missing from server logs: %s", logs.String())
 	}
 }
@@ -313,13 +379,12 @@ func TestAgentBootstrapLogsRuntimeContractMismatch(t *testing.T) {
 	var logs bytes.Buffer
 	logger := zerolog.New(&logs)
 	h := NewAgentHandler(nil, nil, &logger)
-	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{ExecutionID: "execution-1"}}, testBootstrapper{})
+	h.SetBootstrap(&testWorkloadVerifier{identity: &serveragent.WorkloadIdentity{UserID: "user-1", ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1"}}, testBootstrapper{})
 	app := fiber.New()
 	app.Post("/agent/bootstrap", h.WorkloadAuthMiddleware, h.Bootstrap)
 
-	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
+	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +393,7 @@ func TestAgentBootstrapLogsRuntimeContractMismatch(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusUpgradeRequired)
 	}
 	line := logs.String()
-	for _, field := range []string{"agent bootstrap rejected: runtime contract mismatch", `"execution_id":"execution-1"`, `"received_contract_version":""`, `"expected_contract_version":"3"`} {
+	for _, field := range []string{"agent bootstrap rejected: runtime contract mismatch", `"received_contract_version":""`, `"expected_contract_version":"4"`} {
 		if !strings.Contains(line, field) {
 			t.Fatalf("runtime contract diagnostic missing %q in %s", field, line)
 		}
@@ -344,11 +409,11 @@ func TestAgentExecutionJWTScopesAllTaskEndpoints(t *testing.T) {
 		{"progress", "/agent/progress", func(taskID, _ string) *http.Request {
 			return agentJSONRequest("/agent/progress", `{"task_id":"`+taskID+`","message":"working"}`)
 		}},
-		{"prepare", "/agent/artifacts/prepare", func(taskID, executionID string) *http.Request {
-			return agentJSONRequest("/agent/artifacts/prepare", `{"task_id":"`+taskID+`","execution_id":"`+executionID+`","relative_path":"output/content.md","filename":"content.md","content_type":"text/markdown","size":7,"sha256":"`+strings.Repeat("a", 64)+`"}`)
+		{"prepare", "/agent/artifacts/prepare", func(taskID, _ string) *http.Request {
+			return agentJSONRequest("/agent/artifacts/prepare", `{"task_id":"`+taskID+`","relative_path":"output/content.md","filename":"content.md","content_type":"text/markdown","size":7,"sha256":"`+strings.Repeat("a", 64)+`"}`)
 		}},
-		{"manifest", "/agent/artifacts/manifest", func(taskID, executionID string) *http.Request {
-			return agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+taskID+`","execution_id":"`+executionID+`","files":[]}`)
+		{"manifest", "/agent/artifacts/manifest", func(taskID, _ string) *http.Request {
+			return agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+taskID+`","files":[]}`)
 		}},
 		{"complete", "/agent/complete", func(taskID, _ string) *http.Request {
 			return agentJSONRequest("/agent/complete", `{"task_id":"`+taskID+`"}`)
@@ -495,12 +560,7 @@ func TestAgentAPIKeyCannotCompleteExecutionsWithoutSideEffects(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			requestedID := tt.requestedID(executionID)
-			body := `{"task_id":"` + task.ID + `"`
-			if requestedID != "" {
-				body += `,"execution_id":"` + requestedID + `"`
-			}
-			body += `,"result":{"success":false,"error":"late"}}`
+			body := `{"task_id":"` + task.ID + `","result":{"success":false,"error":"late"}}`
 			req := agentJSONRequest("/agent/complete", body)
 			req.Header.Set("Authorization", "Bearer "+rawAPIKey)
 			resp, err := app.Test(req)
@@ -552,8 +612,9 @@ func TestAgentExecutionJWTRejectsConflictingCompletionBodyExecution(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != fiber.StatusBadRequest {
+		responseBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status/body = %d/%s, want 400 for removed execution_id field", resp.StatusCode, responseBody)
 	}
 	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
 	if err != nil {
@@ -572,8 +633,8 @@ func TestAgentCompletionResponseLossRetryIsIdempotentForExecutionTokens(t *testi
 		{name: "cloud", target: "kubernetes"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning)
-			body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"agent failed","tool_use_summary":{"Write":1}}}`
+			app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning)
+			body := `{"task_id":"` + task.ID + `","result":{"success":false,"error":"agent failed","tool_use_summary":{"Write":1}}}`
 			for attempt := 1; attempt <= 2; attempt++ {
 				req := agentJSONRequest("/agent/complete", body)
 				req.Header.Set("Authorization", "Bearer "+token)
@@ -587,7 +648,7 @@ func TestAgentCompletionResponseLossRetryIsIdempotentForExecutionTokens(t *testi
 				}
 			}
 
-			conflict := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"different result"}}`
+			conflict := `{"task_id":"` + task.ID + `","result":{"success":false,"error":"different result"}}`
 			req := agentJSONRequest("/agent/complete", conflict)
 			req.Header.Set("Authorization", "Bearer "+token)
 			resp, err := app.Test(req)
@@ -607,8 +668,8 @@ func TestAgentCompletionResponseLossRetryIsIdempotentForExecutionTokens(t *testi
 }
 
 func TestAgentCompletionPersistsRecoverableFailureIdentity(t *testing.T) {
-	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning)
-	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"执行环境未建立，暂时无法生成或结算图片","terminal_reason":"platform_error","root_error_code":"execution_identity_unavailable","failure_stage":"image_generation","resume_from":"image_generation"}}`
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning)
+	body := `{"task_id":"` + task.ID + `","result":{"success":false,"error":"执行环境未建立，暂时无法生成或结算图片","terminal_reason":"platform_error","root_error_code":"execution_identity_unavailable","failure_stage":"image_generation","resume_from":"image_generation"}}`
 	req := agentJSONRequest("/agent/complete", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := app.Test(req)
@@ -689,14 +750,14 @@ func TestAgentCompletionCorruptStoredResultReturns409ForExecutionTokens(t *testi
 		for _, suffix := range []string{" trailing", ` {"second":true}`} {
 			t.Run(test.name+suffix, func(t *testing.T) {
 				var corruptRepo *completionCorruptResultRepository
-				app, _, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+				app, _, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
 					t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning,
 					func(base repository.Repository) repository.Repository {
 						corruptRepo = &completionCorruptResultRepository{Repository: base, suffix: suffix}
 						return corruptRepo
 					}, nil,
 				)
-				body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","result":{"success":false,"error":"agent failed"}}`
+				body := `{"task_id":"` + task.ID + `","result":{"success":false,"error":"agent failed"}}`
 				first := agentJSONRequest("/agent/complete", body)
 				first.Header.Set("Authorization", "Bearer "+token)
 				firstResp, err := app.Test(first)
@@ -746,13 +807,13 @@ func (r *completionFindExecutionErrorTaskExecutions) FindByID(ctx context.Contex
 }
 
 func TestAgentCompletionRepositoryErrorAfterAuthorizationReturns500(t *testing.T) {
-	app, _, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
+	app, _, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
 		t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning,
 		func(base repository.Repository) repository.Repository {
 			return &completionFindExecutionErrorRepository{Repository: base}
 		}, nil,
 	)
-	req := agentJSONRequest("/agent/complete", `{"task_id":"`+task.ID+`","execution_id":"`+executionID+`","result":{"success":false,"error":"agent failed"}}`)
+	req := agentJSONRequest("/agent/complete", `{"task_id":"`+task.ID+`","result":{"success":false,"error":"agent failed"}}`)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := app.Test(req)
 	if err != nil {
@@ -785,8 +846,8 @@ func TestAgentCompletionErrorResponseDistinguishesStaleFromInternal(t *testing.T
 }
 
 func TestAgentProgressRejectsTerminalResultPayload(t *testing.T) {
-	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentApp(t)
-	body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","message":"still running","result":{"success":true,"model_usage":[{"provider":"provider","model":"early","input_tokens":17}],"cost_status":"reconciled"}}`
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentApp(t)
+	body := `{"task_id":"` + task.ID + `","message":"still running","result":{"success":true,"model_usage":[{"provider":"provider","model":"early","input_tokens":17}],"cost_status":"reconciled"}}`
 	req := agentJSONRequest("/agent/progress", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := app.Test(req)
@@ -858,7 +919,7 @@ func TestAgentArtifactManifestPersistenceFailureIsRedacted(t *testing.T) {
 	key := "uploads/users/" + task.UserID + "/projects/" + task.ProjectID + "/tasks/" + task.ID + "/executions/" + executionID + "/artifacts/workspace/sha256/" + strings.Repeat("a", 64) + "/output/content.md"
 	store.stats = map[string]*storage.ObjectInfo{key: {Key: key, Size: 7, ContentType: "text/markdown", SHA256: strings.Repeat("a", 64)}}
 	file := `{"relative_path":"output/content.md","object_key":"` + key + `","size":7,"sha256":"` + strings.Repeat("a", 64) + `"}`
-	req := agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+task.ID+`","execution_id":"`+executionID+`","files":[`+file+`,`+file+`]}`)
+	req := agentJSONRequest("/agent/artifacts/manifest", `{"task_id":"`+task.ID+`","files":[`+file+`,`+file+`]}`)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := app.Test(req)
 	if err != nil {
@@ -1162,8 +1223,8 @@ func TestAgentProgressRefreshesTaskAndExecutionHeartbeats(t *testing.T) {
 }
 
 func TestAgentStructuredProgressPersistsDeclaredStage(t *testing.T) {
-	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
-	plan := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
+	plan := `{"task_id":"` + task.ID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
 	planReq := agentJSONRequest("/agent/progress-plan", plan)
 	planReq.Header.Set("Authorization", "Bearer "+token)
 	planResp, err := app.Test(planReq)
@@ -1200,9 +1261,7 @@ func TestAgentExecutionTokenStructuredProgressRequiresCurrentExecution(t *testin
 		executionStatus string
 		wantStatus      int
 	}{
-		{name: "current", executionID: func(current string) string { return current }, wantStatus: fiber.StatusOK},
-		{name: "body identity omitted", executionID: func(string) string { return "" }, wantStatus: fiber.StatusOK},
-		{name: "mismatched", executionID: func(string) string { return uuid.NewString() }, wantStatus: fiber.StatusForbidden},
+		{name: "identity derived from token", executionID: func(string) string { return "" }, wantStatus: fiber.StatusOK},
 		{name: "stale", executionID: func(current string) string { return current }, staleCurrent: true, wantStatus: fiber.StatusForbidden},
 		{name: "non-running execution", executionID: func(current string) string { return current }, executionStatus: model.TaskExecutionFailed, wantStatus: fiber.StatusForbidden},
 	}
@@ -1220,9 +1279,8 @@ func TestAgentExecutionTokenStructuredProgressRequiresCurrentExecution(t *testin
 			if err := repo.Tasks().Update(context.Background(), task); err != nil {
 				t.Fatal(err)
 			}
-			requestedExecutionID := tt.executionID(executionID)
 			if tt.wantStatus == fiber.StatusOK {
-				plan := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
+				plan := `{"task_id":"` + task.ID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
 				planReq := agentJSONRequest("/agent/progress-plan", plan)
 				planReq.Header.Set("Authorization", "Bearer "+token)
 				planResp, planErr := app.Test(planReq)
@@ -1230,7 +1288,7 @@ func TestAgentExecutionTokenStructuredProgressRequiresCurrentExecution(t *testin
 					t.Fatalf("progress plan status/error = %v/%v", planResp.StatusCode, planErr)
 				}
 			}
-			body := `{"task_id":"` + task.ID + `","execution_id":"` + requestedExecutionID + `","stage":"writing","state":"active","description":"正在撰写正文"}`
+			body := `{"task_id":"` + task.ID + `","stage":"writing","state":"active","description":"正在撰写正文"}`
 			req := agentJSONRequest("/agent/progress", body)
 			req.Header.Set("Authorization", "Bearer "+token)
 			resp, err := app.Test(req)
@@ -1270,9 +1328,9 @@ func TestAgentExecutionJWTRejectsConflictingProgressBodyExecution(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != fiber.StatusForbidden {
+	if resp.StatusCode != fiber.StatusBadRequest {
 		responseBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status/body = %d/%s, want 403", resp.StatusCode, responseBody)
+		t.Fatalf("status/body = %d/%s, want 400 for removed execution_id field", resp.StatusCode, responseBody)
 	}
 	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
 	if err != nil {
@@ -1285,7 +1343,7 @@ func TestAgentExecutionJWTRejectsConflictingProgressBodyExecution(t *testing.T) 
 
 func TestAgentStructuredProgressRejectsUnknownFrozenPackStage(t *testing.T) {
 	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
-	plan := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
+	plan := `{"task_id":"` + task.ID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
 	planReq := agentJSONRequest("/agent/progress-plan", plan)
 	planReq.Header.Set("Authorization", "Bearer "+token)
 	planResp, planErr := app.Test(planReq)
@@ -1338,8 +1396,8 @@ func TestAgentStructuredProgressReturnsStableProtocolErrorCodes(t *testing.T) {
 		{name: "invalid state", stage: "writing", state: "pending", wantCode: "progress_invalid_state"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			app, _, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
-			plan := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
+			app, _, task, _, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "moments")
+			plan := `{"task_id":"` + task.ID + `","stages":[{"id":"writing","title":"朋友圈正文"},{"id":"delivery","title":"交付验收"}]}`
 			planReq := agentJSONRequest("/agent/progress-plan", plan)
 			planReq.Header.Set("Authorization", "Bearer "+token)
 			planResp, err := app.Test(planReq)
@@ -1541,12 +1599,12 @@ func TestAgentArtifactManifestErrorTaxonomy(t *testing.T) {
 		data, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(data)
 	}
-	invalidStatus, _ := request(`{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","files":[{"relative_path":"../bad","object_key":"bad","size":1,"sha256":"` + strings.Repeat("a", 64) + `"}]}`)
+	invalidStatus, _ := request(`{"task_id":"` + task.ID + `","files":[{"relative_path":"../bad","object_key":"bad","size":1,"sha256":"` + strings.Repeat("a", 64) + `"}]}`)
 	if invalidStatus != fiber.StatusBadRequest {
 		t.Fatalf("invalid status = %d", invalidStatus)
 	}
 	store.statErr = errors.New("secret backend endpoint timed out")
-	unavailableStatus, body := request(`{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","files":[{"relative_path":"output/article.md","object_key":"` + wantKey + `","size":1,"sha256":"` + strings.Repeat("a", 64) + `"}]}`)
+	unavailableStatus, body := request(`{"task_id":"` + task.ID + `","files":[{"relative_path":"output/article.md","object_key":"` + wantKey + `","size":1,"sha256":"` + strings.Repeat("a", 64) + `"}]}`)
 	if unavailableStatus != fiber.StatusServiceUnavailable {
 		t.Fatalf("unavailable status/body = %d/%s", unavailableStatus, body)
 	}
@@ -1560,7 +1618,7 @@ func TestAgentArtifactPrepareAndManifest(t *testing.T) {
 	body := []byte("# title\n\nbody")
 	sum := sha256.Sum256(body)
 	hash := hex.EncodeToString(sum[:])
-	prepareBody := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","relative_path":"output/article.md","filename":"article.md","content_type":"text/markdown","size":13,"sha256":"` + hash + `"}`
+	prepareBody := `{"task_id":"` + task.ID + `","relative_path":"output/article.md","filename":"article.md","content_type":"text/markdown","size":13,"sha256":"` + hash + `"}`
 	req := httptest.NewRequest("POST", "/agent/artifacts/prepare", strings.NewReader(prepareBody))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -1587,7 +1645,7 @@ func TestAgentArtifactPrepareAndManifest(t *testing.T) {
 		t.Fatalf("prepared upload = %#v", store)
 	}
 	store.stats = map[string]*storage.ObjectInfo{stagingKey: {Key: stagingKey, Size: int64(len(body)), ContentType: "text/markdown", ETag: "etag", SHA256: hash}}
-	manifestBody := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","files":[{"relative_path":"output/article.md","object_key":"` + stagingKey + `","content_type":"text/markdown","size":13,"sha256":"` + hash + `"}]}`
+	manifestBody := `{"task_id":"` + task.ID + `","files":[{"relative_path":"output/article.md","object_key":"` + stagingKey + `","content_type":"text/markdown","size":13,"sha256":"` + hash + `"}]}`
 	req = httptest.NewRequest("POST", "/agent/artifacts/manifest", strings.NewReader(manifestBody))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")

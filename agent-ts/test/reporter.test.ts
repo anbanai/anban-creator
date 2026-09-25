@@ -14,15 +14,18 @@ describe("Reporter", () => {
     };
     try {
       const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1" }, "execution-token", "task-1");
-      await reporter.submitCompletionMetadata({ tags: [] });
+      await reporter.submitCompletionMetadata({ task_id: "task-1", execution_id: "execution-1", tags: [] });
       expect(requests[0]?.headers.get("Accept")).toBe("application/json, text/event-stream");
       expect(requests[2]?.headers.get("Mcp-Session-Id")).toBe("session-1");
+      const call = requests[2]?.body as { params?: { arguments?: Record<string, unknown> } };
+      const args = call.params?.arguments;
+      expect(args).toEqual({ task_id: "task-1", metadata: JSON.stringify({ tags: [] }) });
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  test("reports progress with the server task and execution identity", async () => {
+  test("reports progress with task selector but no repeated execution identity", async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
@@ -32,13 +35,13 @@ describe("Reporter", () => {
     try {
       const reporter = new Reporter({ serverURL: "https://creator.example.com", executionID: "execution-1", workspace: "/workspace", workloadTokenFile: "/token", allowHTTPServer: false }, "execution-token", "task-1");
       await reporter.progress("working");
-      expect(requests).toEqual([{ url: "https://creator.example.com/api/v1/agent/progress", body: { task_id: "task-1", execution_id: "execution-1", message: "working" } }]);
+      expect(requests).toEqual([{ url: "https://creator.example.com/api/v1/agent/progress", body: { task_id: "task-1", message: "working" } }]);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  test("reports structured stage progress with state and identity", async () => {
+  test("reports structured stage progress without execution identity", async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
@@ -56,7 +59,6 @@ describe("Reporter", () => {
         url: "https://creator.example.com/api/v1/agent/progress",
         body: {
           task_id: "task-1",
-          execution_id: "execution-1",
           stage: "research",
           state: "active",
           description: "Gathering sources",
@@ -67,7 +69,7 @@ describe("Reporter", () => {
     }
   });
 
-  test("reports completion with task and execution identity", async () => {
+  test("reports completion with task selector but no repeated execution identity", async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
@@ -80,7 +82,7 @@ describe("Reporter", () => {
       await reporter.complete(result);
       expect(requests).toEqual([{
         url: "https://creator.example.com/api/v1/agent/complete",
-        body: { task_id: "task-1", execution_id: "execution-1", result },
+        body: { task_id: "task-1", result },
       }]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -134,7 +136,7 @@ describe("Reporter", () => {
       expect(durableCompletions).toBe(1);
       expect(requests).toHaveLength(2);
       expect(requests[1]).toEqual(requests[0]);
-      expect(requests[0]).toEqual({ task_id: "task-1", execution_id: "execution-1", result });
+      expect(requests[0]).toEqual({ task_id: "task-1", result });
     } finally {
       globalThis.fetch = originalFetch;
     }
