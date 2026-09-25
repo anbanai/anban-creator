@@ -2,7 +2,7 @@
 
 ## Status
 
-Design approved in principle by the user; implementation has not started. This document is the reviewable contract proposal.
+Implemented as runtime contract v4. Current-execution requests derive execution identity from verified credentials; historical metadata tools retain an explicit target selector for user/API-key calls. Server and runtime images require a coordinated release: build and publish v4 runtime images before enabling the new Server; do not mix runtime contract versions. No database migration is required.
 
 ## Goal
 

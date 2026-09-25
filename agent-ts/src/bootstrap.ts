@@ -17,7 +17,7 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
-export const AGENT_RUNTIME_CONTRACT_VERSION = 3;
+export const AGENT_RUNTIME_CONTRACT_VERSION = 4;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "execution_id", "task_id", "task_type", "project_id", "prompt",
@@ -190,8 +190,7 @@ export async function readWorkloadToken(path: string): Promise<string> {
 export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse> {
   const response = await fetch(`${config.serverURL}/api/v1/agent/bootstrap`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION) },
-    body: JSON.stringify({ execution_id: config.executionID }),
+    headers: { Authorization: `Bearer ${token}`, "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION) },
     signal,
     redirect: "error",
   });

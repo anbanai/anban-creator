@@ -25,9 +25,16 @@ func (h *AgentHandler) StreamArtifactContent(c fiber.Ctx) error {
 	}
 	userID := h.authenticatedUserID(c)
 	executionID := h.authenticatedExecutionID(c)
-	taskID, _ := c.Locals(agentTaskIDContextKey).(string)
+	identity := h.authenticatedExecutionIdentity(c)
+	taskID := identity.TaskID
 	if strings.TrimSpace(userID) == "" || strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
 		return Error(c, fiber.StatusForbidden, "execution credentials are required")
+	}
+	if strings.TrimSpace(c.Get("X-Anban-Execution-ID")) != "" {
+		return Error(c, fiber.StatusBadRequest, "execution identity is derived from the credential")
+	}
+	if requestedTaskID := strings.TrimSpace(c.Get("X-Anban-Task-ID")); requestedTaskID != "" && requestedTaskID != taskID {
+		return Error(c, fiber.StatusForbidden, "task access denied")
 	}
 
 	declaredSize, err := strconv.ParseInt(strings.TrimSpace(c.Get(agentArtifactSizeHeader)), 10, 64)

@@ -30,7 +30,7 @@ func TestWorkloadDockerVerifierValidatesTokenAndLiveContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, err := verifier.Verify(context.Background(), raw, "execution-1")
+	identity, err := verifier.Verify(context.Background(), raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestWorkloadDockerVerifierRejectsInvalidTokenInspectionAndRestartingState(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := verifier.Verify(context.Background(), tc.token, "execution-1"); err == nil {
+			if _, err := verifier.Verify(context.Background(), tc.token); err == nil {
 				t.Fatal("invalid Docker workload accepted")
 			}
 		})
@@ -94,7 +94,6 @@ func TestWorkloadDockerVerifierRejectsOwnershipSpoofStaleAndTerminalContainers(t
 		executionID string
 		mutate      func(*container.InspectResponse)
 	}{
-		{name: "requested execution spoof", executionID: "other-execution"},
 		{name: "execution owner label", executionID: "execution-1", mutate: func(c *container.InspectResponse) { c.Config.Labels[dockerExecutionIDLabel] = "other" }},
 		{name: "task owner label", executionID: "execution-1", mutate: func(c *container.InspectResponse) { c.Config.Labels[dockerTaskIDLabel] = "other" }},
 		{name: "project owner label", executionID: "execution-1", mutate: func(c *container.InspectResponse) { c.Config.Labels[dockerProjectIDLabel] = "other" }},
@@ -118,7 +117,7 @@ func TestWorkloadDockerVerifierRejectsOwnershipSpoofStaleAndTerminalContainers(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := verifier.Verify(context.Background(), raw, tc.executionID); err == nil {
+			if _, err := verifier.Verify(context.Background(), raw); err == nil {
 				t.Fatal("spoofed or inactive Docker workload accepted")
 			}
 		})

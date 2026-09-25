@@ -217,7 +217,7 @@ func TestMCPHandlerStaticKeyCannotReachFixedSKUServices(t *testing.T) {
 		{name: "generate_image", arguments: `{"project_id":"project-1","task_id":"task-1","prompt":"cover","output_path":"output/cover.png","aspect_ratio":"16:9"}`},
 		{name: "upload_image", arguments: `{"project_id":"project-1","task_id":"task-1","file_path":"output/cover.png"}`},
 		{name: "analyze_image", arguments: `{"project_id":"project-1","task_id":"task-1","prompt":"review","file_path":"output/cover.png"}`},
-		{name: "submit_completion_metadata", arguments: `{"task_id":"task-1","execution_id":"execution-1","metadata":"{}"}`},
+		{name: "submit_completion_metadata", arguments: `{"task_id":"task-1","metadata":"{}"}`},
 	}
 
 	for _, tt := range tests {
@@ -358,7 +358,7 @@ func TestMCPHandlerCurrentExecutionTokenReachesEachFixedSKUServiceExactlyOnce(t 
 		{name: "generate_image", arguments: `{"project_id":"project-1","task_id":"task-1","prompt":"cover","output_path":"output/cover.png","aspect_ratio":"16:9"}`},
 		{name: "upload_image", arguments: `{"project_id":"project-1","task_id":"task-1","file_path":"output/cover.png"}`},
 		{name: "analyze_image", arguments: `{"project_id":"project-1","task_id":"task-1","prompt":"review","file_path":"output/cover.png"}`},
-		{name: "submit_completion_metadata", arguments: `{"task_id":"task-1","execution_id":"execution-1","metadata":"{}"}`},
+		{name: "submit_completion_metadata", arguments: `{"task_id":"task-1","metadata":"{}"}`},
 	} {
 		rec := callMCPToolForScopeTest(handler, token, sessionID, tt.name, tt.arguments)
 		if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"isError":true`) {

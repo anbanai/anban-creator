@@ -13,8 +13,8 @@ import (
 )
 
 func TestAgentProgressPlanAndStageUpdateUseLifecycleContract(t *testing.T) {
-	app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "")
-	planBody := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","stages":[{"id":"research","title":"研究素材","goal":"核验事实"},{"id":"writing","title":"撰写内容"}]}`
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "")
+	planBody := `{"task_id":"` + task.ID + `","stages":[{"id":"research","title":"研究素材","goal":"核验事实"},{"id":"writing","title":"撰写内容"}]}`
 	planReq := agentJSONRequest("/agent/progress-plan", planBody)
 	planReq.Header.Set("Authorization", "Bearer "+token)
 	planResp, err := app.Test(planReq)
@@ -26,7 +26,7 @@ func TestAgentProgressPlanAndStageUpdateUseLifecycleContract(t *testing.T) {
 		t.Fatalf("plan status/body = %d/%s", planResp.StatusCode, body)
 	}
 
-	updateBody := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","stage":"research","state":"active","description":"正在核验来源"}`
+	updateBody := `{"task_id":"` + task.ID + `","stage":"research","state":"active","description":"正在核验来源"}`
 	updateReq := agentJSONRequest("/agent/progress", updateBody)
 	updateReq.Header.Set("Authorization", "Bearer "+token)
 	updateResp, err := app.Test(updateReq)
@@ -50,8 +50,8 @@ func TestAgentProgressPlanAndStageUpdateUseLifecycleContract(t *testing.T) {
 func TestAgentProgressRejectsRemovedPercentageAndTitleFields(t *testing.T) {
 	for _, removed := range []string{`"title":"客户端标题"`, `"progress_percent":50`} {
 		t.Run(removed, func(t *testing.T) {
-			app, repo, task, executionID, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "")
-			body := `{"task_id":"` + task.ID + `","execution_id":"` + executionID + `","stage":"research","state":"active",` + removed + `}`
+			app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "")
+			body := `{"task_id":"` + task.ID + `","stage":"research","state":"active",` + removed + `}`
 			req := agentJSONRequest("/agent/progress", body)
 			req.Header.Set("Authorization", "Bearer "+token)
 			resp, err := app.Test(req)
@@ -73,7 +73,7 @@ func TestAgentProgressRejectsRemovedPercentageAndTitleFields(t *testing.T) {
 	}
 }
 
-func TestAgentProgressPlanRejectsBodyExecutionMismatchWithoutMutation(t *testing.T) {
+func TestAgentProgressPlanRejectsLegacyExecutionIDWithoutMutation(t *testing.T) {
 	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPack(t, model.PlatformMoments, "")
 	body := `{"task_id":"` + task.ID + `","execution_id":"wrong","stages":[{"id":"research","title":"研究素材"},{"id":"writing","title":"撰写内容"}]}`
 	req := agentJSONRequest("/agent/progress-plan", body)
@@ -82,8 +82,8 @@ func TestAgentProgressPlanRejectsBodyExecutionMismatchWithoutMutation(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 	persisted, err := repo.Tasks().FindByID(context.Background(), task.ID)
 	if err != nil {
