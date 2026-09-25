@@ -211,10 +211,17 @@ export async function runJob(
       config.workloadTokenFile,
     );
     let data: ResolvedBootstrapResponse | undefined;
+    let reporter: JobReporter | undefined;
     try {
       data = await dependencies.bootstrap(
         config,
         workloadToken,
+        shutdown.signal,
+      );
+      reporter = dependencies.createReporter(config, data);
+      stopHeartbeat = dependencies.startHeartbeat(
+        reporter,
+        stderr,
         shutdown.signal,
       );
       if (data.task_type === "hypit") {
@@ -274,10 +281,11 @@ export async function runJob(
         data ??
         (error instanceof BootstrapResponseError ? error.identity : undefined);
       if (identity) {
-        const reporter = dependencies.createReporter(config, identity);
+        const completionReporter =
+          reporter ?? dependencies.createReporter(config, identity);
         const completionAbort = abortAfter(finalizationTimeouts().completion);
         try {
-          await reporter.complete(
+          await completionReporter.complete(
             failure(config.workspace, error),
             completionAbort.signal,
           );
@@ -293,12 +301,9 @@ export async function runJob(
       }
       throw error;
     }
-    const reporter = dependencies.createReporter(config, data);
-    stopHeartbeat = dependencies.startHeartbeat(
-      reporter,
-      stderr,
-      shutdown.signal,
-    );
+    const activeReporter = reporter;
+    if (!activeReporter)
+      throw new Error("agent reporter unavailable after bootstrap");
     let result: ExecutionResult;
     result = await runWithProviderPolicyRecovery(
       config.workspace,
@@ -309,7 +314,7 @@ export async function runJob(
             return await dependencies.runClaude(
               config,
               sessionData,
-              reporter,
+              activeReporter,
               shutdown.signal,
             );
           shutdown.signal.throwIfAborted();
@@ -317,7 +322,7 @@ export async function runJob(
             const aborted = () => reject(shutdown.signal.reason);
             shutdown.signal.addEventListener("abort", aborted, { once: true });
             void dependencies
-              .runClaude(config, sessionData, reporter, shutdown.signal)
+              .runClaude(config, sessionData, activeReporter, shutdown.signal)
               .then(resolve, reject)
               .finally(() =>
                 shutdown.signal.removeEventListener("abort", aborted),
@@ -327,7 +332,7 @@ export async function runJob(
           return failure(config.workspace, error);
         }
       },
-      (message) => reporter.progress(message, shutdown.signal),
+      (message) => activeReporter.progress(message, shutdown.signal),
       shutdown.signal,
     );
     if (data.task_type === "hypit" && result.success) {
@@ -396,7 +401,7 @@ export async function runJob(
       const summary = await dependencies.uploadWorkspaceArtifacts(
         hypitUpload?.workspace ?? config.workspace,
         data,
-        reporter,
+        activeReporter,
         artifactAbort.signal,
         artifactStartedAt + timeouts.artifact,
       );
@@ -416,7 +421,7 @@ export async function runJob(
       stderr.write(
         `artifact finalization failed: duration_ms=${Date.now() - artifactStartedAt} operation=${manifestFailure.operation} code=${manifestFailure.code} attempts=${manifestFailure.attempts}\n`,
       );
-      void reporter
+      void activeReporter
         .progress(
           `artifact upload failed: ${manifestFailure.code}`,
           artifactAbort.signal,
@@ -455,7 +460,7 @@ export async function runJob(
             "utf8",
           ),
         );
-        await reporter.submitCompletionMetadata(
+        await activeReporter.submitCompletionMetadata(
           metadata,
           completionAbort.signal,
         );
@@ -490,7 +495,7 @@ export async function runJob(
         }
         result = JSON.parse(encoded);
       }
-      await reporter.complete(result, completionAbort.signal);
+      await activeReporter.complete(result, completionAbort.signal);
       stderr.write(
         `completion report acknowledged: duration_ms=${Date.now() - completionStartedAt}\n`,
       );

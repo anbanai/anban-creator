@@ -1094,6 +1094,63 @@ afterEach(() => {
 });
 
 describe("Hypit managed finalization", () => {
+  test("starts heartbeat before Hypit workspace preparation", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "hypit-heartbeat-order-"));
+    try {
+      const harness = runJobHarness();
+      const order: string[] = [];
+      harness.dependencies.bootstrap = async () => {
+        order.push("bootstrap");
+        return { ...bootstrapData, task_type: "hypit" };
+      };
+      harness.dependencies.startHeartbeat = () => {
+        order.push("heartbeat");
+        return () => order.push("stop-heartbeat");
+      };
+      harness.dependencies.materializeBootstrapFiles = async () => {
+        order.push("materialize");
+      };
+      harness.dependencies.prepareWorkspace = async () => {
+        order.push("workspace");
+      };
+      harness.dependencies.prepareHypitWorkspace = async () => {
+        order.push("hypit-prepare");
+      };
+      harness.dependencies.runClaude = async () => {
+        order.push("agent");
+        return { success: false, error: "fixture failure", work_dir: workspace };
+      };
+      harness.dependencies.cleanupHypit = async () => {
+        order.push("cleanup");
+      };
+      harness.dependencies.uploadWorkspaceArtifacts = async () => {
+        order.push("upload");
+        return { uploaded: 0, failures: [] };
+      };
+
+      await runJob(
+        jobArgs(workspace),
+        harness.stdout,
+        harness.stderr,
+        harness.dependencies,
+      );
+
+      expect(order).toEqual([
+        "bootstrap",
+        "heartbeat",
+        "materialize",
+        "workspace",
+        "hypit-prepare",
+        "agent",
+        "cleanup",
+        "upload",
+        "stop-heartbeat",
+      ]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   test("keeps the runtime available until delivery verification finishes", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "hypit-runtime-order-"));
     try {
