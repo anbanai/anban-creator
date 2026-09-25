@@ -58,7 +58,11 @@ func contentMetadataSubmitHandler(ctx context.Context, req *mcp.CallToolRequest)
 func parseRecomputeArgs(ctx context.Context, req *mcp.CallToolRequest) (string, string, *mcp.CallToolResult) {
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
-	requestedExecutionID, _ := args["execution_id"].(string)
+	rawTarget, hasTarget := args["execution_id"]
+	requestedExecutionID, validTarget := rawTarget.(string)
+	if hasTarget && (!validTarget || strings.TrimSpace(requestedExecutionID) == "") {
+		return "", "", errorResult("execution_id target must be a non-empty string")
+	}
 	executionID := getExecutionID(ctx)
 	if executionID != "" {
 		if strings.TrimSpace(requestedExecutionID) != "" && strings.TrimSpace(requestedExecutionID) != executionID {

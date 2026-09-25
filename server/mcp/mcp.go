@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -140,6 +141,10 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 		Instructions: "Content creation assistant for WeChat and Seednote publishing.",
 	})
 
+	// The SDK retains the initialize context across requests. Bind tool identity
+	// from the transport's verified credentials for each individual call.
+	mcServer.AddReceivingMiddleware(requestIdentityMiddleware)
+
 	// Register all tools.
 	RegisterTools(mcServer)
 
@@ -164,6 +169,33 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 	protected := mcpauth.RequireBearerToken(verifier, nil)(scoped)
 
 	return mcpLoggingMiddleware(protected, zlog)
+}
+
+// requestIdentityMiddleware prevents a stateful MCP session from retaining
+// execution authority after the caller changes credentials. RequestExtra is
+// populated by the authenticated HTTP transport, never by tool arguments.
+func requestIdentityMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if method != "tools/call" {
+			return next(ctx, method, req)
+		}
+		extra := req.GetExtra()
+		if extra == nil || extra.TokenInfo == nil {
+			return nil, errors.New("authenticated MCP request credentials are required")
+		}
+		info := extra.TokenInfo
+		ctx = context.WithValue(ctx, mcpRequestTokenInfoContextKey{}, info)
+		var projectID, taskID, executionID string
+		if slices.Contains(info.Scopes, "execution") {
+			projectID, _ = info.Extra["project_id"].(string)
+			taskID, _ = info.Extra["task_id"].(string)
+			executionID, _ = info.Extra["execution_id"].(string)
+		}
+		// Empty values intentionally shadow any identity from session setup when
+		// this request uses a user/API-key credential instead of an execution JWT.
+		ctx = withMCPExecutionIdentity(ctx, info.UserID, projectID, taskID, executionID)
+		return next(ctx, method, req)
+	}
 }
 
 // tokenVerifier validates execution JWTs and per-user API keys, with static key fallback.
@@ -269,7 +301,6 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 		projectID, _ := info.Extra["project_id"].(string)
 		taskID, _ := info.Extra["task_id"].(string)
 		executionID, _ := info.Extra["execution_id"].(string)
-		executionContext := withMCPExecutionIdentity(r.Context(), info.UserID, projectID, taskID, executionID)
 		toolCallFound := false
 		for _, request := range requests {
 			if request.Method != "tools/call" {
@@ -282,18 +313,14 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 			}
 		}
 		if !toolCallFound {
-			// The SDK derives stateful tool-handler contexts from the initialize
-			// request. Seed the immutable execution identity before that session
-			// context is detached; each later tool call is still independently
-			// checked below against its request token and current-execution state.
-			next.ServeHTTP(w, r.WithContext(executionContext))
+			next.ServeHTTP(w, r)
 			return
 		}
 		if authorizer == nil || authorizer.ValidateAgentExecutionAccess(r.Context(), info.UserID, projectID, taskID, executionID) != nil {
 			http.Error(w, "execution token is not authorized for the current task execution", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(executionContext))
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -309,11 +336,10 @@ type scopeRequest struct {
 // call must carry. The table is deliberately fail-closed: adding a new MCP
 // tool without an explicit entry cannot silently widen an execution token.
 type executionToolScope struct {
-	Denied           bool
-	RequireProjectID bool
-	RequireTaskID    bool
-	RequireExecution bool
-	ForbidExecution  bool
+	Denied               bool
+	RequireProjectID     bool
+	RequireTaskID        bool
+	AllowExecutionTarget bool
 }
 
 var executionToolScopes = map[string]executionToolScope{
@@ -346,10 +372,10 @@ var executionToolScopes = map[string]executionToolScope{
 	"set_task_progress_plan":         {RequireTaskID: true},
 	"update_task_progress":           {RequireTaskID: true},
 	"submit_agent_feedback":          {RequireTaskID: true},
-	"submit_completion_metadata":     {RequireTaskID: true, ForbidExecution: true},
-	"recompute_content_tags":         {RequireTaskID: true},
-	"recompute_agent_feedback":       {RequireTaskID: true},
-	"get_completion_metadata_status": {RequireTaskID: true},
+	"submit_completion_metadata":     {RequireTaskID: true},
+	"recompute_content_tags":         {RequireTaskID: true, AllowExecutionTarget: true},
+	"recompute_agent_feedback":       {RequireTaskID: true, AllowExecutionTarget: true},
+	"get_completion_metadata_status": {RequireTaskID: true, AllowExecutionTarget: true},
 	"create_draft":                   {Denied: true},
 	"generate_image":                 {RequireProjectID: true, RequireTaskID: true},
 	"crop_image":                     {RequireTaskID: true},
@@ -391,13 +417,17 @@ func validateExecutionToolScope(toolName string, arguments map[string]any, proje
 	}{
 		{name: "project_id", expected: projectID, required: rule.RequireProjectID},
 		{name: "task_id", expected: taskID, required: rule.RequireTaskID},
-		{name: "execution_id", expected: executionID, required: rule.RequireExecution},
+		{name: "execution_id", expected: executionID},
 	} {
-		requested, present := stringArgument(arguments, field.name)
-		if field.name == "execution_id" && rule.ForbidExecution && present {
+		raw, present := arguments[field.name]
+		if field.name == "execution_id" && !rule.AllowExecutionTarget && present {
 			return fmt.Errorf("execution-scoped MCP tool %q does not accept execution_id; identity is derived from the credential", toolName)
 		}
-		if field.required && (!present || strings.TrimSpace(requested) == "") {
+		requested, valid := raw.(string)
+		if present && (!valid || strings.TrimSpace(requested) == "") {
+			return fmt.Errorf("execution-scoped MCP tool %q requires %s to be a non-empty string", toolName, field.name)
+		}
+		if field.required && !present {
 			return fmt.Errorf("execution-scoped MCP tool %q requires %s", toolName, field.name)
 		}
 		if present && requested != field.expected {
@@ -417,15 +447,6 @@ func parseScopeRequests(body []byte) ([]scopeRequest, error) {
 		return nil, err
 	}
 	return batch, nil
-}
-
-func stringArgument(arguments map[string]any, key string) (string, bool) {
-	value, exists := arguments[key]
-	if !exists {
-		return "", false
-	}
-	valueString, ok := value.(string)
-	return valueString, ok
 }
 
 func redactMCPLogValue(v any) any {
@@ -520,10 +541,19 @@ func redactURLQuery(raw string) string {
 	return raw
 }
 
+type mcpRequestTokenInfoContextKey struct{}
+
+func getMCPTokenInfo(ctx context.Context) *mcpauth.TokenInfo {
+	if info, ok := ctx.Value(mcpRequestTokenInfoContextKey{}).(*mcpauth.TokenInfo); ok {
+		return info
+	}
+	return mcpauth.TokenInfoFromContext(ctx)
+}
+
 // getUserID extracts the authenticated user ID from the MCP request context.
 // Returns empty string for static key / admin mode.
 func getUserID(ctx context.Context) string {
-	info := mcpauth.TokenInfoFromContext(ctx)
+	info := getMCPTokenInfo(ctx)
 	if info != nil {
 		return info.UserID
 	}
@@ -572,11 +602,11 @@ func getMCPExecutionIdentity(ctx context.Context) (mcpExecutionIdentity, bool) {
 }
 
 func hasMCPTokenInfo(ctx context.Context) bool {
-	return mcpauth.TokenInfoFromContext(ctx) != nil
+	return getMCPTokenInfo(ctx) != nil
 }
 
 func hasMCPScope(ctx context.Context, scope string) bool {
-	info := mcpauth.TokenInfoFromContext(ctx)
+	info := getMCPTokenInfo(ctx)
 	return info != nil && slices.Contains(info.Scopes, strings.TrimSpace(scope))
 }
 
@@ -587,7 +617,7 @@ func getExecutionID(ctx context.Context) string {
 
 // requireMCPExecutionIdentity prevents fixed-SKU operations from falling back
 // to API-key or static-key authentication. The execution scope is installed by
-// executionScopeMiddleware after the JWT has been authorized for the task.
+// requestIdentityMiddleware after HTTP authorization of the current request.
 func requireMCPExecutionIdentity(ctx context.Context, operation, projectID, taskID, executionID string) *mcp.CallToolResult {
 	identity, ok := getMCPExecutionIdentity(ctx)
 	if !ok || identity.ProjectID == "" || identity.TaskID == "" || identity.ExecutionID == "" {
@@ -626,7 +656,7 @@ func errorResult(msg string) *mcp.CallToolResult {
 
 // isManagedCall returns true if the MCP call is from a managed key (agent task execution).
 func isManagedCall(ctx context.Context) bool {
-	info := mcpauth.TokenInfoFromContext(ctx)
+	info := getMCPTokenInfo(ctx)
 	if info == nil {
 		return false
 	}
@@ -634,7 +664,7 @@ func isManagedCall(ctx context.Context) bool {
 }
 
 func isAdminCall(ctx context.Context) bool {
-	info := mcpauth.TokenInfoFromContext(ctx)
+	info := getMCPTokenInfo(ctx)
 	if info == nil {
 		return false
 	}

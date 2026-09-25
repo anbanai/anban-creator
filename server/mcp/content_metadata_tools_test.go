@@ -56,6 +56,7 @@ func TestExecutionScopedMetadataToolRejectsIdentityDuplicationAndMismatch(t *tes
 	}{
 		{name: "submit omits execution identity", tool: "submit_completion_metadata", args: map[string]any{"task_id": "task-1"}},
 		{name: "submit rejects duplicated execution identity", tool: "submit_completion_metadata", args: map[string]any{"task_id": "task-1", "execution_id": "execution-1"}, wantError: true},
+		{name: "task read rejects repeated identity", tool: "get_task", args: map[string]any{"task_id": "task-1", "execution_id": "execution-1"}, wantError: true},
 		{name: "historical tool defaults target", tool: "recompute_content_tags", args: map[string]any{"task_id": "task-1"}},
 		{name: "historical tool cannot redirect target", tool: "recompute_content_tags", args: map[string]any{"task_id": "task-1", "execution_id": "execution-2"}, wantError: true},
 	} {
@@ -65,5 +66,29 @@ func TestExecutionScopedMetadataToolRejectsIdentityDuplicationAndMismatch(t *tes
 				t.Fatalf("validate scope error = %v, wantError=%t", err, test.wantError)
 			}
 		})
+	}
+}
+
+func TestCompletionMetadataRejectsMalformedExplicitTarget(t *testing.T) {
+	for _, identity := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"execution", withMCPExecutionIdentity(context.Background(), "user-1", "project-1", "task-1", "execution-current")},
+		{"user", withMCPUserID(context.Background(), "user-1")},
+	} {
+		for _, value := range []struct {
+			name  string
+			value any
+		}{
+			{"null", nil}, {"number", 123}, {"empty", ""}, {"blank", " "},
+		} {
+			t.Run(identity.name+"/"+value.name, func(t *testing.T) {
+				taskID, executionID, result := parseRecomputeArgs(identity.ctx, metadataTargetRequest(t, map[string]any{"task_id": "task-1", "execution_id": value.value}))
+				if result == nil || !result.IsError || taskID != "" || executionID != "" {
+					t.Fatalf("malformed target selected %q/%q, result=%v", taskID, executionID, result)
+				}
+			})
+		}
 	}
 }
