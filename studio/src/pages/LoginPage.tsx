@@ -88,6 +88,13 @@ export default function LoginPage() {
       footerLinkText="立即注册"
       footerLinkTo="/register"
     >
+      {inviteCode ? (
+        <div className="mb-6">
+          <FormLabel>邀请码</FormLabel>
+          <Input readOnly value={inviteCode} autoComplete="off" className="mt-1.5 uppercase" tabIndex={-1} />
+        </div>
+      ) : null}
+
       <Tabs defaultValue="password" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="password">密码登录</TabsTrigger>
