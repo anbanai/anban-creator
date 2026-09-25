@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-var ErrHypitInput = errors.New("hypit input invalid")
+var ErrHypitInput = errors.New("视频复刻输入无效")
 
 type HypitCapabilityService struct{ config config.HypitConfig }
 
@@ -149,7 +149,7 @@ func validateHypitTaskFiles(ctx context.Context, repo repository.Repository, use
 func validateHypitProject(p *model.Project, s *HypitCapabilityService) error {
 	if !model.IsHypitPlatform(p.Platform) {
 		if p.HypitDefaultsSet {
-			return fmt.Errorf("%w: hypit_defaults only valid on hypit", ErrHypitInput)
+			return fmt.Errorf("%w: hypit_defaults 仅适用于视频复刻项目", ErrHypitInput)
 		}
 		return nil
 	}

@@ -327,7 +327,7 @@ func (s *TaskService) StorageProviderName() string {
 }
 
 var (
-	ErrMontageInput                         = errors.New("montage input invalid")
+	ErrMontageInput                         = errors.New("视频生成输入无效")
 	ErrTaskCreationProjectInactive          = errors.New("task creation project is not active")
 	ErrViralAnalysisRequiresSeednoteProject = errors.New("viral analysis requires a Seednote project")
 )
@@ -564,7 +564,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		return nil, err
 	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
-		return nil, fmt.Errorf("%w: montage_input can only be set on montage tasks", ErrMontageInput)
+		return nil, fmt.Errorf("%w: montage_input 只能用于视频生成任务", ErrMontageInput)
 	}
 
 	// E-commerce: merge the PROJECT's reusable e-commerce defaults (default
@@ -610,7 +610,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		effectiveImageCapabilityKey = effectiveImageCapabilitySnapshot.Key
 	}
 	if p.HypitInput != nil && !model.IsHypitPlatform(taskType) {
-		return nil, fmt.Errorf("%w: hypit_input only valid on hypit", ErrHypitInput)
+		return nil, fmt.Errorf("%w: hypit_input 仅适用于视频复刻任务", ErrHypitInput)
 	}
 	if model.IsHypitPlatform(taskType) {
 		quantity = 1
@@ -650,7 +650,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			p.MontageInput = input
 		}
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
-			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
+			return nil, fmt.Errorf("%w: 视频生成任务需要填写需求", ErrMontageInput)
 		}
 		effectiveProject := project
 		if p.ProjectSnapshot != nil {

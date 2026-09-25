@@ -663,7 +663,7 @@ describe('TasksPage Montage creation', () => {
     ...fixtures.project,
     id: 'project-montage',
     platform: 'montage',
-    name: 'Montage 项目',
+    name: '视频生成项目',
     montage_defaults: {
       default_pipeline: 'cinematic',
       preferences: {

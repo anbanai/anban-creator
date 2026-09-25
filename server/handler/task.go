@@ -426,7 +426,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		return nil, Error(c, fiber.StatusBadRequest, "execution_profile is required")
 	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
-		return nil, Error(c, fiber.StatusBadRequest, "montage task requires brief")
+		return nil, Error(c, fiber.StatusBadRequest, "视频生成任务需要填写需求")
 	}
 	prompt := strings.TrimSpace(req.Prompt)
 	if utf8.RuneCountInString(prompt) > maxTaskPromptCharacters {

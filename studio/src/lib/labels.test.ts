@@ -69,7 +69,7 @@ describe('taskFailurePresentation', () => {
 
 describe('video platform labels', () => {
   it.each([
-    ['montage', 'Montage 视频生成'],
+    ['montage', '视频生成'],
     ['hypit', '视频复刻'],
   ])('uses one name for %s in cards, timelines and type selectors', (type, label) => {
     expect(taskTypeLabelCN[type]).toBe(label)

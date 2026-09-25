@@ -1015,8 +1015,8 @@ func TestTaskServiceCreateManualRejectsMontageInputForOtherPlatforms(t *testing.
 			Brief: "错误平台",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "montage_input can only be set on montage tasks") {
-		t.Fatalf("CreateManual error = %v, want montage input rejection", err)
+	if err == nil || !errors.Is(err, ErrMontageInput) || !strings.Contains(err.Error(), "montage_input 只能用于视频生成任务") {
+		t.Fatalf("CreateManual error = %v, want 视频生成输入无效", err)
 	}
 }
 

@@ -671,7 +671,7 @@ describe('task form mapping', () => {
       omitted: ['has_content_image', 'has_tail_image', 'article_with_cover', 'article_with_content_images', 'montage_input'],
     },
     {
-      name: 'Montage normalizes nested submission input and omits execution target',
+      name: '视频生成 normalizes nested submission input and omits execution target',
       values: {
         type: 'montage' as const,
         prompt: '  Launch video  ',

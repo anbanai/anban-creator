@@ -1,15 +1,60 @@
-import { BookOpen, Clapperboard, MessageCircle, Repeat2, ShoppingBag, Signature } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import type { ComponentType } from 'react'
+import { BookOpen, MessageCircle, ShoppingBag, Signature } from 'lucide-react'
 import type { TaskType } from '@/types'
 
-export const platformIcon: Record<TaskType, LucideIcon> = {
+type PlatformIconComponent = ComponentType<{ className?: string }>
+
+function VideoPlatformIcon({ platform, className }: { platform: 'montage' | 'hypit'; className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={`shrink-0 ${className ?? ''}`}
+      data-platform-icon={platform}
+      fill="none"
+      focusable="false"
+      height="24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      width="24"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9 9.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997A1 1 0 0 1 9 14.996z" />
+      {platform === 'montage' ? (
+        <g data-platform-symbol="sparkles" transform="translate(10 0) scale(.5)">
+          <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a2 2 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a2 2 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" />
+          <path d="M20 2v4" />
+          <path d="M22 4h-4" />
+          <circle cx="4" cy="20" r="2" />
+        </g>
+      ) : (
+        <g data-platform-symbol="copy" transform="translate(11 11) scale(.5)">
+          <rect width="14" height="14" x="8" y="8" rx="2" />
+          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </g>
+      )}
+    </svg>
+  )
+}
+
+function VideoGenerationIcon(props: { className?: string }) {
+  return <VideoPlatformIcon platform="montage" {...props} />
+}
+
+function VideoReplicationIcon(props: { className?: string }) {
+  return <VideoPlatformIcon platform="hypit" {...props} />
+}
+
+export const platformIcon: Record<TaskType, PlatformIconComponent> = {
   seednote: BookOpen,
   article: Signature,
   moments: MessageCircle,
   ecommerce: ShoppingBag,
   viral_analysis: BookOpen,
-  montage: Clapperboard,
-  hypit: Repeat2,
+  montage: VideoGenerationIcon,
+  hypit: VideoReplicationIcon,
 }
 
 export const platformIconColor: Record<TaskType, string> = {

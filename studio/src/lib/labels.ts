@@ -39,7 +39,7 @@ export const taskTypeLabelCN: Record<string, string> = {
   moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
-  montage: 'Montage 视频生成',
+  montage: '视频生成',
   hypit: '视频复刻',
 }
 
@@ -54,7 +54,7 @@ export const contentTypeLabel: Record<string, string> = {
   moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
-  montage: 'Montage 视频生成',
+  montage: '视频生成',
   hypit: '视频复刻',
 }
 
@@ -124,7 +124,7 @@ export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
   { value: 'article', label: '公众号文章' },
   { value: 'moments', label: '朋友圈' },
-  { value: 'montage', label: 'Montage 视频生成' },
+  { value: 'montage', label: '视频生成' },
   { value: 'hypit', label: '视频复刻' },
   { value: 'ecommerce', label: '电商出图' },
 ]
@@ -134,7 +134,7 @@ export const platformLabels: Record<string, string> = {
   article: '公众号',
   moments: '朋友圈',
   ecommerce: '电商出图',
-  montage: 'Montage 视频生成',
+  montage: '视频生成',
   hypit: '视频复刻',
 }
 

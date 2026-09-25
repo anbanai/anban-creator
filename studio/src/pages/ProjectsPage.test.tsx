@@ -181,7 +181,7 @@ describe('ProjectsPage', () => {
     expect(screen.queryByRole('option', { name: '朋友圈' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: '视频复刻' })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Montage 视频生成' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '视频生成' })).toBeInTheDocument()
   })
 
   it('does not open internal replication defaults from an ordinary-user deep link', async () => {
@@ -200,7 +200,7 @@ describe('ProjectsPage', () => {
     render(<ProjectsPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('Montage 视频生成')
+    expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('视频生成')
     expect(within(dialog).getByText('视频默认设置')).toBeInTheDocument()
   })
 

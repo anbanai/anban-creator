@@ -52,7 +52,7 @@ const platformOptions: { value: ProjectPlatform; label: string }[] = [
   { value: 'article', label: '公众号' },
   { value: 'moments', label: '朋友圈' },
   { value: 'ecommerce', label: '电商出图' },
-  { value: 'montage', label: 'Montage 视频生成' },
+  { value: 'montage', label: '视频生成' },
   { value: 'hypit', label: '视频复刻' },
 ]
 

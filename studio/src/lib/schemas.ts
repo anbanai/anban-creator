@@ -201,7 +201,7 @@ export const createTaskSchema = z.object({
     if (!brief) {
       ctx.addIssue({
         code: "custom",
-        message: "请填写 Montage 视频 brief",
+        message: "请填写视频生成需求",
         path: ["montage_input", "brief"],
       })
     }
@@ -242,7 +242,7 @@ export const planSchema = z.object({
     if (!brief) {
       ctx.addIssue({
         code: "custom",
-        message: "请填写 Montage 视频 brief",
+        message: "请填写视频生成需求",
         path: ["montage_input", "brief"],
       })
     }

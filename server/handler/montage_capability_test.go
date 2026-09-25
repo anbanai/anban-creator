@@ -11,6 +11,29 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
+func TestMontageCapabilityHandlerListUsesVideoGenerationNameWhenUnavailable(t *testing.T) {
+	app := fiber.New()
+	app.Get("/api/v1/montage-capabilities", NewMontageCapabilityHandler(nil).List)
+
+	resp, err := app.Test(httptest.NewRequest("GET", "/api/v1/montage-capabilities", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusServiceUnavailable)
+	}
+	var envelope struct {
+		Msg string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Msg != "视频生成能力不可用" {
+		t.Fatalf("message = %q, want 视频生成能力不可用", envelope.Msg)
+	}
+}
+
 func TestMontageCapabilityHandlerListReturnsPublicCatalog(t *testing.T) {
 	svc := service.NewMontageCapabilityService(config.MontageConfig{
 		Enabled: true, DefaultPipeline: "cinematic",

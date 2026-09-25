@@ -40,6 +40,9 @@ func TestMontageHasPublicPlatformConfig(t *testing.T) {
 	if config == nil || config.ID != PlatformMontage || len(config.Fields) == 0 {
 		t.Fatalf("Montage platform config = %#v, want public form metadata", config)
 	}
+	if config.Label != "视频生成" {
+		t.Fatalf("Montage platform label = %q, want 视频生成", config.Label)
+	}
 }
 
 func TestSeednoteProjectConfigHasNoPublishingAuthor(t *testing.T) {

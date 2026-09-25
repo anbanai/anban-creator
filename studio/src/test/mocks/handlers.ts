@@ -230,7 +230,7 @@ export const mockPlatformConfigs: PlatformConfig[] = [
   },
   {
     id: 'montage',
-    label: 'Montage',
+    label: '视频生成',
     badge_variant: 'secondary',
     supports_publishing: false,
     supports_auto_fetch: false,
@@ -276,7 +276,7 @@ export const mockAgentPackCatalog: AgentPackCatalog = {
     managedPack('ecommerce', '电商素材', { projectPlatforms: ['ecommerce'], taskTypes: ['ecommerce'] }),
     managedPack('live-slicer', '直播切片', { taskTypes: ['live-slicer'], surfaces: ['plugin'] }),
     managedPack('moments', '朋友圈素材包', { projectPlatforms: ['moments'], taskTypes: ['moments'] }),
-    managedPack('montage', 'Montage 视频', { projectPlatforms: ['montage'], taskTypes: ['montage'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
+    managedPack('montage', '视频生成', { projectPlatforms: ['montage'], taskTypes: ['montage'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
     managedPack('seednote', '种草笔记', { projectPlatforms: ['seednote'], taskTypes: ['seednote', 'viral_analysis'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
   ],
 }

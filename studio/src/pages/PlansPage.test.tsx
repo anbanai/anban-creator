@@ -899,7 +899,7 @@ describe('PlansPage Montage input', () => {
     id: 'project-montage',
     user_id: '1',
     platform: 'montage',
-    name: 'Montage 项目',
+    name: '视频生成项目',
     avatar_url: '',
     profile_url: '',
     instructions: '新品短视频',
@@ -932,7 +932,7 @@ describe('PlansPage Montage input', () => {
   const savedMontagePlan = {
     id: 'montage-plan-1',
     type: 'montage',
-    title: 'Montage 周计划',
+    title: '视频生成周计划',
     description: '',
     cron_expr: '0 9 * * 1',
     prompt: '',

@@ -211,7 +211,7 @@
     },
     {
       "id": "hypit",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
@@ -319,7 +319,7 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "33cedc52e244abb55007ab0a55c5e31d89d308f28c5bc360a52c36776f0de451"
+      "digest": "4ad39d4e38c1e93a7a8e5826d8bf9cf479bb996af4550404819a34115bb87fb4"
     },
     {
       "id": "live-slicer",
@@ -486,10 +486,10 @@
     },
     {
       "id": "montage",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "kind": "managed",
-      "display_name": "Montage 视频",
-      "description": "使用 OpenMontage 从素材和业务输入生产最终视频与交付清单。",
+      "display_name": "视频生成",
+      "description": "从素材和业务输入生成最终视频与交付清单。",
       "agent": {
         "name": "montage",
         "skills": [
@@ -565,7 +565,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "e78f23d896988ecf5925b90e8c618ee112b1297d94929dd05e2125fe10d95477"
+      "digest": "96c64c3d0033f6ab274cba3928d40968f4ebeaa91b3683b9541b0d4e46ada192"
     },
     {
       "id": "seednote",

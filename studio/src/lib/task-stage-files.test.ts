@@ -101,12 +101,12 @@ describe('groupTaskStageFiles', () => {
     expect(result.unassigned.map((item) => item.id)).toEqual(['cover.png', 'unknown.json'])
   })
 
-  it('matches named Montage outputs to the producing pipeline instead of skipped delivery registration', () => {
+  it('matches named video generation outputs to the producing pipeline instead of skipped delivery registration', () => {
     const result = groupTaskStageFiles([file('final.mp4', { role: 'video' }), file('montage-project.json')], {
       ...lifecycle,
       stages: [
         { ...lifecycle.stages[0], id: 'preflight', title: '能力预检与生产决策' },
-        { ...lifecycle.stages[1], id: 'pipeline', title: '执行上游 Montage 管线', goal: '生成 final.mp4 和 montage-project.json', state: 'failed' },
+        { ...lifecycle.stages[1], id: 'pipeline', title: '执行上游 OpenMontage 管线', goal: '生成 final.mp4 和 montage-project.json', state: 'failed' },
         { ...lifecycle.stages[2], id: 'delivery', title: '封面与交付登记', state: 'skipped' },
       ],
     })
@@ -127,10 +127,10 @@ describe('groupTaskStageFiles', () => {
     expect(result.unassigned).toEqual(files)
   })
 
-  it('recognizes the Montage project when its generic file role carries no stage information', () => {
+  it('recognizes the video generation project when its generic file role carries no stage information', () => {
     const result = groupTaskStageFiles([file('montage-project.json')], { ...lifecycle, stages: [
       { ...lifecycle.stages[0], title: '能力预检与生产决策' },
-      { ...lifecycle.stages[1], id: 'pipeline', title: '执行上游 Montage 管线', state: 'failed' },
+      { ...lifecycle.stages[1], id: 'pipeline', title: '执行上游 OpenMontage 管线', state: 'failed' },
       { ...lifecycle.stages[2], title: '封面与交付登记', state: 'skipped' },
     ] })
     expect(result.byStage.get('pipeline')?.map((item) => item.id)).toEqual(['montage-project.json'])

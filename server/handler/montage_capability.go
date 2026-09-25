@@ -15,7 +15,7 @@ func NewMontageCapabilityHandler(svc *service.MontageCapabilityService) *Montage
 
 func (h *MontageCapabilityHandler) List(c fiber.Ctx) error {
 	if h == nil || h.service == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "montage capabilities unavailable")
+		return Error(c, fiber.StatusServiceUnavailable, "视频生成能力不可用")
 	}
 	return Success(c, h.service.Catalog())
 }

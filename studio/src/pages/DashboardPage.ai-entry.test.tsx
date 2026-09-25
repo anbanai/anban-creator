@@ -87,7 +87,7 @@ const {
       id: 'project-5',
       platform: 'montage',
       name: '短片项目',
-      description: 'Montage 短片内容',
+      description: '视频生成短片内容',
       image_ratio: '9:16',
       config: {},
       montage_defaults: {

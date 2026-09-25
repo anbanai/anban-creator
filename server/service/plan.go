@@ -170,7 +170,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		}
 	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(project.Platform) {
-		return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
+		return nil, fmt.Errorf("%w: montage_input 只能用于视频生成计划", ErrMontageInput)
 	}
 	if model.IsMontagePlatform(project.Platform) {
 		if s.montageCapabilities != nil {
@@ -191,7 +191,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 			p.MontageInput = input
 		}
 		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
-			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
+			return nil, fmt.Errorf("%w: 视频生成任务需要填写需求", ErrMontageInput)
 		}
 	}
 	agentInput, err := validateAndCloneAgentInput(project.Platform, p.AgentInput)
@@ -509,7 +509,7 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 			return nil, fmt.Errorf("find project: %w", err)
 		}
 		if !model.IsMontagePlatform(project.Platform) {
-			return nil, fmt.Errorf("%w: montage_input can only be set on montage plans", ErrMontageInput)
+			return nil, fmt.Errorf("%w: montage_input 只能用于视频生成计划", ErrMontageInput)
 		}
 		candidate := plan.MontageInput.Data()
 		if p.MontageInput != nil {
@@ -527,7 +527,7 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 			}
 		}
 		if strings.TrimSpace(candidate.Brief) == "" {
-			return nil, fmt.Errorf("%w: montage task requires brief", ErrMontageInput)
+			return nil, fmt.Errorf("%w: 视频生成任务需要填写需求", ErrMontageInput)
 		}
 		if p.MontageInput != nil {
 			plan.SetMontageInput(candidate)

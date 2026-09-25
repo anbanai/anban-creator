@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"gopkg.in/yaml.v3"
 )
 
 func TestMontageTaskMapsToDedicatedAgent(t *testing.T) {
@@ -244,10 +246,160 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 	for _, want := range []string{
 		"[agents.montage]",
 		"montage.toml",
-		"Montage 视频生产引擎",
+		"视频生成（业务需求 + 素材 → 成片与交付清单）",
 	} {
 		if !strings.Contains(reg, want) {
 			t.Fatalf("codex agents registration missing %q", want)
+		}
+	}
+}
+
+func TestVideoPackBrandingKeepsLegacyDiscoveryAliases(t *testing.T) {
+	root := repoRoot(t)
+	requiredKeywords := []string{"Montage", "Hypit", "视频生成", "视频复刻"}
+	assertValues := func(path string, actual, expected []string) {
+		t.Helper()
+		if len(actual) != len(expected) {
+			t.Fatalf("%s values = %v, want %v", path, actual, expected)
+		}
+		for index, value := range expected {
+			if actual[index] != value {
+				t.Fatalf("%s values = %v, want %v", path, actual, expected)
+			}
+		}
+	}
+	assertKeywords := func(path string, actual []string) {
+		t.Helper()
+		for _, keyword := range requiredKeywords {
+			found := false
+			for _, candidate := range actual {
+				if candidate == keyword {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("%s missing keyword %q", path, keyword)
+			}
+		}
+	}
+
+	for _, relativePath := range []string{".claude-plugin/plugin.json", ".codex-plugin/plugin.json"} {
+		var manifest struct {
+			Description string   `json:"description"`
+			Keywords    []string `json:"keywords"`
+			Interface   struct {
+				LongDescription string `json:"longDescription"`
+			} `json:"interface"`
+		}
+		body := readRepoFile(t, filepath.Join(root, "harness", filepath.FromSlash(relativePath)))
+		if err := json.Unmarshal([]byte(body), &manifest); err != nil {
+			t.Fatalf("parse %s: %v", relativePath, err)
+		}
+		if !strings.Contains(manifest.Description, "video generation") || !strings.Contains(manifest.Description, "video replication") {
+			t.Fatalf("%s description = %q", relativePath, manifest.Description)
+		}
+		assertKeywords(relativePath, manifest.Keywords)
+		if strings.HasSuffix(relativePath, ".codex-plugin/plugin.json") && !strings.Contains(manifest.Interface.LongDescription, "video generation and video replication") {
+			t.Fatalf("Codex longDescription = %q", manifest.Interface.LongDescription)
+		}
+	}
+
+	var marketplace struct {
+		Description string `json:"description"`
+		Plugins     []struct {
+			Description string   `json:"description"`
+			Keywords    []string `json:"keywords"`
+		} `json:"plugins"`
+	}
+	marketplaceBody := readRepoFile(t, filepath.Join(root, "harness", ".claude-plugin", "marketplace.json"))
+	if err := json.Unmarshal([]byte(marketplaceBody), &marketplace); err != nil {
+		t.Fatalf("parse Claude marketplace: %v", err)
+	}
+	if !strings.Contains(marketplace.Description, "video generation") || !strings.Contains(marketplace.Description, "video replication") {
+		t.Fatalf("Claude marketplace header description = %q", marketplace.Description)
+	}
+	if len(marketplace.Plugins) != 1 {
+		t.Fatalf("Claude marketplace plugin count = %d, want 1", len(marketplace.Plugins))
+	}
+	if !strings.Contains(marketplace.Plugins[0].Description, "video generation") || !strings.Contains(marketplace.Plugins[0].Description, "video replication") {
+		t.Fatalf("Claude marketplace description = %q", marketplace.Plugins[0].Description)
+	}
+	assertKeywords("Claude marketplace", marketplace.Plugins[0].Keywords)
+
+	type codexRegistrationEntry struct {
+		Description        string   `toml:"description"`
+		NicknameCandidates []string `toml:"nickname_candidates"`
+	}
+	var registration struct {
+		Agents map[string]toml.Primitive `toml:"agents"`
+	}
+	registrationBody := readRepoFile(t, filepath.Join(root, "harness", "install", "agents-registration.toml"))
+	if _, err := toml.Decode(registrationBody, &registration); err != nil {
+		t.Fatalf("parse Codex agent registration: %v", err)
+	}
+
+	for _, test := range []struct {
+		id          string
+		displayName string
+		candidates  []string
+	}{
+		{id: "montage", displayName: "视频生成", candidates: []string{"VideoGenerator", "VideoGen", "Montage", "视频生成"}},
+		{id: "hypit", displayName: "视频复刻", candidates: []string{"VideoReplica", "Hypit", "视频复刻"}},
+	} {
+		packPath := filepath.Join("packs", test.id, "agent-pack.yaml")
+		var pack struct {
+			DisplayName string `yaml:"display_name"`
+		}
+		packBody := readRepoFile(t, filepath.Join(root, "harness", packPath))
+		if err := yaml.Unmarshal([]byte(packBody), &pack); err != nil {
+			t.Fatalf("parse %s: %v", packPath, err)
+		}
+		if pack.DisplayName != test.displayName {
+			t.Fatalf("%s display_name = %q, want %q", packPath, pack.DisplayName, test.displayName)
+		}
+
+		for _, relativePath := range []string{
+			filepath.Join("packs", test.id, "agent.codex.toml"),
+			filepath.Join("agents", test.id+".toml"),
+		} {
+			var codexAgent struct {
+				Name               string   `toml:"name"`
+				Description        string   `toml:"description"`
+				NicknameCandidates []string `toml:"nickname_candidates"`
+			}
+			body := readRepoFile(t, filepath.Join(root, "harness", relativePath))
+			if _, err := toml.Decode(body, &codexAgent); err != nil {
+				t.Fatalf("parse %s: %v", relativePath, err)
+			}
+			if codexAgent.Name != test.id || !strings.Contains(codexAgent.Description, test.displayName) {
+				t.Fatalf("%s identity = %q/%q", relativePath, codexAgent.Name, codexAgent.Description)
+			}
+			assertValues(relativePath, codexAgent.NicknameCandidates, test.candidates)
+		}
+
+		primitive, ok := registration.Agents[test.id]
+		if !ok {
+			t.Fatalf("Codex registration missing agent %s", test.id)
+		}
+		var agent codexRegistrationEntry
+		if err := toml.PrimitiveDecode(primitive, &agent); err != nil {
+			t.Fatalf("decode Codex registration for %s: %v", test.id, err)
+		}
+		if !strings.Contains(agent.Description, test.displayName) {
+			t.Fatalf("Codex registration description for %s = %q", test.id, agent.Description)
+		}
+		assertValues("Codex registration for "+test.id, agent.NicknameCandidates, test.candidates)
+
+		for _, relativePath := range []string{
+			filepath.Join("packs", test.id, "agent.claude.md"),
+			filepath.Join("agents", test.id+".md"),
+		} {
+			path := filepath.Join(root, "harness", relativePath)
+			frontmatter := parseSkillFrontmatter(t, path, readRepoFile(t, path))
+			if frontmatterStringValue(frontmatter["name"]) != test.id || !strings.Contains(frontmatterStringValue(frontmatter["description"]), test.displayName) {
+				t.Fatalf("%s Claude identity = %#v", relativePath, frontmatter)
+			}
 		}
 	}
 }
@@ -341,8 +493,8 @@ func TestMontagePluginManifestsAdvertiseSupport(t *testing.T) {
 		filepath.Join(root, "harness", ".codex-plugin", "plugin.json"),
 	} {
 		body := readRepoFile(t, path)
-		if !strings.Contains(body, "Montage") {
-			t.Fatalf("%s must advertise Montage support", path)
+		if !strings.Contains(body, "video generation") || !strings.Contains(body, "video replication") {
+			t.Fatalf("%s must advertise video generation and replication support", path)
 		}
 	}
 }

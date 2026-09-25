@@ -6,7 +6,7 @@ import { ProjectIdentity } from './ProjectIdentity'
 
 describe('ProjectIdentity', () => {
   it.each([
-    ['montage', 'Montage 视频生成项目', 'text-purple-700'],
+    ['montage', '视频生成项目', 'text-purple-700'],
     ['hypit', '视频复刻项目', 'text-orange-700'],
   ])('preserves the %s identity in the project selector', (platform, label, color) => {
     render(<ProjectIdentity project={{ id: platform, name: '视频项目', platform }} />)

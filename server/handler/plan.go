@@ -183,7 +183,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
 	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
-		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
+		return Error(c, fiber.StatusBadRequest, "视频生成任务需要填写需求")
 	}
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
@@ -388,7 +388,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
-		return Error(c, fiber.StatusBadRequest, "montage task requires brief")
+		return Error(c, fiber.StatusBadRequest, "视频生成任务需要填写需求")
 	}
 	// Verify ownership before update.
 	existing, err := h.service.GetByID(c.Context(), id)

@@ -42,13 +42,14 @@ describe('ProjectCard', () => {
   }
 
   it.each([
-    ['montage', 'Montage 视频生成', 'text-purple-700', 'lucide-clapperboard'],
-    ['hypit', '视频复刻', 'text-orange-700', 'lucide-repeat-2'],
-  ] as const)('shows the %s platform identity on project cards', (platform, label, color, icon) => {
+    ['montage', '视频生成', 'text-purple-700', 'sparkles'],
+    ['hypit', '视频复刻', 'text-orange-700', 'copy'],
+  ] as const)('shows the %s platform identity on project cards', (platform, label, color, symbol) => {
     render(<ProjectCard project={project({ platform })} />)
     const badge = screen.getByText(label)
     expect(badge).toHaveClass(color)
-    expect(badge.querySelector('svg')).toHaveClass(icon)
+    expect(badge.querySelector(`[data-platform-icon="${platform}"]`)).toBeInTheDocument()
+    expect(badge.querySelector(`[data-platform-symbol="${symbol}"]`)).toBeInTheDocument()
   })
 
   it('shows only basic project activity', () => {

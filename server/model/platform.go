@@ -105,7 +105,7 @@ var PlatformConfigs = map[string]*PlatformConfig{
 	},
 	PlatformMontage: {
 		ID:                   PlatformMontage,
-		Label:                "Montage",
+		Label:                "视频生成",
 		BadgeVariant:         "secondary",
 		SupportsPublishing:   false,
 		SupportsAutoFetch:    false,

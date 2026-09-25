@@ -79,7 +79,7 @@ export default function PluginsPage() {
               Anban Creator
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
-              把公众号、种草笔记、Montage 视频生产与发布流程接入你正在使用的 Agent。
+              把公众号、种草笔记、视频生成、视频复刻及发布流程接入你正在使用的 Agent。
             </p>
           </div>
 

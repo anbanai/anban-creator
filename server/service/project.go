@@ -19,7 +19,7 @@ var (
 	ErrProjectOwnedByUser        = errors.New("project not owned by user")
 	ErrProjectDeleteConflict     = errors.New("project delete conflict")
 	ErrProjectUpdateConflict     = errors.New("project update conflict")
-	ErrProjectMontageDefaults    = errors.New("invalid montage project defaults")
+	ErrProjectMontageDefaults    = errors.New("视频生成项目默认设置无效")
 	ErrInvalidAgentConfig        = errors.New("invalid agent config")
 	ErrWechatCredentialsRequired = errors.New("wechat credentials required")
 )
@@ -69,14 +69,14 @@ func validateProjectMontageDefaults(project *model.Project, capabilities *Montag
 		return nil
 	}
 	if !model.IsMontagePlatform(project.Platform) {
-		return fmt.Errorf("%w: montage_defaults can only be set on montage projects", ErrProjectMontageDefaults)
+		return fmt.Errorf("%w: montage_defaults 只能用于视频生成项目", ErrProjectMontageDefaults)
 	}
 	if capabilities != nil {
 		return capabilities.ValidateProjectDefaults(project.MontageDefaults.Data())
 	}
 	duration := project.MontageDefaults.Data().Preferences.DurationSeconds
 	if duration < 0 || duration > 600 {
-		return fmt.Errorf("%w: montage duration_seconds must be between 0 and 600", ErrProjectMontageDefaults)
+		return fmt.Errorf("%w: 视频生成 duration_seconds 必须在 0 到 600 之间", ErrProjectMontageDefaults)
 	}
 	return nil
 }

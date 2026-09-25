@@ -76,7 +76,7 @@ func ValidateMontageInlineBootstrapBudget(input *model.MontageInput, project *mo
 	for _, value := range values {
 		raw, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
-			return fmt.Errorf("%w: montage bootstrap metadata cannot be serialized: %v", ErrMontageInput, err)
+			return fmt.Errorf("%w: 视频生成 bootstrap metadata cannot be serialized: %v", ErrMontageInput, err)
 		}
 		totalBytes += int64(len(raw))
 	}
@@ -84,7 +84,7 @@ func ValidateMontageInlineBootstrapBudget(input *model.MontageInput, project *mo
 		totalBytes += int64(len([]byte("# CLAUDE.md\n\n## 项目定位\n\n" + trimmed)))
 	}
 	if totalBytes > montageBootstrapInlineReserveBytes {
-		return fmt.Errorf("%w: inline Montage bootstrap metadata exceeds %d bytes", ErrMontageInput, montageBootstrapInlineReserveBytes)
+		return fmt.Errorf("%w: inline 视频生成 bootstrap metadata exceeds %d bytes", ErrMontageInput, montageBootstrapInlineReserveBytes)
 	}
 	return nil
 }
@@ -223,7 +223,7 @@ func (s *MontageCapabilityService) NormalizeAndValidateInput(input *model.Montag
 		input.Preferences.DurationSeconds = capability.RecommendedDurationSeconds
 	}
 	if !s.config.Enabled {
-		return fmt.Errorf("%w: montage is disabled", ErrMontageInput)
+		return fmt.Errorf("%w: 视频生成已停用", ErrMontageInput)
 	}
 	if !allowed {
 		return fmt.Errorf("%w: pipeline_key %q is not allowed", ErrMontageInput, input.PipelineKey)
@@ -242,7 +242,7 @@ func (s *MontageCapabilityService) NormalizeAndValidateInput(input *model.Montag
 
 func (s *MontageCapabilityService) ValidateProjectDefaults(defaults model.MontageDefaults) error {
 	if !s.config.Enabled {
-		return fmt.Errorf("%w: montage is disabled", ErrProjectMontageDefaults)
+		return fmt.Errorf("%w: 视频生成已停用", ErrProjectMontageDefaults)
 	}
 	key := strings.TrimSpace(defaults.DefaultPipeline)
 	if key != "" {
@@ -252,7 +252,7 @@ func (s *MontageCapabilityService) ValidateProjectDefaults(defaults model.Montag
 	}
 	duration := defaults.Preferences.DurationSeconds
 	if duration < 0 || duration > s.config.MaxDurationSeconds {
-		return fmt.Errorf("%w: montage duration_seconds must be between 0 and %d", ErrProjectMontageDefaults, s.config.MaxDurationSeconds)
+		return fmt.Errorf("%w: 视频生成 duration_seconds 必须在 0 到 %d 之间", ErrProjectMontageDefaults, s.config.MaxDurationSeconds)
 	}
 	return nil
 }

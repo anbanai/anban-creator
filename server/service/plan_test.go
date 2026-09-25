@@ -461,8 +461,8 @@ func TestPlanServiceRejectsMontageInputForOtherPlatforms(t *testing.T) {
 			Brief: "错误平台",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "montage_input can only be set on montage plans") {
-		t.Fatalf("Create error = %v, want montage input rejection", err)
+	if err == nil || !errors.Is(err, ErrMontageInput) || !strings.Contains(err.Error(), "montage_input 只能用于视频生成计划") {
+		t.Fatalf("Create error = %v, want 视频生成输入无效", err)
 	}
 
 	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
@@ -480,8 +480,8 @@ func TestPlanServiceRejectsMontageInputForOtherPlatforms(t *testing.T) {
 			Brief: "错误平台更新",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "montage_input can only be set on montage plans") {
-		t.Fatalf("Update error = %v, want montage input rejection", err)
+	if err == nil || !errors.Is(err, ErrMontageInput) || !strings.Contains(err.Error(), "montage_input 只能用于视频生成计划") {
+		t.Fatalf("Update error = %v, want 视频生成输入无效", err)
 	}
 }
 

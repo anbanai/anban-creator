@@ -390,6 +390,8 @@ describe('createTaskSchema', () => {
     })
 
     expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected video generation brief validation to fail')
+    expect(result.error.issues[0]?.message).toBe('请填写视频生成需求')
   })
 })
 
@@ -552,6 +554,19 @@ describe('planSchema', () => {
 
     expect(result.success).toBe(true)
   })
+
+  it('uses video generation wording when a plan brief is missing', () => {
+    const result = planSchema.safeParse({
+      project_id: 'project-montage',
+      type: 'montage',
+      cron_expr: '0 10 * * *',
+      montage_input: { brief: '' },
+    })
+
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected video generation plan brief validation to fail')
+    expect(result.error.issues[0]?.message).toBe('请填写视频生成需求')
+  })
 })
 
 describe('projectSchema', () => {
@@ -587,7 +602,7 @@ describe('projectSchema', () => {
   it('accepts montage project defaults', () => {
     const result = projectSchema.safeParse({
       platform: 'montage',
-      name: 'Montage 项目',
+      name: '视频生成项目',
       image_ratio: '9:16',
       montage_defaults: {
         default_pipeline: 'social-short',
