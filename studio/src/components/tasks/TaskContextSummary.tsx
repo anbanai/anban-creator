@@ -22,6 +22,7 @@ import type { Project, Task, TaskFile } from '@/types'
 
 export interface TaskContextSummaryProps {
   compact?: boolean
+  layout?: 'grid' | 'sidebar'
   task: Task
   project?: Project
   files: TaskFile[]
@@ -33,6 +34,7 @@ export interface TaskContextSummaryProps {
 
 interface SummaryItemProps {
   compact?: boolean
+  layout?: 'grid' | 'sidebar'
   actionLabel: string
   detail: string
   detailSuffix?: string
@@ -60,6 +62,7 @@ function latestNormalizedLogLine(logs: string[]) {
 
 function SummaryItem({
   compact,
+  layout = 'grid',
   actionLabel,
   detail,
   detailSuffix,
@@ -80,9 +83,13 @@ function SummaryItem({
       className={cn(
         'min-w-0 flex-col items-start justify-start gap-1.5 overflow-hidden rounded-none px-3 py-2 text-left',
         compact ? 'h-auto' : 'h-24',
-        index === 0 && 'border-r border-b border-r-border border-b-border lg:border-b-0',
-        index === 1 && 'border-b border-b-border lg:border-r lg:border-r-border lg:border-b-0',
-        index === 2 && 'border-r border-r-border',
+        layout === 'sidebar'
+          ? index < 3 && 'border-b border-b-border'
+          : cn(
+              index === 0 && 'border-r border-b border-r-border border-b-border lg:border-b-0',
+              index === 1 && 'border-b border-b-border lg:border-r lg:border-r-border lg:border-b-0',
+              index === 2 && 'border-r border-r-border',
+            ),
       )}
       onClick={onClick}
     >
@@ -122,6 +129,7 @@ function taskLogState(task: Task, sseError: string | null) {
 
 export function TaskContextSummary({
   compact = false,
+  layout = 'grid',
   task,
   project,
   files,
@@ -150,7 +158,7 @@ export function TaskContextSummary({
 
   return (
     <Card role="region" aria-label="任务上下文" size="sm" className={compact ? 'gap-2 border-0 bg-transparent shadow-none ring-0' : undefined}>
-      {!compact && <CardHeader className="border-b border-border">
+      {(!compact || layout === 'sidebar') && <CardHeader className={cn('border-b border-border', compact && 'px-3 pb-3')}>
         <CardTitle>
           <h2>任务上下文</h2>
         </CardTitle>
@@ -158,10 +166,11 @@ export function TaskContextSummary({
       <CardContent className="p-0">
         <div
           data-testid="task-context-grid"
-          className="grid grid-cols-2 gap-0 lg:grid-cols-4"
+          className={cn('grid gap-0', layout === 'sidebar' ? 'grid-cols-1' : 'grid-cols-2 lg:grid-cols-4')}
         >
           <SummaryItem
             compact={compact}
+            layout={layout}
             actionLabel="打开任务概览"
             descriptionId={`${descriptionIdPrefix}-overview`}
             icon={ClipboardList}
@@ -174,6 +183,7 @@ export function TaskContextSummary({
           />
           <SummaryItem
             compact={compact}
+            layout={layout}
             actionLabel="打开创作配置"
             descriptionId={`${descriptionIdPrefix}-configuration`}
             icon={SlidersHorizontal}
@@ -186,6 +196,7 @@ export function TaskContextSummary({
           />
           <SummaryItem
             compact={compact}
+            layout={layout}
             actionLabel="打开参考素材"
             descriptionId={`${descriptionIdPrefix}-materials`}
             icon={Paperclip}
@@ -197,6 +208,7 @@ export function TaskContextSummary({
           />
           <SummaryItem
             compact={compact}
+            layout={layout}
             actionLabel="打开执行日志"
             descriptionId={`${descriptionIdPrefix}-logs`}
             icon={ScrollText}
