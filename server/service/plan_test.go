@@ -588,6 +588,56 @@ func TestPlanService_Create_ArticleImageToggles(t *testing.T) {
 	}
 }
 
+func TestPlanServiceCreateRequiresAndPersistsArticleCoverPortrait(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := t.Context()
+	projectID := createTestProject(t, repo, "user-1", model.PlatformArticle)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.PortraitReferenceImageAssetID = "portrait-asset"
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID: "user-1", ProjectID: projectID, ExecutionProfile: "effective",
+		CronExpr: "0 9 * * *", ArticleCoverUsePortrait: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.ArticleCoverUsePortrait {
+		t.Fatal("plan did not persist required portrait setting")
+	}
+
+	taskSvc, taskRepo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.NewString()
+	ensureTestUser(t, taskRepo, userID)
+	spawnProjectID := createTestProject(t, taskRepo, userID, model.PlatformArticle)
+	portrait := referenceAssetFixture("portrait", userID, DirectUploadPurposeProjectPortraitReference)
+	seedReferenceAsset(t, taskRepo, portrait)
+	spawnProject, err := taskRepo.Projects().FindByID(ctx, spawnProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spawnProject.PortraitReferenceImageAssetID = portrait.ID
+	if err := taskRepo.Projects().Update(ctx, spawnProject); err != nil {
+		t.Fatal(err)
+	}
+	taskSvc.SetReferenceAssetService(NewReferenceAssetService(taskRepo, nil, nil))
+	spawned, err := taskSvc.CreateFromPlan(ctx, &model.Plan{
+		ID: uuid.NewString(), UserID: userID, ProjectID: spawnProjectID, Type: model.PlatformArticle,
+		ExecutionProfile: "effective", ArticleCoverUsePortrait: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !spawned.ArticleCoverUsePortrait {
+		t.Fatal("spawned task did not inherit required portrait setting")
+	}
+}
+
 func TestPlanService_GetByID(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()

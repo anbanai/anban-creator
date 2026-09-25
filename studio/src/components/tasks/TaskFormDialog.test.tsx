@@ -318,17 +318,30 @@ describe('TaskFormDialog', () => {
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
   })
 
-  it('automatically supplies the configured portrait as optional Agent input', async () => {
+  it('automatically supplies the configured portrait and leaves cover usage optional by default', async () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    expect(await within(dialog).findByText('已作为输入提供，由 Agent 按内容决定是否用于封面')).toBeInTheDocument()
-    expect(within(dialog).queryByRole('switch', { name: '使用人物图' })).not.toBeInTheDocument()
+    expect(await within(dialog).findByText('已作为任务输入提供')).toBeInTheDocument()
+    await openTaskParameters(dialog)
+    const portraitSwitch = within(dialog).getByRole('switch', { name: '封面必须使用项目默认人物' })
+    expect(portraitSwitch).not.toBeChecked()
     fireEvent.click(within(dialog).getByRole('switch', { name: '生成封面图' }))
     expect(within(dialog).getByAltText('项目人物参考')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), { target: { value: '写文章' } })
     fireEvent.submit(document.getElementById('task-create-form')!)
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
-    expect(vi.mocked(api.tasks.create).mock.calls[0][0]).not.toHaveProperty('use_portrait_reference')
+    expect(vi.mocked(api.tasks.create).mock.calls[0][0]).toMatchObject({ article_cover_use_portrait: false })
+  })
+
+  it('submits the required project portrait option for an article task', async () => {
+    renderDialog()
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    await openTaskParameters(dialog)
+    fireEvent.click(within(dialog).getByRole('switch', { name: '封面必须使用项目默认人物' }))
+    fireEvent.change(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), { target: { value: '写文章' } })
+    fireEvent.submit(document.getElementById('task-create-form')!)
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
+    expect(vi.mocked(api.tasks.create).mock.calls[0][0]).toMatchObject({ article_cover_use_portrait: true })
   })
 
   it('shows the missing project portrait without requiring one', async () => {
@@ -336,7 +349,8 @@ describe('TaskFormDialog', () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     expect(await within(dialog).findByText('项目尚未设置人物参考图')).toBeInTheDocument()
-    expect(within(dialog).queryByRole('switch', { name: '使用人物图' })).not.toBeInTheDocument()
+    await openTaskParameters(dialog)
+    expect(within(dialog).getByRole('switch', { name: '封面必须使用项目默认人物' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('在任务创建和克隆时用模板覆盖非空 Prompt 且保留附件', async () => {

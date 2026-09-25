@@ -1397,11 +1397,21 @@ func TestCloneArticleEditableOverridesPreserveDirectReferenceOutsideGenericAttac
 	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
 	seedReferenceAsset(t, repo, asset)
+	portrait := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeProjectPortraitReference)
+	seedReferenceAsset(t, repo, portrait)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.PortraitReferenceImageAssetID = portrait.ID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
 	source := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ArticleCoverUsePortrait: true,
 	}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
@@ -1424,6 +1434,9 @@ func TestCloneArticleEditableOverridesPreserveDirectReferenceOutsideGenericAttac
 	attachments := clone.InputAttachments.Data()
 	if clone.ReferenceImageAssetID != asset.ID {
 		t.Fatalf("clone reference asset = %q, want %q", clone.ReferenceImageAssetID, asset.ID)
+	}
+	if !clone.ArticleCoverUsePortrait {
+		t.Fatal("editable clone did not inherit required project portrait setting")
 	}
 	if len(attachments) != 2 || attachments[0].FileName != "brief.pdf" || attachments[1].FileName != "notes.txt" {
 		t.Fatalf("clone attachments = %#v", attachments)

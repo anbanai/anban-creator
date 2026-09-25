@@ -70,8 +70,8 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if claudeManifest.Version == "" || claudeManifest.Version != codexManifest.Version {
 		t.Fatalf("native manifest versions = %q/%q, want one aligned version", claudeManifest.Version, codexManifest.Version)
 	}
-	if claudeManifest.Version != "4.2.6" {
-		t.Fatalf("native manifest version = %q, want 4.2.6 for the current plugin surface", claudeManifest.Version)
+	if claudeManifest.Version != "4.2.7" {
+		t.Fatalf("native manifest version = %q, want 4.2.7 for the current plugin surface", claudeManifest.Version)
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")

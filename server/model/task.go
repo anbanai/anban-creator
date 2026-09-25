@@ -211,6 +211,7 @@ type Task struct {
 	// BuildUserPrompt; non-article task types ignore them.
 	ArticleWithCover         *bool `gorm:"default:true;not null" json:"article_with_cover"`
 	ArticleWithContentImages *bool `gorm:"default:true;not null" json:"article_with_content_images"`
+	ArticleCoverUsePortrait  bool  `gorm:"default:false;not null" json:"article_cover_use_portrait"`
 	// Ecommerce carries the e-commerce package config for platform="ecommerce"
 	// tasks (selected deliverable modules, product photos, target platform, selling
 	// points, and language). Zero value for non-ecommerce

@@ -38,6 +38,7 @@ type CloneTaskOverrides struct {
 	HasTailImage             *bool
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
+	ArticleCoverUsePortrait  *bool
 	Ecommerce                *model.EcommerceConfig
 	MontageInput             *model.MontageInput
 	HypitInput               *model.HypitInput
@@ -100,6 +101,10 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		if preserveArticleReference {
 			preservedReferenceAssetID = referenceAssetID
 		}
+		articleCoverUsePortrait := src.ArticleCoverUsePortrait
+		if override.ArticleCoverUsePortrait != nil {
+			articleCoverUsePortrait = *override.ArticleCoverUsePortrait
+		}
 		params := CreateManualParams{
 			UserID:                   src.UserID,
 			ProjectID:                override.ProjectID,
@@ -119,6 +124,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			HasTailImage:             override.HasTailImage,
 			ArticleWithCover:         override.ArticleWithCover,
 			ArticleWithContentImages: override.ArticleWithContentImages,
+			ArticleCoverUsePortrait:  articleCoverUsePortrait,
 			Ecommerce:                override.Ecommerce,
 			MontageInput:             override.MontageInput,
 			HypitInput:               override.HypitInput,
@@ -183,6 +189,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		HasTailImage:                  &hasTail,
 		ArticleWithCover:              articleCover,
 		ArticleWithContentImages:      articleContent,
+		ArticleCoverUsePortrait:       src.ArticleCoverUsePortrait,
 		AgentInput:                    src.AgentInput.Data(),
 	}
 	if cloneParams.AgentInput != nil {

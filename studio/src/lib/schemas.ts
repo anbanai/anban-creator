@@ -144,6 +144,7 @@ export const createTaskSchema = z.object({
   // task types ignore these fields server-side.
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
+  article_cover_use_portrait: z.boolean().default(false),
   // E-commerce package (server ignores for non-ecommerce). selected_modules maps
   // module key → quantity; product_photos are server-owned storage URLs
   // materialized into the agent workspace by the executor.
@@ -231,6 +232,7 @@ export const planSchema = z.object({
   // article tasks inherit them; non-article plans ignore them server-side.
   article_with_cover: z.boolean().default(true),
   article_with_content_images: z.boolean().default(true),
+  article_cover_use_portrait: z.boolean().default(false),
   hypit_input: hypitInputSchema,
   montage_input: montageInputSchema,
 }).superRefine((data, ctx) => {

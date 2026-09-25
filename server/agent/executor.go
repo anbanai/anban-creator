@@ -32,6 +32,7 @@ type UserPromptParams struct {
 	// nil defaults true for legacy tasks/callers. Ignored for non-article task types.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
+	ArticleCoverUsePortrait  bool
 }
 
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
@@ -126,6 +127,9 @@ func describeRuntimeControls(p UserPromptParams) string {
 		controls = append(controls, "seednote_image_mode="+seednoteImageMode(p.HasContentImage, p.HasTailImage))
 	case model.PlatformArticle:
 		controls = append(controls, "article_image_mode="+articleImageMode(defaultTrue(p.ArticleWithCover), defaultTrue(p.ArticleWithContentImages)))
+		if p.ArticleCoverUsePortrait {
+			controls = append(controls, "article_cover_portrait=required_project_portrait")
+		}
 	}
 	if len(controls) == 0 {
 		return ""

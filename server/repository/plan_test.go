@@ -129,6 +129,7 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 	stale.CreatedAt = createdAt.Add(time.Hour)
 	stale.ExecutionProfile = "balanced"
 	stale.Prompt = "after"
+	stale.ArticleCoverUsePortrait = true
 	if err := repo.Plans().UpdateEditable(t.Context(), stale, false); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ExecutionProfile != "balanced" || got.Prompt != "after" || got.UserID != "user-1" || got.ProjectID != "project-1" || got.Type != model.PlatformArticle || got.Status != model.PlanStatusActive || !got.CreatedAt.Equal(createdAt) {
+	if got.ExecutionProfile != "balanced" || got.Prompt != "after" || !got.ArticleCoverUsePortrait || got.UserID != "user-1" || got.ProjectID != "project-1" || got.Type != model.PlatformArticle || got.Status != model.PlanStatusActive || !got.CreatedAt.Equal(createdAt) {
 		t.Fatalf("editable update changed protected fields: %#v", got)
 	}
 	if got.NextRunAt == nil || !got.NextRunAt.Equal(schedulerNext) || got.CronExpr != "0 * * * *" {

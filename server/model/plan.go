@@ -42,6 +42,7 @@ type Plan struct {
 	// generate). See model.Task.ArticleWithCover for why *bool is required.
 	ArticleWithCover         *bool                                 `gorm:"default:true;not null" json:"article_with_cover"`
 	ArticleWithContentImages *bool                                 `gorm:"default:true;not null" json:"article_with_content_images"`
+	ArticleCoverUsePortrait  bool                                  `gorm:"default:false;not null" json:"article_cover_use_portrait"`
 	InputAttachments         datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
 	HypitInput               datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
 	MontageInput             datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`

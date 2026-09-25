@@ -96,6 +96,7 @@ func planEditableUpdates(plan *model.Plan, scheduleChanged bool) map[string]inte
 		"has_tail_image":              plan.HasTailImage,
 		"article_with_cover":          plan.ArticleWithCover,
 		"article_with_content_images": plan.ArticleWithContentImages,
+		"article_cover_use_portrait":  plan.ArticleCoverUsePortrait,
 		"input_attachments":           plan.InputAttachments,
 		"montage_input":               plan.MontageInput,
 		"hypit_input":                 plan.HypitInput,

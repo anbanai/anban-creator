@@ -742,10 +742,18 @@ describe('task form mapping', () => {
     })
   })
 
-  it('leaves project portrait inheritance to the server without an opt-in parameter', () => {
+  it('keeps project portraits optional unless the cover requirement is selected', () => {
     const values = createTaskFormDefaults(project({ platform: 'article' }))
-    expect(taskFormValuesToRequest(values)).not.toHaveProperty('use_portrait_reference')
-    expect(taskFormValuesToRequest({ ...values, article_with_cover: false })).not.toHaveProperty('use_portrait_reference')
+    expect(values.article_cover_use_portrait).toBe(false)
+    expect(taskFormValuesToRequest(values)).toMatchObject({ article_cover_use_portrait: false })
+    expect(taskFormValuesToRequest({ ...values, article_with_cover: false })).toMatchObject({ article_cover_use_portrait: false })
+  })
+
+  it('submits an explicit project portrait requirement for article covers', () => {
+    const values = createTaskFormDefaults(project({ platform: 'article' }))
+    expect(taskFormValuesToRequest({ ...values, article_cover_use_portrait: true })).toMatchObject({
+      article_cover_use_portrait: true,
+    })
   })
 
   it('keeps a cloned article portrait out of general input attachments', () => {
@@ -766,5 +774,20 @@ describe('task form mapping', () => {
 
     expect(cloned.reference_image).toEqual({ asset_id: '11111111-1111-4111-8111-111111111111' })
     expect(cloned.input_attachments).toEqual([{ type: 'document', key: 'brief', role: 'brief' }])
+  })
+
+  it('preserves the required portrait setting when cloning an article task', () => {
+    const cloned = cloneTaskFormDefaults(task({ type: 'article', article_cover_use_portrait: true }))
+    expect(cloned.article_cover_use_portrait).toBe(true)
+  })
+
+  it('clears the required portrait option when switching to an article project without a portrait', () => {
+    const current = { ...createTaskFormDefaults(project({ platform: 'article' })), article_cover_use_portrait: true }
+    const switched = switchTaskFormDefaults(current, project({
+      id: 'project-without-portrait',
+      platform: 'article',
+      portrait_reference_image: null,
+    }))
+    expect(switched.article_cover_use_portrait).toBe(false)
   })
 })

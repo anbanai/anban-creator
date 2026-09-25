@@ -120,6 +120,7 @@ export interface Task {
   // Article image composition persisted with the task.
   article_with_cover?: boolean
   article_with_content_images?: boolean
+  article_cover_use_portrait?: boolean
   // Failure detail persisted by server model.Task.ErrorMessage; omitted when empty.
   error_message?: string
   plan_id?: string | null
@@ -253,6 +254,7 @@ export interface CreateTaskRequest {
   // toggleable. Both default true. Server ignores for non-article task types.
   article_with_cover?: boolean
   article_with_content_images?: boolean
+  article_cover_use_portrait?: boolean
   // E-commerce package fields (server ignores for non-ecommerce). Product photos
   // are server-owned storage URLs returned by direct upload; the executor
   // materializes them into the agent workspace.

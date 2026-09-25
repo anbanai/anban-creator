@@ -11,6 +11,7 @@ export interface TaskFormDefaults extends CreateTaskFormValues {
   has_tail_image: boolean
   article_with_cover: boolean
   article_with_content_images: boolean
+  article_cover_use_portrait: boolean
 }
 
 function cloneValue<T>(value: T): T {
@@ -51,6 +52,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     has_tail_image: false,
     article_with_cover: true,
     article_with_content_images: true,
+    article_cover_use_portrait: false,
     product_photos: [],
     selected_modules: cloneValue(defaults.selectedModules),
     target_platform: defaults.targetPlatform,
@@ -73,6 +75,7 @@ export function switchTaskFormDefaults(
       project_id: project.id,
       image_ratio: defaults.image_ratio,
       image_capability_key: defaults.image_capability_key,
+      article_cover_use_portrait: current.article_cover_use_portrait && Boolean(project.portrait_reference_image),
     }
 
     if (current.type === 'ecommerce') {
@@ -152,6 +155,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     has_tail_image: task.has_tail_image ?? false,
     article_with_cover: task.article_with_cover ?? true,
     article_with_content_images: task.article_with_content_images ?? true,
+    article_cover_use_portrait: task.article_cover_use_portrait ?? false,
     product_photos: cloneValue(ecommerce?.product_photos ?? []),
     selected_modules: cloneValue(ecommerce?.selected_modules ?? {}),
     target_platform: ecommerce?.target_platform ?? '',
@@ -203,6 +207,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
       ? {
           article_with_cover: values.article_with_cover,
           article_with_content_images: values.article_with_content_images,
+          article_cover_use_portrait: values.article_cover_use_portrait,
         }
       : {}),
     ...(values.type === 'ecommerce'

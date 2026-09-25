@@ -861,6 +861,21 @@ func TestBuildUserPrompt_ArticleImageComposition(t *testing.T) {
 	}
 }
 
+func TestBuildUserPrompt_RequiredArticleCoverPortrait(t *testing.T) {
+	got := BuildUserPrompt(UserPromptParams{
+		TaskType:                model.PlatformArticle,
+		ArticleWithCover:        ptrBool(true),
+		ArticleCoverUsePortrait: true,
+	})
+	if !strings.Contains(got, "article_cover_portrait=required_project_portrait") {
+		t.Fatalf("prompt = %q, want required project portrait runtime control", got)
+	}
+	unchecked := BuildUserPrompt(UserPromptParams{TaskType: model.PlatformArticle, ArticleWithCover: ptrBool(true)})
+	if strings.Contains(unchecked, "article_cover_portrait=") {
+		t.Fatalf("unchecked prompt = %q, must not add portrait requirement", unchecked)
+	}
+}
+
 func ptrBool(v bool) *bool {
 	return &v
 }

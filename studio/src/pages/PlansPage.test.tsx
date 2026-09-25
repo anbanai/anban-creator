@@ -231,10 +231,20 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
     fireEvent.submit(document.getElementById('plan-form')!)
 
-    expect(within(dialog).getByText('已作为输入提供，由 Agent 按内容决定是否用于封面')).toBeInTheDocument()
-    expect(within(dialog).queryByRole('switch', { name: '使用人物图' })).not.toBeInTheDocument()
+    expect(within(dialog).getByText('已作为计划输入，每次运行时会提供')).toBeInTheDocument()
     await waitFor(() => expect(api.plans.create).toHaveBeenCalled())
-    expect(vi.mocked(api.plans.create).mock.calls[0][0]).not.toHaveProperty('use_portrait_reference')
+    expect(vi.mocked(api.plans.create).mock.calls[0][0]).toHaveProperty('article_cover_use_portrait', false)
+  })
+
+  it('submits the article cover portrait requirement for recurring plans', async () => {
+    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    render(<PlansPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    const portraitSwitch = await within(dialog).findByRole('switch', { name: '封面必须使用项目默认人物' })
+    fireEvent.click(portraitSwitch)
+    fireEvent.submit(document.getElementById('plan-form')!)
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalled())
+    expect(vi.mocked(api.plans.create).mock.calls[0][0]).toMatchObject({ article_cover_use_portrait: true })
   })
 
   it('disables a plan portrait when the project has no configured image', async () => {

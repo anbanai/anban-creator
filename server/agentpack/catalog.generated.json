@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -103,7 +103,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "9482b823dc3aaac6b53fd3a0cd9b232b70887533ac2bec8ec53aaf283b5878fc"
+      "digest": "e079820296935ed60009b010ed3fc282f14d4a3519220cd0b6e0e834bc42feb0"
     },
     {
       "id": "ecommerce",

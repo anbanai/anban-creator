@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	ErrUnsupportedPlanPlatform = errors.New("plans are not supported for this project platform")
-	ErrPlanUpdateConflict      = errors.New("plan changed concurrently")
+	ErrUnsupportedPlanPlatform         = errors.New("plans are not supported for this project platform")
+	ErrPlanUpdateConflict              = errors.New("plan changed concurrently")
+	ErrArticleCoverPortraitUnavailable = errors.New("a project portrait reference and an enabled article cover are required")
 )
 
 // PlanService handles plan CRUD and lifecycle operations.
@@ -94,6 +95,7 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
+	ArticleCoverUsePortrait  bool
 	MontageInput             *model.MontageInput
 	HypitInput               *model.HypitInput
 	InputAttachments         []model.EntryAttachment
@@ -127,6 +129,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
+	}
+	if p.ArticleCoverUsePortrait && (project.Platform != model.PlatformArticle || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "") {
+		return nil, ErrArticleCoverPortraitUnavailable
 	}
 	profile, err := resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
 	if err != nil {
@@ -236,6 +241,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if p.ArticleWithContentImages != nil {
 		articleContent = *p.ArticleWithContentImages
 	}
+	if p.ArticleCoverUsePortrait && !articleCover {
+		return nil, ErrArticleCoverPortraitUnavailable
+	}
 	// A plan carries scheduling-adjacent "what to produce" image params.
 	// Project/account style config is snapshotted when a task is spawned.
 	plan := &model.Plan{
@@ -257,6 +265,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		HasTailImage:             hasTail,
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
+		ArticleCoverUsePortrait:  p.ArticleCoverUsePortrait,
 	}
 	plan.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
 	if agentInput != nil {
@@ -337,6 +346,7 @@ type UpdatePlanParams struct {
 	HasTailImage             *bool
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
+	ArticleCoverUsePortrait  *bool
 	MontageInput             *model.MontageInput
 	HypitInput               *model.HypitInput
 	InputAttachments         *[]model.EntryAttachment
@@ -444,6 +454,21 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 	if p.ArticleWithContentImages != nil {
 		v := *p.ArticleWithContentImages
 		plan.ArticleWithContentImages = &v
+	}
+	if p.ArticleCoverUsePortrait != nil {
+		plan.ArticleCoverUsePortrait = *p.ArticleCoverUsePortrait
+	}
+	if plan.ArticleCoverUsePortrait {
+		if plan.Type != model.PlatformArticle || (plan.ArticleWithCover != nil && !*plan.ArticleWithCover) {
+			return nil, ErrArticleCoverPortraitUnavailable
+		}
+		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" {
+			return nil, ErrArticleCoverPortraitUnavailable
+		}
 	}
 	if p.InputAttachments != nil {
 		plan.SetInputAttachments(cloneEntryAttachments(*p.InputAttachments))

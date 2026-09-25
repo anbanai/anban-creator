@@ -73,6 +73,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
+    article_cover_use_portrait: plan.article_cover_use_portrait ?? false,
     hypit_input: plan.type === 'hypit' ? initialHypitInput(plan.prompt || '', plan.hypit_input) : undefined,
     montage_input: plan.type === 'montage' ? initialMontageInput(plan.prompt || '', plan.montage_input) : undefined,
   }
@@ -135,6 +136,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      article_cover_use_portrait: false,
       hypit_input: undefined,
       montage_input: undefined,
     },
@@ -405,6 +407,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      article_cover_use_portrait: false,
       hypit_input: initialType === 'hypit' ? initialHypitInput('', undefined, selectedIntentProject?.hypit_defaults) : undefined,
       montage_input: initialType === 'montage'
         ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
@@ -480,6 +483,7 @@ export default function PlansPage() {
       has_tail_image: false,
       article_with_cover: true,
       article_with_content_images: true,
+      article_cover_use_portrait: false,
       hypit_input: undefined,
       montage_input: undefined,
     })
@@ -534,6 +538,7 @@ export default function PlansPage() {
       // Article image toggles (公众号文章): both default true; non-article omits.
       article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
       article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
+      article_cover_use_portrait: values.type === 'article' ? values.article_cover_use_portrait : undefined,
       hypit_input: values.type === 'hypit' ? buildHypitInputForSubmit(values.prompt || '', values.hypit_input, selectedProject?.hypit_defaults) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
     }
@@ -949,6 +954,7 @@ export default function PlansPage() {
                             </div>
                             <Switch aria-label="生成封面图" checked={!!field.value} onCheckedChange={(checked) => {
                               field.onChange(checked)
+                              if (!checked) form.setValue('article_cover_use_portrait', false, { shouldDirty: true })
                             }} />
                           </div>
                           <div className="py-2">
@@ -957,14 +963,14 @@ export default function PlansPage() {
                                 <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                                 <div className="min-w-0">
                                   <p className="text-sm font-medium text-foreground">人物参考</p>
-                                  <p className="mt-0.5 text-xs text-muted-foreground">每次执行自动提供项目人物参考，由 Agent 判断用途</p>
+                                  <p className="mt-0.5 text-xs text-muted-foreground">可指定封面必须出现项目默认人物；人物参考只用于封面</p>
                                 </div>
                               </div>
                             </div>
                             {selectedProject?.portrait_reference_image ? (
                               <div className="mt-3 flex items-center gap-3 rounded-md border border-border bg-muted/30 p-2">
                                 <img src={selectedProject.portrait_reference_image.download_url} alt="项目人物参考" className="h-14 w-14 rounded-md border object-cover" />
-                                <span className="text-xs text-muted-foreground">已作为输入提供，由 Agent 按内容决定是否用于封面</span>
+                                <span className="text-xs text-muted-foreground">已作为计划输入，每次运行时会提供</span>
                               </div>
                             ) : (
                               <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed border-border p-2 text-xs text-muted-foreground">
@@ -972,6 +978,22 @@ export default function PlansPage() {
                                 <Link className="text-primary hover:underline" to={`/projects?edit=${selectedProject?.id ?? ''}`}>去设置</Link>
                               </div>
                             )}
+                            <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border p-2">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-foreground">封面必须使用项目默认人物</p>
+                                <p className="mt-0.5 text-xs text-muted-foreground">
+                                  {form.watch('article_cover_use_portrait')
+                                    ? '封面必须使用参考图中的人物；正文配图不会使用人物参考'
+                                    : '关闭时由 Agent 根据文章内容决定是否使用人物'}
+                                </p>
+                              </div>
+                              <Switch
+                                aria-label="封面必须使用项目默认人物"
+                                checked={!!form.watch('article_cover_use_portrait')}
+                                disabled={!field.value || (!selectedProject?.portrait_reference_image && !form.watch('article_cover_use_portrait'))}
+                                onCheckedChange={(checked) => form.setValue('article_cover_use_portrait', checked, { shouldDirty: true })}
+                              />
+                            </div>
                           </div>
                           <div className="flex items-center justify-between py-2">
                             <div className="min-w-0">

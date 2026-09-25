@@ -397,6 +397,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		ImageRatio: task.ImageRatio, HasReferenceImage: taskReferenceAsset != nil,
 		HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage,
 		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,
+		ArticleCoverUsePortrait: task.ArticleCoverUsePortrait,
 	})
 	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery && task.Outcome != nil && canRepairArticlePublicationPackage(task.Outcome.Publication) {
 		prompt += "\n\n发布包修复：\n" +
