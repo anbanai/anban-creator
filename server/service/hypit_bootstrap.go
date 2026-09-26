@@ -56,10 +56,8 @@ func (s *TaskService) freezeHypitTask(ctx context.Context, t *model.Task) error 
 		}
 		prior := readHypitSnapshot(src)
 		if prior.Image != "" {
-			v.Image = prior.Image
 			v.Profile = prior.Profile
 			v.Limits = prior.Limits
-			v.SourceExecution = prior.SourceExecution
 		}
 		files, err := s.repo.TaskFiles().FindByTaskID(ctx, src.ID)
 		if err != nil {
@@ -67,6 +65,12 @@ func (s *TaskService) freezeHypitTask(ctx context.Context, t *model.Task) error 
 		}
 		for _, f := range files {
 			if f.State == model.TaskFileStateDelivered && f.FilePath == "output/project.zip" && f.Role == "project_archive" && f.FileSize > 0 && f.FileSize <= v.Limits.MaxProjectBytes && lowercaseSHA256.MatchString(f.ContentHash) {
+				// Only an imported project requires the original runtime. A clone
+				// without an archive starts fresh with the current image and Pack.
+				if prior.Image != "" {
+					v.Image = prior.Image
+					v.SourceExecution = prior.SourceExecution
+				}
 				v.SourceTaskID = src.ID
 				v.SourceArchiveID = f.ID
 				if f.ExecutionID != "" {

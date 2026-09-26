@@ -17,6 +17,8 @@ Server 的 `hypit.enabled` 默认关闭；内部验证阶段同时沿用平台�
 
 开启前按业务所需能力提供官方 Provider 和额度。在 Studio 创建“视频复刻”项目，上传参考或填写官方可下载链接，输入替换要求，提交一条任务。单任务提供成片、封面、project.json、project.zip、delivery-manifest.json、quality-report.json。定时计划复用相同输入校验。再次改编关联原任务并复用原版本和工程。
 
+克隆没有已交付 `project.zip` 的任务时，使用当前部署的镜像和 Pack 重新生成，保留源任务的输入、Provider 配置和限制；只有导入已交付工程时才继承原镜像和 Pack。若无归档克隆因旧 Pack 身份失败，部署修复后重新克隆任务。若已有工程的再次改编出现身份不匹配，应恢复其匹配的历史镜像 digest，不能跳过 bootstrap 校验或只改写 Pack 版本。
+
 ## 工程与恢复
 
 工作目录固定 `/workspace/project`，任务输入为 `/workspace/input.json`，官方运行配置为 `/workspace/runtime-profile.json`。媒体先进入工程 assets，官方 Results 目录仍为 `.hypit/results`，不改写其格式或名称。

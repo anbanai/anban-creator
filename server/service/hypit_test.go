@@ -297,6 +297,73 @@ func TestHypitCloneKeepsFrozenLimitsAfterConfigChange(t *testing.T) {
 	}
 }
 
+func TestHypitCloneSelectsRuntimeForArchiveReuse(t *testing.T) {
+	for _, tc := range []struct {
+		name, status string
+		archive      bool
+	}{
+		{name: "failed without archive", status: model.TaskStatusFailed},
+		{name: "cancelled without archive", status: model.TaskStatusCancelled},
+		{name: "completed with archive", status: model.TaskStatusCompleted, archive: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			svc.SetHypitConfig(hypitTestConfig())
+			svc.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "registry/hypit@sha256:old"}})
+			user := uuid.NewString()
+			project := createTestProject(t, repo, user, model.PlatformHypit)
+			tasks, err := svc.CreateManual(t.Context(), CreateManualParams{UserID: user, ProjectID: project, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			src := tasks[0]
+			src.Status = tc.status
+			snapshot := readHypitSnapshot(src)
+			snapshot.SourceExecution.Version = "2.0.1"
+			snapshot.SourceExecution.Digest = "a041f8fc889907d6e985521381baf951e20eaa7bdd5de2584015c947b714cb37"
+			src.HypitRuntimeSnapshot, err = json.Marshal(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.Tasks().Update(t.Context(), src); err != nil {
+				t.Fatal(err)
+			}
+			if tc.archive {
+				execution := snapshot.SourceExecution.execution()
+				execution.ID, execution.TaskID = uuid.NewString(), src.ID
+				execution.RuntimeImage = snapshot.Image
+				if err := repo.TaskExecutions().Create(t.Context(), execution); err != nil {
+					t.Fatal(err)
+				}
+				file := &model.TaskFile{ID: uuid.NewString(), TaskID: src.ID, ExecutionID: execution.ID, FilePath: "output/project.zip", Role: "project_archive", State: model.TaskFileStateDelivered, OSSKey: "immutable/project.zip", ContentHash: strings.Repeat("a", 64), FileSize: 128, StorageProvider: "fake"}
+				if err := repo.TaskFiles().Create(t.Context(), file); err != nil {
+					t.Fatal(err)
+				}
+			}
+			svc.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "registry/hypit@sha256:new"}})
+			clones, err := svc.Clone(t.Context(), src.ID, CloneTaskParams{ExecutionProfile: "effective"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			execution, created, err := svc.createCurrentExecution(t.Context(), clones[0])
+			if err != nil || !created {
+				t.Fatalf("create execution: created=%v err=%v", created, err)
+			}
+			pack, _ := agentpack.Default().Pack("hypit")
+			wantImage, wantVersion, wantDigest := "registry/hypit@sha256:new", pack.Version, pack.Digest
+			if tc.archive {
+				wantImage, wantVersion, wantDigest = snapshot.Image, snapshot.SourceExecution.Version, snapshot.SourceExecution.Digest
+			}
+			if execution.RuntimeImage != wantImage || execution.AgentPackVersion != wantVersion || execution.AgentPackDigest != wantDigest {
+				t.Fatalf("execution image=%s Pack=%s/%s; want image=%s Pack=%s/%s", execution.RuntimeImage, execution.AgentPackVersion, execution.AgentPackDigest, wantImage, wantVersion, wantDigest)
+			}
+			if got := readHypitSnapshot(clones[0]); got.Image != wantImage || got.SourceExecution.Version != wantVersion || got.SourceExecution.Digest != wantDigest {
+				t.Fatalf("clone bootstrap snapshot does not match execution: %+v", got)
+			}
+		})
+	}
+}
+
 func TestHypitSourceLineageAuthorizesAncestorMediaOnly(t *testing.T) {
 	_, repo := setupTaskServiceWithEnqueuer(t)
 	root := &model.Task{ID: uuid.NewString(), UserID: "owner", ProjectID: "old-project", Type: model.PlatformHypit}
