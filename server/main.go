@@ -368,9 +368,11 @@ func main() {
 	var referenceAssetSvc *service.ReferenceAssetService
 	var imageAnalysisSvc *service.ImageAnalysisService
 	var asynqClient *scheduler.AsynqClient
+	var analyticsRebuildManager *service.AnalyticsRebuildManager
 	hypitCapabilitySvc := service.NewHypitCapabilityService(cfg.Hypit)
 	montageCapabilitySvc := service.NewMontageCapabilityService(cfg.Montage)
 	if repo != nil {
+		analyticsRebuildManager = service.NewAnalyticsRebuildManager(repo)
 		planSvc = service.NewPlanService(repo, log)
 		projectSvc = service.NewProjectService(repo, log)
 		planSvc.SetHypitCapabilityService(hypitCapabilitySvc)
@@ -526,6 +528,7 @@ func main() {
 	var taskHandler *handler.TaskHandler
 	var seednoteAnalyticsHandler *handler.SeednoteAnalyticsHandler
 	var contentAnalyticsHandler *handler.ContentAnalyticsHandler
+	var analyticsV2Handler *handler.AnalyticsV2Handler
 	var seednoteImportHandler *handler.SeednoteImportHandler
 	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
 	var wechatAnalyticsImportHandler *handler.WechatAnalyticsImportHandler
@@ -568,6 +571,7 @@ func main() {
 		}
 		seednoteAnalyticsHandler = handler.NewSeednoteAnalyticsHandler(seednoteTrackingSvc, log)
 		contentAnalyticsHandler = handler.NewContentAnalyticsHandler(service.NewContentAnalyticsService(repo))
+		analyticsV2Handler = handler.NewAnalyticsV2Handler(service.NewAnalyticsService(repo))
 		seednoteImportHandler = handler.NewSeednoteImportHandler(service.NewSeednoteImportService(repo, store), log)
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
 		wechatAnalyticsImportHandler = handler.NewWechatAnalyticsImportHandler(service.NewWechatAnalyticsImportService(repo, store), log)
@@ -739,7 +743,8 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, cfg, log)
+		startAnalyticsRebuildRecovery(ctx, repo, asynqClient, log)
 	}
 
 	// 15.1 Start plan checker if repository and task service are available.
@@ -813,6 +818,7 @@ func main() {
 		TaskHandler:                  taskHandler,
 		SeednoteAnalyticsHandler:     seednoteAnalyticsHandler,
 		ContentAnalyticsHandler:      contentAnalyticsHandler,
+		AnalyticsV2Handler:           analyticsV2Handler,
 		SeednoteImportHandler:        seednoteImportHandler,
 		WechatAnalyticsHandler:       wechatAnalyticsHandler,
 		WechatAnalyticsImportHandler: wechatAnalyticsImportHandler,
@@ -1252,7 +1258,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1301,6 +1307,9 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	if imageAnalysisSvc != nil {
 		srv.RegisterImageAnalysisHandler(imageAnalysisSvc.Process, log)
 	}
+	if analyticsRebuildManager != nil {
+		srv.RegisterAnalyticsRebuildHandler(analyticsRebuildManager.Run, log)
+	}
 
 	go func() {
 		log.Info().Int("concurrency", cfg.Asynq.Concurrency).Msg("starting Asynq task processor")
@@ -1329,6 +1338,39 @@ func startImageAnalysisRecovery(ctx context.Context, analyses *service.ImageAnal
 			run()
 		}
 	}
+}
+
+func startAnalyticsRebuildRecovery(ctx context.Context, repo repository.Repository, client *scheduler.AsynqClient, log *zerolog.Logger) {
+	if repo == nil || client == nil {
+		return
+	}
+	run := func() {
+		jobs, err := repo.Analytics().ListRebuildJobs(ctx, []string{"queued", "running"}, 100)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Error().Err(err).Msg("analytics rebuild recovery scan failed")
+			}
+			return
+		}
+		for _, job := range jobs {
+			if err := client.EnqueueAnalyticsRebuild(job.ID); err != nil {
+				log.Error().Err(err).Str("job_id", job.ID).Msg("analytics rebuild requeue failed")
+			}
+		}
+	}
+	run()
+	ticker := time.NewTicker(time.Minute)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run()
+			}
+		}
+	}()
 }
 
 type analyticsRecoveryService interface {

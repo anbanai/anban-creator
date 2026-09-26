@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -88,6 +89,9 @@ func (h *WechatAnalyticsImportHandler) Import(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
 	req.UserID, req.ProjectID = userID, projectID
+	if req.IdempotencyKey == "" || req.DataAsOfAt == nil {
+		return Error(c, 400, "data_as_of_at 和 idempotency_key 为必填")
+	}
 	result, err := h.service.Import(c.Context(), req)
 	if err != nil {
 		return h.respond(c, nil, err)
@@ -158,6 +162,9 @@ func (h *WechatAnalyticsImportHandler) Article(c fiber.Ctx) error {
 }
 
 func (h *WechatAnalyticsImportHandler) respond(c fiber.Ctx, value any, err error) error {
+	if errors.Is(err, repository.ErrAnalyticsIdempotencyConflict) || errors.Is(err, repository.ErrAnalyticsRebuilding) {
+		return analyticsResponse(c, value, err)
+	}
 	if err == nil {
 		return Success(c, value)
 	}

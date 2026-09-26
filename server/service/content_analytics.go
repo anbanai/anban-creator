@@ -43,33 +43,38 @@ type ContentAnalyticsService struct{ repo repository.Repository }
 func NewContentAnalyticsService(repo repository.Repository) *ContentAnalyticsService {
 	return &ContentAnalyticsService{repo: repo}
 }
+
+func analyticsCandidateDate(value string) *time.Time {
+	if value == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05-07:00", "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return &parsed
+		}
+	}
+	return nil
+}
 func (s *ContentAnalyticsService) Candidates(ctx context.Context, userID, projectID, search string, offset, limit int) ([]AnalyticsCandidate, int, error) {
-	candidates, err := loadAnalyticsCandidates(ctx, s.repo, userID, projectID)
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		return nil, 0, err
 	}
-	filtered := make([]AnalyticsCandidate, 0, len(candidates))
-	search = strings.ToLower(strings.TrimSpace(search))
-	for _, c := range candidates {
-		if search == "" || strings.Contains(strings.ToLower(c.Title), search) {
-			filtered = append(filtered, c)
-		}
+	if project.UserID != userID {
+		return nil, 0, errors.New("project does not belong to user")
 	}
-	total := len(filtered)
-	if offset < 0 {
-		offset = 0
+	if project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote {
+		return nil, 0, errors.New("project does not support content analytics")
 	}
-	if offset > total {
-		offset = total
+	rows, total, err := s.repo.Analytics().CandidatePage(ctx, userID, projectID, project.Platform, search, offset, limit)
+	if err != nil {
+		return nil, 0, err
 	}
-	if limit <= 0 || limit > 100 {
-		limit = 25
+	result := make([]AnalyticsCandidate, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, AnalyticsCandidate{Target: AnalyticsTarget{Kind: row.Kind, ID: row.ID}, Title: row.Title, ContentType: row.ContentType, Status: row.Status, Date: analyticsCandidateDate(row.Date), URL: row.URL})
 	}
-	end := offset + limit
-	if end > total {
-		end = total
-	}
-	return filtered[offset:end], total, nil
+	return result, int(total), nil
 }
 
 func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, userID, projectID string) ([]AnalyticsCandidate, error) {
@@ -143,6 +148,12 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 				return nil, err
 			}
 		}
+		postCountByTask := map[string]int{}
+		for _, post := range posts {
+			if post.TaskID != "" {
+				postCountByTask[post.TaskID]++
+			}
+		}
 		for _, post := range posts {
 			if post.ProjectID != projectID || post.UserID != userID {
 				continue
@@ -155,23 +166,21 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 			if c.ContentType == "" {
 				c.ContentType = "unknown"
 			}
-			if i, ok := byTask[post.TaskID]; ok {
-				old := result[i]
-				c.Target = old.Target
-				c.Task = old.Task
-				c.Status = old.Status
-				c.aliases = append(old.aliases, AnalyticsTarget{"seednote_post", post.ID})
-				c.titles = append(old.titles, old.Title)
-				if c.Title == "" {
-					c.Title = old.Title
+			// A single post created from a task is an alias of that task. When a
+			// task owns multiple posts, keep every post independent and leave the
+			// task target ambiguous so a title match cannot silently pick one.
+			if postCountByTask[post.TaskID] == 1 {
+				if i, ok := byTask[post.TaskID]; ok {
+					old := result[i]
+					old.aliases = append(old.aliases, c.Target)
+					old.titles = append(old.titles, c.Title)
+					old.Post = c.Post
+					old.matchDate = c.matchDate
+					result[i] = old
+					continue
 				}
-				if c.Date == nil {
-					c.Date = old.Date
-				}
-				result[i] = c
-			} else {
-				result = append(result, c)
 			}
+			result = append(result, c)
 		}
 	}
 	if project.Platform == model.PlatformArticle {
@@ -199,10 +208,9 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 					result[i].titles = append(result[i].titles, raw["内容标题"])
 				}
 			}
-			if result[i].URL != "" {
-				continue
+			if result[i].URL == "" {
+				result[i].URL = historicalWechatArticleURL(snapshots)
 			}
-			result[i].URL = historicalWechatArticleURL(snapshots)
 			identities := map[string]struct{}{}
 			for _, snapshot := range snapshots {
 				var raw map[string]string

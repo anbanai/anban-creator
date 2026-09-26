@@ -27,6 +27,7 @@ import (
 
 // Services aggregates all service dependencies required by the router.
 type Services struct {
+	AnalyticsV2Handler           *handler.AnalyticsV2Handler
 	ContentAnalyticsHandler      *handler.ContentAnalyticsHandler
 	Config                       *config.Config
 	Logger                       *zerolog.Logger
@@ -349,6 +350,13 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/feedback", svc.FeedbackHandler.GetTaskFeedback)
 		apiV1.Put("/tasks/:id/feedback", svc.FeedbackHandler.UpsertTaskFeedback)
 	}
+	if svc.AnalyticsV2Handler != nil {
+		apiV1.Get("/projects/:id/content-analytics/overview", svc.AnalyticsV2Handler.Overview)
+		apiV1.Get("/projects/:id/content-analytics/contents", svc.AnalyticsV2Handler.Contents)
+		apiV1.Get("/projects/:id/content-analytics/contents/:contentId", svc.AnalyticsV2Handler.Detail)
+		apiV1.Get("/projects/:id/content-analytics/contents/:contentId/observations", svc.AnalyticsV2Handler.Observations)
+		apiV1.Get("/projects/:id/content-analytics/dates", svc.AnalyticsV2Handler.Dates)
+	}
 	if svc.ContentAnalyticsHandler != nil {
 		apiV1.Get("/projects/:id/content-analytics/candidates", svc.ContentAnalyticsHandler.Candidates)
 	}
@@ -359,9 +367,6 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/projects/:id/seednote-analytics/imports/:batchId", svc.SeednoteImportHandler.Detail)
 		apiV1.Get("/projects/:id/seednote-analytics/imports/:batchId/file", svc.SeednoteImportHandler.File)
 		apiV1.Post("/projects/:id/seednote-analytics/imports/:batchId/revoke", svc.SeednoteImportHandler.Revoke)
-		apiV1.Get("/projects/:id/seednote-analytics/overview", svc.SeednoteImportHandler.Overview)
-		apiV1.Get("/projects/:id/seednote-analytics/posts", svc.SeednoteImportHandler.Posts)
-		apiV1.Get("/projects/:id/seednote-analytics/posts/:postId", svc.SeednoteImportHandler.Post)
 	}
 	if svc.WechatPublicationHandler != nil {
 		apiV1.Get("/projects/:id/wechat/capabilities", svc.WechatPublicationHandler.Capabilities)
@@ -376,16 +381,12 @@ func NewRouter(svc *Services) *fiber.App {
 	if svc.WechatAnalyticsImportHandler != nil {
 		apiV1.Get("/wechat-analytics/imports/:batchId", svc.WechatAnalyticsImportHandler.GlobalDetail)
 
-		apiV1.Get("/articles/:articleId/wechat-analytics", svc.WechatAnalyticsImportHandler.GlobalArticle)
 		apiV1.Post("/projects/:id/wechat-analytics/imports/preview", svc.WechatAnalyticsImportHandler.Preview)
 		apiV1.Post("/projects/:id/wechat-analytics/imports", svc.WechatAnalyticsImportHandler.Import)
 		apiV1.Get("/projects/:id/wechat-analytics/imports", svc.WechatAnalyticsImportHandler.List)
 		apiV1.Get("/projects/:id/wechat-analytics/imports/:batchId", svc.WechatAnalyticsImportHandler.Detail)
 
 		apiV1.Post("/projects/:id/wechat-analytics/imports/:batchId/revoke", svc.WechatAnalyticsImportHandler.Revoke)
-		apiV1.Get("/projects/:id/wechat-analytics/overview", svc.WechatAnalyticsImportHandler.Overview)
-		apiV1.Get("/projects/:id/wechat-analytics/articles", svc.WechatAnalyticsImportHandler.Articles)
-		apiV1.Get("/projects/:id/wechat-analytics/articles/:articleId", svc.WechatAnalyticsImportHandler.Article)
 	}
 
 	// Local file serving (only when using local storage provider).

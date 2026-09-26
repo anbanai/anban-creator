@@ -23,6 +23,7 @@ const (
 	TypeWechatPublicationPoll      = "wechat:publication_poll"
 	TypeWechatPublicationReconcile = "wechat:publication_reconcile"
 	TypeImageAnalyze               = "image:analyze"
+	TypeAnalyticsRebuild           = "analytics:rebuild"
 )
 
 // TaskEnqueuer abstracts the async task enqueue mechanism.
@@ -107,6 +108,20 @@ func (c *AsynqClient) EnqueueImageAnalysis(jobID string, generation int64) error
 	return err
 }
 
+func (c *AsynqClient) EnqueueAnalyticsRebuild(jobID string) error {
+	payload, err := json.Marshal(struct {
+		JobID string `json:"job_id"`
+	}{JobID: jobID})
+	if err != nil {
+		return err
+	}
+	_, err = c.client.Enqueue(asynq.NewTask(TypeAnalyticsRebuild, payload), asynq.TaskID("analytics-rebuild:"+jobID), asynq.Queue("analysis"), asynq.MaxRetry(10), asynq.Timeout(c.effectiveTimeout()))
+	if errors.Is(err, asynq.ErrTaskIDConflict) {
+		return nil
+	}
+	return err
+}
+
 // EnqueueIn creates an Asynq task and enqueues it with a delay.
 func (c *AsynqClient) EnqueueIn(taskType string, payload []byte, delay time.Duration) error {
 	_, err := c.client.Enqueue(
@@ -130,6 +145,7 @@ type TaskProcessor struct {
 }
 
 type ImageAnalysisHandler func(ctx context.Context, jobID string, generation int64) error
+type AnalyticsRebuildHandler func(ctx context.Context, jobID string) error
 
 func (tp *TaskProcessor) RegisterImageAnalysisHandler(handler ImageAnalysisHandler, logger *zerolog.Logger) {
 	if tp == nil || handler == nil {
@@ -144,6 +160,21 @@ func (tp *TaskProcessor) RegisterImageAnalysisHandler(handler ImageAnalysisHandl
 			return fmt.Errorf("invalid image analysis payload")
 		}
 		return handler(ctx, payload.JobID, payload.Generation)
+	})
+}
+
+func (tp *TaskProcessor) RegisterAnalyticsRebuildHandler(handler AnalyticsRebuildHandler, logger *zerolog.Logger) {
+	if tp == nil || handler == nil {
+		return
+	}
+	tp.mux.HandleFunc(TypeAnalyticsRebuild, func(ctx context.Context, task *asynq.Task) error {
+		var payload struct {
+			JobID string `json:"job_id"`
+		}
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil || payload.JobID == "" {
+			return fmt.Errorf("invalid analytics rebuild payload")
+		}
+		return handler(ctx, payload.JobID)
 	})
 }
 

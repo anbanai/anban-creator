@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
@@ -52,6 +53,12 @@ func (h *SeednoteImportHandler) Import(c fiber.Ctx) error {
 		return Error(c, 400, "invalid request body")
 	}
 	req.UserID, req.ProjectID = userID, projectID
+	if req.IdempotencyKey == "" || req.DataAsOfAt == nil {
+		return Error(c, 400, "data_as_of_at 和 idempotency_key 为必填")
+	}
+	if req.MetricBasis != "cumulative" && req.MetricBasis != "daily" {
+		return Error(c, 400, "metric_basis 必须是 cumulative 或 daily")
+	}
 	result, err := h.service.Import(c.Context(), req)
 	return h.respond(c, result, err)
 }
@@ -168,6 +175,9 @@ func parseDateQuery(raw string) (*time.Time, error) {
 	return &t, nil
 }
 func (h *SeednoteImportHandler) respond(c fiber.Ctx, value any, err error) error {
+	if errors.Is(err, repository.ErrAnalyticsIdempotencyConflict) || errors.Is(err, repository.ErrAnalyticsRebuilding) {
+		return analyticsResponse(c, value, err)
+	}
 	if err == nil {
 		return Success(c, value)
 	}

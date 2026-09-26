@@ -235,8 +235,8 @@ func (s *SeednoteTrackingService) CaptureMetrics(ctx context.Context, trackingID
 		return s.recordTrackingFailure(ctx, tracking, fmt.Errorf("tracking has no note URL"))
 	}
 	now := time.Now()
-	if snapshot, ok := s.findSnapshotForDate(ctx, tracking, model.SeednoteCapturedDate(now)); ok {
-		if tracking.LastRunAt != nil && model.SeednoteCapturedDate(*tracking.LastRunAt) == snapshot.CapturedDate {
+	if snapshot, ok := s.findSnapshotForDate(ctx, tracking, seednoteAnalyticsDate(now)); ok {
+		if tracking.LastRunAt != nil && seednoteAnalyticsDate(*tracking.LastRunAt) == snapshot.CapturedDate {
 			if tracking.LastError != "" && tracking.NextRunAt != nil {
 				if err := s.enqueueCapture(tracking.ID, delayUntil(*tracking.NextRunAt, now)); err != nil {
 					return s.handleEnqueueFailure(ctx, tracking, err)
@@ -267,7 +267,7 @@ func (s *SeednoteTrackingService) persistFetchedMetrics(ctx context.Context, tra
 		TrackingID:   tracking.ID,
 		TaskID:       tracking.TaskID,
 		CapturedAt:   now,
-		CapturedDate: model.SeednoteCapturedDate(now),
+		CapturedDate: seednoteAnalyticsDate(now),
 		LikeCount:    metrics.LikeCount,
 		CollectCount: metrics.CollectCount,
 		CommentCount: metrics.CommentCount,
@@ -275,8 +275,33 @@ func (s *SeednoteTrackingService) persistFetchedMetrics(ctx context.Context, tra
 		ViewCount:    metrics.ViewCount,
 		RawData:      string(raw),
 	}
-	if err := s.repo.SeednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, snapshot); err != nil {
-		return fmt.Errorf("upsert snapshot: %w", err)
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if _, err := tx.Analytics().LockProject(ctx, tracking.ProjectID); err != nil {
+			return err
+		}
+		if err := tx.SeednoteMetricSnapshots().UpsertByTrackingAndDate(ctx, snapshot); err != nil {
+			return err
+		}
+		post, err := tx.Analytics().SeednotePostForTracking(ctx, tracking)
+		if err != nil {
+			return err
+		}
+		row := &model.SeednoteImportRow{ID: snapshot.ID, PostID: post.ID, LikeCount: analyticsInt(snapshot.LikeCount), CollectCount: analyticsInt(snapshot.CollectCount), CommentCount: analyticsInt(snapshot.CommentCount), ShareCount: analyticsInt(snapshot.ShareCount), RawData: snapshot.RawData}
+		if snapshot.ViewCount != nil {
+			row.ViewCount = analyticsInt(*snapshot.ViewCount)
+		}
+		input, err := analyticsSeednoteInput(post, row, &model.SeednoteImportBatch{ProjectID: tracking.ProjectID, DataAsOfAt: now}, "cumulative", now)
+		if err != nil {
+			return err
+		}
+		input.Observation.ID = analyticsCaptureID("seednote_public", tracking.ID, seednoteAnalyticsDate(now), now)
+		input.Observation.Source = "seednote_public"
+		input.Observation.SourcePriority = 100
+		input.Observation.TrackingID = tracking.ID
+		_, err = NewAnalyticsService(tx).Apply(ctx, AnalyticsWriteRequest{ProjectID: tracking.ProjectID, Observations: []AnalyticsObservationInput{input}})
+		return err
+	}); err != nil {
+		return err
 	}
 
 	return s.finishCaptureLifecycle(ctx, tracking, snapshot, now, now)
@@ -372,7 +397,7 @@ func filterLifecycleSnapshots(tracking *model.SeednotePostTracking, snapshots []
 }
 
 func (s *SeednoteTrackingService) findSnapshotForDate(ctx context.Context, tracking *model.SeednotePostTracking, capturedDate string) (*model.SeednoteMetricSnapshot, bool) {
-	snapshots, err := s.repo.SeednoteMetricSnapshots().FindByTaskID(ctx, tracking.TaskID)
+	snapshots, err := analyticsSeednoteTrackingSnapshots(ctx, s.repo, tracking.TaskID)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn().Err(err).Str("tracking_id", tracking.ID).Msg("failed to check seednote same-day snapshot")
@@ -388,7 +413,7 @@ func (s *SeednoteTrackingService) findSnapshotForDate(ctx context.Context, track
 }
 
 func (s *SeednoteTrackingService) findPreviousLifecycleSnapshot(ctx context.Context, tracking *model.SeednotePostTracking, capturedAt time.Time) (*model.SeednoteMetricSnapshot, error) {
-	snapshots, err := s.repo.SeednoteMetricSnapshots().FindByTaskID(ctx, tracking.TaskID)
+	snapshots, err := analyticsSeednoteTrackingSnapshots(ctx, s.repo, tracking.TaskID)
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -311,16 +312,16 @@ func parseSeednoteTime(raw string, location *time.Location) (time.Time, error) {
 }
 
 func parseSeednoteCount(label, raw string, errs *[]string) *int64 {
-	value := parseSeednoteNumber(label, raw, errs)
-	if value == nil {
+	raw = strings.TrimSpace(strings.ReplaceAll(raw, ",", ""))
+	if raw == "" {
 		return nil
 	}
-	if *value != float64(int64(*value)) {
-		*errs = append(*errs, label+"必须是整数")
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		*errs = append(*errs, label+"必须是有效的非负整数")
 		return nil
 	}
-	result := int64(*value)
-	return &result
+	return &value
 }
 
 func parseSeednoteRate(label, raw string, errs *[]string) *float64 {
@@ -349,7 +350,7 @@ func parseSeednoteNumber(label, raw string, errs *[]string) *float64 {
 		return nil
 	}
 	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil || value < 0 {
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
 		*errs = append(*errs, label+"不是有效的非负数")
 		return nil
 	}

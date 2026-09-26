@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronsUpDown, FileSpreadsheet, Loader2, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { contentAnalyticsApi, contentTypeLabel, targetKey } from '@/lib/content-analytics'
-import { shanghaiDay } from '@/lib/analytics-period'
+import { useDebouncedValue } from '@/hooks/use-debounced-value'
 import { uploadToOSS } from '@/lib/direct-upload'
 import type { Project } from '@/types'
 import type { AnalyticsCandidate, AnalyticsPreview, AnalyticsTarget } from '@/types/content-analytics'
@@ -18,7 +18,8 @@ function TargetPicker({ projectId, rowNumber, target, label, disabled, onChange 
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
-  const query = useQuery({ queryKey: ['content-analytics-candidates', projectId, search, page], queryFn: () => contentAnalyticsApi.candidates(projectId, { search, offset: page * 25, limit: 25 }), enabled: open })
+  const debouncedSearch = useDebouncedValue(search)
+  const query = useQuery({ queryKey: ['content-analytics', projectId, 'candidates', debouncedSearch, page], queryFn: ({ signal }) => contentAnalyticsApi.candidates(projectId, { search: debouncedSearch, offset: page * 25, limit: 25 }, signal), enabled: open, placeholderData: keepPreviousData })
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger render={<Button variant="outline" size="sm" className="max-w-64 justify-between" disabled={disabled} aria-label={`第 ${rowNumber} 行选择对应内容`} />}><span className="truncate">{label}</span><ChevronsUpDown className="shrink-0" /></PopoverTrigger>
     <PopoverContent align="end" className="w-[min(26rem,calc(100vw-2rem))]">
@@ -34,7 +35,7 @@ function TargetPicker({ projectId, rowNumber, target, label, disabled, onChange 
 }
 
 export async function invalidateContentAnalytics(client: ReturnType<typeof useQueryClient>, projectId: string) {
-  await client.invalidateQueries({ predicate: ({ queryKey }) => queryKey[1] === projectId && /^(content-analytics|wechat-import|seednote-import)/.test(String(queryKey[0])) || queryKey[0] === 'task' || queryKey[0] === 'tasks' })
+  await client.invalidateQueries({ predicate: ({ queryKey }) => queryKey[1] === projectId && /^(content-analytics|wechat-import|seednote-import)/.test(String(queryKey[0])) })
 }
 
 export default function ContentImportDialog({ project, onClose, onImported }: { project: Project; onClose: () => void; onImported?: (result: { count: number; date: string }) => void }) {
@@ -45,7 +46,10 @@ export default function ContentImportDialog({ project, onClose, onImported }: { 
   const [targets, setTargets] = useState<Record<number, AnalyticsTarget>>({})
   const [labels, setLabels] = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<number[]>([])
-  const [asOf, setAsOf] = useState(`${shanghaiDay(new Date())}T23:59`)
+  const [asOf, setAsOf] = useState('')
+  const [basis, setBasis] = useState<'cumulative' | 'daily' | ''>(project.platform === 'article' ? 'cumulative' : '')
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  useEffect(() => { setIdempotencyKey(crypto.randomUUID()) }, [uploadId, selected, targets, asOf, basis, file])
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [type, setType] = useState('all')
@@ -65,7 +69,7 @@ export default function ContentImportDialog({ project, onClose, onImported }: { 
     },
   })
   const importMutation = useMutation({
-    mutationFn: () => contentAnalyticsApi.import(project, { upload_id: uploadId, selections: selected.map((source_row) => ({ source_row, target: targets[source_row] })), data_as_of_at: new Date(`${asOf}:00+08:00`).toISOString(), timezone: 'Asia/Shanghai', client_file_modified_at: file ? new Date(file.lastModified).toISOString() : undefined }),
+    mutationFn: () => contentAnalyticsApi.import(project, { metric_basis: basis as 'cumulative' | 'daily', idempotency_key: idempotencyKey, upload_id: uploadId, selections: selected.map((source_row) => ({ source_row, target: targets[source_row] })), data_as_of_at: new Date(`${asOf}:00+08:00`).toISOString(), timezone: 'Asia/Shanghai', client_file_modified_at: file ? new Date(file.lastModified).toISOString() : undefined }),
     onSuccess: async (result) => { await invalidateContentAnalytics(client, project.id); onImported?.(result); onClose() },
   })
   const busy = previewMutation.isPending || importMutation.isPending
@@ -92,6 +96,7 @@ export default function ContentImportDialog({ project, onClose, onImported }: { 
       {previewMutation.isError && <div role="alert" className="text-sm text-destructive">{previewMutation.error.message}<Button variant="ghost" disabled={!file || busy} onClick={() => file && previewMutation.mutate(file)}>重新解析</Button></div>}
       {preview && <>
         <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm">共 <strong>{preview.total_rows}</strong> 条 · 已选 <strong className="text-primary">{selected.length}</strong> 条 · 跳过 {preview.total_rows - selected.length} 条</p><label className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">数据截至时间（北京时间）<Input className="w-auto" type="datetime-local" aria-label="数据截至时间" value={asOf} disabled={busy} onChange={(event) => setAsOf(event.target.value)} /></label></div>
+        <label className="flex items-center gap-2 text-sm">统计口径<select aria-label="导入统计口径" className="rounded-md border bg-background p-2" value={basis} disabled={busy || project.platform === 'article'} onChange={event => setBasis(event.target.value as typeof basis)}><option value="">请选择数据口径</option><option value="cumulative">累计数据</option>{project.platform === 'seednote' && <option value="daily">当日新增</option>}</select><span className="text-xs text-muted-foreground">{project.platform === 'article' ? '公众号数据按累计统计' : '按原始报表口径选择，不同口径分开统计'}</span></label>
         <p className="text-xs leading-relaxed text-muted-foreground">未匹配的内容可手动选择当前账号内任意状态的内容。未选择的行直接跳过，关联不会改变发布状态。</p>
         <div className="flex flex-wrap gap-2"><Input className="min-w-40 flex-1" aria-label="搜索导入内容" placeholder="搜索表格内容" value={search} onChange={(event) => { setSearch(event.target.value); setPage(0) }} /><select aria-label="导入内容类型" className="h-9 rounded-md border bg-background px-3 text-sm" value={type} onChange={(event) => { setType(event.target.value); setPage(0) }}><option value="all">全部类型</option>{types.map((value) => <option key={value} value={value}>{contentTypeLabel(value)}</option>)}</select></div>
         <div className="overflow-x-auto rounded-lg border"><Table className="min-w-[640px]"><TableHeader><TableRow><TableHead><input type="checkbox" aria-label="选择当前筛选的可导入内容" disabled={busy || !readyRows.length} checked={readyRows.length > 0 && readyRows.every((row) => selected.includes(row.source_row))} onChange={(event) => setSelected(event.target.checked ? [...new Set([...selected, ...readyRows.map((row) => row.source_row)])] : selected.filter((id) => !readyRows.some((row) => row.source_row === id)))} /></TableHead><TableHead>内容</TableHead><TableHead>类型</TableHead><TableHead className="text-right">{project.platform === 'article' ? '阅读人数' : '观看量'}</TableHead><TableHead>关联内容</TableHead></TableRow></TableHeader><TableBody>{rows.slice(currentPage * 25, currentPage * 25 + 25).map((row) => <TableRow key={row.source_row}><TableCell><input type="checkbox" aria-label={`选择第 ${row.source_row} 行`} checked={selected.includes(row.source_row)} disabled={busy || !targets[row.source_row] || Boolean(row.parse_error) || row.match_status === 'invalid'} onChange={(event) => setSelected(event.target.checked ? [...selected, row.source_row] : selected.filter((id) => id !== row.source_row))} /></TableCell><TableCell className="max-w-80"><p className="truncate font-medium" title={row.title}>{row.title || '未提供标题'}</p><p className="mt-1 text-xs text-muted-foreground">第 {row.source_row} 行{(row.published_date || row.first_published_at) ? ` · ${(row.published_date || row.first_published_at)!.slice(0, 10)}` : ''}</p></TableCell><TableCell className="whitespace-nowrap text-xs text-muted-foreground">{contentTypeLabel(row.content_type)}</TableCell><TableCell className="text-right tabular-nums">{(project.platform === 'article' ? row.read_users : row.view_count)?.toLocaleString('zh-CN') ?? '—'}</TableCell><TableCell>{row.parse_error || row.match_status === 'invalid' ? <p className="text-xs text-destructive">{row.parse_error || '格式错误，请修正文件'}</p> : <div className="space-y-1"><TargetPicker projectId={project.id} rowNumber={row.source_row} target={targets[row.source_row]} label={labels[row.source_row] ?? '选择对应内容'} disabled={busy} onChange={(candidate) => { setTargets({ ...targets, [row.source_row]: candidate.target }); setLabels({ ...labels, [row.source_row]: candidate.title }); setSelected([...new Set([...selected, row.source_row])]) }} /><p className={`text-xs ${selected.includes(row.source_row) && duplicates.has(targetKey(targets[row.source_row])) ? 'text-destructive' : 'text-muted-foreground'}`}>{selected.includes(row.source_row) ? duplicates.has(targetKey(targets[row.source_row])) ? '同一内容重复关联，请修改或取消选择' : '已选择，将导入' : row.match_status === 'needs_review' ? '匹配不唯一，未选择则跳过' : '未选择，将跳过'}</p></div>}</TableCell></TableRow>)}</TableBody></Table>{!rows.length && <p className="p-6 text-center text-sm text-muted-foreground">没有符合筛选的内容</p>}</div>
@@ -100,6 +105,6 @@ export default function ContentImportDialog({ project, onClose, onImported }: { 
       {(error || importMutation.error) && <p role="alert" className="text-sm text-destructive">{error || importMutation.error?.message}</p>}
       {duplicates.size > 0 && <p role="alert" className="text-sm text-destructive">同一内容只能导入一行数据，请处理重复关联。</p>}
     </div>
-    <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t bg-card px-6 py-4"><Button variant="outline" disabled={busy} onClick={onClose}>取消</Button><Button disabled={busy || !preview || !selected.length || !validTime || duplicates.size > 0} onClick={() => importMutation.mutate()}>{importMutation.isPending ? '正在导入…' : `确认导入${selected.length ? ` ${selected.length} 条` : ''}`}</Button></DialogFooter>
+    <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t bg-card px-6 py-4"><Button variant="outline" disabled={busy} onClick={onClose}>取消</Button><Button disabled={busy || !preview || !selected.length || !validTime || !basis || duplicates.size > 0} onClick={() => importMutation.mutate()}>{importMutation.isPending ? '正在导入…' : `确认导入${selected.length ? ` ${selected.length} 条` : ''}`}</Button></DialogFooter>
   </DialogContent></Dialog>
 }
