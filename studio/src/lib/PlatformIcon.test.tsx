@@ -55,19 +55,25 @@ describe('video platform identity', () => {
     expect(replicationBadge.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
   })
 
-  it('draws both video marks from the same frame geometry', () => {
+  it('draws the video marks from unmodified lucide geometry', () => {
     const { container, rerender } = render(<>{renderPlatformIcon('montage')}</>)
-    const generationFrame = container.querySelector('[data-platform-icon="montage"] rect')
-    expect(generationFrame?.getAttribute('width')).toBe('18')
-    expect(generationFrame?.getAttribute('rx')).toBe('5')
+    const generation = container.querySelector('[data-platform-icon="montage"]')
+    expect(generation?.getAttribute('stroke-width')).toBe('2')
+    expect([...generation!.querySelectorAll('path')].map((path) => path.getAttribute('d'))).toEqual([
+      'm12.296 3.464 3.02 3.956',
+      'M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z',
+      'M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+      'm6.18 5.276 3.1 3.899',
+    ])
 
     rerender(<>{renderPlatformIcon('hypit')}</>)
-    const replicationFrames = container.querySelectorAll('[data-platform-icon="hypit"] rect')
-    expect(replicationFrames).toHaveLength(2)
-    for (const frame of replicationFrames) {
-      expect(frame.getAttribute('width')).toBe('15')
-      expect(frame.getAttribute('rx')).toBe('4.25')
-    }
+    const replication = container.querySelector('[data-platform-icon="hypit"]')
+    expect(replication?.getAttribute('stroke-width')).toBe('2')
+    expect(replication?.querySelector('path')?.getAttribute('d')).toBe(
+      'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2',
+    )
+    const sheet = replication?.querySelector('rect')
+    expect([sheet?.getAttribute('width'), sheet?.getAttribute('height'), sheet?.getAttribute('rx')]).toEqual(['14', '14', '2'])
   })
 
   it.each(['montage', 'hypit'] as const)('animates %s on hover and settles on leave', (platform) => {
