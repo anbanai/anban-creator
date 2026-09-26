@@ -5,7 +5,7 @@ import type { AnalyticsCandidate, AnalyticsImportPayload, AnalyticsPreview, Anal
 export type AnalyticsPlatform = 'article' | 'seednote'
 export type MetricBasis = 'cumulative' | 'daily'
 export interface AnalyticsMetric { key: string; label: string; color: string; kind: 'count' | 'rate' | 'duration'; summary: boolean; format: (value: number) => string }
-export interface AnalyticsContent { id: string; title: string; content_type: string; status?: string; url?: string; date?: string; metrics: Record<string, number | null> }
+export interface AnalyticsContent { id: string; title: string; content_type: string; status?: string; url?: string; date?: string; last_stat_date?: string; metrics: Record<string, number | null> }
 export interface AnalyticsParams { from: string; to: string; granularity: 'day' | 'week' | 'month'; metric_basis: MetricBasis; expected_revision?: number }
 export interface AnalyticsOverview { revision: number; updated_at: string; metric_basis: MetricBasis; totals: Record<string, number | null>; series: AnalyticsPoint[]; coverage: { contents: number }; unavailable_metrics: Record<string, string> }
 export interface AnalyticsDetail extends Omit<AnalyticsOverview, 'coverage'> { content: AnalyticsContent }

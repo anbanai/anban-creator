@@ -267,7 +267,9 @@ func (s *AnalyticsService) read(ctx context.Context, user, project string, q Ana
 		if e != nil {
 			return e
 		}
-		if state.ActiveGeneration <= 0 || state.Status != "ready" {
+		// During a rebuild the last published generation remains readable; only
+		// projects without a published generation are unavailable.
+		if state.ActiveGeneration <= 0 {
 			return ErrAnalyticsRebuilding
 		}
 		if q.ExpectedRevision != nil && *q.ExpectedRevision != state.Revision {

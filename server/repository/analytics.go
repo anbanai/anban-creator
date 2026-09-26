@@ -255,10 +255,10 @@ func (r *AnalyticsRepository) rangeQuery(ctx context.Context, project string, ge
 func (r *AnalyticsRepository) contentRange(ctx context.Context, project string, generation int64, basis, from, to, content string) *gorm.DB {
 	q := r.rangeQuery(ctx, project, generation, basis, from, to, content)
 	if basis == "cumulative" {
-		ranked := q.Select("content_id," + analyticsMetricColumns("") + ", ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY last_stat_date DESC) AS rn")
-		return r.db.WithContext(ctx).Table("(?) AS ranked", ranked).Select("content_id," + analyticsMetricColumns("")).Where("rn = 1")
+		ranked := q.Select("content_id,last_stat_date," + analyticsMetricColumns("") + ", ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY last_stat_date DESC) AS rn")
+		return r.db.WithContext(ctx).Table("(?) AS ranked", ranked).Select("content_id,last_stat_date," + analyticsMetricColumns("")).Where("rn = 1")
 	}
-	return q.Select("content_id," + analyticsSumColumns("")).Group("content_id")
+	return q.Select("content_id,MAX(last_stat_date) AS last_stat_date," + analyticsSumColumns("")).Group("content_id")
 }
 func (r *AnalyticsRepository) RangeTotals(ctx context.Context, project string, generation int64, basis, from, to, content string, preserveRatios bool) (model.AnalyticsMetrics, int64, error) {
 	sub := r.contentRange(ctx, project, generation, basis, from, to, content)
@@ -298,6 +298,7 @@ func (r *AnalyticsRepository) ResolveContent(ctx context.Context, project, id st
 type AnalyticsContentRow struct {
 	model.AnalyticsContent
 	model.AnalyticsMetrics
+	LastStatDate string `json:"last_stat_date,omitempty"`
 }
 type AnalyticsContentFilter struct {
 	Search, ContentType, Sort, Direction string
@@ -365,7 +366,7 @@ func (r *AnalyticsRepository) Contents(ctx context.Context, project string, gene
 		}
 	}
 	rows := []AnalyticsContentRow{}
-	e := q.Select("c.*, " + liveTitle + " AS title, " + liveType + " AS content_type, " + liveStatus + " AS status, " + liveURL + " AS url, COALESCE(m.last_stat_date, c.date) AS date, " + analyticsMetricColumns("m.")).Order(order).Offset(f.Offset).Limit(f.Limit).Scan(&rows).Error
+	e := q.Select("c.*, " + liveTitle + " AS title, " + liveType + " AS content_type, " + liveStatus + " AS status, " + liveURL + " AS url, COALESCE(m.last_stat_date, '') AS last_stat_date, " + analyticsMetricColumns("m.")).Order(order).Offset(f.Offset).Limit(f.Limit).Scan(&rows).Error
 	return rows, n, e
 }
 func (r *AnalyticsRepository) ObservationPage(ctx context.Context, project, content, from, to, basis string, offset, limit int) ([]model.AnalyticsObservation, int64, error) {
