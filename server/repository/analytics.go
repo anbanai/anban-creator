@@ -306,11 +306,26 @@ type AnalyticsContentFilter struct {
 
 func (r *AnalyticsRepository) Contents(ctx context.Context, project string, generation int64, basis, from, to string, f AnalyticsContentFilter) ([]AnalyticsContentRow, int64, error) {
 	sub := r.contentRange(ctx, project, generation, basis, from, to, "")
-	q := r.db.WithContext(ctx).Table("analytics_contents AS c").Joins("LEFT JOIN (?) AS m ON m.content_id = c.id", sub).Joins("LEFT JOIN tasks AS t ON t.id = c.task_id AND t.project_id = c.project_id").Joins("LEFT JOIN wechat_publications AS p ON p.id = c.publication_id AND p.project_id = c.project_id").Joins("LEFT JOIN seednote_posts AS sp ON sp.id = c.post_id AND sp.project_id = c.project_id").Where("c.project_id = ?", project)
-	liveTitle := "COALESCE(NULLIF(p.draft_title,''), NULLIF(sp.title,''), NULLIF(t.title,''), c.title)"
-	liveType := "COALESCE(NULLIF(sp.genre,''), NULLIF(t.type,''), NULLIF(c.content_type,''))"
-	liveStatus := "COALESCE(NULLIF(p.status,''), NULLIF(t.status,''), NULLIF(c.status,''))"
-	liveURL := "COALESCE(NULLIF(p.article_url,''), NULLIF(sp.note_url,''), c.url)"
+	q := r.db.WithContext(ctx).Table("analytics_contents AS c").Joins("LEFT JOIN (?) AS m ON m.content_id = c.id", sub).Where("c.project_id = ?", project)
+	liveTitle, liveType, liveStatus, liveURL := "c.title", "c.content_type", "c.status", "c.url"
+	if r.db.Migrator().HasTable("tasks") {
+		q = q.Joins("LEFT JOIN tasks AS t ON t.id = c.task_id AND t.project_id = c.project_id")
+		liveTitle = "COALESCE(NULLIF(t.title,''), c.title)"
+		liveType = "COALESCE(NULLIF(t.type,''), c.content_type)"
+		liveStatus = "COALESCE(NULLIF(t.status,''), c.status)"
+	}
+	if r.db.Migrator().HasTable("wechat_publications") {
+		q = q.Joins("LEFT JOIN wechat_publications AS p ON p.id = c.publication_id AND p.project_id = c.project_id")
+		liveTitle = "COALESCE(NULLIF(p.draft_title,''), " + liveTitle + ")"
+		liveStatus = "COALESCE(NULLIF(p.status,''), " + liveStatus + ")"
+		liveURL = "COALESCE(NULLIF(p.article_url,''), " + liveURL + ")"
+	}
+	if r.db.Migrator().HasTable("seednote_posts") {
+		q = q.Joins("LEFT JOIN seednote_posts AS sp ON sp.id = c.post_id AND sp.project_id = c.project_id")
+		liveTitle = "COALESCE(NULLIF(sp.title,''), " + liveTitle + ")"
+		liveType = "COALESCE(NULLIF(sp.genre,''), " + liveType + ")"
+		liveURL = "COALESCE(NULLIF(sp.note_url,''), " + liveURL + ")"
+	}
 	if f.Search != "" {
 		q = q.Where(liveTitle+" LIKE ?", "%"+f.Search+"%")
 	}
