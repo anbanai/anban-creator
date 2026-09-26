@@ -37,7 +37,7 @@ describe('ProjectContextControl', () => {
     const trigger = screen.getByRole('combobox', { name: '项目上下文' })
     expect(trigger).toHaveTextContent('Morning Brief')
     expect(trigger).toHaveTextContent('Daily editorial briefing')
-    expect(trigger).not.toHaveTextContent('公众号项目')
+    expect(trigger).toHaveTextContent('公众号项目')
     expect(trigger.querySelector('img')).toHaveAttribute('src', 'https://example.com/morning.png')
     expect(trigger).toHaveClass('border-border')
 
@@ -143,7 +143,7 @@ describe('ProjectContextControl', () => {
     )
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
-    expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
+    expect(screen.getByText('公众号项目')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Morning Brief' })).toHaveAttribute(
       'src',
       'https://example.com/morning.png',
@@ -166,6 +166,7 @@ describe('ProjectContextControl', () => {
     )
 
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
+    expect(screen.getByText('公众号')).toBeInTheDocument()
     expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
     expect(screen.queryByText('Daily editorial briefing')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
@@ -188,7 +189,7 @@ describe('ProjectContextControl', () => {
 
     const trigger = screen.getByRole('combobox', { name: 'Choose project context' })
     expect(trigger).toHaveTextContent('Morning Brief')
-    expect(trigger).not.toHaveTextContent('公众号项目')
+    expect(trigger).toHaveTextContent('公众号')
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
       'data-compact',
@@ -199,6 +200,36 @@ describe('ProjectContextControl', () => {
     const option = await screen.findByRole('option', { name: /Morning Brief/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
     expect(option).not.toHaveTextContent('公众号项目')
+  })
+
+  it('keeps the video brand visible for projects still named after the legacy platform', async () => {
+    render(
+      <ProjectContextControl
+        mode="select"
+        projects={[
+          { id: 'hypit-1', name: 'Hypit', platform: 'hypit' },
+          { id: 'montage-1', name: 'Montage', platform: 'montage' },
+        ]}
+        value="hypit-1"
+        onValueChange={vi.fn()}
+      />,
+    )
+
+    const trigger = screen.getByRole('combobox', { name: '项目上下文' })
+    expect(trigger).toHaveTextContent('视频复刻项目')
+    expect(trigger.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    const replicationGroup = (await screen.findByText('视频复刻')).closest('[data-platform]')
+    expect(replicationGroup).toHaveAttribute('data-platform', 'hypit')
+    expect(screen.getByText('视频生成').closest('[data-platform]')).toHaveAttribute(
+      'data-platform',
+      'montage',
+    )
+    const replication = await screen.findByRole('option', { name: /Hypit/ })
+    expect(replication).toHaveTextContent('Hypit')
+    const generation = screen.getByRole('option', { name: /Montage/ })
+    expect(generation).toHaveTextContent('Montage')
   })
 
   it('renders nothing in hidden mode', () => {

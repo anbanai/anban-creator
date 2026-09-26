@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import PageHeader from '@/components/layout/PageHeader'
 import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
-import { taskStatusLabel, contentTypeLabel, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
+import { taskStatusLabel, contentTypeDisplayName, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
@@ -510,7 +510,7 @@ export default function TasksPage() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || (contentTypeLabel[task.type] || task.type) + ' 任务'}</h3>
+                          <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}</h3>
                           <div className="flex shrink-0 items-center gap-1.5">
                             <Badge variant={statusBadgeVariant(task.status)}>
                               {taskStatusLabel[task.status] || task.status}
@@ -522,7 +522,7 @@ export default function TasksPage() {
                         )}
                         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           <Badge variant="outline" className={`text-[10px] ${platformBadgeClassName[task.type] || ''}`}>
-                            {contentTypeLabel[task.type] || task.type}
+                            {contentTypeDisplayName(task.type)}
                           </Badge>
                           <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>
                           {actionSignal.tone !== 'risk' && <span>{actionSignal.hint}</span>}

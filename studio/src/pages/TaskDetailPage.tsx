@@ -31,7 +31,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { taskStatusLabel, contentTypeLabel, statusBadgeVariant } from '@/lib/labels'
+import { taskStatusLabel, contentTypeDisplayName, platformDisplayName, statusBadgeVariant } from '@/lib/labels'
 import { platformBadgeClassName, renderPlatformIcon } from '@/lib/PlatformIcon'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
@@ -584,17 +584,17 @@ export default function TaskDetailPage() {
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden sm:list-item" />
               <BreadcrumbItem className="hidden sm:inline-flex">
-                <BreadcrumbPage>{task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}</BreadcrumbPage>
+                <BreadcrumbPage>{task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="min-w-0 max-w-4xl text-xl font-bold leading-tight text-foreground">
-              {task.title || task.prompt || contentTypeLabel[task.type] + ' 任务'}
+              {task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}
             </h1>
             <Badge variant="outline" className={platformBadgeClassName[task.type]}>
                 {renderPlatformIcon(task.type)}
-                {contentTypeLabel[task.type] || task.type}
+                {contentTypeDisplayName(task.type)}
             </Badge>
             <Badge variant={statusBadgeVariant(task.status)}>
               {taskStatusLabel[task.status] || task.status}
@@ -800,7 +800,7 @@ export default function TaskDetailPage() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">平台</p>
-                  <p className="mt-1 text-sm text-foreground">{contentTypeLabel[projectDialogPlatform] || projectDialogPlatform}</p>
+                  <p className="mt-1 text-sm text-foreground">{platformDisplayName(projectDialogPlatform)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">

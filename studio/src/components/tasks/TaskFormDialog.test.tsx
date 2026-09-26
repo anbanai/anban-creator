@@ -1056,6 +1056,19 @@ describe('video replication task integration', () => {
     vi.mocked(api.projects.list).mockResolvedValue([hypitProject])
     vi.mocked(api.hypitCapabilities.list).mockResolvedValue({ enabled: true, configured: true, missing_configuration: [], limits: { max_assets: 20, max_duration_seconds: 180, max_asset_bytes: 100000, max_input_bytes: 200000 } })
   })
+  it('brands the replication project instead of the raw platform key', async () => {
+    const legacyNamed = { ...hypitProject, name: 'Hypit' } as Project
+    vi.mocked(api.projects.list).mockResolvedValue([legacyNamed])
+    renderDialog({ initialProjectId: legacyNamed.id, initialType: 'hypit' })
+    await screen.findByLabelText('主参考视频链接')
+    const selector = screen.getByRole('combobox', { name: /^项目：/ })
+    await waitFor(() => expect(selector).toHaveTextContent('视频复刻'))
+    expect(selector).toHaveTextContent('Hypit')
+    expect(selector.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
+    expect(selector).not.toHaveTextContent('Hypit项目')
+    expect(screen.queryByText('hypit')).not.toBeInTheDocument()
+  })
+
   it('keeps a valid same-type project switch ready and retains the reference', async () => {
     const second = { ...hypitProject, id: 'hypit-two', name: '第二复刻项目', hypit_defaults: { preferences: { duration_seconds: 40 } } } as Project
     vi.mocked(api.projects.list).mockResolvedValue([hypitProject, second])

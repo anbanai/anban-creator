@@ -16,7 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { contentTypeLabel } from '@/lib/labels'
+import { contentTypeDisplayName } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskFile } from '@/types'
 
@@ -189,7 +189,7 @@ export function TaskContextSummary({
             icon={SlidersHorizontal}
             index={1}
             label="创作配置"
-            value={contentTypeLabel[platform] || platform}
+            value={contentTypeDisplayName(platform)}
             detail={configurationDetail}
             neutral={configurationDetail === '未设置'}
             onClick={() => onOpenTab('configuration')}

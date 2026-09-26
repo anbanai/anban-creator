@@ -6,7 +6,7 @@ import StatsCard from '@/components/StatsCard'
 import StatsCardSkeleton from '@/components/StatsCardSkeleton'
 import { Card } from '@/components/ui/card'
 import { api } from '@/lib/api'
-import { contentTypeLabel, formatDateYMD } from '@/lib/labels'
+import { contentTypeDisplayName, formatDateYMD } from '@/lib/labels'
 import { queryKeys } from '@/lib/query-keys'
 import type { UsageStats } from '@/types'
 
@@ -87,7 +87,7 @@ export default function UsagePage() {
           <div className="divide-y divide-border">
             {byType.map(([type, entry]) => (
               <div key={type} className="flex items-center justify-between px-4 py-3 text-sm">
-                <span className="font-medium">{contentTypeLabel[type as keyof typeof contentTypeLabel] ?? type}</span>
+                <span className="font-medium">{contentTypeDisplayName(type)}</span>
                 <span className="tabular-nums text-muted-foreground">{entry.count.toLocaleString()} 个</span>
               </div>
             ))}

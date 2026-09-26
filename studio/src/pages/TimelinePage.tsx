@@ -11,7 +11,7 @@ import type { TimelineItem, PlanStatus, TaskStatus } from '@/types'
 import {
   taskStatusLabel,
   planStatusLabel,
-  contentTypeLabel,
+  contentTypeDisplayName,
   timelineItemTypeLabel,
   contentTypeFilterOptions,
   timelineItemTypeOptions,
@@ -363,7 +363,7 @@ export default function TimelinePage() {
                                     </span>
                                     <Badge variant="outline" className={`text-[10px] ${platformBadgeClassName[item.content_type] || ''}`}>
                                       {renderPlatformIcon(item.content_type)}
-                                      {contentTypeLabel[item.content_type] || item.content_type}
+                                      {contentTypeDisplayName(item.content_type)}
                                     </Badge>
                                     <Badge variant="outline" className="text-[10px]">
                                       {timelineItemTypeLabel[item.type] || item.type}

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Archive, Brain, Lightbulb, Pencil, RotateCcw } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
-import { platformLabels } from '@/lib/labels'
+import { platformDisplayName } from '@/lib/labels'
 import { renderPlatformIcon, platformBadgeVariant, platformBadgeClassName } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { Badge } from '@/components/ui/badge'
@@ -23,7 +23,7 @@ interface ProjectCardProps {
 export function ProjectCard({ project, stats, onEdit, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
-  const platformLabel = platformLabels[project.platform] || project.platform
+  const platformLabel = platformDisplayName(project.platform)
   const platformBadge = platformBadgeVariant[project.platform] || ('secondary' as const)
   const positioning = project.instructions || project.positioning || ''
   const isArchived = project.status === 'archived'

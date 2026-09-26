@@ -2,8 +2,8 @@ import { useState } from 'react'
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
-import { platformBadgeClassName, platformBgColor, platformIconColor } from '@/lib/PlatformIcon'
-import { platformLabels } from '@/lib/labels'
+import { platformBadgeClassName, platformBgColor, platformIconColor, renderPlatformIcon } from '@/lib/PlatformIcon'
+import { platformDisplayName } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 
 export interface ProjectIdentityProject {
@@ -27,9 +27,7 @@ export function ProjectIdentity({
 }: ProjectIdentityProps) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string>()
   const initial = project.name.trim().charAt(0) || '项'
-  const platformLabel = project.platform
-    ? (platformLabels[project.platform] ?? project.platform)
-    : '通用'
+  const platformLabel = platformDisplayName(project.platform)
 
   return (
     <span
@@ -63,7 +61,10 @@ export function ProjectIdentity({
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
           {showType ? (
-            <Badge variant="secondary" className={project.platform ? platformBadgeClassName[project.platform] : undefined}>{platformLabel}项目</Badge>
+            <Badge variant="secondary" className={cn('shrink-0', project.platform ? platformBadgeClassName[project.platform] : undefined)}>
+              {project.platform ? renderPlatformIcon(project.platform) : null}
+              {compact ? platformLabel : `${platformLabel}项目`}
+            </Badge>
           ) : null}
         </span>
         {!compact && project.description ? (

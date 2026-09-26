@@ -16,23 +16,47 @@ function VideoPlatformIcon({ platform, className }: { platform: 'montage' | 'hyp
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="2"
+      strokeWidth="1.75"
       viewBox="0 0 24 24"
       width="24"
     >
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M9 9.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997A1 1 0 0 1 9 14.996z" />
       {platform === 'montage' ? (
-        <g data-platform-symbol="sparkles" transform="translate(10 0) scale(.5)">
-          <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a2 2 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a2 2 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" />
-          <path d="M20 2v4" />
-          <path d="M22 4h-4" />
-          <circle cx="4" cy="20" r="2" />
+        <g data-platform-symbol="generate">
+          <rect height="18" rx="5" width="18" x="3" y="3" />
+          <path
+            d="M10.2 8.7v6.6a.55.55 0 0 0 .84.47l5.3-3.3a.55.55 0 0 0 0-.94l-5.3-3.3a.55.55 0 0 0-.84.47Z"
+            fill="currentColor"
+            stroke="none"
+          />
+          <rect
+            className="animate-platform-generate"
+            fill="currentColor"
+            height="14"
+            opacity="0"
+            rx="1.75"
+            stroke="none"
+            width="3.5"
+            x="6"
+            y="5"
+          />
         </g>
       ) : (
-        <g data-platform-symbol="copy" transform="translate(11 11) scale(.5)">
-          <rect width="14" height="14" x="8" y="8" rx="2" />
-          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        <g data-platform-symbol="replicate">
+          <rect
+            className="animate-platform-replicate"
+            height="15"
+            opacity="0.4"
+            rx="4.25"
+            width="15"
+            x="5.5"
+            y="3"
+          />
+          <rect height="15" rx="4.25" width="15" x="3" y="6" />
+          <path
+            d="M9.2 11.2v4.6a.5.5 0 0 0 .76.43l3.9-2.3a.5.5 0 0 0 0-.86l-3.9-2.3a.5.5 0 0 0-.76.43Z"
+            fill="currentColor"
+            stroke="none"
+          />
         </g>
       )}
     </svg>

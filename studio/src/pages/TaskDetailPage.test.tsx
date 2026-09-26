@@ -1996,6 +1996,35 @@ describe('TaskDetailPage', () => {
     expect(within(dialog).queryByText('图片比例')).not.toBeInTheDocument()
   })
 
+  it('brands video replication tasks without leaking the raw platform key', async () => {
+    vi.mocked(api.projects.get).mockResolvedValue({
+      ...mockProjectDetail,
+      project: { ...mockProjectDetail.project, name: 'Hypit', platform: 'hypit' as const },
+    })
+    mockTask(taskWith({
+      id: 'task-hypit',
+      type: 'hypit',
+      status: 'running',
+      title: '',
+      prompt: '',
+      project_id: mockProjectDetail.project.id,
+      project_snapshot: {
+        project_name: 'Hypit',
+        platform: 'hypit',
+        image_ratio: '9:16',
+      },
+    }))
+
+    render(<TaskDetailPage />)
+
+    const badge = await screen.findByText('视频复刻', { selector: '[data-slot="badge"]' })
+    expect(badge.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
+    expect(badge.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('视频复刻 任务')
+    expect(screen.queryByText('hypit')).not.toBeInTheDocument()
+    expect(screen.queryByText('montage')).not.toBeInTheDocument()
+  })
+
   it('renders dynamic logs as markdown and keeps copyable raw text', async () => {
     const writeText = vi.fn()
     Object.assign(navigator, {

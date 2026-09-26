@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { contentTypeLabel, contentTypeOptions, platformDefaultRatio, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
+import { contentTypeDisplayName, contentTypeLabel, contentTypeOptions, platformDefaultRatio, platformDisplayName, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
 
 describe('statusBadgeVariant', () => {
   it('returns "outline" for running', () => {
@@ -76,5 +76,24 @@ describe('video platform labels', () => {
     expect(contentTypeLabel[type]).toBe(label)
     expect(platformLabels[type]).toBe(label)
     expect(contentTypeOptions.find(option => option.value === type)?.label).toBe(label)
+  })
+
+  it('resolves every known platform to a display name without leaking raw keys', () => {
+    expect(platformDisplayName('montage')).toBe('视频生成')
+    expect(platformDisplayName('hypit')).toBe('视频复刻')
+    expect(platformDisplayName('viral_analysis')).toBe('爆文拆解')
+    expect(platformDisplayName(undefined)).toBe('通用')
+    expect(platformDisplayName('', '上下文')).toBe('上下文')
+    expect(platformDisplayName('unknown_platform')).toBe('unknown_platform')
+  })
+
+  it('keeps content type wording distinct from platform wording', () => {
+    expect(contentTypeDisplayName('article')).toBe('公众号文章')
+    expect(platformDisplayName('article')).toBe('公众号')
+    expect(contentTypeDisplayName('montage')).toBe('视频生成')
+    expect(contentTypeDisplayName('hypit')).toBe('视频复刻')
+    expect(contentTypeDisplayName('viral_analysis')).toBe('爆文拆解')
+    expect(contentTypeDisplayName(null)).toBe('通用')
+    expect(contentTypeDisplayName('unknown_type')).toBe('unknown_type')
   })
 })

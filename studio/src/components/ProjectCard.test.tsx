@@ -42,8 +42,8 @@ describe('ProjectCard', () => {
   }
 
   it.each([
-    ['montage', '视频生成', 'text-purple-700', 'sparkles'],
-    ['hypit', '视频复刻', 'text-orange-700', 'copy'],
+    ['montage', '视频生成', 'text-purple-700', 'generate'],
+    ['hypit', '视频复刻', 'text-orange-700', 'replicate'],
   ] as const)('shows the %s platform identity on project cards', (platform, label, color, symbol) => {
     render(<ProjectCard project={project({ platform })} />)
     const badge = screen.getByText(label)

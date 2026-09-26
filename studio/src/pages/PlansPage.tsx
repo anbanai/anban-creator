@@ -27,7 +27,7 @@ import { Switch } from '@/components/ui/switch'
 import SchedulePicker from '@/components/SchedulePicker'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { planStatusLabel, contentTypeLabel, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
+import { planStatusLabel, contentTypeDisplayName, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
 import { platformBadgeVariant, platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { normalizeImageRatio, planSchema, type PlanFormValues } from '@/lib/schemas'
@@ -740,7 +740,7 @@ export default function PlansPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <span className="truncate text-sm font-medium text-foreground">
-                        {plan.prompt || contentTypeLabel[plan.type] + '计划'}
+                        {plan.prompt || contentTypeDisplayName(plan.type) + '计划'}
                       </span>
                       <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">
                         {planStatusLabel[plan.status] || plan.status}
@@ -751,7 +751,7 @@ export default function PlansPage() {
                     )}
                     <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <Badge variant={platformBadge} className={cn("text-[10px]", platformBadgeClassName[plan.type])}>
-                        {contentTypeLabel[plan.type] || plan.type}
+                        {contentTypeDisplayName(plan.type)}
                       </Badge>
                       <span>{cronToHuman(plan.cron_expr)}</span>
                       <span>下次：{formatDateTimeCN(plan.next_run_at)}</span>

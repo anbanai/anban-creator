@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/combobox'
 import { Separator } from '@/components/ui/separator'
 import { platformBgColor, platformBorderColor, renderPlatformIcon } from '@/lib/PlatformIcon'
-import { platformLabels } from '@/lib/labels'
+import { platformDisplayName } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import {
   ProjectIdentity,
@@ -96,7 +96,7 @@ function projectGroups(
   if (allowNoProject) result.push({ value: '上下文', items: [noProjectItem] })
   for (const [platform, items] of groups) {
     result.push({
-      value: platformLabels[platform] ?? (platform === 'project' ? '项目' : platform),
+      value: platform === 'project' ? '项目' : platformDisplayName(platform, platform),
       platform,
       items,
     })
@@ -189,7 +189,7 @@ function SelectProjectContext({
                 加载项目...
               </span>
             ) : selected?.kind === 'project' ? (
-              <ProjectIdentity project={selected} compact={compact} showType={false} />
+              <ProjectIdentity project={selected} compact={compact} />
             ) : selected?.name ?? placeholder}
           </span>
         </ComboboxTrigger>
@@ -272,7 +272,7 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
         className="min-w-0"
       >
         {props.project ? (
-          <ProjectIdentity project={props.project} compact={props.compact} showType={false} />
+          <ProjectIdentity project={props.project} compact={props.compact} />
         ) : props.noProjectLabel ?? '未关联项目'}
       </div>
     )

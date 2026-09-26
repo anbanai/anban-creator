@@ -138,6 +138,16 @@ export const platformLabels: Record<string, string> = {
   hypit: '视频复刻',
 }
 
+export function platformDisplayName(platform: string | null | undefined, fallback = '通用'): string {
+  if (!platform) return fallback
+  return platformLabels[platform] ?? contentTypeLabel[platform] ?? platform
+}
+
+export function contentTypeDisplayName(type: string | null | undefined, fallback = '通用'): string {
+  if (!type) return fallback
+  return contentTypeLabel[type] ?? platformLabels[type] ?? type
+}
+
 export const platformDefaultRatio: Record<string, string> = {
   article: '16:9',
   seednote: '3:4',

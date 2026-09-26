@@ -1,5 +1,5 @@
 import { Separator } from '@/components/ui/separator'
-import { contentTypeLabel } from '@/lib/labels'
+import { contentTypeDisplayName } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task } from '@/types'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
@@ -139,7 +139,7 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
         <h3 id="task-project-snapshot" className="text-sm font-semibold">项目快照</h3>
         <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
           <Detail label="项目" value={projectName} />
-          <Detail label="内容类型" value={contentTypeLabel[platform] || platform} />
+          <Detail label="内容类型" value={contentTypeDisplayName(platform)} />
           <Detail label="视觉风格" value={visualStyle} wide />
           <Detail label={ratioLabel} value={task.type === 'hypit' ? task.hypit_input?.preferences?.aspect_ratio || '跟随参考视频' : imageRatio} />
           {task.type !== 'hypit' && <div className="flex min-w-0 flex-col gap-1">

@@ -9,25 +9,45 @@ describe('video platform identity', () => {
     const generation = container.querySelector('[data-platform-icon="montage"]')
     expect(generation?.tagName).toBe('svg')
     expect(generation).toHaveClass('text-[#9333EA]')
-    expect(generation?.querySelector('[data-platform-symbol="sparkles"]')).toBeInTheDocument()
+    expect(generation?.querySelector('[data-platform-symbol="generate"]')).toBeInTheDocument()
+    expect(generation?.querySelector('.animate-platform-generate')).toBeInTheDocument()
 
     rerender(<>{renderPlatformIcon('hypit')}</>)
     const replication = container.querySelector('[data-platform-icon="hypit"]')
     expect(replication?.tagName).toBe('svg')
     expect(replication).toHaveClass('text-[#F97316]')
-    expect(replication?.querySelector('[data-platform-symbol="copy"]')).toBeInTheDocument()
+    expect(replication?.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
+    expect(replication?.querySelector('.animate-platform-replicate')).toBeInTheDocument()
   })
 
   it('keeps composite icons as direct SVG children in compact badges', () => {
     const { getByTestId, rerender } = render(<Badge data-testid="video-badge">{renderPlatformIcon('montage')}</Badge>)
     const generationBadge = getByTestId('video-badge')
     expect(generationBadge.firstElementChild?.tagName).toBe('svg')
-    expect(generationBadge.querySelector('[data-platform-symbol="sparkles"]')).toBeInTheDocument()
+    expect(generationBadge.querySelector('[data-platform-symbol="generate"]')).toBeInTheDocument()
 
     rerender(<Badge data-testid="video-badge">{renderPlatformIcon('hypit')}</Badge>)
     const replicationBadge = getByTestId('video-badge')
     expect(replicationBadge.firstElementChild?.tagName).toBe('svg')
-    expect(replicationBadge.querySelector('[data-platform-symbol="copy"]')).toBeInTheDocument()
+    expect(replicationBadge.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
+  })
+
+  it('draws both video marks from the same frame geometry', () => {
+    const { container, rerender } = render(<>{renderPlatformIcon('montage')}</>)
+    const generationFrame = container.querySelector('[data-platform-icon="montage"] rect')
+    const generationBox = generationFrame?.getAttribute('width')
+    const generationRadius = generationFrame?.getAttribute('rx')
+
+    rerender(<>{renderPlatformIcon('hypit')}</>)
+    const replicationFrames = container.querySelectorAll('[data-platform-icon="hypit"] rect')
+
+    expect(generationBox).toBe('18')
+    expect(generationRadius).toBe('5')
+    expect(replicationFrames).toHaveLength(2)
+    for (const frame of replicationFrames) {
+      expect(frame.getAttribute('width')).toBe('15')
+      expect(frame.getAttribute('rx')).toBe('4.25')
+    }
   })
 
   it('keeps platform accents distinct across cards, badges and selectors', () => {

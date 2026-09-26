@@ -1015,6 +1015,21 @@ describe('PlansPage Montage input', () => {
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ hypit_input: expect.objectContaining({ preferences: { duration_seconds: 0 } }) })))
   })
 
+  it('shows the replication brand instead of the raw platform key in the plan dialog', async () => {
+    const project = { ...montageProject, platform: 'hypit', name: 'Hypit' } as Project
+    vi.mocked(api.projects.list).mockResolvedValue([project])
+    window.history.pushState({}, '', `/plans?create=true&type=hypit&project_id=${project.id}&intent=schedule`)
+    render(<PlansPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    const selector = await within(dialog).findByRole('combobox', { name: /^项目：/ })
+    await waitFor(() => expect(selector).toHaveTextContent('Hypit'))
+    expect(selector).toHaveTextContent('视频复刻')
+    expect(selector.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
+    expect(selector).not.toHaveTextContent('Hypit项目')
+    expect(dialog).not.toHaveTextContent('montage')
+    expect(dialog).not.toHaveTextContent('hypit')
+  })
+
   it('blocks plan creation while supplemental media has unresolved upload failures', async () => {
     const project = { ...montageProject, platform: 'hypit' } as Project
     const second = { ...project, id: 'second-hypit-plan-project', name: '第二复刻计划项目' } as Project

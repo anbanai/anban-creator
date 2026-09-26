@@ -59,8 +59,24 @@ describe('ProjectIdentity', () => {
       document.querySelector('[data-slot="project-identity-description"]'),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByText('种草笔记项目', { selector: '[data-slot="badge"]' }),
+      screen.getByText('种草笔记', { selector: '[data-slot="badge"]' }),
     ).toBeInTheDocument()
+    expect(screen.queryByText('种草笔记项目')).not.toBeInTheDocument()
+  })
+
+  it('drops the project suffix in compact contexts so video brands stay readable', () => {
+    const { rerender } = render(
+      <ProjectIdentity project={{ id: 'hypit-1', name: 'Hypit', platform: 'hypit' }} />,
+    )
+    expect(screen.getByText('视频复刻项目')).toHaveClass('text-orange-700')
+
+    rerender(
+      <ProjectIdentity project={{ id: 'hypit-1', name: 'Hypit', platform: 'hypit' }} compact />,
+    )
+    const compactBadge = screen.getByText('视频复刻', { selector: '[data-slot="badge"]' })
+    expect(compactBadge).toHaveClass('text-orange-700')
+    expect(compactBadge).toHaveClass('shrink-0')
+    expect(screen.getByText('Hypit')).toBeInTheDocument()
   })
 
   it('shows the initial when the project avatar fails to load', () => {
