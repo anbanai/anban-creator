@@ -184,17 +184,6 @@
     50% { opacity: 0.4; }
 }
 
-@keyframes platform-generate {
-    0% { opacity: 0; transform: translateX(0); }
-    18%, 82% { opacity: 0.16; }
-    100% { opacity: 0; transform: translateX(8px); }
-}
-
-@keyframes platform-replicate {
-    0%, 100% { opacity: 0.4; transform: translate(0, 0); }
-    50% { opacity: 0.85; transform: translate(1.4px, -1.1px); }
-}
-
 @utility animate-pulse-dot {
     animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
@@ -213,14 +202,6 @@
 
 @utility animate-glow-pulse {
     animation: glow-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-@utility animate-platform-generate {
-    animation: platform-generate 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-@utility animate-platform-replicate {
-    animation: platform-replicate 3.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
 /* Shared interaction defaults also cover native controls outside the UI library. */

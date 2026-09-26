@@ -1,10 +1,59 @@
 import type { ComponentType } from 'react'
+import { useCallback } from 'react'
 import { BookOpen, MessageCircle, ShoppingBag, Signature } from 'lucide-react'
+import { motion, useAnimation, useReducedMotion, type Variants } from 'motion/react'
 import type { TaskType } from '@/types'
 
 type PlatformIconComponent = ComponentType<{ className?: string }>
 
+const generateSweepVariants: Variants = {
+  normal: { x: 0, opacity: 0 },
+  animate: {
+    x: [0, 9],
+    opacity: [0, 0.16, 0.16, 0],
+    transition: { duration: 0.7, times: [0, 0.25, 0.65, 1], ease: 'easeInOut' },
+  },
+}
+
+const generatePlayVariants: Variants = {
+  normal: { scale: 1, originX: '12px', originY: '12.5px' },
+  animate: {
+    scale: [1, 0.88, 1.08, 1],
+    transition: { duration: 0.5, velocity: 0.3 },
+  },
+}
+
+const replicateEchoVariants: Variants = {
+  normal: { scale: 1, x: 0, y: 0, opacity: 0.4, originX: '13px', originY: '10.5px' },
+  animate: {
+    scale: [1, 1.16, 0.97, 1],
+    x: [0, -1.6, 0.7, 0],
+    y: [0, -1.2, 0.5, 0],
+    opacity: [0.4, 0.95, 0.5, 0.4],
+    transition: { duration: 0.6, velocity: 0.3 },
+  },
+}
+
+const replicateFrameVariants: Variants = {
+  normal: { scale: 1, originX: '10.5px', originY: '13.5px' },
+  animate: {
+    scale: [1, 0.95, 1.05, 1],
+    transition: { duration: 0.45, velocity: 0.3 },
+  },
+}
+
 function VideoPlatformIcon({ platform, className }: { platform: 'montage' | 'hypit'; className?: string }) {
+  const controls = useAnimation()
+  const reducedMotion = useReducedMotion()
+
+  const handleMouseEnter = useCallback(() => {
+    if (!reducedMotion) controls.start('animate')
+  }, [controls, reducedMotion])
+
+  const handleMouseLeave = useCallback(() => {
+    if (!reducedMotion) controls.start('normal')
+  }, [controls, reducedMotion])
+
   return (
     <svg
       aria-hidden="true"
@@ -13,6 +62,8 @@ function VideoPlatformIcon({ platform, className }: { platform: 'montage' | 'hyp
       fill="none"
       focusable="false"
       height="24"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -23,18 +74,21 @@ function VideoPlatformIcon({ platform, className }: { platform: 'montage' | 'hyp
       {platform === 'montage' ? (
         <g data-platform-symbol="generate">
           <rect height="18" rx="5" width="18" x="3" y="3" />
-          <path
+          <motion.path
+            animate={controls}
             d="M10.2 8.7v6.6a.55.55 0 0 0 .84.47l5.3-3.3a.55.55 0 0 0 0-.94l-5.3-3.3a.55.55 0 0 0-.84.47Z"
             fill="currentColor"
             stroke="none"
+            variants={generatePlayVariants}
           />
-          <rect
-            className="animate-platform-generate"
+          <motion.rect
+            animate={controls}
             fill="currentColor"
             height="14"
             opacity="0"
             rx="1.75"
             stroke="none"
+            variants={generateSweepVariants}
             width="3.5"
             x="6"
             y="5"
@@ -42,16 +96,25 @@ function VideoPlatformIcon({ platform, className }: { platform: 'montage' | 'hyp
         </g>
       ) : (
         <g data-platform-symbol="replicate">
-          <rect
-            className="animate-platform-replicate"
+          <motion.rect
+            animate={controls}
             height="15"
             opacity="0.4"
             rx="4.25"
+            variants={replicateEchoVariants}
             width="15"
             x="5.5"
             y="3"
           />
-          <rect height="15" rx="4.25" width="15" x="3" y="6" />
+          <motion.rect
+            animate={controls}
+            height="15"
+            rx="4.25"
+            variants={replicateFrameVariants}
+            width="15"
+            x="3"
+            y="6"
+          />
           <path
             d="M9.2 11.2v4.6a.5.5 0 0 0 .76.43l3.9-2.3a.5.5 0 0 0 0-.86l-3.9-2.3a.5.5 0 0 0-.76.43Z"
             fill="currentColor"
