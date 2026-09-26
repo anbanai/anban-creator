@@ -7,9 +7,9 @@ import type { TaskType } from '@/types'
 type PlatformIconComponent = ComponentType<{ className?: string }>
 
 const clapperLidVariants: Variants = {
-  normal: { rotate: 0, originX: '2.6px', originY: '8.6px' },
+  normal: { rotate: 0, originX: '2.75px', originY: '7.35px' },
   animate: {
-    rotate: [0, -15, 5, 0],
+    rotate: [0, -6.5, 2.5, 0],
     transition: { duration: 0.5, velocity: 0.3 },
   },
 }
@@ -25,8 +25,8 @@ const clapperBodyVariants: Variants = {
 const copySheetVariants: Variants = {
   normal: { x: 0, y: 0, scale: 1, originX: '8px', originY: '8px' },
   animate: {
-    x: [0, 2.4, -0.8, 0],
-    y: [0, -2.4, 0.8, 0],
+    x: [0, 1.8, -0.6, 0],
+    y: [0, -1.8, 0.6, 0],
     scale: [1, 0.96, 1.02, 1],
     transition: { duration: 0.55, velocity: 0.3 },
   },
@@ -66,23 +66,22 @@ function VideoPlatformIcon({ platform, className }: { platform: 'montage' | 'hyp
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth="2"
+      style={{ overflow: 'visible' }}
       viewBox="0 0 24 24"
       width="24"
     >
       {platform === 'montage' ? (
         <g data-platform-symbol="generate">
-          <path d="m12.296 3.464 3.02 3.956" />
-          <motion.path
-            animate={controls}
-            d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z"
-            variants={clapperLidVariants}
-          />
+          <motion.g animate={controls} variants={clapperLidVariants}>
+            <path d="m12.296 3.464 3.02 3.956" />
+            <path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z" />
+            <path d="m6.18 5.276 3.1 3.899" />
+          </motion.g>
           <motion.path
             animate={controls}
             d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
             variants={clapperBodyVariants}
           />
-          <path d="m6.18 5.276 3.1 3.899" />
         </g>
       ) : (
         <g data-platform-symbol="replicate">

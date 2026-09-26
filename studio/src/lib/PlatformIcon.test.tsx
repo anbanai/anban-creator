@@ -59,21 +59,39 @@ describe('video platform identity', () => {
     const { container, rerender } = render(<>{renderPlatformIcon('montage')}</>)
     const generation = container.querySelector('[data-platform-icon="montage"]')
     expect(generation?.getAttribute('stroke-width')).toBe('2')
+    expect(generation).toHaveStyle({ overflow: 'visible' })
     expect([...generation!.querySelectorAll('path')].map((path) => path.getAttribute('d'))).toEqual([
       'm12.296 3.464 3.02 3.956',
       'M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z',
-      'M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
       'm6.18 5.276 3.1 3.899',
+      'M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
     ])
 
     rerender(<>{renderPlatformIcon('hypit')}</>)
     const replication = container.querySelector('[data-platform-icon="hypit"]')
     expect(replication?.getAttribute('stroke-width')).toBe('2')
+    expect(replication).toHaveStyle({ overflow: 'visible' })
     expect(replication?.querySelector('path')?.getAttribute('d')).toBe(
       'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2',
     )
     const sheet = replication?.querySelector('rect')
     expect([sheet?.getAttribute('width'), sheet?.getAttribute('height'), sheet?.getAttribute('rx')]).toEqual(['14', '14', '2'])
+  })
+
+  it('animates the clapper lid together with its stripes', () => {
+    const { container } = render(<>{renderPlatformIcon('montage')}</>)
+    const symbol = container.querySelector('[data-platform-symbol="generate"]')
+    const animated = symbol!.querySelector('g')
+    expect(animated?.tagName).toBe('g')
+
+    const lidGroupPaths = [...animated!.querySelectorAll('path')].map((path) => path.getAttribute('d'))
+    expect(lidGroupPaths).toHaveLength(3)
+    expect(lidGroupPaths).toContain('M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z')
+    expect(lidGroupPaths).toContain('m12.296 3.464 3.02 3.956')
+    expect(lidGroupPaths).toContain('m6.18 5.276 3.1 3.899')
+    expect([...symbol!.querySelectorAll(':scope > path')].map((path) => path.getAttribute('d'))).toEqual([
+      'M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+    ])
   })
 
   it.each(['montage', 'hypit'] as const)('animates %s on hover and settles on leave', (platform) => {
