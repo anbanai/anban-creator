@@ -47,6 +47,8 @@ export interface SeednotePostIdentity {
   genre?: string
   note_id?: string
   note_url?: string
+  /** Task that produced this note; the Server stores it once when the post is first imported. */
+  task_id?: string
   first_published_at?: string | null
 }
 export interface SeednotePostSummary extends SeednotePostIdentity {

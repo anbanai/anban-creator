@@ -111,6 +111,17 @@ describe('ContentDataPage', () => {
     await waitFor(() => expect(new URLSearchParams(location.search).get('from')).toBe('2026-09-24'))
     expect(new URLSearchParams(location.search).get('content')).toBe('task:0')
   })
+  it('opens the single content a task deep link points at and keeps it marked in the switcher', async () => {
+    window.history.replaceState(null, '', '/content-data?account=notes&content=task:t1')
+    const resolved = { ...contents[0], id: 'seednote_post:n1', title: '任务对应的笔记' }
+    vi.mocked(loadContentAnalytics).mockImplementation(async (_project, _period, contentId) => ({ contents: [resolved, contents[1]], selected: contentId === 'task:t1' ? resolved : undefined, totals: { views: 42 }, series: [], availableDates: ['2026-09-24'] }))
+    render(<ContentDataPage />)
+    expect(await screen.findByRole('heading', { name: '任务对应的笔记' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '该内容暂不可用' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '切换内容' }))
+    const switcher = screen.getByRole('textbox', { name: '搜索要切换的内容' }).closest('[data-slot="popover-content"]') as HTMLElement
+    expect(within(switcher).getByRole('button', { name: '任务对应的笔记' }).querySelector('.text-primary')).toBeInTheDocument()
+  })
   it('restores time controls through browser back and forward', async () => {
     window.history.replaceState(null, '', '/content-data?account=wechat&from=2026-08-01&to=2026-08-31&preset=custom&granularity=day')
     render(<ContentDataPage />)

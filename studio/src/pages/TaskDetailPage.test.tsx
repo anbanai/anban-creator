@@ -1545,6 +1545,38 @@ describe('TaskDetailPage', () => {
     expect(api.feedback.getTask).not.toHaveBeenCalled()
   })
 
+  it('links completed 公众号/种草笔记 tasks to their own 内容数据 page and hides it elsewhere', async () => {
+    mockTask(taskWith({ id: 'task-1', type: 'article', status: 'completed' }))
+
+    const { unmount } = render(<TaskDetailPage />)
+
+    const dataLink = await screen.findByRole('link', { name: '查看数据' })
+    expect(dataLink).toHaveAttribute('href', '/content-data?account=ch-1&content=task%3Atask-1')
+
+    unmount()
+    mockTask(taskWith({ id: 'task-1', type: 'seednote', status: 'completed' }))
+    render(<TaskDetailPage />)
+    expect(await screen.findByRole('link', { name: '查看数据' })).toHaveAttribute('href', '/content-data?account=ch-1&content=task%3Atask-1')
+  })
+
+  it('omits the 内容数据 link for task types without a content analytics board', async () => {
+    mockTask(taskWith({ id: 'task-1', type: 'montage', status: 'completed' }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('button', { name: '克隆任务' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看数据' })).not.toBeInTheDocument()
+  })
+
+  it('omits the 内容数据 link until a task has content to report on', async () => {
+    mockTask(taskWith({ id: 'task-1', type: 'article', status: 'running' }))
+
+    render(<TaskDetailPage />)
+
+    await screen.findByRole('button', { name: '完成创作，进行中' })
+    expect(screen.queryByRole('link', { name: '查看数据' })).not.toBeInTheDocument()
+  })
+
   it('closes feedback when a completed task leaves the completed state', async () => {
     const task = taskWith({ id: 'task-1', status: 'completed' })
     const { queryClient } = renderWithCachedTasks(task)

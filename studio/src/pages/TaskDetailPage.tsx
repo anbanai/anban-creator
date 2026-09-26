@@ -3,17 +3,18 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, Trash2, RefreshCw, Loader2, Ban, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Trash2, RefreshCw, Loader2, Ban, BarChart3, MessageSquare } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
+import { taskContentDataHref } from '@/lib/content-analytics'
 import { queryKeys } from '@/lib/query-keys'
 import type { InputAttachment, Task, TaskLifecycle } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
-import { Button } from '@/components/common/button'
+import { Button, buttonVariants } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { SignedImage } from '@/components/ui/SignedImage'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
@@ -538,6 +539,8 @@ export default function TaskDetailPage() {
   const canCancel = task.status === 'pending' || task.status === 'running'
   const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
   const canResume = task.status === 'failed' || task.status === 'cancelled'
+  // 内容数据 only covers 公众号/种草笔记 账号，montage 等任务没有对应的数据看板。
+  const canViewContentData = task.status === 'completed' && (task.type === 'article' || task.type === 'seednote')
   const currentTask = task
   const snapshot = task.project_snapshot
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
@@ -626,6 +629,12 @@ export default function TaskDetailPage() {
           </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+          {canViewContentData && (
+            <Link to={taskContentDataHref(task.project_id, task.id)} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              <BarChart3 className="h-4 w-4" />
+              查看数据
+            </Link>
+          )}
           {task.status === 'completed' && (
             <Tooltip>
               <TooltipTrigger
