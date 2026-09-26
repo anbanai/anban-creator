@@ -28,6 +28,8 @@ func NewSeednoteImportService(repo repository.Repository, store storage.Provider
 }
 
 type SeednoteImportRequest struct {
+	MetricBasis          string               `json:"metric_basis"`
+	IdempotencyKey       string               `json:"idempotency_key"`
 	Selections           []AnalyticsSelection `json:"selections"`
 	UserID               string
 	ProjectID            string
@@ -38,8 +40,9 @@ type SeednoteImportRequest struct {
 }
 
 type SeednoteImportSummary struct {
-	Batch *model.SeednoteImportBatch `json:"batch"`
-	Rows  []*model.SeednoteImportRow `json:"rows,omitempty"`
+	Revision int64                      `json:"revision"`
+	Batch    *model.SeednoteImportBatch `json:"batch"`
+	Rows     []*model.SeednoteImportRow `json:"rows,omitempty"`
 }
 
 func (s *SeednoteImportService) loadWorkbook(ctx context.Context, req SeednoteImportRequest) (*model.Asset, []byte, *ParsedSeednoteWorkbook, *time.Location, error) {
@@ -81,6 +84,20 @@ func (s *SeednoteImportService) loadWorkbook(ctx context.Context, req SeednoteIm
 }
 
 func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRequest) (*SeednoteImportSummary, error) {
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = uuid.NewString()
+	}
+	if req.DataAsOfAt == nil {
+		now := s.now()
+		req.DataAsOfAt = &now
+	}
+	if req.MetricBasis == "" {
+		req.MetricBasis = "cumulative"
+	}
+
+	if err := validateAnalyticsImport("seednote", req.MetricBasis, req.IdempotencyKey, req.DataAsOfAt); err != nil {
+		return nil, err
+	}
 	if len(req.Selections) == 0 {
 		return nil, errors.New("select at least one content row to import")
 	}
@@ -113,7 +130,7 @@ func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRe
 		FileName: asset.FileName, ContentType: asset.ContentType, FileSize: int64(len(data)), SHA256: hex.EncodeToString(hash[:]),
 		ReceivedAt: now, ClientModifiedAt: req.ClientFileModifiedAt, SourceCreatedAt: parsed.Metadata.Created, SourceModifiedAt: parsed.Metadata.Modified,
 		SourceMetadataJSON: string(metadataRaw), DataAsOfAt: dataAsOf, Timezone: defaultSeednoteImportTimezone(req.Timezone),
-		ParserVersion: SeednoteImportParserVersion, Status: model.SeednoteImportBatchStatusProcessing, TotalRows: len(parsed.Rows),
+		MetricBasis: req.MetricBasis, ParserVersion: SeednoteImportParserVersion, Status: model.SeednoteImportBatchStatusProcessing, TotalRows: len(parsed.Rows),
 	}
 	rows := make([]*model.SeednoteImportRow, 0, len(parsed.Rows))
 	for _, parsedRow := range parsed.Rows {
@@ -129,12 +146,21 @@ func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRe
 
 		rows = append(rows, row)
 	}
+	var revision int64
+	var replayID string
 	batch.Status = model.SeednoteImportBatchStatusCompleted
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		// Serialize creation of the analytics identity shared by a task.
-		if err := tx.WechatAnalyticsImports().LockProject(ctx, req.ProjectID); err != nil {
-			return err
+		existing, rev, claimErr := NewAnalyticsService(tx).ClaimIdempotency(ctx, req.ProjectID, req.IdempotencyKey, analyticsRequestFingerprint(batch.SHA256, req.MetricBasis, batch.DataAsOfAt, req.Selections), batch.ID)
+		if claimErr != nil {
+			return claimErr
 		}
+		if existing != "" {
+			replayID = existing
+			revision = rev
+			return nil
+		}
+		writes := make([]AnalyticsObservationInput, 0, len(rows))
+		// Serialize creation of the analytics identity shared by a task.
 		candidates, err := loadAnalyticsCandidates(ctx, tx, req.UserID, req.ProjectID)
 		if err != nil {
 			return err
@@ -184,6 +210,11 @@ func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRe
 					return err
 				}
 			}
+			input, inputErr := analyticsSeednoteInput(post, row, batch, req.MetricBasis, now)
+			if inputErr != nil {
+				return inputErr
+			}
+			writes = append(writes, input)
 			row.PostID, row.CandidatePostID = post.ID, post.ID
 			row.MatchStatus, row.CandidateConfidence = model.SeednoteImportRowStatusMatched, 1
 			batch.ResolvedRows++
@@ -197,18 +228,39 @@ func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRe
 		if err := tx.SeednoteImports().CreateRows(ctx, rows); err != nil {
 			return err
 		}
+		revision, err = NewAnalyticsService(tx).Apply(ctx, AnalyticsWriteRequest{ProjectID: req.ProjectID, Observations: writes})
+		if err != nil {
+			return err
+		}
+		// Preserve the immutable import version used by the task detail and
+		// review history surfaces. Content analytics reads the typed facts.
 		for _, row := range rows {
-			if row.PostID != "" {
-				if err := s.createMetricVersion(ctx, tx, batch, row, now); err != nil {
-					return err
-				}
+			if row.PostID == "" {
+				continue
+			}
+			if err := tx.SeednoteMetricVersions().Create(ctx, &model.SeednoteMetricVersion{
+				ID: uuid.NewString(), PostID: row.PostID, BatchID: batch.ID, ImportRowID: row.ID,
+				DataAsOfAt: batch.DataAsOfAt, ImportedAt: now, ExposureCount: row.ExposureCount,
+				ViewCount: row.ViewCount, CoverClickRate: row.CoverClickRate, LikeCount: row.LikeCount,
+				CommentCount: row.CommentCount, CollectCount: row.CollectCount, FollowerGainCount: row.FollowerGainCount,
+				ShareCount: row.ShareCount, AvgWatchDuration: row.AvgWatchDuration, BarrageCount: row.BarrageCount,
+				RawData: row.RawData,
+			}); err != nil {
+				return err
 			}
 		}
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("persist import: %w", err)
 	}
-	return &SeednoteImportSummary{Batch: batch, Rows: rows}, nil
+	if replayID != "" {
+		result, err := s.GetBatch(ctx, req.UserID, req.ProjectID, replayID)
+		if result != nil {
+			result.Revision = revision
+		}
+		return result, err
+	}
+	return &SeednoteImportSummary{Batch: batch, Rows: rows, Revision: revision}, nil
 }
 
 func defaultSeednoteImportTimezone(value string) string {

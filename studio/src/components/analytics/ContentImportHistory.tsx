@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
@@ -10,10 +10,10 @@ export default function ContentImportHistory({ project, onClose, onRevoked }: { 
   const client = useQueryClient()
   const [page, setPage] = useState(0)
   const [target, setTarget] = useState<{ id: string; name: string }>()
-  const query = useQuery({ queryKey: ['content-analytics-history', project.id, page], queryFn: async () => {
-    const result = project.platform === 'article' ? await api.wechatAnalyticsImport.listBatches(project.id, { offset: page * 20, limit: 20 }) : await api.seednoteImport.listBatches(project.id, { offset: page * 20, limit: 20 })
+  const query = useQuery({ queryKey: ['content-analytics', project.id, 'history', page], queryFn: async ({ signal }) => {
+    const result = project.platform === 'article' ? await api.wechatAnalyticsImport.listBatches(project.id, { offset: page * 20, limit: 20 }, signal) : await api.seednoteImport.listBatches(project.id, { offset: page * 20, limit: 20 }, signal)
     return { total: result.total, items: result.items.map((batch) => ({ id: batch.id, name: batch.file_name, date: batch.data_as_of_at, revoked: Boolean(batch.revoked_at) || batch.status === 'revoked', count: 'matched_rows' in batch ? batch.matched_rows : batch.resolved_rows })) }
-  } })
+  }, placeholderData: keepPreviousData })
   const revoke = useMutation({ mutationFn: async (id: string) => { if (project.platform === 'article') await api.wechatAnalyticsImport.revoke(project.id, id); else await api.seednoteImport.revoke(project.id, id) }, onSuccess: async () => { await invalidateContentAnalytics(client, project.id); setTarget(undefined); onRevoked?.() } })
   return <Dialog open onOpenChange={(open) => { if (!open && !revoke.isPending) onClose() }}><DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl" closeButtonDisabled={revoke.isPending}><DialogHeader><DialogTitle>导入记录</DialogTitle><DialogDescription>{project.name} · 撤销后该批次不再计入统计，文件和历史记录仍会保留。</DialogDescription></DialogHeader>
     {query.isPending ? <p role="status" className="py-8 text-center text-muted-foreground">读取导入记录…</p> : query.isError ? <div role="alert">{query.error.message}<Button variant="ghost" onClick={() => void query.refetch()}>重试</Button></div> : !query.data.items.length ? <p className="py-8 text-center text-muted-foreground">还没有导入记录</p> : <div className="divide-y">{query.data.items.map((batch) => <div key={batch.id} className="flex flex-wrap items-center justify-between gap-3 py-4"><div className="min-w-0 flex-1"><p className="break-all text-sm font-medium">{batch.name}</p><p className="mt-1 text-xs text-muted-foreground">{new Date(batch.date).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })} · {batch.revoked ? '已撤销 · 不计入统计' : `${batch.count} 条已导入`}</p></div>{!batch.revoked && <Button size="sm" variant="ghost" disabled={revoke.isPending} onClick={() => { setTarget({ id: batch.id, name: batch.name }); revoke.reset() }}>撤销本次导入</Button>}</div>)}</div>}

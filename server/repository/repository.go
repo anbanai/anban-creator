@@ -11,6 +11,7 @@ import (
 
 // Repository aggregates all sub-repositories and supports transactions.
 type Repository interface {
+	Analytics() *AnalyticsRepository
 	Users() UserRepository
 	Sessions() SessionRepository
 	Plans() PlanRepository
@@ -783,3 +784,6 @@ func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) er
 }
 
 func (r *txRepository) Close() error { return nil }
+
+func (r *repository) Analytics() *AnalyticsRepository   { return &AnalyticsRepository{db: r.db} }
+func (r *txRepository) Analytics() *AnalyticsRepository { return &AnalyticsRepository{db: r.db} }

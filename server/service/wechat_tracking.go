@@ -170,6 +170,21 @@ func (s *WechatTrackingService) CaptureMetrics(ctx context.Context, trackingID s
 				return err
 			}
 		}
+		publication, err := tx.WechatPublications().FindByID(ctx, tracking.PublicationID)
+		if err != nil {
+			return err
+		}
+		inputs := make([]AnalyticsObservationInput, 0, len(snapshots))
+		for _, snapshot := range snapshots {
+			input, err := analyticsWechatCaptureInput(tracking, publication, snapshot)
+			if err != nil {
+				return err
+			}
+			inputs = append(inputs, input)
+		}
+		if _, err = NewAnalyticsService(tx).Apply(ctx, AnalyticsWriteRequest{ProjectID: tracking.ProjectID, Observations: inputs}); err != nil {
+			return err
+		}
 		if manualMsgID != "" {
 			bound, err := tx.WechatPublications().BindMsgID(ctx, tracking.PublicationID, manualMsgID)
 			if err != nil {

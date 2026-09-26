@@ -18,6 +18,7 @@ const (
 
 // SeednoteImportBatch records one immutable official export import.
 type SeednoteImportBatch struct {
+	MetricBasis        string     `gorm:"type:varchar(16);not null;default:''" json:"metric_basis"`
 	ID                 string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID             string     `gorm:"type:char(36);index;not null" json:"user_id"`
 	ProjectID          string     `gorm:"type:char(36);index;not null" json:"project_id"`

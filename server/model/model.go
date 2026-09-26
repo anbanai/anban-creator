@@ -5,6 +5,7 @@ import "gorm.io/gorm"
 // AutoMigrate creates or updates all database tables.
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
+		&AnalyticsState{}, &AnalyticsContent{}, &AnalyticsObservation{}, &AnalyticsRawPayload{}, &AnalyticsBucket{}, &AnalyticsIdempotency{}, &AnalyticsRebuildJob{},
 		&User{},
 		&LoginSession{},
 		&Project{},

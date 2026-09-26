@@ -23,6 +23,8 @@ export interface AnalyticsPreviewRow {
 }
 export interface AnalyticsPreview { file_name: string; total_rows: number; rows: AnalyticsPreviewRow[] }
 export interface AnalyticsImportPayload {
+  metric_basis: 'cumulative' | 'daily'
+  idempotency_key: string
   upload_id: string
   selections: AnalyticsSelection[]
   data_as_of_at: string

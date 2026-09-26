@@ -15,16 +15,18 @@ func (s *SeednoteImportService) Revoke(ctx context.Context, userID, projectID, b
 	if err := s.checkProject(ctx, userID, projectID); err != nil {
 		return nil, err
 	}
+	var revision int64
 	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		if err := tx.SeednoteImports().LockBatch(ctx, projectID, batchID); err != nil {
-			return err
-		}
 		batch, err := tx.SeednoteImports().FindBatchByID(ctx, projectID, batchID)
 		if err != nil {
 			return err
 		}
 		if batch.UserID != userID {
 			return errors.New("batch does not belong to user")
+		}
+		revision, err = NewAnalyticsService(tx).RevokeBatch(ctx, projectID, batchID)
+		if err != nil {
+			return err
 		}
 		if batch.RevokedAt != nil {
 			return nil
@@ -36,31 +38,25 @@ func (s *SeednoteImportService) Revoke(ctx context.Context, userID, projectID, b
 	if err != nil {
 		return nil, err
 	}
-	return s.GetBatch(ctx, userID, projectID, batchID)
+	result, err := s.GetBatch(ctx, userID, projectID, batchID)
+	if result != nil {
+		result.Revision = revision
+	}
+	return result, err
 }
-
 func (s *WechatAnalyticsImportService) Revoke(ctx context.Context, userID, projectID, batchID string) (*WechatAnalyticsImportSummary, error) {
-	// Check ownership before taking a write lock. Recheck inside the transaction.
-	batch, err := s.repo.WechatAnalyticsImports().FindBatchByID(ctx, projectID, batchID)
-	if err != nil {
-		return nil, err
-	}
-	if batch.UserID != userID {
-		return nil, errors.New("import does not belong to user")
-	}
-	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		if err := tx.WechatAnalyticsImports().LockProject(ctx, projectID); err != nil {
-			return err
-		}
-		if err := tx.WechatAnalyticsImports().LockBatch(ctx, projectID, batchID); err != nil {
-			return err
-		}
+	var revision int64
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		batch, err := tx.WechatAnalyticsImports().FindBatchByID(ctx, projectID, batchID)
 		if err != nil {
 			return err
 		}
 		if batch.UserID != userID {
 			return errors.New("import does not belong to user")
+		}
+		revision, err = NewAnalyticsService(tx).RevokeBatch(ctx, projectID, batchID)
+		if err != nil {
+			return err
 		}
 		if batch.RevokedAt != nil {
 			return nil
@@ -70,36 +66,50 @@ func (s *WechatAnalyticsImportService) Revoke(ctx context.Context, userID, proje
 		if err := tx.WechatAnalyticsImports().UpdateBatch(ctx, batch); err != nil {
 			return err
 		}
-		// Scan the project's publications, including links sourced by this batch
-		// whose rows were subsequently relinked. Only import-owned URLs can change.
+		// Reconcile the operational URL/status from the remaining valid import
+		// observations. The analytics projection is already recomputed above;
+		// this keeps publication lifecycle metadata consistent for existing task
+		// and publication views without making it part of the read path.
+		rows, err := tx.WechatAnalyticsImports().FindRowsByBatchID(ctx, projectID, batchID)
+		if err != nil {
+			return err
+		}
+		seen := map[string]bool{}
+		// A URL can be linked by RecordImportedAnalytics before a row is
+		// materialized (for example a manually selected publication). Include
+		// those durable ownership links in the same reconciliation pass.
 		publications, err := tx.WechatPublications().ListByProject(ctx, projectID)
 		if err != nil {
 			return err
 		}
 		for _, publication := range publications {
-			snapshots, err := tx.WechatAnalyticsImports().FindSnapshotsByPublicationID(ctx, projectID, publication.ID)
+			if publication.ArticleURLImportBatchID == batchID {
+				rows = append(rows, &model.WechatAnalyticsImportRow{PublicationID: publication.ID})
+			}
+		}
+		for _, row := range rows {
+			if row.PublicationID == "" || seen[row.PublicationID] {
+				continue
+			}
+			seen[row.PublicationID] = true
+			snapshots, err := tx.WechatAnalyticsImports().FindSnapshotsByPublicationID(ctx, projectID, row.PublicationID)
 			if err != nil {
 				return err
 			}
-			url := historicalWechatArticleURL(snapshots)
-			sourceBatchID := ""
-			if url != "" && len(snapshots) > 0 {
-				// Choose an active observation that actually supplies this URL.
-				for _, snapshot := range snapshots {
-					if historicalWechatArticleURL([]*model.WechatAnalyticsSnapshot{snapshot}) == url {
-						sourceBatchID = snapshot.BatchID
-						break
-					}
-				}
+			replacementURL := historicalWechatArticleURL(snapshots)
+			replacementBatchID := ""
+			if len(snapshots) > 0 {
+				replacementBatchID = snapshots[0].BatchID
 			}
-			status := "import_available"
-			if len(snapshots) == 0 {
-				status, err = wechatAnalyticsStatusWithoutImports(ctx, tx, publication)
-				if err != nil {
-					return err
-				}
+			publication, err := tx.WechatPublications().FindByID(ctx, row.PublicationID)
+			if err != nil {
+				return err
 			}
-			if err := tx.WechatPublications().RevokeImportedAnalytics(ctx, projectID, publication.ID, batchID, url, sourceBatchID, status); err != nil {
+			status, err := wechatAnalyticsStatusWithoutImports(ctx, tx, publication)
+			if err != nil {
+				return err
+			}
+			if err := tx.WechatPublications().RevokeImportedAnalytics(ctx, projectID, row.PublicationID, batchID, replacementURL, replacementBatchID, status); err != nil {
 				return err
 			}
 		}
@@ -108,7 +118,11 @@ func (s *WechatAnalyticsImportService) Revoke(ctx context.Context, userID, proje
 	if err != nil {
 		return nil, err
 	}
-	return s.GetBatch(ctx, userID, projectID, batchID)
+	result, err := s.GetBatch(ctx, userID, projectID, batchID)
+	if result != nil {
+		result.Revision = revision
+	}
+	return result, err
 }
 
 func wechatAnalyticsStatusWithoutImports(ctx context.Context, repo repository.Repository, publication *model.WechatPublication) (string, error) {

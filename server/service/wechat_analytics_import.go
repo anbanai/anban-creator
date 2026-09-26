@@ -30,6 +30,8 @@ func NewWechatAnalyticsImportService(repo repository.Repository, store storage.P
 }
 
 type WechatAnalyticsImportRequest struct {
+	MetricBasis          string               `json:"metric_basis"`
+	IdempotencyKey       string               `json:"idempotency_key"`
 	UserID               string               `json:"-"`
 	ProjectID            string               `json:"-"`
 	UploadID             string               `json:"upload_id"`
@@ -40,11 +42,13 @@ type WechatAnalyticsImportRequest struct {
 }
 
 type WechatAnalyticsImportSummary struct {
-	Batch *model.WechatAnalyticsImportBatch `json:"batch"`
-	Rows  []*model.WechatAnalyticsImportRow `json:"rows,omitempty"`
+	Revision int64                             `json:"revision"`
+	Batch    *model.WechatAnalyticsImportBatch `json:"batch"`
+	Rows     []*model.WechatAnalyticsImportRow `json:"rows,omitempty"`
 }
 
 type WechatAnalyticsImportReceipt struct {
+	Revision      int64  `json:"revision"`
 	BatchID       string `json:"batch_id"`
 	SourceFile    string `json:"source_file"`
 	TotalRows     int    `json:"total_rows"`
@@ -59,7 +63,7 @@ func (s *WechatAnalyticsImportSummary) Receipt() *WechatAnalyticsImportReceipt {
 	if s == nil || s.Batch == nil {
 		return nil
 	}
-	return &WechatAnalyticsImportReceipt{
+	return &WechatAnalyticsImportReceipt{Revision: s.Revision,
 		BatchID: s.Batch.ID, SourceFile: s.Batch.FileName, TotalRows: s.Batch.TotalRows,
 		MatchedRows: s.Batch.MatchedRows, AmbiguousRows: s.Batch.ReviewRows,
 		UnmatchedRows: s.Batch.UnmatchedRows, InvalidRows: s.Batch.InvalidRows,
@@ -124,6 +128,20 @@ func (s *WechatAnalyticsImportService) Preview(ctx context.Context, req WechatAn
 }
 
 func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAnalyticsImportRequest) (*WechatAnalyticsImportSummary, error) {
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = uuid.NewString()
+	}
+	if req.DataAsOfAt == nil {
+		now := s.now()
+		req.DataAsOfAt = &now
+	}
+	if req.MetricBasis == "" {
+		req.MetricBasis = "cumulative"
+	}
+
+	if err := validateAnalyticsImport("article", req.MetricBasis, req.IdempotencyKey, req.DataAsOfAt); err != nil {
+		return nil, err
+	}
 	project, asset, parsed, data, err := s.readWorkbook(ctx, req)
 	if err != nil {
 		return nil, err
@@ -164,7 +182,18 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 		TotalRows: len(selectedRows),
 	}
 	rows := make([]*model.WechatAnalyticsImportRow, 0, len(selectedRows))
+	var revision int64
+	var replayID string
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		existing, rev, claimErr := NewAnalyticsService(tx).ClaimIdempotency(ctx, project.ID, req.IdempotencyKey, analyticsRequestFingerprint(batch.SHA256, "cumulative", batch.DataAsOfAt, req.Selections), batch.ID)
+		if claimErr != nil {
+			return claimErr
+		}
+		if existing != "" {
+			replayID = existing
+			revision = rev
+			return nil
+		}
 		if err := tx.WechatAnalyticsImports().LockProject(ctx, project.ID); err != nil {
 			return err
 		}
@@ -220,10 +249,22 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 		if err := tx.WechatAnalyticsImports().CreateRows(ctx, rows); err != nil {
 			return err
 		}
+		writes := make([]AnalyticsObservationInput, 0, len(rows))
 		for _, row := range rows {
-			if row.MatchStatus != model.WechatAnalyticsImportRowMatched {
-				continue
+			input, err := analyticsWechatInput(selected[row.SourceRow], row, batch, now)
+			if err != nil {
+				return err
 			}
+			writes = append(writes, input)
+		}
+		revision, err = NewAnalyticsService(tx).Apply(ctx, AnalyticsWriteRequest{ProjectID: project.ID, Observations: writes})
+		if err != nil {
+			return err
+		}
+		// Keep the operational import history used by task/publication panels.
+		// The new analytics facts above remain the sole source for content
+		// analytics queries; these rows are retained for audit and lifecycle UI.
+		for _, row := range rows {
 			if err := tx.WechatAnalyticsImports().CreateSnapshot(ctx, snapshotFromWechatImport(batch, row, now)); err != nil {
 				return err
 			}
@@ -233,7 +274,14 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 	if err != nil {
 		return nil, fmt.Errorf("persist WeChat analytics import: %w", err)
 	}
-	return &WechatAnalyticsImportSummary{Batch: batch, Rows: rows}, nil
+	if replayID != "" {
+		result, err := s.GetBatch(ctx, req.UserID, req.ProjectID, replayID)
+		if result != nil {
+			result.Revision = revision
+		}
+		return result, err
+	}
+	return &WechatAnalyticsImportSummary{Batch: batch, Rows: rows, Revision: revision}, nil
 }
 
 func previewWechatCandidateRow(row ParsedWechatAnalyticsRow, candidates []AnalyticsCandidate) WechatAnalyticsPreviewRow {
