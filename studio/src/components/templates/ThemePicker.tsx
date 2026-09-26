@@ -166,6 +166,7 @@ export function ThemePicker({
     <div className="space-y-2 rounded-lg border border-dashed border-input p-3">
       {header}
       {readOnly ? readOnlyLabel : select}
+      <p className="text-[0.8rem] text-muted-foreground">只影响公众号文章的 HTML 排版样式，不影响文案内容。</p>
       {theme ? (
         <ThemePreview theme={theme} />
       ) : (

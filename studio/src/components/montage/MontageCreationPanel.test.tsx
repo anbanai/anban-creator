@@ -183,6 +183,21 @@ describe('MontageCreationPanel', () => {
     await waitFor(() => expect(onReadyChange).toHaveBeenLastCalledWith(false))
   })
 
+  it('explains what each video input changes', async () => {
+    render(<PanelHarness />)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /电影感制作/ })).toBeChecked())
+
+    expect(screen.getByText('Agent 按 brief 组织叙事、镜头和节奏；写得越具体，成片越可控。')).toBeInTheDocument()
+    expect(screen.getByText('可上传文件，也可以引用其他任务的产物链接。')).toBeInTheDocument()
+    expect(screen.getByText('智能决定会按素材语言和画面内容自行判断是否需要字幕。')).toBeInTheDocument()
+    expect(screen.getByText(/保留原声适合素材本身有解说的情况/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /更多创作要求/ }))
+    expect(screen.getByText('影响镜头语言、色彩和剪辑节奏；留空则由 Agent 按参考素材判断。')).toBeInTheDocument()
+    expect(screen.getByText('描述配乐风格、情绪和卡点；留空则按视频类型默认处理。')).toBeInTheDocument()
+    expect(screen.getByText(/补充的交付要求会写进 Agent 的交付清单/)).toBeInTheDocument()
+  })
+
   it('serializes product subtitle and voice choices and keeps advanced requirements collapsed', async () => {
     render(<PanelHarness />)
     await waitFor(() => expect(screen.getByRole('radio', { name: /电影感制作/ })).toBeChecked())

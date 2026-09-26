@@ -159,6 +159,7 @@ export function PersonaBlock({
           placeholder="例如：李雷、某某实验室"
           maxLength={100}
         />
+        <p className="text-[0.8rem] text-muted-foreground">会写进公众号草稿的作者位；已创建的任务不随这里的修改变化。</p>
       </section>
 
       <section className="space-y-2 rounded-lg border border-input p-3">
@@ -186,6 +187,7 @@ export function PersonaBlock({
             ))}
           </SelectContent>
         </Select>
+        <p className="text-[0.8rem] text-muted-foreground">决定 Agent 的行文语气、结构习惯和用词偏好，会随每次创作注入提示。</p>
       </section>
     </div>
   )

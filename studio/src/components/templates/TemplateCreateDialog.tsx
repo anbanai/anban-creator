@@ -161,6 +161,7 @@ export function TemplateCreateDialog({ open, onOpenChange, template }: TemplateC
           <div className="space-y-1.5">
             <Label htmlFor="template-name">模板名称</Label>
             <Input id="template-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：清透成分说明书" maxLength={100} />
+            <p className="text-[0.8rem] text-muted-foreground">仅用于列表识别和搜索，不会写进生成内容。</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
@@ -169,10 +170,12 @@ export function TemplateCreateDialog({ open, onOpenChange, template }: TemplateC
                 <SelectTrigger id="template-category" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>{SEEDNOTE_TEMPLATE_CATEGORIES.map((value) => <SelectItem key={value} value={value} label={value}>{value}</SelectItem>)}</SelectContent>
               </Select>
+              <p className="text-[0.8rem] text-muted-foreground">决定模板出现在哪个行业分组，也决定它能否被其他项目使用。</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="template-sort-order">排序</Label>
               <Input id="template-sort-order" type="number" value={sortOrder} onChange={(event) => setSortOrder(Number(event.target.value))} />
+              <p className="text-[0.8rem] text-muted-foreground">数值越大越靠前。</p>
             </div>
           </div>
           <div className="space-y-1.5">
@@ -192,15 +195,26 @@ export function TemplateCreateDialog({ open, onOpenChange, template }: TemplateC
                 : undefined}
               onAnalysisAction={refreshCurrent}
             />
+            <p className="text-[0.8rem] text-muted-foreground">这是模板的核心：应用时这段 Prompt 会作为提示词预填到新建任务里。</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-              <Label htmlFor="template-public">公开模板</Label>
-              <Switch id="template-public" checked={visibility === 'public'} onCheckedChange={(checked) => setVisibility(checked ? 'public' : 'private')} />
+            <div className="rounded-md border border-border px-3 py-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <Label htmlFor="template-public">公开模板</Label>
+                  <p className="text-[0.8rem] text-muted-foreground">开启后其他用户也能在模板库里看到并使用这个模板。</p>
+                </div>
+                <Switch className="mt-0.5 shrink-0" id="template-public" checked={visibility === 'public'} onCheckedChange={(checked) => setVisibility(checked ? 'public' : 'private')} />
+              </div>
             </div>
-            <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-              <Label htmlFor="template-active">识别完成后启用</Label>
-              <Switch id="template-active" checked={isActive} onCheckedChange={setIsActive} />
+            <div className="rounded-md border border-border px-3 py-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <Label htmlFor="template-active">识别完成后启用</Label>
+                  <p className="text-[0.8rem] text-muted-foreground">后台识别结束前先不出现在可选列表，避免用半成品模板创作。</p>
+                </div>
+                <Switch className="mt-0.5 shrink-0" id="template-active" checked={isActive} onCheckedChange={setIsActive} />
+              </div>
             </div>
           </div>
         </div>

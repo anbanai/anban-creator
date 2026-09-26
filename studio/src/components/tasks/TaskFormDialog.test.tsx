@@ -393,6 +393,18 @@ describe('TaskFormDialog', () => {
     expect(within(dialog).getByText('高峰 4800 积分 · 低峰 3840 积分 · 低峰可节省 960 积分')).toBeInTheDocument()
   })
 
+  it('explains the ecommerce task inputs that decide scope, cost and output', async () => {
+    renderDialog({ initialProjectId: fixtures.ecommerceProject.id, initialType: 'ecommerce' })
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+
+    expect(within(dialog).getByText('写清目标、素材用法和不能出现的表达；未填写的部分按项目默认值执行。')).toBeInTheDocument()
+    expect(await within(dialog).findByText('按开启的模块生成交付物，图片生成与理解按实际用量单独计费。')).toBeInTheDocument()
+    expect(within(dialog).getByText(/多角度实拍图最佳/)).toBeInTheDocument()
+    expect(within(dialog).getByText('决定图片尺寸和该平台的合规、违禁词规范。')).toBeInTheDocument()
+    expect(within(dialog).getByText(/填写后会覆盖 AI 从产品图提炼的卖点/)).toBeInTheDocument()
+    expect(within(dialog).getByText('指定文案与图片中文字的输出语言。')).toBeInTheDocument()
+  })
+
   it('creates viral analysis through the task API with only Seednote projects', async () => {
     renderDialog({ initialProjectId: undefined, initialType: 'viral_analysis' })
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })

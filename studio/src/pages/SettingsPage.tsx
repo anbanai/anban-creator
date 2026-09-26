@@ -12,7 +12,7 @@ import { Button } from '@/components/common/button'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Badge } from '@/components/ui/badge'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import { api } from '@/lib/api'
@@ -224,6 +224,7 @@ export default function SettingsPage() {
                     <FormControl>
                       <PasswordInput placeholder="输入新密码（至少 8 个字符）" {...field} />
                     </FormControl>
+                    <FormDescription>8-128 个字符，且不能与当前密码相同。修改成功后所有登录会话失效，需要用新密码重新登录。</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

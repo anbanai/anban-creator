@@ -94,4 +94,15 @@ describe('PersonaBlock', () => {
     expect(screen.getByLabelText('写作风格头像 custom-style')).toBeInTheDocument()
     expect(screen.queryByText('选择写作风格')).not.toBeInTheDocument()
   })
+
+  it('explains what the author and writer fields change', () => {
+    vi.mocked(api.resources.list).mockResolvedValue({ category: 'writers', items: [] })
+
+    renderWithClient(
+      <PersonaBlock author="小安" onAuthor={() => {}} writer="dan-koe" onWriter={() => {}} />,
+    )
+
+    expect(screen.getByText('会写进公众号草稿的作者位；已创建的任务不随这里的修改变化。')).toBeInTheDocument()
+    expect(screen.getByText(/决定 Agent 的行文语气、结构习惯和用词偏好/)).toBeInTheDocument()
+  })
 })

@@ -42,6 +42,30 @@ describe('AgentPackSchemaFields', () => {
     expect(onChange).toHaveBeenLastCalledWith({ include_sources: true })
   })
 
+  it('derives missing field guidance from the schema constraints', () => {
+    render(<AgentPackSchemaFields pack={schemaPack} surface="task" value={{}} onChange={() => {}} />)
+
+    expect(screen.getByText('最小 1，最大 5。')).toBeInTheDocument()
+
+    const pack: AgentPack = {
+      ...schemaPack,
+      schemas: {
+        task_input: {
+          type: 'object',
+          required: ['count', 'note'],
+          properties: {
+            count: { type: 'integer', title: '数量', description: '一次生成的张数。', minimum: 1, maximum: 5 },
+            note: { type: 'string', title: '备注' },
+          },
+        },
+      },
+    }
+    render(<AgentPackSchemaFields pack={pack} surface="task" value={{}} onChange={() => {}} />)
+    expect(screen.getByText('一次生成的张数。 最小 1，最大 5。')).toBeInTheDocument()
+    // A required field with no description is only marked as required, not given invented copy.
+    expect(screen.getByPlaceholderText('必填')).toBeInTheDocument()
+  })
+
   it('does not replace registered custom scenario fields', () => {
     const customPack = { ...schemaPack, id: 'article', ui: { renderer: 'custom:article' } }
     const { container } = render(<AgentPackSchemaFields pack={customPack} surface="task" value={{}} onChange={() => {}} />)

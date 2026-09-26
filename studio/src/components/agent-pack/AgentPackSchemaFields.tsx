@@ -104,6 +104,8 @@ interface SchemaFieldProps {
 function SchemaField({ id, name, schema, required, value, onChange }: SchemaFieldProps) {
   const label = schema.title || name
   const description = schema.description
+  const hint = schemaHint(schema, description)
+  const placeholder = !description && required ? '必填' : undefined
 
   if (schema.enum?.length && !hasSafeEnumOptions(schema)) {
     return (
@@ -117,7 +119,7 @@ function SchemaField({ id, name, schema, required, value, onChange }: SchemaFiel
     return (
       <Field orientation="horizontal">
         <FieldLabel htmlFor={id}>{label}{required ? ' *' : ''}</FieldLabel>
-        {description ? <FieldDescription>{description}</FieldDescription> : null}
+        {hint ? <FieldDescription>{hint}</FieldDescription> : null}
         <Switch id={id} aria-label={label} checked={value === true} onCheckedChange={onChange} />
       </Field>
     )
@@ -137,7 +139,7 @@ function SchemaField({ id, name, schema, required, value, onChange }: SchemaFiel
             </SelectGroup>
           </SelectContent>
         </Select>
-        {description ? <FieldDescription>{description}</FieldDescription> : null}
+        {hint ? <FieldDescription>{hint}</FieldDescription> : null}
       </Field>
     )
   }
@@ -153,10 +155,11 @@ function SchemaField({ id, name, schema, required, value, onChange }: SchemaFiel
           min={schema.minimum}
           max={schema.maximum}
           step={schema.type === 'integer' ? 1 : 'any'}
+          placeholder={placeholder}
           value={typeof value === 'number' ? value : ''}
           onChange={(event) => onChange(event.target.value === '' ? undefined : Number(event.target.value))}
         />
-        {description ? <FieldDescription>{description}</FieldDescription> : null}
+        {hint ? <FieldDescription>{hint}</FieldDescription> : null}
       </Field>
     )
   }
@@ -166,13 +169,14 @@ function SchemaField({ id, name, schema, required, value, onChange }: SchemaFiel
       id,
       'aria-label': label,
       value: typeof value === 'string' ? value : '',
+      placeholder,
       onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value),
     }
     return (
       <Field>
         <FieldLabel htmlFor={id}>{label}{required ? ' *' : ''}</FieldLabel>
         {schema.format === 'textarea' ? <Textarea {...common} /> : <Input {...common} />}
-        {description ? <FieldDescription>{description}</FieldDescription> : null}
+        {hint ? <FieldDescription>{hint}</FieldDescription> : null}
       </Field>
     )
   }
@@ -182,6 +186,23 @@ function SchemaField({ id, name, schema, required, value, onChange }: SchemaFiel
       <AlertDescription>{label} 使用了 Studio 尚未支持的 Schema 类型。</AlertDescription>
     </Alert>
   )
+}
+
+/**
+ * Pack 未写 description 时，用 Schema 自身的数值约束生成最小可用的补充说明。
+ * 必填性已经由标题上的 * 和必填 placeholder 表达，不再重复成一句话。
+ */
+function schemaHint(
+  schema: AgentPackJSONSchema,
+  description: string | undefined,
+): string | undefined {
+  const range: string[] = []
+  if (typeof schema.minimum === 'number') range.push(`最小 ${schema.minimum}`)
+  if (typeof schema.maximum === 'number') range.push(`最大 ${schema.maximum}`)
+  const parts: string[] = []
+  if (description) parts.push(description)
+  if (range.length > 0) parts.push(`${range.join('，')}。`)
+  return parts.length > 0 ? parts.join(' ') : undefined
 }
 
 function hasSafeEnumOptions(schema: AgentPackJSONSchema) {

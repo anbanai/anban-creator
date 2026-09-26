@@ -147,6 +147,17 @@ describe('TemplateCreateDialog', () => {
     ))
   })
 
+  it('explains what each template field changes', () => {
+    renderDialog()
+
+    expect(screen.getByText('仅用于列表识别和搜索，不会写进生成内容。')).toBeInTheDocument()
+    expect(screen.getByText('决定模板出现在哪个行业分组，也决定它能否被其他项目使用。')).toBeInTheDocument()
+    expect(screen.getByText('数值越大越靠前。')).toBeInTheDocument()
+    expect(screen.getByText('这是模板的核心：应用时这段 Prompt 会作为提示词预填到新建任务里。')).toBeInTheDocument()
+    expect(screen.getByText('开启后其他用户也能在模板库里看到并使用这个模板。')).toBeInTheDocument()
+    expect(screen.getByText('后台识别结束前先不出现在可选列表，避免用半成品模板创作。')).toBeInTheDocument()
+  })
+
   it('编辑模板只提交实际修改的字段', async () => {
     mocks.update.mockResolvedValue({ ...analyzedTemplate, name: '新名称' })
     renderDialog(analyzedTemplate)

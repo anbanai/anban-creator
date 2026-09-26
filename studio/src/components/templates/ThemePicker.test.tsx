@@ -83,4 +83,14 @@ describe('ThemePicker', () => {
     })
     expect(screen.getByLabelText('排版风格色彩预览 custom-theme')).toBeInTheDocument()
   })
+
+  it('explains that the theme only affects layout', async () => {
+    vi.mocked(api.resources.list).mockResolvedValue({ category: 'themes', items: [] })
+
+    renderWithClient(<ThemePicker theme="custom-theme" onTheme={() => {}} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('只影响公众号文章的 HTML 排版样式，不影响文案内容。')).toBeInTheDocument()
+    })
+  })
 })

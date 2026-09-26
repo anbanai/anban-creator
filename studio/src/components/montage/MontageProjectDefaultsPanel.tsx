@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
-import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { useMontageCapabilities } from '@/hooks/useMontageCapabilities'
 import type { ProjectFormValues } from '@/lib/schemas'
 import type { MontagePipelineCapability } from '@/types'
@@ -143,6 +143,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
                 ))}
               </NativeSelect>
             </FormControl>
+            <FormDescription>留空表示由每次任务自行决定。</FormDescription>
             <FormMessage />
           </FormItem>
         )} />
@@ -159,6 +160,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
                 ))}
               </NativeSelect>
             </FormControl>
+            <FormDescription>留空表示由每次任务自行决定。</FormDescription>
             <FormMessage />
           </FormItem>
         )} />
@@ -170,6 +172,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
           <FormControl>
             <Textarea aria-label="风格偏好" {...field} value={field.value ?? ''} rows={3} placeholder="镜头、色彩、节奏与整体视觉调性" />
           </FormControl>
+          <FormDescription>作为该项目每次视频创作的默认风格约束。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />
@@ -179,6 +182,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
           <FormControl>
             <Textarea aria-label="音乐提示" {...field} value={field.value ?? ''} rows={2} placeholder="音乐风格、情绪与节奏" />
           </FormControl>
+          <FormDescription>默认配乐方向；单次任务可临时改写。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />
@@ -188,6 +192,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
           <FormControl>
             <Textarea aria-label="素材使用说明" {...field} value={field.value ?? ''} rows={3} placeholder="素材优先级、必须保留内容与禁用方式" />
           </FormControl>
+          <FormDescription>长期素材规则，例如品牌必须露出、禁用第三方素材。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />
@@ -202,6 +207,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
               maxTags={20}
             />
           </FormControl>
+          <FormDescription>该项目视频任务的默认交付要求；单次任务可追加。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />

@@ -92,6 +92,18 @@ describe('MontageProjectDefaultsPanel', () => {
     expect(output).toHaveTextContent('"delivery_targets":["final_video","subtitles"]')
   })
 
+  it('explains that these are defaults the task may override', async () => {
+    render(<PanelHarness />)
+
+    await waitFor(() => expect(screen.getByRole('radio', { name: /电影感制作/ })).toBeChecked())
+
+    expect(screen.getAllByText('留空表示由每次任务自行决定。').length).toBeGreaterThan(0)
+    expect(screen.getByText('作为该项目每次视频创作的默认风格约束。')).toBeInTheDocument()
+    expect(screen.getByText('默认配乐方向；单次任务可临时改写。')).toBeInTheDocument()
+    expect(screen.getByText('长期素材规则，例如品牌必须露出、禁用第三方素材。')).toBeInTheDocument()
+    expect(screen.getByText('该项目视频任务的默认交付要求；单次任务可追加。')).toBeInTheDocument()
+  })
+
   it('keeps following pipeline recommendations until the default duration is edited', async () => {
     render(<PanelHarness />)
 

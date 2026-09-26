@@ -25,7 +25,7 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import SchedulePicker from '@/components/SchedulePicker'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { planStatusLabel, contentTypeDisplayName, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
 import { platformBadgeVariant, platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
@@ -833,6 +833,7 @@ export default function PlansPage() {
                       )}
                     />
                   </FormControl>
+                  <FormDescription>到点自动创建任务并按项目默认配置执行；这里的修改只影响下一次执行。</FormDescription>
                 </FormItem>
               )} />
 

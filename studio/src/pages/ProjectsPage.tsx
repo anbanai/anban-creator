@@ -5,10 +5,10 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Inbox, Minus, CircleHelp } from 'lucide-react'
+import { Plus, Inbox, Minus } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import QueryErrorState from '@/components/QueryErrorState'
+import { FieldHint } from '@/components/common/FieldHint'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
 import type { ImageAnalysis, Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig } from '@/types'
@@ -656,7 +656,10 @@ export default function ProjectsPage() {
             <form id="project-form" onSubmit={handleProjectSubmit} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="platform" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
-                  <FormLabel className="shrink-0 w-20 text-right">平台</FormLabel>
+                  <div className="flex w-20 shrink-0 items-center justify-end gap-1">
+                    <FormLabel className="w-auto">平台</FormLabel>
+                    <FieldHint>决定这个项目的创作流程、可选能力与交付物，创建后不可修改。</FieldHint>
+                  </div>
                   <FormControl>
                     <Select
                       value={field.value}
@@ -754,7 +757,10 @@ export default function ProjectsPage() {
 
               <FormField control={form.control} name="avatar_url" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
-                  <FormLabel className="shrink-0 w-20 text-right">头像</FormLabel>
+                  <div className="flex w-20 shrink-0 items-center justify-end gap-1">
+                    <FormLabel className="w-auto">头像</FormLabel>
+                    <FieldHint>只用于项目列表和发布信息展示，不影响生成内容。留空则使用平台默认图标。</FieldHint>
+                  </div>
                   <FormControl>
                     <Input className="flex-1 min-w-0" placeholder="自动获取或手动填写 URL" {...field} />
                   </FormControl>
@@ -764,25 +770,17 @@ export default function ProjectsPage() {
 
               <FormField control={form.control} name="instructions" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>
-                    <span className="flex items-center gap-1">
-                      项目定位
-                      <Tooltip>
-                        <TooltipTrigger render={<span tabIndex={0} className="inline-flex cursor-help text-muted-foreground" aria-label="关于项目定位"><CircleHelp className="h-3.5 w-3.5" /></span>}>
-                          <CircleHelp className="h-3.5 w-3.5" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          写入 AGENTS.md，Agent 创作时会自动遵循此定位。
-                        </TooltipContent>
-                      </Tooltip>
-                    </span>
-                  </FormLabel>
+                  <div className="flex items-center gap-1">
+                    <FormLabel className="w-auto">项目定位</FormLabel>
+                    <FieldHint>写入任务工作区的 CLAUDE.md，Agent 每次创作都会按它对齐定位。</FieldHint>
+                  </div>
                   <FormControl>
                     <Textarea
                       placeholder="例如 面向开发者的实用 AI 教程"
                       {...field}
                     />
                   </FormControl>
+                  <FormDescription>写清受众、领域和语气；定位会作为长期约束注入每一次创作，任务里可再补充单次要求。</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -806,6 +804,7 @@ export default function ProjectsPage() {
                           <FormControl>
                             <Input className="flex-1 min-w-0" placeholder="wx..." {...field} />
                           </FormControl>
+                          <FormDescription>在公众号后台「设置与开发 → 基本配置」获取，用于向微信创建草稿和正式发布。</FormDescription>
                           <FormMessage />
                         </FormItem>
                       )} />
@@ -990,6 +989,7 @@ export default function ProjectsPage() {
                             ))}
                           </SelectContent>
                         </Select>
+                        <FormDescription>决定图片尺寸与该平台的合规、违禁词规范，新建任务时预填。</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )} />
@@ -1003,6 +1003,7 @@ export default function ProjectsPage() {
                             <ImageCapabilitySelector options={imageCapabilityOptions} value={field.value || defaultImageCapability} onChange={field.onChange} />
                           )}
                         </FormControl>
+                        <FormDescription>决定出图模型与计费单价，单个任务仍可临时切换。</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )} />
@@ -1012,6 +1013,7 @@ export default function ProjectsPage() {
                         <FormControl>
                           <Textarea {...field} placeholder="品牌定位、受众、调性、禁忌和固定视觉要求" className="min-h-[72px] resize-y" />
                         </FormControl>
+                        <FormDescription>作为长期约束注入该项目的每次电商出图，避免每次重复交代品牌要求。</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )} />

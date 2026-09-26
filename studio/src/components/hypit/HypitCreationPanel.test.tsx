@@ -50,6 +50,16 @@ describe('video replication creation panel', () => {
     await waitFor(() => expect(submit).toHaveBeenCalled())
     expect(submit.mock.calls[0][0].hypit_input.preferences.duration_seconds).toBeUndefined()
   })
+  it('explains the replication inputs', async () => {
+    vi.mocked(api.hypitCapabilities.list).mockResolvedValue(capability)
+    mount({})
+    await screen.findByText('请上传主参考视频或填写主参考视频链接')
+
+    expect(screen.getAllByText(/这段要求会作为复刻约束下发给执行环境/).length).toBeGreaterThan(0)
+    expect(screen.getByText('跟随参考视频会沿用源比例；指定比例会按新构图重新排版画面。')).toBeInTheDocument()
+    expect(screen.getByText('指定成片字幕与配音的语言；留空跟随参考视频。')).toBeInTheDocument()
+  })
+
   it('limits the primary reference to one video and permits all supplemental media types', async () => {
     vi.mocked(api.hypitCapabilities.list).mockResolvedValue(capability)
     const ready = vi.fn(); mount({ ready })

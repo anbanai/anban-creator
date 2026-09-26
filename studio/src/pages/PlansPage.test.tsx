@@ -355,6 +355,14 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(document.querySelectorAll('form form')).toHaveLength(0)
   })
 
+  it('explains what the schedule field actually does', async () => {
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    expect(within(dialog).getByText('到点自动创建任务并按项目默认配置执行；这里的修改只影响下一次执行。')).toBeInTheDocument()
+  })
+
   it('renders the edited plan project as a compact readonly identity inside the composer', async () => {
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))

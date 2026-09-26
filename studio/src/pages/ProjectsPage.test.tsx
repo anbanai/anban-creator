@@ -214,6 +214,30 @@ describe('ProjectsPage', () => {
     expect(within(dialog).queryByText('作者名')).not.toBeInTheDocument()
   })
 
+  it('explains the project fields whose effect is invisible in the form', async () => {
+    window.history.pushState({}, '', '/projects?create=true&type=article&intent=new')
+
+    render(<ProjectsPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    expect(within(dialog).getByText('写清受众、领域和语气；定位会作为长期约束注入每一次创作，任务里可再补充单次要求。')).toBeInTheDocument()
+    expect(within(dialog).getByText('在公众号后台「设置与开发 → 基本配置」获取，用于向微信创建草稿和正式发布。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '决定这个项目的创作流程、可选能力与交付物，创建后不可修改。' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '只用于项目列表和发布信息展示，不影响生成内容。留空则使用平台默认图标。' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '写入任务工作区的 CLAUDE.md，Agent 每次创作都会按它对齐定位。' })).toBeInTheDocument()
+  })
+
+  it('explains the ecommerce project defaults', async () => {
+    window.history.pushState({}, '', '/projects?create=true&type=ecommerce&intent=new')
+
+    render(<ProjectsPage />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    expect(within(dialog).getByText('决定图片尺寸与该平台的合规、违禁词规范，新建任务时预填。')).toBeInTheDocument()
+    expect(within(dialog).getByText('决定出图模型与计费单价，单个任务仍可临时切换。')).toBeInTheDocument()
+    expect(within(dialog).getByText('作为长期约束注入该项目的每次电商出图，避免每次重复交代品牌要求。')).toBeInTheDocument()
+  })
+
   it('constrains project ratios with the selected business platform', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'ProjectsPage.tsx'), 'utf8')
     expect(source).toContain('ratios={currentPlatformConfig?.supported_image_ratios ?? []}')

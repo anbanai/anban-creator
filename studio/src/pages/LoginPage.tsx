@@ -8,9 +8,10 @@ import { getApiErrorMessage } from '@/lib/http-client'
 import { useAuth } from '@/contexts/AuthContext'
 import { loginSchema, codeLoginSchema, type LoginFormValues, type CodeLoginFormValues } from '@/lib/schemas'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Button } from '@/components/common/button'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import AuthLayout from '@/components/auth/AuthLayout'
 
@@ -90,8 +91,9 @@ export default function LoginPage() {
     >
       {inviteCode ? (
         <div className="mb-6">
-          <FormLabel>邀请码</FormLabel>
-          <Input readOnly value={inviteCode} autoComplete="off" className="mt-1.5 uppercase" tabIndex={-1} />
+          <Label htmlFor="login-invite-code">邀请码</Label>
+          <Input id="login-invite-code" readOnly value={inviteCode} autoComplete="off" className="mt-1.5 uppercase" tabIndex={-1} />
+          <p className="text-[0.8rem] text-muted-foreground">来自邀请链接，登录时无需输入。</p>
         </div>
       ) : null}
 
@@ -175,6 +177,7 @@ export default function LoginPage() {
                         {countdown > 0 ? `${countdown}s` : '发送验证码'}
                       </Button>
                     </div>
+                    <FormDescription>验证码邮件在有限时间内有效，过期后请重新发送。</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

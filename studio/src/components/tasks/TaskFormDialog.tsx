@@ -18,7 +18,7 @@ import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
@@ -533,7 +533,8 @@ export function TaskFormDialog({
               />
 
               {watchedType !== 'hypit' && <div className="pt-1">
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
+                <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
+                <p className="mb-2 text-xs text-muted-foreground">写清目标、素材用法和不能出现的表达；未填写的部分按项目默认值执行。</p>
                 {!isViralAnalysisTask ? (
                   <SeednoteTemplateGallery
                     platform={selectedProject?.platform}
@@ -703,11 +704,13 @@ export function TaskFormDialog({
                         <FormControl>
                           <MultiImageUpload value={field.value ?? []} onChange={field.onChange} purpose="reference" max={16} />
                         </FormControl>
+                        <FormDescription>多角度实拍图最佳；产品档案、卖点和主图都会从这些图里提炼，图片越清晰跨图一致性越高。</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )} />
                     <div className="space-y-2">
                       <FormLabel>交付模块（至少选一项）</FormLabel>
+                      <p className="text-[0.8rem] text-muted-foreground">按开启的模块生成交付物，图片生成与理解按实际用量单独计费。</p>
                       <div className="divide-y divide-border">
                         {ecommerceModuleCatalog.map((module) => {
                           const moduleQuantity = watchedSelectedModules?.[module.key] ?? 0
@@ -752,6 +755,7 @@ export function TaskFormDialog({
                             {ecommerceTargetPlatformOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                           </SelectContent>
                         </Select>
+                        <FormDescription>决定图片尺寸和该平台的合规、违禁词规范。</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )} />
@@ -759,6 +763,7 @@ export function TaskFormDialog({
                       <FormItem>
                         <FormLabel>核心卖点（可选）</FormLabel>
                         <FormControl><Textarea placeholder="列出产品核心卖点（材质 / 功能 / 使用场景 / 价格优势等）。留空则由 AI 从产品图分析提炼" className="min-h-[72px] resize-y" {...field} /></FormControl>
+                        <FormDescription>填写后会覆盖 AI 从产品图提炼的卖点，主图和详情文案都按这里的信息写。</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )} />
@@ -771,6 +776,7 @@ export function TaskFormDialog({
                             {ecommerceLanguageOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                           </SelectContent>
                         </Select>
+                        <FormDescription>指定文案与图片中文字的输出语言。</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )} />

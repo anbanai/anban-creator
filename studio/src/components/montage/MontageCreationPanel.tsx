@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { TagInput } from '@/components/ui/TagInput'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { useMontageCapabilities } from '@/hooks/useMontageCapabilities'
 import { cn } from '@/lib/utils'
 import type { MontageAsset, MontagePipelineCapability } from '@/types'
@@ -130,6 +130,7 @@ export function MontageCreationPanel({
               rows={4}
             />
           </FormControl>
+          <FormDescription>Agent 按 brief 组织叙事、镜头和节奏；写得越具体，成片越可控。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />}
@@ -158,6 +159,7 @@ export function MontageCreationPanel({
           {(sourceError || assetsError) && (
             <p role="alert" className="text-xs text-destructive">{sourceError || assetsError}</p>
           )}
+                <FormDescription>可上传文件，也可以引用其他任务的产物链接。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />
@@ -202,6 +204,7 @@ export function MontageCreationPanel({
                     ))}
                   </NativeSelect>
                 </FormControl>
+                <FormDescription>智能决定会按素材语言和画面内容自行判断是否需要字幕。</FormDescription>
                 <FormMessage />
               </FormItem>
             )
@@ -219,6 +222,7 @@ export function MontageCreationPanel({
                     ))}
                   </NativeSelect>
                 </FormControl>
+                <FormDescription>保留原声适合素材本身有解说的情况；生成旁白会按 brief 撰写配音稿。</FormDescription>
                 <FormMessage />
               </FormItem>
             )
@@ -239,6 +243,7 @@ export function MontageCreationPanel({
                 <FormControl>
                   <Textarea aria-label="风格偏好" {...field} value={field.value ?? ''} placeholder="镜头、色彩、节奏与整体调性" rows={3} />
                 </FormControl>
+                <FormDescription>影响镜头语言、色彩和剪辑节奏；留空则由 Agent 按参考素材判断。</FormDescription>
                 <FormMessage />
               </FormItem>
             )} />
@@ -248,6 +253,7 @@ export function MontageCreationPanel({
                 <FormControl>
                   <Textarea aria-label="音乐提示" {...field} value={field.value ?? ''} placeholder="音乐风格、情绪与节奏" rows={3} />
                 </FormControl>
+                <FormDescription>描述配乐风格、情绪和卡点；留空则按视频类型默认处理。</FormDescription>
                 <FormMessage />
               </FormItem>
             )} />
@@ -263,6 +269,7 @@ export function MontageCreationPanel({
                   maxTags={20}
                 />
               </FormControl>
+              <FormDescription>补充的交付要求会写进 Agent 的交付清单；成片和封面始终交付，不受此项影响。</FormDescription>
               <FormMessage />
             </FormItem>
           )} />

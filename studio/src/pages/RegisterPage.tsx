@@ -10,7 +10,7 @@ import { registerSchema, type RegisterFormValues } from '@/lib/schemas'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Button } from '@/components/common/button'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import AuthLayout from '@/components/auth/AuthLayout'
 
 const COUNTDOWN_SECONDS = 60
@@ -109,6 +109,7 @@ export default function RegisterPage() {
                     {countdown > 0 ? `${countdown}s` : '发送验证码'}
                   </Button>
                 </div>
+                <FormDescription>验证码邮件在有限时间内有效，过期后请重新发送。</FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -122,6 +123,7 @@ export default function RegisterPage() {
                 <FormControl>
                   <Input autoComplete="off" placeholder="请输入邀请码" className="uppercase" {...field} />
                 </FormControl>
+                <FormDescription>开启邀请注册时必填；不区分大小写，提交后会占用邀请人的一次邀请额度。</FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -148,6 +150,7 @@ export default function RegisterPage() {
                 <FormControl>
                   <PasswordInput autoComplete="new-password" placeholder="至少 8 个字符" {...field} />
                 </FormControl>
+                <FormDescription>至少 8 个字符，用于登录和调用平台密钥。</FormDescription>
                 <FormMessage />
               </FormItem>
             )}
