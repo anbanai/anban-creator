@@ -166,7 +166,8 @@ describe('ProjectContextControl', () => {
     )
 
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
-    expect(screen.getByText('公众号')).toBeInTheDocument()
+    expect(screen.queryByText('公众号')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
     expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
     expect(screen.queryByText('Daily editorial briefing')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
@@ -189,7 +190,9 @@ describe('ProjectContextControl', () => {
 
     const trigger = screen.getByRole('combobox', { name: 'Choose project context' })
     expect(trigger).toHaveTextContent('Morning Brief')
-    expect(trigger).toHaveTextContent('公众号')
+    expect(trigger).not.toHaveTextContent('公众号')
+    expect(trigger.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
+    expect(trigger).not.toHaveClass('border-border')
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
       'data-compact',

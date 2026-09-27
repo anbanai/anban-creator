@@ -1071,7 +1071,7 @@ describe('PlansPage Montage input', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     const selector = await within(dialog).findByRole('combobox', { name: /^项目：/ })
     await waitFor(() => expect(selector).toHaveTextContent('Hypit'))
-    expect(selector).toHaveTextContent('视频复刻')
+    expect(selector).not.toHaveTextContent('视频复刻')
     expect(selector.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
     expect(selector).not.toHaveTextContent('Hypit项目')
     expect(dialog).not.toHaveTextContent('montage')

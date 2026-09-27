@@ -143,7 +143,7 @@ function SelectProjectContext({
       data-mode="select"
       data-compact={compact}
       aria-busy={loading}
-      className="min-w-0"
+      className={cn(compact ? 'inline-flex min-w-0 max-w-full' : 'min-w-0')}
     >
       <Combobox
         items={groups}
@@ -168,13 +168,15 @@ function SelectProjectContext({
           render={
             <Button
               type="button"
-              variant="outline"
+              variant={compact ? 'ghost' : 'outline'}
               aria-label={ariaLabel}
               disabled={isDisabled}
               className={cn(
-                'w-full min-w-0 justify-between font-normal',
-                selected?.kind === 'project' && (compact ? 'h-8' : 'h-auto min-h-14 py-2'),
-                selected?.kind === 'project' && selected.platform && [
+                'min-w-0 justify-between font-normal',
+                compact ? 'w-auto max-w-full' : 'w-full',
+                compact ? 'h-8' : selected?.kind === 'project' ? 'h-auto min-h-14 py-2' : undefined,
+                compact && 'px-1.5 shadow-none hover:bg-muted/70',
+                selected?.kind === 'project' && selected.platform && !compact && [
                   'border-l-2',
                   platformBorderColor[selected.platform],
                 ],
@@ -189,7 +191,12 @@ function SelectProjectContext({
                 加载项目...
               </span>
             ) : selected?.kind === 'project' ? (
-              <ProjectIdentity project={selected} compact={compact} />
+              <ProjectIdentity
+                project={selected}
+                compact={compact}
+                showType={!compact}
+                avatarMode={compact ? 'platform' : 'project'}
+              />
             ) : selected?.name ?? placeholder}
           </span>
         </ComboboxTrigger>
@@ -229,7 +236,7 @@ function SelectProjectContext({
                       className="min-h-10 rounded-lg border border-transparent px-2 py-1 pr-9 aria-selected:border-border/70 aria-selected:bg-accent/70"
                     >
                       {item.kind === 'project' ? (
-                        <ProjectIdentity project={item} showType={false} />
+                        <ProjectIdentity project={item} showType={false} avatarMode="platform" />
                       ) : item.name}
                     </ComboboxItem>
                   )}
@@ -269,10 +276,15 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
         data-slot="project-context-control"
         data-mode="readonly"
         data-compact={props.compact}
-        className="min-w-0"
+        className={cn(props.compact ? 'inline-flex min-w-0 max-w-full' : 'min-w-0')}
       >
         {props.project ? (
-          <ProjectIdentity project={props.project} compact={props.compact} />
+          <ProjectIdentity
+            project={props.project}
+            compact={props.compact}
+            showType={!props.compact}
+            avatarMode={props.compact ? 'platform' : 'project'}
+          />
         ) : props.noProjectLabel ?? '未关联项目'}
       </div>
     )

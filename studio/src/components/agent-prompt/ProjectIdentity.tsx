@@ -18,16 +18,19 @@ interface ProjectIdentityProps {
   project: ProjectIdentityProject
   compact?: boolean
   showType?: boolean
+  avatarMode?: 'project' | 'platform'
 }
 
 export function ProjectIdentity({
   project,
   compact = false,
   showType = true,
+  avatarMode = 'project',
 }: ProjectIdentityProps) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string>()
   const initial = project.name.trim().charAt(0) || '项'
   const platformLabel = platformDisplayName(project.platform)
+  const platformIcon = project.platform ? renderPlatformIcon(project.platform) : null
 
   return (
     <span
@@ -39,7 +42,17 @@ export function ProjectIdentity({
       )}
     >
       <Avatar size={compact ? 'sm' : 'lg'}>
-        {project.avatar_url && failedAvatarUrl !== project.avatar_url ? (
+        {avatarMode === 'platform' && platformIcon ? (
+          <AvatarFallback
+            className={cn(
+              platformBgColor[project.platform ?? ''],
+              platformIconColor[(project.platform ?? '') as keyof typeof platformIconColor],
+              '[&_svg]:size-4',
+            )}
+          >
+            {platformIcon}
+          </AvatarFallback>
+        ) : project.avatar_url && failedAvatarUrl !== project.avatar_url ? (
           <img
             src={project.avatar_url}
             alt={project.name}

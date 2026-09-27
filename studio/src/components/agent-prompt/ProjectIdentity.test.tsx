@@ -64,6 +64,21 @@ describe('ProjectIdentity', () => {
     expect(screen.queryByText('种草笔记项目')).not.toBeInTheDocument()
   })
 
+  it('can use the platform mark as the avatar for compact project controls', () => {
+    render(
+      <ProjectIdentity
+        project={{ id: 'hypit-1', name: 'Hypit', platform: 'hypit' }}
+        avatarMode="platform"
+        showType={false}
+        compact
+      />,
+    )
+
+    expect(screen.getByText('Hypit')).toBeInTheDocument()
+    expect(screen.queryByText('视频复刻')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
+  })
+
   it('drops the project suffix in compact contexts so video brands stay readable', () => {
     const { rerender } = render(
       <ProjectIdentity project={{ id: 'hypit-1', name: 'Hypit', platform: 'hypit' }} />,
