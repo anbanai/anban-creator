@@ -18,18 +18,17 @@ import (
 // AnalyticsMigrationReport is persisted on the rebuild job. Unknown Seednote
 // basis and missing identity are counted explicitly and never enter totals.
 type AnalyticsMigrationReport struct {
-	WechatImports       int64            `json:"wechat_imports"`
-	WechatRecoveredRows int64            `json:"wechat_recovered_rows"`
-	WechatOfficial      int64            `json:"wechat_official"`
-	SeednoteImports     int64            `json:"seednote_imports"`
-	SeednoteOfficial    int64            `json:"seednote_official"`
-	Inserted            int64            `json:"inserted"`
-	Duplicates          int64            `json:"duplicates"`
-	Revoked             int64            `json:"revoked"`
-	BasisUnknown        int64            `json:"basis_unknown"`
-	IdentityConflicts   int64            `json:"identity_conflicts"`
-	Skipped             int64            `json:"skipped"`
-	Reasons             map[string]int64 `json:"reasons"`
+	WechatImports     int64            `json:"wechat_imports"`
+	WechatOfficial    int64            `json:"wechat_official"`
+	SeednoteImports   int64            `json:"seednote_imports"`
+	SeednoteOfficial  int64            `json:"seednote_official"`
+	Inserted          int64            `json:"inserted"`
+	Duplicates        int64            `json:"duplicates"`
+	Revoked           int64            `json:"revoked"`
+	BasisUnknown      int64            `json:"basis_unknown"`
+	IdentityConflicts int64            `json:"identity_conflicts"`
+	Skipped           int64            `json:"skipped"`
+	Reasons           map[string]int64 `json:"reasons"`
 }
 
 func (r *AnalyticsMigrationReport) skip(reason string) {
@@ -311,14 +310,16 @@ func legacyRevoked(at *time.Time) *time.Time {
 	return &t
 }
 
-func (m *AnalyticsRebuildManager) migrateWechatImports(ctx context.Context, project string, report *AnalyticsMigrationReport, queue func(legacyMigrationInput) error) error {
-	if err := m.migrateWechatSnapshots(ctx, project, report, queue); err != nil {
-		return err
+// Prefix and column are internal SQL constants used to identify observations
+// that were already written by the modern import path.
+func analyticsPrefixedIDSQL(dialect, prefix, column string) string {
+	if dialect == "mysql" {
+		return "CONCAT('" + prefix + "', " + column + ")"
 	}
-	return m.recoverWechatImportRows(ctx, project, report, queue)
+	return "('" + prefix + "' || " + column + ")"
 }
 
-func (m *AnalyticsRebuildManager) migrateWechatSnapshots(ctx context.Context, project string, report *AnalyticsMigrationReport, queue func(legacyMigrationInput) error) error {
+func (m *AnalyticsRebuildManager) migrateWechatImports(ctx context.Context, project string, report *AnalyticsMigrationReport, queue func(legacyMigrationInput) error) error {
 	type row struct {
 		model.WechatAnalyticsSnapshot
 		BatchRevokedAt *time.Time `gorm:"column:batch_revoked_at"`
