@@ -18,17 +18,18 @@ import (
 // AnalyticsMigrationReport is persisted on the rebuild job. Unknown Seednote
 // basis and missing identity are counted explicitly and never enter totals.
 type AnalyticsMigrationReport struct {
-	WechatImports     int64            `json:"wechat_imports"`
-	WechatOfficial    int64            `json:"wechat_official"`
-	SeednoteImports   int64            `json:"seednote_imports"`
-	SeednoteOfficial  int64            `json:"seednote_official"`
-	Inserted          int64            `json:"inserted"`
-	Duplicates        int64            `json:"duplicates"`
-	Revoked           int64            `json:"revoked"`
-	BasisUnknown      int64            `json:"basis_unknown"`
-	IdentityConflicts int64            `json:"identity_conflicts"`
-	Skipped           int64            `json:"skipped"`
-	Reasons           map[string]int64 `json:"reasons"`
+	WechatImports       int64            `json:"wechat_imports"`
+	WechatRecoveredRows int64            `json:"wechat_recovered_rows"`
+	WechatOfficial      int64            `json:"wechat_official"`
+	SeednoteImports     int64            `json:"seednote_imports"`
+	SeednoteOfficial    int64            `json:"seednote_official"`
+	Inserted            int64            `json:"inserted"`
+	Duplicates          int64            `json:"duplicates"`
+	Revoked             int64            `json:"revoked"`
+	BasisUnknown        int64            `json:"basis_unknown"`
+	IdentityConflicts   int64            `json:"identity_conflicts"`
+	Skipped             int64            `json:"skipped"`
+	Reasons             map[string]int64 `json:"reasons"`
 }
 
 func (r *AnalyticsMigrationReport) skip(reason string) {
@@ -311,6 +312,13 @@ func legacyRevoked(at *time.Time) *time.Time {
 }
 
 func (m *AnalyticsRebuildManager) migrateWechatImports(ctx context.Context, project string, report *AnalyticsMigrationReport, queue func(legacyMigrationInput) error) error {
+	if err := m.migrateWechatSnapshots(ctx, project, report, queue); err != nil {
+		return err
+	}
+	return m.recoverWechatImportRows(ctx, project, report, queue)
+}
+
+func (m *AnalyticsRebuildManager) migrateWechatSnapshots(ctx context.Context, project string, report *AnalyticsMigrationReport, queue func(legacyMigrationInput) error) error {
 	type row struct {
 		model.WechatAnalyticsSnapshot
 		BatchRevokedAt *time.Time `gorm:"column:batch_revoked_at"`
@@ -320,7 +328,17 @@ func (m *AnalyticsRebuildManager) migrateWechatImports(ctx context.Context, proj
 		return nil
 	}
 	var rows []row
-	query := db.WithContext(ctx).Table("wechat_analytics_snapshots s").Select("s.*, b.revoked_at AS batch_revoked_at").Joins("LEFT JOIN wechat_analytics_import_batches b ON b.id=s.batch_id").Where("s.project_id = ?", project)
+	query := db.WithContext(ctx).Table("wechat_analytics_snapshots s").Select("s.*, b.revoked_at AS batch_revoked_at").Joins("LEFT JOIN wechat_analytics_import_batches b ON b.id=s.batch_id AND b.project_id=s.project_id").Where("s.project_id = ?", project)
+	// Modern imports already wrote the immutable fact in the same transaction.
+	// Their retained legacy snapshots are audit copies, not additional versions.
+	duplicateCondition := "EXISTS (SELECT 1 FROM analytics_observations o WHERE o.project_id = s.project_id AND (o.id = " + analyticsPrefixedIDSQL(db.Dialector.Name(), "wechat_import:", "s.import_row_id") + " OR o.id = " + analyticsPrefixedIDSQL(db.Dialector.Name(), "legacy:wechat_import:", "s.id") + "))"
+	var duplicateCount int64
+	if err := db.WithContext(ctx).Table("wechat_analytics_snapshots s").Where("s.project_id = ?", project).Where(duplicateCondition).Count(&duplicateCount).Error; err != nil {
+		return err
+	}
+	report.Duplicates += duplicateCount
+	report.WechatImports += duplicateCount
+	query = query.Where("NOT " + duplicateCondition)
 	if err := query.FindInBatches(&rows, 500, func(_ *gorm.DB, _ int) error {
 		for _, v := range rows {
 			contentID := ""

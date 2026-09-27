@@ -160,7 +160,9 @@ func (r *AnalyticsRepository) RecomputeDays(ctx context.Context, project string,
 			part := ids[start:end]
 			rows := []model.AnalyticsBucket{}
 			if g.Granularity == "day" {
-				ranked := r.db.WithContext(ctx).Model(&model.AnalyticsObservation{}).Select("content_id, id AS observation_id, stat_date AS last_stat_date,"+analyticsMetricColumns("")+", ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY source_priority DESC, effective_at DESC, sequence DESC) AS rn").Where("project_id = ? AND metric_basis = ? AND stat_date = ? AND revoked_at IS NULL AND content_id IN ?", project, g.Basis, g.Start, part)
+				// Backfills receive new storage sequences. Use their original receipt
+				// time before sequence so an old import cannot replace a later correction.
+				ranked := r.db.WithContext(ctx).Model(&model.AnalyticsObservation{}).Select("content_id, id AS observation_id, stat_date AS last_stat_date,"+analyticsMetricColumns("")+", ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY source_priority DESC, effective_at DESC, received_at DESC, sequence DESC) AS rn").Where("project_id = ? AND metric_basis = ? AND stat_date = ? AND revoked_at IS NULL AND content_id IN ?", project, g.Basis, g.Start, part)
 				if e := r.db.WithContext(ctx).Table("(?) AS winners", ranked).Where("rn = 1").Scan(&rows).Error; e != nil {
 					return e
 				}

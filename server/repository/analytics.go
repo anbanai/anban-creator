@@ -168,7 +168,7 @@ func AnalyticsBucketBounds(date, granularity string) (string, string) {
 // never summed across dates. No raw payload is read by the projector.
 func (r *AnalyticsRepository) RecomputeDay(ctx context.Context, project string, generation int64, content, basis, date string) error {
 	var winner model.AnalyticsObservation
-	e := r.db.WithContext(ctx).Where("project_id = ? AND content_id = ? AND metric_basis = ? AND stat_date = ? AND revoked_at IS NULL", project, content, basis, date).Order("source_priority DESC, effective_at DESC, sequence DESC").First(&winner).Error
+	e := r.db.WithContext(ctx).Where("project_id = ? AND content_id = ? AND metric_basis = ? AND stat_date = ? AND revoked_at IS NULL", project, content, basis, date).Order("source_priority DESC, effective_at DESC, received_at DESC, sequence DESC").First(&winner).Error
 	if e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
 		return e
 	}
@@ -408,7 +408,7 @@ func (r *AnalyticsRepository) ObservationPage(ctx context.Context, project, cont
 		return nil, 0, e
 	}
 	rows := []model.AnalyticsObservation{}
-	e := q.Order("stat_date DESC, source_priority DESC, effective_at DESC, sequence DESC").Offset(offset).Limit(limit).Find(&rows).Error
+	e := q.Order("stat_date DESC, source_priority DESC, effective_at DESC, received_at DESC, sequence DESC").Offset(offset).Limit(limit).Find(&rows).Error
 	return rows, count, e
 }
 func (r *AnalyticsRepository) Dates(ctx context.Context, project string, generation int64, basis string, year int) ([]string, error) {
@@ -483,6 +483,11 @@ func (r *AnalyticsRepository) Rebuild(ctx context.Context, project string, gener
 }
 
 func (r *AnalyticsRepository) DBCreateRebuildJob(ctx context.Context, j *model.AnalyticsRebuildJob) error {
+	// MySQL JSON rejects an empty string; legacy SQL-created jobs can also
+	// load NULL into the Go string before their first progress update.
+	if strings.TrimSpace(j.ReportJSON) == "" {
+		j.ReportJSON = "{}"
+	}
 	return r.db.WithContext(ctx).Create(j).Error
 }
 func (r *AnalyticsRepository) FindRebuildJob(ctx context.Context, id string) (*model.AnalyticsRebuildJob, error) {
@@ -516,6 +521,9 @@ func (r *AnalyticsRepository) ListRebuildJobs(ctx context.Context, statuses []st
 }
 
 func (r *AnalyticsRepository) UpdateRebuildJob(ctx context.Context, j *model.AnalyticsRebuildJob) error {
+	if strings.TrimSpace(j.ReportJSON) == "" {
+		j.ReportJSON = "{}"
+	}
 	return r.db.WithContext(ctx).Save(j).Error
 }
 func (r *AnalyticsRepository) BeginRebuild(ctx context.Context, project string) (*model.AnalyticsState, error) {
