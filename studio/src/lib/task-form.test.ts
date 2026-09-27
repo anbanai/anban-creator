@@ -742,17 +742,37 @@ describe('task form mapping', () => {
     })
   })
 
+  it.each(['article', 'seednote', 'montage', 'hypit'] as const)('serializes explicit portrait selection and cloned settings for %s', (platform) => {
+    const values = createTaskFormDefaults(project({ platform }))
+    expect(values.cover_use_portrait).toBe(false)
+    expect(taskFormValuesToRequest(values).cover_use_portrait).toBe(false)
+    expect(taskFormValuesToRequest({ ...values, cover_use_portrait: true }).cover_use_portrait).toBe(true)
+    expect(cloneTaskFormDefaults(task({ type: platform, cover_use_portrait: true })).cover_use_portrait).toBe(true)
+  })
+
+  it.each(['viral_analysis', 'ecommerce', 'moments'] as const)('omits portrait selection for unsupported %s tasks', (type) => {
+    expect(taskFormValuesToRequest({ ...createTaskFormDefaults(), type, cover_use_portrait: true })).not.toHaveProperty('cover_use_portrait')
+  })
+
+  it('clears an enabled portrait requirement from an article request with no cover', () => {
+    expect(taskFormValuesToRequest({ ...createTaskFormDefaults(project({ platform: 'article' })), article_with_cover: false, cover_use_portrait: true }).cover_use_portrait).toBe(false)
+  })
+
+  it('clears portrait selection when cloning an article without cover generation', () => {
+    expect(cloneTaskFormDefaults(task({ type: 'article', article_with_cover: false, cover_use_portrait: true })).cover_use_portrait).toBe(false)
+  })
+
   it('keeps project portraits optional unless the cover requirement is selected', () => {
     const values = createTaskFormDefaults(project({ platform: 'article' }))
-    expect(values.article_cover_use_portrait).toBe(false)
-    expect(taskFormValuesToRequest(values)).toMatchObject({ article_cover_use_portrait: false })
-    expect(taskFormValuesToRequest({ ...values, article_with_cover: false })).toMatchObject({ article_cover_use_portrait: false })
+    expect(values.cover_use_portrait).toBe(false)
+    expect(taskFormValuesToRequest(values)).toMatchObject({ cover_use_portrait: false })
+    expect(taskFormValuesToRequest({ ...values, article_with_cover: false })).toMatchObject({ cover_use_portrait: false })
   })
 
   it('submits an explicit project portrait requirement for article covers', () => {
     const values = createTaskFormDefaults(project({ platform: 'article' }))
-    expect(taskFormValuesToRequest({ ...values, article_cover_use_portrait: true })).toMatchObject({
-      article_cover_use_portrait: true,
+    expect(taskFormValuesToRequest({ ...values, cover_use_portrait: true })).toMatchObject({
+      cover_use_portrait: true,
     })
   })
 
@@ -777,17 +797,17 @@ describe('task form mapping', () => {
   })
 
   it('preserves the required portrait setting when cloning an article task', () => {
-    const cloned = cloneTaskFormDefaults(task({ type: 'article', article_cover_use_portrait: true }))
-    expect(cloned.article_cover_use_portrait).toBe(true)
+    const cloned = cloneTaskFormDefaults(task({ type: 'article', cover_use_portrait: true }))
+    expect(cloned.cover_use_portrait).toBe(true)
   })
 
   it('clears the required portrait option when switching to an article project without a portrait', () => {
-    const current = { ...createTaskFormDefaults(project({ platform: 'article' })), article_cover_use_portrait: true }
+    const current = { ...createTaskFormDefaults(project({ platform: 'article' })), cover_use_portrait: true }
     const switched = switchTaskFormDefaults(current, project({
       id: 'project-without-portrait',
       platform: 'article',
       portrait_reference_image: null,
     }))
-    expect(switched.article_cover_use_portrait).toBe(false)
+    expect(switched.cover_use_portrait).toBe(false)
   })
 })

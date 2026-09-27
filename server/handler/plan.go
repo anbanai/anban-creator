@@ -139,7 +139,7 @@ type createPlanRequest struct {
 	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
 	ArticleWithCover         *bool                   `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
-	ArticleCoverUsePortrait  bool                    `json:"article_cover_use_portrait,omitempty"`
+	CoverUsePortrait         bool                    `json:"cover_use_portrait,omitempty"`
 	MontageInput             *model.MontageInput     `json:"montage_input,omitempty"`
 	HypitInput               *model.HypitInput       `json:"hypit_input,omitempty"`
 	InputAttachments         []model.EntryAttachment `json:"input_attachments,omitempty"`
@@ -160,7 +160,7 @@ type updatePlanRequest struct {
 	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
 	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
-	ArticleCoverUsePortrait  *bool                            `json:"article_cover_use_portrait,omitempty"`
+	CoverUsePortrait         *bool                            `json:"cover_use_portrait,omitempty"`
 	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
 	HypitInput               *model.HypitInput                `json:"hypit_input,omitempty"`
 	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
@@ -263,7 +263,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
-		ArticleCoverUsePortrait:  req.ArticleCoverUsePortrait,
+		CoverUsePortrait:         req.CoverUsePortrait,
 		MontageInput:             req.MontageInput,
 		HypitInput:               req.HypitInput,
 		InputAttachments:         req.InputAttachments,
@@ -283,7 +283,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if errors.Is(err, service.ErrArticleCoverPortraitUnavailable) {
+		if errors.Is(err, service.ErrCoverPortraitUnavailable) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrInvalidAgentInput) {
@@ -476,7 +476,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		HasTailImage:             req.HasTailImage,
 		ArticleWithCover:         req.ArticleWithCover,
 		ArticleWithContentImages: req.ArticleWithContentImages,
-		ArticleCoverUsePortrait:  req.ArticleCoverUsePortrait,
+		CoverUsePortrait:         req.CoverUsePortrait,
 		MontageInput:             req.MontageInput,
 		HypitInput:               req.HypitInput,
 		InputAttachments:         req.InputAttachments,
@@ -510,7 +510,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 	}
 	if err != nil {
-		if errors.Is(err, service.ErrArticleCoverPortraitUnavailable) {
+		if errors.Is(err, service.ErrCoverPortraitUnavailable) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrInvalidAgentInput) {

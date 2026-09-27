@@ -363,6 +363,21 @@ describe('ProjectsPage', () => {
     expect(screen.getByRole('button', { name: '创建' })).toBeEnabled()
   })
 
+  it.each(['article', 'seednote', 'montage', 'hypit'] as const)('uploads an independent portrait for a %s project', async (platform) => {
+    const project = { ...projectWithReference, platform }
+    vi.mocked(api.projects.list).mockResolvedValue([project])
+    vi.mocked(api.projects.update).mockResolvedValue(project)
+    render(<ProjectsPage />)
+    await clickProjectAction('测试项目', '编辑项目')
+    fireEvent.change(await screen.findByLabelText('人物参考图文件'), { target: { files: [new File(['portrait'], 'portrait.png', { type: 'image/png' })] } })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.projects.update).toHaveBeenCalled())
+    expect(vi.mocked(api.projects.update).mock.calls[0][1]).toMatchObject({ portrait_reference_image: { upload_session_id: '11111111-1111-4111-8111-111111111111' } })
+    expect(vi.mocked(api.projects.update).mock.calls[0][1]).not.toHaveProperty('reference_image')
+  })
+
   it('omits an untouched existing project asset from an edit payload', async () => {
     vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
@@ -545,8 +560,8 @@ describe('ProjectsPage', () => {
     render(<ProjectsPage />)
 
     expect(await screen.findByText('视频默认设置')).toBeInTheDocument()
-    expect(screen.getByText('人物参考')).toBeInTheDocument()
-    expect(screen.getByText('自动提供给任务和计划，由 Agent 按内容决定是否用于封面。')).toBeInTheDocument()
+    expect(screen.getByText('默认人物参考')).toBeInTheDocument()
+    expect(screen.getByText('用于任务和计划中勾选的人物封面；未勾选时生成普通封面。')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: 'Launch montage' } })
     fireEvent.click(screen.getByRole('radio', { name: /口播精剪/ }))
     fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '45' } })

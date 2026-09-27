@@ -2,13 +2,14 @@
   "packs": [
     {
       "id": "article",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
       "agent": {
         "name": "article",
         "skills": [
+          "portrait-cover-design",
           "content-writing",
           "humanizer",
           "article-visual-design",
@@ -103,7 +104,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "a574839700cfc5042b8cffd28a33aca3523edfda8244a6e53227811277d02da0"
+      "digest": "14104ba620b9f75ec886e80a764376c2332d432d29ef9b7c30dc09e0ee55f05c"
     },
     {
       "id": "ecommerce",
@@ -211,12 +212,15 @@
     },
     {
       "id": "hypit",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
       "agent": {
         "name": "hypit",
+        "skills": [
+          "portrait-cover-design"
+        ],
         "max_turns": 180
       },
       "bindings": {
@@ -282,6 +286,24 @@
           "path": "output/quality-report.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "other",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "other",
+          "path": "output/cover-prompt.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "review",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -314,12 +336,27 @@
           "role": "quality_report",
           "path": "output/quality-report.json",
           "mime_type": "application/json"
+        },
+        {
+          "role": "other",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "other",
+          "path": "output/cover-prompt.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "review",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json"
         }
       ],
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "4ad39d4e38c1e93a7a8e5826d8bf9cf479bb996af4550404819a34115bb87fb4"
+      "digest": "3f2b24750866e21e207e95b7ef4bbb67d1bfd7856c1d6134264995185d345192"
     },
     {
       "id": "live-slicer",
@@ -486,7 +523,7 @@
     },
     {
       "id": "montage",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "kind": "managed",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
@@ -494,7 +531,7 @@
         "name": "montage",
         "skills": [
           "montage",
-          "video-cover-design"
+          "portrait-cover-design"
         ],
         "max_turns": 180
       },
@@ -565,17 +602,18 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "96c64c3d0033f6ab274cba3928d40968f4ebeaa91b3683b9541b0d4e46ada192"
+      "digest": "19e15c71c43550036da4894297a9daa0fbf2b3d4d48019708160d7205be3540c"
     },
     {
       "id": "seednote",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
       "agent": {
         "name": "seednote",
         "skills": [
+          "portrait-cover-design",
           "humanizer",
           "seednote-research",
           "seednote-viral-analysis",
@@ -688,7 +726,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "f4d13bbd50336cefaa866ac1bd21654cac616916370ef816f8438be6578530f9"
+      "digest": "07b89e486eeaa6e2fb67364b06e5536e91d7f626635f3d8ed06a6ff59bdfcdf6"
     }
   ]
 }

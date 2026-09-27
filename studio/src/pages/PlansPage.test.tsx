@@ -231,20 +231,22 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
     fireEvent.submit(document.getElementById('plan-form')!)
 
-    expect(within(dialog).getByText('已作为计划输入，每次运行时会提供')).toBeInTheDocument()
+    expect(within(dialog).getByText('勾选后使用项目人物与标题设计封面')).toBeInTheDocument()
     await waitFor(() => expect(api.plans.create).toHaveBeenCalled())
-    expect(vi.mocked(api.plans.create).mock.calls[0][0]).toHaveProperty('article_cover_use_portrait', false)
+    expect(vi.mocked(api.plans.create).mock.calls[0][0]).toHaveProperty('cover_use_portrait', false)
   })
 
-  it('submits the article cover portrait requirement for recurring plans', async () => {
+  it.each(['article', 'seednote'] as const)('submits the %s portrait requirement for recurring plans', async (platform) => {
+    const projects = await api.projects.list()
+    vi.mocked(api.projects.list).mockResolvedValue([{ ...projects[0], platform }])
     window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const portraitSwitch = await within(dialog).findByRole('switch', { name: '封面必须使用项目默认人物' })
+    const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
     fireEvent.click(portraitSwitch)
     fireEvent.submit(document.getElementById('plan-form')!)
     await waitFor(() => expect(api.plans.create).toHaveBeenCalled())
-    expect(vi.mocked(api.plans.create).mock.calls[0][0]).toMatchObject({ article_cover_use_portrait: true })
+    expect(vi.mocked(api.plans.create).mock.calls[0][0]).toMatchObject({ cover_use_portrait: true })
   })
 
   it('disables a plan portrait when the project has no configured image', async () => {
@@ -1008,6 +1010,44 @@ describe('PlansPage Montage input', () => {
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ hypit_input: expect.objectContaining({ brief: '修改后复刻要求', preferences: { duration_seconds: 12, aspect_ratio: '1:1' } }) })))
   })
 
+  it.each(['article', 'seednote', 'montage', 'hypit'] as const)('saves a disabled %s portrait cover and restores it when editing again', async (platform) => {
+    const project: Project = {
+      ...montageProject,
+      platform,
+      portrait_reference_image: { asset_id: '22222222-2222-4222-8222-222222222222', download_url: '/portrait.png', file_name: 'portrait.png', content_type: 'image/png', size: 8, download_expires_at: '' },
+    }
+    let savedPlan: Plan = {
+      ...savedMontagePlan,
+      type: platform,
+      prompt: '使用项目人物介绍新品',
+      cover_use_portrait: true,
+      montage_input: platform === 'montage' ? savedMontagePlan.montage_input : undefined,
+      hypit_input: platform === 'hypit' ? { brief: '使用项目人物介绍新品', reference: { type: 'video_url', url: 'https://example.com/saved.mp4' }, preferences: { aspect_ratio: '16:9' } } : undefined,
+    }
+    vi.mocked(api.projects.list).mockResolvedValue([project])
+    vi.mocked(api.plans.list).mockImplementation(async () => ({ items: [savedPlan], total: 1 }))
+    vi.mocked(api.plans.update).mockImplementationOnce(async (_id, request) => {
+      savedPlan = { ...savedPlan, cover_use_portrait: request.cover_use_portrait ?? savedPlan.cover_use_portrait }
+      return savedPlan
+    })
+
+    render(<PlansPage />)
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
+    expect(portraitSwitch).toBeChecked()
+    fireEvent.click(portraitSwitch)
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '更新' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(savedPlan.id, expect.objectContaining({ cover_use_portrait: false })))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
+    await waitFor(() => expect(api.plans.list).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const reopenedDialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    expect(await within(reopenedDialog).findByRole('switch', { name: '人物封面' })).not.toBeChecked()
+  })
+
   it.each([0, 12])('saves a follow-source plan when its previous duration is %s', async (duration) => {
     const project = { ...montageProject, platform: 'hypit', hypit_defaults: { preferences: { duration_seconds: 80 } } } as Project
     const plan = { ...savedMontagePlan, type: 'hypit', hypit_input: { brief: '复刻要求', reference: { type: 'video_url', url: 'https://example.com/saved.mp4' }, preferences: { duration_seconds: duration } } } as Plan
@@ -1064,8 +1104,8 @@ describe('PlansPage Montage input', () => {
     expect(api.plans.create).not.toHaveBeenCalled()
   })
 
-  it('creates a video replication plan with reference, brief and inherited preferences', async () => {
-    const project = { ...montageProject, platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '9:16', language: '中文' } } } as Project
+  it.each([false, true])('creates a video replication plan with portrait selection %s and independent references', async (usePortrait) => {
+    const project = { ...montageProject, portrait_reference_image: { asset_id: '22222222-2222-4222-8222-222222222222', download_url: '/portrait.png', file_name: 'portrait.png', content_type: 'image/png', size: 8, download_expires_at: '' }, platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '9:16', language: '中文' } } } as Project
     vi.mocked(api.projects.list).mockResolvedValue([project])
     window.history.pushState({}, '', `/plans?create=true&type=hypit&project_id=${project.id}&intent=schedule`)
     render(<PlansPage />)
@@ -1074,8 +1114,9 @@ describe('PlansPage Montage input', () => {
     fireEvent.change(within(dialog).getByLabelText('复刻要求'), { target: { value: '每周复刻品牌故事' } })
     fireEvent.change(within(dialog).getByLabelText('主参考视频链接'), { target: { value: 'https://example.com/story.mp4' } })
     await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    if (usePortrait) fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'hypit', hypit_input: expect.objectContaining({ brief: '每周复刻品牌故事', reference: { type: 'video_url', url: 'https://example.com/story.mp4' }, preferences: { aspect_ratio: '9:16', language: '中文' } }) })))
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'hypit', cover_use_portrait: usePortrait, hypit_input: expect.objectContaining({ brief: '每周复刻品牌故事', reference: { type: 'video_url', url: 'https://example.com/story.mp4' }, preferences: { aspect_ratio: '9:16', language: '中文' } }) })))
   })
 
   it('uses the preselected project platform when the URL type conflicts', async () => {
@@ -1104,7 +1145,8 @@ describe('PlansPage Montage input', () => {
     })))
   })
 
-  it('creates a Montage plan with image settings', async () => {
+  it.each([false, true])('creates a Montage plan with portrait selection %s', async (usePortrait) => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ ...montageProject, portrait_reference_image: { asset_id: '22222222-2222-4222-8222-222222222222', download_url: '/portrait.png', file_name: 'portrait.png', content_type: 'image/png', size: 8, download_expires_at: '' } }])
     window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
     render(<PlansPage />)
 
@@ -1113,6 +1155,7 @@ describe('PlansPage Montage input', () => {
     fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
       target: { value: '无需图片能力的 Montage' },
     })
+    if (usePortrait) fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
 
     await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -1121,7 +1164,7 @@ describe('PlansPage Montage input', () => {
     })))
     const createCalls = vi.mocked(api.plans.create).mock.calls
     const payload = createCalls[createCalls.length - 1]?.[0]
-    expect(payload).toMatchObject({ image_ratio: '16:9' })
+    expect(payload).toMatchObject({ image_ratio: '16:9', cover_use_portrait: usePortrait })
   })
 
   it('inherits project defaults and creates a plan with complete Montage input', async () => {

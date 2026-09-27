@@ -1,3 +1,4 @@
+import { PortraitCoverControl } from './PortraitCoverControl'
 import { HypitCreationPanel } from '@/components/hypit/HypitCreationPanel'
 import { initialHypitInput } from '@/lib/hypit-form'
 import { useEffect, useMemo, useRef, useState, type BaseSyntheticEvent } from 'react'
@@ -5,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, useWatch, type FieldPath, type FieldPathValue, type Resolver } from 'react-hook-form'
 import { Link } from 'react-router-dom'
-import { Images, Minus, Package, Plus, Stamp, UserRound } from 'lucide-react'
+import { Images, Minus, Package, Plus, Stamp } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -171,7 +172,7 @@ export function TaskFormDialog({
   const hasTailImage = useWatch({ control: form.control, name: 'has_tail_image' }) ?? false
   const articleWithCover = useWatch({ control: form.control, name: 'article_with_cover' }) ?? true
   const articleWithContentImages = useWatch({ control: form.control, name: 'article_with_content_images' }) ?? true
-  const articleCoverUsePortrait = useWatch({ control: form.control, name: 'article_cover_use_portrait' }) ?? false
+  const coverUsePortrait = useWatch({ control: form.control, name: 'cover_use_portrait' }) ?? false
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
@@ -628,46 +629,8 @@ export function TaskFormDialog({
                         </div>
                         <Switch aria-label="生成封面图" checked={articleWithCover} onCheckedChange={(checked) => {
                           setFormValue('article_with_cover', checked)
-                          if (!checked) setFormValue('article_cover_use_portrait', false)
+                          if (!checked) setFormValue('cover_use_portrait', false)
                         }} />
-                      </div>
-                      <div className="py-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex min-w-0 items-start gap-2">
-                            <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                            <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground">人物参考</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">可指定封面必须出现项目默认人物；人物参考只用于封面</p>
-                            </div>
-                          </div>
-                        </div>
-                        {selectedProject?.portrait_reference_image ? (
-                          <div className="mt-3 flex items-center gap-3 rounded-md border border-border bg-muted/30 p-2">
-                            <img src={selectedProject.portrait_reference_image.download_url} alt="项目人物参考" className="h-14 w-14 rounded-md border object-cover" />
-                            <span className="text-xs text-muted-foreground">已作为任务输入提供</span>
-                          </div>
-                        ) : (
-                          <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed border-border p-2 text-xs text-muted-foreground">
-                            <span>项目尚未设置人物参考图</span>
-                            <Link className="text-primary hover:underline" to={`/projects?edit=${selectedProject?.id ?? ''}`}>去设置</Link>
-                          </div>
-                        )}
-                        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border p-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground">封面必须使用项目默认人物</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              {articleCoverUsePortrait
-                                ? '封面必须使用参考图中的人物；正文配图不会使用人物参考'
-                                : '关闭时由 Agent 根据文章内容决定是否使用人物'}
-                            </p>
-                          </div>
-                          <Switch
-                            aria-label="封面必须使用项目默认人物"
-                            checked={articleCoverUsePortrait}
-                            disabled={!articleWithCover || (!selectedProject?.portrait_reference_image && !articleCoverUsePortrait)}
-                            onCheckedChange={(checked) => setFormValue('article_cover_use_portrait', checked)}
-                          />
-                        </div>
                       </div>
                       <div className="flex items-center justify-between py-2">
                         <div className="min-w-0">
@@ -688,6 +651,14 @@ export function TaskFormDialog({
                     </p>
                   </div>
                 ) : null}
+
+                <PortraitCoverControl
+                  type={watchedType}
+                  project={selectedProject}
+                  checked={coverUsePortrait}
+                  coverEnabled={watchedType !== 'article' || articleWithCover}
+                  onCheckedChange={(checked) => setFormValue('cover_use_portrait', checked)}
+                />
 
                 {watchedType === 'ecommerce' ? (
                   <div className="space-y-4 rounded-lg border border-border p-3">

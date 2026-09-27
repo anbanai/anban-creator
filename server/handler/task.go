@@ -164,7 +164,7 @@ type createTaskRequest struct {
 	// Non-article task types ignore them.
 	ArticleWithCover         *bool `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool `json:"article_with_content_images,omitempty"`
-	ArticleCoverUsePortrait  bool  `json:"article_cover_use_portrait,omitempty"`
+	CoverUsePortrait         bool  `json:"cover_use_portrait,omitempty"`
 	// E-commerce package fields (project platform = "ecommerce"). SelectedModules
 	// maps a module key (main_images / detail_page / cover_banner / share_image /
 	// sku_images) to its quantity; creation billing uses the ecommerce base task
@@ -196,7 +196,7 @@ type cloneTaskRequest struct {
 	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
 	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
 	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
-	ArticleCoverUsePortrait  *bool                            `json:"article_cover_use_portrait,omitempty"`
+	CoverUsePortrait         *bool                            `json:"cover_use_portrait,omitempty"`
 	ProductPhotos            []string                         `json:"product_photos,omitempty"`
 	SelectedModules          map[string]int                   `json:"selected_modules,omitempty"`
 	TargetPlatform           string                           `json:"target_platform,omitempty"`
@@ -602,7 +602,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			HasTailImage:             req.HasTailImage,
 			ArticleWithCover:         req.ArticleWithCover,
 			ArticleWithContentImages: req.ArticleWithContentImages,
-			ArticleCoverUsePortrait:  req.ArticleCoverUsePortrait,
+			CoverUsePortrait:         req.CoverUsePortrait,
 			Ecommerce:                ecommerceCfg,
 			MontageInput:             req.MontageInput,
 			HypitInput:               req.HypitInput,
@@ -620,7 +620,7 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	if errors.Is(err, service.ErrViralAnalysisRequiresSeednoteProject) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	if errors.Is(err, service.ErrArticleCoverPortraitUnavailable) {
+	if errors.Is(err, service.ErrCoverPortraitUnavailable) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if errors.Is(err, service.ErrInvalidAgentInput) {
@@ -945,7 +945,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			HasTailImage:             req.HasTailImage,
 			ArticleWithCover:         req.ArticleWithCover,
 			ArticleWithContentImages: req.ArticleWithContentImages,
-			ArticleCoverUsePortrait:  req.ArticleCoverUsePortrait != nil && *req.ArticleCoverUsePortrait,
+			CoverUsePortrait:         req.CoverUsePortrait != nil && *req.CoverUsePortrait,
 			ProductPhotos:            req.ProductPhotos,
 			SelectedModules:          req.SelectedModules,
 			TargetPlatform:           req.TargetPlatform,
@@ -978,7 +978,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			HasTailImage:             prepared.params.HasTailImage,
 			ArticleWithCover:         prepared.params.ArticleWithCover,
 			ArticleWithContentImages: prepared.params.ArticleWithContentImages,
-			ArticleCoverUsePortrait:  req.ArticleCoverUsePortrait,
+			CoverUsePortrait:         req.CoverUsePortrait,
 			Ecommerce:                prepared.params.Ecommerce,
 			MontageInput:             prepared.params.MontageInput,
 			HypitInput:               prepared.params.HypitInput,

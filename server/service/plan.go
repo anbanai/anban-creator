@@ -17,9 +17,9 @@ import (
 )
 
 var (
-	ErrUnsupportedPlanPlatform         = errors.New("plans are not supported for this project platform")
-	ErrPlanUpdateConflict              = errors.New("plan changed concurrently")
-	ErrArticleCoverPortraitUnavailable = errors.New("a project portrait reference and an enabled article cover are required")
+	ErrUnsupportedPlanPlatform  = errors.New("plans are not supported for this project platform")
+	ErrPlanUpdateConflict       = errors.New("plan changed concurrently")
+	ErrCoverPortraitUnavailable = errors.New("portrait cover requires a supported task type, a project portrait reference, and an enabled cover")
 )
 
 // PlanService handles plan CRUD and lifecycle operations.
@@ -95,7 +95,7 @@ type CreatePlanParams struct {
 	// non-nil honors explicit user choice.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	ArticleCoverUsePortrait  bool
+	CoverUsePortrait         bool
 	MontageInput             *model.MontageInput
 	HypitInput               *model.HypitInput
 	InputAttachments         []model.EntryAttachment
@@ -130,8 +130,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
 	}
-	if p.ArticleCoverUsePortrait && (project.Platform != model.PlatformArticle || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "") {
-		return nil, ErrArticleCoverPortraitUnavailable
+	if p.CoverUsePortrait && (!model.SupportsPortraitCover(project.Platform) || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "") {
+		return nil, ErrCoverPortraitUnavailable
 	}
 	profile, err := resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
 	if err != nil {
@@ -199,6 +199,9 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		return nil, err
 	}
 	effectiveImageRatio := strings.TrimSpace(p.ImageRatio)
+	if model.IsHypitPlatform(project.Platform) && p.CoverUsePortrait {
+		effectiveImageRatio = hypitPortraitCoverRatio(p.HypitInput.Preferences)
+	}
 	if model.IsMontagePlatform(project.Platform) && effectiveImageRatio == model.ImageRatioAuto {
 		effectiveImageRatio = ""
 	}
@@ -241,8 +244,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if p.ArticleWithContentImages != nil {
 		articleContent = *p.ArticleWithContentImages
 	}
-	if p.ArticleCoverUsePortrait && !articleCover {
-		return nil, ErrArticleCoverPortraitUnavailable
+	if p.CoverUsePortrait && project.Platform == model.PlatformArticle && !articleCover {
+		return nil, ErrCoverPortraitUnavailable
 	}
 	// A plan carries scheduling-adjacent "what to produce" image params.
 	// Project/account style config is snapshotted when a task is spawned.
@@ -265,7 +268,7 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		HasTailImage:             hasTail,
 		ArticleWithCover:         &articleCover,
 		ArticleWithContentImages: &articleContent,
-		ArticleCoverUsePortrait:  p.ArticleCoverUsePortrait,
+		CoverUsePortrait:         p.CoverUsePortrait,
 	}
 	plan.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
 	if agentInput != nil {
@@ -346,7 +349,7 @@ type UpdatePlanParams struct {
 	HasTailImage             *bool
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	ArticleCoverUsePortrait  *bool
+	CoverUsePortrait         *bool
 	MontageInput             *model.MontageInput
 	HypitInput               *model.HypitInput
 	InputAttachments         *[]model.EntryAttachment
@@ -455,19 +458,19 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		v := *p.ArticleWithContentImages
 		plan.ArticleWithContentImages = &v
 	}
-	if p.ArticleCoverUsePortrait != nil {
-		plan.ArticleCoverUsePortrait = *p.ArticleCoverUsePortrait
+	if p.CoverUsePortrait != nil {
+		plan.CoverUsePortrait = *p.CoverUsePortrait
 	}
-	if plan.ArticleCoverUsePortrait {
-		if plan.Type != model.PlatformArticle || (plan.ArticleWithCover != nil && !*plan.ArticleWithCover) {
-			return nil, ErrArticleCoverPortraitUnavailable
+	if plan.CoverUsePortrait {
+		if !model.SupportsPortraitCover(plan.Type) || (plan.Type == model.PlatformArticle && plan.ArticleWithCover != nil && !*plan.ArticleWithCover) {
+			return nil, ErrCoverPortraitUnavailable
 		}
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
 		if err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" {
-			return nil, ErrArticleCoverPortraitUnavailable
+			return nil, ErrCoverPortraitUnavailable
 		}
 	}
 	if p.InputAttachments != nil {
@@ -502,6 +505,9 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 			return nil, err
 		}
 		plan.SetHypitInput(in)
+		if plan.CoverUsePortrait {
+			plan.ImageRatio = hypitPortraitCoverRatio(in.Preferences)
+		}
 	}
 	if p.MontageInput != nil || (model.IsMontagePlatform(plan.Type) && s.montageCapabilities != nil) {
 		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)

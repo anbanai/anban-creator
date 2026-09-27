@@ -115,6 +115,9 @@ func main() {
 		if _, err := service.MigrateImageCapabilities(context.Background(), mysqlDB, cfg.ModelRoutes.ImageGeneration.DefaultCapability, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate image capabilities")
 		}
+		if err := service.MigrateCoverPortrait(context.Background(), mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate portrait cover option")
+		}
 		if err := migrateModels(mysqlDB, model.AutoMigrate); err != nil {
 			log.Fatal().Err(err).Msg("failed to auto-migrate models")
 		} else {

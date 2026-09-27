@@ -321,27 +321,66 @@ describe('TaskFormDialog', () => {
   it('automatically supplies the configured portrait and leaves cover usage optional by default', async () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
-    expect(await within(dialog).findByText('已作为任务输入提供')).toBeInTheDocument()
+    expect(await within(dialog).findByText('勾选后使用项目人物与标题设计封面')).toBeInTheDocument()
     await openTaskParameters(dialog)
-    const portraitSwitch = within(dialog).getByRole('switch', { name: '封面必须使用项目默认人物' })
+    const portraitSwitch = within(dialog).getByRole('switch', { name: '人物封面' })
     expect(portraitSwitch).not.toBeChecked()
     fireEvent.click(within(dialog).getByRole('switch', { name: '生成封面图' }))
     expect(within(dialog).getByAltText('项目人物参考')).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), { target: { value: '写文章' } })
     fireEvent.submit(document.getElementById('task-create-form')!)
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
-    expect(vi.mocked(api.tasks.create).mock.calls[0][0]).toMatchObject({ article_cover_use_portrait: false })
+    expect(vi.mocked(api.tasks.create).mock.calls[0][0]).toMatchObject({ cover_use_portrait: false })
   })
 
   it('submits the required project portrait option for an article task', async () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     await openTaskParameters(dialog)
-    fireEvent.click(within(dialog).getByRole('switch', { name: '封面必须使用项目默认人物' }))
+    fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
     fireEvent.change(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), { target: { value: '写文章' } })
     fireEvent.submit(document.getElementById('task-create-form')!)
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
-    expect(vi.mocked(api.tasks.create).mock.calls[0][0]).toMatchObject({ article_cover_use_portrait: true })
+    expect(vi.mocked(api.tasks.create).mock.calls[0][0]).toMatchObject({ cover_use_portrait: true })
+  })
+
+  it.each(['article', 'seednote', 'montage', 'hypit'] as const)('offers an unselected portrait cover for %s tasks', async (platform) => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, platform }])
+    renderDialog()
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    expect(await within(dialog).findByRole('switch', { name: '人物封面' })).not.toBeChecked()
+    fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
+    expect(within(dialog).getByRole('switch', { name: '人物封面' })).toBeChecked()
+  })
+
+  it.each([fixtures.seednoteProject, fixtures.montageProject])('submits the selected portrait cover for a $platform task', async (project) => {
+    renderDialog({ initialProjectId: project.id })
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
+    expect(portraitSwitch).not.toBeChecked()
+    fireEvent.click(portraitSwitch)
+    fireEvent.change(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
+      target: { value: '用项目人物介绍新品' },
+    })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      type: project.platform,
+      project_id: project.id,
+      cover_use_portrait: true,
+    })))
+  })
+
+  it('keeps stale portrait selection editable when cloning a task whose project portrait was removed', async () => {
+    vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, portrait_reference_image: null }])
+    renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, article_with_cover: true, cover_use_portrait: true } })
+    const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
+    const toggle = await within(dialog).findByRole('switch', { name: '人物封面' })
+    expect(toggle).toBeChecked()
+    expect(toggle).not.toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(toggle)
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('shows the missing project portrait without requiring one', async () => {
@@ -350,7 +389,7 @@ describe('TaskFormDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     expect(await within(dialog).findByText('项目尚未设置人物参考图')).toBeInTheDocument()
     await openTaskParameters(dialog)
-    expect(within(dialog).getByRole('switch', { name: '封面必须使用项目默认人物' })).toHaveAttribute('aria-disabled', 'true')
+    expect(within(dialog).getByRole('switch', { name: '人物封面' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('在任务创建和克隆时用模板覆盖非空 Prompt 且保留附件', async () => {
@@ -1120,7 +1159,7 @@ describe('video replication task integration', () => {
     expect(screen.getByRole('button', { name: '再次改编' })).toBeDisabled()
   })
 
-  it('creates from video link and inherited defaults without image capability controls', async () => {
+  it.each([false, true])('creates from video link with portrait selection %s and inherited defaults', async (usePortrait) => {
     renderDialog({ initialProjectId: hypitProject.id, initialType: 'hypit' })
     await screen.findByLabelText('主参考视频链接')
     expect(screen.getAllByLabelText('复刻要求')).toHaveLength(1)
@@ -1128,9 +1167,12 @@ describe('video replication task integration', () => {
     expect(screen.queryByRole('button', { name: '添加附件' })).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('复刻要求'), { target: { value: '替换为新品，保留镜头节奏' } })
     fireEvent.change(screen.getByLabelText('主参考视频链接'), { target: { value: 'https://example.com/reference.mp4' } })
+    const portraitSwitch = screen.getByRole('switch', { name: '人物封面' })
+    expect(portraitSwitch).not.toBeChecked()
+    if (usePortrait) fireEvent.click(portraitSwitch)
     await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'hypit', hypit_input: { brief: '替换为新品，保留镜头节奏', reference: { type: 'video_url', url: 'https://example.com/reference.mp4' }, source_assets: [], preferences: { aspect_ratio: '16:9', duration_seconds: 25 } } })))
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'hypit', cover_use_portrait: usePortrait, hypit_input: { brief: '替换为新品，保留镜头节奏', reference: { type: 'video_url', url: 'https://example.com/reference.mp4' }, source_assets: [], preferences: { aspect_ratio: '16:9', duration_seconds: 25 } } })))
   })
   it('uses frozen source capabilities when global duration limits have been reduced', async () => {
     vi.mocked(api.hypitCapabilities.list).mockImplementation(async (sourceTaskId?: string) => ({ enabled: true, configured: true, missing_configuration: [], limits: { max_assets: 20, max_duration_seconds: sourceTaskId ? 180 : 60, max_asset_bytes: 100000, max_input_bytes: 200000 } }))

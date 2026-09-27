@@ -71,6 +71,27 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			in = task.HypitInput.Data()
 		}
 		p := AgentProjectProfile{"name": project.Name, "platform": project.Platform, "instructions": project.Instructions, "hypit": map[string]any{"defaults": project.HypitDefaults.Data(), "input": in, "workspace_input_file": "input.json", "runtime_profile_file": "runtime-profile.json", "project_root": "/workspace/project", "required_artifacts": []string{"output/final.mp4", "output/cover.png", "output/project.json", "output/project.zip", "output/delivery-manifest.json", "output/quality-report.json"}}}
+		resolved := map[string]any{
+			"id": project.ID, "name": project.Name, "platform": project.Platform,
+			"instructions": project.Instructions, "visual_style": project.VisualStyle,
+			"image_ratio":           hypitPortraitCoverRatio(project.HypitDefaults.Data().Preferences),
+			"allowed_image_ratios":  model.SupportedImageRatios(project.Platform),
+			"uses_project_snapshot": usesProjectSnapshot,
+		}
+		if task != nil {
+			resolved["image_ratio"] = task.ImageRatio
+			resolved["image_capability_key"] = task.ImageCapabilityKey
+		}
+		if projectPortraitReferenceAssetID(task) != "" {
+			resolved["project_portrait_reference_path"] = serveragent.ProjectPortraitReferenceImagePath
+		}
+		if taskReferenceAssetID(task) != "" {
+			resolved["task_reference_path"] = serveragent.TaskReferenceImagePath
+		}
+		if projectStyleReferenceAssetID(task) != "" {
+			resolved["project_style_reference_path"] = serveragent.ProjectStyleReferenceImagePath
+		}
+		p["resolved_profile"] = resolved
 		return &p, nil
 	}
 	style := ResolveStyle(project, task)

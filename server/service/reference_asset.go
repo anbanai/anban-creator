@@ -79,14 +79,18 @@ func projectStyleReferenceAssetID(task *model.Task) string {
 }
 
 func projectPortraitReferenceAssetID(task *model.Task) string {
-	if task == nil || task.Type != model.PlatformArticle {
+	if task == nil || !model.SupportsPortraitCover(task.Type) {
 		return ""
 	}
 	return strings.TrimSpace(task.ProjectSnapshot.Data().PortraitReferenceImageAssetID)
 }
 
 func resolveProjectPortraitReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
-	return resolveOwnedReferenceAsset(ctx, repo, task, projectPortraitReferenceAssetID(task), []string{
+	assetID := projectPortraitReferenceAssetID(task)
+	if task != nil && task.CoverUsePortrait && (task.Type != model.PlatformArticle || task.ArticleWithCover == nil || *task.ArticleWithCover) && assetID == "" {
+		return nil, ErrCoverPortraitUnavailable
+	}
+	return resolveOwnedReferenceAsset(ctx, repo, task, assetID, []string{
 		DirectUploadPurposeProjectPortraitReference,
 	}, "project portrait reference")
 }

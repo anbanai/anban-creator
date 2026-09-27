@@ -389,7 +389,7 @@ type CreateManualParams struct {
 	// non-nil honors explicit user choice. Non-article task types ignore them.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	ArticleCoverUsePortrait  bool
+	CoverUsePortrait         bool
 	// Ecommerce carries the e-commerce package config (selected modules, product
 	// photos, target platform, selling points, language, provider-strategy
 	// override). Only consulted when the project platform is "ecommerce"; ignored
@@ -530,16 +530,16 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
 	}
-	if p.ArticleCoverUsePortrait {
+	if p.CoverUsePortrait {
 		portraitAssetID := project.PortraitReferenceImageAssetID
 		if p.ProjectSnapshot != nil {
 			portraitAssetID = p.ProjectSnapshot.PortraitReferenceImageAssetID
 		}
-		if taskType != model.PlatformArticle || portraitAssetID == "" {
-			return nil, ErrArticleCoverPortraitUnavailable
+		if !model.SupportsPortraitCover(taskType) || strings.TrimSpace(portraitAssetID) == "" {
+			return nil, ErrCoverPortraitUnavailable
 		}
-		if p.ArticleWithCover != nil && !*p.ArticleWithCover {
-			return nil, ErrArticleCoverPortraitUnavailable
+		if taskType == model.PlatformArticle && p.ArticleWithCover != nil && !*p.ArticleWithCover {
+			return nil, ErrCoverPortraitUnavailable
 		}
 	}
 	isMontageTask := model.IsMontagePlatform(taskType)
@@ -624,6 +624,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		if err := capabilities.NormalizeAndValidateInput(p.HypitInput, defaults, p.InputSourceTaskID != ""); err != nil {
 			return nil, err
+		}
+		if p.CoverUsePortrait {
+			effectiveImageRatio = hypitPortraitCoverRatio(p.HypitInput.Preferences)
 		}
 		if err := validateHypitUploadInputs(ctx, s.repo, s.store, p.UserID, p.HypitInput, capabilities.config.Limits); err != nil {
 			return nil, err
@@ -723,8 +726,8 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.ArticleWithContentImages != nil {
 			articleContent = *p.ArticleWithContentImages
 		}
-		if p.ArticleCoverUsePortrait && !articleCover {
-			return nil, ErrArticleCoverPortraitUnavailable
+		if p.CoverUsePortrait && taskType == model.PlatformArticle && !articleCover {
+			return nil, ErrCoverPortraitUnavailable
 		}
 
 		task := &model.Task{
@@ -745,7 +748,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			HasTailImage:             hasTail,
 			ArticleWithCover:         &articleCover,
 			ArticleWithContentImages: &articleContent,
-			ArticleCoverUsePortrait:  p.ArticleCoverUsePortrait,
+			CoverUsePortrait:         p.CoverUsePortrait,
 			ExecutionProfile:         p.ExecutionProfile,
 			AgentProfileSnapshot:     profileSnapshot,
 			AgentProfileFingerprint:  profileFingerprint,
@@ -1000,8 +1003,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		project = found
 		taskType = found.Platform
 	}
-	if plan.ArticleCoverUsePortrait && (taskType != model.PlatformArticle || project == nil || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" || (plan.ArticleWithCover != nil && !*plan.ArticleWithCover)) {
-		return nil, ErrArticleCoverPortraitUnavailable
+	if plan.CoverUsePortrait && (!model.SupportsPortraitCover(taskType) || project == nil || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" || (taskType == model.PlatformArticle && plan.ArticleWithCover != nil && !*plan.ArticleWithCover)) {
+		return nil, ErrCoverPortraitUnavailable
 	}
 	isMontageTask := model.IsMontagePlatform(taskType)
 	effectiveImageRatio := strings.TrimSpace(plan.ImageRatio)
@@ -1054,6 +1057,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			return nil, err
 		}
 		planHypitInput = &in
+		if plan.CoverUsePortrait {
+			effectiveImageRatio = hypitPortraitCoverRatio(in.Preferences)
+		}
 	}
 	var planMontageInput *model.MontageInput
 	if isMontageTask {
@@ -1097,7 +1103,7 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		HasTailImage:             plan.HasTailImage,
 		ArticleWithCover:         plan.ArticleWithCover,
 		ArticleWithContentImages: plan.ArticleWithContentImages,
-		ArticleCoverUsePortrait:  plan.ArticleCoverUsePortrait,
+		CoverUsePortrait:         plan.CoverUsePortrait,
 		ExecutionProfile:         profile.ID,
 		AgentProfileSnapshot:     profileSnapshot,
 		AgentProfileFingerprint:  profileFingerprint,

@@ -23,6 +23,13 @@ import yauzl from "yauzl";
 import yazl from "yazl";
 import { cleanBootstrapPath } from "./bootstrap.js";
 
+const HYPIT_COVER_AUDITS = [
+  "cover-plan.md",
+  "cover-prompt.md",
+  "cover-quality.json",
+];
+const HYPIT_COVER_AUDIT_MAX_BYTES = 2 * 1024 * 1024;
+
 async function readJSON(path: string): Promise<Record<string, any>> {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -1468,6 +1475,22 @@ export async function finalizeHypit(
       if (verifiedMedia[name] && verifiedMedia[name] !== deliveryHashes[name])
         throw new Error("verified media changed before delivery");
     }
+    for (const name of HYPIT_COVER_AUDITS) {
+      try {
+        await lstat(join(output, name));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      deliveryHashes[name] = await snapshotFile(
+        output,
+        name,
+        undefined,
+        HYPIT_COVER_AUDIT_MAX_BYTES,
+        secrets,
+        signal,
+      );
+    }
     report.artifact_sha256 = deliveryHashes;
     report.upstream = {
       repository: "https://github.com/hypit-ai/hypit",
@@ -1632,7 +1655,10 @@ export async function prepareHypitUpload(
         "delivery-manifest.json",
         "quality-report.json",
       ];
-      for (const name of required) {
+      const optional = HYPIT_COVER_AUDITS.filter((name) =>
+        Object.hasOwn(receipt, name),
+      );
+      for (const name of [...required, ...optional]) {
         if (!/^[0-9a-f]{64}$/.test(receipt[name] ?? ""))
           throw new Error("missing verified artifact receipt");
         const digest = await snapshotFile(
@@ -1641,7 +1667,9 @@ export async function prepareHypitUpload(
           join(stage, "output", name),
           name === "project.zip"
             ? HYPIT_LIMITS.max_project_bytes
-            : HYPIT_LIMITS.max_video_bytes,
+            : optional.includes(name)
+              ? HYPIT_COVER_AUDIT_MAX_BYTES
+              : HYPIT_LIMITS.max_video_bytes,
           name === "project.zip" ? [] : secrets,
           signal,
         );

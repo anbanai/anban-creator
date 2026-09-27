@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"gopkg.in/yaml.v3"
 )
 
@@ -166,7 +167,8 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"ecommerce":   {"ecommerce-product-analysis", "ecommerce-copywriting", "ecommerce-visual-design", "ecommerce-platform-specs"},
 		"live-slicer": {"live-slice", "capcut-draft"},
 		"moments":     {"moments"},
-		"montage":     {"montage", "video-cover-design"},
+		"hypit":       {},
+		"montage":     {"montage"},
 		"seednote":    {"seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
 		"article":     {"content-writing", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-viral-strategy"},
 	}
@@ -187,6 +189,16 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 	agentsRoot := filepath.Join(root, "harness", "agents")
 	skillsRoot := filepath.Join(root, "harness", "skills")
 	referenced := map[string]bool{}
+	// Packs also own deferred skills; ownership does not require eager loading.
+	catalog, err := agentpack.LoadCatalog(filepath.Join(root, "harness"))
+	if err != nil {
+		t.Fatalf("read Agent Pack catalog: %v", err)
+	}
+	for _, pack := range catalog.Packs {
+		for _, skill := range pack.Agent.Skills {
+			referenced[skill] = true
+		}
+	}
 	agents, err := os.ReadDir(agentsRoot)
 	if err != nil {
 		t.Fatalf("read Claude agents: %v", err)
@@ -276,6 +288,7 @@ func TestArticleCodexAgentDeclaresOwnedSkills(t *testing.T) {
 		"topic-research",
 		"seo-optimization",
 		"article-viral-strategy",
+		"portrait-cover-design",
 	}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("%s skills = %q, want %q", path, got, want)

@@ -169,3 +169,12 @@ func (s *TaskService) HypitCapabilitiesForSource(ctx context.Context, userID, so
 	}
 	return capabilities.Catalog(), nil
 }
+
+// hypitPortraitCoverRatio follows normalized video preferences. Source-sized
+// videos resolve to a supported concrete image ratio only after media inspection.
+func hypitPortraitCoverRatio(preferences model.HypitPreferences) string {
+	if preferences.AspectRatio == "" || preferences.AspectRatio == "source" {
+		return model.ImageRatioAuto
+	}
+	return preferences.AspectRatio
+}
