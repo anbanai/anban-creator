@@ -136,7 +136,7 @@ export function manualChunks(id: string) {
 }
 
 export function rewriteAgentGuideURL(url: string | undefined): string | undefined {
-  const match = url?.match(/^\/(claude|codex)\/?(\?.*)?$/)
+  const match = url?.match(/^\/(claude|codex|dsh)\/?(\?.*)?$/)
   if (!match) return url
   return `/${match[1]}/index.html${match[2] ?? ''}`
 }

@@ -85,6 +85,8 @@ describe('rewriteAgentGuideURL', () => {
     ['/claude/', '/claude/index.html'],
     ['/codex', '/codex/index.html'],
     ['/codex/?source=plugin', '/codex/index.html?source=plugin'],
+    ['/dsh', '/dsh/index.html'],
+    ['/dsh/?source=plugin', '/dsh/index.html?source=plugin'],
   ])('serves %s from its static Agent guide', (input, expected) => {
     expect(rewriteAgentGuideURL(input)).toBe(expected)
   })

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Check, ChevronRight, Copy, KeyRound, PlugZap, TerminalSquare } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-type PluginClient = 'claude' | 'codex'
+type PluginClient = 'claude' | 'codex' | 'dsh'
 
 const clientContent: Record<PluginClient, {
   label: string
@@ -22,10 +22,18 @@ const clientContent: Record<PluginClient, {
     prompt: '阅读 https://creator.anbanai.com/codex，帮我安装并配置 Anban Creator 插件。需要 ANBAN_API_KEY 时向我索取。',
     detail: '粘贴到 Codex 的任意任务。Agent 会读取专用说明并完成安装。',
   },
+  dsh: {
+    label: 'DeepSeek Harness',
+    guideUrl: 'https://creator.anbanai.com/dsh',
+    prompt: '阅读 https://creator.anbanai.com/dsh，帮我安装并配置 Anban Creator 插件。需要 ANBAN_API_KEY 时向我索取。',
+    detail: '粘贴到 DeepSeek Harness 的任意会话。Agent 会读取专用说明，完成插件与 Preset 两个显式安装步骤。',
+  },
 }
 
 function clientFromQuery(value: string | null): PluginClient {
-  return value === 'codex' ? 'codex' : 'claude'
+  if (value === 'codex') return 'codex'
+  if (value === 'dsh') return 'dsh'
+  return 'claude'
 }
 
 export default function PluginsPage() {
@@ -83,13 +91,13 @@ export default function PluginsPage() {
             </p>
           </div>
 
-          <div className="mb-5 inline-flex h-10 rounded-md border border-black/10 bg-white p-1 dark:border-white/10 dark:bg-white/5" aria-label="选择 Agent">
+          <div className="mb-5 flex w-fit max-w-full flex-wrap items-center rounded-md border border-black/10 bg-white p-1 dark:border-white/10 dark:bg-white/5" aria-label="选择 Agent">
             {(Object.keys(clientContent) as PluginClient[]).map((item) => (
               <button
                 key={item}
                 type="button"
                 onClick={() => selectClient(item)}
-                className={`min-w-32 rounded px-4 text-sm font-medium transition-colors ${
+                className={`min-w-28 whitespace-nowrap rounded px-3 py-2 text-sm font-medium transition-colors ${
                   item === client
                     ? 'bg-[#171716] text-white dark:bg-white dark:text-[#171716]'
                     : 'text-black/55 hover:text-black dark:text-white/55 dark:hover:text-white'

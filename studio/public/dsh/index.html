@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Install Anban Creator for DeepSeek Harness</title>
+  <meta name="description" content="Agent-readable installation instructions for the Anban Creator DeepSeek Harness plugin.">
+</head>
+<body>
+  <main>
+    <h1>Install Anban Creator for DeepSeek Harness</h1>
+    <p>This page is written for DeepSeek Harness (DSH). Complete the installation on the user's machine.</p>
+
+    <h2>Safety</h2>
+    <ul>
+      <li>Never print, log, commit, or upload the user's ANBAN_API_KEY.</li>
+      <li>Ask the user for the key only when credentials are needed.</li>
+      <li>Presets are global under the resolved DSH home and shared by every profile using it. Check which other profiles depend on them before any destructive command.</li>
+      <li>Never delete a Preset or lock directory recursively. Back up a locally modified owned Preset first.</li>
+    </ul>
+
+    <h2>Scope</h2>
+    <p>Installation is two explicit steps with two scopes. The Bundle is profile-local. Presets are global at <code>$DSH_HOME/.agent-presets</code>. Bundle activation never installs, upgrades, or removes Presets, so always run the explicit Preset command after installing, upgrading, or rolling back the Bundle. Presets currently exist for Article and Seednote only.</p>
+
+    <h2>Prerequisites</h2>
+    <p>DeepSeek Harness with the <code>dsh</code> CLI, and Node <code>&gt;=22.19.0 &lt;23</code> or <code>&gt;=24.0.0</code>.</p>
+    <p>Normalize the DSH home before any filesystem operation. Expand an exact <code>~</code>, <code>~/</code>, or <code>~\</code> form, fall back to <code>~/.dsh</code> when <code>DSH_HOME</code> is unset, empty, or whitespace-only, otherwise preserve the configured value, and resolve the result to an absolute path. Refuse an empty result or a filesystem root.</p>
+    <pre><code>NORMALIZED_DSH_HOME="$(
+node &lt;&lt;'NODE'
+const os = require('node:os')
+const path = require('node:path')
+
+const configured = process.env.DSH_HOME ?? ''
+let value = configured
+if (configured.trim() === '') value = path.join(os.homedir(), '.dsh')
+else if (configured === '~') value = os.homedir()
+else if (configured.startsWith('~/') || configured.startsWith('~\\')) {
+  value = path.join(os.homedir(), configured.slice(2))
+}
+
+const normalized = path.resolve(value)
+if (normalized === path.parse(normalized).root) {
+  console.error('Refusing to use the filesystem root as DSH_HOME')
+  process.exit(1)
+}
+process.stdout.write(normalized)
+NODE
+)" || {
+  printf '%s\n' 'Unable to normalize DSH_HOME' &gt;&amp;2
+  exit 1
+}
+[ -n "$NORMALIZED_DSH_HOME" ] || {
+  printf '%s\n' 'Refusing an empty normalized DSH_HOME' &gt;&amp;2
+  exit 1
+}
+export DSH_HOME="$NORMALIZED_DSH_HOME"
+unset NORMALIZED_DSH_HOME
+install -d -m 700 "$DSH_HOME"
+chmod 700 "$DSH_HOME"</code></pre>
+
+    <h2>Get the API key</h2>
+    <p>Ask the user to sign in at <a href="https://creator.anbanai.com/settings#api-key-settings">https://creator.anbanai.com/settings#api-key-settings</a>, create a platform key, and keep the full value. The full key is displayed only once.</p>
+
+    <h2>Select the active profile</h2>
+    <p>Choose the target profile once and use it for every command below. Use <code>web</code> for public DeepSeek Harness Web.</p>
+    <pre><code>ACTIVE_PROFILE="web"</code></pre>
+
+    <h2>Install</h2>
+    <p>Install only a published, immutable artifact. Resolve one exact version from the public registry, then pin it exactly. Never install an unversioned package, a dist-tag, or a version range.</p>
+    <ol>
+      <li>Resolve the current published version of the Anban DSH plugin and confirm it resolves anonymously from npm.</li>
+      <li>Add that exact version to the selected profile.</li>
+      <li>Compose the profile configuration with <code>--dump-config</code> to prepare the peer fallback before the first standalone Bundle command.</li>
+      <li>Materialize the global Presets with the explicit Preset command.</li>
+    </ol>
+    <pre><code>PUBLISHED_VERSION="$(npm view "@anban/dsh-plugin" version)"
+dsh plugin --profile "$ACTIVE_PROFILE" add "@anban/dsh-plugin@${PUBLISHED_VERSION}"
+dsh --profile "$ACTIVE_PROFILE" --dump-config
+dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets</code></pre>
+    <p>Bundle activation alone leaves Presets unchanged. If Preset installation fails after a successful Bundle install, keep the Bundle, resolve the reported error, and rerun <code>install-presets</code>.</p>
+
+    <h2>Credential configuration</h2>
+    <p>The Creator MCP endpoint is fixed at <code>https://creator.anbanai.com/mcp</code> and is not a profile option. The official DSH credential precedence is inherited process environment (read-only, highest priority), then <code>$DSH_HOME/.credentials.yaml</code> (managed, writable), then invocation-project <code>.env</code>, then <code>$DSH_HOME/.env</code>. For persistent Web use, write the key into the managed document without echoing it.</p>
+    <pre><code>ANBAN_API_KEY: &lt;user-provided-key&gt;</code></pre>
+    <p>On POSIX keep that file at mode <code>0600</code>. Do not put the key or a serialized Authorization header in a Preset, a command argument, a log, a screenshot, a test fixture, or a generated artifact. DeepSeek Harness model onboarding configures model-provider credentials, not third-party credentials like this one.</p>
+    <pre><code>chmod 600 "$DSH_HOME/.credentials.yaml"</code></pre>
+
+    <h2>Verify</h2>
+    <ol>
+      <li>Run the read-only status command and confirm the installed Presets report <code>state=current</code>. The states are <code>absent</code>, <code>current</code>, <code>outdated</code>, <code>modified</code>, and <code>unowned</code>.</li>
+      <li>Restart DeepSeek Harness if the credential was only added to the environment.</li>
+      <li>Confirm the Creator MCP connection can list Anban projects.</li>
+    </ol>
+    <pre><code>dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status</code></pre>
+    <p>Inside an interactive session the equivalent registered commands are <code>/anban-presets-install</code>, <code>/anban-presets-status</code>, <code>/anban-presets-install force</code>, and <code>/anban-presets-remove confirm</code>. Both surfaces call the same Preset manager.</p>
+
+    <h2>Shell and interactive commands</h2>
+    <pre><code>dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets
+dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status
+dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets --force
+dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh remove-presets</code></pre>
+
+    <h2>Advanced artifacts</h2>
+    <p>Prefer the public npm package. When a registry install is not possible, use one of these verified artifacts instead of an unpinned install.</p>
+    <ul>
+      <li><strong>Checksummed release tarball</strong>: download <code>anban-dsh-plugin-X.Y.Z.tgz</code> and the matching <code>.sha256</code> from the matching <code>anbanai/anban-creator</code> release tag, verify the digest, then add that exact archive.</li>
+      <li><strong>Immutable Git source</strong>: add the approved <code>https://github.com/anbanai/creator-harness.git</code> repository pinned to a full 40-character commit or a protected release tag, never a branch or floating URL, then approve the prepare build in the same profile and repeat the exact add command.</li>
+      <li><strong>Local development</strong>: run <code>pnpm pack --json</code> in the plugin repository and add the exact tarball path reported in the <code>filename</code> field. Never install a source directory with a <code>file:</code> specifier.</li>
+    </ul>
+
+    <h2>Upgrade, rollback, and removal</h2>
+    <p>Upgrade the profile-local Bundle first, compose the profile configuration, then explicitly reconcile the global Presets and check status again. Before <code>--force</code> or removal, check status and back up local changes.</p>
+    <pre><code>dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status
+PUBLISHED_VERSION="$(npm view "@anban/dsh-plugin" version)"
+dsh plugin --profile "$ACTIVE_PROFILE" add "@anban/dsh-plugin@${PUBLISHED_VERSION}"
+dsh --profile "$ACTIVE_PROFILE" --dump-config
+dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh install-presets
+dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status</code></pre>
+    <p>A normal upgrade replaces <code>outdated</code> owned Presets and refuses <code>modified</code> and <code>unowned</code> state. <code>--force</code> is destructive and is only for intentional replacement. Rollback installs an exact previously published Bundle version and then reconciles Presets with <code>--force</code> because newer owned Presets can look modified to an older package. Removal takes the global Presets away first, then the profile-local Bundle.</p>
+    <pre><code>dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh status
+dsh plugin --profile "$ACTIVE_PROFILE" exec anban-dsh remove-presets
+dsh plugin --profile "$ACTIVE_PROFILE" remove @anban/dsh-plugin</code></pre>
+
+    <h2>Troubleshooting</h2>
+    <p>The CLI prints stable, secret-safe operational codes:</p>
+    <ul>
+      <li><code>ERR_RUNTIME_MISSING</code>: an incomplete package or source install lacks <code>dsh/lib/cli.js</code>. Remove only that profile dependency, install the exact verified npm version or packed <code>.tgz</code>, compose the profile configuration, and rerun Preset installation.</li>
+      <li><code>ERR_PRESET_UNOWNED</code>: the target directory has no Anban ownership record. Removal is refused and replacement needs an explicit trust decision.</li>
+      <li><code>ERR_PRESET_MODIFIED</code>: back the Preset up, then use <code>--force</code> only when replacement is intended.</li>
+      <li><code>ERR_PRESET_LOCKED</code>: another mutation is active. Wait and rerun status; do not disturb the lock.</li>
+      <li><code>ERR_PRESET_LOCK_INVALID</code>: stop DSH writers sharing this home, back up <code>$DSH_HOME/.agent-presets</code>, inspect <code>.anban-dsh.lock/owner.json</code>, and move the lock residue to a unique quarantine path instead of deleting it.</li>
+      <li><code>ERR_PRESET_ROLLBACK</code> and <code>ERR_PRESET_OPERATION</code>: preserve the reported recovery path, check filesystem access and space, and retry the same explicit step.</li>
+    </ul>
+
+    <h2>Runtime limitation</h2>
+    <p>The MCP connection can be healthy while task-context operations still fail. Operations that require an Anban task or execution context need a valid current task and execution. Without that context, report the failure and continue only with capabilities that do not require it.</p>
+
+    <h2>Result</h2>
+    <p>Report the installed plugin version, the selected profile, the Preset states reported by status, whether setup verification passed, and any action still required from the user. Do not include the API key.</p>
+  </main>
+</body>
+</html>

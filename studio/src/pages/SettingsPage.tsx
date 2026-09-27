@@ -260,7 +260,7 @@ export default function SettingsPage() {
         <div className="border-b border-border px-4 py-3 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-foreground">平台密钥</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">用于 Claude Code 插件或第三方工具访问你的账号。</p>
+            <p className="text-xs text-muted-foreground mt-0.5">用于 Agent 插件或第三方工具访问你的账号。</p>
             <p className="text-xs text-muted-foreground mt-1">
               不知道如何使用密钥？<Link to="/plugins" className="text-primary underline underline-offset-4">查看插件接入 →</Link>
             </p>
@@ -288,6 +288,9 @@ export default function SettingsPage() {
                 </Link>
                 <Link to="/connect/codex">
                   <Button size="sm" variant="outline">继续配置 Codex</Button>
+                </Link>
+                <Link to="/plugins?client=dsh">
+                  <Button size="sm" variant="outline">继续配置 DeepSeek Harness</Button>
                 </Link>
                 <Button size="sm" variant="ghost" onClick={() => setNewKeyData(null)}>
                   我已保存密钥
