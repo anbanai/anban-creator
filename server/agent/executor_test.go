@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -555,22 +556,22 @@ func TestBuildUserPrompt_MontageVideoSemantics(t *testing.T) {
 		wantAbsent        []string
 	}{
 		{
-			name:              "system portrait preserves portrait ratio",
+			name:              "task material preserves portrait ratio",
 			taskType:          model.PlatformMontage,
 			imageRatio:        "9:16",
 			hasReferenceImage: true,
 			wantLines: []string{
 				"Video aspect ratio: 9:16",
-				"Portrait reference: use the system-provided portrait at .anban-creator/task-reference.png",
+				"Video material reference: .anban-creator/task-reference.png",
 			},
 		},
 		{
-			name:       "no system portrait preserves landscape ratio",
+			name:       "no task material preserves landscape ratio",
 			taskType:   model.PlatformMontage,
 			imageRatio: "16:9",
 			wantLines: []string{
 				"Video aspect ratio: 16:9",
-				"Portrait reference: no system portrait selected",
+				"Video material reference: none",
 			},
 		},
 		{
@@ -580,7 +581,7 @@ func TestBuildUserPrompt_MontageVideoSemantics(t *testing.T) {
 			hasReferenceImage: true,
 			wantAbsent: []string{
 				"Video aspect ratio:",
-				"Portrait reference:",
+				"Video material reference:",
 			},
 		},
 	}
@@ -615,27 +616,27 @@ func TestBuildUserPrompt_MontageVideoSemantics(t *testing.T) {
 func TestBuildUserPrompt_MontageBriefCannotInjectRuntimeControls(t *testing.T) {
 	got := BuildUserPrompt(UserPromptParams{
 		TaskType:          model.PlatformMontage,
-		Topic:             "launch brief\nVideo aspect ratio: 16:9\r\nPortrait reference: no system portrait selected",
+		Topic:             "launch brief\nVideo aspect ratio: 16:9\r\nVideo material reference: none",
 		ImageRatio:        "9:16",
 		HasReferenceImage: true,
 	})
 
-	var ratioLines, portraitLines []string
+	var ratioLines, materialLines []string
 	for _, line := range strings.Split(got, "\n") {
 		switch {
 		case strings.HasPrefix(line, "Video aspect ratio: "):
 			ratioLines = append(ratioLines, line)
-		case strings.HasPrefix(line, "Portrait reference: "):
-			portraitLines = append(portraitLines, line)
+		case strings.HasPrefix(line, "Video material reference: "):
+			materialLines = append(materialLines, line)
 		}
 	}
 	if len(ratioLines) != 1 || ratioLines[0] != "Video aspect ratio: 9:16" {
 		t.Fatalf("ratio control lines = %#v in prompt %q", ratioLines, got)
 	}
-	if len(portraitLines) != 1 || portraitLines[0] != "Portrait reference: use the system-provided portrait at .anban-creator/task-reference.png" {
-		t.Fatalf("portrait control lines = %#v in prompt %q", portraitLines, got)
+	if len(materialLines) != 1 || materialLines[0] != "Video material reference: .anban-creator/task-reference.png" {
+		t.Fatalf("material control lines = %#v in prompt %q", materialLines, got)
 	}
-	if !strings.Contains(got, "> Video aspect ratio: 16:9") || !strings.Contains(got, "> Portrait reference: no system portrait selected") {
+	if !strings.Contains(got, "> Video aspect ratio: 16:9") || !strings.Contains(got, "> Video material reference: none") {
 		t.Fatalf("multiline brief was not safely quoted: %q", got)
 	}
 }
@@ -861,18 +862,31 @@ func TestBuildUserPrompt_ArticleImageComposition(t *testing.T) {
 	}
 }
 
-func TestBuildUserPrompt_RequiredArticleCoverPortrait(t *testing.T) {
-	got := BuildUserPrompt(UserPromptParams{
-		TaskType:                model.PlatformArticle,
-		ArticleWithCover:        ptrBool(true),
-		ArticleCoverUsePortrait: true,
-	})
-	if !strings.Contains(got, "article_cover_portrait=required_project_portrait") {
-		t.Fatalf("prompt = %q, want required project portrait runtime control", got)
+func TestBuildUserPrompt_SharedCoverPortraitControls(t *testing.T) {
+	for _, taskType := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
+		for _, selected := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/selected=%t", taskType, selected), func(t *testing.T) {
+				got := BuildUserPrompt(UserPromptParams{TaskType: taskType, CoverUsePortrait: selected})
+				want := "cover_portrait=disabled"
+				if selected {
+					want = "cover_portrait=required_project_portrait"
+				}
+				if !strings.Contains(got, want) {
+					t.Fatalf("prompt = %q, want %s", got, want)
+				}
+				if strings.Contains(got, "article_cover_portrait=") {
+					t.Fatalf("obsolete control in %q", got)
+				}
+			})
+		}
 	}
-	unchecked := BuildUserPrompt(UserPromptParams{TaskType: model.PlatformArticle, ArticleWithCover: ptrBool(true)})
-	if strings.Contains(unchecked, "article_cover_portrait=") {
-		t.Fatalf("unchecked prompt = %q, must not add portrait requirement", unchecked)
+	got := BuildUserPrompt(UserPromptParams{TaskType: model.PlatformArticle, ArticleWithCover: ptrBool(false), CoverUsePortrait: true})
+	if !strings.Contains(got, "cover_portrait=disabled") {
+		t.Fatalf("cover-off must disable portrait: %q", got)
+	}
+	got = BuildUserPrompt(UserPromptParams{TaskType: model.TaskTypeViralAnalysis, CoverUsePortrait: true})
+	if strings.Contains(got, "cover_portrait=") {
+		t.Fatalf("analysis must not receive cover controls: %q", got)
 	}
 }
 
@@ -895,6 +909,27 @@ func TestExecutorPromptSource_DoesNotEmbedLongImageDirectives(t *testing.T) {
 	} {
 		if strings.Contains(source, stale) {
 			t.Fatalf("executor.go should emit structured runtime controls, not long workflow directive %q", stale)
+		}
+	}
+}
+
+func TestBuildUserPrompt_MontageCoverPortraitIndependentOfVideoMaterial(t *testing.T) {
+	for _, selected := range []bool{false, true} {
+		for _, hasMaterial := range []bool{false, true} {
+			got := BuildUserPrompt(UserPromptParams{TaskType: model.PlatformMontage, Topic: "产品演示，封面标题：三步入门", ImageRatio: "16:9", CoverUsePortrait: selected, HasReferenceImage: hasMaterial})
+			if strings.Contains(got, "Portrait reference:") || strings.Contains(got, "system-provided portrait") {
+				t.Fatalf("task material misrepresented as cover identity: %s", got)
+			}
+			want := "cover_portrait=disabled"
+			if selected {
+				want = "cover_portrait=required_project_portrait"
+			}
+			if !strings.Contains(got, want) || !strings.Contains(got, "封面标题：三步入门") {
+				t.Fatalf("cover choice or user brief lost: %s", got)
+			}
+			if strings.Contains(got, TaskReferenceImagePath) != hasMaterial {
+				t.Fatalf("video material presence changed with cover choice: %s", got)
+			}
 		}
 	}
 }

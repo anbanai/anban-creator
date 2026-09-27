@@ -131,7 +131,7 @@ func TestArticleAgentWiresPortraitReferenceOnlyIntoCoverStep(t *testing.T) {
 			"project_portrait_reference_path",
 			"output/cover-plan.md",
 			"ref_image_paths=$COVER_REFERENCE_PATHS",
-			"正文配图不得使用人物参考图",
+			"人物参考图不进入正文配图",
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing article portrait-cover wiring %q", relative, want)

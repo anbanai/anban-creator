@@ -602,12 +602,12 @@ func TestPlanServiceCreateRequiresAndPersistsArticleCoverPortrait(t *testing.T) 
 	}
 	plan, err := svc.Create(ctx, CreatePlanParams{
 		UserID: "user-1", ProjectID: projectID, ExecutionProfile: "effective",
-		CronExpr: "0 9 * * *", ArticleCoverUsePortrait: true,
+		CronExpr: "0 9 * * *", CoverUsePortrait: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.ArticleCoverUsePortrait {
+	if !plan.CoverUsePortrait {
 		t.Fatal("plan did not persist required portrait setting")
 	}
 
@@ -628,12 +628,12 @@ func TestPlanServiceCreateRequiresAndPersistsArticleCoverPortrait(t *testing.T) 
 	taskSvc.SetReferenceAssetService(NewReferenceAssetService(taskRepo, nil, nil))
 	spawned, err := taskSvc.CreateFromPlan(ctx, &model.Plan{
 		ID: uuid.NewString(), UserID: userID, ProjectID: spawnProjectID, Type: model.PlatformArticle,
-		ExecutionProfile: "effective", ArticleCoverUsePortrait: true,
+		ExecutionProfile: "effective", CoverUsePortrait: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !spawned.ArticleCoverUsePortrait {
+	if !spawned.CoverUsePortrait {
 		t.Fatal("spawned task did not inherit required portrait setting")
 	}
 }

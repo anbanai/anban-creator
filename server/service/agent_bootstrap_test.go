@@ -347,20 +347,20 @@ func TestBootstrapBuildsMontagePromptFromFrozenTaskImageSettings(t *testing.T) {
 		wantLines         []string
 	}{
 		{
-			name:              "task portrait",
+			name:              "task material",
 			imageRatio:        "9:16",
 			hasReferenceImage: true,
 			wantLines: []string{
 				"Video aspect ratio: 9:16",
-				"Portrait reference: use the system-provided portrait at .anban-creator/task-reference.png",
+				"Video material reference: .anban-creator/task-reference.png",
 			},
 		},
 		{
-			name:       "no portrait",
+			name:       "no task material",
 			imageRatio: "16:9",
 			wantLines: []string{
 				"Video aspect ratio: 16:9",
-				"Portrait reference: no system portrait selected",
+				"Video material reference: none",
 			},
 		},
 	} {
@@ -739,7 +739,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AgentMemoryDirectory != ".claude/agent-memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
-	if first.AgentPackID != "seednote" || first.AgentPackVersion != "2.0.1" || len(first.AgentPackDigest) != 64 || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
+	if first.AgentPackID != "seednote" || first.AgentPackVersion != profiledExecution.AgentPackVersion || first.AgentPackVersion == "" || first.AgentPackDigest != profiledExecution.AgentPackDigest || len(first.AgentPackDigest) != 64 || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
 		t.Fatalf("response Agent Pack identity = %#v", first)
 	}
 	if first.ExecutionProfile.Envs["ANTHROPIC_AUTH_TOKEN"] != "test-token" || first.ExecutionProfile.Envs["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.ExecutionProfile.Envs["ANTHROPIC_MODEL"] != "claude-test" || len(first.ExecutionProfile.Envs) != 7 {

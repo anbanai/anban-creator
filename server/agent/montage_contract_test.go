@@ -187,7 +187,6 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 	for _, want := range []string{
 		"name: montage",
 		"  - montage",
-		"  - video-cover-design",
 		"montage-input.json",
 		"montage-tool-policy.json",
 		"montage-pipeline-defaults.json",
@@ -197,7 +196,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"不得读取 `montage_input.preferences.aspect_ratio`",
 		"output/cover.png",
 		"output/cover-quality.json",
-		"video-cover-design Skill",
+		"portrait-cover-design Skill",
 		"delivery_targets",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
 		"/workspace/openmontage",
@@ -223,7 +222,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"不得读取 montage_input.preferences.aspect_ratio",
 		"output/cover.png",
 		"output/cover-quality.json",
-		"video-cover-design Skill",
+		"portrait-cover-design Skill",
 		"delivery_targets",
 		"ANBAN_MONTAGE_SUBMODULE_PATH",
 		"/workspace/openmontage",
@@ -232,7 +231,7 @@ func TestMontagePluginContractsAreDistributed(t *testing.T) {
 		"final_video",
 		`submit_agent_feedback(agent_name=\"montage\"`,
 		"__PLUGIN_ROOT__/skills/montage/SKILL.md",
-		"__PLUGIN_ROOT__/skills/video-cover-design/SKILL.md",
+		"__PLUGIN_ROOT__/skills/portrait-cover-design/SKILL.md",
 	} {
 		if !strings.Contains(codexAgent, want) {
 			t.Fatalf("codex montage agent missing %q", want)

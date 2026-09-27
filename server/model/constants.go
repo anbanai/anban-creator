@@ -118,6 +118,16 @@ func IsMontagePlatform(platform string) bool {
 	return platform == PlatformMontage
 }
 
+// SupportsPortraitCover identifies workflows with an independently selected project portrait cover.
+func SupportsPortraitCover(taskType string) bool {
+	switch taskType {
+	case PlatformArticle, PlatformSeednote, PlatformMontage, PlatformHypit:
+		return true
+	default:
+		return false
+	}
+}
+
 const ImageRatioAuto = "auto"
 
 // ValidImageRatios is the union of business image ratios, including explicit auto selection.

@@ -1,3 +1,4 @@
+import { supportsPortraitCover } from '@/lib/portrait-cover'
 import { HypitCreationPanel } from '@/components/hypit/HypitCreationPanel'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -539,7 +540,7 @@ export default function ProjectsPage() {
     }
     const referenceImage = referenceSelectionFromValue(values.reference_image)
     const portraitReferenceImage = referenceSelectionFromValue(values.portrait_reference_image)
-    if (values.platform === 'article') payload.portrait_reference_image = portraitReferenceImage
+    if (supportsPortraitCover(values.platform)) payload.portrait_reference_image = portraitReferenceImage
     if (editingProject) {
       const updatePayload = {
         ...payload,
@@ -852,8 +853,8 @@ export default function ProjectsPage() {
               {supportsVisualReference && selectedPlatform === 'montage' ? (
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">人物参考</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">自动提供给任务和计划，由 Agent 按内容决定是否用于封面。</p>
+                    <p className="text-sm font-medium text-foreground">视频素材参考</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">提供给视频创作使用，与封面人物参考独立。</p>
                   </div>
                   <ReferenceAssetUpload
                     value={referenceImage ?? null}
@@ -905,12 +906,12 @@ export default function ProjectsPage() {
                 )} />
               ) : null}
 
-              {isWechat && (
+              {supportsPortraitCover(selectedPlatform) && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">默认人物参考</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">自动提供给任务和计划，由 Agent 按内容决定是否用于封面。</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">用于任务和计划中勾选的人物封面；未勾选时生成普通封面。</p>
                     </div>
                     <ReferenceAssetUpload
                       value={portraitReferenceImage ?? null}

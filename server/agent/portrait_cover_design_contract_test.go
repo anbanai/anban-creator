@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-func TestVideoCoverDesignUsesManagedMCPWorkflow(t *testing.T) {
+func TestPortraitCoverDesignUsesManagedMCPWorkflow(t *testing.T) {
 	root := repoRoot(t)
-	skillRoot := filepath.Join(root, "harness", "skills", "video-cover-design")
+	skillRoot := filepath.Join(root, "harness", "skills", "portrait-cover-design")
 	body := readRepoFile(t, filepath.Join(skillRoot, "SKILL.md"))
 
 	for _, want := range []string{
@@ -18,21 +18,21 @@ func TestVideoCoverDesignUsesManagedMCPWorkflow(t *testing.T) {
 		"output/cover-prompt.md",
 		"output/cover-quality.json",
 		"output/failure-diagnosis.md",
-		"$VIDEO_ASPECT_RATIO",
-		".anban-creator/task-reference.png",
-		"不得向用户提问",
+		"$COVER_ASPECT_RATIO",
+		"$PORTRAIT_REFERENCE_PATH",
+		"不询问用户",
 		"最多 3 次",
 		"generate_image(",
 		"project_id=$PROJECT_ID",
 		"task_id=$TASK_ID",
 		`image_type="cover"`,
 		`output_path="output/cover.png"`,
-		"aspect_ratio=$VIDEO_ASPECT_RATIO",
+		"aspect_ratio=$COVER_ASPECT_RATIO",
 		"analyze_image(",
 		`file_path="output/cover.png"`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("video-cover-design SKILL.md missing managed workflow term %q", want)
+			t.Fatalf("portrait-cover-design SKILL.md missing managed workflow term %q", want)
 		}
 	}
 
@@ -43,22 +43,22 @@ func TestVideoCoverDesignUsesManagedMCPWorkflow(t *testing.T) {
 		"三轮提问",
 	} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("video-cover-design SKILL.md retains interactive or prompt-only contract %q", forbidden)
+			t.Fatalf("portrait-cover-design SKILL.md retains interactive or prompt-only contract %q", forbidden)
 		}
 	}
 }
 
-func TestVideoCoverDesignReferencesUseRuntimeRatioAndCleanPackaging(t *testing.T) {
+func TestPortraitCoverDesignReferencesUseRuntimeRatioAndCleanPackaging(t *testing.T) {
 	root := repoRoot(t)
-	skillRoot := filepath.Join(root, "harness", "skills", "video-cover-design")
+	skillRoot := filepath.Join(root, "harness", "skills", "portrait-cover-design")
 
 	for _, forbiddenPath := range []string{"README.md", ".git", ".gitignore", "assets/.gitkeep"} {
 		if _, err := os.Stat(filepath.Join(skillRoot, forbiddenPath)); !os.IsNotExist(err) {
-			t.Fatalf("video-cover-design must not ship %s", forbiddenPath)
+			t.Fatalf("portrait-cover-design must not ship %s", forbiddenPath)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(skillRoot, "LICENSE")); err != nil {
-		t.Fatalf("video-cover-design must preserve LICENSE: %v", err)
+		t.Fatalf("portrait-cover-design must preserve LICENSE: %v", err)
 	}
 
 	err := filepath.WalkDir(skillRoot, func(path string, entry os.DirEntry, err error) error {
@@ -86,6 +86,6 @@ func TestVideoCoverDesignReferencesUseRuntimeRatioAndCleanPackaging(t *testing.T
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("walk video-cover-design: %v", err)
+		t.Fatalf("walk portrait-cover-design: %v", err)
 	}
 }

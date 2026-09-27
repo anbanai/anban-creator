@@ -888,11 +888,13 @@ function runSeednoteGate(cwd: string, taskType: string, pluginRoot: string, sign
 }
 
 function requiredSkills(taskType: string): string[] {
-  if (taskType === "seednote") return ["anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design", "anban:humanizer"];
+  if (taskType === "seednote") return ["anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design", "anban:humanizer", "anban:portrait-cover-design"];
   if (taskType === "viral_analysis") return ["anban:seednote-research", "anban:seednote-viral-analysis"];
-  if (taskType === "article" || taskType === "ecommerce") return ["anban:humanizer"];
+  if (taskType === "article") return ["anban:humanizer", "anban:portrait-cover-design"];
+  if (taskType === "ecommerce") return ["anban:humanizer"];
   if (taskType === "live-slicer") return ["anban:live-slice", "anban:capcut-draft"];
-  if (taskType === "montage") return ["anban:montage", "anban:video-cover-design"];
+  if (taskType === "montage") return ["anban:montage", "anban:portrait-cover-design"];
+  if (taskType === "hypit") return ["anban:portrait-cover-design"];
   return [];
 }
 

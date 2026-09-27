@@ -32,7 +32,7 @@ type UserPromptParams struct {
 	// nil defaults true for legacy tasks/callers. Ignored for non-article task types.
 	ArticleWithCover         *bool
 	ArticleWithContentImages *bool
-	ArticleCoverUsePortrait  bool
+	CoverUsePortrait         bool
 }
 
 // BuildUserPrompt constructs the user prompt for Claude Code agent execution.
@@ -73,11 +73,11 @@ func BuildUserPrompt(p UserPromptParams) string {
 		base += "\n\n" + controls
 	}
 	if model.IsMontagePlatform(p.TaskType) {
-		portraitReference := "Portrait reference: no system portrait selected"
+		materialReference := "Video material reference: none"
 		if p.HasReferenceImage {
-			portraitReference = "Portrait reference: use the system-provided portrait at " + TaskReferenceImagePath
+			materialReference = "Video material reference: " + TaskReferenceImagePath
 		}
-		base += "\n\nVideo aspect ratio: " + p.ImageRatio + "\n" + portraitReference
+		base += "\n\nVideo aspect ratio: " + p.ImageRatio + "\n" + materialReference
 	}
 	if p.TaskID != "" || p.ProjectID != "" {
 		parts := make([]string, 0, 2)
@@ -127,9 +127,13 @@ func describeRuntimeControls(p UserPromptParams) string {
 		controls = append(controls, "seednote_image_mode="+seednoteImageMode(p.HasContentImage, p.HasTailImage))
 	case model.PlatformArticle:
 		controls = append(controls, "article_image_mode="+articleImageMode(defaultTrue(p.ArticleWithCover), defaultTrue(p.ArticleWithContentImages)))
-		if p.ArticleCoverUsePortrait {
-			controls = append(controls, "article_cover_portrait=required_project_portrait")
+	}
+	if model.SupportsPortraitCover(p.TaskType) {
+		portraitMode := "disabled"
+		if p.CoverUsePortrait && (p.TaskType != model.PlatformArticle || defaultTrue(p.ArticleWithCover)) {
+			portraitMode = "required_project_portrait"
 		}
+		controls = append(controls, "cover_portrait="+portraitMode)
 	}
 	if len(controls) == 0 {
 		return ""

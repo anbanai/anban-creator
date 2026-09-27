@@ -25,6 +25,9 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 		t.Run(pack.ID, func(t *testing.T) {
 			wantVersion := "2.0.1"
 			if pack.ID == "article" || pack.ID == "montage" || pack.ID == "hypit" {
+				wantVersion = "2.0.3"
+			}
+			if pack.ID == "seednote" {
 				wantVersion = "2.0.2"
 			}
 			if pack.Version != wantVersion {

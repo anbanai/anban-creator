@@ -140,6 +140,7 @@ describe("validateManagedInit", () => {
         "anban:seednote-writing",
         "anban:seednote-visual-design",
         "anban:humanizer",
+        "anban:portrait-cover-design",
       ],
     };
     expect(() => validateManagedInit(message, "seednote")).not.toThrow();
@@ -185,7 +186,7 @@ describe("validateManagedInit", () => {
 
   test("does not implicitly require legacy progress for other managed task types", () => {
     const taskTypes = [
-      { taskType: "article", tool: "get_project_profile", skills: ["anban:humanizer"] },
+      { taskType: "article", tool: "get_project_profile", skills: ["anban:humanizer", "anban:portrait-cover-design"] },
       { taskType: "ecommerce", tool: "get_project_profile", skills: ["anban:humanizer"] },
       { taskType: "live-slicer", tool: "analyze_video", skills: ["anban:live-slice", "anban:capcut-draft"] },
       { taskType: "moments", tool: "get_project_profile", skills: [] },
@@ -210,7 +211,7 @@ describe("validateManagedInit", () => {
       "get_project_profile",
       "submit_agent_feedback",
     ];
-    const requiredSkills = ["anban:montage", "anban:video-cover-design"];
+    const requiredSkills = ["anban:montage", "anban:portrait-cover-design"];
     const message = {
       type: "system" as const,
       subtype: "init" as const,
@@ -233,6 +234,22 @@ describe("validateManagedInit", () => {
         skills: message.skills.filter((skill) => skill !== missing),
       }, "montage"), missing).toThrow(missing);
     }
+  });
+
+  test.each(["article", "seednote", "hypit"])("requires the shared portrait cover skill for %s", (taskType) => {
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: ["analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback"].map((tool) => `mcp__anban__${tool}`),
+      skills: ["anban:humanizer", "anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design", "anban:portrait-cover-design"],
+    };
+    expect(() => validateManagedInit(message, taskType)).not.toThrow();
+    expect(() => validateManagedInit({
+      ...message,
+      skills: [...message.skills.filter((skill) => skill !== "anban:portrait-cover-design"), "anban:video-cover-design"],
+    }, taskType)).toThrow("anban:portrait-cover-design");
   });
 
   test("maps terminal SDK usage through the bootstrap model aliases", () => {

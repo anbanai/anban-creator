@@ -1411,7 +1411,7 @@ func TestCloneArticleEditableOverridesPreserveDirectReferenceOutsideGenericAttac
 
 	source := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
-		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ArticleCoverUsePortrait: true,
+		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, CoverUsePortrait: true,
 	}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
@@ -1435,7 +1435,7 @@ func TestCloneArticleEditableOverridesPreserveDirectReferenceOutsideGenericAttac
 	if clone.ReferenceImageAssetID != asset.ID {
 		t.Fatalf("clone reference asset = %q, want %q", clone.ReferenceImageAssetID, asset.ID)
 	}
-	if !clone.ArticleCoverUsePortrait {
+	if !clone.CoverUsePortrait {
 		t.Fatal("editable clone did not inherit required project portrait setting")
 	}
 	if len(attachments) != 2 || attachments[0].FileName != "brief.pdf" || attachments[1].FileName != "notes.txt" {

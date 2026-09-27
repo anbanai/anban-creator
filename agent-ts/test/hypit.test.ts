@@ -4,6 +4,7 @@ import {
   mkdir,
   writeFile,
   readFile,
+  readdir,
   rm,
   symlink,
 } from "node:fs/promises";
@@ -291,6 +292,16 @@ test.skipIf(!hasMedia)(
         dependencies,
       );
       const snapshot = await prepareHypitUpload(root, [], receipt);
+      const requiredNames = [
+        "cover.png",
+        "delivery-manifest.json",
+        "final.mp4",
+        "project.json",
+        "project.zip",
+        "quality-report.json",
+      ];
+      expect(Object.keys(receipt).sort()).toEqual(requiredNames);
+      expect((await readdir(join(snapshot.workspace, "output"))).sort()).toEqual(requiredNames);
       expect(
         await readFile(join(snapshot.workspace, "output/final.mp4")),
       ).toEqual(await readFile(join(root, "output/final.mp4")));
@@ -302,6 +313,55 @@ test.skipIf(!hasMedia)(
       expect(report.media.width).toBe(64);
       expect(commands.map((c) => c[0])).toEqual(["check", "plan"]);
       expect(commands[1]).toContain("--runtime");
+      const coverAudits = {
+        "cover-plan.md": "# Portrait cover\nUse the locked headline and portrait.",
+        "cover-prompt.md": "16:9 cover with the exact locked headline.",
+        "cover-quality.json": '{"overall_pass":true,"attempts":1}',
+      };
+      for (const [name, content] of Object.entries(coverAudits))
+        await writeFile(join(root, "output", name), content);
+      await writeFile(join(root, "output/unlisted-audit.md"), "not for upload");
+      const auditReceipt = await finalizeHypit(
+        root,
+        process.env,
+        undefined,
+        dependencies,
+      );
+      const auditSnapshot = await prepareHypitUpload(root, [], auditReceipt);
+      try {
+        for (const [name, content] of Object.entries(coverAudits)) {
+          expect(auditReceipt[name]).toMatch(/^[0-9a-f]{64}$/);
+          expect(
+            await readFile(join(auditSnapshot.workspace, "output", name), "utf8"),
+          ).toBe(content);
+        }
+        expect(
+          await readdir(join(auditSnapshot.workspace, "output")),
+        ).not.toContain("unlisted-audit.md");
+      } finally {
+        await auditSnapshot.dispose();
+      }
+      for (const [name, content] of Object.entries(coverAudits)) {
+        await writeFile(join(root, "output", name), "changed-after-verification");
+        await expect(prepareHypitUpload(root, [], auditReceipt)).rejects.toThrow(
+          "changed",
+        );
+        await writeFile(join(root, "output", name), content);
+      }
+      await writeFile(join(root, "output/cover-prompt.md"), "native-auth-sensitive");
+      await expect(
+        finalizeHypit(
+          root,
+          { ...process.env, HYPIT_AUTH: "native-auth-sensitive" },
+          undefined,
+          dependencies,
+        ),
+      ).rejects.toThrow("credential");
+      await writeFile(join(root, "output/cover-prompt.md"), Buffer.alloc(2 * 1024 * 1024 + 1));
+      await expect(
+        finalizeHypit(root, process.env, undefined, dependencies),
+      ).rejects.toThrow("snapshot");
+      await writeFile(join(root, "output/cover-prompt.md"), coverAudits["cover-prompt.md"]);
       await writeFile(join(root, "project/notes.txt"), "native-auth-sensitive");
       await expect(
         finalizeHypit(
@@ -819,6 +879,56 @@ test("upload receipt cannot be used to follow a swapped output symlink", async (
     await expect(prepareHypitUpload(root, [], receipt)).rejects.toThrow(
       "snapshot",
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  { scenario: "unverified", error: undefined },
+  { scenario: "failed_execution", error: undefined },
+  { scenario: "invalid_digest", error: "receipt" },
+  { scenario: "symlink", error: "snapshot" },
+  { scenario: "oversized", error: "snapshot" },
+  { scenario: "credential", error: "credential" },
+])("cover audit upload protects against $scenario files", async ({ scenario, error }) => {
+  const root = await mkdtemp(join(tmpdir(), "hypit-audit-upload-"));
+  try {
+    await mkdir(join(root, "output"));
+    const receipt: Record<string, string> = {};
+    for (const name of [
+      "final.mp4", "cover.png", "project.json", "project.zip",
+      "delivery-manifest.json", "quality-report.json",
+    ]) {
+      await writeFile(join(root, "output", name), name);
+      receipt[name] = createHash("sha256").update(name).digest("hex");
+    }
+    const content = scenario === "oversized"
+      ? Buffer.alloc(2 * 1024 * 1024 + 1)
+      : Buffer.from("private-provider-credential");
+    const auditPath = join(root, "output/cover-prompt.md");
+    if (scenario === "symlink") {
+      await writeFile(join(root, "outside"), content);
+      await symlink(join(root, "outside"), auditPath);
+    } else await writeFile(auditPath, content);
+    if (scenario !== "unverified")
+      receipt["cover-prompt.md"] = scenario === "invalid_digest"
+        ? "invalid"
+        : createHash("sha256").update(content).digest("hex");
+    const upload = prepareHypitUpload(
+      root,
+      scenario === "credential" ? ["private-provider-credential"] : [],
+      scenario === "failed_execution" ? undefined : receipt,
+    );
+    if (error) await expect(upload).rejects.toThrow(error);
+    else {
+      const snapshot = await upload;
+      try {
+        expect(await readdir(join(snapshot.workspace, "output"))).not.toContain("cover-prompt.md");
+      } finally {
+        await snapshot.dispose();
+      }
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
