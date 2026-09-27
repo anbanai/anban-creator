@@ -418,7 +418,7 @@ SET s.active_generation = g.generation,
 
 -- Persist a SQL migration receipt/report for operational audit.
 INSERT INTO analytics_rebuild_jobs(
-  id, project_id, generation, status, cursor_source, processed, report,
+  id, project_id, generation, status, cursor_source, processed, report_json,
   created_at, updated_at
 )
 SELECT
