@@ -292,6 +292,38 @@ func (r *AnalyticsRepository) ResolveContent(ctx context.Context, project, id st
 	}
 	var c model.AnalyticsContent
 	e := q.Order("date IS NULL ASC, date DESC, id ASC").First(&c).Error
+	if !errors.Is(e, gorm.ErrRecordNotFound) || len(parts) != 2 || parts[0] != "task" {
+		return &c, e
+	}
+	// Legacy imports could create a publication/post content row before the
+	// task identity was copied into analytics_contents. Resolve the task deep
+	// link through the authoritative operational identity tables as a fallback.
+	if r.db.Migrator().HasTable("wechat_publications") {
+		var alias model.AnalyticsContent
+		e2 := r.db.WithContext(ctx).Table("analytics_contents AS c").Select("c.*").
+			Joins("JOIN wechat_publications AS p ON p.id = c.publication_id AND p.project_id = c.project_id").
+			Where("c.project_id = ? AND p.task_id = ?", project, parts[1]).
+			Order("c.date IS NULL ASC, c.date DESC, c.id ASC").First(&alias).Error
+		if e2 == nil {
+			return &alias, nil
+		}
+		if !errors.Is(e2, gorm.ErrRecordNotFound) {
+			return &c, e2
+		}
+	}
+	if r.db.Migrator().HasTable("seednote_posts") {
+		var alias model.AnalyticsContent
+		e2 := r.db.WithContext(ctx).Table("analytics_contents AS c").Select("c.*").
+			Joins("JOIN seednote_posts AS p ON p.id = c.post_id AND p.project_id = c.project_id").
+			Where("c.project_id = ? AND p.task_id = ?", project, parts[1]).
+			Order("c.date IS NULL ASC, c.date DESC, c.id ASC").First(&alias).Error
+		if e2 == nil {
+			return &alias, nil
+		}
+		if !errors.Is(e2, gorm.ErrRecordNotFound) {
+			return &c, e2
+		}
+	}
 	return &c, e
 }
 
