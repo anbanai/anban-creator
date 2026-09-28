@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"net/url"
 	"strconv"
 
 	"github.com/anbanai/anban-creator/server/repository"
@@ -15,6 +16,21 @@ type AnalyticsV2Handler struct{ service *service.AnalyticsService }
 func NewAnalyticsV2Handler(s *service.AnalyticsService) *AnalyticsV2Handler {
 	return &AnalyticsV2Handler{service: s}
 }
+
+// Fiber keeps encoded route parameters encoded unless UnescapePath is enabled.
+// Content IDs are composite keys (for example seednote_post:<uuid>), so decode
+// this parameter at the analytics boundary before resolving the content.
+func decodeAnalyticsContentID(raw string) (string, error) {
+	if raw == "" {
+		return "", errors.New("contentId is required")
+	}
+	decoded, err := url.PathUnescape(raw)
+	if err != nil {
+		return "", errors.New("invalid contentId encoding")
+	}
+	return decoded, nil
+}
+
 func analyticsQuery(c fiber.Ctx) (service.AnalyticsQuery, error) {
 	q := service.AnalyticsQuery{From: c.Query("from"), To: c.Query("to"), Granularity: c.Query("granularity"), MetricBasis: c.Query("metric_basis"), Search: c.Query("search"), ContentType: c.Query("content_type"), Sort: c.Query("sort"), Direction: c.Query("direction")}
 	var err error
@@ -65,6 +81,13 @@ func (h *AnalyticsV2Handler) read(c fiber.Ctx, operation string) error {
 	if err != nil {
 		return Error(c, 400, err.Error())
 	}
+	contentID := ""
+	if operation == "detail" || operation == "observations" {
+		contentID, err = decodeAnalyticsContentID(c.Params("contentId"))
+		if err != nil {
+			return Error(c, 400, err.Error())
+		}
+	}
 	switch operation {
 	case "overview":
 		value, err := h.service.Overview(c.Context(), user, project, q)
@@ -73,10 +96,10 @@ func (h *AnalyticsV2Handler) read(c fiber.Ctx, operation string) error {
 		value, err := h.service.Contents(c.Context(), user, project, q)
 		return analyticsResponse(c, value, err)
 	case "detail":
-		value, err := h.service.Detail(c.Context(), user, project, c.Params("contentId"), q)
+		value, err := h.service.Detail(c.Context(), user, project, contentID, q)
 		return analyticsResponse(c, value, err)
 	case "observations":
-		value, err := h.service.Observations(c.Context(), user, project, c.Params("contentId"), q)
+		value, err := h.service.Observations(c.Context(), user, project, contentID, q)
 		return analyticsResponse(c, value, err)
 	case "dates":
 		year, e := strconv.Atoi(c.Query("year"))
