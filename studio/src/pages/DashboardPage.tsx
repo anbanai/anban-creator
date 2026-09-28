@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowUpRight, Lightbulb } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -40,6 +40,7 @@ function requiresImageCapabilityReselection(message: string) {
 
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const queryClient = useQueryClient()
 
   const composerRef = useRef<HTMLDivElement>(null)
@@ -52,6 +53,15 @@ export default function DashboardPage() {
   const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
   const [imageCapabilityKey, setImageCapabilityKey] = useState('')
   const [imageCapabilityReselectionRequired, setImageCapabilityReselectionRequired] = useState(false)
+  const trendState = location.state as { project_id?: string; trend_title?: string; trend_url?: string } | null
+
+  useEffect(() => {
+    if (!trendState?.trend_title) return
+    const source = trendState.trend_url ? `\n来源：${trendState.trend_url}` : ''
+    setPrompt(`围绕当前热点「${trendState.trend_title}」：先判断它是否适合我的账号赛道；若合适，给出 2-3 个差异化的二创角度，并把最推荐的一条写成可直接发布的文案初稿。${source}`)
+    if (trendState.project_id) setSelectedProjectId(trendState.project_id)
+    navigate(location.pathname + location.search, { replace: true, state: null })
+  }, [location.pathname, location.search, navigate, trendState?.project_id, trendState?.trend_title, trendState?.trend_url])
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: GENERAL_AGENT_ATTACHMENT_POLICY,
@@ -63,6 +73,11 @@ export default function DashboardPage() {
     queryKey: ['projects', 'dashboard', 'active'],
     queryFn: () => api.projects.list({ status: 'active' }),
     staleTime: 60_000,
+  })
+  const dashboardTrendsQuery = useQuery({
+    queryKey: queryKeys.trends.all('weibo,douyin', 3),
+    queryFn: () => api.trends.list({ platforms: 'weibo,douyin', limit: 3 }),
+    staleTime: 30_000,
   })
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
@@ -362,6 +377,14 @@ export default function DashboardPage() {
           <span>任务创建后，可在「任务」中查看进度与作品</span>
           {executionProfilePrice !== undefined && <span className="tabular-nums">任务固定费 { (executionProfilePrice * quantity).toLocaleString() } 积分{quantity > 1 ? ` / ${quantity} 个任务` : ''} · 图片、视频等按用量另计</span>}
         </div>
+
+        <section aria-label="今日热点" className="mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div><p className="text-sm font-medium">今日热点</p><p className="mt-1 text-xs text-muted-foreground">微博、抖音各 3 条 · {dashboardTrendsQuery.data?.items.some((item) => item.stale) ? '部分数据已过期' : '自动保持新鲜'}</p></div>
+            <Link to="/trends" className="text-xs font-medium text-primary hover:underline">查看热点雷达</Link>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">{(dashboardTrendsQuery.data?.items || []).map((group) => <div key={group.platform}><p className="mb-1 text-xs font-medium text-muted-foreground">{group.label}{group.stale ? ' · stale' : ''}</p>{group.items.map((item) => <button key={item.title} type="button" className="block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => navigate('/', { state: { project_id: selectedProjectId, trend_title: item.title, trend_url: item.url } })}>{item.rank}. {item.title}</button>)}</div>)}</div>
+        </section>
 
         {!prompt.trim() && (
           <section aria-label="创作灵感" className="mx-auto w-full max-w-3xl">

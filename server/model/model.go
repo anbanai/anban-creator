@@ -43,6 +43,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&ViralAnalysis{},
 		&PosterTask{},
 		&TopicPool{},
+		&TrendSnapshot{},
 		&AgentFeedback{},
 		&ContentMetadataReport{},
 		&ContentTagAssignment{},

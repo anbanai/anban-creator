@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -67,10 +68,16 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, to
 	}
 
 	items := make([]*model.TopicPool, 0, len(topics))
+	seen := make(map[string]struct{}, len(topics))
 	for _, t := range topics {
+		t = strings.TrimSpace(t)
 		if t == "" {
 			continue
 		}
+		if _, exists := seen[t]; exists {
+			continue
+		}
+		seen[t] = struct{}{}
 		if len([]rune(t)) > maxTopicLength {
 			return nil, fmt.Errorf("topic exceeds %d character limit: %.50q...", maxTopicLength, t)
 		}
@@ -83,6 +90,27 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, to
 	}
 	if len(items) == 0 {
 		return nil, fmt.Errorf("at least one non-empty topic is required")
+	}
+	titles := make([]string, 0, len(items))
+	for _, item := range items {
+		titles = append(titles, item.Topic)
+	}
+	existing, err := s.repo.TopicPools().FindTitlesByProject(ctx, projectID, titles)
+	if err != nil {
+		return nil, fmt.Errorf("find existing topics: %w", err)
+	}
+	for _, title := range existing {
+		delete(seen, title)
+	}
+	filtered := items[:0]
+	for _, item := range items {
+		if _, ok := seen[item.Topic]; ok {
+			filtered = append(filtered, item)
+		}
+	}
+	items = filtered
+	if len(items) == 0 {
+		return []*model.TopicPool{}, nil
 	}
 
 	if err := s.repo.TopicPools().CreateBatch(ctx, items); err != nil {

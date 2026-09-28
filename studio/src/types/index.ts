@@ -171,6 +171,7 @@ export type {
 
 // Topic Pool
 export type { TopicPoolStatus, TopicPool } from './topic-pool'
+export type { TrendItem, TrendPlatformResult, TrendQueryResult } from './trends'
 
 // Viral Analysis
 export type {

@@ -27,6 +27,7 @@ import { seednoteAdminApi } from './seednote-admin'
 import { seednoteImportApi } from './seednote-import'
 import { wechatAnalyticsImportApi } from './wechat-analytics-import'
 import { imageAnalysesApi } from './image-analyses'
+import { trendsApi } from './trends'
 
 export const api = {
   auth: authApi,
@@ -58,4 +59,5 @@ export const api = {
   seednoteImport: seednoteImportApi,
   wechatAnalyticsImport: wechatAnalyticsImportApi,
   imageAnalyses: imageAnalysesApi,
+  trends: trendsApi,
 }

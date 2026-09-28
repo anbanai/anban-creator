@@ -48,6 +48,12 @@ type Config struct {
 	Seednote           SeednoteConfig                  `yaml:"seednote"`
 	Worldtree          WorldtreeConfig                 `yaml:"worldtree"`
 	Ilink              IlinkConfig                     `yaml:"ilink"`
+	Trends             TrendsConfig                    `yaml:"trends"`
+}
+
+type TrendsConfig struct {
+	TTL     time.Duration `yaml:"ttl"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceConfig) []string {
@@ -950,6 +956,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"seednote":        true,
 		"worldtree":       true,
 		"ilink":           true,
+		"trends":          true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -1029,6 +1036,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Redis.Addr == "" {
 		c.Redis.Addr = "localhost:6379"
+	}
+	if c.Trends.TTL == 0 {
+		c.Trends.TTL = 10 * time.Minute
+	}
+	if c.Trends.Timeout == 0 {
+		c.Trends.Timeout = 8 * time.Second
 	}
 	if c.JWT.AccessExpiry == "" {
 		c.JWT.AccessExpiry = "24h"
@@ -1533,6 +1546,12 @@ func detectPluginDir() string {
 // Validate checks that required configuration fields are set.
 func (c *Config) Validate() error {
 	var errs []string
+	if c.Trends.TTL <= 0 {
+		errs = append(errs, "trends.ttl must be positive")
+	}
+	if c.Trends.Timeout <= 0 {
+		errs = append(errs, "trends.timeout must be positive")
+	}
 	if err := c.Claude.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}

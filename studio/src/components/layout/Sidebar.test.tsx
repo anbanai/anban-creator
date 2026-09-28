@@ -82,6 +82,7 @@ describe('Sidebar', () => {
       '插件',
       '设置',
       '内容数据',
+      '热点雷达',
     ])
     expect(navigation.queryByText('创作')).not.toBeInTheDocument()
     expect(navigation.queryByText('自动化')).not.toBeInTheDocument()

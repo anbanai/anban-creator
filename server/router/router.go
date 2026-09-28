@@ -69,6 +69,7 @@ type Services struct {
 	PosterHandler                *handler.PosterHandler
 	ResourceHandler              *handler.ResourceHandler
 	TopicPoolHandler             *handler.TopicPoolHandler
+	TrendsHandler                *handler.TrendsHandler
 	IlinkHandler                 *handler.IlinkHandler
 	MCPHandler                   http.Handler
 	StorageProvider              storage.Provider
@@ -291,6 +292,10 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/projects/:project_id/topics", svc.TopicPoolHandler.Create)
 		apiV1.Delete("/projects/:project_id/topics/:id", svc.TopicPoolHandler.Delete)
 		apiV1.Patch("/projects/:project_id/topics/:id/reset", svc.TopicPoolHandler.Reset)
+	}
+	if svc.TrendsHandler != nil {
+		apiV1.Get("/trends", svc.TrendsHandler.List)
+		apiV1.Post("/trends/refresh", svc.TrendsHandler.Refresh)
 	}
 
 	// ---------------------------------------------------------------------------

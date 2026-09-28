@@ -32,6 +32,7 @@ const TemplatesPage = lazyWithRecovery(() => import('@/pages/TemplatesPage'))
 const SeednoteAdminPage = lazyWithRecovery(() => import('@/pages/SeednoteAdminPage'))
 const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
 const ContentDataPage = lazyWithRecovery(() => import('@/pages/ContentDataPage'))
+const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
 
 function LoadingSpinner() {
   return (
@@ -161,6 +162,7 @@ function AppRoutes() {
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
           <Route path="content-data" element={<LazyPage component={ContentDataPage} />} />
+          <Route path="trends" element={<LazyPage component={TrendsPage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

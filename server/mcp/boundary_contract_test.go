@@ -51,6 +51,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"listPublishedHandler":                    "svcs.PublishingSvc.ListPublished",
 	"listResourcesHandler":                    "svcs.ResourceCatalogSvc.Query",
 	"listTopicsHandler":                       "svcs.TopicPoolSvc.List",
+	"listTrendsHandler":                       "svcs.TrendSvc.List",
 	"planCreateHandler":                       "svcs.PlanSvc.Create",
 	"planListHandler":                         "svcs.PlanSvc.List",
 	"prepareFileUploadHandler":                "svcs.FileUploadSvc.PrepareForExecution",

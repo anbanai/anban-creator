@@ -555,6 +555,8 @@ func main() {
 	var posterHandler *handler.PosterHandler
 	var resourceHandler *handler.ResourceHandler
 	var topicPoolHandler *handler.TopicPoolHandler
+	var trendsHandler *handler.TrendsHandler
+	var trendSvc *service.TrendService
 	var topicPoolSvc *service.TopicPoolService
 	var agentFeedbackSvc *service.AgentFeedbackService
 	var ilinkHandler *handler.IlinkHandler
@@ -628,6 +630,8 @@ func main() {
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 		topicPoolSvc = service.NewTopicPoolService(repo, log)
 		topicPoolHandler = handler.NewTopicPoolHandler(topicPoolSvc, log)
+		trendSvc = service.NewTrendService(repo, rdb, cfg.Trends, log)
+		trendsHandler = handler.NewTrendsHandler(trendSvc, log)
 		if taskSvc != nil {
 			taskSvc.SetTopicPoolService(topicPoolSvc)
 		}
@@ -704,6 +708,7 @@ func main() {
 			FileUploadSvc:          service.NewFileUploadService(store),
 			MediaPipelineSvc:       service.NewMediaPipelineService(store, cfg.TingWu.Complete()),
 			TopicPoolSvc:           topicPoolSvc,
+			TrendSvc:               trendSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
 			ContentMetadataSvc:     service.NewContentMetadataService(repo, log),
 			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver),
@@ -847,6 +852,7 @@ func main() {
 		PosterHandler:                posterHandler,
 		ResourceHandler:              resourceHandler,
 		TopicPoolHandler:             topicPoolHandler,
+		TrendsHandler:                trendsHandler,
 		IlinkHandler:                 ilinkHandler,
 		MCPHandler:                   mcpHandler,
 		StorageProvider:              store,

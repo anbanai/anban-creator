@@ -53,6 +53,22 @@ func (r *topicPoolRepository) FindByProject(ctx context.Context, projectID, stat
 	return topics, total, nil
 }
 
+func (r *topicPoolRepository) FindTitlesByProject(ctx context.Context, projectID string, titles []string) ([]string, error) {
+	if len(titles) == 0 {
+		return nil, nil
+	}
+	var rows []struct{ Topic string }
+	if err := r.db.WithContext(ctx).Model(&model.TopicPool{}).
+		Select("topic").Where("project_id = ?", projectID).Where("topic IN ?", titles).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.Topic)
+	}
+	return out, nil
+}
+
 // ClaimOne atomically claims the earliest unused topic using SELECT FOR UPDATE
 // to prevent race conditions when multiple plans trigger simultaneously.
 func (r *topicPoolRepository) ClaimOne(ctx context.Context, userID, projectID string) (*model.TopicPool, error) {

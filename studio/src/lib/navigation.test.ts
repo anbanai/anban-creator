@@ -19,6 +19,7 @@ describe('navigation IA', () => {
       '插件',
       '设置',
       '内容数据',
+      '热点雷达',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
@@ -43,6 +44,7 @@ describe('navigation IA', () => {
       '/plugins',
       '/settings',
       '/content-data',
+      '/trends',
       '/templates',
       '/admin/seednote',
     ])

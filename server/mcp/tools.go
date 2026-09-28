@@ -54,6 +54,7 @@ type Services struct {
 	FileUploadSvc          *service.FileUploadService
 	MediaPipelineSvc       *service.MediaPipelineService
 	TopicPoolSvc           *service.TopicPoolService
+	TrendSvc               *service.TrendService
 	AgentFeedbackSvc       *service.AgentFeedbackService
 	ContentMetadataSvc     ContentMetadataManager
 	AgentProjectProfileSvc *service.AgentProjectProfileService
@@ -81,6 +82,7 @@ func RegisterTools(server *mcp.Server) {
 	registerFileUploadTools(server)
 	registerLiveSliceTools(server)
 	registerTopicPoolTools(server)
+	registerTrendTools(server)
 	registerProgressTools(server)
 	registerAgentFeedbackTools(server)
 	registerContentMetadataTools(server)

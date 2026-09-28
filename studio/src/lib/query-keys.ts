@@ -66,6 +66,9 @@ export const queryKeys = {
     all: (projectId: string) => ['topic-pool', projectId] as const,
     list: (projectId: string, status?: string) => ['topic-pool', projectId, status] as const,
   },
+  trends: {
+    all: (platforms?: string, limit?: number) => ['trends', platforms, limit] as const,
+  },
   imageCapabilities: {
     all: ['image-capabilities'] as const,
   },

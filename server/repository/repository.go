@@ -42,6 +42,7 @@ type Repository interface {
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
+	TrendSnapshots() TrendSnapshotRepository
 	AgentFeedbacks() AgentFeedbackRepository
 	ContentMetadata() ContentMetadataRepository
 	IlinkBindings() IlinkBindingRepository
@@ -425,6 +426,7 @@ type TopicPoolRepository interface {
 	CreateBatch(ctx context.Context, topics []*model.TopicPool) error
 	FindByID(ctx context.Context, id uint) (*model.TopicPool, error)
 	FindByProject(ctx context.Context, projectID, status string, offset, limit int) ([]*model.TopicPool, int64, error)
+	FindTitlesByProject(ctx context.Context, projectID string, titles []string) ([]string, error)
 	ClaimOne(ctx context.Context, userID, projectID string) (*model.TopicPool, error)
 	ClaimWithTask(ctx context.Context, userID, projectID, taskID string) (*model.TopicPool, error)
 	MarkUsed(ctx context.Context, id uint, taskID string) error
@@ -483,6 +485,7 @@ type repository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
+	trendSnapshots          TrendSnapshotRepository
 	agentFeedbacks          AgentFeedbackRepository
 	contentMetadata         ContentMetadataRepository
 	ilinkBindings           IlinkBindingRepository
@@ -522,6 +525,7 @@ func New(db *gorm.DB) Repository {
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
+	trendSnapshots := newTrendSnapshotRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
 	contentMetadata := newContentMetadataRepository(db)
 	ilinkBindings := newIlinkBindingRepository(db)
@@ -560,6 +564,7 @@ func New(db *gorm.DB) Repository {
 		viralAnalyses:           viralAnalyses,
 		posterTasks:             posterTasks,
 		topicPools:              topicPools,
+		trendSnapshots:          trendSnapshots,
 		agentFeedbacks:          agentFeedbacks,
 		contentMetadata:         contentMetadata,
 		ilinkBindings:           ilinkBindings,
@@ -610,7 +615,8 @@ func (r *repository) PosterTasks() PosterTaskRepository          { return r.post
 func (r *repository) AgentFeedbacks() AgentFeedbackRepository    { return r.agentFeedbacks }
 func (r *repository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
-func (r *repository) TopicPools() TopicPoolRepository { return r.topicPools }
+func (r *repository) TopicPools() TopicPoolRepository         { return r.topicPools }
+func (r *repository) TrendSnapshots() TrendSnapshotRepository { return r.trendSnapshots }
 func (r *repository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings
 }
@@ -674,6 +680,7 @@ type txRepository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
+	trendSnapshots          TrendSnapshotRepository
 	agentFeedbacks          AgentFeedbackRepository
 	contentMetadata         ContentMetadataRepository
 	ilinkBindings           IlinkBindingRepository
@@ -714,6 +721,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
+		trendSnapshots:          newTrendSnapshotRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		contentMetadata:         newContentMetadataRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
@@ -766,7 +774,8 @@ func (r *txRepository) PosterTasks() PosterTaskRepository          { return r.po
 func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository    { return r.agentFeedbacks }
 func (r *txRepository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
-func (r *txRepository) TopicPools() TopicPoolRepository { return r.topicPools }
+func (r *txRepository) TopicPools() TopicPoolRepository         { return r.topicPools }
+func (r *txRepository) TrendSnapshots() TrendSnapshotRepository { return r.trendSnapshots }
 func (r *txRepository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings
 }

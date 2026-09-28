@@ -10,6 +10,7 @@ import {
   PlugZap,
   KeyRound,
   BarChart3,
+  Flame,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -29,6 +30,7 @@ export const mvpNavItems: NavItem[] = [
   { to: '/plugins', label: '插件', icon: PlugZap },
   { to: '/settings', label: '设置', icon: Settings },
   { to: '/content-data', label: '内容数据', icon: BarChart3 },
+  { to: '/trends', label: '热点雷达', icon: Flame },
 ]
 
 export const adminNavItems: NavItem[] = [

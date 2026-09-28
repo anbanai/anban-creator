@@ -18,6 +18,10 @@ redis:
   password: "${ANBAN_REDIS_PASSWORD}"
   db: ${ANBAN_REDIS_DB:-0}
 
+trends:
+  ttl: 10m
+  timeout: 8s
+
 jwt:
   secret_key: "${ANBAN_JWT_SECRET_KEY}"
   access_expiry: "24h"

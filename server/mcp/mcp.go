@@ -360,6 +360,7 @@ var executionToolScopes = map[string]executionToolScope{
 	"list_drafts":             {RequireProjectID: true},
 	"list_published_articles": {RequireProjectID: true},
 	"list_topics":             {RequireProjectID: true},
+	"list_trends":             {},
 	"claim_topic":             {RequireProjectID: true, RequireTaskID: true},
 	"convert_markdown":        {RequireProjectID: true, RequireTaskID: true},
 	"render_template":         {RequireProjectID: true, RequireTaskID: true},
