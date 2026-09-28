@@ -29,9 +29,23 @@ beforeEach(() => {
 })
 function setExplicitScope() {
   fireEvent.change(screen.getByLabelText('数据截至时间'), { target: { value: '2026-09-24T12:00' } })
-  fireEvent.change(screen.getByLabelText('导入统计口径'), { target: { value: 'daily' } })
+  fireEvent.click(screen.getByLabelText('导入统计口径'))
+  fireEvent.click(screen.getByRole('option', { name: '当日新增' }))
 }
 describe('统一导入确认', () => {
+  it('defaults the data cutoff to the current Beijing minute and keeps it after replacing the file', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-28T00:12:34.000Z'))
+    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    expect(screen.getByLabelText('数据截至时间')).toHaveValue('2026-09-28T08:12')
+    await upload()
+    expect(screen.getByText(/文件已解析/)).toBeInTheDocument()
+    expect(screen.getByText('data.xlsx')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('选择导入文件'), { target: { files: [new File(['fixture-2'], 'data-2.xlsx')] } })
+    expect(screen.getByLabelText('数据截至时间')).toHaveValue('2026-09-28T08:12')
+    vi.useRealTimers()
+  })
+
   it('invalidates only analytics belonging to the imported project', async () => {
     const client = new QueryClient()
     const own = ['content-analytics', 'p1', 'overview']
@@ -49,8 +63,8 @@ describe('统一导入确认', () => {
     render(<ContentImportDialog project={wechat} onClose={vi.fn()} />)
     await upload()
     expect(screen.getByLabelText('导入统计口径')).toBeDisabled()
-    expect(screen.getByLabelText('导入统计口径')).toHaveValue('cumulative')
-    expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeDisabled()
+    expect(screen.getByLabelText('导入统计口径')).toHaveTextContent('累计数据')
+    expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeEnabled()
     fireEvent.change(screen.getByLabelText('数据截至时间'), { target: { value: '2026-09-24T12:00' } })
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
     await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(wechat, expect.objectContaining({ metric_basis: 'cumulative' })))

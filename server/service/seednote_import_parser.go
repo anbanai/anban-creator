@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -316,11 +317,23 @@ func parseSeednoteCount(label, raw string, errs *[]string) *int64 {
 	if raw == "" {
 		return nil
 	}
-	value, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || value < 0 {
+	if value, err := strconv.ParseInt(raw, 10, 64); err == nil && value >= 0 {
+		return &value
+	}
+	// Official XLSX exports encode counters as numeric cells such as "260.0".
+	// Parse them exactly so fractional, negative, and out-of-range values are not
+	// silently truncated or rounded by float64 conversion.
+	rational, ok := new(big.Rat).SetString(raw)
+	// Rat also accepts fraction syntax (for example, "1/1"), which is not a
+	// numeric cell representation emitted by XLSX and must not be imported.
+	if strings.Contains(raw, "/") {
+		ok = false
+	}
+	if !ok || rational.Sign() < 0 || !rational.IsInt() || rational.Num().BitLen() > 63 {
 		*errs = append(*errs, label+"必须是有效的非负整数")
 		return nil
 	}
+	value := rational.Num().Int64()
 	return &value
 }
 

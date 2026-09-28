@@ -15,8 +15,18 @@ func TestAnalyticsImportNumbersPreserveInt64(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyticsImportCountsAcceptIntegralXLSXDecimals(t *testing.T) {
+	for _, raw := range []string{"0.0", "260.0", "1180.0", "5048.0"} {
+		var errors []string
+		value := parseSeednoteCount("count", raw, &errors)
+		if len(errors) != 0 || value == nil {
+			t.Errorf("did not accept integral XLSX count %s: value=%v errors=%v", raw, value, errors)
+		}
+	}
+}
 func TestAnalyticsImportNumbersRejectNonfiniteAndOverflow(t *testing.T) {
-	for _, raw := range []string{"NaN", "+Inf", "-Inf", "9223372036854775808", "1.2", "-1"} {
+	for _, raw := range []string{"NaN", "+Inf", "-Inf", "9223372036854775808", "1.2", "-1", "1/1"} {
 		var errors []string
 		if value := parseSeednoteCount("count", raw, &errors); value != nil || len(errors) == 0 {
 			t.Errorf("accepted invalid count %s", raw)
