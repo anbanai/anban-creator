@@ -54,7 +54,7 @@ type WechatAnalyticsImportRow struct {
 	Title                  string     `gorm:"type:varchar(500);not null" json:"title"`
 	NormalizedTitle        string     `gorm:"type:varchar(500);index;not null" json:"normalized_title"`
 	PublishedDate          *time.Time `gorm:"index" json:"published_date,omitempty"`
-	ArticleURL             string     `gorm:"type:varchar(1000);not null;default:'';index" json:"article_url,omitempty"`
+	ArticleURL             string     `gorm:"type:varchar(1000);not null;default:'';index:,length:191" json:"article_url,omitempty"`
 	ReadUsers              *int64     `json:"read_users,omitempty"`
 	ShareUsers             *int64     `json:"share_users,omitempty"`
 	ReadToFollowUsers      *int64     `json:"read_to_follow_users,omitempty"`

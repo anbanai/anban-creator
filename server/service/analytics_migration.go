@@ -13,6 +13,7 @@ import (
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // AnalyticsMigrationReport is persisted on the rebuild job. Unknown Seednote
@@ -229,14 +230,38 @@ func (m *AnalyticsRebuildManager) migrateLegacy(ctx context.Context, job *model.
 				if err := r.UpsertContent(ctx, &in.content); err != nil {
 					return err
 				}
-				inserted, err := r.InsertObservation(ctx, &in.obs, in.raw)
-				if err != nil {
+				var prior model.AnalyticsObservation
+				err := txdb.Where("id = ?", in.obs.ID).First(&prior).Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					inserted, insertErr := r.InsertObservation(ctx, &in.obs, in.raw)
+					if insertErr != nil {
+						return insertErr
+					}
+					if inserted {
+						report.Inserted++
+						affected = append(affected, repository.AnalyticsAffectedDay{ContentID: in.obs.ContentID, MetricBasis: in.obs.MetricBasis, StatDate: in.obs.StatDate})
+					} else {
+						report.Duplicates++
+					}
+				} else if err != nil {
 					return err
-				}
-				if inserted {
-					report.Inserted++
-					affected = append(affected, repository.AnalyticsAffectedDay{ContentID: in.obs.ContentID, MetricBasis: in.obs.MetricBasis, StatDate: in.obs.StatDate})
+				} else if strings.HasPrefix(in.obs.ID, "legacy:") {
+					// Legacy observations are deterministic projections of source rows.
+					// Refresh them on reruns so identity resolution and revocation changes
+					// are reflected without touching modern observations.
+					if err := txdb.Model(&model.AnalyticsObservation{}).Where("id = ?", in.obs.ID).Select("*").Omit("sequence").Updates(&in.obs).Error; err != nil {
+						return err
+					}
+					if err := txdb.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "observation_id"}}, DoUpdates: clause.AssignmentColumns([]string{"payload"})}).Create(&model.AnalyticsRawPayload{ObservationID: in.obs.ID, Payload: in.raw}).Error; err != nil {
+						return err
+					}
+					report.Duplicates++
+					affected = append(affected,
+						repository.AnalyticsAffectedDay{ContentID: prior.ContentID, MetricBasis: prior.MetricBasis, StatDate: prior.StatDate},
+						repository.AnalyticsAffectedDay{ContentID: in.obs.ContentID, MetricBasis: in.obs.MetricBasis, StatDate: in.obs.StatDate},
+					)
 				} else {
+					// A non-legacy conflict is an existing modern fact. Preserve it.
 					report.Duplicates++
 				}
 				if in.obs.RevokedAt != nil {
@@ -335,13 +360,18 @@ func (m *AnalyticsRebuildManager) migrateWechatImports(ctx context.Context, proj
 	query := db.WithContext(ctx).Table("wechat_analytics_snapshots s").Select("s.*, b.revoked_at AS batch_revoked_at").Joins("LEFT JOIN wechat_analytics_import_batches b ON b.id=s.batch_id AND b.project_id=s.project_id").Where("s.project_id = ?", project)
 	// Modern imports already wrote the immutable fact in the same transaction.
 	// Their retained legacy snapshots are audit copies, not additional versions.
-	duplicateCondition := "EXISTS (SELECT 1 FROM analytics_observations o WHERE o.project_id = s.project_id AND (o.id = " + analyticsPrefixedIDSQL(db.Dialector.Name(), "wechat_import:", "s.import_row_id") + " OR o.id = " + analyticsPrefixedIDSQL(db.Dialector.Name(), "legacy:wechat_import:", "s.id") + "))"
+	duplicateCondition := "EXISTS (SELECT 1 FROM analytics_observations o WHERE o.project_id = s.project_id AND o.id = " + analyticsPrefixedIDSQL(db.Dialector.Name(), "wechat_import:", "s.import_row_id") + ")"
 	var duplicateCount int64
 	if err := db.WithContext(ctx).Table("wechat_analytics_snapshots s").Where("s.project_id = ?", project).Where(duplicateCondition).Count(&duplicateCount).Error; err != nil {
 		return err
 	}
 	report.Duplicates += duplicateCount
 	report.WechatImports += duplicateCount
+	var duplicateRevokedCount int64
+	if err := db.WithContext(ctx).Table("wechat_analytics_snapshots s").Joins("LEFT JOIN wechat_analytics_import_batches b ON b.id=s.batch_id AND b.project_id=s.project_id").Where("s.project_id = ?", project).Where("b.revoked_at IS NOT NULL").Where(duplicateCondition).Count(&duplicateRevokedCount).Error; err != nil {
+		return err
+	}
+	report.Revoked += duplicateRevokedCount
 	query = query.Where("NOT " + duplicateCondition)
 	if err := query.FindInBatches(&rows, 500, func(_ *gorm.DB, _ int) error {
 		for _, v := range rows {
@@ -373,20 +403,44 @@ func (m *AnalyticsRebuildManager) migrateWechatImports(ctx context.Context, proj
 func (m *AnalyticsRebuildManager) migrateWechatOfficial(ctx context.Context, project string, report *AnalyticsMigrationReport, queue func(legacyMigrationInput) error) error {
 	type row struct {
 		model.WechatMetricSnapshot
-		ProjectID     string `gorm:"column:project_id"`
-		PublicationID string `gorm:"column:publication_id"`
+		ProjectID      string `gorm:"column:project_id"`
+		PublicationID  string `gorm:"column:publication_id"`
+		TrackingTaskID string `gorm:"column:tracking_task_id"`
 	}
 	db := m.repo.Analytics().DB()
 	if !db.Migrator().HasTable("wechat_metric_snapshots") {
 		return nil
 	}
 	var rows []row
-	query := db.WithContext(ctx).Table("wechat_metric_snapshots s").Select("s.*, t.project_id, p.id AS publication_id").Joins("JOIN wechat_article_trackings t ON t.id=s.tracking_id").Joins("LEFT JOIN wechat_publications p ON p.task_id=t.task_id").Where("t.project_id = ?", project)
+	query := db.WithContext(ctx).Table("wechat_metric_snapshots s").Select("s.*, t.project_id, t.publication_id AS publication_id, t.task_id AS tracking_task_id").Joins("JOIN wechat_article_trackings t ON t.id=s.tracking_id").Where("t.project_id = ?", project)
+	duplicateCondition := "EXISTS (SELECT 1 FROM analytics_observations o WHERE o.project_id = t.project_id AND o.tracking_id = s.tracking_id AND o.source = 'wechat_api' AND o.metric_basis = 'cumulative' AND o.stat_date = s.stat_date AND o.id NOT LIKE 'legacy:wechat_official:%')"
+	var duplicateCount int64
+	if err := db.WithContext(ctx).Table("wechat_metric_snapshots s").Joins("JOIN wechat_article_trackings t ON t.id=s.tracking_id").Where("t.project_id = ?", project).Where(duplicateCondition).Count(&duplicateCount).Error; err != nil {
+		return err
+	}
+	report.Duplicates += duplicateCount
+	report.WechatOfficial += duplicateCount
+	query = query.Where("NOT " + duplicateCondition)
 	if err := query.FindInBatches(&rows, 500, func(_ *gorm.DB, _ int) error {
 		for _, v := range rows {
-			contentID := "task:" + v.TaskID
+			contentID := ""
+			publicationID := strings.TrimSpace(v.PublicationID)
+			taskID := strings.TrimSpace(v.TaskID)
+			if taskID == "" {
+				taskID = strings.TrimSpace(v.TrackingTaskID)
+			}
+			if taskID != "" {
+				contentID = "task:" + taskID
+			} else if publicationID != "" {
+				contentID = "wechat_publication:" + publicationID
+			}
+			if contentID == "" {
+				report.IdentityConflicts++
+				report.skip("wechat_official_missing_identity")
+				continue
+			}
 			metrics := model.AnalyticsMetrics{ReadUsers: int64ptr(v.ReadUsers), ShareUsers: int64ptr(v.ShareUsers), CollectionUsers: int64ptr(v.CollectionUsers), LikeUsers: int64ptr(v.LikeUsers), ZaikanUsers: int64ptr(v.ZaikanUsers), CommentCount: int64ptr(v.CommentCount), ReadToFollowUsers: int64ptr(v.ReadToSubscribeUsers), ReadCompletionRate: decimalFromFloat(v.ReadFinishRate), AverageReadActiveTime: decimalFromFloat(v.AverageReadActiveTime)}
-			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformArticle, TaskID: v.TaskID, PublicationID: v.PublicationID}, obs: model.AnalyticsObservation{ID: "legacy:wechat_official:" + v.ID, TrackingID: v.TrackingID, ProjectID: project, ContentID: contentID, BatchID: v.TrackingID, MetricBasis: "cumulative", StatDate: v.StatDate, Source: "wechat_api", SourcePriority: 200, EffectiveAt: v.CapturedAt.UTC(), ReceivedAt: v.CapturedAt.UTC(), AnalyticsMetrics: metrics}, raw: string(v.RawResponse)}
+			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformArticle, TaskID: taskID, PublicationID: publicationID}, obs: model.AnalyticsObservation{ID: "legacy:wechat_official:" + v.ID, TrackingID: v.TrackingID, ProjectID: project, ContentID: contentID, MetricBasis: "cumulative", StatDate: v.StatDate, Source: "wechat_api", SourcePriority: 200, EffectiveAt: v.CapturedAt.UTC(), ReceivedAt: v.CapturedAt.UTC(), AnalyticsMetrics: metrics}, raw: string(v.RawResponse)}
 			if err := queue(in); err != nil {
 				return err
 			}
@@ -412,6 +466,19 @@ func (m *AnalyticsRebuildManager) migrateSeednoteImports(ctx context.Context, pr
 	}
 	var rows []row
 	query := db.WithContext(ctx).Table("seednote_metric_versions v").Select("v.*, p.project_id, b.metric_basis, b.revoked_at AS batch_revoked_at").Joins("JOIN seednote_posts p ON p.id=v.post_id").Joins("LEFT JOIN seednote_import_batches b ON b.id=v.batch_id").Where("p.project_id = ?", project)
+	duplicateCondition := "EXISTS (SELECT 1 FROM analytics_observations o WHERE o.project_id = p.project_id AND o.id = " + analyticsPrefixedIDSQL(db.Dialector.Name(), "seednote_import:", "v.import_row_id") + ")"
+	var duplicateCount int64
+	if err := db.WithContext(ctx).Table("seednote_metric_versions v").Joins("JOIN seednote_posts p ON p.id=v.post_id").Where("p.project_id = ?", project).Where(duplicateCondition).Count(&duplicateCount).Error; err != nil {
+		return err
+	}
+	report.Duplicates += duplicateCount
+	report.SeednoteImports += duplicateCount
+	var duplicateRevokedCount int64
+	if err := db.WithContext(ctx).Table("seednote_metric_versions v").Joins("JOIN seednote_posts p ON p.id=v.post_id").Joins("LEFT JOIN seednote_import_batches b ON b.id=v.batch_id").Where("p.project_id = ?", project).Where("b.revoked_at IS NOT NULL").Where(duplicateCondition).Count(&duplicateRevokedCount).Error; err != nil {
+		return err
+	}
+	report.Revoked += duplicateRevokedCount
+	query = query.Where("NOT " + duplicateCondition)
 	if err := query.FindInBatches(&rows, 500, func(_ *gorm.DB, _ int) error {
 		for _, v := range rows {
 			basis := strings.ToLower(strings.TrimSpace(v.MetricBasis))
@@ -478,6 +545,14 @@ func (m *AnalyticsRebuildManager) migrateSeednoteOfficial(ctx context.Context, p
 		}
 	}
 	query := db.WithContext(ctx).Table("seednote_metric_snapshots s").Select("s.*, t.project_id, t.note_id, t.note_url, t.task_id").Joins("JOIN seednote_post_trackings t ON t.id=s.tracking_id").Where("t.project_id = ?", project)
+	duplicateCondition := "EXISTS (SELECT 1 FROM analytics_observations o WHERE o.project_id = t.project_id AND o.tracking_id = s.tracking_id AND o.source = 'seednote_public' AND o.metric_basis = 'cumulative' AND o.stat_date = s.captured_date AND o.id NOT LIKE 'legacy:seednote_official:%')"
+	var duplicateCount int64
+	if err := db.WithContext(ctx).Table("seednote_metric_snapshots s").Joins("JOIN seednote_post_trackings t ON t.id=s.tracking_id").Where("t.project_id = ?", project).Where(duplicateCondition).Count(&duplicateCount).Error; err != nil {
+		return err
+	}
+	report.Duplicates += duplicateCount
+	report.SeednoteOfficial += duplicateCount
+	query = query.Where("NOT " + duplicateCondition)
 	if err := query.FindInBatches(&rows, 500, func(_ *gorm.DB, _ int) error {
 		for _, v := range rows {
 			postID, ambiguous := resolveSeednotePostIdentity(v.NoteID, v.NoteURL, v.TaskID, byNote, noteCount, byURL, urlCount, byTask, taskCount)
@@ -493,7 +568,7 @@ func (m *AnalyticsRebuildManager) migrateSeednoteOfficial(ctx context.Context, p
 			}
 			contentID := "seednote_post:" + postID
 			metrics := model.AnalyticsMetrics{LikeCount: int64ptr(v.LikeCount), CollectCount: int64ptr(v.CollectCount), CommentCount: int64ptr(v.CommentCount), ShareCount: int64ptr(v.ShareCount)}
-			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformSeednote, PostID: postID}, obs: model.AnalyticsObservation{ID: "legacy:seednote_official:" + v.ID, TrackingID: v.TrackingID, ProjectID: project, ContentID: contentID, BatchID: v.TrackingID, MetricBasis: "cumulative", StatDate: v.CapturedDate, Source: "seednote_public", SourcePriority: 50, EffectiveAt: v.CapturedAt.UTC(), ReceivedAt: v.CapturedAt.UTC(), AnalyticsMetrics: metrics}, raw: v.RawData}
+			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformSeednote, PostID: postID}, obs: model.AnalyticsObservation{ID: "legacy:seednote_official:" + v.ID, TrackingID: v.TrackingID, ProjectID: project, ContentID: contentID, MetricBasis: "cumulative", StatDate: v.CapturedDate, Source: "seednote_public", SourcePriority: 50, EffectiveAt: v.CapturedAt.UTC(), ReceivedAt: v.CapturedAt.UTC(), AnalyticsMetrics: metrics}, raw: v.RawData}
 			if err := queue(in); err != nil {
 				return err
 			}
