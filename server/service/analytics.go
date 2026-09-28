@@ -18,6 +18,11 @@ var ErrAnalyticsInvalidQuery = errors.New("invalid analytics query")
 var ErrAnalyticsRebuilding = repository.ErrAnalyticsRebuilding
 var ErrAnalyticsIdempotencyConflict = repository.ErrAnalyticsIdempotencyConflict
 
+// Raw payloads are retained for audit and rebuilds, but they are not an
+// unbounded blob store. Providers can still send a large response while a
+// malformed upload cannot consume arbitrary database space in one request.
+const maxAnalyticsRawPayloadBytes = 4 << 20
+
 type AnalyticsService struct{ repo repository.Repository }
 
 func NewAnalyticsService(repo repository.Repository) *AnalyticsService {
@@ -127,6 +132,9 @@ func validateAnalyticsWrite(req AnalyticsWriteRequest) error {
 		}
 		if e := o.AnalyticsMetrics.Validate(); e != nil {
 			return e
+		}
+		if len(in.RawPayload) > maxAnalyticsRawPayloadBytes {
+			return fmt.Errorf("analytics raw payload exceeds %d bytes", maxAnalyticsRawPayloadBytes)
 		}
 	}
 	return nil

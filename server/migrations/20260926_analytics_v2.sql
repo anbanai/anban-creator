@@ -1,4 +1,4 @@
--- Content analytics v2. Raw legacy tables remain for audit/migration; reads use these projections.
+-- Content analytics schema. Raw legacy tables remain for audit/migration; reads use these projections.
 CREATE TABLE IF NOT EXISTS `analytics_project_states` (
  `project_id` CHAR(36) NOT NULL,
  `revision` BIGINT NOT NULL DEFAULT 0,

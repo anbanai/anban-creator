@@ -11,10 +11,10 @@ import (
 	"gorm.io/gorm"
 )
 
-type AnalyticsV2Handler struct{ service *service.AnalyticsService }
+type AnalyticsHandler struct{ service *service.AnalyticsService }
 
-func NewAnalyticsV2Handler(s *service.AnalyticsService) *AnalyticsV2Handler {
-	return &AnalyticsV2Handler{service: s}
+func NewAnalyticsHandler(s *service.AnalyticsService) *AnalyticsHandler {
+	return &AnalyticsHandler{service: s}
 }
 
 // Fiber keeps encoded route parameters encoded unless UnescapePath is enabled.
@@ -68,7 +68,7 @@ func analyticsResponse(c fiber.Ctx, value any, err error) error {
 		return Error(c, 400, err.Error())
 	}
 }
-func (h *AnalyticsV2Handler) read(c fiber.Ctx, operation string) error {
+func (h *AnalyticsHandler) read(c fiber.Ctx, operation string) error {
 	project, err := validateUUIDParam(c, "id")
 	if err != nil {
 		return err
@@ -111,8 +111,8 @@ func (h *AnalyticsV2Handler) read(c fiber.Ctx, operation string) error {
 	}
 	return Error(c, 404, "not found")
 }
-func (h *AnalyticsV2Handler) Overview(c fiber.Ctx) error     { return h.read(c, "overview") }
-func (h *AnalyticsV2Handler) Contents(c fiber.Ctx) error     { return h.read(c, "contents") }
-func (h *AnalyticsV2Handler) Detail(c fiber.Ctx) error       { return h.read(c, "detail") }
-func (h *AnalyticsV2Handler) Observations(c fiber.Ctx) error { return h.read(c, "observations") }
-func (h *AnalyticsV2Handler) Dates(c fiber.Ctx) error        { return h.read(c, "dates") }
+func (h *AnalyticsHandler) Overview(c fiber.Ctx) error     { return h.read(c, "overview") }
+func (h *AnalyticsHandler) Contents(c fiber.Ctx) error     { return h.read(c, "contents") }
+func (h *AnalyticsHandler) Detail(c fiber.Ctx) error       { return h.read(c, "detail") }
+func (h *AnalyticsHandler) Observations(c fiber.Ctx) error { return h.read(c, "observations") }
+func (h *AnalyticsHandler) Dates(c fiber.Ctx) error        { return h.read(c, "dates") }

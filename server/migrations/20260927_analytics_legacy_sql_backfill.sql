@@ -1,6 +1,6 @@
--- Analytics v2 legacy backfill for environments where the Go rebuild command
+-- Analytics legacy backfill for environments where the Go rebuild command
 -- cannot be run.  Requires MySQL 8.0+ and the tables from
--- 20260926_analytics_v2.sql.
+-- Initial content analytics schema migration.
 --
 -- Before running:
 --   1. Take a MySQL backup and stop imports/automatic collectors.
@@ -72,6 +72,7 @@ DROP TEMPORARY TABLE IF EXISTS tmp_analytics_wechat;
 CREATE TEMPORARY TABLE tmp_analytics_wechat ENGINE=InnoDB AS
 SELECT
   s.id AS legacy_id,
+  s.import_row_id,
   s.project_id,
   COALESCE(NULLIF(ir.task_id, ''), NULLIF(pub_task.task_id, ''), '') AS task_id,
   s.publication_id,
@@ -125,6 +126,24 @@ FROM seednote_metric_versions v
 JOIN seednote_posts p ON p.id = v.post_id
 LEFT JOIN seednote_import_batches b ON b.id = v.batch_id
 JOIN tmp_analytics_scope x ON x.project_id = p.project_id;
+
+-- New imports already persisted these source rows under their request IDs.
+-- Reuse those facts instead of adding a second legacy observation.
+DROP TEMPORARY TABLE IF EXISTS tmp_analytics_wechat_to_import;
+CREATE TEMPORARY TABLE tmp_analytics_wechat_to_import ENGINE=InnoDB AS
+SELECT w.*
+FROM tmp_analytics_wechat w
+LEFT JOIN analytics_observations existing
+  ON existing.id = CONCAT('wechat_import:', w.import_row_id)
+WHERE existing.id IS NULL;
+
+DROP TEMPORARY TABLE IF EXISTS tmp_analytics_seednote_to_import;
+CREATE TEMPORARY TABLE tmp_analytics_seednote_to_import ENGINE=InnoDB AS
+SELECT n.*
+FROM tmp_analytics_seednote n
+LEFT JOIN analytics_observations existing
+  ON existing.id = CONCAT('seednote_import:', n.legacy_id)
+WHERE existing.id IS NULL;
 
 -- Refresh list metadata from operational tables.  Analytics facts themselves
 -- remain immutable and contain no copied title/url as their source of truth.
@@ -186,7 +205,7 @@ SELECT
   delivered_users, read_users, share_users, read_to_follow_users,
   CAST(read_completion_rate AS DECIMAL(38,18)),
   CAST(delivery_completion_rate AS DECIMAL(38,18))
-FROM tmp_analytics_wechat
+FROM tmp_analytics_wechat_to_import
 ORDER BY legacy_id;
 
 INSERT INTO analytics_observations(
@@ -202,19 +221,23 @@ SELECT
   follower_gain_count, share_count, barrage_count,
   CAST(cover_click_rate AS DECIMAL(38,18)),
   CAST(avg_watch_duration AS DECIMAL(38,18))
-FROM tmp_analytics_seednote
+FROM tmp_analytics_seednote_to_import
 WHERE metric_basis IN ('daily', 'cumulative')
 ORDER BY legacy_id;
 
 INSERT INTO analytics_observation_payloads(observation_id, payload)
 SELECT CONCAT('legacy:wechat_import:', legacy_id), CAST(raw_data AS CHAR)
-FROM tmp_analytics_wechat
+FROM tmp_analytics_wechat_to_import
+JOIN analytics_observations existing
+  ON existing.id = CONCAT('legacy:wechat_import:', tmp_analytics_wechat_to_import.legacy_id)
 ON DUPLICATE KEY UPDATE payload = VALUES(payload);
 
 INSERT INTO analytics_observation_payloads(observation_id, payload)
 SELECT CONCAT('legacy:seednote_import:', legacy_id), CAST(raw_data AS CHAR)
-FROM tmp_analytics_seednote
-WHERE metric_basis IN ('daily', 'cumulative')
+FROM tmp_analytics_seednote_to_import
+JOIN analytics_observations existing
+  ON existing.id = CONCAT('legacy:seednote_import:', tmp_analytics_seednote_to_import.legacy_id)
+WHERE tmp_analytics_seednote_to_import.metric_basis IN ('daily', 'cumulative')
 ON DUPLICATE KEY UPDATE payload = VALUES(payload);
 
 -- Winning observation per content/day/basis.  Revoked batches are excluded.
@@ -396,14 +419,14 @@ SELECT x.project_id,
 FROM tmp_analytics_scope x
 LEFT JOIN (
   SELECT project_id, COUNT(*) AS wechat_imports
-  FROM tmp_analytics_wechat
+  FROM tmp_analytics_wechat_to_import
   GROUP BY project_id
 ) w ON w.project_id = x.project_id
 LEFT JOIN (
   SELECT project_id,
          SUM(metric_basis IN ('daily', 'cumulative')) AS seednote_imports,
          SUM(metric_basis IS NULL OR metric_basis NOT IN ('daily', 'cumulative')) AS seednote_basis_unknown
-  FROM tmp_analytics_seednote
+  FROM tmp_analytics_seednote_to_import
   GROUP BY project_id
 ) n ON n.project_id = x.project_id;
 

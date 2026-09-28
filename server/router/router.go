@@ -27,7 +27,7 @@ import (
 
 // Services aggregates all service dependencies required by the router.
 type Services struct {
-	AnalyticsV2Handler           *handler.AnalyticsV2Handler
+	AnalyticsHandler             *handler.AnalyticsHandler
 	ContentAnalyticsHandler      *handler.ContentAnalyticsHandler
 	Config                       *config.Config
 	Logger                       *zerolog.Logger
@@ -350,12 +350,12 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/tasks/:id/feedback", svc.FeedbackHandler.GetTaskFeedback)
 		apiV1.Put("/tasks/:id/feedback", svc.FeedbackHandler.UpsertTaskFeedback)
 	}
-	if svc.AnalyticsV2Handler != nil {
-		apiV1.Get("/projects/:id/content-analytics/overview", svc.AnalyticsV2Handler.Overview)
-		apiV1.Get("/projects/:id/content-analytics/contents", svc.AnalyticsV2Handler.Contents)
-		apiV1.Get("/projects/:id/content-analytics/contents/:contentId", svc.AnalyticsV2Handler.Detail)
-		apiV1.Get("/projects/:id/content-analytics/contents/:contentId/observations", svc.AnalyticsV2Handler.Observations)
-		apiV1.Get("/projects/:id/content-analytics/dates", svc.AnalyticsV2Handler.Dates)
+	if svc.AnalyticsHandler != nil {
+		apiV1.Get("/projects/:id/content-analytics/overview", svc.AnalyticsHandler.Overview)
+		apiV1.Get("/projects/:id/content-analytics/contents", svc.AnalyticsHandler.Contents)
+		apiV1.Get("/projects/:id/content-analytics/contents/:contentId", svc.AnalyticsHandler.Detail)
+		apiV1.Get("/projects/:id/content-analytics/contents/:contentId/observations", svc.AnalyticsHandler.Observations)
+		apiV1.Get("/projects/:id/content-analytics/dates", svc.AnalyticsHandler.Dates)
 	}
 	if svc.ContentAnalyticsHandler != nil {
 		apiV1.Get("/projects/:id/content-analytics/candidates", svc.ContentAnalyticsHandler.Candidates)

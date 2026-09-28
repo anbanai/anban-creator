@@ -2,13 +2,15 @@ package service
 
 import (
 	"context"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"testing"
-	"time"
 )
 
 func analyticsFixture(t *testing.T) (*AnalyticsService, *gorm.DB) {
@@ -31,7 +33,7 @@ func analyticsWrite(t *testing.T, s *AnalyticsService, id, content, date, basis,
 		t.Fatal(e)
 	}
 }
-func TestAnalyticsV2CumulativePriorityRevocationAndRange(t *testing.T) {
+func TestAnalyticsCumulativePriorityRevocationAndRange(t *testing.T) {
 	s, _ := analyticsFixture(t)
 	a, b, c := int64(10), int64(20), int64(30)
 	analyticsWrite(t, s, "1", "a", "2026-01-31", "cumulative", "b1", 200, &a)
@@ -59,7 +61,7 @@ func TestAnalyticsV2CumulativePriorityRevocationAndRange(t *testing.T) {
 		t.Fatalf("revision error %v", e)
 	}
 }
-func TestAnalyticsV2DailyNullAndRollback(t *testing.T) {
+func TestAnalyticsDailyNullAndRollback(t *testing.T) {
 	s, db := analyticsFixture(t)
 	zero, n := int64(0), int64(7)
 	analyticsWrite(t, s, "1", "a", "2026-02-01", "daily", "one", 200, &zero)
@@ -86,7 +88,7 @@ func TestAnalyticsV2DailyNullAndRollback(t *testing.T) {
 	}
 }
 
-func TestAnalyticsV2ExactDecimalsNullOrderingAndAudit(t *testing.T) {
+func TestAnalyticsExactDecimalsNullOrderingAndAudit(t *testing.T) {
 	s, db := analyticsFixture(t)
 	ctx := context.Background()
 	at := time.Date(2026, 2, 3, 12, 0, 0, 0, time.UTC)
@@ -129,7 +131,7 @@ func TestAnalyticsV2ExactDecimalsNullOrderingAndAudit(t *testing.T) {
 		t.Fatalf("facts %d", count)
 	}
 }
-func TestAnalyticsV2OverflowAndInvalidDecimalRollBack(t *testing.T) {
+func TestAnalyticsOverflowAndInvalidDecimalRollBack(t *testing.T) {
 	s, db := analyticsFixture(t)
 	ctx := context.Background()
 	max := int64(9223372036854775807)
@@ -155,7 +157,31 @@ func TestAnalyticsV2OverflowAndInvalidDecimalRollBack(t *testing.T) {
 		t.Fatal("failed write advanced revision")
 	}
 }
-func TestAnalyticsV2BoundariesAndSparseCumulative(t *testing.T) {
+
+func TestAnalyticsRejectsOversizedRawPayloadBeforeTransaction(t *testing.T) {
+	s, db := analyticsFixture(t)
+	at := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	count := int64(1)
+	in := AnalyticsObservationInput{
+		Content: model.AnalyticsContent{ID: "large", ProjectID: "p", Platform: "seednote"},
+		Observation: model.AnalyticsObservation{
+			ID: "large-observation", ProjectID: "p", ContentID: "large", StatDate: "2026-02-01",
+			MetricBasis: "daily", Source: "import", EffectiveAt: at, ReceivedAt: at,
+			AnalyticsMetrics: model.AnalyticsMetrics{ViewCount: &count},
+		},
+		RawPayload: strings.Repeat("x", maxAnalyticsRawPayloadBytes+1),
+	}
+	if _, err := s.Apply(context.Background(), AnalyticsWriteRequest{ProjectID: "p", Observations: []AnalyticsObservationInput{in}}); err == nil {
+		t.Fatal("expected oversized payload to be rejected")
+	}
+	var observations, payloads int64
+	db.Model(&model.AnalyticsObservation{}).Count(&observations)
+	db.Model(&model.AnalyticsRawPayload{}).Count(&payloads)
+	if observations != 0 || payloads != 0 {
+		t.Fatalf("oversized payload partially committed: observations=%d payloads=%d", observations, payloads)
+	}
+}
+func TestAnalyticsBoundariesAndSparseCumulative(t *testing.T) {
 	s, _ := analyticsFixture(t)
 	a, b, c, d := int64(2), int64(100), int64(4), int64(1000)
 	analyticsWrite(t, s, "a1", "a", "2026-01-01", "cumulative", "a1", 200, &a)
@@ -173,7 +199,7 @@ func TestAnalyticsV2BoundariesAndSparseCumulative(t *testing.T) {
 		t.Fatalf("basis leaked %+v %v", v, e)
 	}
 }
-func TestAnalyticsV2RebuildGateAndIdempotency(t *testing.T) {
+func TestAnalyticsRebuildGateAndIdempotency(t *testing.T) {
 	s, db := analyticsFixture(t)
 	ctx := context.Background()
 	q := AnalyticsQuery{From: "2026-01-01", To: "2026-01-31", MetricBasis: "daily"}

@@ -15,6 +15,7 @@ import (
 
 var ErrAnalyticsRebuilding = errors.New("analytics rebuilding")
 var ErrAnalyticsIdempotencyConflict = errors.New("analytics idempotency key reused with changed request")
+var ErrAnalyticsRebuildSuperseded = errors.New("analytics rebuild publication was superseded")
 
 type AnalyticsRepository struct{ db *gorm.DB }
 
@@ -458,7 +459,16 @@ func (r *AnalyticsRepository) Rebuild(ctx context.Context, project string, gener
 	if generation <= 0 {
 		return errors.New("invalid analytics generation")
 	}
-	if e := r.db.WithContext(ctx).Where("project_id = ? AND generation = ?", project, generation).Delete(&model.AnalyticsBucket{}).Error; e != nil {
+	if e := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var state model.AnalyticsState
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("project_id = ?", project).First(&state).Error; err != nil {
+			return err
+		}
+		if state.Status != "rebuilding" || state.ActiveGeneration >= generation {
+			return ErrAnalyticsRebuildSuperseded
+		}
+		return tx.Where("project_id = ? AND generation = ?", project, generation).Delete(&model.AnalyticsBucket{}).Error
+	}); e != nil {
 		return e
 	}
 	var after AnalyticsAffectedDay
@@ -471,7 +481,16 @@ func (r *AnalyticsRepository) Rebuild(ctx context.Context, project string, gener
 		if e := q.Order("content_id, metric_basis, stat_date").Limit(500).Scan(&rows).Error; e != nil {
 			return e
 		}
-		if e := r.RecomputeDays(ctx, project, generation, rows); e != nil {
+		if e := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var state model.AnalyticsState
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("project_id = ?", project).First(&state).Error; err != nil {
+				return err
+			}
+			if state.Status != "rebuilding" || state.ActiveGeneration >= generation {
+				return ErrAnalyticsRebuildSuperseded
+			}
+			return (&AnalyticsRepository{db: tx}).RecomputeDays(ctx, project, generation, rows)
+		}); e != nil {
 			return e
 		}
 
@@ -546,7 +565,16 @@ func (r *AnalyticsRepository) BeginRebuild(ctx context.Context, project string) 
 }
 func (r *AnalyticsRepository) PublishRebuild(ctx context.Context, project string, generation int64) error {
 	result := r.db.WithContext(ctx).Model(&model.AnalyticsState{}).Where("project_id = ? AND status = ? AND active_generation < ?", project, "rebuilding", generation).Updates(map[string]any{"active_generation": generation, "status": "ready", "revision": gorm.Expr("revision + 1"), "updated_at": time.Now().UTC()})
-	return result.Error
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrAnalyticsRebuildSuperseded
+	}
+	// Buckets are a replaceable read projection. Once the new generation is
+	// published, remove every older projection for this project in the same
+	// transaction so repeated rebuilds cannot grow storage without bound.
+	return r.db.WithContext(ctx).Where("project_id = ? AND generation <> ?", project, generation).Delete(&model.AnalyticsBucket{}).Error
 }
 
 // AbortRebuild releases the project write gate after a failed migration or

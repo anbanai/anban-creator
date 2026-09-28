@@ -89,39 +89,42 @@ func (m *AnalyticsRebuildManager) Run(ctx context.Context, jobID string) error {
 	if !claimed {
 		return nil
 	}
+	// Once a job is claimed, every failure must release the project write gate
+	// and persist a terminal job status. Use a detached context for cleanup so a
+	// canceled worker request cannot strand the project in rebuilding state.
+	fail := func(cause error) error {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		abortErr := m.repo.Analytics().AbortRebuild(cleanupCtx, job.ProjectID)
+		job.Status, job.Error, job.UpdatedAt = "failed", cause.Error(), time.Now().UTC()
+		jobErr := m.repo.Analytics().UpdateRebuildJob(cleanupCtx, job)
+		return errors.Join(cause, abortErr, jobErr)
+	}
 	job.Status, job.UpdatedAt = "running", time.Now().UTC()
 	if err = m.repo.Analytics().UpdateRebuildJob(ctx, job); err != nil {
-		return err
+		return fail(err)
 	}
 	report, err := m.migrateLegacy(ctx, job)
 	if err != nil {
-		_ = m.repo.Analytics().AbortRebuild(ctx, job.ProjectID)
-		job.Status, job.Error, job.UpdatedAt = "failed", err.Error(), time.Now().UTC()
-		_ = m.repo.Analytics().UpdateRebuildJob(ctx, job)
-		return err
+		return fail(err)
 	}
 	encodedReport, _ := json.Marshal(report)
 	job.ReportJSON = string(encodedReport)
 	if err = m.repo.Analytics().Rebuild(ctx, job.ProjectID, job.Generation); err != nil {
-		_ = m.repo.Analytics().AbortRebuild(ctx, job.ProjectID)
-		job.Status, job.Error, job.UpdatedAt = "failed", err.Error(), time.Now().UTC()
-		_ = m.repo.Analytics().UpdateRebuildJob(ctx, job)
-		return err
+		return fail(err)
 	}
 	if err = m.repo.WithTx(ctx, func(tx repository.Repository) error {
 		return tx.Analytics().PublishRebuild(ctx, job.ProjectID, job.Generation)
 	}); err != nil {
-		return err
-	}
-	state, err = m.repo.Analytics().State(ctx, job.ProjectID)
-	if err != nil {
-		return err
-	}
-	if state.ActiveGeneration < job.Generation || state.Status != "ready" {
-		return errors.New("analytics rebuild publication was superseded")
+		return fail(err)
 	}
 	job.Status, job.UpdatedAt, job.Processed = "published", time.Now().UTC(), report.Inserted
-	return m.repo.Analytics().UpdateRebuildJob(ctx, job)
+	if err := m.repo.Analytics().UpdateRebuildJob(ctx, job); err != nil {
+		// Publication is already durable; fail only the job record update. The
+		// next retry observes the active generation and repairs the job status.
+		return err
+	}
+	return nil
 }
 func (m *AnalyticsRebuildManager) Status(ctx context.Context, jobID string) (*model.AnalyticsRebuildJob, error) {
 	return m.repo.Analytics().FindRebuildJob(ctx, jobID)
@@ -383,7 +386,7 @@ func (m *AnalyticsRebuildManager) migrateWechatOfficial(ctx context.Context, pro
 		for _, v := range rows {
 			contentID := "task:" + v.TaskID
 			metrics := model.AnalyticsMetrics{ReadUsers: int64ptr(v.ReadUsers), ShareUsers: int64ptr(v.ShareUsers), CollectionUsers: int64ptr(v.CollectionUsers), LikeUsers: int64ptr(v.LikeUsers), ZaikanUsers: int64ptr(v.ZaikanUsers), CommentCount: int64ptr(v.CommentCount), ReadToFollowUsers: int64ptr(v.ReadToSubscribeUsers), ReadCompletionRate: decimalFromFloat(v.ReadFinishRate), AverageReadActiveTime: decimalFromFloat(v.AverageReadActiveTime)}
-			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformArticle, TaskID: v.TaskID, PublicationID: v.PublicationID}, obs: model.AnalyticsObservation{ID: "legacy:wechat_official:" + v.ID, TrackingID: v.TrackingID, ProjectID: project, ContentID: contentID, BatchID: v.TrackingID, MetricBasis: "cumulative", StatDate: v.StatDate, Source: "wechat_api", SourcePriority: 300, EffectiveAt: v.CapturedAt.UTC(), ReceivedAt: v.CapturedAt.UTC(), AnalyticsMetrics: metrics}, raw: string(v.RawResponse)}
+			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformArticle, TaskID: v.TaskID, PublicationID: v.PublicationID}, obs: model.AnalyticsObservation{ID: "legacy:wechat_official:" + v.ID, TrackingID: v.TrackingID, ProjectID: project, ContentID: contentID, BatchID: v.TrackingID, MetricBasis: "cumulative", StatDate: v.StatDate, Source: "wechat_api", SourcePriority: 200, EffectiveAt: v.CapturedAt.UTC(), ReceivedAt: v.CapturedAt.UTC(), AnalyticsMetrics: metrics}, raw: string(v.RawResponse)}
 			if err := queue(in); err != nil {
 				return err
 			}
@@ -453,14 +456,16 @@ func (m *AnalyticsRebuildManager) migrateSeednoteOfficial(ctx context.Context, p
 		return err
 	}
 	byNote, byURL, byTask := map[string]string{}, map[string]string{}, map[string]string{}
-	taskCount := map[string]int{}
+	noteCount, urlCount, taskCount := map[string]int{}, map[string]int{}, map[string]int{}
 	for _, p := range posts {
 		if p.NoteID != "" {
+			noteCount[p.NoteID]++
 			if _, ok := byNote[p.NoteID]; !ok {
 				byNote[p.NoteID] = p.ID
 			}
 		}
 		if p.NoteURL != "" {
+			urlCount[p.NoteURL]++
 			if _, ok := byURL[p.NoteURL]; !ok {
 				byURL[p.NoteURL] = p.ID
 			}
@@ -475,18 +480,15 @@ func (m *AnalyticsRebuildManager) migrateSeednoteOfficial(ctx context.Context, p
 	query := db.WithContext(ctx).Table("seednote_metric_snapshots s").Select("s.*, t.project_id, t.note_id, t.note_url, t.task_id").Joins("JOIN seednote_post_trackings t ON t.id=s.tracking_id").Where("t.project_id = ?", project)
 	if err := query.FindInBatches(&rows, 500, func(_ *gorm.DB, _ int) error {
 		for _, v := range rows {
-			postID := byNote[v.NoteID]
+			postID, ambiguous := resolveSeednotePostIdentity(v.NoteID, v.NoteURL, v.TaskID, byNote, noteCount, byURL, urlCount, byTask, taskCount)
 			if postID == "" {
-				postID = byURL[v.NoteURL]
-			}
-			if postID == "" {
-				if taskCount[v.TaskID] == 1 {
-					postID = byTask[v.TaskID]
+				if ambiguous {
+					report.IdentityConflicts++
+					report.skip("seednote_ambiguous_note_identity")
+				} else {
+					report.IdentityConflicts++
+					report.skip("seednote_missing_note_identity")
 				}
-			}
-			if postID == "" {
-				report.IdentityConflicts++
-				report.skip("seednote_missing_note_identity")
 				continue
 			}
 			contentID := "seednote_post:" + postID
@@ -502,4 +504,34 @@ func (m *AnalyticsRebuildManager) migrateSeednoteOfficial(ctx context.Context, p
 		return err
 	}
 	return nil
+}
+
+func resolveSeednotePostIdentity(noteID, noteURL, taskID string, postsByNoteID map[string]string, noteIDCounts map[string]int, postsByURL map[string]string, urlCounts map[string]int, postsByTask map[string]string, taskCounts map[string]int) (string, bool) {
+	candidates := map[string]struct{}{}
+	if noteID != "" {
+		if noteIDCounts[noteID] > 1 {
+			return "", true
+		}
+		if postID := postsByNoteID[noteID]; postID != "" {
+			candidates[postID] = struct{}{}
+		}
+	}
+	if noteURL != "" {
+		if urlCounts[noteURL] > 1 {
+			return "", true
+		}
+		if postID := postsByURL[noteURL]; postID != "" {
+			candidates[postID] = struct{}{}
+		}
+	}
+	if len(candidates) > 1 {
+		return "", true
+	}
+	for postID := range candidates {
+		return postID, false
+	}
+	if taskID != "" && taskCounts[taskID] == 1 {
+		return postsByTask[taskID], false
+	}
+	return "", false
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestAnalyticsV2MigrationContract(t *testing.T) {
+func TestAnalyticsMigrationContract(t *testing.T) {
 	b, e := os.ReadFile("20260926_analytics_v2.sql")
 	if e != nil {
 		t.Fatal(e)
