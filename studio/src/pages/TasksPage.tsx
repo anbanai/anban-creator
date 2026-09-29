@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2, BarChart3 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -20,6 +20,7 @@ import { platformBadgeClassName, platformBorderColor, platformHoverBorderColor }
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
+import { taskContentDataHref } from '@/lib/content-analytics'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
@@ -487,7 +488,7 @@ export default function TasksPage() {
 
             return (
               <div key={task.id} className="border-b border-border last:border-b-0">
-                <div className={`border-l-2 p-4 ${borderColor} ${hoverBorderColor} transition-colors hover:bg-muted/35`}>
+                <div className={`border-l-2 p-3.5 sm:p-4 ${borderColor} ${hoverBorderColor} transition-colors hover:bg-muted/35`}>
                   <div className="flex items-start gap-3">
                     <button
                       type="button"
@@ -520,22 +521,29 @@ export default function TasksPage() {
                         {project?.name && (
                           <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
                         )}
-                        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
                           <Badge variant="outline" className={`text-[10px] ${platformBadgeClassName[task.type] || ''}`}>
                             {contentTypeDisplayName(task.type)}
                           </Badge>
                           <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>
-                          {actionSignal.tone !== 'risk' && <span>{actionSignal.hint}</span>}
-                          <span>创建：{formatDateTimeCN(task.created_at)}</span>
-                          {task.completed_at && (
-                            <span>完成：{formatDateTimeCN(task.completed_at)}</span>
-                          )}
-                          <span className="font-medium text-foreground">
-                            累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分
-                          </span>
+                          {actionSignal.tone === 'risk' && <span>{actionSignal.hint}</span>}
+                          <span className="hidden sm:inline">创建：{formatDateTimeCN(task.created_at)}</span>
+                          {task.completed_at && <span className="hidden sm:inline">完成：{formatDateTimeCN(task.completed_at)}</span>}
+                          <span className="font-medium text-foreground">累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分</span>
                         </div>
                       </div>
                     </Link>
+                    {task.status === 'completed' && (task.type === 'article' || task.type === 'seednote') && (
+                      <Link
+                        to={taskContentDataHref(task.project_id, task.id)}
+                        aria-label="查看内容数据"
+                        title="查看内容数据"
+                        className="mt-0.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                      >
+                        <BarChart3 className="h-4 w-4" />
+                        <span className="hidden md:inline">查看数据</span>
+                      </Link>
+                    )}
                   </div>
                 </div>
               </div>

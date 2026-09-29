@@ -324,6 +324,23 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.queryByText('待发布确认')).not.toBeInTheDocument()
   })
 
+  it('offers content analytics from completed article task rows', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [fixtures.completedTask as Task, { ...fixtures.failedTask, type: 'montage', id: 'montage-task' } as Task],
+      total: 2,
+    })
+
+    renderTasksPage()
+
+    expect(await screen.findByRole('link', { name: '查看内容数据' })).toHaveAttribute(
+      'href',
+      '/content-data?account=project-1&content=task%3Aapproval-task',
+    )
+    expect(screen.getAllByRole('link', { name: '查看内容数据' })).toHaveLength(1)
+    expect(screen.getByText('已完成文章')).toBeInTheDocument()
+    expect(screen.getByText('失败文章')).toBeInTheDocument()
+  })
+
   it('shows the task total including image operation charges', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({
       items: [{ ...fixtures.failedTask, billing_total_credits: 6800 } as Task],
