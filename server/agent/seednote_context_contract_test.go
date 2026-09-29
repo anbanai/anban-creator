@@ -34,7 +34,6 @@ func TestClaudeSeednoteAgentDeclaresPhaseSkillsWithoutInvocationBoilerplate(t *t
 	frontmatter := frontmatterBlock(t, body)
 	for _, want := range []string{
 		"  - seednote-research",
-		"  - seednote-viral-analysis",
 		"  - seednote-writing",
 		"  - seednote-visual-design",
 	} {

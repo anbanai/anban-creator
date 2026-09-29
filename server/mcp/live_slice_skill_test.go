@@ -40,11 +40,8 @@ func TestLiveSliceSkillFiles(t *testing.T) {
 			"ffmpeg -y -ss \"$START\" -i \"$VIDEO\" -t \"$DURATION\" -c:v libx264 -c:a aac \"$OUT\"",
 			"get_media_pipeline_status",
 			"prepare_file_upload",
-			"project_id=\"$PROJECT_ID\"",
-			"task_id=\"$TASK_ID\"",
-			"size=$AUDIO_SIZE",
-			"Content-Length: $AUDIO_SIZE",
-			`purpose="live_audio"`,
+			"runtime adapter",
+			"atomic file-upload",
 			"create_live_analysis_task(audio_key=",
 			"analysis.json",
 			"segments.json",
@@ -69,7 +66,7 @@ func TestLiveSliceSkillFiles(t *testing.T) {
 				t.Fatalf("%s SKILL.md missing %q", plugin, want)
 			}
 		}
-		for _, banned := range []string{"python" + "3", legacyPythonHelper, `DUR` + `ATION="$END_TIME-START_TIME"`, `DUR` + `ATION="$END_TIME` + ` - $START_TIME"`, "补充或替换 `segments" + ".json`", "Call `upload_live_audio"} {
+		for _, banned := range []string{"python" + "3", legacyPythonHelper, `DUR` + `ATION="$END_TIME-START_TIME"`, `DUR` + `ATION="$END_TIME` + ` - $START_TIME"`, "补充或替换 `segments" + ".json`", "Call `upload_live_audio", "curl", "Content-Length: $AUDIO_SIZE", `purpose="live_audio"`} {
 			if strings.Contains(body, banned) {
 				t.Fatalf("%s SKILL.md still mentions %q", plugin, banned)
 			}

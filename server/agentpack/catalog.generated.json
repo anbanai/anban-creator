@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "2.0.5",
+      "version": "2.0.6",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -52,6 +52,24 @@
       },
       "artifacts": [
         {
+          "role": "research",
+          "path": "output/01-research.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "outline",
+          "path": "output/02-outline.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "draft",
+          "path": "output/03-article.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
           "role": "final_markdown",
           "path": "output/04-article-final.md",
           "mime_type": "text/markdown",
@@ -62,6 +80,84 @@
           "path": "output/05-article.html",
           "mime_type": "text/html",
           "required": true
+        },
+        {
+          "role": "context",
+          "path": "output/context-brief.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "quality",
+          "path": "output/content-quality-report.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "seo",
+          "path": "output/seo-result.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual-rhythm-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "image_plan",
+          "path": "output/image-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_prompt",
+          "path": "output/cover-prompt.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_exact",
+          "path": "output/cover-exact.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "portrait_failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "images",
+          "path": "output/images.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "image",
+          "path": "output/img_*.png",
+          "mime_type": "image/png",
+          "required": false
         },
         {
           "role": "review",
@@ -76,10 +172,28 @@
           "required": false
         },
         {
+          "role": "viral_audit",
+          "path": "output/viral-audit.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
           "role": "other",
           "path": "output/draft.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -107,11 +221,11 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "c0e9ed4878803c9db8570efd494dbcb07ca6a3b963ec7b2ac744c8420eec8904"
+      "digest": "a8af4cef1bbb26ab60aabd8cc75f03092b7e41dfd2cfb5d8281459ea4aa8b0cb"
     },
     {
       "id": "ecommerce",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "kind": "managed",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -159,16 +273,64 @@
           "required": true
         },
         {
+          "role": "product_photos",
+          "path": "output/product-photos.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
           "role": "copywriting",
           "path": "output/copywriting.md",
           "mime_type": "text/markdown",
           "required": true
         },
         {
+          "role": "asset_plan",
+          "path": "output/asset-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "image_prompts",
+          "path": "output/image-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "best_refs",
+          "path": "output/best-refs.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "compliance",
+          "path": "output/compliance-report.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
           "role": "manifest",
           "path": "output/manifest.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "compressed_image",
+          "path": "output/compressed_*.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -211,11 +373,11 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "92beb694a5df1ff3e966efab6c9429546e90fd2e3811a27037cc3d3bde1f7f3d"
+      "digest": "d6af7cd65a8b83ab05fdbdf0bfaf75d606d0d65cb1ba0e2c281f0c80edc768d6"
     },
     {
       "id": "feedback",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "plugin",
       "display_name": "反馈分析",
       "description": "周期性分析公众号与种草笔记数据并生成可追溯的反馈证据。",
@@ -240,12 +402,44 @@
       "features": [
         "feedback"
       ],
+      "artifacts": [
+        {
+          "role": "analysis_result",
+          "path": "output/feedback-analysis.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "evidence",
+          "path": "output/feedback-evidence.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "skipped",
+          "path": "output/feedback-skipped.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
       "ui": {},
-      "digest": "d5dc706bf39b360407e04f0b7e02d44baf5f0b38aece7cc44af5bbd202380dbc"
+      "digest": "4d0d5138ef4edaba3815afe2622d919e2f8701b156d7e4ebcb70b3f85e211f7b"
     },
     {
       "id": "hypit",
-      "version": "2.0.3",
+      "version": "2.0.4",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
@@ -337,6 +531,36 @@
           "path": "output/cover-quality.json",
           "mime_type": "application/json",
           "required": false
+        },
+        {
+          "role": "reference_media",
+          "path": "output/reference-media.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "semantic_report",
+          "path": "output/semantic-report.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -389,11 +613,11 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "3f2b24750866e21e207e95b7ef4bbb67d1bfd7856c1d6134264995185d345192"
+      "digest": "66f65ff40a9b5403fa80755efc3176574c777b0dfced240e2dcf53946583a579"
     },
     {
       "id": "live-slicer",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "kind": "managed",
       "display_name": "直播切片",
       "description": "从直播视频转写、规划并批量导出短视频切片。",
@@ -424,6 +648,84 @@
       ],
       "artifacts": [
         {
+          "role": "metadata",
+          "path": "output/metadata.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.jpg",
+          "mime_type": "image/jpeg",
+          "required": false
+        },
+        {
+          "role": "clip_cover",
+          "path": "output/cover-*.jpg",
+          "mime_type": "image/jpeg",
+          "required": false
+        },
+        {
+          "role": "decision_log",
+          "path": "output/decision-log.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "audio",
+          "path": "output/audio.mp3",
+          "mime_type": "audio/mpeg",
+          "required": false
+        },
+        {
+          "role": "analysis",
+          "path": "output/analysis.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "tingwu_task",
+          "path": "output/tingwu-task.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "invalid_sentences",
+          "path": "output/invalid-sentences.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "valid_sentences",
+          "path": "output/valid-sentences.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "segments",
+          "path": "output/segments.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "subjects",
+          "path": "output/subjects.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "subject_completions",
+          "path": "output/subject-completions.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "subject_plan",
+          "path": "output/subject-clip-plan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
           "role": "summary",
           "path": "output/summary.md",
           "mime_type": "text/markdown",
@@ -440,6 +742,48 @@
           "path": "output/clip-plan.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "clip_results",
+          "path": "output/clip_results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "clip_draft_results",
+          "path": "output/clip-draft-results.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "transcript",
+          "path": "output/transcript.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "export_video",
+          "path": "output/exports/*.mp4",
+          "mime_type": "video/mp4",
+          "required": false
+        },
+        {
+          "role": "export_metadata",
+          "path": "output/exports/*.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -465,11 +809,11 @@
         }
       ],
       "ui": {},
-      "digest": "0f81b531214af9f4cc634f9d4afa2b9a6cffb6491b00ab121125d4b3fd4d76f5"
+      "digest": "dbaf5e37aae20f6ef3ba133f5d2bbd63cc9361015a0fffe0f0b6c168e9f7be0d"
     },
     {
       "id": "moments",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "kind": "managed",
       "display_name": "朋友圈素材包",
       "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
@@ -535,6 +879,18 @@
           "path": "output/quality-review.md",
           "mime_type": "text/markdown",
           "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -552,11 +908,11 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "40154689cdff1fe19e08ad5e66ed4f1ea464bc59008d1d11fe157325d2a6fe3c"
+      "digest": "0c746d60ad1983238fd4599d3e344036bda7ac5f82e48231e10c67c47e307a51"
     },
     {
       "id": "montage",
-      "version": "2.0.3",
+      "version": "2.0.4",
       "kind": "managed",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
@@ -618,6 +974,42 @@
           "path": "output/delivery-manifest.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_prompt",
+          "path": "output/cover-prompt.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -635,11 +1027,11 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "19e15c71c43550036da4894297a9daa0fbf2b3d4d48019708160d7205be3540c"
+      "digest": "907e9fa6dcf35fe75ba17632d501d3cf92affb52d389a1fd42ec4da164c2ce52"
     },
     {
       "id": "profile-analysis",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "kind": "managed",
       "display_name": "账号画像分析",
       "description": "基于用户提供的公开资料和问答生成可确认的六维账号画像草稿。",
@@ -677,6 +1069,18 @@
           "path": "output/profile-draft.json",
           "mime_type": "application/json",
           "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -846,11 +1250,11 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "e505cefbdc15268652e7d77ba18c263eb7009d0be5bcd1938206f3895514cc7d"
+      "digest": "a335669a39eefc30481c0be82c1ebe35362efca3562b33643b38b53a9b8c1a71"
     },
     {
       "id": "seednote",
-      "version": "2.0.4",
+      "version": "2.0.5",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -900,6 +1304,30 @@
       },
       "artifacts": [
         {
+          "role": "topic_analysis",
+          "path": "output/topic-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "source_note",
+          "path": "output/source-note.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "source_analysis",
+          "path": "output/source-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "viral_template",
+          "path": "output/viral-template.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
           "role": "final_markdown",
           "path": "output/content.md",
           "mime_type": "text/markdown",
@@ -912,8 +1340,80 @@
           "required": true
         },
         {
+          "role": "image_prompt",
+          "path": "output/image-prompts.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "image_review",
+          "path": "output/image-review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "reference_usage",
+          "path": "output/reference-usage-summary.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "compliance",
+          "path": "output/compliance-report.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_prompt",
+          "path": "output/cover-prompt.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "cover_failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "image",
+          "path": "output/image_*.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "tail",
+          "path": "output/tail.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
           "role": "failure_state",
           "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
         }
@@ -973,7 +1473,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "d30c5a3c39d4e8ed5fd8f39d9c65b66c9caa8f0e613b9a54180ea0a35e7557fb"
+      "digest": "0dcc8378c007199414eef22f5b8ea4cbf3ef485181e46ea437729a7c52b06dcf"
     }
   ]
 }

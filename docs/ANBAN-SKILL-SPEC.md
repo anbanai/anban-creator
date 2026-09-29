@@ -58,6 +58,7 @@ harness/
 - Pack YAML 是产物路径和交付角色的权威来源；Skill 不得声明与 Pack 冲突的必需产物。
 - `harness/` 变更必须同步更新 Claude 和 Codex 两份插件清单，并按仓库规则递增版本号。
 - 上游第三方 Skill 可保留其许可证和必要文件，但新增 Anban Skill 遵循本规范。
+- `skills/humanizer` 是固定 Git revision 的 vendored third-party Skill。不得修改其 `SKILL.md`、README、许可证或上游目录结构；只校验入口、许可证、上游版本、revision 和调用边界。不得把它纳入本地 README 禁止项或重构规则，业务约束放在拥有它的 Agent/Skill 中。
 
 ### 工作流分层
 
