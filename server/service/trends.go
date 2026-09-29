@@ -267,7 +267,7 @@ func sortTrendResults(items []TrendPlatformResult, order []string) {
 }
 
 func (s *TrendService) getPlatform(ctx context.Context, platform string, limit int, force bool) TrendPlatformResult {
-	result := TrendPlatformResult{Platform: platform, Label: trendLabels[platform], Stale: true}
+	result := TrendPlatformResult{Platform: platform, Label: trendLabels[platform], Items: make([]TrendItem, 0), Stale: true}
 	snapshot, err := s.repo.TrendSnapshots().FindByPlatform(ctx, platform)
 	now := time.Now().UTC()
 	if err == nil {
@@ -304,8 +304,11 @@ func (s *TrendService) getPlatform(ctx context.Context, platform string, limit i
 }
 
 func snapshotResult(snapshot *model.TrendSnapshot, ttl time.Duration, limit int, now time.Time) TrendPlatformResult {
-	var items []TrendItem
+	items := make([]TrendItem, 0)
 	_ = json.Unmarshal(snapshot.Items, &items)
+	if items == nil {
+		items = make([]TrendItem, 0)
+	}
 	if len(items) > limit {
 		items = items[:limit]
 	}

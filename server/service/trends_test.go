@@ -91,3 +91,19 @@ func TestTrendServiceLimitAndForceRefresh(t *testing.T) {
 		t.Fatalf("force refresh calls=%d", f.calls)
 	}
 }
+
+func TestTrendServiceReturnsEmptyItemsWhenInitialRefreshFails(t *testing.T) {
+	f := &trendTestFetcher{err: io.ErrUnexpectedEOF}
+	svc, _ := trendTestService(t, f, time.Hour)
+
+	result, err := svc.List(context.Background(), []string{"toutiao"}, 12, false)
+	if err != nil {
+		t.Fatalf("list should expose stale result instead of failing: %v", err)
+	}
+	if result.Items[0].Items == nil {
+		t.Fatalf("expected an empty items array, got nil: %+v", result.Items[0])
+	}
+	if len(result.Items[0].Items) != 0 {
+		t.Fatalf("expected no items, got %+v", result.Items[0].Items)
+	}
+}
