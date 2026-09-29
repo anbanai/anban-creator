@@ -195,6 +195,7 @@ Development rules:
 - Do not reintroduce legacy Python helper scripts for live slicing.
 - Keep generated task artifacts explicit and file-backed, especially JSON returned by MCP tools.
 - Skills must stay host-neutral. Put unavoidable host syntax in the native manifest, MCP, Hook, Agent, or install adapter rather than duplicating a Skill tree.
+- Before adding or modifying a Skill, read [`docs/ANBAN-SKILL-SPEC.md`](docs/ANBAN-SKILL-SPEC.md); it is the canonical Anban contract for Claude-compatible frontmatter, progressive disclosure, file-backed outputs, failure handling, and Skill/Server boundaries.
 - When changing plugin assets under `harness/` (agents, skills/`SKILL.md`, hooks, themes, writers, manifests, install scripts, or runtime-affecting docs), update both native manifest versions in the same change: `harness/.claude-plugin/plugin.json` and `harness/.codex-plugin/plugin.json`. Default to a patch bump unless the release scope warrants minor/major.
 
 ## Testing Patterns
