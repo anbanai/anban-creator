@@ -118,11 +118,8 @@ func validateAnalyticsWrite(req AnalyticsWriteRequest) error {
 		if c.ID == "" || len(c.ID) > 100 || c.ProjectID != req.ProjectID || o.ContentID != c.ID || o.ProjectID != req.ProjectID {
 			return errors.New("analytics identity mismatch")
 		}
-		if o.MetricBasis != "daily" && o.MetricBasis != "cumulative" {
-			return errors.New("analytics metric_basis must be daily or cumulative")
-		}
-		if (c.Platform == "article" || c.Platform == "wechat") && o.MetricBasis != "cumulative" {
-			return errors.New("WeChat analytics require cumulative basis")
+		if o.MetricBasis != "cumulative" {
+			return errors.New("analytics observations require cumulative basis")
 		}
 		if !validAnalyticsDate(o.StatDate) || o.EffectiveAt.IsZero() || o.ReceivedAt.IsZero() || o.Source == "" {
 			return errors.New("analytics date and provenance required")
@@ -224,8 +221,8 @@ func normalizeAnalyticsQuery(q AnalyticsQuery) (AnalyticsQuery, error) {
 	if a.After(b) || b.After(a.AddDate(10, 0, 0)) {
 		return bad("range must be ordered and at most ten years")
 	}
-	if q.MetricBasis != "daily" && q.MetricBasis != "cumulative" {
-		return bad("metric_basis required")
+	if q.MetricBasis != "cumulative" {
+		return bad("metric_basis must be cumulative")
 	}
 	if q.Granularity == "" {
 		q.Granularity = "day"
@@ -303,7 +300,7 @@ func analyticsOverviewRead(ctx context.Context, r *repository.AnalyticsRepositor
 	}
 	out.Totals = m.Map(p.Platform)
 	out.Coverage.Contents = n
-	if content != "" && q.MetricBasis == "cumulative" {
+	if content != "" {
 		out.UnavailableMetrics = map[string]string{}
 	}
 	rows, e := r.Series(ctx, p.ID, state.ActiveGeneration, q.MetricBasis, q.From, q.To, q.Granularity, content)
@@ -312,7 +309,7 @@ func analyticsOverviewRead(ctx context.Context, r *repository.AnalyticsRepositor
 	}
 	for _, row := range rows {
 		metrics := row.AnalyticsMetrics
-		if content == "" || q.MetricBasis == "daily" {
+		if content == "" {
 			metrics.DeliveryCompletionRate = nil
 			metrics.ReadCompletionRate = nil
 			metrics.AverageReadActiveTime = nil

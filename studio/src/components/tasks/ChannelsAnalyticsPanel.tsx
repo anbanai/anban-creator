@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, ExternalLink, Heart, Loader2, MessageCircle, Share2 } from 'lucide-react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -94,10 +93,10 @@ function ChannelsAnalyticsContent({ analytics }: { analytics: ChannelsAnalytics 
           {tracking.last_error && <p className="mt-2 text-xs text-amber-400">{tracking.last_error}</p>}
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Metric icon={<Heart />} label="点赞数" value={analytics.latest?.like_count} delta={analytics.deltas?.like_count} />
-          <Metric icon={<Bookmark />} label="收藏数" value={analytics.latest?.favorite_count} delta={analytics.deltas?.favorite_count} />
-          <Metric icon={<MessageCircle />} label="评论数" value={analytics.latest?.comment_count} delta={analytics.deltas?.comment_count} />
-          <Metric icon={<Share2 />} label="转发数" value={analytics.latest?.forward_count} delta={analytics.deltas?.forward_count} />
+          <Metric icon={<Heart />} label="点赞数" value={analytics.latest?.like_count} />
+          <Metric icon={<Bookmark />} label="收藏数" value={analytics.latest?.favorite_count} />
+          <Metric icon={<MessageCircle />} label="评论数" value={analytics.latest?.comment_count} />
+          <Metric icon={<Share2 />} label="转发数" value={analytics.latest?.forward_count} />
         </div>
         {chartData.length > 0 && (
           <div className="h-64">
@@ -133,8 +132,8 @@ function BindForm({ value, pending, error, onChange, onSubmit }: { value: string
   )
 }
 
-function Metric({ icon, label, value, delta }: { icon: ReactNode; label: string; value?: number; delta?: number }) {
-  return <div className="rounded-md border border-border bg-muted/20 p-3"><div className="flex items-center gap-2 text-xs text-muted-foreground">{icon}<span>{label}</span></div><div className="mt-2 flex items-baseline gap-2"><span className="text-xl font-semibold tabular-nums">{value ?? '--'}</span>{delta != null && delta !== 0 && <span className="text-xs text-emerald-500">{delta > 0 ? '+' : ''}{delta}</span>}</div></div>
+function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value?: number }) {
+  return <div className="rounded-md border border-border bg-muted/20 p-3"><div className="flex items-center gap-2 text-xs text-muted-foreground">{icon}<span>{label}</span></div><div className="mt-2"><span className="text-xl font-semibold tabular-nums">{value ?? '--'}</span></div></div>
 }
 
 function formatDateTime(value?: string | null) {

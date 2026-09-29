@@ -22,13 +22,6 @@ export interface SeednoteMetricInfo {
   captured_at?: string | null
 }
 
-export interface SeednoteMetricDelta {
-  like_count: number
-  collect_count: number
-  comment_count: number
-  share_count: number
-}
-
 export interface SeednoteMetricSeriesItem {
   captured_at: string
   like_count: number
@@ -41,6 +34,5 @@ export interface SeednoteMetricSeriesItem {
 export interface SeednoteAnalytics {
   tracking?: SeednoteTrackingInfo
   latest?: SeednoteMetricInfo
-  deltas?: SeednoteMetricDelta
   series: SeednoteMetricSeriesItem[]
 }

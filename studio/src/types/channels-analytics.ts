@@ -23,13 +23,6 @@ export interface ChannelsMetricInfo {
   captured_at?: string | null
 }
 
-export interface ChannelsMetricDelta {
-  like_count: number
-  favorite_count: number
-  comment_count: number
-  forward_count: number
-}
-
 export interface ChannelsMetricSeriesItem {
   captured_at: string
   like_count: number
@@ -41,6 +34,5 @@ export interface ChannelsMetricSeriesItem {
 export interface ChannelsAnalytics {
   tracking?: ChannelsTrackingInfo
   latest?: ChannelsMetricInfo
-  deltas?: ChannelsMetricDelta
   series: ChannelsMetricSeriesItem[]
 }

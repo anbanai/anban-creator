@@ -54,12 +54,6 @@ describe('ChannelsAnalyticsPanel', () => {
         comment_count: 9,
         forward_count: 25,
       },
-      deltas: {
-        like_count: 10,
-        favorite_count: 2,
-        comment_count: 1,
-        forward_count: 3,
-      },
       series: [],
     })
 
@@ -72,5 +66,7 @@ describe('ChannelsAnalyticsPanel', () => {
     expect(screen.getByText('18')).toBeInTheDocument()
     expect(screen.getByText('9')).toBeInTheDocument()
     expect(screen.getByText('25')).toBeInTheDocument()
+    expect(screen.queryByText('+10')).not.toBeInTheDocument()
+    expect(screen.queryByText('+2')).not.toBeInTheDocument()
   })
 })

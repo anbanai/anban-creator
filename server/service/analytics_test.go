@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -61,33 +62,6 @@ func TestAnalyticsCumulativePriorityRevocationAndRange(t *testing.T) {
 		t.Fatalf("revision error %v", e)
 	}
 }
-func TestAnalyticsDailyNullAndRollback(t *testing.T) {
-	s, db := analyticsFixture(t)
-	zero, n := int64(0), int64(7)
-	analyticsWrite(t, s, "1", "a", "2026-02-01", "daily", "one", 200, &zero)
-	analyticsWrite(t, s, "2", "a", "2026-02-02", "daily", "two", 200, nil)
-	analyticsWrite(t, s, "3", "a", "2026-02-03", "daily", "three", 200, &n)
-	analyticsWrite(t, s, "4", "a", "2026-02-03", "cumulative", "four", 200, &n)
-	q := AnalyticsQuery{From: "2026-02-01", To: "2026-02-02", Granularity: "week", MetricBasis: "daily"}
-	v, e := s.Overview(context.Background(), "u", "p", q)
-	if e != nil || v.Totals["view_count"] != int64(0) {
-		t.Fatalf("clipped totals=%+v %v", v, e)
-	}
-	q.From = "2026-02-02"
-	v, e = s.Overview(context.Background(), "u", "p", q)
-	if e != nil || v.Totals["view_count"] != nil {
-		t.Fatalf("null totals=%+v %v", v, e)
-	}
-	var raw int64
-	db.Model(&model.AnalyticsRawPayload{}).Count(&raw)
-	if raw != 4 {
-		t.Fatalf("raw=%d", raw)
-	}
-	if _, e = s.Overview(context.Background(), "other", "p", q); e != ErrAnalyticsForbidden {
-		t.Fatalf("ownership=%v", e)
-	}
-}
-
 func TestAnalyticsExactDecimalsNullOrderingAndAudit(t *testing.T) {
 	s, db := analyticsFixture(t)
 	ctx := context.Background()
@@ -135,10 +109,10 @@ func TestAnalyticsOverflowAndInvalidDecimalRollBack(t *testing.T) {
 	s, db := analyticsFixture(t)
 	ctx := context.Background()
 	max := int64(9223372036854775807)
-	analyticsWrite(t, s, "max", "a", "2026-02-01", "daily", "max", 200, &max)
+	analyticsWrite(t, s, "max", "a", "2026-02-01", "cumulative", "max", 200, &max)
 	at := time.Now()
 	one := int64(1)
-	in := AnalyticsObservationInput{Content: model.AnalyticsContent{ID: "b", ProjectID: "p", Platform: "seednote"}, Observation: model.AnalyticsObservation{ID: "overflow", ProjectID: "p", ContentID: "b", StatDate: "2026-02-01", MetricBasis: "daily", Source: "import", EffectiveAt: at, ReceivedAt: at, AnalyticsMetrics: model.AnalyticsMetrics{ViewCount: &one}}, RawPayload: "{}"}
+	in := AnalyticsObservationInput{Content: model.AnalyticsContent{ID: "b", ProjectID: "p", Platform: "seednote"}, Observation: model.AnalyticsObservation{ID: "overflow", ProjectID: "p", ContentID: "b", StatDate: "2026-02-01", MetricBasis: "cumulative", Source: "import", EffectiveAt: at, ReceivedAt: at, AnalyticsMetrics: model.AnalyticsMetrics{ViewCount: &one}}, RawPayload: "{}"}
 	if _, e := s.Apply(ctx, AnalyticsWriteRequest{ProjectID: "p", Observations: []AnalyticsObservationInput{in}}); e == nil {
 		t.Fatal("expected sum overflow")
 	}
@@ -166,7 +140,7 @@ func TestAnalyticsRejectsOversizedRawPayloadBeforeTransaction(t *testing.T) {
 		Content: model.AnalyticsContent{ID: "large", ProjectID: "p", Platform: "seednote"},
 		Observation: model.AnalyticsObservation{
 			ID: "large-observation", ProjectID: "p", ContentID: "large", StatDate: "2026-02-01",
-			MetricBasis: "daily", Source: "import", EffectiveAt: at, ReceivedAt: at,
+			MetricBasis: "cumulative", Source: "import", EffectiveAt: at, ReceivedAt: at,
 			AnalyticsMetrics: model.AnalyticsMetrics{ViewCount: &count},
 		},
 		RawPayload: strings.Repeat("x", maxAnalyticsRawPayloadBytes+1),
@@ -194,15 +168,32 @@ func TestAnalyticsBoundariesAndSparseCumulative(t *testing.T) {
 		t.Fatalf("sparse %+v %v", v, e)
 	}
 	q.MetricBasis = "daily"
-	v, e = s.Overview(context.Background(), "u", "p", q)
-	if e != nil || v.Totals["view_count"] != nil || len(v.Series) != 0 {
-		t.Fatalf("basis leaked %+v %v", v, e)
+	if _, e = s.Overview(context.Background(), "u", "p", q); !errors.Is(e, ErrAnalyticsInvalidQuery) {
+		t.Fatalf("daily query accepted: %v", e)
 	}
 }
+
+func TestAnalyticsRejectsDailyObservationWrites(t *testing.T) {
+	s, _ := analyticsFixture(t)
+	count := int64(10)
+	at := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	in := AnalyticsObservationInput{
+		Content: model.AnalyticsContent{ID: "a", ProjectID: "p", Platform: "seednote"},
+		Observation: model.AnalyticsObservation{
+			ID: "daily", ProjectID: "p", ContentID: "a", StatDate: "2026-02-01",
+			MetricBasis: "daily", Source: "import", EffectiveAt: at, ReceivedAt: at,
+			AnalyticsMetrics: model.AnalyticsMetrics{ViewCount: &count},
+		},
+	}
+	if _, err := s.Apply(context.Background(), AnalyticsWriteRequest{ProjectID: "p", Observations: []AnalyticsObservationInput{in}}); err == nil {
+		t.Fatal("daily observation was accepted")
+	}
+}
+
 func TestAnalyticsRebuildGateAndIdempotency(t *testing.T) {
 	s, db := analyticsFixture(t)
 	ctx := context.Background()
-	q := AnalyticsQuery{From: "2026-01-01", To: "2026-01-31", MetricBasis: "daily"}
+	q := AnalyticsQuery{From: "2026-01-01", To: "2026-01-31", MetricBasis: "cumulative"}
 	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	e := s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		svc := NewAnalyticsService(tx)

@@ -41,13 +41,6 @@ export interface WechatMetricInfo {
   captured_at?: string | null
 }
 
-export interface WechatMetricDelta {
-  int_page_read_user: number
-  int_page_read_count: number
-  share_count: number
-  add_to_fav_count: number
-}
-
 export interface WechatMetricSeriesItem {
   captured_at: string
   stat_date: string
@@ -66,7 +59,6 @@ export interface WechatAnalytics {
   tracking?: WechatTrackingInfo
   metrics?: WechatMetricInfo
   latest?: WechatMetricInfo
-  deltas?: WechatMetricDelta
   trend?: WechatMetricSeriesItem[]
   series?: WechatMetricSeriesItem[]
 }

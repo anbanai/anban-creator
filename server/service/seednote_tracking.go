@@ -61,7 +61,6 @@ func NewSeednoteTrackingService(repo repository.Repository, platform SeednotePub
 type SeednoteAnalytics struct {
 	Tracking *SeednoteTrackingInfo       `json:"tracking,omitempty"`
 	Latest   *SeednoteMetricInfo         `json:"latest,omitempty"`
-	Deltas   *SeednoteMetricDelta        `json:"deltas,omitempty"`
 	Series   []*SeednoteMetricSeriesItem `json:"series"`
 }
 
@@ -85,13 +84,6 @@ type SeednoteMetricInfo struct {
 	ShareCount   int        `json:"share_count"`
 	ViewCount    *int       `json:"view_count"`
 	CapturedAt   *time.Time `json:"captured_at,omitempty"`
-}
-
-type SeednoteMetricDelta struct {
-	LikeCount    int `json:"like_count"`
-	CollectCount int `json:"collect_count"`
-	CommentCount int `json:"comment_count"`
-	ShareCount   int `json:"share_count"`
 }
 
 type SeednoteMetricSeriesItem struct {
@@ -478,11 +470,6 @@ func (s *SeednoteTrackingService) GetTaskAnalytics(ctx context.Context, userID, 
 	if len(snapshots) > 0 {
 		latest := snapshots[len(snapshots)-1]
 		analytics.Latest = metricInfoFromSnapshot(latest)
-		if len(snapshots) > 1 {
-			analytics.Deltas = metricDelta(latest, snapshots[len(snapshots)-2])
-		} else {
-			analytics.Deltas = &SeednoteMetricDelta{}
-		}
 	}
 	return analytics, nil
 }
@@ -568,14 +555,5 @@ func metricInfoFromSnapshot(snapshot *model.SeednoteMetricSnapshot) *SeednoteMet
 		ShareCount:   snapshot.ShareCount,
 		ViewCount:    snapshot.ViewCount,
 		CapturedAt:   &snapshot.CapturedAt,
-	}
-}
-
-func metricDelta(current, previous *model.SeednoteMetricSnapshot) *SeednoteMetricDelta {
-	return &SeednoteMetricDelta{
-		LikeCount:    current.LikeCount - previous.LikeCount,
-		CollectCount: current.CollectCount - previous.CollectCount,
-		CommentCount: current.CommentCount - previous.CommentCount,
-		ShareCount:   current.ShareCount - previous.ShareCount,
 	}
 }

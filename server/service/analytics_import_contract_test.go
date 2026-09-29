@@ -15,7 +15,7 @@ func TestAnalyticsImportRequiresExplicitSemantics(t *testing.T) {
 		{"wechat cumulative", "article", "cumulative", "key", &now, true},
 		{"wechat fixed default", "article", "", "key", &now, true},
 		{"seednote cumulative", "seednote", "cumulative", "key", &now, true},
-		{"seednote daily", "seednote", "daily", "key", &now, true},
+		{"seednote daily rejected", "seednote", "daily", "key", &now, false},
 		{"seednote missing basis", "seednote", "", "key", &now, false},
 		{"wechat daily forbidden", "article", "daily", "key", &now, false},
 		{"missing date", "article", "cumulative", "key", nil, false},
@@ -37,9 +37,6 @@ func TestAnalyticsRequestFingerprintIncludesMeaningButNotSelectionOrder(t *testi
 	b := analyticsRequestFingerprint("file", "cumulative", now, []AnalyticsSelection{selections[1], selections[0]})
 	if a != b {
 		t.Fatal("same selections reordered must be same request")
-	}
-	if a == analyticsRequestFingerprint("file", "daily", now, selections) {
-		t.Fatal("basis not fingerprinted")
 	}
 	if a == analyticsRequestFingerprint("file", "cumulative", now.Add(time.Hour), selections) {
 		t.Fatal("date not fingerprinted")

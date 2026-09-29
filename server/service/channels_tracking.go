@@ -45,7 +45,6 @@ func NewChannelsTrackingService(repo repository.Repository, provider ChannelsAna
 type ChannelsAnalytics struct {
 	Tracking *ChannelsTrackingInfo       `json:"tracking,omitempty"`
 	Latest   *ChannelsMetricInfo         `json:"latest,omitempty"`
-	Deltas   *ChannelsMetricDelta        `json:"deltas,omitempty"`
 	Series   []*ChannelsMetricSeriesItem `json:"series"`
 }
 
@@ -70,13 +69,6 @@ type ChannelsMetricInfo struct {
 	CommentCount  int        `json:"comment_count"`
 	ForwardCount  int        `json:"forward_count"`
 	CapturedAt    *time.Time `json:"captured_at,omitempty"`
-}
-
-type ChannelsMetricDelta struct {
-	LikeCount     int `json:"like_count"`
-	FavoriteCount int `json:"favorite_count"`
-	CommentCount  int `json:"comment_count"`
-	ForwardCount  int `json:"forward_count"`
 }
 
 type ChannelsMetricSeriesItem struct {
@@ -415,16 +407,6 @@ func (s *ChannelsTrackingService) GetTaskAnalytics(ctx context.Context, userID, 
 	if len(filtered) > 0 {
 		latest := filtered[len(filtered)-1]
 		analytics.Latest = channelsMetricInfo(latest)
-		analytics.Deltas = &ChannelsMetricDelta{}
-		if len(filtered) > 1 {
-			previous := filtered[len(filtered)-2]
-			analytics.Deltas = &ChannelsMetricDelta{
-				LikeCount:     latest.LikeCount - previous.LikeCount,
-				FavoriteCount: latest.FavoriteCount - previous.FavoriteCount,
-				CommentCount:  latest.CommentCount - previous.CommentCount,
-				ForwardCount:  latest.ForwardCount - previous.ForwardCount,
-			}
-		}
 	}
 	return analytics, nil
 }

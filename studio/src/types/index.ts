@@ -74,7 +74,6 @@ export type {
 
 export type {
   SeednoteAnalytics,
-  SeednoteMetricDelta,
   SeednoteMetricInfo,
   SeednoteMetricSeriesItem,
   SeednoteTrackingInfo,
@@ -84,7 +83,6 @@ export type { SeednoteImportBatch, SeednoteImportRow, SeednoteImportSummary, See
 
 export type {
   WechatAnalytics,
-  WechatMetricDelta,
   WechatMetricInfo,
   WechatMetricSeriesItem,
   WechatTrackingInfo,
@@ -106,7 +104,6 @@ export type {
 
 export type {
   ChannelsAnalytics,
-  ChannelsMetricDelta,
   ChannelsMetricInfo,
   ChannelsMetricSeriesItem,
   ChannelsTrackingInfo,

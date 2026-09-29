@@ -20,6 +20,13 @@ beforeEach(() => {
   vi.mocked(contentAnalyticsApi.observations).mockResolvedValue({ revision: 4, items: [], total: 0, offset: 0, limit: 25 })
 })
 describe('server analytics queries', () => {
+  it('uses cumulative reporting without a daily or increment basis control', async () => {
+    render(<ContentDataPage />)
+    expect(await screen.findByText('趋势')).toBeInTheDocument()
+    expect(screen.queryByLabelText('统计口径')).not.toBeInTheDocument()
+    expect(screen.queryByText(/当日新增|增量/)).not.toBeInTheDocument()
+  })
+
   it('reads observation history only after explicitly opening it', async () => {
     window.history.replaceState(null, '', '/content-data?account=notes&content=canonical-1')
     render(<ContentDataPage />)

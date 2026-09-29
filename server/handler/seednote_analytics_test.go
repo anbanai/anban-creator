@@ -176,8 +176,12 @@ func TestSeednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 	if analytics.Latest == nil || analytics.Latest.LikeCount != 18 || analytics.Latest.ViewCount == nil {
 		t.Fatalf("latest = %+v", analytics.Latest)
 	}
-	if analytics.Deltas == nil || analytics.Deltas.LikeCount != 8 || analytics.Deltas.CollectCount != 1 {
-		t.Fatalf("deltas = %+v", analytics.Deltas)
+	var analyticsJSON map[string]any
+	if err := json.Unmarshal(raw, &analyticsJSON); err != nil {
+		t.Fatalf("decode raw analytics: %v", err)
+	}
+	if _, exists := analyticsJSON["deltas"]; exists {
+		t.Fatal("analytics response must not include metric deltas")
 	}
 	if len(analytics.Series) != 2 {
 		t.Fatalf("series length = %d, want 2", len(analytics.Series))

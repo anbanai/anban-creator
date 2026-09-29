@@ -29,8 +29,6 @@ beforeEach(() => {
 })
 function setExplicitScope() {
   fireEvent.change(screen.getByLabelText('数据截至时间'), { target: { value: '2026-09-24T12:00' } })
-  fireEvent.click(screen.getByLabelText('导入统计口径'))
-  fireEvent.click(screen.getByRole('option', { name: '当日新增' }))
 }
 describe('统一导入确认', () => {
   it('defaults the data cutoff to the current Beijing minute and keeps it after replacing the file', async () => {
@@ -62,20 +60,20 @@ describe('统一导入确认', () => {
     const wechat = { ...project, platform: 'article' as const }
     render(<ContentImportDialog project={wechat} onClose={vi.fn()} />)
     await upload()
-    expect(screen.getByLabelText('导入统计口径')).toBeDisabled()
-    expect(screen.getByLabelText('导入统计口径')).toHaveTextContent('累计数据')
+    expect(screen.queryByLabelText('导入统计口径')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeEnabled()
     fireEvent.change(screen.getByLabelText('数据截至时间'), { target: { value: '2026-09-24T12:00' } })
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
     await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(wechat, expect.objectContaining({ metric_basis: 'cumulative' })))
   })
-  it('requires an explicit date and basis before importing Seednote', async () => {
+  it('requires an explicit date and imports latest cumulative Seednote values', async () => {
     render(<ContentImportDialog project={project} onClose={vi.fn()} />)
     await upload()
-    expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeDisabled()
+    expect(screen.queryByLabelText('导入统计口径')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeEnabled()
     setExplicitScope()
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
-    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ metric_basis: 'daily', data_as_of_at: '2026-09-24T04:00:00.000Z', idempotency_key: expect.any(String) })))
+    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ metric_basis: 'cumulative', data_as_of_at: '2026-09-24T04:00:00.000Z', idempotency_key: expect.any(String) })))
   })
   it('retains the idempotency key on retry and replaces it after editing the request', async () => {
     vi.mocked(contentAnalyticsApi.import).mockRejectedValue(new Error('网络中断'))

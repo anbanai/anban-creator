@@ -17,12 +17,8 @@ func validateAnalyticsImport(platform, basis, key string, at *time.Time) error {
 	if strings.TrimSpace(key) == "" || len(key) > 128 {
 		return errors.New("idempotency_key 必须为 1 到 128 个字符")
 	}
-	if platform == "article" {
-		if basis != "" && basis != "cumulative" {
-			return errors.New("公众号数据必须使用累计口径 cumulative")
-		}
-	} else if basis != "cumulative" && basis != "daily" {
-		return errors.New("请确认累计或单日统计口径；暂不支持多日区间汇总文件")
+	if basis != "cumulative" && !(platform == "article" && basis == "") {
+		return errors.New("内容数据必须使用累计口径 cumulative")
 	}
 	return nil
 }

@@ -3,7 +3,6 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { Check, CheckCircle2, ChevronsUpDown, FileCheck2, FileSpreadsheet, Loader2, RefreshCw, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -57,9 +56,8 @@ export default function ContentImportDialog({ project, onClose, onImported }: { 
   const [labels, setLabels] = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<number[]>([])
   const [asOf, setAsOf] = useState(() => currentBeijingDateTimeLocal())
-  const [basis, setBasis] = useState<'cumulative' | 'daily' | ''>(project.platform === 'article' ? 'cumulative' : '')
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
-  useEffect(() => { setIdempotencyKey(crypto.randomUUID()) }, [uploadId, selected, targets, asOf, basis, file])
+  useEffect(() => { setIdempotencyKey(crypto.randomUUID()) }, [uploadId, selected, targets, asOf, file])
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [type, setType] = useState('all')
@@ -80,7 +78,7 @@ export default function ContentImportDialog({ project, onClose, onImported }: { 
     },
   })
   const importMutation = useMutation({
-    mutationFn: () => contentAnalyticsApi.import(project, { metric_basis: basis as 'cumulative' | 'daily', idempotency_key: idempotencyKey, upload_id: uploadId, selections: selected.map((source_row) => ({ source_row, target: targets[source_row] })), data_as_of_at: new Date(`${asOf}:00+08:00`).toISOString(), timezone: 'Asia/Shanghai', client_file_modified_at: file ? new Date(file.lastModified).toISOString() : undefined }),
+    mutationFn: () => contentAnalyticsApi.import(project, { metric_basis: 'cumulative', idempotency_key: idempotencyKey, upload_id: uploadId, selections: selected.map((source_row) => ({ source_row, target: targets[source_row] })), data_as_of_at: new Date(`${asOf}:00+08:00`).toISOString(), timezone: 'Asia/Shanghai', client_file_modified_at: file ? new Date(file.lastModified).toISOString() : undefined }),
     onSuccess: async (result) => { await invalidateContentAnalytics(client, project.id); onImported?.(result); onClose() },
   })
   const busy = previewMutation.isPending || importMutation.isPending
@@ -106,7 +104,7 @@ export default function ContentImportDialog({ project, onClose, onImported }: { 
       {!file ? <label htmlFor="content-import-file" className={`flex cursor-pointer items-center gap-4 rounded-lg border border-dashed p-5 hover:border-primary focus-within:ring-2 focus-within:ring-ring ${busy ? 'pointer-events-none opacity-60' : ''}`}><FileSpreadsheet className="size-7 shrink-0 text-primary" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">选择官方导出表格</span><span className="mt-1 block text-xs text-muted-foreground">{project.platform === 'article' ? '.xls / .xlsx' : '.xlsx'} · 最大 20 MB</span></span>{filePicker}</label> : <div className="flex items-center gap-3 rounded-lg border bg-muted/20 px-4 py-3"><FileCheck2 className="size-5 shrink-0 text-primary" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{file.name}</p>{preview && !previewMutation.isPending ? <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><CheckCircle2 className="size-3.5 text-emerald-600" />文件已解析 · {preview.total_rows} 条</p> : <p className="mt-0.5 text-xs text-muted-foreground">{previewMutation.isPending ? '正在解析…' : '等待解析'}</p>}</div><Button type="button" size="icon-sm" variant="ghost" aria-label="更换导入文件" disabled={busy} onClick={() => fileInputRef.current?.click()}><RefreshCw /></Button>{filePicker}</div>}
       {previewMutation.isPending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />正在解析并匹配当前账号内容…</p>}
       {previewMutation.isError && <div role="alert" className="text-sm text-destructive">{previewMutation.error.message}<Button variant="ghost" disabled={!file || busy} onClick={() => file && previewMutation.mutate(file)}>重新解析</Button></div>}
-      <div className="flex flex-wrap items-end gap-4 border-b pb-4"><label className="grid gap-1.5 text-xs text-muted-foreground">数据截至时间（北京时间）<Input className="w-52" type="datetime-local" aria-label="数据截至时间" value={asOf} disabled={busy} onChange={(event) => setAsOf(event.target.value)} /></label>{preview && <label className="grid gap-1.5 text-xs text-muted-foreground">统计口径<Select value={basis || undefined} onValueChange={(value) => setBasis(value as typeof basis)} disabled={busy || project.platform === 'article'}><SelectTrigger aria-label="导入统计口径" className="w-36"><SelectValue>{basis === 'cumulative' ? '累计数据' : basis === 'daily' ? '当日新增' : '请选择'}</SelectValue></SelectTrigger><SelectContent><SelectItem value="cumulative" label="累计数据" onClick={() => setBasis('cumulative')}>累计数据</SelectItem>{project.platform === 'seednote' && <SelectItem value="daily" label="当日新增" onClick={() => setBasis('daily')}>当日新增</SelectItem>}</SelectContent></Select><span className="text-[11px]">{project.platform === 'article' ? '公众号按累计统计' : '按原始报表口径'}</span></label>}</div>
+      <div className="flex flex-wrap items-end gap-4 border-b pb-4"><label className="grid gap-1.5 text-xs text-muted-foreground">数据截至时间（北京时间）<Input className="w-52" type="datetime-local" aria-label="数据截至时间" value={asOf} disabled={busy} onChange={(event) => setAsOf(event.target.value)} /></label>{preview && <p className="text-xs text-muted-foreground">导入每篇内容截至该时间的累计数据</p>}</div>
       {preview && <>
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm"><p>共 <strong>{preview.total_rows}</strong> 条 · 已选 <strong className="text-primary">{selected.length}</strong> 条 · 跳过 {preview.total_rows - selected.length} 条</p><span className="text-xs text-muted-foreground">只导入已匹配且通过校验的内容</span></div>
         <p className="text-xs leading-relaxed text-muted-foreground">未匹配的内容可手动选择当前账号内任意状态的内容。未选择的行直接跳过，关联不会改变发布状态。</p>
@@ -117,6 +115,6 @@ export default function ContentImportDialog({ project, onClose, onImported }: { 
       {(error || importMutation.error) && <p role="alert" className="text-sm text-destructive">{error || importMutation.error?.message}</p>}
       {duplicates.size > 0 && <p role="alert" className="text-sm text-destructive">同一内容只能导入一行数据，请处理重复关联。</p>}
     </div>
-    <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t bg-card px-6 py-4"><Button variant="outline" disabled={busy} onClick={onClose}>取消</Button><Button disabled={busy || !preview || !selected.length || !validTime || !basis || duplicates.size > 0} onClick={() => importMutation.mutate()}>{importMutation.isPending ? '正在导入…' : `确认导入${selected.length ? ` ${selected.length} 条` : ''}`}</Button></DialogFooter>
+    <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t bg-card px-6 py-4"><Button variant="outline" disabled={busy} onClick={onClose}>取消</Button><Button disabled={busy || !preview || !selected.length || !validTime || duplicates.size > 0} onClick={() => importMutation.mutate()}>{importMutation.isPending ? '正在导入…' : `确认导入${selected.length ? ` ${selected.length} 条` : ''}`}</Button></DialogFooter>
   </DialogContent></Dialog>
 }

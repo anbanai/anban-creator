@@ -53,7 +53,7 @@ const statusVariant: Record<SeednoteTrackingStatus, 'default' | 'secondary' | 'd
 
 const stopReasonLabel: Record<string, string> = {
   max_duration_reached: '已达到最长追踪周期',
-  low_growth: '连续多天增量较低',
+  low_growth: '连续多天数据变化较低',
   discovery_timeout: '连续 7 天未能识别笔记',
   too_many_failures: '连续采集失败次数过多',
   manual_stop: '已手动停止',
@@ -234,10 +234,10 @@ function SeednoteAnalyticsContent({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <MetricTile icon={<Heart />} label="点赞" value={analytics.latest?.like_count} delta={analytics.deltas?.like_count} />
-          <MetricTile icon={<Bookmark />} label="收藏" value={analytics.latest?.collect_count} delta={analytics.deltas?.collect_count} />
-          <MetricTile icon={<MessageCircle />} label="评论" value={analytics.latest?.comment_count} delta={analytics.deltas?.comment_count} />
-          <MetricTile icon={<Share2 />} label="分享" value={analytics.latest?.share_count} delta={analytics.deltas?.share_count} />
+          <MetricTile icon={<Heart />} label="点赞" value={analytics.latest?.like_count} />
+          <MetricTile icon={<Bookmark />} label="收藏" value={analytics.latest?.collect_count} />
+          <MetricTile icon={<MessageCircle />} label="评论" value={analytics.latest?.comment_count} />
+          <MetricTile icon={<Share2 />} label="分享" value={analytics.latest?.share_count} />
           <MetricTile icon={<Eye />} label="曝光" value={analytics.latest?.view_count ?? null} unavailable={analytics.latest?.view_count == null} />
         </div>
 
@@ -314,13 +314,11 @@ function MetricTile({
   icon,
   label,
   value,
-  delta,
   unavailable,
 }: {
   icon: ReactNode
   label: string
   value?: number | null
-  delta?: number
   unavailable?: boolean
 }) {
   return (
@@ -333,11 +331,6 @@ function MetricTile({
         <span className="text-lg font-semibold tabular-nums text-foreground">
           {unavailable ? '暂无公开数据' : formatNumber(value)}
         </span>
-        {delta != null && (
-          <span className="text-xs tabular-nums text-emerald-400">
-            +{formatNumber(delta)}
-          </span>
-        )}
       </div>
     </div>
   )

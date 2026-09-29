@@ -3,7 +3,7 @@ import { shanghaiDay, type AnalyticsPoint } from '@/lib/analytics-period'
 import type { Project } from '@/types'
 import type { AnalyticsCandidate, AnalyticsImportPayload, AnalyticsPreview, AnalyticsTarget } from '@/types/content-analytics'
 export type AnalyticsPlatform = 'article' | 'seednote'
-export type MetricBasis = 'cumulative' | 'daily'
+export type MetricBasis = 'cumulative'
 export interface AnalyticsMetric { key: string; label: string; color: string; kind: 'count' | 'rate' | 'duration'; summary: boolean; format: (value: number) => string }
 export interface AnalyticsContent { id: string; title: string; content_type: string; status?: string; url?: string; date?: string; last_stat_date?: string; metrics: Record<string, number | null> }
 export interface AnalyticsParams { from: string; to: string; granularity: 'day' | 'week' | 'month'; metric_basis: MetricBasis; expected_revision?: number }
@@ -31,7 +31,7 @@ function contentDataHref(projectId: string, target: AnalyticsTarget) {
 }
 export function taskContentDataHref(projectId: string, taskId: string) { return contentDataHref(projectId, { kind: 'task', id: taskId }) }
 export const contentTypeLabel = (type: string) => ({ article: '文章', image: '贴图', image_text: '图文', '图文': '图文', '视频': '视频', video: '视频', unknown: '类型未知' }[type] ?? '类型未知')
-export function descriptionFor(_platform: string, _selected: boolean, basis: MetricBasis = 'cumulative') { return basis === 'cumulative' ? '每篇内容取范围内最新累计记录，不代表当日新增；缺失记录不补零。' : '仅统计明确标记为当日新增的数据；计数按日求和，缺失记录不补零。' }
+export function descriptionFor() { return '每篇内容取范围内最新累计记录；缺失记录不补零。' }
 const path = (id: string) => `/projects/${encodeURIComponent(id)}/content-analytics`
 const nativePath = (project: Project) => `/projects/${project.id}/${project.platform === 'article' ? 'wechat' : 'seednote'}-analytics`
 export const contentAnalyticsApi = {

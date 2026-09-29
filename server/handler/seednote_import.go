@@ -56,8 +56,8 @@ func (h *SeednoteImportHandler) Import(c fiber.Ctx) error {
 	if req.IdempotencyKey == "" || req.DataAsOfAt == nil {
 		return Error(c, 400, "data_as_of_at 和 idempotency_key 为必填")
 	}
-	if req.MetricBasis != "cumulative" && req.MetricBasis != "daily" {
-		return Error(c, 400, "metric_basis 必须是 cumulative 或 daily")
+	if req.MetricBasis != "cumulative" {
+		return Error(c, 400, "内容数据必须使用累计口径 cumulative")
 	}
 	result, err := h.service.Import(c.Context(), req)
 	return h.respond(c, result, err)

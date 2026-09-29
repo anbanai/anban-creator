@@ -19,9 +19,9 @@ describe('bounded analytics API', () => {
     expect(http.get).toHaveBeenCalledWith('/projects/p1/content-analytics/contents', { params: request, signal })
   })
   it('requests available dates by year without fetching batches', async () => {
-    await contentAnalyticsApi.dates('p1', { year: 2026, metric_basis: 'daily' })
+    await contentAnalyticsApi.dates('p1', { year: 2026, metric_basis: 'cumulative' })
     expect(http.get).toHaveBeenCalledTimes(1)
-    expect(http.get).toHaveBeenCalledWith('/projects/p1/content-analytics/dates', { params: { year: 2026, metric_basis: 'daily' }, signal: undefined })
+    expect(http.get).toHaveBeenCalledWith('/projects/p1/content-analytics/dates', { params: { year: 2026, metric_basis: 'cumulative' }, signal: undefined })
   })
   it('retains the business task deep-link contract', () => {
     expect(taskContentDataHref('p1', 't1')).toBe('/content-data?account=p1&content=task%3At1')
