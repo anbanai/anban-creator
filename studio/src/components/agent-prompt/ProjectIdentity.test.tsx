@@ -6,14 +6,19 @@ import { ProjectIdentity } from './ProjectIdentity'
 
 describe('ProjectIdentity', () => {
   it.each([
-    ['montage', '视频生成项目', 'text-purple-700'],
-    ['hypit', '视频复刻项目', 'text-orange-700'],
-  ])('preserves the %s identity in the project selector', (platform, label, color) => {
+    ['montage', 'text-[#9333EA]'],
+    ['hypit', 'text-[#F97316]'],
+  ])('uses the %s type mark as the avatar without a repeated type label', (platform, color) => {
     render(<ProjectIdentity project={{ id: platform, name: '视频项目', platform }} />)
-    expect(screen.getByText(label)).toHaveClass(color)
+    const icon = platform === 'montage'
+      ? document.querySelector('[data-platform-icon="montage"]')
+      : document.querySelector('[data-platform-icon="hypit"]')
+    expect(icon).toBeInTheDocument()
+    expect(icon).toHaveClass(color)
+    expect(screen.queryByText(/视频生成项目|视频复刻项目/)).not.toBeInTheDocument()
   })
 
-  it('renders the project avatar, name, description, and localized type', () => {
+  it('renders the type avatar, project name, and description without a type badge', () => {
     render(
       <ProjectIdentity
         project={{
@@ -26,42 +31,35 @@ describe('ProjectIdentity', () => {
       />,
     )
 
-    expect(screen.getByRole('img', { name: 'Morning Brief' })).toHaveAttribute(
-      'src',
-      'https://example.com/morning.png',
-    )
+    expect(document.querySelector('.lucide-signature')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '公众号类型' })).toHaveAttribute('title', '公众号类型')
+    expect(screen.queryByRole('img', { name: 'Morning Brief' })).not.toBeInTheDocument()
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
-    expect(screen.getByText('公众号项目')).toBeInTheDocument()
+    expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
   })
 
-  it('uses the project initial without inventing a repeated type description', () => {
+  it('uses the project initial when no platform mark or avatar is available', () => {
     const { rerender } = render(
       <ProjectIdentity
-        project={{ id: 'seednote-1', name: '  Garden Notes  ', platform: 'seednote' }}
+        project={{ id: 'unknown-1', name: '  Garden Notes  ' }}
       />,
     )
 
-    expect(screen.getByText('G')).toHaveClass('bg-[#FF2442]/10', 'text-[#FF2442]')
-    expect(
-      screen.getByText('种草笔记项目', { selector: '[data-slot="badge"]' }),
-    ).toBeInTheDocument()
+    expect(screen.getByText('G')).toBeInTheDocument()
     expect(document.querySelector('[data-slot="project-identity-description"]')).not.toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
 
     rerender(
       <ProjectIdentity
-        project={{ id: 'seednote-1', name: '  Garden Notes  ', platform: 'seednote' }}
+        project={{ id: 'unknown-1', name: '  Garden Notes  ' }}
         compact
       />,
     )
     expect(
       document.querySelector('[data-slot="project-identity-description"]'),
     ).not.toBeInTheDocument()
-    expect(
-      screen.getByText('种草笔记', { selector: '[data-slot="badge"]' }),
-    ).toBeInTheDocument()
-    expect(screen.queryByText('种草笔记项目')).not.toBeInTheDocument()
+    expect(screen.queryByText('种草笔记')).not.toBeInTheDocument()
   })
 
   it('can use the platform mark as the avatar for compact project controls', () => {
@@ -77,21 +75,6 @@ describe('ProjectIdentity', () => {
     expect(screen.getByText('Hypit')).toBeInTheDocument()
     expect(screen.queryByText('视频复刻')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
-  })
-
-  it('drops the project suffix in compact contexts so video brands stay readable', () => {
-    const { rerender } = render(
-      <ProjectIdentity project={{ id: 'hypit-1', name: 'Hypit', platform: 'hypit' }} />,
-    )
-    expect(screen.getByText('视频复刻项目')).toHaveClass('text-orange-700')
-
-    rerender(
-      <ProjectIdentity project={{ id: 'hypit-1', name: 'Hypit', platform: 'hypit' }} compact />,
-    )
-    const compactBadge = screen.getByText('视频复刻', { selector: '[data-slot="badge"]' })
-    expect(compactBadge).toHaveClass('text-orange-700')
-    expect(compactBadge).toHaveClass('shrink-0')
-    expect(screen.getByText('Hypit')).toBeInTheDocument()
   })
 
   it('shows the initial when the project avatar fails to load', () => {

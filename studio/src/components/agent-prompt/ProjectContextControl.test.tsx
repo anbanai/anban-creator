@@ -37,8 +37,8 @@ describe('ProjectContextControl', () => {
     const trigger = screen.getByRole('combobox', { name: '项目上下文' })
     expect(trigger).toHaveTextContent('Morning Brief')
     expect(trigger).toHaveTextContent('Daily editorial briefing')
-    expect(trigger).toHaveTextContent('公众号项目')
-    expect(trigger.querySelector('img')).toHaveAttribute('src', 'https://example.com/morning.png')
+    expect(trigger).not.toHaveTextContent('公众号项目')
+    expect(trigger.querySelector('.lucide-signature')).toBeInTheDocument()
     expect(trigger).toHaveClass('border-border')
 
     fireEvent.click(trigger)
@@ -50,7 +50,7 @@ describe('ProjectContextControl', () => {
     expect(articleGroup?.closest('[data-slot="combobox-label"]')).toHaveClass('py-0.5')
     expect(articleGroup?.closest('[data-slot="combobox-label"]')).not.toHaveTextContent('1 个')
     expect(screen.getByText('种草笔记')).toBeInTheDocument()
-    const selectedOption = screen.getByRole('option', { name: /Morning Brief/ })
+    const selectedOption = screen.getByRole('option', { name: /Morning Brief.*公众号/ })
     expect(selectedOption).toHaveTextContent('Daily editorial briefing')
     expect(selectedOption).not.toHaveTextContent('公众号项目')
     expect(selectedOption).toHaveAttribute('aria-selected', 'true')
@@ -143,11 +143,9 @@ describe('ProjectContextControl', () => {
     )
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
-    expect(screen.getByText('公众号项目')).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: 'Morning Brief' })).toHaveAttribute(
-      'src',
-      'https://example.com/morning.png',
-    )
+    expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
+    expect(document.querySelector('.lucide-signature')).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Morning Brief' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
 
     rerender(
@@ -200,7 +198,7 @@ describe('ProjectContextControl', () => {
     )
 
     fireEvent.click(trigger)
-    const option = await screen.findByRole('option', { name: /Morning Brief/ })
+    const option = await screen.findByRole('option', { name: /Morning Brief.*公众号/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
     expect(option).not.toHaveTextContent('公众号项目')
   })
@@ -219,7 +217,7 @@ describe('ProjectContextControl', () => {
     )
 
     const trigger = screen.getByRole('combobox', { name: '项目上下文' })
-    expect(trigger).toHaveTextContent('视频复刻项目')
+    expect(trigger).not.toHaveTextContent('视频复刻项目')
     expect(trigger.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
 
     fireEvent.click(trigger)
@@ -229,9 +227,9 @@ describe('ProjectContextControl', () => {
       'data-platform',
       'montage',
     )
-    const replication = await screen.findByRole('option', { name: /Hypit/ })
+    const replication = await screen.findByRole('option', { name: /Hypit.*视频复刻/ })
     expect(replication).toHaveTextContent('Hypit')
-    const generation = screen.getByRole('option', { name: /Montage/ })
+    const generation = screen.getByRole('option', { name: /Montage.*视频生成/ })
     expect(generation).toHaveTextContent('Montage')
   })
 

@@ -194,8 +194,8 @@ function SelectProjectContext({
               <ProjectIdentity
                 project={selected}
                 compact={compact}
-                showType={!compact}
-                avatarMode={compact ? 'platform' : 'project'}
+                showType={false}
+                avatarMode="platform"
               />
             ) : selected?.name ?? placeholder}
           </span>
@@ -233,6 +233,11 @@ function SelectProjectContext({
                     <ComboboxItem
                       key={item.id}
                       value={item}
+                      aria-label={item.kind === 'project'
+                        ? [item.name, item.platform ? platformDisplayName(item.platform) : undefined, item.description]
+                          .filter(Boolean)
+                          .join(' · ')
+                        : item.name}
                       className="min-h-10 rounded-lg border border-transparent px-2 py-1 pr-9 aria-selected:border-border/70 aria-selected:bg-accent/70"
                     >
                       {item.kind === 'project' ? (
@@ -282,8 +287,8 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
           <ProjectIdentity
             project={props.project}
             compact={props.compact}
-            showType={!props.compact}
-            avatarMode={props.compact ? 'platform' : 'project'}
+            showType={false}
+            avatarMode="platform"
           />
         ) : props.noProjectLabel ?? '未关联项目'}
       </div>

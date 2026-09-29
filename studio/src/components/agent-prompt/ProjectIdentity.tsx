@@ -24,13 +24,14 @@ interface ProjectIdentityProps {
 export function ProjectIdentity({
   project,
   compact = false,
-  showType = true,
-  avatarMode = 'project',
+  showType = false,
+  avatarMode = 'platform',
 }: ProjectIdentityProps) {
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string>()
   const initial = project.name.trim().charAt(0) || '项'
   const platformLabel = platformDisplayName(project.platform)
   const platformIcon = project.platform ? renderPlatformIcon(project.platform) : null
+  const usesPlatformAvatar = avatarMode === 'platform' && Boolean(platformIcon)
 
   return (
     <span
@@ -41,13 +42,19 @@ export function ProjectIdentity({
         compact ? 'h-6 gap-2' : 'min-h-10 gap-3',
       )}
     >
-      <Avatar size={compact ? 'sm' : 'lg'}>
-        {avatarMode === 'platform' && platformIcon ? (
+      <Avatar
+        size={compact ? 'sm' : 'lg'}
+        role={usesPlatformAvatar ? 'img' : undefined}
+        aria-label={usesPlatformAvatar ? `${platformLabel}类型` : undefined}
+        title={usesPlatformAvatar ? `${platformLabel}类型` : undefined}
+        className={usesPlatformAvatar ? 'rounded-xl after:rounded-xl' : undefined}
+      >
+        {usesPlatformAvatar ? (
           <AvatarFallback
             className={cn(
               platformBgColor[project.platform ?? ''],
               platformIconColor[(project.platform ?? '') as keyof typeof platformIconColor],
-              '[&_svg]:size-4',
+              'rounded-xl [&_svg]:size-4',
             )}
           >
             {platformIcon}
