@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "article",
-      "version": "2.0.3",
+      "version": "2.0.5",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -14,7 +14,10 @@
           "humanizer",
           "article-visual-design",
           "article-cover-design",
-          "topic-research",
+          "article-research",
+          "trending-topics",
+          "trend-rider",
+          "topic-evaluator",
           "seo-optimization",
           "article-viral-strategy",
           "article-publishing"
@@ -104,7 +107,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "14104ba620b9f75ec886e80a764376c2332d432d29ef9b7c30dc09e0ee55f05c"
+      "digest": "05c312ed0752715e6604d668e71adae1e5a208f171362b93466b294b5216006a"
     },
     {
       "id": "ecommerce",
@@ -208,7 +211,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "d5324f2fe612b98d508120b632332efff0bd49fe7af00b13d18ceaec136763a4"
+      "digest": "92beb694a5df1ff3e966efab6c9429546e90fd2e3811a27037cc3d3bde1f7f3d"
     },
     {
       "id": "hypit",
@@ -606,7 +609,7 @@
     },
     {
       "id": "seednote",
-      "version": "2.0.2",
+      "version": "2.0.4",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -616,6 +619,9 @@
           "portrait-cover-design",
           "humanizer",
           "seednote-research",
+          "trending-topics",
+          "trend-rider",
+          "topic-evaluator",
           "seednote-viral-analysis",
           "seednote-writing",
           "seednote-visual-design"
@@ -726,7 +732,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "07b89e486eeaa6e2fb67364b06e5536e91d7f626635f3d8ed06a6ff59bdfcdf6"
+      "digest": "7532542528e42286f32476867da26dd76880efc697a467c3ebf0873a085fd451"
     }
   ]
 }

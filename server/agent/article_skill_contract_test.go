@@ -859,7 +859,7 @@ func TestArticleSkillsDoNotReferenceRemovedGenerationMCPTools(t *testing.T) {
 		filepath.Join(root, "harness", "agents", "article.toml"),
 	}
 	for _, plugin := range []string{"harness"} {
-		for _, skill := range []string{"content-writing", "topic-research", "seo-optimization"} {
+		for _, skill := range []string{"content-writing", "article-research", "seo-optimization"} {
 			files = append(files, filepath.Join(root, plugin, "skills", skill, "SKILL.md"))
 		}
 	}
@@ -889,8 +889,8 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 			"output/03-article.md",
 		)...)
 
-		topic := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "topic-research", "SKILL.md"))
-		assertArticleContractContainsAll(t, plugin+" topic-research", topic, append(requiredSections,
+		topic := readArticleContractFile(t, filepath.Join(root, plugin, "skills", "article-research", "SKILL.md"))
+		assertArticleContractContainsAll(t, plugin+" article-research", topic, append(requiredSections,
 			"claim_topic",
 			"list_project_titles",
 			"list_drafts",
@@ -916,7 +916,7 @@ func TestArticleAgentsRouteCreativeGenerationToSkills(t *testing.T) {
 	} {
 		body := readArticleContractFile(t, file)
 		assertArticleContractContainsAll(t, file, body,
-			"topic-research",
+			"article-research",
 			"content-writing",
 			"seo-optimization",
 			"Skills 内部完成",

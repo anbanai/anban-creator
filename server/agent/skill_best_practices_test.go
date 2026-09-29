@@ -169,8 +169,8 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 		"moments":     {"moments"},
 		"hypit":       {},
 		"montage":     {"montage"},
-		"seednote":    {"seednote-research", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
-		"article":     {"content-writing", "article-visual-design", "article-cover-design", "topic-research", "seo-optimization", "article-viral-strategy"},
+		"seednote":    {"seednote-research", "trending-topics", "trend-rider", "topic-evaluator", "seednote-viral-analysis", "seednote-writing", "seednote-visual-design"},
+		"article":     {"content-writing", "article-visual-design", "article-cover-design", "article-research", "trending-topics", "trend-rider", "topic-evaluator", "seo-optimization", "article-viral-strategy"},
 	}
 
 	for agentName, want := range expected {
@@ -285,7 +285,10 @@ func TestArticleCodexAgentDeclaresOwnedSkills(t *testing.T) {
 		"humanizer",
 		"article-visual-design",
 		"article-cover-design",
-		"topic-research",
+		"article-research",
+		"trending-topics",
+		"trend-rider",
+		"topic-evaluator",
 		"seo-optimization",
 		"article-viral-strategy",
 		"portrait-cover-design",
@@ -298,6 +301,25 @@ func TestArticleCodexAgentDeclaresOwnedSkills(t *testing.T) {
 		for _, skill := range got {
 			if skill == forbidden {
 				t.Fatalf("%s must not preload %q", path, forbidden)
+			}
+		}
+	}
+}
+
+func TestTopicSelectionSkillsAreLoadedByCodexAgents(t *testing.T) {
+	root := repoRoot(t)
+	want := []string{"trending-topics", "trend-rider", "topic-evaluator"}
+	for _, path := range []string{
+		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "seednote.toml"),
+		filepath.Join(root, "harness", "packs", "article", "agent.codex.toml"),
+		filepath.Join(root, "harness", "packs", "seednote", "agent.codex.toml"),
+	} {
+		body := readRepoFile(t, path)
+		for _, skill := range want {
+			config := `path = "__PLUGIN_ROOT__/skills/` + skill + `/SKILL.md"`
+			if !strings.Contains(body, config) {
+				t.Errorf("%s must load %s through skills.config", path, skill)
 			}
 		}
 	}

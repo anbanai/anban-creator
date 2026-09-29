@@ -311,16 +311,16 @@ describe("buildQueryOptions", () => {
     }
 
     const articleWorker = article.agents?.["managed-readonly-worker"];
-    expect(articleWorker?.tools).toEqual(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__anban__get_project_profile", "mcp__anban__list_project_titles"]);
-    expect(articleWorker?.skills).toEqual(["topic-research", "seo-optimization"]);
+    expect(articleWorker?.tools).toEqual(["Read", "Glob", "Grep", "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"]);
+    expect(articleWorker?.skills).toEqual(["article-research", "trending-topics", "seo-optimization"]);
     for (const options of [seednote, viral]) {
       const worker = options.agents?.["managed-readonly-worker"];
       expect(worker?.tools).toEqual([
-        "Read", "Glob", "Grep", "WebSearch", "WebFetch",
-        "mcp__anban__get_project_profile", "mcp__anban__list_project_titles",
+        "Read", "Glob", "Grep",
+        "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
         "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
       ]);
-      expect(worker?.skills).toEqual(["seednote-research", "seednote-viral-analysis"]);
+      expect(worker?.skills).toEqual(["seednote-research", "trending-topics", "seednote-viral-analysis"]);
     }
 
     const ineligible = runner.buildQueryOptions({ ...validBootstrap(), task_type: "montage" }, "/workspace");

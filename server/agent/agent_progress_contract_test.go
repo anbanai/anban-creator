@@ -24,11 +24,14 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 		pack := pack
 		t.Run(pack.ID, func(t *testing.T) {
 			wantVersion := "2.0.1"
-			if pack.ID == "article" || pack.ID == "montage" || pack.ID == "hypit" {
+			if pack.ID == "article" {
+				wantVersion = "2.0.5"
+			}
+			if pack.ID == "montage" || pack.ID == "hypit" {
 				wantVersion = "2.0.3"
 			}
 			if pack.ID == "seednote" {
-				wantVersion = "2.0.2"
+				wantVersion = "2.0.4"
 			}
 			if pack.Version != wantVersion {
 				t.Fatalf("Pack version = %q, want %s", pack.Version, wantVersion)

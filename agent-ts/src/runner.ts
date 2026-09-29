@@ -155,24 +155,24 @@ const MANAGED_ALLOWED_TOOLS = [
 ];
 const MANAGED_PARALLEL_TASK_TYPES = new Set(["article", "seednote", "viral_analysis"]);
 const MANAGED_READONLY_WORKER = "managed-readonly-worker";
-const MANAGED_READONLY_WORKER_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"];
+const MANAGED_READONLY_WORKER_TOOLS = ["Read", "Glob", "Grep"];
 const MANAGED_READONLY_WORKER_MCP_TOOLS: Record<string, string[]> = {
-  article: ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles"],
+  article: ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"],
   seednote: [
-    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles",
+    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
     "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
   ],
   viral_analysis: [
-    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles",
+    "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
     "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
   ],
 };
 const MANAGED_READONLY_WORKER_SKILLS: Record<string, string[]> = {
-  article: ["topic-research", "seo-optimization"],
-  seednote: ["seednote-research", "seednote-viral-analysis"],
-  viral_analysis: ["seednote-research", "seednote-viral-analysis"],
+  article: ["article-research", "trending-topics", "seo-optimization"],
+  seednote: ["seednote-research", "trending-topics", "seednote-viral-analysis"],
+  viral_analysis: ["seednote-research", "trending-topics", "seednote-viral-analysis"],
 };
-const MANAGED_READONLY_WORKER_PROMPT = `You are the managed read-only research worker. Inspect sources and return concise findings to the main agent. Do not write or edit files, run commands, create tasks, invoke other agents, generate or upload media, publish, report progress, or submit completion metadata.`;
+const MANAGED_READONLY_WORKER_PROMPT = `You are the managed read-only research worker. Inspect sources and return concise findings to the main agent. Use the authenticated Anban MCP tools for public trend snapshots; never invent heat, freshness, or interaction data. Public trend discovery is research input only: leave trend-rider judgments, topic-evaluator decisions, final topic selection, and all workflow decisions to the main agent. Do not write or edit files, run commands, create tasks, invoke other agents, generate or upload media, publish, report progress, or submit completion metadata.`;
 const MANAGED_PARALLEL_WORKER_CONTRACT = `\n\nManaged parallel-worker contract: You remain the main agent and own all workflow decisions, file writes, task lifecycle, generation, publishing, feedback, progress, and completion. Delegate only when there are at least two independent research, material-analysis, or quality-review tasks. You may invoke exactly one worker type: \`${MANAGED_READONLY_WORKER}\`, with at most three concurrent Workers. Worker results must be consumed in this foreground turn. Do not request other worker types, model overrides, isolation, or background execution; worker calls are forced to \`run_in_background: false\`.`;
 const EXECUTION_IDENTITY_TOOLS = new Set(["generate_image", "upload_image", "analyze_image", "submit_completion_metadata"]);
 

@@ -482,7 +482,7 @@ func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
 	}
 }
 
-func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) {
+func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalSeednoteData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "harness", "agents", "seednote.md"),
@@ -555,7 +555,7 @@ func TestAgentReachSkillIsNotDistributed(t *testing.T) {
 	}
 }
 
-func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalXHSData(t *testing.T) {
+func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalSeednoteData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "harness", "skills", "seednote-research", "SKILL.md"),
