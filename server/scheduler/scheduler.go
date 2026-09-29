@@ -24,6 +24,9 @@ const (
 	TypeWechatPublicationReconcile = "wechat:publication_reconcile"
 	TypeImageAnalyze               = "image:analyze"
 	TypeAnalyticsRebuild           = "analytics:rebuild"
+	TypeFeedbackDaily              = "feedback:daily"
+	TypeFeedbackWeekly             = "feedback:weekly"
+	TypeFeedbackMonthly            = "feedback:monthly"
 )
 
 // TaskEnqueuer abstracts the async task enqueue mechanism.
@@ -78,6 +81,23 @@ func (c *AsynqClient) EnqueueUnique(taskType string, payload []byte, uniqueKey s
 	_, err := c.client.Enqueue(
 		asynq.NewTask(taskType, payload),
 		asynq.TaskID(uniqueKey),
+		asynq.MaxRetry(3),
+		asynq.Timeout(c.effectiveTimeout()),
+	)
+	if errors.Is(err, asynq.ErrTaskIDConflict) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// EnqueueUniqueIn is the delayed counterpart used by periodic feedback jobs.
+// The task ID remains the idempotency key while ProcessIn spreads a cadence
+// burst across a small scheduling window.
+func (c *AsynqClient) EnqueueUniqueIn(taskType string, payload []byte, uniqueKey string, delay time.Duration) (bool, error) {
+	_, err := c.client.Enqueue(
+		asynq.NewTask(taskType, payload),
+		asynq.TaskID(uniqueKey),
+		asynq.ProcessIn(delay),
 		asynq.MaxRetry(3),
 		asynq.Timeout(c.effectiveTimeout()),
 	)
@@ -146,6 +166,7 @@ type TaskProcessor struct {
 
 type ImageAnalysisHandler func(ctx context.Context, jobID string, generation int64) error
 type AnalyticsRebuildHandler func(ctx context.Context, jobID string) error
+type FeedbackHandler func(ctx context.Context, jobID string) error
 
 func (tp *TaskProcessor) RegisterImageAnalysisHandler(handler ImageAnalysisHandler, logger *zerolog.Logger) {
 	if tp == nil || handler == nil {
@@ -176,6 +197,31 @@ func (tp *TaskProcessor) RegisterAnalyticsRebuildHandler(handler AnalyticsRebuil
 		}
 		return handler(ctx, payload.JobID)
 	})
+}
+
+func (tp *TaskProcessor) RegisterFeedbackHandler(handler FeedbackHandler, logger *zerolog.Logger) {
+	if tp == nil || handler == nil {
+		return
+	}
+	for _, taskType := range []string{TypeFeedbackDaily, TypeFeedbackWeekly, TypeFeedbackMonthly} {
+		t := taskType
+		tp.mux.HandleFunc(t, func(ctx context.Context, task *asynq.Task) error {
+			var payload struct {
+				Fingerprint string `json:"fingerprint"`
+				JobID       string `json:"job_id"` // legacy payload compatibility
+			}
+			if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+				return fmt.Errorf("invalid feedback payload")
+			}
+			if payload.Fingerprint == "" {
+				payload.Fingerprint = payload.JobID
+			}
+			if payload.Fingerprint == "" {
+				return fmt.Errorf("invalid feedback payload")
+			}
+			return handler(ctx, payload.Fingerprint)
+		})
+	}
 }
 
 // ContentGenerateHandler is the function signature for handling content generation tasks.

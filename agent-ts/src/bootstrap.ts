@@ -493,7 +493,7 @@ export function preflightBootstrapFiles(files: BootstrapFile[], taskType?: strin
     const remote = cleanString(file.download_url ?? "");
     if (inline === remote) throw new Error(`bootstrap file ${relative} must have exactly one content source`);
     if (file.content_sha256 !== undefined && !/^[0-9a-f]{64}$/.test(file.content_sha256)) throw new Error(`bootstrap file ${relative} has invalid content SHA-256`);
-    if (file.replace_existing && key !== ".anban-creator/settings.json"
+	    if (file.replace_existing && key !== ".anban-creator/settings.json" && key !== ".anban-creator/feedback-strategy.json"
       && (!PUBLICATION_RECOVERY_REPLACE_PATHS.has(key) || !remote || !file.content_sha256)) {
       throw new Error(`bootstrap file ${relative} cannot replace existing workspace content`);
     }

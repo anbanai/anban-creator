@@ -2,13 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/resources"
 )
 
@@ -27,10 +30,15 @@ type AgentProjectProfileService struct {
 	resources         *resources.ResourceManager
 	montage           config.MontageConfig
 	imageCapabilities *ImageCapabilityResolver
+	repo              repository.Repository
 }
 
-func NewAgentProjectProfileService(projects *ProjectService, tasks *TaskService, manager *resources.ResourceManager, montage config.MontageConfig, imageCapabilities *ImageCapabilityResolver) *AgentProjectProfileService {
-	return &AgentProjectProfileService{projects: projects, tasks: tasks, resources: manager, montage: montage, imageCapabilities: imageCapabilities}
+func NewAgentProjectProfileService(projects *ProjectService, tasks *TaskService, manager *resources.ResourceManager, montage config.MontageConfig, imageCapabilities *ImageCapabilityResolver, repos ...repository.Repository) *AgentProjectProfileService {
+	var repo repository.Repository
+	if len(repos) > 0 {
+		repo = repos[0]
+	}
+	return &AgentProjectProfileService{projects: projects, tasks: tasks, resources: manager, montage: montage, imageCapabilities: imageCapabilities, repo: repo}
 }
 
 func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectProfileRequest) (*AgentProjectProfile, error) {
@@ -126,6 +134,17 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"author_source": style.AuthorSource, "theme_source": style.ThemeSource,
 		"agent_config": agentConfig,
 	}
+	projectProfile := project.Profile.Data()
+	if projectProfile.SchemaVersion == 0 {
+		projectProfile = model.NewProjectProfile()
+	}
+	// Drafts are review material for Studio only. Downstream Agents may consume
+	// an account profile after the user confirms it through the versioned
+	// project-profile API; exposing an unconfirmed draft here would let a
+	// creative workflow silently treat inference as project truth.
+	if projectProfile.IsConfirmed() {
+		profile["account_profile"] = projectProfile
+	}
 	resolvedProfile := map[string]any{
 		"id": project.ID, "name": project.Name, "platform": project.Platform,
 		"profile_url": project.ProfileURL, "avatar_url": project.AvatarURL,
@@ -142,6 +161,11 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			"keywords":     agentProfileSource(usesProjectSnapshot),
 		},
 	}
+	if projectProfile.IsConfirmed() {
+		resolvedProfile["account_profile"] = projectProfile
+	} else {
+		resolvedProfile["account_profile_status"] = projectProfile.Status
+	}
 	hasTaskReference := taskReferenceAssetID(task) != ""
 	hasProjectStyleReference := projectStyleReferenceAssetID(task) != ""
 	if hasTaskReference {
@@ -154,6 +178,13 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		resolvedProfile["project_portrait_reference_path"] = serveragent.ProjectPortraitReferenceImagePath
 	}
 	profile["resolved_profile"] = resolvedProfile
+	if project.Platform == model.PlatformArticle || project.Platform == model.PlatformSeednote {
+		feedbackStrategy, err := s.feedbackStrategyProfile(ctx, project, task)
+		if err != nil {
+			return nil, fmt.Errorf("load feedback strategy: %w", err)
+		}
+		profile["feedback_strategy"] = feedbackStrategy
+	}
 
 	switch project.Platform {
 	case model.PlatformSeednote:
@@ -220,6 +251,38 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		}
 	}
 	return &profile, nil
+}
+
+func (s *AgentProjectProfileService) feedbackStrategyProfile(ctx context.Context, project *model.Project, task *model.Task) (map[string]any, error) {
+	payload := map[string]any{"mode": "advisory", "available": false, "strategy_unavailable": "no_active_strategy"}
+	if s == nil || s.repo == nil || project == nil {
+		return payload, nil
+	}
+	taskType := project.Platform
+	if task != nil && strings.TrimSpace(task.Type) != "" {
+		taskType = task.Type
+	}
+	snapshot, err := s.repo.FeedbackLoop().FindActiveStrategy(ctx, project.ID, project.Platform)
+	if err != nil {
+		return nil, err
+	}
+	if !feedbackStrategyUsable(snapshot, taskType, project.Platform, time.Now().UTC()) {
+		return payload, nil
+	}
+	recommendations := json.RawMessage(snapshot.Recommendations)
+	evidence := json.RawMessage(snapshot.Evidence)
+	if !json.Valid(recommendations) || !json.Valid(evidence) {
+		payload["strategy_unavailable"] = "invalid_strategy_payload"
+		return payload, nil
+	}
+	payload["available"] = true
+	payload["strategy_snapshot_id"] = snapshot.ID
+	payload["strategy_revision"] = snapshot.Revision
+	payload["strategy_digest"] = snapshot.Digest
+	payload["recommendations"] = recommendations
+	payload["evidence"] = evidence
+	payload["limitations"] = snapshot.Limitations
+	return payload, nil
 }
 
 func (s *AgentProjectProfileService) montageProfile(project *model.Project, task *model.Task) map[string]any {

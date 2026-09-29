@@ -120,6 +120,7 @@ export const platformIcon: Record<TaskType, PlatformIconComponent> = {
   moments: MessageCircle,
   ecommerce: ShoppingBag,
   viral_analysis: BookOpen,
+  profile_analysis: BookOpen,
   montage: VideoGenerationIcon,
   hypit: VideoReplicationIcon,
 }
@@ -130,6 +131,7 @@ export const platformIconColor: Record<TaskType, string> = {
   moments: 'text-[#2F855A]',
   ecommerce: 'text-[#FF6A00]',
   viral_analysis: 'text-[#7C3AED]',
+  profile_analysis: 'text-[#64748B]',
   montage: 'text-[#9333EA]',
   hypit: 'text-[#F97316]',
 }

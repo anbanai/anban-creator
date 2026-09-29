@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -109,6 +110,41 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	}
 }
 
+func TestAgentProjectProfileIncludesMatchingFeedbackStrategy(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile-feedback.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Template{}, &model.StrategySnapshot{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.Nop()
+	projectSvc := NewProjectService(repo, &logger)
+	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
+	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{}, agentProjectProfileImageCapabilityResolver(), repo)
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "feedback project"}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
+	if err := repo.Tasks().Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.StrategySnapshot{ID: uuid.NewString(), ProjectID: project.ID, Platform: model.PlatformArticle, Revision: 1, SourceRevision: 3, Digest: "digest", Status: "active", ApplicableTasks: `["article"]`, Recommendations: `["keep"]`, Evidence: `{"sample_count":10}`, Confidence: "medium", Limitations: "advisory"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback, ok := (*profile)["feedback_strategy"].(map[string]any)
+	if !ok || feedback["available"] != true || feedback["strategy_revision"] != int64(1) {
+		t.Fatalf("feedback_strategy = %#v, want active matching strategy", (*profile)["feedback_strategy"])
+	}
+}
+
 func TestAgentProjectProfileRejectsTaskWithoutFrozenImageCapability(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile-default.db")), &gorm.Config{})
 	if err != nil {
@@ -152,6 +188,62 @@ func TestAgentProjectProfileRejectsTaskWithoutFrozenImageCapability(t *testing.T
 	}
 	if got, want := resolved["allowed_image_ratios"], []string{"3:4", "1:1", "4:3"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("allowed_image_ratios = %#v, want %#v", got, want)
+	}
+}
+
+func TestAgentProjectProfileOnlyExposesConfirmedAccountProfile(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile-confirmation.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.Nop()
+	projectSvc := NewProjectService(repo, &logger)
+	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
+	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{}, agentProjectProfileImageCapabilityResolver())
+
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "profile gate"}
+	draft := model.NewProjectProfile()
+	draft.Dimensions.Identity.Content["name"] = "inferred"
+	project.Profile = datatypes.NewJSONType(draft)
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := (*got)["account_profile"]; ok {
+		t.Fatal("unconfirmed profile leaked as account_profile")
+	}
+	resolved := (*got)["resolved_profile"].(map[string]any)
+	if _, ok := resolved["account_profile"]; ok {
+		t.Fatal("unconfirmed profile leaked in resolved_profile")
+	}
+	if resolved["account_profile_status"] != model.ProfileStatusDraft {
+		t.Fatalf("account_profile_status = %v, want draft", resolved["account_profile_status"])
+	}
+
+	draft.Status = model.ProfileStatusConfirmed
+	draft.Version = 1
+	project.Profile = datatypes.NewJSONType(draft)
+	if err := repo.Projects().Update(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	got, err = svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := (*got)["account_profile"]; !ok {
+		t.Fatal("confirmed profile missing from account_profile")
+	}
+	if _, ok := (*got)["resolved_profile"].(map[string]any)["account_profile"]; !ok {
+		t.Fatal("confirmed profile missing from resolved_profile")
 	}
 }
 

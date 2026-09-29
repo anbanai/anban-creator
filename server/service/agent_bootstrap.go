@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
@@ -295,6 +296,53 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("%w: workload has no positive bootstrap credential lifetime", ErrAgentBootstrapConflict)
 	}
 	effective := serveragent.EffectiveProject(project, task)
+	feedbackFile := BootstrapFile{}
+	if s.repo != nil && s.repo.FeedbackLoop() != nil {
+		// The first bootstrap freezes the strategy for this execution. Retries
+		// reuse that context so a later monthly activation cannot affect a task
+		// that is already running.
+		gc, err := s.repo.FeedbackLoop().FindGenerationContext(ctx, execution.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load generation context: %w", err)
+		}
+		var strategy *model.StrategySnapshot
+		frozenStrategy := gc != nil && gc.StrategySnapshotID != ""
+		if frozenStrategy {
+			strategy, err = s.repo.FeedbackLoop().FindStrategyByID(ctx, gc.StrategySnapshotID)
+			if err != nil {
+				return nil, fmt.Errorf("load frozen feedback strategy: %w", err)
+			}
+		} else if gc == nil {
+			strategy, err = s.repo.FeedbackLoop().FindActiveStrategy(ctx, task.ProjectID, project.Platform)
+			if err != nil {
+				return nil, fmt.Errorf("load feedback strategy: %w", err)
+			}
+			gc = &model.GenerationContext{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, ProjectID: task.ProjectID, StrategyMode: "advisory"}
+		}
+		strategyPayload := map[string]any{"mode": "advisory", "available": false, "strategy_unavailable": "no_active_strategy"}
+		// A strategy is validated when a new execution freezes it. A retry of the
+		// same execution keeps consuming that frozen snapshot even after it is
+		// retired by a newer monthly activation.
+		strategyUsable := strategy != nil && (frozenStrategy || feedbackStrategyUsable(strategy, task.Type, project.Platform, issuedAt))
+		if strategyUsable {
+			gc.StrategySnapshotID, gc.StrategyRevision, gc.StrategyDigest = strategy.ID, strategy.Revision, strategy.Digest
+			strategyPayload = map[string]any{"mode": "advisory", "available": true, "strategy_snapshot_id": strategy.ID, "strategy_revision": strategy.Revision, "strategy_digest": strategy.Digest, "recommendations": json.RawMessage(strategy.Recommendations), "evidence": json.RawMessage(strategy.Evidence), "limitations": strategy.Limitations}
+		} else {
+			if gc.UnavailableReason == "" {
+				gc.UnavailableReason = "strategy_not_applicable"
+			}
+		}
+		if gc.ID != "" {
+			if err := s.repo.FeedbackLoop().CreateGenerationContext(ctx, gc); err != nil {
+				return nil, fmt.Errorf("persist generation context: %w", err)
+			}
+		}
+		strategyBytes, err := json.Marshal(strategyPayload)
+		if err != nil {
+			return nil, fmt.Errorf("marshal feedback strategy: %w", err)
+		}
+		feedbackFile = BootstrapFile{Path: ".anban-creator/feedback-strategy.json", Text: string(strategyBytes), Mode: 0600, ReplaceExisting: true}
+	}
 	taskReferenceAsset, projectStyleReferenceAsset, err := resolveRuntimeReferenceAssets(ctx, s.repo, task)
 	if err != nil {
 		return nil, fmt.Errorf("resolve reference asset: %w", err)
@@ -332,6 +380,9 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("marshal runtime settings: %w", err)
 	}
 	files = append(files, BootstrapFile{Path: ".anban-creator/settings.json", Text: string(settings), Mode: 0600, ReplaceExisting: true})
+	if feedbackFile.Path != "" {
+		files = append(files, feedbackFile)
+	}
 	if instructions := strings.TrimSpace(effective.Instructions); instructions != "" {
 		files = append(files, BootstrapFile{Path: "CLAUDE.md", Text: "# CLAUDE.md\n\n## 项目定位\n\n" + instructions, Mode: 0644})
 	}
@@ -876,7 +927,7 @@ func validateBootstrapFilesForTask(files []BootstrapFile, task *model.Task) erro
 				return fmt.Errorf("invalid bootstrap file path %q: %w", file.Path, err)
 			}
 		}
-		if file.ReplaceExisting && filepath.ToSlash(clean) != ".anban-creator/settings.json" {
+		if file.ReplaceExisting && filepath.ToSlash(clean) != ".anban-creator/settings.json" && filepath.ToSlash(clean) != ".anban-creator/feedback-strategy.json" {
 			_, recoveryArtifact := findPublicationRecoveryArtifactSpec(filepath.ToSlash(clean))
 			if !recoveryArtifact || strings.TrimSpace(file.DownloadURL) == "" || !lowercaseSHA256.MatchString(file.ContentSHA256) {
 				return fmt.Errorf("bootstrap file %q cannot replace existing workspace content", clean)

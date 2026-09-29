@@ -1,9 +1,10 @@
-import { fireEvent, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ProjectCard } from './ProjectCard'
 import { render } from '@/test/test-utils'
 import type { Project, ProjectStats } from '@/types'
+import { api } from '@/lib/api'
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
@@ -30,6 +31,17 @@ function project(overrides: Partial<Project> = {}): Project {
 }
 
 describe('ProjectCard', () => {
+  beforeEach(() => {
+    vi.spyOn(api.projects, 'feedback').mockResolvedValue({
+      project_id: 'project-1', platform: 'article', timezone: 'Asia/Shanghai', feedback_paused: false,
+      analytics: { revision: 3, status: 'ready', content_count: 6, valid_observation_count: 5 },
+      queue: { counts: { queued: 1, running: 0, succeeded: 2, failed: 0, skipped: 1, blocked: 0 }, last_success_at: null },
+      next_runs: {}, strategy: { id: '', revision: 0, status: 'unavailable' },
+    })
+    vi.spyOn(api.projects, 'setFeedbackPaused').mockResolvedValue({ project_id: 'project-1', feedback_paused: true })
+    vi.spyOn(api.projects, 'rerunFeedback').mockResolvedValue({ created: 1, enqueued: 1, skipped: 0 })
+  })
+
   const stats: ProjectStats = {
     total_tasks: 10,
     completed_tasks: 8,
@@ -103,5 +115,20 @@ describe('ProjectCard', () => {
     expect(screen.queryByRole('button', { name: '归档项目：公众号项目' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '恢复项目：公众号项目' }))
     expect(onRestore).toHaveBeenCalledWith('project-1')
+  })
+
+  it('pauses feedback scheduling and submits an explicit monthly period', async () => {
+    render(<ProjectCard project={project()} />)
+
+    await screen.findByText('反馈闭环')
+    fireEvent.click(screen.getByRole('button', { name: /暂停/ }))
+    await waitFor(() => expect(api.projects.setFeedbackPaused).toHaveBeenCalledWith('project-1', true))
+
+    fireEvent.click(screen.getByRole('button', { name: '月' }))
+    fireEvent.change(screen.getByLabelText('开始日期'), { target: { value: '2026-08-01' } })
+    fireEvent.change(screen.getByLabelText('结束日期'), { target: { value: '2026-08-31' } })
+    fireEvent.click(screen.getByRole('button', { name: '检查并排队' }))
+
+    await waitFor(() => expect(api.projects.rerunFeedback).toHaveBeenCalledWith('project-1', 'monthly', { start: '2026-08-01', end: '2026-08-31' }))
   })
 })

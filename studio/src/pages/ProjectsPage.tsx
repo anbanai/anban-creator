@@ -12,7 +12,7 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { FieldHint } from '@/components/common/FieldHint'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { ImageAnalysis, Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig } from '@/types'
+import type { ImageAnalysis, Project, ProjectPlatform, ProjectStats, CreateProjectRequest, PlatformConfig, ProjectProfile } from '@/types'
 import { isImageAnalysisActive, isImageAnalysisUpdateOlder } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
@@ -68,6 +68,13 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '活跃', value: 'active' },
   { label: '已归档', value: 'archived' },
 ]
+
+const profileQuestionGroups = [
+  { key: 'basic', label: '基础平台与账号信息', placeholder: '账号名称、平台、主页定位、代表栏目或作品。' },
+  { key: 'intent', label: '运营意图、方向和差异化', placeholder: '运营目标、长期方向、希望被记住的差异化。' },
+  { key: 'content', label: '内容偏好、形式、调性和受众', placeholder: '常做主题、内容形式、语气、视觉偏好和目标受众。' },
+  { key: 'boundaries', label: '不做内容、合作边界和合规红线', placeholder: '明确不做的内容、合作限制、敏感信息和合规要求。' },
+] as const
 
 const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   platform: 'article',
@@ -174,6 +181,15 @@ export default function ProjectsPage() {
   const editingAnalysisUpdatedAtRef = useRef('')
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [montageDefaultsReady, setMontageDefaultsReady] = useState(false)
+  const [profileProject, setProfileProject] = useState<Project | null>(null)
+  const [profileDraft, setProfileDraft] = useState<ProjectProfile | null>(null)
+  const [profileAnswers, setProfileAnswers] = useState<Record<string, string>>({})
+  const [profileDraftText, setProfileDraftText] = useState<Record<string, string>>({})
+  const [profileJsonError, setProfileJsonError] = useState<string | null>(null)
+  const [profileQuote, setProfileQuote] = useState<{ id: string; price_credits: number; list_price_credits: number; currency: string; expires_at: string } | null>(null)
+  const [profileSamples, setProfileSamples] = useState<string[]>([''])
+  const [profileQuoteOpen, setProfileQuoteOpen] = useState(false)
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
   const { submit } = useSubmitLock()
 
   const form = useForm<ProjectFormValues>({
@@ -365,7 +381,11 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       const createdProject = created.project
+      if (createdProject?.id && (createdProject.platform === 'article' || createdProject.platform === 'seednote')) {
+        openProfile(createdProject)
+      }
       if (returnTo && createdProject?.id) {
+        closeProfile()
         resetModal()
         navigate(projectCreatedReturnHref({
           returnTo,
@@ -380,6 +400,96 @@ export default function ProjectsPage() {
     onError: (err) => {
       toast.error(getApiErrorMessage(err, '创建项目失败，请重试'))
     },
+  })
+
+  const profileQuery = useQuery({
+    queryKey: ['project-profile', profileProject?.id],
+    queryFn: () => api.projects.getAccountProfile(profileProject!.id),
+    enabled: profileModalOpen && Boolean(profileProject),
+  })
+  useEffect(() => {
+    if (!profileQuery.data) return
+    setProfileDraft(profileQuery.data)
+    setProfileDraftText(Object.fromEntries(Object.entries(profileQuery.data.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
+    setProfileJsonError(null)
+  }, [profileQuery.data])
+  const profileAnalysisQuery = useQuery({
+    queryKey: ['project-profile-analysis', profileProject?.id, profileDraft?.analysis_task_id],
+    queryFn: () => api.projects.profileAnalysis(profileProject!.id),
+    enabled: profileModalOpen && Boolean(profileProject?.id && profileDraft?.analysis_task_id && profileDraft.status !== 'confirmed'),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'pending' || status === 'running' ? 2000 : false
+    },
+  })
+  useEffect(() => {
+    const result = profileAnalysisQuery.data
+    if (!result) return
+    if (result.draft) {
+      setProfileDraft(result.draft)
+      setProfileDraftText(Object.fromEntries(Object.entries(result.draft.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
+      setProfileJsonError(null)
+    }
+  }, [profileAnalysisQuery.data])
+  const profileQuoteMutation = useMutation({
+    mutationFn: () => api.projects.profileQuote(profileProject!.id, {
+      answers: Object.fromEntries(Object.entries(profileAnswers).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
+      samples: profileSamples.map((sample) => sample.trim()).filter(Boolean),
+    }),
+    onSuccess: (quote) => {
+      setProfileQuote(quote)
+      setProfileQuoteOpen(true)
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err, '无法获取画像分析报价')),
+  })
+  const profileAnalysisMutation = useMutation({
+    mutationFn: (quoteConfirmed: boolean) => api.projects.startProfileAnalysis(profileProject!.id, {
+      quote_confirmed: quoteConfirmed,
+      quote_id: profileQuote!.id,
+      answers: Object.fromEntries(Object.entries(profileAnswers).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
+      samples: profileSamples.map((sample) => sample.trim()).filter(Boolean),
+    }),
+    onSuccess: (result) => {
+      setProfileQuoteOpen(false)
+      setProfileDraft(result.profile)
+      setProfileJsonError(null)
+      toast.success('画像分析任务已启动')
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err, '画像分析启动失败')),
+  })
+
+  function resetProfileFlow() {
+    setProfileDraft(null)
+    setProfileAnswers({})
+    setProfileSamples([''])
+    setProfileDraftText({})
+    setProfileJsonError(null)
+    setProfileQuote(null)
+    setProfileQuoteOpen(false)
+  }
+
+  function openProfile(project: Project) {
+    resetProfileFlow()
+    setProfileProject(project)
+    setProfileModalOpen(true)
+    void queryClient.invalidateQueries({ queryKey: ['project-profile', project.id] })
+  }
+
+  function closeProfile() {
+    setProfileModalOpen(false)
+    setProfileProject(null)
+    resetProfileFlow()
+  }
+
+  const profileConfirmMutation = useMutation({
+    mutationFn: () => api.projects.confirmAccountProfile(profileProject!.id, profileDraft!),
+    onSuccess: (profile) => {
+      setProfileDraft(profile)
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      toast.success('账号画像已确认')
+      closeProfile()
+    },
+    onError: (err) => toast.error(getApiErrorMessage(err, '画像确认失败，请刷新后重试')),
   })
 
   const updateMutation = useMutation({
@@ -567,6 +677,10 @@ export default function ProjectsPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
+  const profileDimensionLabels: Record<string, string> = { identity: '定位', style: '风格', audience: '受众', platforms: '平台', preferences: '偏好与红线', memory: '记忆' }
+  const profileAnalysisStatus = profileAnalysisQuery.data?.status ?? (profileDraft?.analysis_task_id ? 'pending' : 'not_started')
+  const profileAnalysisRunning = profileAnalysisStatus === 'pending' || profileAnalysisStatus === 'running' || profileAnalysisMutation.isPending
+  const profileAnalysisFailed = profileAnalysisStatus === 'failed' || profileAnalysisStatus === 'cancelled'
 
   return (
     <div className="space-y-6">
@@ -638,6 +752,7 @@ export default function ProjectsPage() {
               project={project}
               stats={projectStats[project.id]}
               onEdit={openEdit}
+              onProfile={openProfile}
               archiving={archiveMutation.isPending}
               restoring={restoreMutation.isPending}
               onArchive={(id) => { void submit(async () => archiveMutation.mutateAsync(id)).catch(() => {}) }}
@@ -1045,6 +1160,103 @@ export default function ProjectsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={profileModalOpen} onOpenChange={(open) => { if (!open) closeProfile() }}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>配置账号画像</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[70vh] space-y-4 overflow-y-auto">
+            <p className="text-sm text-muted-foreground">画像分析只使用你提供的公开资料和补充信息，结果先作为草稿保存，确认后才会进入项目。</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {profileQuestionGroups.map((group) => (
+                <div key={group.key} className="space-y-1.5">
+                  <label className="text-sm font-medium" htmlFor={`profile-answer-${group.key}`}>{group.label}</label>
+                  <Textarea
+                    id={`profile-answer-${group.key}`}
+                    value={profileAnswers[group.key] ?? ''}
+                    onChange={(event) => setProfileAnswers((current) => ({ ...current, [group.key]: event.target.value }))}
+                    placeholder={group.placeholder}
+                    className="min-h-[92px]"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="profile-samples">可选内容样本</label>
+              <Textarea
+                id="profile-samples"
+                value={profileSamples[0] ?? ''}
+                onChange={(event) => setProfileSamples([event.target.value])}
+                placeholder="粘贴代表性公开内容、标题或样本；抓取受限时用于补充分析依据。"
+                className="min-h-[110px]"
+              />
+              <p className="text-xs text-muted-foreground">仅提交公开资料。敏感信息请先删除。</p>
+            </div>
+            {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像分析进行中，完成后会显示草稿。此窗口可以关闭，稍后从项目再次打开。</p>}
+            {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像分析{profileAnalysisStatus === 'cancelled' ? '已取消' : '失败'}，正式画像没有被覆盖，可以重新分析。</p>}
+            {profileAnalysisStatus === 'completed' && !profileAnalysisQuery.data?.draft && <p className="text-sm text-amber-600" role="alert">分析已完成但没有找到草稿产物，请重新分析。</p>}
+            {profileDraft && (
+              <div className="space-y-3">
+                {Object.entries(profileDraft.dimensions).map(([key, dimension]) => (
+                  <div key={key} className="rounded-md border p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-medium">{profileDimensionLabels[key] || key}</span>
+                      <span className="text-xs text-muted-foreground">{dimension.sources.join('、') || '[待补充]'}</span>
+                    </div>
+                    <Textarea
+                      value={profileDraftText[key] ?? JSON.stringify(dimension.content, null, 2)}
+                      onChange={(event) => {
+                        const text = event.target.value
+                        setProfileDraftText((current) => ({ ...current, [key]: text }))
+                        try {
+                          const content = JSON.parse(text) as Record<string, unknown>
+                          if (!content || Array.isArray(content) || typeof content !== 'object') throw new Error('object required')
+                          setProfileJsonError(null)
+                          setProfileDraft({ ...profileDraft, dimensions: { ...profileDraft.dimensions, [key]: { ...dimension, content } } })
+                        } catch { setProfileJsonError(`${profileDimensionLabels[key] || key} 的内容必须是有效 JSON 对象`) }
+                      }}
+                      className="min-h-[76px] font-mono text-xs"
+                    />
+                    {dimension.missing_fields.length > 0 && <p className="mt-1 text-xs text-amber-600">待补充：{dimension.missing_fields.join('、')}</p>}
+                  </div>
+                ))}
+                {profileDraft.follow_up_questions.length > 0 && <div className="text-sm text-muted-foreground">待确认问题：{profileDraft.follow_up_questions.join('；')}</div>}
+                {profileJsonError && <p className="text-sm text-destructive" role="alert">{profileJsonError}</p>}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={closeProfile}>跳过</Button>
+            <Button
+              variant="outline"
+              loading={profileQuoteMutation.isPending || profileAnalysisMutation.isPending}
+              disabled={!profileProject || profileAnalysisRunning}
+              onClick={() => profileQuoteMutation.mutate()}
+            >{profileAnalysisFailed ? '重新分析' : '分析画像'}</Button>
+            <Button
+              disabled={!profileDraft || profileConfirmMutation.isPending || Boolean(profileJsonError) || profileAnalysisRunning}
+              loading={profileConfirmMutation.isPending}
+              onClick={() => profileDraft && profileConfirmMutation.mutate()}
+            >{profileDraft?.status === 'confirmed' ? '保存画像' : '确认画像'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={profileQuoteOpen} onOpenChange={setProfileQuoteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认画像分析报价</AlertDialogTitle>
+            <AlertDialogDescription>
+              本次分析将消耗 {profileQuote?.price_credits ?? 0} {profileQuote?.currency === 'credits' ? '积分' : (profileQuote?.currency ?? '')}，报价有效期至 {profileQuote?.expires_at ? new Date(profileQuote.expires_at).toLocaleString() : '未知'}。分析结果只会生成草稿，确认后才写入项目画像。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => profileAnalysisMutation.mutate(true)} disabled={!profileQuote?.id}>确认开始</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Dirty form confirmation */}
       <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>

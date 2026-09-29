@@ -167,6 +167,7 @@ type ProjectSnapshot struct {
 	HypitDefaults                 HypitDefaults            `json:"hypit_defaults,omitempty"`
 	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
 	AgentConfig                   map[string]any           `json:"agent_config,omitempty"`
+	Profile                       ProjectProfile           `json:"profile,omitempty"`
 }
 
 // Task represents a content generation task.
@@ -324,6 +325,7 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		MontageDefaults:               p.MontageDefaults.Data(),
 		HypitDefaults:                 p.HypitDefaults.Data(),
 		AgentConfig:                   cloneAgentExtensionMap(p.AgentConfig.Data()),
+		Profile:                       p.Profile.Data(),
 	}
 }
 
@@ -352,5 +354,6 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.SetMontageDefaults(snap.MontageDefaults)
 	p.SetHypitDefaults(snap.HypitDefaults)
 	p.SetAgentConfig(cloneAgentExtensionMap(snap.AgentConfig))
+	p.Profile = datatypes.NewJSONType(snap.Profile)
 	return &p
 }

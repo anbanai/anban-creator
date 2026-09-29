@@ -33,14 +33,17 @@ func (r *wechatTrackingRepository) FindByID(ctx context.Context, id string) (*mo
 
 func (r *wechatTrackingRepository) FindDue(ctx context.Context, now time.Time, limit int) ([]*model.WechatArticleTracking, error) {
 	var trackings []*model.WechatArticleTracking
-	query := r.db.WithContext(ctx).
-		Where("next_fetch_at IS NOT NULL AND next_fetch_at <= ?", now).
-		Where("status IN ?", []string{model.WechatTrackingStatusWaitingData, model.WechatTrackingStatusTracking, model.WechatTrackingStatusError}).
-		Order("next_fetch_at ASC")
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	return trackings, query.Find(&trackings).Error
+	err := retryWechatSQLiteBusy(ctx, r.db.Dialector.Name(), func() error {
+		query := r.db.WithContext(ctx).
+			Where("next_fetch_at IS NOT NULL AND next_fetch_at <= ?", now).
+			Where("status IN ?", []string{model.WechatTrackingStatusWaitingData, model.WechatTrackingStatusTracking, model.WechatTrackingStatusError}).
+			Order("next_fetch_at ASC")
+		if limit > 0 {
+			query = query.Limit(limit)
+		}
+		return query.Find(&trackings).Error
+	})
+	return trackings, err
 }
 
 func (r *wechatTrackingRepository) TryClaimDueDispatch(ctx context.Context, id string, expectedUpdatedAt, claimedAt, leaseUntil time.Time, token string) (bool, error) {

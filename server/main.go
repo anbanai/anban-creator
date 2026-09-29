@@ -372,6 +372,7 @@ func main() {
 	var imageAnalysisSvc *service.ImageAnalysisService
 	var asynqClient *scheduler.AsynqClient
 	var analyticsRebuildManager *service.AnalyticsRebuildManager
+	var feedbackScheduler *service.FeedbackScheduler
 	hypitCapabilitySvc := service.NewHypitCapabilityService(cfg.Hypit)
 	montageCapabilitySvc := service.NewMontageCapabilityService(cfg.Montage)
 	if repo != nil {
@@ -397,6 +398,12 @@ func main() {
 				cfg.Asynq.ContentGenerateTimeout,
 			)
 			log.Info().Msg("Asynq client initialized")
+		}
+		// Feedback jobs are durable Asynq work. Do not start the cadence scanner
+		// without a queue client, otherwise a degraded Redis dependency would
+		// leave queued rows with no worker able to claim them.
+		if asynqClient != nil {
+			feedbackScheduler = service.NewFeedbackScheduler(repo, asynqClient)
 		}
 		wechatPublicationSvc.SetEnqueuer(asynqClient)
 
@@ -541,6 +548,7 @@ func main() {
 	var agentProfileHandler *handler.AgentProfileHandler
 	agentPackHandler := handler.NewAgentPackHandler()
 	var projectHandler *handler.ProjectHandler
+	var feedbackDashboardHandler *handler.FeedbackDashboardHandler
 	var timelineHandler *handler.TimelineHandler
 	var apiKeyHandler *handler.APIKeyHandler
 	var fileHandler *handler.FileHandler
@@ -586,6 +594,10 @@ func main() {
 			ilinkHandler = handler.NewIlinkHandler(ilinkBindingSvc, log)
 		}
 		projectHandler = handler.NewProjectHandler(projectSvc, log)
+		projectHandler.SetFeedbackScheduler(feedbackScheduler)
+		feedbackDashboardHandler = handler.NewFeedbackDashboardHandler(projectSvc, repo, feedbackScheduler)
+		projectHandler.SetTaskService(taskSvc)
+		projectHandler.SetBillingCatalogService(fixedBilling.Catalog)
 		projectHandler.SetProjectMemoryStore(projectMemoryStore)
 		projectHandler.SetReferenceAssetService(referenceAssetSvc)
 		projectHandler.SetUploadRepository(repo)
@@ -711,7 +723,7 @@ func main() {
 			TrendSvc:               trendSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
 			ContentMetadataSvc:     service.NewContentMetadataService(repo, log),
-			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver),
+			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver, repo),
 			ArticleScoreSvc:        service.NewArticleScoreService(),
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
 			ResourceCatalogSvc:     service.NewResourceCatalogService(resources.Manager()),
@@ -751,7 +763,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, cfg, log)
 		startAnalyticsRebuildRecovery(ctx, repo, asynqClient, log)
 	}
 
@@ -760,6 +772,9 @@ func main() {
 		schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 		defer schedulerCancel()
 		go scheduler.StartPlanChecker(schedulerCtx, repo, taskSvc, log, rdb)
+	}
+	if feedbackScheduler != nil {
+		go startFeedbackCadenceLoop(ctx, feedbackScheduler, log)
 	}
 	if asynqClient != nil {
 		if imageAnalysisSvc != nil {
@@ -822,6 +837,7 @@ func main() {
 		PlanService:                  planSvc,
 		TaskService:                  taskSvc,
 		ProjectHandler:               projectHandler,
+		FeedbackDashboardHandler:     feedbackDashboardHandler,
 		PlanHandler:                  planHandler,
 		TaskHandler:                  taskHandler,
 		SeednoteAnalyticsHandler:     seednoteAnalyticsHandler,
@@ -1267,7 +1283,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1319,6 +1335,11 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	if analyticsRebuildManager != nil {
 		srv.RegisterAnalyticsRebuildHandler(analyticsRebuildManager.Run, log)
 	}
+	if feedbackScheduler != nil {
+		srv.RegisterFeedbackHandler(func(ctx context.Context, fingerprint string) error {
+			return service.ProcessFeedbackJob(ctx, repo, fingerprint)
+		}, log)
+	}
 
 	go func() {
 		log.Info().Int("concurrency", cfg.Asynq.Concurrency).Msg("starting Asynq task processor")
@@ -1328,6 +1349,35 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	}()
 
 	return srv
+}
+
+func startFeedbackCadenceLoop(ctx context.Context, feedbackScheduler *service.FeedbackScheduler, log *zerolog.Logger) {
+	if feedbackScheduler == nil {
+		return
+	}
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	run := func() {
+		now := time.Now().UTC()
+		cadences := []string{service.FeedbackCadenceDaily, service.FeedbackCadenceWeekly, service.FeedbackCadenceMonthly}
+		for _, cadence := range cadences {
+			result, err := feedbackScheduler.RunCadenceWindowed(ctx, cadence, now)
+			if err != nil {
+				log.Error().Err(err).Str("cadence", cadence).Msg("feedback cadence scan failed")
+				continue
+			}
+			log.Info().Str("cadence", cadence).Int("created", result.Created).Int("enqueued", result.Enqueued).Int("skipped", result.Skipped).Msg("feedback cadence scan completed")
+		}
+	}
+	run()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
 }
 
 func startImageAnalysisRecovery(ctx context.Context, analyses *service.ImageAnalysisService, log *zerolog.Logger) {

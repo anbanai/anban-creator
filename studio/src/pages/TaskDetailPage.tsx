@@ -36,6 +36,7 @@ import { taskStatusLabel, contentTypeDisplayName, platformDisplayName, statusBad
 import { platformBadgeClassName, renderPlatformIcon } from '@/lib/PlatformIcon'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
+import { TaskRuntimeContext } from '@/components/tasks/TaskRuntimeContext'
 
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
 const RESUME_ATTACHMENT_POLICY = {
@@ -687,6 +688,12 @@ export default function TaskDetailPage() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
+          <TaskRuntimeContext
+            task={task}
+            project={project}
+            files={deliveredFiles}
+            onResume={canResume ? () => setShowResumeDialog(true) : undefined}
+          />
           <TaskExecutionRail
             key={task.id}
             taskId={task.id}

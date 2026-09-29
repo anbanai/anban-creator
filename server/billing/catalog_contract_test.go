@@ -446,6 +446,10 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 			operation: "task.viral_analysis", executionProfile: profile, chargePolicy: "task_admission", priceCredits: 1200,
 			delivery: "viral_analysis_report_verified",
 		}
+		want["task.profile-analysis."+profile] = skuSnapshot{
+			operation: "task.profile_analysis", executionProfile: profile, chargePolicy: "task_admission", priceCredits: map[string]int64{"effective": 1200, "balanced": 1500, "quality": 3600}[profile],
+			delivery: "profile_analysis_draft_verified",
+		}
 	}
 	if !strings.HasPrefix(catalog.CatalogID, "retail-sha256-") || len(catalog.CatalogID) != len("retail-sha256-")+64 || catalog.Currency != "credits" {
 		return fmt.Errorf("retail catalog identity = %q/%q", catalog.CatalogID, catalog.Currency)

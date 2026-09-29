@@ -862,8 +862,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 7 {
-		t.Fatalf("Pack count = %d, want 7", len(catalog.Packs))
+	if len(catalog.Packs) != 9 {
+		t.Fatalf("Pack count = %d, want 9", len(catalog.Packs))
 	}
 
 	wantRoutes := map[string]struct {
@@ -871,14 +871,15 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		profile string
 		adapter string
 	}{
-		"article":        {packID: "article", profile: "article", adapter: AdapterStandard},
-		"seednote":       {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"viral_analysis": {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"moments":        {packID: "moments", profile: "article", adapter: AdapterStandard},
-		"ecommerce":      {packID: "ecommerce", profile: "article", adapter: AdapterStandard},
-		"hypit":          {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
-		"montage":        {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
-		"live-slicer":    {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
+		"article":          {packID: "article", profile: "article", adapter: AdapterStandard},
+		"seednote":         {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
+		"viral_analysis":   {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
+		"moments":          {packID: "moments", profile: "article", adapter: AdapterStandard},
+		"ecommerce":        {packID: "ecommerce", profile: "article", adapter: AdapterStandard},
+		"hypit":            {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
+		"montage":          {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
+		"live-slicer":      {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
+		"profile_analysis": {packID: "profile-analysis", profile: "article", adapter: AdapterStandard},
 	}
 	for taskType, want := range wantRoutes {
 		pack, ok := catalog.ForTaskType(taskType)

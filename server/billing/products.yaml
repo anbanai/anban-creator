@@ -140,6 +140,25 @@ skus:
     price_credits: 1200
     delivery: "viral_analysis_report_verified"
 
+  - id: "task.profile-analysis.effective"
+    operation: "task.profile_analysis"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    delivery: "profile_analysis_draft_verified"
+  - id: "task.profile-analysis.balanced"
+    operation: "task.profile_analysis"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 1500
+    delivery: "profile_analysis_draft_verified"
+  - id: "task.profile-analysis.quality"
+    operation: "task.profile_analysis"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 3600
+    delivery: "profile_analysis_draft_verified"
+
   - id: "image.standard"
     operation: "image.generate"
     charge_policy: "image_operation"

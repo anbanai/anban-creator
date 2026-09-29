@@ -44,6 +44,7 @@ type Repository interface {
 	TopicPools() TopicPoolRepository
 	TrendSnapshots() TrendSnapshotRepository
 	AgentFeedbacks() AgentFeedbackRepository
+	FeedbackLoop() FeedbackLoopRepository
 	ContentMetadata() ContentMetadataRepository
 	IlinkBindings() IlinkBindingRepository
 	IlinkNotifications() IlinkNotificationRepository
@@ -441,6 +442,28 @@ type AgentFeedbackRepository interface {
 	FindByTaskID(ctx context.Context, taskID string) ([]*model.AgentFeedback, error)
 }
 
+type FeedbackLoopRepository interface {
+	CreateJob(ctx context.Context, job *model.FeedbackJob) (bool, error)
+	FindJobByFingerprint(ctx context.Context, fingerprint string) (*model.FeedbackJob, error)
+	FindJobByIDOrFingerprint(ctx context.Context, identity string) (*model.FeedbackJob, error)
+	FindRunningJob(ctx context.Context, projectID, operation string) (*model.FeedbackJob, error)
+	ClaimQueuedJob(ctx context.Context, identity string, now time.Time) (*model.FeedbackJob, bool, error)
+	AcquireFeedbackLease(ctx context.Context, scope, jobID string, now time.Time, ttl time.Duration) (bool, error)
+	ReleaseFeedbackLease(ctx context.Context, scope, jobID string) error
+	UpdateJob(ctx context.Context, job *model.FeedbackJob) error
+	ListJobs(ctx context.Context, projectID, cadence string, limit int) ([]*model.FeedbackJob, error)
+	ListRunningByAccount(ctx context.Context, accountID, operation string, limit int) ([]*model.FeedbackJob, error)
+	ListRunningByUser(ctx context.Context, userID string, limit int) ([]*model.FeedbackJob, error)
+	ListRunningByProject(ctx context.Context, projectID string, limit int) ([]*model.FeedbackJob, error)
+	CreateInsight(ctx context.Context, insight *model.FeedbackInsight) error
+	CreateStrategy(ctx context.Context, snapshot *model.StrategySnapshot) error
+	NextStrategyRevision(ctx context.Context, projectID, platform string) (int64, error)
+	FindStrategyByID(ctx context.Context, id string) (*model.StrategySnapshot, error)
+	FindActiveStrategy(ctx context.Context, projectID, platform string) (*model.StrategySnapshot, error)
+	CreateGenerationContext(ctx context.Context, context *model.GenerationContext) error
+	FindGenerationContext(ctx context.Context, executionID string) (*model.GenerationContext, error)
+}
+
 type ContentMetadataRepository interface {
 	CreateOrUpdate(ctx context.Context, report *model.ContentMetadataReport) error
 	FindByTaskExecution(ctx context.Context, taskID, executionID string) (*model.ContentMetadataReport, error)
@@ -487,6 +510,7 @@ type repository struct {
 	topicPools              TopicPoolRepository
 	trendSnapshots          TrendSnapshotRepository
 	agentFeedbacks          AgentFeedbackRepository
+	feedbackLoop            FeedbackLoopRepository
 	contentMetadata         ContentMetadataRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
@@ -527,6 +551,7 @@ func New(db *gorm.DB) Repository {
 	topicPools := newTopicPoolRepository(db)
 	trendSnapshots := newTrendSnapshotRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
+	feedbackLoop := newFeedbackLoopRepository(db)
 	contentMetadata := newContentMetadataRepository(db)
 	ilinkBindings := newIlinkBindingRepository(db)
 	ilinkNotifications := newIlinkNotificationRepository(db)
@@ -566,6 +591,7 @@ func New(db *gorm.DB) Repository {
 		topicPools:              topicPools,
 		trendSnapshots:          trendSnapshots,
 		agentFeedbacks:          agentFeedbacks,
+		feedbackLoop:            feedbackLoop,
 		contentMetadata:         contentMetadata,
 		ilinkBindings:           ilinkBindings,
 		ilinkNotifications:      ilinkNotifications,
@@ -613,6 +639,7 @@ func (r *repository) Templates() TemplateRepository              { return r.temp
 func (r *repository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
 func (r *repository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
 func (r *repository) AgentFeedbacks() AgentFeedbackRepository    { return r.agentFeedbacks }
+func (r *repository) FeedbackLoop() FeedbackLoopRepository       { return r.feedbackLoop }
 func (r *repository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
 func (r *repository) TopicPools() TopicPoolRepository         { return r.topicPools }
@@ -682,6 +709,7 @@ type txRepository struct {
 	topicPools              TopicPoolRepository
 	trendSnapshots          TrendSnapshotRepository
 	agentFeedbacks          AgentFeedbackRepository
+	feedbackLoop            FeedbackLoopRepository
 	contentMetadata         ContentMetadataRepository
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
@@ -723,6 +751,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		topicPools:              newTopicPoolRepository(tx),
 		trendSnapshots:          newTrendSnapshotRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
+		feedbackLoop:            newFeedbackLoopRepository(tx),
 		contentMetadata:         newContentMetadataRepository(tx),
 		ilinkBindings:           newIlinkBindingRepository(tx),
 		ilinkNotifications:      newIlinkNotificationRepository(tx),
@@ -772,6 +801,7 @@ func (r *txRepository) Templates() TemplateRepository              { return r.te
 func (r *txRepository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
 func (r *txRepository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
 func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository    { return r.agentFeedbacks }
+func (r *txRepository) FeedbackLoop() FeedbackLoopRepository       { return r.feedbackLoop }
 func (r *txRepository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
 func (r *txRepository) TopicPools() TopicPoolRepository         { return r.topicPools }

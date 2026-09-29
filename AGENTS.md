@@ -94,7 +94,7 @@ The managed runtime uses four independent images: `creator-agent-article` for th
 minimal Article runtime, `creator-agent-seednote` for the independent Seednote
 workflow, `creator-agent-montage` for OpenMontage/Remotion/ffmpeg, and
 `creator-agent-hypit` for video replication from unmodified official Hypit source. Seednote
-Xiaohongshu research flows through authenticated Anban Server MCP tools backed by
+Seednote research flows through authenticated Anban Server MCP tools backed by
 the separately deployed `sidecar-seednote`. Keep the canonical
 plugin tree intact in every image; image selection controls system dependencies,
 not which Skills are distributed.

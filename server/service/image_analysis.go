@@ -713,7 +713,7 @@ func prohibitedTemplateAnalysisBoundary(prompt string) string {
 	return ""
 }
 
-const projectVisualStyleSystemPrompt = "你是一位专业的小红书视觉风格分析师，擅长把参考图提炼成可直接用于 AI 图片生成的中文风格指令。"
+const projectVisualStyleSystemPrompt = "你是一位专业的种草笔记视觉风格分析师，擅长把参考图提炼成可直接用于 AI 图片生成的中文风格指令。"
 const projectVisualStyleUserPrompt = `请分析图片并严格按六行输出风格指令：整体氛围、色彩色调、画面质感、构图手法、光影特征、信息密度。不要描述具体物体、人物、文字、品牌或场景。`
 const templatePromptSystemPrompt = "你是种草笔记模板的视觉与版式分析器。只提取可复用的视觉形式和版式规则。"
 const templatePromptUserPrompt = `输出可复用的中文图片生成提示词，只包含视觉风格、色彩、材质光影、构图、信息层级、版式、留白、字号层级和装饰位置。禁止商业目标、目标受众、卖点、正文文案、CTA、产品事实、品牌产品名和人物身份。`

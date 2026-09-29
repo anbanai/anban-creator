@@ -14,9 +14,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/billing"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -378,7 +380,14 @@ type CreateManualParams struct {
 	// fields remain authoritative; this map is accepted only when the resolved
 	// Pack declares a task_input Schema.
 	AgentInput map[string]any
-	Watermark  *bool
+	// BillingQuoteID and BillingRequestFingerprint let a workflow consume the
+	// exact quote the user reviewed instead of silently creating a second quote.
+	BillingQuoteID            string
+	BillingRequestFingerprint string
+	// ProfileAnalysisExpectedVersion reserves the project profile and links the
+	// analysis task in the same transaction as billing/task admission.
+	ProfileAnalysisExpectedVersion *int64
+	Watermark                      *bool
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to task model defaults (content on, tail off);
 	// non-nil honors explicit user choice.
@@ -526,6 +535,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			return nil, ErrViralAnalysisRequiresSeednoteProject
 		}
 		taskType = model.TaskTypeViralAnalysis
+	}
+	if p.RequestedTaskType == model.TaskTypeProfileAnalysis {
+		if project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote {
+			return nil, fmt.Errorf("profile analysis requires an article or seednote project")
+		}
+		taskType = model.TaskTypeProfileAnalysis
 	}
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
@@ -785,7 +800,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 		tasks = append(tasks, task)
 	}
-	if err := s.persistTasksWithFixedAdmission(ctx, tasks, p.HasContentImage); err != nil {
+	if err := s.persistTasksWithFixedAdmission(ctx, tasks, p.HasContentImage, p); err != nil {
 		if s.topicPoolSvc != nil {
 			for _, task := range tasks {
 				if relErr := s.topicPoolSvc.ReleaseForTask(ctx, task.ID); relErr != nil {
@@ -830,12 +845,18 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 	}
 	var hasContentImageOverride *bool
 	allowMissingPlanID := ""
+	var manualAdmission *CreateManualParams
 	for _, option := range options {
 		switch value := option.(type) {
 		case *bool:
 			hasContentImageOverride = value
 		case string:
 			allowMissingPlanID = value
+		case CreateManualParams:
+			copy := value
+			manualAdmission = &copy
+		case *CreateManualParams:
+			manualAdmission = value
 		}
 	}
 	explicitlyDisableContentImage := hasContentImageOverride != nil && !*hasContentImageOverride
@@ -893,6 +914,9 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		return repo.Tasks().Update(ctx, task)
 	}
 	if s.billingCatalogSvc == nil && s.billingWalletSvc == nil {
+		if manualAdmission != nil && manualAdmission.ProfileAnalysisExpectedVersion != nil {
+			return fmt.Errorf("profile analysis billing is not configured")
+		}
 		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
 			if err := lockProjectAdmission(tx); err != nil {
 				return err
@@ -915,18 +939,29 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 	}
 	admissions := make([]admission, 0, len(tasks))
 	for _, task := range tasks {
-		payload, err := json.Marshal(task)
-		if err != nil {
-			return fmt.Errorf("marshal task billing fingerprint: %w", err)
+		fingerprint := ""
+		quoteID := ""
+		if manualAdmission != nil {
+			fingerprint = manualAdmission.BillingRequestFingerprint
+			quoteID = manualAdmission.BillingQuoteID
 		}
-		fingerprint := billingFingerprint("task-admission", string(payload))
-		quote, err := s.billingCatalogSvc.CreateTaskQuote(ctx, TaskQuoteRequest{
-			UserID: task.UserID, TaskType: task.Type, RequestFingerprint: fingerprint,
-			ExecutionProfile: task.ExecutionProfile,
-			IdempotencyScope: "task-admission-quote", IdempotencyKey: task.ID,
-		})
-		if err != nil {
-			return err
+		var quote *model.BillingQuote
+		if strings.TrimSpace(quoteID) == "" {
+			payload, err := json.Marshal(task)
+			if err != nil {
+				return fmt.Errorf("marshal task billing fingerprint: %w", err)
+			}
+			fingerprint = billingFingerprint("task-admission", string(payload))
+			quote, err = s.billingCatalogSvc.CreateTaskQuote(ctx, TaskQuoteRequest{
+				UserID: task.UserID, TaskType: task.Type, RequestFingerprint: fingerprint,
+				ExecutionProfile: task.ExecutionProfile,
+				IdempotencyScope: "task-admission-quote", IdempotencyKey: task.ID,
+			})
+			if err != nil {
+				return err
+			}
+		} else if !validBillingFingerprint(fingerprint) {
+			return fmt.Errorf("billing request fingerprint is required with a quote")
 		}
 		admissions = append(admissions, admission{task: task, quote: quote, fingerprint: fingerprint})
 	}
@@ -935,6 +970,27 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			return err
 		}
 		for _, item := range admissions {
+			if item.quote == nil {
+				quoteID := ""
+				if manualAdmission != nil {
+					quoteID = manualAdmission.BillingQuoteID
+				}
+				if strings.TrimSpace(quoteID) == "" {
+					return fmt.Errorf("billing quote is required")
+				}
+				quote, err := tx.Billing().LockQuote(ctx, quoteID)
+				if err != nil {
+					return err
+				}
+				if quote.UserID != item.task.UserID || quote.RequestFingerprint != item.fingerprint {
+					return ErrBillingQuoteMismatch
+				}
+				var pinned billing.SKUConfig
+				if err := json.Unmarshal(quote.SKUSnapshot, &pinned); err != nil || pinned.Operation != "task.profile_analysis" || pinned.ExecutionProfile != item.task.ExecutionProfile {
+					return ErrBillingQuoteMismatch
+				}
+				item.quote = quote
+			}
 			charge, err := s.billingWalletSvc.ChargeTaskAdmissionInTx(ctx, tx, TaskChargeRequest{
 				UserID: item.task.UserID, TaskID: item.task.ID, QuoteID: item.quote.ID,
 				CatalogID: item.quote.CatalogID, SKUID: item.quote.SKUID, RequestFingerprint: item.fingerprint,
@@ -948,6 +1004,31 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			item.task.BillingPricingTier = charge.PricingTier
 			item.task.BillingChargeID, item.task.BillingPriceCredits = stringPtr(charge.ID), charge.PriceCredits
 			if err := createTask(tx, item.task); err != nil {
+				return err
+			}
+		}
+		if manualAdmission != nil && manualAdmission.ProfileAnalysisExpectedVersion != nil {
+			if len(tasks) != 1 || tasks[0].Type != model.TaskTypeProfileAnalysis {
+				return fmt.Errorf("profile analysis admission must create one profile task")
+			}
+			project, err := tx.Projects().FindByIDForUpdate(ctx, tasks[0].ProjectID)
+			if err != nil {
+				return err
+			}
+			profile := projectProfileFor(project)
+			if profile.Version != *manualAdmission.ProfileAnalysisExpectedVersion {
+				return ErrProjectProfileVersionConflict
+			}
+			if profile.AnalysisTaskID != "" {
+				if existing, findErr := tx.Tasks().FindByID(ctx, profile.AnalysisTaskID); findErr == nil && (existing.Status == model.TaskStatusPending || existing.Status == model.TaskStatusRunning) {
+					return ErrProjectProfileAnalysisInProgress
+				}
+			}
+			profile.AnalysisTaskID = tasks[0].ID
+			profile.Status = model.ProfileStatusDraft
+			profile.Version++
+			project.Profile = datatypes.NewJSONType(profile)
+			if err := tx.Projects().Update(ctx, project); err != nil {
 				return err
 			}
 		}

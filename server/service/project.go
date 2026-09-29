@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
@@ -15,13 +16,16 @@ import (
 )
 
 var (
-	ErrProjectNotFound           = errors.New("project not found")
-	ErrProjectOwnedByUser        = errors.New("project not owned by user")
-	ErrProjectDeleteConflict     = errors.New("project delete conflict")
-	ErrProjectUpdateConflict     = errors.New("project update conflict")
-	ErrProjectMontageDefaults    = errors.New("视频生成项目默认设置无效")
-	ErrInvalidAgentConfig        = errors.New("invalid agent config")
-	ErrWechatCredentialsRequired = errors.New("wechat credentials required")
+	ErrProjectNotFound                   = errors.New("project not found")
+	ErrProjectOwnedByUser                = errors.New("project not owned by user")
+	ErrProjectDeleteConflict             = errors.New("project delete conflict")
+	ErrProjectUpdateConflict             = errors.New("project update conflict")
+	ErrProjectMontageDefaults            = errors.New("视频生成项目默认设置无效")
+	ErrInvalidAgentConfig                = errors.New("invalid agent config")
+	ErrWechatCredentialsRequired         = errors.New("wechat credentials required")
+	ErrProjectProfileVersionConflict     = errors.New("project profile version conflict")
+	ErrProjectProfileAnalysisInProgress  = errors.New("project profile analysis is already in progress")
+	ErrProjectProfileUnsupportedPlatform = errors.New("project profile is only supported for article and seednote projects")
 )
 
 type projectDeleteConflictError struct {
@@ -209,6 +213,172 @@ func (s *ProjectService) Get(ctx context.Context, userID, projectID string) (*mo
 	return ch, stats, nil
 }
 
+func projectProfileFor(project *model.Project) model.ProjectProfile {
+	profile := project.Profile.Data()
+	if profile.SchemaVersion == 0 {
+		profile = model.NewProjectProfile()
+	}
+	return profile
+}
+
+func validateProjectProfilePlatform(project *model.Project) error {
+	if project == nil || (project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote) {
+		return ErrProjectProfileUnsupportedPlatform
+	}
+	return nil
+}
+
+// GetProfile returns the project-scoped profile. A new project receives an
+// empty draft shape so Studio can render the same six-dimensional editor.
+func (s *ProjectService) GetProfile(ctx context.Context, userID, projectID string) (model.ProjectProfile, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return model.ProjectProfile{}, fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+	}
+	if project.UserID != userID {
+		return model.ProjectProfile{}, ErrProjectOwnedByUser
+	}
+	if err := validateProjectProfilePlatform(project); err != nil {
+		return model.ProjectProfile{}, err
+	}
+	return projectProfileFor(project), nil
+}
+
+func (s *ProjectService) updateProfile(ctx context.Context, userID, projectID string, expectedVersion int64, next model.ProjectProfile) (model.ProjectProfile, error) {
+	if err := next.Validate(); err != nil {
+		return model.ProjectProfile{}, fmt.Errorf("invalid project profile: %w", err)
+	}
+	var result model.ProjectProfile
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		project, err := tx.Projects().FindByIDForUpdate(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+		}
+		if project.UserID != userID {
+			return ErrProjectOwnedByUser
+		}
+		if err := validateProjectProfilePlatform(project); err != nil {
+			return err
+		}
+		current := projectProfileFor(project)
+		if expectedVersion != current.Version {
+			return ErrProjectProfileVersionConflict
+		}
+		if next.SchemaVersion == 0 {
+			next.SchemaVersion = 1
+		}
+		next.Version = current.Version + 1
+		if next.Status == "" {
+			next.Status = current.Status
+		}
+		project.Profile = datatypes.NewJSONType(next)
+		if err := tx.Projects().Update(ctx, project); err != nil {
+			return err
+		}
+		result = next
+		return nil
+	})
+	return result, err
+}
+
+func (s *ProjectService) ConfirmProfile(ctx context.Context, userID, projectID string, expectedVersion int64, profile model.ProjectProfile) (model.ProjectProfile, error) {
+	// The analysis task link is server-owned bookkeeping. Preserve the current
+	// link while accepting only the six-dimensional content from Studio.
+	current, err := s.GetProfile(ctx, userID, projectID)
+	if err != nil {
+		return model.ProjectProfile{}, err
+	}
+	profile.AnalysisTaskID = current.AnalysisTaskID
+	profile.Status = model.ProfileStatusConfirmed
+	if profile.Version < 0 {
+		return model.ProjectProfile{}, fmt.Errorf("invalid project profile version")
+	}
+	return s.updateProfile(ctx, userID, projectID, expectedVersion, profile)
+}
+
+// SetProfileAnalysisTaskID links the server-owned analysis task to the
+// project-scoped draft without confirming any of its contents. The version
+// check keeps a concurrent manual edit from being silently overwritten.
+func (s *ProjectService) SetProfileAnalysisTaskID(ctx context.Context, userID, projectID string, expectedVersion int64, taskID string) (model.ProjectProfile, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return model.ProjectProfile{}, fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+	}
+	if project.UserID != userID {
+		return model.ProjectProfile{}, ErrProjectOwnedByUser
+	}
+	profile := projectProfileFor(project)
+	profile.AnalysisTaskID = strings.TrimSpace(taskID)
+	profile.Status = model.ProfileStatusDraft
+	return s.updateProfile(ctx, userID, projectID, expectedVersion, profile)
+}
+
+func (s *ProjectService) UpdateProfileDimension(ctx context.Context, userID, projectID, dimension string, expectedVersion int64, value model.ProfileDimension) (model.ProjectProfile, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return model.ProjectProfile{}, fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+	}
+	if project.UserID != userID {
+		return model.ProjectProfile{}, ErrProjectOwnedByUser
+	}
+	profile := projectProfileFor(project)
+	currentDimension := func() model.ProfileDimension {
+		switch dimension {
+		case "identity":
+			return profile.Dimensions.Identity
+		case "style":
+			return profile.Dimensions.Style
+		case "audience":
+			return profile.Dimensions.Audience
+		case "platforms":
+			return profile.Dimensions.Platforms
+		case "preferences":
+			return profile.Dimensions.Preferences
+		case "memory":
+			return profile.Dimensions.Memory
+		default:
+			return model.ProfileDimension{}
+		}
+	}
+	previous := currentDimension()
+	if len(value.Sources) == 0 {
+		value.Sources = append([]string(nil), previous.Sources...)
+	}
+	if len(value.Evidence) == 0 {
+		value.Evidence = append([]string(nil), previous.Evidence...)
+	}
+	if len(value.MissingFields) == 0 {
+		value.MissingFields = append([]string(nil), previous.MissingFields...)
+	}
+	if dimension == "memory" {
+		merged := map[string]any{}
+		for key, item := range previous.Content {
+			merged[key] = item
+		}
+		for key, item := range value.Content {
+			merged[key] = item
+		}
+		value.Content = merged
+	}
+	switch dimension {
+	case "identity":
+		profile.Dimensions.Identity = value
+	case "style":
+		profile.Dimensions.Style = value
+	case "audience":
+		profile.Dimensions.Audience = value
+	case "platforms":
+		profile.Dimensions.Platforms = value
+	case "preferences":
+		profile.Dimensions.Preferences = value
+	case "memory":
+		profile.Dimensions.Memory = value
+	default:
+		return model.ProjectProfile{}, fmt.Errorf("unknown profile dimension %q", dimension)
+	}
+	return s.updateProfile(ctx, userID, projectID, expectedVersion, profile)
+}
+
 // List returns projects for the given user, filtered by the provided options.
 func (s *ProjectService) List(ctx context.Context, userID string, opts repository.ProjectListOptions) ([]*model.Project, error) {
 	projects, err := s.repo.Projects().ListByUserID(ctx, userID, opts)
@@ -236,6 +406,32 @@ func (s *ProjectService) BatchStats(ctx context.Context, projectIDs []string) (m
 // Update updates mutable fields on a project owned by the user.
 func (s *ProjectService) Update(ctx context.Context, userID, projectID string, ch *model.Project) (*model.Project, error) {
 	return s.update(ctx, userID, projectID, ch, "", false)
+}
+
+// SetFeedbackPaused changes only the periodic feedback switch. Keeping this
+// mutation separate from the broad project update prevents an observability
+// control from accidentally changing generation defaults.
+func (s *ProjectService) SetFeedbackPaused(ctx context.Context, userID, projectID string, paused bool) (*model.Project, error) {
+	var result *model.Project
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		project, err := tx.Projects().FindByIDForUpdate(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+		}
+		if project.UserID != userID {
+			return ErrProjectOwnedByUser
+		}
+		project.FeedbackPaused = paused
+		if err := tx.Projects().Update(ctx, project); err != nil {
+			return err
+		}
+		result = project
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("set feedback pause: %w", err)
+	}
+	return result, nil
 }
 
 func (s *ProjectService) UpdateIfReferenceImageAssetID(ctx context.Context, userID, projectID string, ch *model.Project, expectedID string) (*model.Project, error) {

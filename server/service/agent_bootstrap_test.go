@@ -757,7 +757,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 		t.Fatal("runtime settings must be replaceable across resumed executions")
 	}
 	for bootstrapPath, file := range paths {
-		if bootstrapPath != ".anban-creator/settings.json" && file.ReplaceExisting {
+		if bootstrapPath != ".anban-creator/settings.json" && bootstrapPath != ".anban-creator/feedback-strategy.json" && file.ReplaceExisting {
 			t.Fatalf("bootstrap path %q unexpectedly permits replacement", bootstrapPath)
 		}
 	}
@@ -849,6 +849,10 @@ type bootstrapReadTrackingExecutions struct {
 
 func (r *bootstrapReadTrackingRepository) TaskExecutions() repository.TaskExecutionRepository {
 	return &bootstrapReadTrackingExecutions{owner: r}
+}
+
+func (r *bootstrapReadTrackingRepository) FeedbackLoop() repository.FeedbackLoopRepository {
+	return nil
 }
 
 func (r *bootstrapReadTrackingExecutions) FindByID(context.Context, string) (*model.TaskExecution, error) {
@@ -953,6 +957,10 @@ func (r *bootstrapRaceRepository) Tasks() repository.TaskRepository {
 
 func (r *bootstrapRaceRepository) TaskExecutions() repository.TaskExecutionRepository {
 	return &bootstrapRaceExecutions{state: r.state, inTx: r.inTx}
+}
+
+func (r *bootstrapRaceRepository) FeedbackLoop() repository.FeedbackLoopRepository {
+	return nil
 }
 
 func (r *bootstrapRaceRepository) WithTx(_ context.Context, fn func(repository.Repository) error) error {

@@ -107,7 +107,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "05c312ed0752715e6604d668e71adae1e5a208f171362b93466b294b5216006a"
+      "digest": "c0e9ed4878803c9db8570efd494dbcb07ca6a3b963ec7b2ac744c8420eec8904"
     },
     {
       "id": "ecommerce",
@@ -212,6 +212,36 @@
         "renderer": "custom:ecommerce"
       },
       "digest": "92beb694a5df1ff3e966efab6c9429546e90fd2e3811a27037cc3d3bde1f7f3d"
+    },
+    {
+      "id": "feedback",
+      "version": "1.0.0",
+      "kind": "plugin",
+      "display_name": "反馈分析",
+      "description": "周期性分析公众号与种草笔记数据并生成可追溯的反馈证据。",
+      "agent": {
+        "name": "feedback",
+        "skills": [
+          "publish-log",
+          "data-tracker",
+          "publish-analytics",
+          "performance-review",
+          "content-postmortem",
+          "post-scorer",
+          "strategy-advisor"
+        ],
+        "max_turns": 80
+      },
+      "bindings": {},
+      "runtime": {},
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "feedback"
+      ],
+      "ui": {},
+      "digest": "d5dc706bf39b360407e04f0b7e02d44baf5f0b38aece7cc44af5bbd202380dbc"
     },
     {
       "id": "hypit",
@@ -608,6 +638,217 @@
       "digest": "19e15c71c43550036da4894297a9daa0fbf2b3d4d48019708160d7205be3540c"
     },
     {
+      "id": "profile-analysis",
+      "version": "2.0.1",
+      "kind": "managed",
+      "display_name": "账号画像分析",
+      "description": "基于用户提供的公开资料和问答生成可确认的六维账号画像草稿。",
+      "agent": {
+        "name": "profile-analysis",
+        "skills": [
+          "profile-builder"
+        ],
+        "max_turns": 80
+      },
+      "bindings": {
+        "task_types": [
+          "profile_analysis"
+        ]
+      },
+      "runtime": {
+        "profile": "article",
+        "adapter": "standard",
+        "max_turns": 40
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task"
+      ],
+      "features": [
+        "profile-analysis"
+      ],
+      "billing_operations": {
+        "profile_analysis": "task.profile_analysis"
+      },
+      "artifacts": [
+        {
+          "role": "profile_draft",
+          "path": "output/profile-draft.json",
+          "mime_type": "application/json",
+          "required": true
+        }
+      ],
+      "delivery": [
+        {
+          "role": "profile_draft",
+          "path": "output/profile-draft.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "schemas": {
+        "task_input": {
+          "type": "object",
+          "required": [
+            "project_id",
+            "platform",
+            "profile_url",
+            "answers",
+            "samples"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "enum": [
+                "article",
+                "seednote"
+              ]
+            },
+            "profile_url": {
+              "type": "string"
+            },
+            "answers": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "basic": {
+                  "type": "string"
+                },
+                "intent": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "boundaries": {
+                  "type": "string"
+                }
+              }
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": [
+            "schema_version",
+            "status",
+            "dimensions",
+            "analysis_limits",
+            "follow_up_questions"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "integer",
+              "enum": [
+                1
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "draft"
+              ]
+            },
+            "dimensions": {
+              "type": "object",
+              "required": [
+                "identity",
+                "style",
+                "audience",
+                "platforms",
+                "preferences",
+                "memory"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "identity": {
+                  "$ref": "#/definitions/dimension"
+                },
+                "style": {
+                  "$ref": "#/definitions/dimension"
+                },
+                "audience": {
+                  "$ref": "#/definitions/dimension"
+                },
+                "platforms": {
+                  "$ref": "#/definitions/dimension"
+                },
+                "preferences": {
+                  "$ref": "#/definitions/dimension"
+                },
+                "memory": {
+                  "$ref": "#/definitions/dimension"
+                }
+              }
+            },
+            "analysis_limits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "follow_up_questions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "definitions": {
+            "dimension": {
+              "type": "object",
+              "required": [
+                "content",
+                "sources",
+                "evidence",
+                "missing_fields"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "missing_fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ui": {
+        "renderer": "custom:profile-analysis"
+      },
+      "digest": "e505cefbdc15268652e7d77ba18c263eb7009d0be5bcd1938206f3895514cc7d"
+    },
+    {
       "id": "seednote",
       "version": "2.0.4",
       "kind": "managed",
@@ -732,7 +973,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "7532542528e42286f32476867da26dd76880efc697a467c3ebf0873a085fd451"
+      "digest": "d30c5a3c39d4e8ed5fd8f39d9c65b66c9caa8f0e613b9a54180ea0a35e7557fb"
     }
   ]
 }

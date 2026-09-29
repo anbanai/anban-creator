@@ -50,8 +50,9 @@ const (
 
 // Managed task types that are not project platforms.
 const (
-	TaskTypeLiveSlicer    = "live-slicer"
-	TaskTypeViralAnalysis = "viral_analysis"
+	TaskTypeLiveSlicer      = "live-slicer"
+	TaskTypeViralAnalysis   = "viral_analysis"
+	TaskTypeProfileAnalysis = "profile_analysis"
 )
 
 // File role constants.
@@ -111,7 +112,7 @@ func IsAdminOnlyProjectPlatform(value string) bool {
 
 // IsTaskType reports whether value is an explicitly implemented task type.
 func IsTaskType(value string) bool {
-	return IsProjectPlatform(value) || value == TaskTypeLiveSlicer || value == TaskTypeViralAnalysis
+	return IsProjectPlatform(value) || value == TaskTypeLiveSlicer || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis
 }
 
 func IsMontagePlatform(platform string) bool {

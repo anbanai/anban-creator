@@ -54,6 +54,7 @@ type Services struct {
 	BillingHandler               *handler.BillingHandler
 	BillingAdminHandler          *handler.BillingAdminHandler
 	ProjectHandler               *handler.ProjectHandler
+	FeedbackDashboardHandler     *handler.FeedbackDashboardHandler
 	TimelineHandler              *handler.TimelineHandler
 	APIKeyHandler                *handler.APIKeyHandler
 	FileHandler                  *handler.FileHandler
@@ -276,6 +277,17 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/projects", svc.ProjectHandler.Create)
 		apiV1.Post("/projects/fetch-profile", svc.ProjectHandler.FetchProfile)
 		apiV1.Get("/projects/:id", svc.ProjectHandler.Get)
+		if svc.FeedbackDashboardHandler != nil {
+			apiV1.Get("/projects/:id/feedback", svc.FeedbackDashboardHandler.Get)
+			apiV1.Post("/projects/:id/feedback/rerun", svc.FeedbackDashboardHandler.Rerun)
+			apiV1.Post("/projects/:id/feedback/:state", svc.FeedbackDashboardHandler.SetPaused)
+		}
+		apiV1.Get("/projects/:id/profile", svc.ProjectHandler.GetProfile)
+		apiV1.Post("/projects/:id/profile/analysis/quote", svc.ProjectHandler.ProfileAnalysisQuote)
+		apiV1.Post("/projects/:id/profile/analysis", svc.ProjectHandler.StartProfileAnalysis)
+		apiV1.Get("/projects/:id/profile/analysis", svc.ProjectHandler.GetProfileAnalysis)
+		apiV1.Put("/projects/:id/profile", svc.ProjectHandler.UpdateProfile)
+		apiV1.Patch("/projects/:id/profile/:dimension", svc.ProjectHandler.UpdateProfileDimension)
 		apiV1.Get("/projects/:id/memory", svc.ProjectHandler.Memory)
 		apiV1.Put("/projects/:id", svc.ProjectHandler.Update)
 		apiV1.Patch("/projects/:id/archive", svc.ProjectHandler.Archive)

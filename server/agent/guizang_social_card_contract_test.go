@@ -43,7 +43,7 @@ func TestGuizangSocialCardRoutingIsRemoved(t *testing.T) {
 				"归藏",
 				"Guizang",
 				"social card",
-				"小红书组图",
+				"种草笔记组图",
 				"editorial card",
 				"社交卡片",
 			} {

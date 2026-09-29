@@ -501,7 +501,7 @@ func (s *TaskService) validateFrozenTaskImageCapability(ctx context.Context, tas
 }
 
 func taskUsesFrozenImageCapability(taskType string) bool {
-	return strings.TrimSpace(taskType) != model.TaskTypeViralAnalysis
+	return strings.TrimSpace(taskType) != model.TaskTypeViralAnalysis && strings.TrimSpace(taskType) != model.TaskTypeProfileAnalysis
 }
 
 func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, bool, error) {
