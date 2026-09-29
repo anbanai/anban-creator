@@ -72,6 +72,8 @@ describe('Sidebar', () => {
   it('renders only the approved MVP navigation for regular users', () => {
     renderSidebar()
 
+    expect(screen.getByText('Anban Studio')).toBeInTheDocument()
+
     const navigation = within(screen.getByRole('navigation', { name: '主导航' }))
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
       'AI助手',

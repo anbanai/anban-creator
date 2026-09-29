@@ -52,7 +52,7 @@ export default function Sidebar() {
         ) : (
           <>
             <div className="min-w-0 flex-1">
-              <p className="text-xl font-semibold tracking-tight">Anban<span className="ml-1.5 text-primary">AI</span></p>
+              <p className="text-xl font-semibold tracking-tight">Anban Studio</p>
               <p className="mt-0.5 text-xs text-muted-foreground">自媒体智能创作助手</p>
             </div>
             {mobile ? (
