@@ -527,6 +527,16 @@ export function TaskFormDialog({
                 </div>
               ) : null}
 
+              {selectedProject ? (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground" aria-label="本次将使用">
+                  <span className="font-medium text-foreground">本次将使用</span>
+                  <span>项目：{selectedProject.name}</span>
+                  <span>画像：当前版本</span>
+                  <span>执行配置：{selectedExecutionProfile?.display_name || watchedExecutionProfile || '加载中'}</span>
+                  <span>预计费用：{costPreview.priceAvailable ? `${costPreview.totalCost.toLocaleString()} 积分` : '待确认'}</span>
+                </div>
+              ) : null}
+
               <TaskTimePricingNotice
                 catalog={billingCatalog}
                 taskType={watchedType}

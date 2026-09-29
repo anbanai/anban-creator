@@ -14,7 +14,7 @@ import {
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
-import type { Project, Task, TaskFile } from '@/types'
+import type { Project, Task, TaskFile, TaskRuntimeContext as RuntimeContext } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -66,7 +66,16 @@ function profileSummary(task: Task, project?: Project) {
   return { projectName, profileLabel }
 }
 
-function makeItems(task: Task, project: Project | undefined, files: TaskFile[]): ContextItem[] {
+function makeItems(task: Task, project: Project | undefined, files: TaskFile[], context?: RuntimeContext): ContextItem[] {
+  if (context) {
+    const statusFor = (status: string): RuntimeStatus => status === 'healthy' || status === 'ready' || status === 'conflict' ? 'ready' : status === 'starting' ? 'starting' : status === 'recoverable' ? 'recoverable' : status === 'failed' || status === 'degraded' ? 'failed' : 'unknown'
+    return [
+      { key: 'profile', label: '创作身份', value: context.profile.label, detail: context.profile.changed_since_snapshot ? '项目已更新，任务仍使用冻结版本' : context.profile.summary || '任务已冻结', status: statusFor(context.profile.status), icon: UserRound },
+      { key: 'execution', label: '执行环境', value: context.execution.status === 'starting' ? '建立中' : context.execution.status === 'recoverable' ? '可恢复' : context.execution.status === 'failed' ? '未建立' : '已建立', detail: context.execution.recovery_stage ? `可从${progressStageLabel[context.execution.recovery_stage] || context.execution.recovery_stage}继续` : '工作区已绑定到本次任务', status: statusFor(context.execution.status), icon: CloudCog, action: context.execution.recovery_stage ? `可从${progressStageLabel[context.execution.recovery_stage] || context.execution.recovery_stage}继续` : undefined },
+      { key: 'artifacts', label: '作品文件', value: `${context.artifacts.completed} / ${context.artifacts.required || context.artifacts.completed} 个`, detail: context.artifacts.failed ? `${context.artifacts.failed} 个文件需要处理` : context.artifacts.missing ? `缺少 ${context.artifacts.missing} 个文件` : context.artifacts.completed ? '产物清单已更新' : '等待产物', status: context.artifacts.failed || context.artifacts.missing ? 'recoverable' : context.artifacts.completed ? 'ready' : 'unknown', icon: FileCheck2 },
+      { key: 'connectivity', label: '连接状态', value: context.connectivity.summary, detail: context.connectivity.checked_at ? `最近检查 ${new Date(context.connectivity.checked_at).toLocaleString('zh-CN')}` : '暂无检查记录', status: statusFor(context.connectivity.status), icon: Network },
+    ]
+  }
   const { projectName, profileLabel } = profileSummary(task, project)
   const delivered = files.filter((file) => file.state === 'delivered' || file.state === 'retained')
   const failed = task.outcome?.diagnostic?.code?.startsWith('artifact_') || task.outcome?.diagnostic?.code === 'artifact_manifest_failed'
@@ -128,13 +137,19 @@ function DetailRow({ label, value, copy }: { label: string; value: string; copy?
   )
 }
 
-function RuntimeDetail({ item, task, project, files, onResume }: { item: ContextItem; task: Task; project?: Project; files: TaskFile[]; onResume?: () => void }) {
+function RuntimeDetail({ item, task, project, files, context, onResume }: { item: ContextItem; task: Task; project?: Project; files: TaskFile[]; context?: RuntimeContext; onResume?: () => void }) {
   const { projectName, profileLabel } = profileSummary(task, project)
   const snapshot = task.project_snapshot
   const status = statusCopy[item.status]
   const StatusIcon = status.icon
-  const artifactNames = files.slice(0, 12).map((file) => file.file_name).join('、') || '暂无'
-  const technicalValue = item.key === 'execution' ? task.lifecycle?.execution_id : item.key === 'profile' ? task.agent_profile_fingerprint : item.key === 'artifacts' ? artifactNames : task.outcome?.diagnostic?.code
+  const artifactNames = (context?.artifacts.items.map((file) => file.label) || files.slice(0, 12).map((file) => file.file_name)).join('、') || '暂无'
+  const technicalValue = item.key === 'execution'
+    ? context?.execution.execution_id || task.lifecycle?.execution_id
+    : item.key === 'profile'
+      ? context?.profile.snapshot_id || task.agent_profile_fingerprint
+      : item.key === 'artifacts'
+        ? artifactNames
+        : context?.connectivity.diagnostic_code || task.outcome?.diagnostic?.code
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/25 p-3">
@@ -150,22 +165,24 @@ function RuntimeDetail({ item, task, project, files, onResume }: { item: Context
           <DetailRow label="项目" value={projectName} />
           <DetailRow label="执行配置" value={profileLabel} />
           <DetailRow label="平台" value={contentTypeDisplayName(snapshot?.platform || task.type)} />
-          <DetailRow label="状态" value="任务继续执行时仍使用冻结版本" />
-          <DetailRow label="指纹" value={task.agent_profile_fingerprint || '未记录'} copy={Boolean(task.agent_profile_fingerprint)} />
+          <DetailRow label="状态" value={context?.profile.changed_since_snapshot ? '项目已更新，任务继续执行时仍使用冻结版本' : '任务继续执行时仍使用冻结版本'} />
+          <DetailRow label="快照 ID" value={context?.profile.snapshot_id || task.agent_profile_fingerprint || '未记录'} copy={Boolean(context?.profile.snapshot_id || task.agent_profile_fingerprint)} />
         </dl>
       ) : null}
       {item.key === 'execution' ? (
         <dl>
-          <DetailRow label="执行 ID" value={task.lifecycle?.execution_id || '尚未建立'} copy={Boolean(task.lifecycle?.execution_id)} />
+          <DetailRow label="执行 ID" value={context?.execution.execution_id || task.lifecycle?.execution_id || '尚未建立'} copy={Boolean(context?.execution.execution_id || task.lifecycle?.execution_id)} />
           <DetailRow label="工作区" value="已绑定到本次任务" />
-          <DetailRow label="最近心跳" value={task.last_heartbeat_at ? new Date(task.last_heartbeat_at).toLocaleString('zh-CN') : '暂无记录'} />
+          {context?.execution.runtime_profile ? <DetailRow label="运行配置" value={context.execution.runtime_profile} /> : null}
+          {context?.execution.runtime_image_digest ? <DetailRow label="镜像摘要" value={context.execution.runtime_image_digest} copy /> : null}
+          <DetailRow label="最近心跳" value={context?.execution.last_heartbeat_at || task.last_heartbeat_at ? new Date(context?.execution.last_heartbeat_at || task.last_heartbeat_at || '').toLocaleString('zh-CN') : '暂无记录'} />
           {onResume && (task.status === 'failed' || task.status === 'cancelled') ? <Button size="sm" onClick={onResume}>继续执行</Button> : null}
         </dl>
       ) : null}
       {item.key === 'artifacts' ? (
         <dl>
           <DetailRow label="文件" value={artifactNames} />
-          <DetailRow label="已交付" value={`${files.filter((file) => file.state === 'delivered' || file.state === 'retained').length} 个`} />
+          <DetailRow label="已交付" value={`${context?.artifacts.completed ?? files.filter((file) => file.state === 'delivered' || file.state === 'retained').length} 个`} />
           <DetailRow label="说明" value="文件路径和校验信息仅在技术详情中使用" />
         </dl>
       ) : null}
@@ -193,7 +210,7 @@ function RuntimeDetail({ item, task, project, files, onResume }: { item: Context
 export function TaskRuntimeContext({ task, project, files, onResume }: TaskRuntimeContextProps) {
   const [selected, setSelected] = useState<ContextKey | null>(null)
   const titleId = useId()
-  const items = makeItems(task, project, files)
+  const items = makeItems(task, project, files, task.runtime_context)
   const selectedItem = items.find((item) => item.key === selected)
   return (
     <>
@@ -228,7 +245,7 @@ export function TaskRuntimeContext({ task, project, files, onResume }: TaskRunti
               <SheetTitle className="flex items-center gap-2"><selectedItem.icon className="size-5 text-primary" />{selectedItem.label}</SheetTitle>
               <SheetDescription>本次任务的运行信息和可执行操作</SheetDescription>
             </SheetHeader>
-            <div className="px-5 pb-6"><RuntimeDetail item={selectedItem} task={task} project={project} files={files} onResume={onResume} /></div>
+            <div className="px-5 pb-6"><RuntimeDetail item={selectedItem} task={task} project={project} files={files} context={task.runtime_context} onResume={onResume} /></div>
           </> : null}
         </SheetContent>
       </Sheet>

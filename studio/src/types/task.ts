@@ -150,6 +150,40 @@ export interface Task {
   started_at: string
   completed_at: string
   last_heartbeat_at?: string
+  runtime_context?: TaskRuntimeContext
+}
+
+export interface TaskRuntimeContext {
+  profile: {
+    status: 'frozen' | 'missing' | 'conflict'
+    label: string
+    snapshot_id?: string
+    summary?: string
+    changed_since_snapshot?: boolean
+  }
+  execution: {
+    status: 'ready' | 'starting' | 'failed' | 'recoverable' | 'unknown'
+    execution_id?: string
+    resumable: boolean
+    recovery_stage?: string
+    workspace?: string
+    last_heartbeat_at?: string
+    runtime_profile?: string
+    runtime_image_digest?: string
+  }
+  artifacts: {
+    completed: number
+    required: number
+    failed: number
+    missing: number
+    items: Array<{ id: string; label: string; status: string; diagnostic_code?: string }>
+  }
+  connectivity: {
+    status: 'healthy' | 'degraded' | 'unknown'
+    summary: string
+    diagnostic_code?: string
+    checked_at?: string
+  }
 }
 
 export interface TaskBillingChargeDetail {

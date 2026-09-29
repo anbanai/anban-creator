@@ -64,6 +64,7 @@ export type {
   TaskLifecycle,
   TaskOutcome,
   Task,
+  TaskRuntimeContext,
   TaskBillingChargeDetail,
   TaskFile,
   ReferenceUsageSummaryData,

@@ -724,6 +724,19 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 	}
 
 	resp := taskAPIResponse(task, h.store)
+	var project *model.Project
+	if h.repo != nil && task.ProjectID != "" {
+		project, _ = h.repo.Projects().FindByID(c.Context(), task.ProjectID)
+	}
+	var currentExecution *model.TaskExecution
+	if h.repo != nil {
+		currentExecution, _ = h.repo.TaskExecutions().FindCurrentByTaskID(c.Context(), task.ID)
+	}
+	if files, filesErr := h.service.GetVisibleFiles(c.Context(), task.ID); filesErr == nil {
+		resp["runtime_context"] = buildRuntimeContextWithExecution(task, files, project, currentExecution)
+	} else {
+		resp["runtime_context"] = buildRuntimeContextWithExecution(task, nil, project, currentExecution)
+	}
 	if err := h.enrichTaskBilling(c.Context(), userID, []*model.Task{task}, []map[string]any{resp}, true); err != nil {
 		h.logger.Error().Err(err).Str("task_id", task.ID).Msg("enrich task billing failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to load task billing")

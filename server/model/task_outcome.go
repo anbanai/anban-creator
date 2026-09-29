@@ -10,6 +10,13 @@ type TaskOutcome struct {
 	Diagnostic   *ExecutionDiagnostic    `json:"diagnostic,omitempty"`
 }
 
+func (t *Task) OutcomeDiagnostic() *ExecutionDiagnostic {
+	if t == nil || t.Outcome == nil {
+		return nil
+	}
+	return t.Outcome.Diagnostic
+}
+
 type TaskCoreDeliveryStatus string
 type TaskVisualStatus string
 type TaskReviewStatus string
