@@ -158,6 +158,36 @@ func TestFeedbackNextCadenceUsesProjectTimezoneAndJitter(t *testing.T) {
 	}
 }
 
+func TestFeedbackWindowOpenUsesCadenceSpecificLocalWindows(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		cadence string
+		at      time.Time
+		want    bool
+	}{
+		{"daily before window", FeedbackCadenceDaily, time.Date(2026, 9, 29, 2, 59, 0, 0, loc), false},
+		{"daily in window", FeedbackCadenceDaily, time.Date(2026, 9, 29, 3, 0, 0, 0, loc), true},
+		{"daily at end", FeedbackCadenceDaily, time.Date(2026, 9, 29, 5, 0, 0, 0, loc), false},
+		{"weekly before window", FeedbackCadenceWeekly, time.Date(2026, 9, 28, 3, 59, 0, 0, loc), false},
+		{"weekly in window", FeedbackCadenceWeekly, time.Date(2026, 9, 28, 5, 30, 0, 0, loc), true},
+		{"weekly at end", FeedbackCadenceWeekly, time.Date(2026, 9, 28, 6, 0, 0, 0, loc), false},
+		{"monthly extended window", FeedbackCadenceMonthly, time.Date(2026, 9, 7, 6, 30, 0, 0, loc), true},
+		{"monthly at end", FeedbackCadenceMonthly, time.Date(2026, 9, 7, 7, 0, 0, 0, loc), false},
+		{"monthly weekend", FeedbackCadenceMonthly, time.Date(2026, 9, 6, 6, 30, 0, 0, loc), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := feedbackWindowOpen(tc.cadence, tc.at, "Asia/Shanghai"); got != tc.want {
+				t.Fatalf("feedbackWindowOpen(%q, %s) = %v, want %v", tc.cadence, tc.at, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFeedbackAccountIDUsesPlatformIdentityAndProjectFallback(t *testing.T) {
 	wechatA := &model.Project{ID: "project-a", Platform: model.PlatformArticle, Config: model.ProjectConfig{WechatAppID: "wx-a"}}
 	wechatB := &model.Project{ID: "project-b", Platform: model.PlatformArticle, Config: model.ProjectConfig{WechatAppID: "wx-a"}}

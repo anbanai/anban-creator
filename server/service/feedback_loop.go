@@ -122,6 +122,9 @@ func FeedbackJobFingerprint(in FeedbackEligibilityInput) string {
 }
 
 func NextFeedbackRun(now time.Time, location, cadence string) (time.Time, error) {
+	if strings.TrimSpace(location) == "" {
+		location = "Asia/Shanghai"
+	}
 	loc, err := time.LoadLocation(location)
 	if err != nil {
 		return time.Time{}, err

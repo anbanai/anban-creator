@@ -126,14 +126,14 @@ func loadFeedbackMetricSummary(ctx context.Context, repo repository.Repository, 
 		return feedbackMetricSummary{}, nil, errors.New("feedback analytics repository unavailable")
 	}
 	var rows []model.AnalyticsObservation
-	err := repo.Analytics().DB().WithContext(ctx).
+	query := repo.Analytics().DB().WithContext(ctx).
 		Model(&model.AnalyticsObservation{}).
 		Joins("JOIN analytics_contents ac ON ac.id = analytics_observations.content_id AND ac.project_id = analytics_observations.project_id").
-		Where("analytics_observations.project_id = ? AND analytics_observations.stat_date BETWEEN ? AND ? AND analytics_observations.metric_basis IN ? AND analytics_observations.revoked_at IS NULL AND analytics_observations.content_id <> ''", job.ProjectID, job.PeriodStart, job.PeriodEnd, []string{"daily", "cumulative"}).
+		Where("analytics_observations.project_id = ? AND analytics_observations.stat_date BETWEEN ? AND ? AND analytics_observations.metric_basis IN ? AND analytics_observations.revoked_at IS NULL AND analytics_observations.content_id <> ''", job.ProjectID, job.PeriodStart, job.PeriodEnd, []string{"daily", "cumulative"})
 	if strings.TrimSpace(job.MaturityCutoff) != "" {
-		err = err.Where("ac.date IS NOT NULL AND date(ac.date) <= ?", job.MaturityCutoff)
+		query = query.Where("ac.date IS NOT NULL AND date(ac.date) <= ?", job.MaturityCutoff)
 	}
-	err = err.
+	err := query.
 		Order("analytics_observations.content_id, analytics_observations.stat_date, analytics_observations.sequence").
 		Find(&rows).Error
 	if err != nil {

@@ -369,7 +369,18 @@ func feedbackWindowOpen(cadence string, at time.Time, timezone string) bool {
 		loc = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
 	local := at.In(loc)
-	if local.Hour() < 3 || local.Hour() >= 6 {
+	startHour, endHour := 3, 5
+	switch cadence {
+	case FeedbackCadenceWeekly:
+		startHour, endHour = 4, 6
+	case FeedbackCadenceMonthly:
+		startHour, endHour = 4, 7
+	case FeedbackCadenceDaily:
+		// Daily scans run every day in the 03:00-05:00 local window.
+	default:
+		return false
+	}
+	if local.Hour() < startHour || local.Hour() >= endHour {
 		return false
 	}
 	switch cadence {
@@ -406,20 +417,6 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 		return nil, err
 	}
 	validObservationPredicate := analyticsValidMetricPredicate(p.Platform)
-	var observationCount int64
-	if validObservationPredicate == "" {
-		observationCount = 0
-	} else if err := db.Model(&model.AnalyticsObservation{}).
-		Joins("JOIN analytics_contents ac ON ac.id = analytics_observations.content_id AND ac.project_id = analytics_observations.project_id").
-		Where("analytics_observations.project_id = ? AND analytics_observations.stat_date BETWEEN ? AND ? AND analytics_observations.metric_basis IN ? AND analytics_observations.revoked_at IS NULL AND analytics_observations.content_id <> '' AND ("+validObservationPredicate+")", p.ID, from, to, []string{"daily", "cumulative"}).
-		Distinct("content_id").Count(&observationCount).Error; err != nil {
-		return nil, err
-	}
-	contentIDs, err := feedbackContentIDs(ctx, db, p.ID, from, to, defaultMaturityCutoff)
-	if err != nil {
-		return nil, err
-	}
-	digest := contentDigest(contentIDs, observationCount, from, to, state.Revision)
 	operations := feedbackOperations(cadence)
 	jobs := make([]model.FeedbackJob, 0, len(operations))
 	for _, operation := range operations {
@@ -430,6 +427,15 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 			maturityCutoff = feedbackMaturityCutoffForProject(at, p.Timezone, 7*24*time.Hour)
 			matureContentCount = s.countMatureContents(ctx, db, p, from, to, maturityCutoff)
 		}
+		observationCount, err := feedbackObservationCount(ctx, db, p.ID, from, to, maturityCutoff, validObservationPredicate)
+		if err != nil {
+			return nil, err
+		}
+		contentIDs, err := feedbackContentIDs(ctx, db, p.ID, from, to, maturityCutoff)
+		if err != nil {
+			return nil, err
+		}
+		digest := contentDigest(contentIDs, observationCount, from, to, state.Revision)
 		fingerprintInput := FeedbackEligibilityInput{ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, AnalyticsRevision: state.Revision, ContentSetDigest: digest}
 		fingerprint := FeedbackJobFingerprint(fingerprintInput)
 		alreadySucceeded, running := false, false
@@ -486,10 +492,6 @@ func feedbackMaturityCutoffForProject(now time.Time, timezone string, age time.D
 	return now.In(loc).Add(-age).Format("2006-01-02")
 }
 
-func feedbackMaturityCutoff(at time.Time) time.Time {
-	return at.Add(-24 * time.Hour)
-}
-
 func analyticsValidMetricPredicate(platform string) string {
 	columns := make([]string, 0, len(model.AnalyticsMetricColumns()))
 	for _, column := range model.AnalyticsMetricColumns() {
@@ -506,6 +508,18 @@ func feedbackContentIDs(ctx context.Context, db *gorm.DB, projectID, from, to, c
 		Where("project_id = ? AND date IS NOT NULL AND date <= ? AND date BETWEEN ? AND ?", projectID, cutoff, from, to).
 		Order("id asc").Pluck("id", &ids).Error
 	return ids, err
+}
+
+func feedbackObservationCount(ctx context.Context, db *gorm.DB, projectID, from, to, cutoff, validPredicate string) (int64, error) {
+	if validPredicate == "" {
+		return 0, nil
+	}
+	var count int64
+	err := db.WithContext(ctx).Model(&model.AnalyticsObservation{}).
+		Joins("JOIN analytics_contents ac ON ac.id = analytics_observations.content_id AND ac.project_id = analytics_observations.project_id").
+		Where("analytics_observations.project_id = ? AND analytics_observations.stat_date BETWEEN ? AND ? AND analytics_observations.metric_basis IN ? AND analytics_observations.revoked_at IS NULL AND analytics_observations.content_id <> '' AND ac.date IS NOT NULL AND date(ac.date) <= ? AND ("+validPredicate+")", projectID, from, to, []string{"daily", "cumulative"}, cutoff).
+		Distinct("content_id").Count(&count).Error
+	return count, err
 }
 
 func contentDigest(contents []string, observations int64, from, to string, revision int64) string {
