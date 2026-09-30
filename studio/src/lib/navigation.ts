@@ -29,7 +29,7 @@ export const mvpNavItems: NavItem[] = [
   { to: '/billing', label: '钱包', icon: Coins },
   { to: '/plugins', label: '插件', icon: PlugZap },
   { to: '/settings', label: '设置', icon: Settings },
-  { to: '/content-data', label: '内容数据', icon: BarChart3 },
+  { to: '/content-analytics', label: '内容分析', icon: BarChart3 },
   { to: '/trends', label: '热点雷达', icon: Flame },
 ]
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { http } from '@/lib/http-client'
-import { contentAnalyticsApi, parseTargetKey, taskContentDataHref } from './content-analytics'
+import { contentAnalyticsApi, parseTargetKey, taskContentAnalyticsHref } from './content-analytics'
 vi.mock('@/lib/http-client', () => ({ http: { get: vi.fn(), post: vi.fn() }, unwrap: async (request: Promise<{ data: { data: unknown } }>) => (await request).data.data }))
 const params = { from: '2026-09-01', to: '2026-09-30', granularity: 'month' as const, metric_basis: 'cumulative' as const }
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(http.get).mockResolvedValue({ data: { data: { revision: 7, totals: { views: null }, items: [], total: 0 } } }) })
@@ -24,7 +24,7 @@ describe('bounded analytics API', () => {
     expect(http.get).toHaveBeenCalledWith('/projects/p1/content-analytics/dates', { params: { year: 2026, metric_basis: 'cumulative' }, signal: undefined })
   })
   it('retains the business task deep-link contract', () => {
-    expect(taskContentDataHref('p1', 't1')).toBe('/content-data?account=p1&content=task%3At1')
+    expect(taskContentAnalyticsHref('p1', 't1')).toBe('/content-analytics?account=p1&content=task%3At1')
     expect(parseTargetKey('task:t1')).toEqual({ kind: 'task', id: 't1' })
     expect(parseTargetKey('unknown:t1')).toBeUndefined()
   })

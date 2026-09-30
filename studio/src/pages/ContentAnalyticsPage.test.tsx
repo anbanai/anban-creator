@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { render } from '@/test/test-utils'
-import ContentDataPage from './ContentDataPage'
+import ContentAnalyticsPage from './ContentAnalyticsPage'
 import { contentAnalyticsApi } from '@/lib/content-analytics'
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1' } }) }))
 vi.mock('@/lib/api', () => ({ api: { projects: { list: vi.fn(async () => [{ id: 'notes', platform: 'seednote', name: '生活笔记' }]) } } }))
@@ -12,7 +12,7 @@ vi.mock('@/lib/content-analytics', async importOriginal => ({ ...await importOri
 const content = { id: 'canonical-1', title: '服务器内容', content_type: 'image_text', metrics: { view_count: 12 } }
 const summary = { revision: 4, updated_at: '', metric_basis: 'cumulative' as const, totals: { view_count: 12 }, series: [], unavailable_metrics: {} }
 beforeEach(() => {
-  vi.clearAllMocks(); localStorage.clear(); window.history.replaceState(null, '', '/content-data?account=notes')
+  vi.clearAllMocks(); localStorage.clear(); window.history.replaceState(null, '', '/content-analytics?account=notes')
   vi.mocked(contentAnalyticsApi.overview).mockResolvedValue({ ...summary, coverage: { contents: 51 } })
   vi.mocked(contentAnalyticsApi.contents).mockResolvedValue({ revision: 4, items: [content], total: 51, offset: 0, limit: 25 })
   vi.mocked(contentAnalyticsApi.detail).mockResolvedValue({ ...summary, content })
@@ -21,7 +21,7 @@ beforeEach(() => {
 })
 describe('server analytics queries', () => {
   it('uses the shared compact project selector and removes redundant date controls', async () => {
-    render(<ContentDataPage />)
+    render(<ContentAnalyticsPage />)
 
     const projectSelector = await screen.findByRole('combobox', { name: '筛选项目' })
     await waitFor(() => expect(projectSelector).toHaveTextContent('生活笔记'))
@@ -33,15 +33,15 @@ describe('server analytics queries', () => {
   })
 
   it('uses cumulative reporting without a daily or increment basis control', async () => {
-    render(<ContentDataPage />)
+    render(<ContentAnalyticsPage />)
     expect(await screen.findByText('趋势')).toBeInTheDocument()
     expect(screen.queryByLabelText('统计口径')).not.toBeInTheDocument()
     expect(screen.queryByText(/当日新增|增量/)).not.toBeInTheDocument()
   })
 
   it('reads observation history only after explicitly opening it', async () => {
-    window.history.replaceState(null, '', '/content-data?account=notes&content=canonical-1')
-    render(<ContentDataPage />)
+    window.history.replaceState(null, '', '/content-analytics?account=notes&content=canonical-1')
+    render(<ContentAnalyticsPage />)
     await screen.findByRole('heading', { name: '服务器内容' })
     expect(contentAnalyticsApi.observations).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '查看观测记录' }))
@@ -49,7 +49,7 @@ describe('server analytics queries', () => {
   })
   it('retains the previous page while the next server page is pending', async () => {
     vi.mocked(contentAnalyticsApi.contents).mockResolvedValueOnce({ revision: 4, items: [content], total: 51, offset: 0, limit: 25 }).mockImplementationOnce(() => new Promise(() => {}))
-    render(<ContentDataPage />)
+    render(<ContentAnalyticsPage />)
     await screen.findByRole('button', { name: '服务器内容' })
     fireEvent.click(screen.getByRole('button', { name: '下一页' }))
     await waitFor(() => expect(contentAnalyticsApi.contents).toHaveBeenCalledTimes(2))
@@ -57,8 +57,8 @@ describe('server analytics queries', () => {
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled()
   })
   it('opens a task deep link directly without reading overview or content lists', async () => {
-    window.history.replaceState(null, '', '/content-data?account=notes&content=task:t1')
-    render(<ContentDataPage />)
+    window.history.replaceState(null, '', '/content-analytics?account=notes&content=task:t1')
+    render(<ContentAnalyticsPage />)
     expect(await screen.findByRole('heading', { name: '服务器内容' })).toBeInTheDocument()
     expect(contentAnalyticsApi.detail).toHaveBeenCalledWith('notes', 'task:t1', expect.objectContaining({ metric_basis: 'cumulative' }), expect.any(AbortSignal))
     expect(contentAnalyticsApi.overview).not.toHaveBeenCalled()
@@ -66,7 +66,7 @@ describe('server analytics queries', () => {
     expect(contentAnalyticsApi.observations).not.toHaveBeenCalled()
   })
   it('paginates on the server and keeps overview cached when selecting a row', async () => {
-    render(<ContentDataPage />)
+    render(<ContentAnalyticsPage />)
     await screen.findByRole('button', { name: '服务器内容' })
     fireEvent.click(screen.getByRole('button', { name: '下一页' }))
     await waitFor(() => expect(contentAnalyticsApi.contents).toHaveBeenLastCalledWith('notes', expect.objectContaining({ offset: 25, limit: 25 }), expect.any(AbortSignal)))
@@ -75,7 +75,7 @@ describe('server analytics queries', () => {
     expect(contentAnalyticsApi.overview).toHaveBeenCalledTimes(1)
   })
   it('debounces search while retaining server-side filtering', async () => {
-    render(<ContentDataPage />)
+    render(<ContentAnalyticsPage />)
     await screen.findByRole('button', { name: '服务器内容' })
     const calls = vi.mocked(contentAnalyticsApi.contents).mock.calls.length
     fireEvent.change(screen.getByRole('textbox', { name: '搜索内容' }), { target: { value: '新标题' } })
@@ -85,7 +85,7 @@ describe('server analytics queries', () => {
   it('refreshes the overview revision after a list conflict', async () => {
     vi.mocked(contentAnalyticsApi.contents).mockRejectedValueOnce(Object.assign(new Error('revision conflict'), { response: { status: 409 } }))
     vi.mocked(contentAnalyticsApi.overview).mockResolvedValueOnce({ ...summary, coverage: { contents: 51 } }).mockResolvedValue({ ...summary, revision: 5, coverage: { contents: 51 } })
-    render(<ContentDataPage />)
+    render(<ContentAnalyticsPage />)
     expect(await screen.findByRole('button', { name: '服务器内容' })).toBeInTheDocument()
     expect(contentAnalyticsApi.overview).toHaveBeenCalledTimes(2)
     expect(contentAnalyticsApi.contents).toHaveBeenLastCalledWith('notes', expect.objectContaining({ expected_revision: 5 }), expect.any(AbortSignal))

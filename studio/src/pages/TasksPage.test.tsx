@@ -332,11 +332,11 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    expect(await screen.findByRole('link', { name: '查看内容数据' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: '查看内容分析' })).toHaveAttribute(
       'href',
-      '/content-data?account=project-1&content=task%3Aapproval-task',
+      '/content-analytics?account=project-1&content=task%3Aapproval-task',
     )
-    expect(screen.getAllByRole('link', { name: '查看内容数据' })).toHaveLength(1)
+    expect(screen.getAllByRole('link', { name: '查看内容分析' })).toHaveLength(1)
     expect(screen.getByText('已完成文章')).toBeInTheDocument()
     expect(screen.getByText('失败文章')).toBeInTheDocument()
   })

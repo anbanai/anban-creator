@@ -80,7 +80,7 @@ export default function Sidebar() {
             <Fragment key={item.to}>
               {[0, 4, 7].includes(index) && (compact
                 ? index > 0 && <div className="mx-2 my-2 border-t border-sidebar-border" />
-                : <p className={`px-3 pb-1.5 text-[11px] font-medium text-muted-foreground ${index > 0 ? 'pt-5' : 'pt-2'}`}>{index === 0 ? '工作空间' : index === 4 ? '管理与接入' : '内容数据'}</p>
+                : <p className={`px-3 pb-1.5 text-[11px] font-medium text-muted-foreground ${index > 0 ? 'pt-5' : 'pt-2'}`}>{index === 0 ? '工作空间' : index === 4 ? '管理与接入' : '内容分析'}</p>
               )}
               <SidebarNavLink item={item} collapsed={compact} onClick={() => setMobileOpen(false)} />
             </Fragment>

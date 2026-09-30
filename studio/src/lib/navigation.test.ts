@@ -18,7 +18,7 @@ describe('navigation IA', () => {
       '钱包',
       '插件',
       '设置',
-      '内容数据',
+      '内容分析',
       '热点雷达',
     ])
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
@@ -43,7 +43,7 @@ describe('navigation IA', () => {
       '/billing',
       '/plugins',
       '/settings',
-      '/content-data',
+      '/content-analytics',
       '/trends',
       '/templates',
       '/admin/seednote',

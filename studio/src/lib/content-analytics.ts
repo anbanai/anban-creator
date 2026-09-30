@@ -25,11 +25,11 @@ export function parseTargetKey(value?: string): AnalyticsTarget | undefined {
   if (separator < 1 || !id || !targetKinds.includes(kind as AnalyticsTarget['kind'])) return undefined
   return { kind: kind as AnalyticsTarget['kind'], id }
 }
-/** Single source of truth for the `/content-data` deep-link contract: `?account=<project>&content=<target>`. */
-function contentDataHref(projectId: string, target: AnalyticsTarget) {
-  return `/content-data?${new URLSearchParams({ account: projectId, content: targetKey(target) })}`
+/** Single source of truth for the `/content-analytics` deep-link contract: `?account=<project>&content=<target>`. */
+function contentAnalyticsHref(projectId: string, target: AnalyticsTarget) {
+  return `/content-analytics?${new URLSearchParams({ account: projectId, content: targetKey(target) })}`
 }
-export function taskContentDataHref(projectId: string, taskId: string) { return contentDataHref(projectId, { kind: 'task', id: taskId }) }
+export function taskContentAnalyticsHref(projectId: string, taskId: string) { return contentAnalyticsHref(projectId, { kind: 'task', id: taskId }) }
 export const contentTypeLabel = (type: string) => ({ article: '文章', image: '贴图', image_text: '图文', '图文': '图文', '视频': '视频', video: '视频', unknown: '类型未知' }[type] ?? '类型未知')
 export function descriptionFor() { return '每篇内容取范围内最新累计记录；缺失记录不补零。' }
 const path = (id: string) => `/projects/${encodeURIComponent(id)}/content-analytics`

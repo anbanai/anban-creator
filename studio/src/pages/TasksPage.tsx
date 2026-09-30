@@ -20,7 +20,7 @@ import { platformBadgeClassName, platformBorderColor, platformHoverBorderColor }
 import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
-import { taskContentDataHref } from '@/lib/content-analytics'
+import { taskContentAnalyticsHref } from '@/lib/content-analytics'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
@@ -535,13 +535,13 @@ export default function TasksPage() {
                     </Link>
                     {task.status === 'completed' && (task.type === 'article' || task.type === 'seednote') && (
                       <Link
-                        to={taskContentDataHref(task.project_id, task.id)}
-                        aria-label="查看内容数据"
-                        title="查看内容数据"
+                        to={taskContentAnalyticsHref(task.project_id, task.id)}
+                        aria-label="查看内容分析"
+                        title="查看内容分析"
                         className="mt-0.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                       >
                         <BarChart3 className="h-4 w-4" />
-                        <span className="hidden md:inline">查看数据</span>
+                        <span className="hidden md:inline">查看内容分析</span>
                       </Link>
                     )}
                   </div>

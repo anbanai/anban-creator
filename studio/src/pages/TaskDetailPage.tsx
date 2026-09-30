@@ -9,7 +9,7 @@ import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbP
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { taskContentDataHref } from '@/lib/content-analytics'
+import { taskContentAnalyticsHref } from '@/lib/content-analytics'
 import { queryKeys } from '@/lib/query-keys'
 import type { InputAttachment, Task, TaskLifecycle } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
@@ -540,8 +540,8 @@ export default function TaskDetailPage() {
   const canCancel = task.status === 'pending' || task.status === 'running'
   const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
   const canResume = task.status === 'failed' || task.status === 'cancelled'
-  // 内容数据 only covers 公众号/种草笔记 账号，montage 等任务没有对应的数据看板。
-  const canViewContentData = task.status === 'completed' && (task.type === 'article' || task.type === 'seednote')
+  // 内容分析 only covers 公众号/种草笔记 账号，montage 等任务没有对应的数据看板。
+  const canViewContentAnalytics = task.status === 'completed' && (task.type === 'article' || task.type === 'seednote')
   const currentTask = task
   const snapshot = task.project_snapshot
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
@@ -630,10 +630,10 @@ export default function TaskDetailPage() {
           </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-          {canViewContentData && (
-            <Link to={taskContentDataHref(task.project_id, task.id)} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+          {canViewContentAnalytics && (
+            <Link to={taskContentAnalyticsHref(task.project_id, task.id)} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               <BarChart3 className="h-4 w-4" />
-              查看数据
+              查看内容分析
             </Link>
           )}
           {task.status === 'completed' && (
