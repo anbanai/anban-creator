@@ -20,6 +20,18 @@ beforeEach(() => {
   vi.mocked(contentAnalyticsApi.observations).mockResolvedValue({ revision: 4, items: [], total: 0, offset: 0, limit: 25 })
 })
 describe('server analytics queries', () => {
+  it('uses the shared compact project selector and removes redundant date controls', async () => {
+    render(<ContentDataPage />)
+
+    const projectSelector = await screen.findByRole('combobox', { name: '筛选项目' })
+    await waitFor(() => expect(projectSelector).toHaveTextContent('生活笔记'))
+    expect(projectSelector).not.toHaveClass('border-border')
+    expect(projectSelector.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
+    expect(screen.queryByText(/最近数据/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('数据年份')).not.toBeInTheDocument()
+    expect(contentAnalyticsApi.dates).not.toHaveBeenCalled()
+  })
+
   it('uses cumulative reporting without a daily or increment basis control', async () => {
     render(<ContentDataPage />)
     expect(await screen.findByText('趋势')).toBeInTheDocument()
