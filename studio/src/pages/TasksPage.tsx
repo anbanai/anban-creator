@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2, BarChart3 } from 'lucide-react'
@@ -13,7 +13,6 @@ import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
-import { SimplePagination } from '@/components/SimplePagination'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeDisplayName, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
@@ -36,6 +35,8 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已取消', value: 'cancelled' },
 ]
 
+const TASK_PAGE_SIZE = 20
+
 function normalizeTaskStatusFilter(value: string | null) {
   return value && statusTabs.some((tab) => tab.value === value) ? value : 'all'
 }
@@ -52,7 +53,6 @@ export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState(initialStatus)
   const [projectFilter, setProjectFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
-  const [page, setPage] = useState(1)
   const [modalOpen, setModalOpen] = useState(false)
   const [createDialogIntent, setCreateDialogIntent] = useState<{ projectId?: string; type?: TaskType }>({})
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
@@ -63,8 +63,6 @@ export default function TasksPage() {
     const nextStatus = normalizeTaskStatusFilter(searchParams.get('status'))
     setStatusFilter((current) => (current === nextStatus ? current : nextStatus))
   }, [searchParams])
-
-  useEffect(() => { setPage(1) }, [statusFilter, projectFilter])
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects', 'active'],
@@ -96,21 +94,50 @@ export default function TasksPage() {
     navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
   }, [projects.length, projectsLoading, modalOpen, navigate, createIntent.type, createIntent.intent])
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['tasks', statusFilter, projectFilter, page],
-    queryFn: () =>
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['tasks', { status: statusFilter, project_id: projectFilter }],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
       api.tasks.list({
-        limit: 50,
-        offset: (page - 1) * 50,
+        limit: TASK_PAGE_SIZE,
+        offset: pageParam,
         status: statusFilter === 'all' ? undefined : statusFilter,
         project_id: projectFilter || undefined,
       }),
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.items.length === 0) return undefined
+      const loadedCount = allPages.reduce((count, page) => count + page.items.length, 0)
+      return loadedCount < lastPage.total ? loadedCount : undefined
+    },
     refetchInterval: statusFilter === 'all' || statusFilter === 'running' ? 10000 : undefined,
   })
 
-  const tasks = data?.items ?? []
-  const totalTasks = data?.total ?? 0
-  const totalPages = Math.ceil(totalTasks / 50)
+  const tasks = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data])
+  const totalTasks = data?.pages[0]?.total ?? 0
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const element = loadMoreRef.current
+    if (!element || !hasNextPage || isFetchingNextPage || searchFilter.trim() || typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) fetchNextPage()
+      },
+      { rootMargin: '600px 0px' },
+    )
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, searchFilter])
+
   const filteredTasks = useMemo(() => {
     if (!searchFilter.trim()) return tasks
     const q = searchFilter.trim().toLowerCase()
@@ -293,7 +320,7 @@ export default function TasksPage() {
         title="任务"
         description={
           queueStats.active > 0 || queueStats.failed > 0
-            ? <>本页：{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}</>
+            ? <>已加载：{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}</>
             : '查看进度、产物与发布状态。'
         }
       >
@@ -315,7 +342,7 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* Filters apply to the task queue; text search only covers the loaded page. */}
+      {/* Filters apply to the task queue; text search covers tasks loaded so far. */}
       <div className="flex flex-wrap items-center gap-3">
         {/* Status filter tabs */}
         <div className="flex max-w-full flex-wrap gap-1 rounded-lg bg-muted p-1" role="group" aria-label="任务状态">
@@ -357,14 +384,14 @@ export default function TasksPage() {
           <SearchInput
             value={searchFilter}
             onChange={setSearchFilter}
-            placeholder="搜索本页任务..."
+            placeholder="搜索已加载任务..."
           />
         </div>
       </div>
 
       {!isLoading && !isError && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <p role="status">共 {totalTasks} 个任务 · 本页显示 {filteredTasks.length} 个{searchFilter.trim() ? '匹配结果' : ''}</p>
+          <p role="status">共 {totalTasks} 个任务 · 已加载 {filteredTasks.length} 个{searchFilter.trim() ? '匹配结果' : ''}</p>
           {(statusFilter !== 'all' || projectFilter || searchFilter) && (
             <Button variant="ghost" size="sm" onClick={() => {
               setStatusFilter('all'); setProjectFilter(''); setSearchFilter('')
@@ -401,7 +428,7 @@ export default function TasksPage() {
           title={searchFilter.trim() || projectFilter ? '未找到匹配的任务' : statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
           description={
             searchFilter.trim() || projectFilter
-              ? '试试其他关键词、清空筛选，或翻页查看其他任务。搜索仅匹配当前页。'
+              ? '试试其他关键词、清空筛选，或继续向下滚动加载任务。搜索仅匹配已加载任务。'
               : statusFilter === 'all'
               ? projects.length === 0
                 ? '先创建一个项目，再开始生成内容。'
@@ -555,13 +582,17 @@ export default function TasksPage() {
         </>
       )}
 
-      {!isLoading && !isError && totalPages > 1 && (
-        <div className="mt-4 flex justify-center">
-          <SimplePagination
-            page={page}
-            totalPages={totalPages}
-            onPageChange={setPage}
-          />
+      {!isLoading && !isError && (filteredTasks.length > 0 || hasNextPage || isFetchingNextPage) && (
+        <div ref={loadMoreRef} className="flex min-h-12 items-center justify-center pt-3" aria-live="polite">
+          {isFetchingNextPage ? (
+            <span className="text-sm text-muted-foreground">正在加载更多任务...</span>
+          ) : hasNextPage ? (
+            <Button variant="ghost" size="sm" onClick={() => fetchNextPage()}>
+              继续加载
+            </Button>
+          ) : (
+            <span className="text-xs text-muted-foreground">已加载全部任务</span>
+          )}
         </div>
       )}
 
