@@ -76,6 +76,7 @@ claude:
     article: creator-agent-article:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    whiteboard-animation: creator-agent-whiteboard-animation:latest
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write temp config: %v", err)

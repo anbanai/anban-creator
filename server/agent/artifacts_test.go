@@ -93,6 +93,38 @@ func TestValidateMomentsArtifactsRequiresGeneratedImage(t *testing.T) {
 	}
 }
 
+func TestValidateWhiteboardAnimationArtifactsRequiresCompleteScenePairs(t *testing.T) {
+	required := []string{"output/final.mp4", "output/storyboard.json", "output/quality-report.json", "output/delivery-manifest.json"}
+	tests := []struct {
+		name       string
+		files      []string
+		valid      bool
+		wantMissed string
+	}{
+		{name: "complete scene", files: append(append([]string{}, required...), "output/scenes/scene-01.png", "output/scenes/scene-01.annotation.json"), valid: true},
+		{name: "missing scene pair", files: append(append([]string{}, required...), "output/scenes/scene-01.png"), wantMissed: "scene_annotations"},
+		{name: "mismatched scene pair", files: append(append([]string{}, required...), "output/scenes/scene-01.png", "output/scenes/scene-02.annotation.json"), wantMissed: "scene_pairs"},
+		{name: "no scene", files: required, wantMissed: "scene_images"},
+		{name: "missing final video", files: []string{"output/storyboard.json", "output/quality-report.json", "output/delivery-manifest.json", "output/scenes/scene-01.png", "output/scenes/scene-01.annotation.json"}, wantMissed: "output/final.mp4"},
+		{name: "failure state", files: append(append([]string{}, required...), "output/scenes/scene-01.png", "output/scenes/scene-01.annotation.json", "output/failure-state.json"), wantMissed: "successful whiteboard-animation completion"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			files := make([]*model.TaskFile, 0, len(test.files))
+			for _, path := range test.files {
+				files = append(files, &model.TaskFile{FileName: filepath.Base(path), FilePath: path, FileSize: 1, State: model.TaskFileStateDelivered})
+			}
+			got := ValidateTaskArtifactsFromTaskFiles(&model.Task{Type: model.PlatformWhiteboardAnimation}, files)
+			if got.Valid != test.valid {
+				t.Fatalf("validation = %#v, want valid=%t", got, test.valid)
+			}
+			if test.wantMissed != "" && !containsArtifactName(got.Missing, test.wantMissed) {
+				t.Fatalf("missing = %#v, want %q", got.Missing, test.wantMissed)
+			}
+		})
+	}
+}
+
 func containsArtifactName(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

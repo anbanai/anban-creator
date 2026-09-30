@@ -4,7 +4,7 @@ import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID } from './agent-profile'
 
-export type PlanType = 'seednote' | 'article' | 'montage' | 'hypit'
+export type PlanType = 'seednote' | 'article' | 'montage' | 'whiteboard-animation' | 'hypit'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export interface Plan {

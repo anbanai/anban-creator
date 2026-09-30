@@ -647,7 +647,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-	requiredRuntimeProfiles := []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage}
+	requiredRuntimeProfiles := []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformWhiteboardAnimation}
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -659,7 +659,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != model.PlatformArticle && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformHypit {
+		if profile != model.PlatformArticle && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}

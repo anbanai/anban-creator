@@ -3,6 +3,7 @@ package agent
 import (
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -11,6 +12,8 @@ import (
 const NestedAgentDelegationError = "agent delegated to nested Agent tool and produced no required deliverables"
 
 var seednoteContentImagePattern = regexp.MustCompile(`^image_\d+\.(png|jpe?g|webp)$`)
+var whiteboardSceneImagePattern = regexp.MustCompile(`^scene-\d+\.png$`)
+var whiteboardSceneAnnotationPattern = regexp.MustCompile(`^scene-\d+\.annotation\.json$`)
 
 type ArtifactValidation struct {
 	Valid               bool
@@ -132,6 +135,9 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		result.Valid = true
 		return result
 	}
+	if task != nil && task.Type == model.PlatformWhiteboardAnimation {
+		return validateWhiteboardAnimationArtifacts(files, meaningful)
+	}
 	if task == nil || task.Type != model.PlatformSeednote {
 		result.Valid = meaningful > 0
 		if !result.Valid {
@@ -165,6 +171,67 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 	if len(missing) > 0 {
 		result.Missing = missing
 		result.Reason = "seednote missing required deliverables: " + strings.Join(missing, ", ")
+		return result
+	}
+	result.Valid = true
+	return result
+}
+
+func validateWhiteboardAnimationArtifacts(files map[string]bool, meaningful int) ArtifactValidation {
+	result := ArtifactValidation{MeaningfulFileCount: meaningful}
+	if files["failure-state.json"] || files["output/failure-state.json"] {
+		result.Missing = []string{"successful whiteboard-animation completion"}
+		result.Reason = "whiteboard-animation reported a recoverable failure; inspect failure-state.json"
+		return result
+	}
+	for _, path := range []string{"output/final.mp4", "output/storyboard.json", "output/quality-report.json", "output/delivery-manifest.json"} {
+		if !files[path] {
+			result.Missing = append(result.Missing, path)
+		}
+	}
+	scenes := map[string]map[string]bool{}
+	for path := range files {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if !strings.HasPrefix(path, "output/scenes/") {
+			continue
+		}
+		base := strings.ToLower(filepath.Base(path))
+		kind, sceneID := "", ""
+		switch {
+		case whiteboardSceneImagePattern.MatchString(base):
+			kind, sceneID = "image", strings.TrimSuffix(base, ".png")
+		case whiteboardSceneAnnotationPattern.MatchString(base):
+			kind, sceneID = "annotation", strings.TrimSuffix(base, ".annotation.json")
+		}
+		if kind == "" {
+			continue
+		}
+		if scenes[sceneID] == nil {
+			scenes[sceneID] = map[string]bool{}
+		}
+		scenes[sceneID][kind] = true
+	}
+	imageCount, annotationCount := 0, 0
+	for _, scene := range scenes {
+		if scene["image"] {
+			imageCount++
+		}
+		if scene["annotation"] {
+			annotationCount++
+		}
+		if scene["image"] != scene["annotation"] {
+			result.Missing = append(result.Missing, "scene_pairs")
+		}
+	}
+	if imageCount == 0 {
+		result.Missing = append(result.Missing, "scene_images")
+	}
+	if annotationCount == 0 {
+		result.Missing = append(result.Missing, "scene_annotations")
+	}
+	if len(result.Missing) > 0 {
+		sort.Strings(result.Missing)
+		result.Reason = "whiteboard-animation missing required deliverables: " + strings.Join(result.Missing, ", ")
 		return result
 	}
 	result.Valid = true

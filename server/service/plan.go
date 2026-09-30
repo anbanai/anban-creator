@@ -155,6 +155,11 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	case model.PlatformMoments:
 		return nil, fmt.Errorf("plans are not supported for moments projects: %w", ErrUnsupportedPlanPlatform)
 	}
+	if project.Platform == model.PlatformWhiteboardAnimation {
+		if err := validateWhiteboardAnimationInputs(p.InputAttachments); err != nil {
+			return nil, err
+		}
+	}
 	if p.HypitInput != nil && !model.IsHypitPlatform(project.Platform) {
 		return nil, ErrHypitInput
 	}
@@ -475,6 +480,11 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 	}
 	if p.InputAttachments != nil {
 		plan.SetInputAttachments(cloneEntryAttachments(*p.InputAttachments))
+	}
+	if plan.Type == model.PlatformWhiteboardAnimation {
+		if err := validateWhiteboardAnimationInputs(plan.InputAttachments.Data()); err != nil {
+			return nil, err
+		}
 	}
 	if p.AgentInput != nil {
 		agentInput, err := validateAndCloneAgentInput(plan.Type, *p.AgentInput)

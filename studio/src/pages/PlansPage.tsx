@@ -54,7 +54,7 @@ import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
 function isPlanType(value: string | undefined): value is PlanType {
-  return value === 'seednote' || value === 'article' || value === 'montage' || value === 'hypit'
+  return value === 'seednote' || value === 'article' || value === 'montage' || value === 'whiteboard-animation' || value === 'hypit'
 }
 
 function planToFormValues(plan: Plan): PlanFormValues {
@@ -183,6 +183,15 @@ export default function PlansPage() {
 	const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
 	const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
 	const isMontagePlan = watchedType === 'montage' || watchedType === 'hypit'
+	const whiteboardSubtitles = watchedType === 'whiteboard-animation'
+		? promptAttachments.filter((attachment) => /\.srt$/i.test(attachment.fileName ?? ''))
+		: []
+	const hasWhiteboardSubtitle = whiteboardSubtitles.length === 1 && whiteboardSubtitles[0]?.type === 'text'
+	const whiteboardAttachmentPolicy = {
+		allowedTypes: ['text', 'image'] as const,
+		maxCount: 2,
+		maxBytes: { text: 25 * 1024 * 1024, image: 10 * 1024 * 1024 },
+	}
 	const usesImageSettings = watchedType !== 'hypit'
 	const {
 		items: imageCapabilityOptions,
@@ -552,7 +561,7 @@ export default function PlansPage() {
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && (montageUploading || !montageReady))) {
+		if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && (montageUploading || !montageReady))) {
       event?.preventDefault()
       return
     }
@@ -607,14 +616,14 @@ export default function PlansPage() {
       }}
       onSubmit={() => handlePlanSubmit()}
       attachmentController={attachmentController}
-      attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+		attachmentPolicy={watchedType === 'whiteboard-animation' ? whiteboardAttachmentPolicy : GENERAL_AGENT_ATTACHMENT_POLICY}
       attachmentsEnabled={watchedType !== 'hypit'}
       ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
       submitMode="external"
       placeholder={watchedType === 'hypit' ? '描述每次复刻需要保留和替换的内容' : '描述每次计划的创作方向、内容要求和素材使用方式...'}
       submitLabel={editingPlan ? '更新计划' : '创建计划'}
       submitting={isSubmitting}
-      submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (isMontagePlan && !montageReady)}
+		submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && !montageReady)}
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -1038,7 +1047,8 @@ export default function PlansPage() {
                 || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
                 || attachmentController.uploading
                 || attachmentController.hasFailures
-                || (isMontagePlan && (montageUploading || !montageReady))}
+				|| (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle)
+				|| (isMontagePlan && (montageUploading || !montageReady))}
             >
               {editingPlan ? '更新' : '创建'}
             </Button>

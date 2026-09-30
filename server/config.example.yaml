@@ -354,6 +354,7 @@ claude:
     article: "${ANBAN_AGENT_IMAGE_ARTICLE}"
     seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"
     montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"
+    whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
     hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
   # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
   execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"

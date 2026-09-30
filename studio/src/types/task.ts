@@ -4,7 +4,7 @@ import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
 
-export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'hypit'
+export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection

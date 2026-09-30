@@ -354,6 +354,7 @@ claude:
     article: "${ARTICLE_RUNTIME_IMAGE:-creator-agent-article:latest}"
     seednote: "${SEEDNOTE_RUNTIME_IMAGE:-creator-agent-seednote:latest}"
     montage: "${MONTAGE_RUNTIME_IMAGE:-creator-agent-montage:latest}"
+    whiteboard-animation: "${WHITEBOARD_ANIMATION_RUNTIME_IMAGE:-creator-agent-whiteboard-animation:latest}"
   execution_token_secret: "runtime-smoke-execution-token-secret-32-bytes-minimum"
   agent_server_url: "http://server:8080"
   plugin_dir: "/anbanai"
@@ -368,6 +369,7 @@ claude:
     article: 10
     seednote: 10
     montage: 10
+    whiteboard-animation: 10
   docker:
     network: "${ANBAN_RUNTIME_SMOKE_NETWORK}"
     project_memory_volume: "${COMPOSE_PROJECT}-project-memory"
