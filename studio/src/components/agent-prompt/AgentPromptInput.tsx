@@ -89,7 +89,7 @@ const INPUT_ACCEPT_BY_TYPE: Record<InputAttachmentType, string> = {
   audio: 'audio/*',
   video: 'video/*',
   document: '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.json',
-  text: 'text/*,.csv,.md,.markdown,.txt',
+  text: 'text/*,.csv,.md,.markdown,.txt,.srt',
 }
 
 export interface AgentPromptInputProps {

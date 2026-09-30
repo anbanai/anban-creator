@@ -373,7 +373,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 
 func TestDockerRuntimeProfiles(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"deploy/docker/Dockerfile.agent-article", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage"} {
+	for _, name := range []string{"deploy/docker/Dockerfile.agent-article", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage", "deploy/docker/Dockerfile.agent-whiteboard-animation"} {
 		path := filepath.Join(root, name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
@@ -453,6 +453,40 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("%s retains obsolete runtime dependency %q", path, forbidden)
+		}
+	}
+}
+
+func TestWhiteboardAnimationRuntimeImageContract(t *testing.T) {
+	root := repositoryRoot(t)
+	path := filepath.Join(root, "deploy/docker/Dockerfile.agent-whiteboard-animation")
+	body := readTextFile(t, path)
+	for _, want := range []string{
+		"FROM node:24-bookworm-slim AS builder",
+		"FROM node:24-bookworm-slim",
+		"ARG WHITEBOARD_ANIMATION_REF=696a7243c0e6ffb6827676e539c2ca5ebae2bf6b",
+		"apt-get install -y --no-install-recommends ca-certificates git ffmpeg python3 python3-venv tini",
+		"git fetch --depth 1 origin \"$WHITEBOARD_ANIMATION_REF\"",
+		"test \"$(git rev-parse HEAD)\" = \"$WHITEBOARD_ANIMATION_REF\"",
+		"python3 -m venv \"$WHITEBOARD_ANIMATION_VENV\"",
+		"opencv-python-headless==4.10.0.84 numpy==1.26.4 av==13.1.0 Pillow==11.1.0",
+		"scripts/parse_srt.py --help",
+		"assets/drawing-hand.png",
+		"COPY harness/ /anbanai/",
+		"ENTRYPOINT [\"tini\", \"--\", \"anban\"]",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s missing whiteboard runtime contract %q", path, want)
+		}
+	}
+	for _, forbidden := range []string{
+		"pip install -r",
+		"pip install --upgrade",
+		"npm install",
+		"curl | sh",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("%s retains non-reproducible runtime install %q", path, forbidden)
 		}
 	}
 }
@@ -792,6 +826,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-hypit",
 		"deploy/docker/Dockerfile.agent-montage",
 		"deploy/docker/Dockerfile.agent-seednote",
+		"deploy/docker/Dockerfile.agent-whiteboard-animation",
 		"deploy/docker/Dockerfile.server",
 		"deploy/docker/Dockerfile.sidecar-ilink",
 		"deploy/docker/Dockerfile.sidecar-seednote",
@@ -947,7 +982,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-sidecar-ilink-image:",
 		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
+		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
 		"docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",

@@ -121,6 +121,25 @@ skus:
     price_credits: 6000
     delivery: "montage_artifacts_verified"
 
+  - id: "task.whiteboard-animation.effective"
+    operation: "task.whiteboard-animation"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 3200
+    delivery: "whiteboard_animation_artifacts_verified"
+  - id: "task.whiteboard-animation.balanced"
+    operation: "task.whiteboard-animation"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 4000
+    delivery: "whiteboard_animation_artifacts_verified"
+  - id: "task.whiteboard-animation.quality"
+    operation: "task.whiteboard-animation"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 12000
+    delivery: "whiteboard_animation_artifacts_verified"
+
   - id: "task.viral-analysis.effective"
     operation: "task.viral_analysis"
     execution_profile: "effective"

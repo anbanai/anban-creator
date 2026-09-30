@@ -95,6 +95,8 @@ spec:
               value: ${seednote_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_MONTAGE
               value: ${montage_agent_image_repo}
+            - name: ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION
+              value: ${whiteboard_animation_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_HYPIT
               value: ${hypit_agent_image_repo}
             - name: ANBAN_AGENT_SERVICE_ACCOUNT

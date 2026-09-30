@@ -40,6 +40,7 @@ export const taskTypeLabelCN: Record<string, string> = {
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
   montage: '视频生成',
+  'whiteboard-animation': '白板动画',
   hypit: '视频复刻',
 }
 
@@ -55,6 +56,7 @@ export const contentTypeLabel: Record<string, string> = {
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
   montage: '视频生成',
+  'whiteboard-animation': '白板动画',
   hypit: '视频复刻',
 }
 
@@ -145,6 +147,7 @@ export const contentTypeOptions = [
   { value: 'article', label: '公众号文章' },
   { value: 'moments', label: '朋友圈' },
   { value: 'montage', label: '视频生成' },
+  { value: 'whiteboard-animation', label: '白板动画' },
   { value: 'hypit', label: '视频复刻' },
   { value: 'ecommerce', label: '电商出图' },
 ]
@@ -155,6 +158,7 @@ export const platformLabels: Record<string, string> = {
   moments: '朋友圈',
   ecommerce: '电商出图',
   montage: '视频生成',
+  'whiteboard-animation': '白板动画',
   hypit: '视频复刻',
 }
 
@@ -174,6 +178,7 @@ export const platformDefaultRatio: Record<string, string> = {
   moments: '3:4',
   ecommerce: '1:1',
   montage: '9:16',
+  'whiteboard-animation': '16:9',
   hypit: '9:16',
 }
 

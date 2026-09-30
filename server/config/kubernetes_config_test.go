@@ -18,9 +18,10 @@ func baseKubernetesConfigForTest() Config {
 	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
 	claude.ExecutionTokenSecret = "0123456789abcdef0123456789abcdef"
 	claude.RuntimeImages = RuntimeImages{
-		model.PlatformArticle:  "registry.example.com/creator-agent-article@sha256:" + strings.Repeat("a", 64),
-		model.PlatformSeednote: "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
-		model.PlatformMontage:  "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
+		model.PlatformArticle:             "registry.example.com/creator-agent-article@sha256:" + strings.Repeat("a", 64),
+		model.PlatformSeednote:            "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
+		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
+		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:" + strings.Repeat("d", 64),
 	}
 	claude.Kubernetes = KubernetesConfig{
 		Namespace:          "anbanai-prod",
@@ -57,9 +58,10 @@ func TestValidateAcceptsKubernetesExecutor(t *testing.T) {
 
 func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 	images := RuntimeImages{
-		model.PlatformArticle:  "creator-agent-article:latest",
-		model.PlatformSeednote: "creator-agent-seednote:latest",
-		model.PlatformMontage:  "creator-agent-montage:latest",
+		model.PlatformArticle:             "creator-agent-article:latest",
+		model.PlatformSeednote:            "creator-agent-seednote:latest",
+		model.PlatformMontage:             "creator-agent-montage:latest",
+		model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
 	}
 	for _, test := range []struct {
 		taskType string
@@ -71,6 +73,7 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		{taskType: model.PlatformEcommerce, profile: "article", image: "creator-agent-article:latest"},
 		{taskType: model.PlatformSeednote, profile: "seednote", image: "creator-agent-seednote:latest"},
 		{taskType: model.PlatformMontage, profile: "montage", image: "creator-agent-montage:latest"},
+		{taskType: model.PlatformWhiteboardAnimation, profile: "whiteboard-animation", image: "creator-agent-whiteboard-animation:latest"},
 		{taskType: model.TaskTypeLiveSlicer, profile: "montage", image: "creator-agent-montage:latest"},
 		{taskType: model.TaskTypeViralAnalysis, profile: "seednote", image: "creator-agent-seednote:latest"},
 	} {
@@ -103,7 +106,7 @@ func TestValidateRuntimeImagesRequiresExactCanonicalProfiles(t *testing.T) {
 		},
 		{
 			name:     "unsupported task key",
-			profiles: map[string]string{model.PlatformArticle: "registry/article:v1", model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "registry/montage:v1", "unknown": "registry/unknown:v1"},
+			profiles: map[string]string{model.PlatformArticle: "registry/article:v1", model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "registry/montage:v1", model.PlatformWhiteboardAnimation: "registry/whiteboard:v1", "unknown": "registry/unknown:v1"},
 			want:     `claude.runtime_images contains unsupported profile "unknown"`,
 		},
 	} {

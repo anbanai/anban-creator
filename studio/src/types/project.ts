@@ -3,7 +3,7 @@ import type { MontagePreferences } from './montage'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { ImageAnalysis } from './image-analysis'
 
-export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'hypit'
+export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
 export type ProjectStatus = 'active' | 'archived'
 export interface ProjectConfig {
   wechat_app_id?: string

@@ -558,6 +558,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 	}
 	isMontageTask := model.IsMontagePlatform(taskType)
+	if taskType == model.PlatformWhiteboardAnimation {
+		if err := validateWhiteboardAnimationInputs(p.InputAttachments); err != nil {
+			return nil, err
+		}
+		quantity = 1
+	}
 	effectiveImageRatio := strings.TrimSpace(p.ImageRatio)
 	if isMontageTask && effectiveImageRatio == model.ImageRatioAuto {
 		effectiveImageRatio = ""
@@ -1086,6 +1092,11 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 	if plan.CoverUsePortrait && (!model.SupportsPortraitCover(taskType) || project == nil || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" || (taskType == model.PlatformArticle && plan.ArticleWithCover != nil && !*plan.ArticleWithCover)) {
 		return nil, ErrCoverPortraitUnavailable
+	}
+	if taskType == model.PlatformWhiteboardAnimation {
+		if err := validateWhiteboardAnimationInputs(plan.InputAttachments.Data()); err != nil {
+			return nil, err
+		}
 	}
 	isMontageTask := model.IsMontagePlatform(taskType)
 	effectiveImageRatio := strings.TrimSpace(plan.ImageRatio)

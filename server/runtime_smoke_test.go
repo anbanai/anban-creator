@@ -178,7 +178,7 @@ func TestArticleDockerfileVerifiesManagedBootstrapContract(t *testing.T) {
 }
 
 func TestRuntimeSmokeCreateTaskUsesEffectiveExecutionProfile(t *testing.T) {
-	for _, profile := range []string{"article", "montage"} {
+	for _, profile := range []string{"article", "montage", "whiteboard-animation"} {
 		t.Run(profile, func(t *testing.T) {
 			requestPath := filepath.Join(t.TempDir(), "create-task.json")
 			body := `

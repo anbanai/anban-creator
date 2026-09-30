@@ -8,6 +8,7 @@ BINDIR      := bin
 AGENT_IMAGE := creator-agent-article:latest
 SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
+WHITEBOARD_ANIMATION_AGENT_IMAGE ?= creator-agent-whiteboard-animation:latest
 HYPIT_AGENT_IMAGE ?= creator-agent-hypit:latest
 HYPIT_SOURCE_REPO ?= https://github.com/hypit-ai/hypit.git
 HYPIT_SOURCE_REF ?= 557497b32a6658067c11bf924c7511e61c61df4e
@@ -30,7 +31,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
+        docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
 
 .PHONY: docker-runtime-smoke docker-hypit-smoke
 
@@ -162,7 +163,7 @@ web-build:
 
 # Build all one-shot task runtimes, then start the Compose services. Runtime
 # containers are launched on demand by the server and are not Compose services.
-docker-up: docker-agent-image docker-seednote-agent-image docker-montage-agent-image
+docker-up: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-whiteboard-animation-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
@@ -193,6 +194,12 @@ docker-montage-agent-image:
 		--build-arg OPENMONTAGE_REF="$(OPENMONTAGE_SOURCE_REF)" \
 		-t $(MONTAGE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
+
+docker-whiteboard-animation-agent-image:
+	docker build -f deploy/docker/Dockerfile.agent-whiteboard-animation \
+		--build-arg WHITEBOARD_ANIMATION_REPO=https://github.com/geeklee/srt-whiteboard-animation.git \
+		--build-arg WHITEBOARD_ANIMATION_REF=696a7243c0e6ffb6827676e539c2ca5ebae2bf6b \
+		-t $(WHITEBOARD_ANIMATION_AGENT_IMAGE) .
 
 # Build official source and prepare its tools without modifying upstream code.
 docker-hypit-agent-image:
@@ -238,7 +245,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
+docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-agent-image
@@ -286,6 +293,7 @@ help:
 	@echo "  make docker-agent-image - Build agent image (Claude Code + plugin)"
 	@echo "  make docker-seednote-agent-image - Build independent Seednote workflow image"
 	@echo "  make docker-montage-agent-image - Build Montage agent image with OpenMontage"
+	@echo "  make docker-whiteboard-animation-agent-image - Build whiteboard-animation runtime image"
 	@echo "  make docker-hypit-agent-image - Build video replication runtime from official source"
 	@echo "  make docker-hypit-smoke - Verify official runtime and local render without paid generation"
 	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"

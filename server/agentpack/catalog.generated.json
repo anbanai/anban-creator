@@ -1474,6 +1474,150 @@
         "renderer": "custom:seednote"
       },
       "digest": "0dcc8378c007199414eef22f5b8ea4cbf3ef485181e46ea437729a7c52b06dcf"
+    },
+    {
+      "id": "whiteboard-animation",
+      "version": "2.0.2",
+      "kind": "managed",
+      "display_name": "白板动画",
+      "description": "根据 SRT 字幕生成分镜、白板手绘场景和最终动画视频。",
+      "agent": {
+        "name": "whiteboard-animation",
+        "skills": [
+          "whiteboard-animation"
+        ],
+        "max_turns": 120
+      },
+      "bindings": {
+        "project_platforms": [
+          "whiteboard-animation"
+        ],
+        "task_types": [
+          "whiteboard-animation"
+        ]
+      },
+      "runtime": {
+        "profile": "whiteboard-animation",
+        "adapter": "standard",
+        "max_turns": 120
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task"
+      ],
+      "features": [
+        "subtitle-to-video",
+        "image-generation",
+        "source-assets"
+      ],
+      "billing_operations": {
+        "whiteboard-animation": "task.whiteboard-animation"
+      },
+      "artifacts": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "storyboard",
+          "path": "output/storyboard.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "scene_image",
+          "path": "output/scenes/*.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
+          "role": "scene_annotation",
+          "path": "output/scenes/*.annotation.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "scene_video",
+          "path": "output/scenes/*-whiteboard.mp4",
+          "mime_type": "video/mp4",
+          "required": false
+        },
+        {
+          "role": "scene_preview",
+          "path": "output/scenes/*-preview.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "delivery": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "storyboard",
+          "path": "output/storyboard.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "scene_image",
+          "path": "output/scenes/*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "scene_annotation",
+          "path": "output/scenes/*.annotation.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:whiteboard-animation"
+      },
+      "digest": "b0a204cdc45a547a2e43c1bd27b79157fb94e95087b6f56277eb0fdf579f6c26"
     }
   ]
 }

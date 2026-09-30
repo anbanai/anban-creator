@@ -80,12 +80,13 @@ const (
 
 // Platform constants.
 const (
-	PlatformArticle   = "article"
-	PlatformSeednote  = "seednote"
-	PlatformMoments   = "moments"
-	PlatformEcommerce = "ecommerce"
-	PlatformMontage   = "montage"
-	PlatformHypit     = "hypit"
+	PlatformArticle             = "article"
+	PlatformSeednote            = "seednote"
+	PlatformMoments             = "moments"
+	PlatformEcommerce           = "ecommerce"
+	PlatformMontage             = "montage"
+	PlatformWhiteboardAnimation = "whiteboard-animation"
+	PlatformHypit               = "hypit"
 )
 
 // IsProjectPlatform reports whether value is an explicitly implemented
@@ -93,7 +94,7 @@ const (
 // identities, but must not create new business identities by themselves.
 func IsProjectPlatform(value string) bool {
 	switch value {
-	case PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformHypit:
+	case PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit:
 		return true
 	default:
 		return false
