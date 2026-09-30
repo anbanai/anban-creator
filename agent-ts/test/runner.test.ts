@@ -9,7 +9,7 @@ import type { AgentPack } from "../src/bootstrap.js";
 import type { StageProgressEvent } from "../src/reporter.js";
 import * as runner from "../src/runner.js";
 
-const { buildExecutionEnvironment, terminalModelUsage, validateManagedInit } = runner;
+const { buildExecutionEnvironment, classifyProviderFailure, terminalModelUsage, validateManagedInit } = runner;
 
 const articlePack: AgentPack = {
   id: "article",
@@ -780,9 +780,9 @@ describe("recordAssistantToolUses", () => {
       success: false,
       error: "供应商内容安全策略拒绝了本次请求。",
       terminal_reason: "provider_error",
-      error_code: "provider_policy_rejection",
+      error_code: "provider_content_policy",
       policy_domain: "content_safety",
-      provider_code: "Content Exists Risk",
+      provider_code: "content_exists_risk",
       http_status: 400,
       content_direction: "unknown",
       recoverable: true,
@@ -790,6 +790,58 @@ describe("recordAssistantToolUses", () => {
       failure_stage: "provider_request",
       resume_from: "provider_request",
     });
+  });
+});
+
+describe("classifyProviderFailure", () => {
+  test("uses stable categories and safe details for third-party provider failures", () => {
+    const cases = [
+      { text: "HTTP 401 invalid api key", status: 401, category: "provider_authentication", recoverable: false, resumeFrom: "review_configuration" },
+      { text: "too many requests", status: 429, category: "provider_rate_limited", recoverable: true, resumeFrom: "provider_request" },
+      { text: "request timed out", status: 408, category: "provider_timeout", recoverable: true, resumeFrom: "inspect_results" },
+      { text: "upstream unavailable", status: 503, category: "provider_unavailable", recoverable: true, resumeFrom: "provider_request" },
+      { text: "invalid request payload", status: 422, category: "provider_invalid_request", recoverable: false, resumeFrom: "repair_project" },
+      { text: "response schema validation failed: missing field", status: 502, category: "provider_protocol_error", recoverable: true, resumeFrom: "inspect_results" },
+      { text: "opaque remote failure", status: 500, category: "provider_unknown", recoverable: true, resumeFrom: "inspect_results" },
+    ] as const;
+
+    for (const testCase of cases) {
+      expect(classifyProviderFailure(testCase.text, testCase.status)).toMatchObject({
+        category: testCase.category,
+        recoverable: testCase.recoverable,
+        resume_from: testCase.resumeFrom,
+      });
+    }
+  });
+
+  test("recognizes TokenDance protocol shape errors without exposing provider text", () => {
+    expect(classifyProviderFailure("TOKENDANCE_ERROR: TokenDance task must be an object", 502)).toEqual({
+      category: "provider_protocol_error",
+      provider_code: "tokendance_task_shape_invalid",
+      recoverable: true,
+      resume_from: "inspect_results",
+    });
+  });
+
+  test("gives content policy detection precedence over generic invalid request handling", () => {
+    expect(classifyProviderFailure("HTTP 400 Content Exists Risk", 400)).toMatchObject({
+      category: "provider_content_policy",
+      provider_code: "content_exists_risk",
+      recoverable: true,
+      resume_from: "provider_request",
+    });
+  });
+
+  test("does not derive a public code from arbitrary provider text", () => {
+    const result = classifyProviderFailure("provider_secret=abc response_code=EVIL", 500);
+    expect(result.category).toBe("provider_unknown");
+    expect(result).not.toHaveProperty("provider_code");
+  });
+
+  test("gives recognized HTTP statuses precedence over conflicting text heuristics", () => {
+    expect(classifyProviderFailure("invalid api key", 503).category).toBe("provider_unavailable");
+    expect(classifyProviderFailure("request timed out", 400).category).toBe("provider_invalid_request");
+    expect(classifyProviderFailure("client response", 418)).toMatchObject({ category: "provider_unknown", recoverable: true, resume_from: "inspect_results" });
   });
 });
 

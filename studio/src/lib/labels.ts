@@ -88,10 +88,30 @@ export const progressStageLabel: Record<string, string> = {
 }
 
 export const taskErrorLabels: Record<string, { title: string; message: string; recovery?: string }> = {
+  provider_content_policy: { title: '供应商内容策略拒绝', message: '供应商内容安全策略拒绝了请求。', recovery: '检查内容与保留的执行结果后再重试。' },
+  provider_authentication: { title: '供应商身份验证失败', message: '供应商身份验证失败，请检查执行配置。', recovery: '修复供应商凭据或配置后再重试。' },
+  provider_rate_limited: { title: '供应商请求受限', message: '供应商请求受到频率或配额限制。', recovery: '等待限流窗口恢复后再重试。' },
+  provider_timeout: { title: '供应商请求超时', message: '供应商请求超时，远端结果仍需核对。', recovery: '检查保留的执行结果后再重试。' },
+  provider_unavailable: { title: '供应商暂时不可用', message: '供应商服务暂时不可用。', recovery: '确认服务恢复后再重试。' },
+  provider_invalid_request: { title: '供应商拒绝无效请求', message: '供应商拒绝了无效请求参数。', recovery: '修复项目或运行配置后再重试。' },
+  provider_protocol_error: { title: '供应商响应格式错误', message: '供应商响应格式不符合预期，远端结果仍需核对。', recovery: '检查保留的官方 Results，修复供应商兼容性后再重试。' },
+  provider_unknown: { title: '供应商请求失败', message: '供应商请求未完成，原始执行上下文未对外披露。', recovery: '检查保留的执行结果后再重试。' },
   completion_report_failed: { title: '结果提交失败（可恢复）', message: '任务结果提交失败，但已有产物已保留。' },
   execution_identity_unavailable: { title: '执行环境未建立', message: '执行环境未建立，暂时无法生成或结算图片。', recovery: '修复执行环境后可从“图片生成”阶段继续。' },
   execution_identity_required: { title: '执行环境未建立', message: '执行环境未建立，暂时无法生成或结算图片。', recovery: '修复执行环境后可从“图片生成”阶段继续。' },
   execution_identity_mismatch: { title: '执行身份不匹配', message: '当前执行身份与任务不匹配，请重新启动任务。' },
+}
+
+export const providerDiagnosticLabels: Record<string, string> = {
+  provider_content_policy: '内容策略拒绝',
+  provider_authentication: '身份验证失败',
+  provider_rate_limited: '频率或配额限制',
+  provider_timeout: '请求超时',
+  provider_unavailable: '服务暂时不可用',
+  provider_invalid_request: '无效请求',
+  provider_protocol_error: '响应协议错误',
+  provider_unknown: '未知供应商错误',
+  provider_policy_rejection: '内容策略拒绝',
 }
 
 const taskErrorMessageCodes: Record<string, string> = {

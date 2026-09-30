@@ -1581,7 +1581,24 @@ export function hypitFailureDetails(
   reason: unknown,
   stage: unknown = "execution",
 ): { error_code: string; stage: string; resume_from: string; message: string } {
-  const text = reason instanceof Error ? reason.message : String(reason ?? "");
+  const record = typeof reason === "object" && reason !== null ? reason as Record<string, unknown> : undefined;
+  const reasonCode = typeof record?.error_code === "string" ? record.error_code : "";
+  const text = reason instanceof Error ? reason.message : typeof record?.error === "string" ? record.error : String(reason ?? "");
+  const providerFailure = {
+    provider_content_policy: { error_code: "hypit_provider_content_policy", resume_from: "inspect_results", message: "供应商内容安全策略拒绝了请求。检查保留的官方 Results 后，再修复内容或供应商策略。" },
+    provider_policy_rejection: { error_code: "hypit_provider_content_policy", resume_from: "inspect_results", message: "供应商内容安全策略拒绝了请求。检查保留的官方 Results 后，再修复内容或供应商策略。" },
+    provider_authentication: { error_code: "hypit_provider_authentication", resume_from: "review_configuration", message: "供应商身份验证失败。检查执行配置后，再检查保留的官方 Results。" },
+    provider_rate_limited: { error_code: "hypit_provider_rate_limited", resume_from: "inspect_results", message: "供应商请求受到频率或配额限制。检查保留的官方 Results，确认远端状态后再重试。" },
+    provider_timeout: { error_code: "hypit_provider_timeout", resume_from: "inspect_results", message: "供应商请求超时。检查保留的官方 Results，确认远端状态后再重试。" },
+    provider_unavailable: { error_code: "hypit_provider_unavailable", resume_from: "inspect_results", message: "供应商服务暂时不可用。检查保留的官方 Results，确认远端状态后再重试。" },
+    provider_invalid_request: { error_code: "hypit_provider_invalid_request", resume_from: "repair_project", message: "供应商拒绝了无效请求参数。修复项目或运行配置后，再检查保留的官方 Results。" },
+    provider_protocol_error: { error_code: "hypit_provider_protocol_error", resume_from: "inspect_results", message: "供应商响应格式不符合预期。检查保留的官方 Results，修复供应商兼容性后再重试。" },
+    provider_unknown: { error_code: "hypit_provider_unknown", resume_from: "inspect_results", message: "供应商请求未完成。检查保留的官方 Results，确认远端状态后再重试。" },
+  } as const;
+  if (Object.hasOwn(providerFailure, reasonCode)) {
+    const failure = providerFailure[reasonCode as keyof typeof providerFailure];
+    return { ...failure, stage: "execution" };
+  }
   if (/credential|secret/i.test(text))
     return {
       error_code: "hypit_credential_rejected",
@@ -1635,6 +1652,27 @@ export function hypitFailureDetails(
   };
 }
 
+function safeHypitFailureDetails(
+  failure: ReturnType<typeof hypitFailureDetails>,
+): ReturnType<typeof hypitFailureDetails> {
+  switch (failure.error_code) {
+    case "hypit_credential_rejected": return hypitFailureDetails("credential");
+    case "hypit_execution_timeout": return hypitFailureDetails("deadline");
+    case "hypit_runtime_unavailable": return hypitFailureDetails("worker");
+    case "hypit_delivery_rejected": return hypitFailureDetails(undefined, "quality_validation");
+    case "hypit_delivery_transfer_failed": return hypitFailureDetails(undefined, "artifact_upload");
+    case "hypit_provider_content_policy": return hypitFailureDetails({ error_code: "provider_content_policy" });
+    case "hypit_provider_authentication": return hypitFailureDetails({ error_code: "provider_authentication" });
+    case "hypit_provider_rate_limited": return hypitFailureDetails({ error_code: "provider_rate_limited" });
+    case "hypit_provider_timeout": return hypitFailureDetails({ error_code: "provider_timeout" });
+    case "hypit_provider_unavailable": return hypitFailureDetails({ error_code: "provider_unavailable" });
+    case "hypit_provider_invalid_request": return hypitFailureDetails({ error_code: "provider_invalid_request" });
+    case "hypit_provider_protocol_error": return hypitFailureDetails({ error_code: "provider_protocol_error" });
+    case "hypit_provider_unknown": return hypitFailureDetails({ error_code: "provider_unknown" });
+    default: return hypitFailureDetails(undefined);
+  }
+}
+
 /** Upload only a private, byte-checked snapshot. Failed jobs expose no authored outputs. */
 export async function prepareHypitUpload(
   workspace: string,
@@ -1678,18 +1716,7 @@ export async function prepareHypitUpload(
       }
     } else {
       // Reconstruct every field from the allowlisted code; never copy caller text.
-      const safe =
-        failure.error_code === "hypit_credential_rejected"
-          ? hypitFailureDetails("credential")
-          : failure.error_code === "hypit_execution_timeout"
-            ? hypitFailureDetails("deadline")
-            : failure.error_code === "hypit_runtime_unavailable"
-              ? hypitFailureDetails("worker")
-              : failure.error_code === "hypit_delivery_rejected"
-                ? hypitFailureDetails(undefined, "quality_validation")
-                : failure.error_code === "hypit_delivery_transfer_failed"
-                  ? hypitFailureDetails(undefined, "artifact_upload")
-                  : hypitFailureDetails(undefined);
+      const safe = safeHypitFailureDetails(failure);
       await atomicJSON(join(stage, "output/failure-state.json"), {
         version: "1.0",
         status: "recoverable_failure",

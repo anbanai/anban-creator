@@ -35,7 +35,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatFullDateTimeCN, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskStatusLabel } from '@/lib/labels'
+import { formatFullDateTimeCN, progressStageLabel, providerDiagnosticLabels, statusBadgeVariant, taskFailurePresentation, taskStatusLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskBillingChargeDetail, TaskFile } from '@/types'
 
@@ -234,6 +234,7 @@ function TaskOverviewDetails({
       {providerDiagnostic && (
         <TaskDetailsSection label="供应商诊断" title="供应商诊断" icon={AlertTriangle}>
           <DetailRows rows={[
+            ['诊断类别', providerDiagnosticLabels[providerDiagnostic.code || ''] || '供应商错误'],
             ['供应商', providerDiagnostic.provider || '未披露'],
             ['响应', providerDiagnostic.http_status ? `HTTP ${providerDiagnostic.http_status}` : '未提供'],
             ['供应商代码', providerDiagnostic.provider_code || '未提供'],

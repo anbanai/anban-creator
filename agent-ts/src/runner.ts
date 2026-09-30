@@ -700,35 +700,21 @@ function classifyTerminalMessage(message: Extract<SDKMessage, { type: "result" }
     ? message.api_error_status
     : undefined;
   const requestID = providerRequestID(providerText);
-  const providerCode = providerPolicyCode(providerText, httpStatus);
-  if (providerCode) {
-    return {
-      success: false,
-      error: "供应商内容安全策略拒绝了本次请求。",
-      terminal_reason: "provider_error",
-      error_code: "provider_policy_rejection",
-      policy_domain: "content_safety",
-      provider_code: providerCode,
-      http_status: httpStatus,
-      content_direction: "unknown",
-      recoverable: true,
-      request_id: requestID,
-      failure_stage: "provider_request",
-      resume_from: "provider_request",
-    };
-  }
+  const classification = classifyProviderFailure(providerText, httpStatus);
   if (isAPIFailure) {
     return {
       success: false,
-      error: "供应商请求失败。",
+      error: providerFailureMessage(classification.category),
       terminal_reason: "provider_error",
-      error_code: "provider_api_error",
+      error_code: classification.category,
+      ...(classification.category === "provider_content_policy" ? { policy_domain: "content_safety" } : {}),
+      ...(classification.provider_code ? { provider_code: classification.provider_code } : {}),
       http_status: httpStatus,
       content_direction: "unknown",
-      recoverable: httpStatus === 408 || httpStatus === 409 || httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500),
+      recoverable: classification.recoverable,
       request_id: requestID,
       failure_stage: "provider_request",
-      resume_from: "provider_request",
+      resume_from: classification.resume_from,
     };
   }
   const error = message.subtype === "success"
@@ -737,9 +723,91 @@ function classifyTerminalMessage(message: Extract<SDKMessage, { type: "result" }
   return { success: false, error };
 }
 
-function providerPolicyCode(text: string, httpStatus: number | undefined): string | undefined {
-  if (httpStatus !== 400) return undefined;
-  return text.match(/\bcontent[ _-]+exists[ _-]+risk\b/i)?.[0];
+export type ProviderFailureCategory =
+  | "provider_content_policy"
+  | "provider_authentication"
+  | "provider_rate_limited"
+  | "provider_timeout"
+  | "provider_unavailable"
+  | "provider_invalid_request"
+  | "provider_protocol_error"
+  | "provider_unknown";
+
+export interface ProviderFailureClassification {
+  category: ProviderFailureCategory;
+  provider_code?: "content_exists_risk" | "tokendance_task_shape_invalid";
+  recoverable: boolean;
+  resume_from: "provider_request" | "inspect_results" | "review_configuration" | "repair_project";
+}
+
+const protocolFailurePatterns = [
+  /\btokendance_error\b[\s\S]{0,160}\btask\b[\s\S]{0,80}\b(?:object|shape|type)\b/i,
+  /\b(?:response|result|body|payload)\b[\s\S]{0,100}\b(?:schema|shape|field|object|type|parse|deseriali[sz]|json)\b/i,
+  /\b(?:schema|protocol|deseriali[sz]|malformed response|unexpected response)\b[\s\S]{0,100}\b(?:invalid|mismatch|missing|unexpected|failed|error)\b/i,
+];
+
+/** Convert untrusted provider diagnostics into a finite, safe public taxonomy. */
+export function classifyProviderFailure(text: string, httpStatus?: number): ProviderFailureClassification {
+  const diagnostic = text.slice(0, 2_000);
+  if (httpStatus === 400 && /\bcontent[ _-]+exists[ _-]+risk\b/i.test(diagnostic)) {
+    return { category: "provider_content_policy", provider_code: "content_exists_risk", recoverable: true, resume_from: "provider_request" };
+  }
+  const tokenDanceProtocolError = /\btokendance_error\b[\s\S]{0,160}\btask\b[\s\S]{0,80}\b(?:object|shape|type)\b/i.test(diagnostic);
+  if (tokenDanceProtocolError) {
+    return { category: "provider_protocol_error", provider_code: "tokendance_task_shape_invalid", recoverable: true, resume_from: "inspect_results" };
+  }
+  if (protocolFailurePatterns.some((pattern) => pattern.test(diagnostic))) {
+    return { category: "provider_protocol_error", recoverable: true, resume_from: "inspect_results" };
+  }
+  if (httpStatus === 401 || httpStatus === 403) {
+    return { category: "provider_authentication", recoverable: false, resume_from: "review_configuration" };
+  }
+  if (httpStatus === 429) {
+    return { category: "provider_rate_limited", recoverable: true, resume_from: "provider_request" };
+  }
+  if (httpStatus === 408 || httpStatus === 504) {
+    return { category: "provider_timeout", recoverable: true, resume_from: "inspect_results" };
+  }
+  if (httpStatus === 502 || httpStatus === 503) {
+    return { category: "provider_unavailable", recoverable: true, resume_from: "provider_request" };
+  }
+  if (httpStatus === 400 || httpStatus === 422) {
+    return { category: "provider_invalid_request", recoverable: false, resume_from: "repair_project" };
+  }
+  if (httpStatus !== undefined && httpStatus >= 100 && httpStatus <= 599) {
+    // Known HTTP responses are authoritative. Unmapped statuses remain unknown
+    // and require remote-state inspection instead of an inferred local fix.
+    return { category: "provider_unknown", recoverable: true, resume_from: "inspect_results" };
+  }
+  if (/\b(?:unauthori[sz]ed|forbidden|invalid api key|authentication|credential|access denied)\b/i.test(diagnostic)) {
+    return { category: "provider_authentication", recoverable: false, resume_from: "review_configuration" };
+  }
+  if (/\b(?:rate[ -]?limit(?:ed)?|too many requests|quota exceeded|throttl)\b/i.test(diagnostic)) {
+    return { category: "provider_rate_limited", recoverable: true, resume_from: "provider_request" };
+  }
+  if (/\b(?:timed? ?out|timeout|deadline exceeded|gateway timeout)\b/i.test(diagnostic)) {
+    return { category: "provider_timeout", recoverable: true, resume_from: "inspect_results" };
+  }
+  if (/\b(?:invalid request|validation failed|bad request|unsupported parameter|invalid parameter)\b/i.test(diagnostic)) {
+    return { category: "provider_invalid_request", recoverable: false, resume_from: "repair_project" };
+  }
+  if (/\b(?:unavailable|service down|temporarily overloaded|bad gateway|upstream failure)\b/i.test(diagnostic)) {
+    return { category: "provider_unavailable", recoverable: true, resume_from: "provider_request" };
+  }
+  return { category: "provider_unknown", recoverable: true, resume_from: "inspect_results" };
+}
+
+function providerFailureMessage(category: ProviderFailureCategory): string {
+  switch (category) {
+    case "provider_content_policy": return "供应商内容安全策略拒绝了本次请求。";
+    case "provider_authentication": return "供应商身份验证失败，请检查执行配置。";
+    case "provider_rate_limited": return "供应商请求受到频率或配额限制。";
+    case "provider_timeout": return "供应商请求超时，远端结果仍需核对。";
+    case "provider_unavailable": return "供应商服务暂时不可用。";
+    case "provider_invalid_request": return "供应商拒绝了无效请求参数。";
+    case "provider_protocol_error": return "供应商响应格式不符合预期，远端结果仍需核对。";
+    case "provider_unknown": return "供应商请求失败，原始执行上下文未对外披露。";
+  }
 }
 
 function providerRequestID(text: string): string | undefined {

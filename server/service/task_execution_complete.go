@@ -957,9 +957,10 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 
 	if diagnostic := publicExecutionDiagnostic(execution, result); diagnostic != nil {
 		outcome.Diagnostic = diagnostic
-		if result != nil && result.ErrorCode == "provider_policy_rejection" {
+		if result != nil && (result.ErrorCode == "provider_content_policy" || result.ErrorCode == "provider_policy_rejection") {
+			warningCode := result.ErrorCode
 			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
-				Code: "provider_policy_rejection", Stage: safePublicDiagnosticStage(result.FailureStage),
+				Code: warningCode, Stage: safePublicDiagnosticStage(result.FailureStage),
 				Message: "供应商内容安全策略拒绝了一次请求；已按服务端文件契约判定最终交付。",
 			})
 		}
@@ -1159,14 +1160,27 @@ func publicExecutionDiagnostic(execution *model.TaskExecution, result *agent.Exe
 	}
 	direction := safePublicContentDirection(result.ContentDirection)
 	summary := "供应商请求失败，原始执行上下文未对外披露。"
-	if result.ErrorCode == "provider_policy_rejection" {
+	switch result.ErrorCode {
+	case "provider_content_policy", "provider_policy_rejection":
 		summary = "供应商内容安全策略拒绝了请求。"
 		if direction == "unknown" {
 			summary += "供应商未披露具体片段，也未说明发生在输入还是输出。"
 		}
+	case "provider_authentication":
+		summary = "供应商身份验证失败，请检查执行配置。"
+	case "provider_rate_limited":
+		summary = "供应商请求受到频率或配额限制。"
+	case "provider_timeout":
+		summary = "供应商请求超时，远端结果仍需核对。"
+	case "provider_unavailable":
+		summary = "供应商服务暂时不可用。"
+	case "provider_invalid_request":
+		summary = "供应商拒绝了无效请求参数。"
+	case "provider_protocol_error":
+		summary = "供应商响应格式不符合预期，远端结果仍需核对。"
 	}
 	return &model.ExecutionDiagnostic{
-		Provider: execution.Provider, ProviderCode: safePublicProviderCode(result.ProviderCode), HTTPStatus: safePublicHTTPStatus(result.HTTPStatus),
+		Code: safePublicDiagnosticCode(result.ErrorCode), Provider: execution.Provider, ProviderCode: safePublicProviderCode(result.ProviderCode), HTTPStatus: safePublicHTTPStatus(result.HTTPStatus),
 		Stage: safePublicDiagnosticStage(result.FailureStage), ContentDirection: direction, Recoverable: result.Recoverable,
 		ResumePoint: safePublicDiagnosticStage(result.ResumeFrom), RequestID: safePublicRequestID(result.RequestID), Summary: summary,
 	}
@@ -1177,6 +1191,7 @@ var publicDiagnosticStages = map[string]struct{}{
 	"title_finalization": {}, "image_generation": {}, "rendering": {}, "review": {},
 	"compliance": {}, "publication": {}, "delivery": {}, "provider_request": {},
 	"artifact_upload": {}, "completion": {},
+	"inspect_results": {}, "review_configuration": {}, "repair_project": {}, "retry_transfer": {},
 }
 
 func safePublicDiagnosticStage(value string) string {
@@ -1189,10 +1204,23 @@ func safePublicDiagnosticStage(value string) string {
 
 func safePublicProviderCode(value string) string {
 	canonical := strings.NewReplacer(" ", "_", "-", "_").Replace(strings.ToLower(strings.TrimSpace(value)))
-	if canonical == "content_exists_risk" {
+	switch canonical {
+	case "content_exists_risk", "tokendance_task_shape_invalid":
 		return canonical
+	default:
+		return ""
 	}
-	return ""
+}
+
+func safePublicDiagnosticCode(value string) string {
+	switch strings.TrimSpace(value) {
+	case "provider_content_policy", "provider_authentication", "provider_rate_limited", "provider_timeout", "provider_unavailable", "provider_invalid_request", "provider_protocol_error", "provider_unknown", "provider_policy_rejection":
+		return strings.TrimSpace(value)
+	case "provider_api_error":
+		return "provider_unknown"
+	default:
+		return ""
+	}
 }
 
 func safePublicHTTPStatus(value int) int {

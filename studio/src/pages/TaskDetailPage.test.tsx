@@ -322,6 +322,7 @@ describe('TaskDetailPage', () => {
           { code: 'artifact_upload_failed', stage: 'artifact_upload', message: '文件 output/img_01.png 上传失败：HTTP 503' },
         ],
         diagnostic: {
+          code: 'provider_content_policy',
           provider: 'deepseek',
           provider_code: 'content_exists_risk',
           http_status: 400,
@@ -344,6 +345,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('内容已完成，发布待处理')).not.toBeInTheDocument()
     await openTaskDetails('概览')
     const provider = screen.getByRole('region', { name: '供应商诊断' })
+    expect(provider).toHaveTextContent('内容策略拒绝')
     expect(provider).toHaveTextContent('deepseek')
     expect(provider).toHaveTextContent('HTTP 400')
     expect(provider).toHaveTextContent('content_exists_risk')

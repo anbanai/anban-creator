@@ -1050,6 +1050,40 @@ func TestCompleteCloudExecutionDoesNotInferDraftSuccessFromLogs(t *testing.T) {
 	}
 }
 
+func TestPublicExecutionDiagnosticUsesStableProviderTaxonomy(t *testing.T) {
+	execution := &model.TaskExecution{Provider: "minimax"}
+	result := &agent.ExecutionResult{
+		Success: false, Error: "TOKENDANCE_ERROR: TokenDance task must be an object; secret=https://private.example/token",
+		ErrorCode: "provider_protocol_error", ProviderCode: "tokendance_task_shape_invalid", HTTPStatus: 502,
+		ContentDirection: "unknown", Recoverable: true, FailureStage: "provider_request", ResumeFrom: "inspect_results",
+		RequestID: "request-secret",
+	}
+
+	diagnostic := publicExecutionDiagnostic(execution, result)
+	if diagnostic == nil {
+		t.Fatal("diagnostic = nil")
+	}
+	if diagnostic.Code != "provider_protocol_error" || diagnostic.ProviderCode != "tokendance_task_shape_invalid" || diagnostic.HTTPStatus != 502 || diagnostic.ResumePoint != "inspect_results" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if strings.Contains(diagnostic.Summary, "TOKENDANCE") || strings.Contains(diagnostic.Summary, "private.example") || strings.Contains(diagnostic.Summary, "request-secret") {
+		t.Fatalf("diagnostic leaked raw provider context: %#v", diagnostic)
+	}
+}
+
+func TestPublicExecutionDiagnosticRejectsUnregisteredProviderValues(t *testing.T) {
+	execution := &model.TaskExecution{Provider: "provider"}
+	result := &agent.ExecutionResult{
+		Success: false, ErrorCode: "provider_protocol_error", ProviderCode: "evil:secret", HTTPStatus: 502,
+		FailureStage: "provider_request", ResumeFrom: "inspect_results", Recoverable: true,
+	}
+
+	diagnostic := publicExecutionDiagnostic(execution, result)
+	if diagnostic == nil || diagnostic.Code != "provider_protocol_error" || diagnostic.ProviderCode != "" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestCompleteCloudExecutionUsesDurableDraftPublication(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true)
 	ctx := context.Background()

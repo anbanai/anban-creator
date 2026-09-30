@@ -120,3 +120,11 @@ commit。v0.2.16 的 TokenDance Provider 仍要求 MiniMax 查询响应包含
 不会绕过响应校验。
 
 本次只完成本地升级验证；未部署或启用业务，真实 Provider 任务的端到端验收仍未完成。
+
+## 供应商错误诊断分类
+
+托管 Runner 不把第三方 Provider 的原始错误文本作为公共错误协议。它先按结构化 HTTP 状态和受限文本模式，将失败归入固定类别：`provider_content_policy`、`provider_authentication`、`provider_rate_limited`、`provider_timeout`、`provider_unavailable`、`provider_invalid_request`、`provider_protocol_error` 或 `provider_unknown`。未知错误降级为 `provider_unknown`；原始响应、凭据、URL 和未登记的供应商代码不会进入任务结果。
+
+协议错误覆盖响应缺字段、类型错误、Schema / JSON 解析失败和协议不匹配。当前 Hypit v0.2.16 的 MiniMax/TokenDance `TOKENDANCE_ERROR: TokenDance task must be an object` 会归类为 `provider_protocol_error`，安全细节代码为 `tokendance_task_shape_invalid`。这表示网关响应与 Hypit Provider 契约不一致，不表示用户项目内容本身有问题。
+
+Hypit 对超时、协议错误和未知远端错误保留官方 Results，并从 `inspect_results` 恢复；鉴权错误从 `review_configuration` 恢复；无效请求从 `repair_project` 恢复。限流和暂时不可用错误可以在确认远端状态后重试，但不会绕过 Server 的幂等和扣费状态。新增 Provider 时只应增加内部匹配规则、固定白名单细节和对应测试，不应透传供应商原文。

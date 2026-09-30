@@ -393,7 +393,7 @@ export async function runJob(
           result.success ? hypitReceipt : undefined,
           artifactAbort.signal,
           hypitFailureDetails(
-            hypitFailureReason ?? result.error,
+            hypitFailureReason ?? result,
             result.failure_stage,
           ),
         );
@@ -474,7 +474,7 @@ export async function runJob(
           const details = hypitFailureDetails(
             shutdown.signal.aborted
               ? shutdown.signal.reason
-              : (hypitFailureReason ?? result.error),
+              : (hypitFailureReason ?? result),
             result.failure_stage,
           );
           result = {

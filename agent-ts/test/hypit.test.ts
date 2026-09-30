@@ -12,9 +12,43 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   exportHypitProject,
+  hypitFailureDetails,
   importHypitProject,
   validateHypitEnvironment,
 } from "../src/hypit.js";
+
+test("maps classified provider failures to safe Hypit recovery states", () => {
+  expect(hypitFailureDetails({ error_code: "provider_protocol_error", error: "raw provider response" })).toEqual({
+    error_code: "hypit_provider_protocol_error",
+    stage: "execution",
+    resume_from: "inspect_results",
+    message: "供应商响应格式不符合预期。检查保留的官方 Results，修复供应商兼容性后再重试。",
+  });
+});
+
+test("preserves classified provider failure artifacts through the Hypit allowlist", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hypit-failure-state-"));
+  try {
+    await mkdir(join(root, "output"));
+    const upload = await prepareHypitUpload(root, [], undefined, undefined, {
+      error_code: "hypit_provider_protocol_error",
+      stage: "execution",
+      resume_from: "inspect_results",
+      message: "raw provider text must not be copied",
+    });
+    const state = JSON.parse(await readFile(join(upload.workspace, "output/failure-state.json"), "utf8")) as Record<string, string>;
+    expect(state).toMatchObject({
+      error_code: "hypit_provider_protocol_error",
+      stage: "execution",
+      resume_from: "inspect_results",
+      message: "供应商响应格式不符合预期。检查保留的官方 Results，修复供应商兼容性后再重试。",
+    });
+    expect(state.message).not.toContain("raw provider text");
+    await upload.dispose();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 test("reserved environment cannot replace runner controls; provider secrets permitted", () => {
   expect(() => validateHypitEnvironment({ PATH: "/bad" })).toThrow();
   expect(() =>

@@ -22,7 +22,7 @@ export async function runWithProviderPolicyRecovery(
 }
 
 function isProviderPolicyRejection(result: ExecutionResult): boolean {
-  return result.success === false && result.error_code === "provider_policy_rejection";
+  return result.success === false && (result.error_code === "provider_content_policy" || result.error_code === "provider_policy_rejection");
 }
 
 async function cleanRecoveryBootstrap(data: ResolvedBootstrapResponse, workspace: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse> {
