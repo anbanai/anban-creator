@@ -698,6 +698,39 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	})
 }
 
+// ListBefore handles cursor-based task pagination for the Studio infinite list.
+func (h *TaskHandler) ListBefore(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	limit, _ := strconv.Atoi(c.Query("limit", "20"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	beforeCreatedAt, err := time.Parse(time.RFC3339Nano, c.Query("before_created_at"))
+	if err != nil || c.Query("before_id") == "" {
+		return Error(c, fiber.StatusBadRequest, "invalid task cursor")
+	}
+	status := c.Query("status", "")
+	projectID := c.Query("project_id", "")
+	planID := c.Query("plan_id", "")
+	tasks, total, err := h.service.ListBefore(c.Context(), userID, limit, status, projectID, planID, beforeCreatedAt, c.Query("before_id"))
+	if err != nil {
+		h.logger.Error().Err(err).Msg("list tasks before cursor failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to list tasks")
+	}
+	if err := h.presentTaskReferences(c.Context(), userID, tasks); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
+	responses := taskAPIResponses(tasks, h.store)
+	if err := h.enrichTaskBilling(c.Context(), userID, tasks, responses, false); err != nil {
+		h.logger.Error().Err(err).Msg("enrich task billing failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to load task billing")
+	}
+	return Success(c, fiber.Map{"items": responses, "total": total})
+}
+
 // GetByID handles GET /api/v1/tasks/:id.
 func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 	id, err := validateUUIDParam(c, "id")

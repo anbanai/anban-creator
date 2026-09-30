@@ -52,7 +52,7 @@ func (r *taskRepository) FindByIDForUpdate(ctx context.Context, id string) (*mod
 
 func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC")
+	q := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Order("id DESC")
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
 	}
@@ -70,7 +70,7 @@ func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projec
 
 func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status).Order("created_at DESC")
+	q := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status).Order("created_at DESC").Order("id DESC")
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
 	}
@@ -79,6 +79,48 @@ func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, stat
 	}
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
+	}
+	if err := q.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (r *taskRepository) FindByUserIDBefore(ctx context.Context, userID string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error) {
+	var tasks []*model.Task
+	q := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Where("(created_at < ?) OR (created_at = ? AND id < ?)", beforeCreatedAt, beforeCreatedAt, beforeID).
+		Order("created_at DESC").Order("id DESC")
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
+	}
+	if planID != "" {
+		q = q.Where("plan_id = ?", planID)
+	}
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (r *taskRepository) FindByUserIDAndStatusBefore(ctx context.Context, userID, status string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error) {
+	var tasks []*model.Task
+	q := r.db.WithContext(ctx).
+		Where("user_id = ? AND status = ?", userID, status).
+		Where("(created_at < ?) OR (created_at = ? AND id < ?)", beforeCreatedAt, beforeCreatedAt, beforeID).
+		Order("created_at DESC").Order("id DESC")
+	if projectID != "" {
+		q = q.Where("project_id = ?", projectID)
+	}
+	if planID != "" {
+		q = q.Where("plan_id = ?", planID)
+	}
+	if limit > 0 {
+		q = q.Limit(limit)
 	}
 	if err := q.Find(&tasks).Error; err != nil {
 		return nil, err

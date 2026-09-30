@@ -331,6 +331,7 @@ func NewRouter(svc *Services) *fiber.App {
 
 	if svc.TaskHandler != nil {
 		apiV1.Post("/tasks", svc.TaskHandler.Create)
+		apiV1.Get("/tasks/before", svc.TaskHandler.ListBefore)
 		apiV1.Get("/tasks", svc.TaskHandler.List)
 		apiV1.Post("/tasks/files/zip", svc.TaskHandler.DownloadTasksZip)
 		// Bulk operations (static segments, registered before /tasks/:id to win

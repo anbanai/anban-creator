@@ -19,6 +19,9 @@ export const tasksApi = {
   list: (params?: { offset?: number; limit?: number; status?: string; project_id?: string; plan_id?: string }) =>
     unwrap<PaginatedResponse<Task>>(http.get('/tasks', { params })),
 
+  listBefore: (params: { before_created_at: string; before_id: string; limit?: number; status?: string; project_id?: string; plan_id?: string }) =>
+    unwrap<PaginatedResponse<Task>>(http.get('/tasks/before', { params })),
+
   get: (id: string) =>
     unwrap<Task>(http.get(`/tasks/${id}`)),
 

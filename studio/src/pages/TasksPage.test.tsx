@@ -100,6 +100,7 @@ vi.mock('@/lib/api', async () => {
       tasks: {
         ...actual.api.tasks,
         list: vi.fn().mockResolvedValue({ items: [fixtures.failedTask], total: 1 }),
+        listBefore: vi.fn().mockResolvedValue({ items: [fixtures.failedTask], total: 1 }),
         create: vi.fn(),
         bulkCancel: vi.fn(),
         bulkClone: vi.fn(),
@@ -287,17 +288,15 @@ describe('TasksPage URL-driven recovery filters', () => {
   })
 
   it('loads the next task batch from the scroll fallback control', async () => {
-    vi.mocked(api.tasks.list).mockImplementation(async (params) => {
-      if (params?.offset === 1) return { items: [fixtures.completedTask as Task], total: 2 }
-      return { items: [fixtures.failedTask as Task], total: 2 }
-    })
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({ ...fixtures.failedTask, id: `failed-task-${index}` })) as Task[]
+    vi.mocked(api.tasks.list).mockResolvedValue({ items: firstPage, total: 21 })
+    vi.mocked(api.tasks.listBefore).mockResolvedValue({ items: [fixtures.completedTask as Task], total: 21 })
     renderTasksPage()
 
-    await screen.findByText('失败文章')
-    fireEvent.click(screen.getByRole('button', { name: '继续加载' }))
+    fireEvent.click(await screen.findByRole('button', { name: '继续加载' }))
 
     expect(await screen.findByText('已完成文章')).toBeInTheDocument()
-    expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 1, limit: 20 }))
+    expect(api.tasks.listBefore).toHaveBeenLastCalledWith(expect.objectContaining({ before_id: 'failed-task-19', limit: 20 }))
   })
 
   it('separates task selection from the link and clears hidden selections', async () => {

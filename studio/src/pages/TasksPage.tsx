@@ -36,6 +36,7 @@ const statusTabs: { label: string; value: string }[] = [
 ]
 
 const TASK_PAGE_SIZE = 20
+type TaskCursor = { createdAt: string; id: string }
 
 function normalizeTaskStatusFilter(value: string | null) {
   return value && statusTabs.some((tab) => tab.value === value) ? value : 'all'
@@ -104,20 +105,31 @@ export default function TasksPage() {
     isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ['tasks', { status: statusFilter, project_id: projectFilter }],
-    initialPageParam: 0,
-    queryFn: ({ pageParam }) =>
-      api.tasks.list({
+    initialPageParam: null as TaskCursor | null,
+    queryFn: ({ pageParam }) => pageParam
+      ? api.tasks.listBefore({
         limit: TASK_PAGE_SIZE,
-        offset: pageParam,
+        before_created_at: pageParam.createdAt,
+        before_id: pageParam.id,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        project_id: projectFilter || undefined,
+      })
+      : api.tasks.list({
+        limit: TASK_PAGE_SIZE,
         status: statusFilter === 'all' ? undefined : statusFilter,
         project_id: projectFilter || undefined,
       }),
-    getNextPageParam: (lastPage, allPages) => {
+    getNextPageParam: (lastPage) => {
       if (lastPage.items.length === 0) return undefined
-      const loadedCount = allPages.reduce((count, page) => count + page.items.length, 0)
-      return loadedCount < lastPage.total ? loadedCount : undefined
+      const lastTask = lastPage.items[lastPage.items.length - 1]
+      return lastTask && lastPage.items.length === TASK_PAGE_SIZE
+        ? { createdAt: lastTask.created_at, id: lastTask.id }
+        : undefined
     },
-    refetchInterval: statusFilter === 'all' || statusFilter === 'running' ? 10000 : undefined,
+    refetchInterval: (query) => {
+      const loadedPages = query.state.data?.pages.length ?? 0
+      return loadedPages <= 1 && (statusFilter === 'all' || statusFilter === 'running') ? 10000 : false
+    },
   })
 
   const tasks = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data])

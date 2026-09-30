@@ -1278,6 +1278,30 @@ func (s *TaskService) List(ctx context.Context, userID string, offset, limit int
 	return tasks, total, nil
 }
 
+// ListBefore returns tasks strictly older than the supplied stable cursor.
+func (s *TaskService) ListBefore(ctx context.Context, userID string, limit int, status, projectID, planID string, beforeCreatedAt time.Time, beforeID string) ([]*model.Task, int64, error) {
+	var tasks []*model.Task
+	var err error
+	if status != "" {
+		tasks, err = s.repo.Tasks().FindByUserIDAndStatusBefore(ctx, userID, status, projectID, planID, beforeCreatedAt, beforeID, limit)
+	} else {
+		tasks, err = s.repo.Tasks().FindByUserIDBefore(ctx, userID, projectID, planID, beforeCreatedAt, beforeID, limit)
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("list tasks before cursor: %w", err)
+	}
+	var total int64
+	if status != "" {
+		total, err = s.repo.Tasks().CountByUserIDAndStatus(ctx, userID, status, projectID, planID)
+	} else {
+		total, err = s.repo.Tasks().CountByUserID(ctx, userID, projectID, planID)
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("count tasks before cursor: %w", err)
+	}
+	return tasks, total, nil
+}
+
 // ListTitles returns all recorded titles for a project, ordered by creation time descending.
 func (s *TaskService) ListTitles(ctx context.Context, projectID string) ([]string, error) {
 	return s.repo.Tasks().FindTitlesByProjectID(ctx, projectID)

@@ -113,6 +113,8 @@ type TaskRepository interface {
 	FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
+	FindByUserIDBefore(ctx context.Context, userID string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error)
+	FindByUserIDAndStatusBefore(ctx context.Context, userID, status string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error)
 	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error)
 	FindRunning(ctx context.Context) ([]*model.Task, error)
