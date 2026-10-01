@@ -1391,6 +1391,14 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 			}
 			task, err := feedbackAttributionSvc.EnsureManagedTask(ctx, job)
 			if err != nil {
+				// Account contention is a normal queue condition. Other
+				// preparation failures must converge the durable job state so
+				// an exhausted Asynq retry cannot leave it queued forever.
+				if !errors.Is(err, service.ErrAttributionAccountBusy) {
+					if reconcileErr := service.MarkManagedFeedbackFailure(ctx, repo, job.ID, fmt.Errorf("managed task preparation: %w", err)); reconcileErr != nil {
+						return errors.Join(err, reconcileErr)
+					}
+				}
 				return err
 			}
 			err = taskSvc.HandleExecutionFromPayload(ctx, task.ID, task.UserID)

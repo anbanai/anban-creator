@@ -59,6 +59,32 @@ func TestMarkManagedFeedbackFailureReconcilesTerminalTaskFailure(t *testing.T) {
 	}
 }
 
+func TestMarkManagedFeedbackFailureBlocksAfterManagedRetryLimit(t *testing.T) {
+	repo, db := openFeedbackJobTestRepo(t)
+	job := &model.FeedbackJob{
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat,
+		AccountID: "wechat:wx-1", Operation: "content_postmortem", Cadence: FeedbackCadenceWeekly,
+		PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", Fingerprint: "managed-blocked-fingerprint",
+		Status: model.FeedbackJobRunning, Attempts: model.FeedbackMaxAttempts - 1,
+	}
+	if _, err := repo.FeedbackLoop().CreateJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.FeedbackJob{}).Where("id = ?", job.ID).Update("attempts", model.FeedbackMaxAttempts-1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MarkManagedFeedbackFailure(context.Background(), repo, job.ID, errors.New("runtime exhausted")); err != nil {
+		t.Fatalf("MarkManagedFeedbackFailure() error = %v", err)
+	}
+	stored, err := repo.FeedbackLoop().FindJobByIDOrFingerprint(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != model.FeedbackJobBlocked || stored.Attempts != model.FeedbackMaxAttempts || stored.CompletedAt == nil {
+		t.Fatalf("stored = %#v, want blocked at max attempts", stored)
+	}
+}
+
 func TestProcessFeedbackJobReclaimsFailedJobForBoundedRetry(t *testing.T) {
 	repo, db := openFeedbackJobTestRepo(t)
 	job := &model.FeedbackJob{ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat, AccountID: "wechat:wx-1", Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", AnalyticsRevision: 1, Fingerprint: "retry-fingerprint", Status: model.FeedbackJobQueued}

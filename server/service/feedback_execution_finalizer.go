@@ -82,7 +82,7 @@ func (s *TaskService) finalizeFeedbackExecution(ctx context.Context, task *model
 		}
 	}()
 	if execution.Status != model.TaskExecutionSucceeded || result == nil || !result.Success {
-		markFeedbackFailure(job, errors.New("feedback Agent execution failed"))
+		markManagedFeedbackExecutionFailure(job, errors.New("feedback Agent execution failed"))
 		now := time.Now().UTC()
 		job.CompletedAt = &now
 		if err := s.repo.FeedbackLoop().UpdateJob(ctx, job); err != nil {
@@ -224,11 +224,24 @@ func validateFeedbackArtifacts(job *model.FeedbackJob, analysis *feedbackAnalysi
 }
 
 func (s *TaskService) failFeedbackFinalization(ctx context.Context, job *model.FeedbackJob, reason string) error {
-	markFeedbackFailure(job, errors.New(reason))
+	markManagedFeedbackExecutionFailure(job, errors.New(reason))
 	if err := s.repo.FeedbackLoop().UpdateJob(ctx, job); err != nil {
 		return fmt.Errorf("persist feedback finalization failure: %w", err)
 	}
 	return errors.New(reason)
+}
+
+// markManagedFeedbackExecutionFailure accounts for one terminal managed
+// execution attempt before applying the bounded retry state transition.
+// Finalization can be retried, so only queued/running jobs consume an attempt.
+func markManagedFeedbackExecutionFailure(job *model.FeedbackJob, err error) {
+	if job == nil {
+		return
+	}
+	if job.Status == model.FeedbackJobQueued || job.Status == model.FeedbackJobRunning {
+		job.Attempts++
+	}
+	markFeedbackFailure(job, err)
 }
 
 func (s *TaskService) persistFeedbackStrategy(ctx context.Context, job *model.FeedbackJob, execution *model.TaskExecution, analysis feedbackAnalysisArtifact, evidence string) error {
