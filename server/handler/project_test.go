@@ -261,7 +261,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
 	projectIDs := make(map[string]string)
-	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformHypit} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformWhiteboardAnimation, model.PlatformHypit} {
 		projectID := uuid.NewString()
 		if err := repo.Projects().Create(t.Context(), &model.Project{
 			ID: projectID, UserID: userID, Platform: platform,
@@ -277,8 +277,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("list status = %d", resp.StatusCode)
 	}
 	items := decodeBody(t, resp)["data"].([]any)
-	if len(items) != 3 {
-		t.Fatalf("non-admin projects = %#v, want article, seednote, and montage", items)
+	if len(items) != 4 {
+		t.Fatalf("non-admin projects = %#v, want article, seednote, montage, and whiteboard-animation", items)
 	}
 	for _, item := range items {
 		platformValue := item.(map[string]any)["platform"]
