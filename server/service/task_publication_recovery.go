@@ -20,7 +20,7 @@ func (s *TaskService) RecoverWechatPublication(ctx context.Context, userID, task
 	if err != nil || task.UserID != userID {
 		return model.TaskPublicationOutcome{}, ErrWechatPublicationNotFound
 	}
-	if task.Type != model.PlatformArticle || task.Outcome == nil {
+	if (strings.TrimSpace(task.Channel) != "" && task.Channel != model.ChannelArticle && task.Channel != model.ChannelWechatPicture) || (strings.TrimSpace(task.Channel) == "" && task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture) || task.Outcome == nil {
 		return model.TaskPublicationOutcome{}, ErrWechatPublicationRecoveryUnavailable
 	}
 	switch task.Outcome.Publication.Action {

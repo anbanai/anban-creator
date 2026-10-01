@@ -717,7 +717,7 @@ func TestGenerateTaskImageMaterializesDirectTaskReference(t *testing.T) {
 }
 
 func TestGenerateTaskImageMaterializesProjectPortraitInput(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
 		for _, tt := range []struct {
 			name                                         string
 			use, foreign, wrongPurpose, missing, product bool
@@ -754,6 +754,9 @@ func TestGenerateTaskImageMaterializesProjectPortraitInput(t *testing.T) {
 					t.Fatal(err)
 				}
 				task.Type = platform
+				if platform == model.PlatformWechat {
+					task.Type = model.TaskTypeWechatArticle
+				}
 				task.ImageRatio = "1:1"
 				portraitID := assetID
 				if tt.missing {
@@ -951,8 +954,8 @@ func TestGenerateTaskImageRejectsBillingSKURouteMismatchWithoutProviderCall(t *t
 		name, column, value, wantOperation, wantRoute string
 	}{
 		{
-			name: "operation mismatch", column: "operation", value: "task.article",
-			wantOperation: "task.article", wantRoute: "image_generation.capabilities.standard",
+			name: "operation mismatch", column: "operation", value: "task.wechat_article",
+			wantOperation: "task.wechat_article", wantRoute: "image_generation.capabilities.standard",
 		},
 		{
 			name: "route mismatch", column: "route", value: "image_generation.capabilities.professional",

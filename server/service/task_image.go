@@ -126,12 +126,24 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	if task.ProjectID != req.ProjectID {
 		return nil, errors.New("task does not belong to the requested project")
 	}
-	platform := task.Type
-	if snapshotPlatform := strings.TrimSpace(task.ProjectSnapshot.Data().Platform); snapshotPlatform != "" {
-		platform = snapshotPlatform
+	channel := strings.TrimSpace(task.Channel)
+	if channel == "" {
+		channel, _ = model.AgentChannel(strings.TrimSpace(task.AgentID))
 	}
-	allowedRatios := model.SupportedImageRatios(platform)
-	if !model.IsBusinessImageRatioAllowed(platform, req.AspectRatio) ||
+	allowedRatios := model.SupportedImageRatiosForChannel(channel)
+	allowed := model.IsBusinessImageRatioAllowedForChannel(channel, req.AspectRatio)
+	if channel == "" || len(allowedRatios) == 0 {
+		// Legacy rows are read only during migration; new admissions always freeze
+		// Channel. Keep their image capability checks working until the backfill is
+		// complete without making ProjectSnapshot the source of new identity.
+		legacy := strings.TrimSpace(task.ProjectSnapshot.Data().Platform)
+		if legacy == "" {
+			legacy = strings.TrimSpace(task.Type)
+		}
+		allowedRatios = model.SupportedImageRatios(legacy)
+		allowed = model.IsBusinessImageRatioAllowed(legacy, req.AspectRatio)
+	}
+	if !allowed ||
 		(strings.TrimSpace(task.ImageRatio) != "" && task.ImageRatio != model.ImageRatioAuto && task.ImageRatio != req.AspectRatio) {
 		return nil, &ImageRatioNotAllowedError{
 			RequestedRatio: req.AspectRatio, AllowedImageRatios: allowedRatios, TaskImageRatio: task.ImageRatio,

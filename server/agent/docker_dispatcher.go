@@ -79,7 +79,7 @@ func NewDockerDispatcher(
 	if strings.TrimSpace(cfg.Network) == "" || strings.TrimSpace(cfg.ProjectMemoryVolume) == "" || cfg.CPUCores <= 0 || cfg.MemoryMB <= 0 || cfg.PidsLimit <= 0 || cfg.TimeoutSec <= 0 {
 		return nil, fmt.Errorf("Docker dispatcher configuration is incomplete")
 	}
-	for _, profile := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage} {
+	for _, profile := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, "profile", "feedback"} {
 		if strings.TrimSpace(runtimeImages[profile]) == "" {
 			return nil, fmt.Errorf("Docker runtime image %q is required", profile)
 		}

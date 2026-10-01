@@ -43,7 +43,8 @@ func analyticsWechatCaptureInput(t *model.WechatArticleTracking, p *model.Wechat
 	if err != nil {
 		return AnalyticsObservationInput{}, err
 	}
-	content := model.AnalyticsContent{ID: "task:" + t.TaskID, TaskID: t.TaskID, PublicationID: t.PublicationID, ProjectID: t.ProjectID, Platform: model.PlatformArticle, Title: p.DraftTitle, ContentType: "article", Status: p.Status, URL: p.ArticleURL, Date: p.PublishedAt}
+	contentType := normalizeWechatContentType(p.DraftArticleType)
+	content := model.AnalyticsContent{ID: "task:" + t.TaskID, TaskID: t.TaskID, PublicationID: t.PublicationID, ProjectID: t.ProjectID, Channel: model.ChannelArticle, Platform: model.PlatformWechat, Title: p.DraftTitle, ContentType: contentType, Status: p.Status, URL: p.ArticleURL, Date: p.PublishedAt}
 	return AnalyticsObservationInput{Content: content, Observation: model.AnalyticsObservation{ID: analyticsCaptureID("wechat_api", t.ID, s.StatDate, s.CapturedAt), TrackingID: t.ID, ProjectID: t.ProjectID, ContentID: content.ID, MetricBasis: "cumulative", StatDate: s.StatDate, Source: "wechat_api", SourcePriority: 200, EffectiveAt: date, ReceivedAt: s.CapturedAt, AnalyticsMetrics: metrics}, RawPayload: string(s.RawResponse)}, nil
 }
 func analyticsWechatTrackingSnapshots(ctx context.Context, repo repository.Repository, taskID string) ([]*model.WechatMetricSnapshot, error) {

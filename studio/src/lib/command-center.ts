@@ -68,7 +68,11 @@ export interface NextBestAction {
 const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const LOW_CREDIT_THRESHOLD = 200
 const CRITICAL_CREDIT_THRESHOLD = 50
+<<<<<<< HEAD
 const taskTypes = new Set<TaskType>(['seednote', 'article', 'moments', 'viral_analysis', 'ecommerce', 'montage', 'whiteboard-animation', 'hypit'])
+=======
+const taskTypes = new Set<TaskType>(['seednote', 'wechat-article', 'moments', 'viral_analysis', 'ecommerce', 'montage', 'whiteboard-animation', 'hypit'])
+>>>>>>> codex/tasks-infinite-scroll-review
 const creationIntents = new Set(['new', 'retry', 'schedule'])
 
 function readinessStatus(ready?: boolean | null, legacyKnown?: boolean): ReadinessStatus {
@@ -203,7 +207,7 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
             : 'ok',
   }
 
-  const publishableProjects = projects.filter((project) => project.platform === 'article')
+  const publishableProjects = projects.filter((project) => project.platform === 'wechat')
   const projectStatus: ReadinessStatus = projects.length > 0 ? 'ready' : 'not_ready'
   const publishingStatus: ReadinessStatus =
     projects.length === 0 ? 'unknown' : publishableProjects.length > 0 ? 'ready' : 'not_ready'
@@ -325,7 +329,7 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
       id: 'create-task',
       label: signals.tasks.length === 0 ? '创建首个任务' : '新建创作任务',
       description: defaultProject ? `使用「${defaultProject.name}」继续产出` : '开始新的内容任务',
-      href: createTaskHref({ type: defaultProject?.platform, projectId: defaultProject?.id, intent: 'new' }),
+      href: createTaskHref({ type: defaultProject?.platform === 'wechat' ? 'wechat-article' : defaultProject?.platform, projectId: defaultProject?.id, intent: 'new' }),
       kind: 'running',
     })
   }

@@ -34,11 +34,12 @@ const validResponse = (): BootstrapResponse => {
     execution_token: tokenFor({ execution_id: "execution-1", task_id: "task-1", project_id: "project-1" }),
     execution_id: "execution-1",
     task_id: "task-1",
-    task_type: "article",
-    agent_pack_id: "article",
+    task_type: "wechat-article",
+    task_kind: "content_generation",
+    agent_pack_id: "wechat-article",
     agent_pack_version: "1.0.0",
     agent_pack_digest: "a".repeat(64),
-    runtime_profile: "article",
+    runtime_profile: "wechat",
     runtime_adapter: "standard",
     project_id: "project-1",
     prompt: "Write an article",
@@ -54,7 +55,7 @@ const validResponse = (): BootstrapResponse => {
       },
     },
     max_turns: 10,
-    agent_flag: "anban:article",
+    agent_flag: "anban:wechat-article",
     agent_memory_directory: ".claude/agent-memory",
     artifact_transport: { mode: "stream" },
   };
@@ -124,28 +125,28 @@ describe("validateBootstrapResponse", () => {
   test("accepts and validates the frozen Agent Pack identity against the generated Catalog", async () => {
     const response = validResponse();
     const catalog = JSON.parse(await readFile(new URL("../../harness/agent-pack-catalog.json", import.meta.url), "utf8")) as AgentPackCatalog;
-    const article = catalog.packs.find((pack) => pack.id === "article");
+    const article = catalog.packs.find((pack) => pack.id === "wechat-article");
     if (!article) throw new Error("article Agent Pack is missing");
     response.agent_pack_version = article.version;
     response.agent_pack_digest = article.digest;
 
-    expect(validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog).id).toBe("article");
+    expect(validateAgentPackCatalog(validateBootstrapResponse("execution-1", response), catalog).id).toBe("wechat-article");
   });
 
   test.each([
-    ["agent_pack_id", "montage", "article"],
+    ["agent_pack_id", "montage", "wechat-article"],
     ["agent_pack_version", "2.0.0", "1.0.0"],
     ["agent_pack_digest", "b".repeat(64), "a".repeat(64)],
-    ["runtime_profile", "montage", "article"],
+    ["runtime_profile", "montage", "wechat"],
     ["runtime_adapter", "openmontage", "standard"],
-    ["agent_flag", "anban:montage", "anban:article"],
+    ["agent_flag", "anban:montage", "anban:wechat-article"],
   ] as const)("identifies %s drift between the frozen execution and runtime Catalog", (field, frozen, runtime) => {
     const response = validResponse();
     Object.assign(response, { [field]: frozen });
     const catalog: AgentPackCatalog = { packs: [{
-      id: "article", version: "1.0.0", digest: "a".repeat(64),
-      agent: { name: "article" }, bindings: { task_types: ["article"] },
-      runtime: { profile: "article", adapter: "standard" },
+      id: "wechat-article", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "wechat-article" }, bindings: { task_types: ["wechat-article"] },
+      runtime: { profile: "wechat", adapter: "standard" },
       artifacts: [{ role: "final", path: "output/final.md", required: true }],
     }] };
 
@@ -166,9 +167,9 @@ describe("validateBootstrapResponse", () => {
   test("rejects malformed Agent Pack artifact contracts", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
     const basePack = {
-      id: "article", version: "1.0.0", digest: "a".repeat(64),
-      agent: { name: "article" }, bindings: { task_types: ["article"] },
-      runtime: { profile: "article", adapter: "standard" },
+      id: "wechat-article", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "wechat-article" }, bindings: { task_types: ["wechat-article"] },
+      runtime: { profile: "wechat", adapter: "standard" },
     };
     const invalidArtifacts = [
       undefined,
@@ -196,6 +197,7 @@ describe("validateBootstrapResponse", () => {
     const response = validateBootstrapResponse("execution-1", {
       ...validResponse(),
       task_type: "viral_analysis",
+      task_kind: "viral_analysis",
       agent_pack_id: "seednote",
       runtime_profile: "seednote",
       agent_flag: "anban:seednote",
@@ -252,9 +254,9 @@ describe("validateBootstrapResponse", () => {
   test("rejects malformed task-specific artifact contracts", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
     const basePack = {
-      id: "article", version: "1.0.0", digest: "a".repeat(64),
-      agent: { name: "article" }, bindings: { task_types: ["article"] },
-      runtime: { profile: "article", adapter: "standard" },
+      id: "wechat-article", version: "1.0.0", digest: "a".repeat(64),
+      agent: { name: "wechat-article" }, bindings: { task_types: ["wechat-article"] },
+      runtime: { profile: "wechat", adapter: "standard" },
       artifacts: [{ role: "final", path: "output/final.md", required: true }],
     };
     const invalidOverrides = [
@@ -303,6 +305,7 @@ describe("validateBootstrapResponse", () => {
   test("accepts viral analysis through the Seednote agent route", () => {
     const response = validResponse();
     response.task_type = "viral_analysis";
+    response.task_kind = "viral_analysis";
     response.agent_flag = "anban:seednote";
 
     expect(validateBootstrapResponse("execution-1", response).agent_flag).toBe("anban:seednote");

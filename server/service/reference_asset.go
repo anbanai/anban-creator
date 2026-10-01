@@ -87,7 +87,7 @@ func projectPortraitReferenceAssetID(task *model.Task) string {
 
 func resolveProjectPortraitReferenceAsset(ctx context.Context, repo repository.Repository, task *model.Task) (*model.Asset, error) {
 	assetID := projectPortraitReferenceAssetID(task)
-	if task != nil && task.CoverUsePortrait && (task.Type != model.PlatformArticle || task.ArticleWithCover == nil || *task.ArticleWithCover) && assetID == "" {
+	if task != nil && task.CoverUsePortrait && (task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture || task.ArticleWithCover == nil || *task.ArticleWithCover) && assetID == "" {
 		return nil, ErrCoverPortraitUnavailable
 	}
 	return resolveOwnedReferenceAsset(ctx, repo, task, assetID, []string{

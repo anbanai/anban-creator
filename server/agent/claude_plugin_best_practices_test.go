@@ -21,7 +21,8 @@ func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 		"moments",
 		"montage",
 		"seednote",
-		"article",
+		"wechat-article",
+		"wechat-picture",
 	}
 
 	for _, name := range agents {
@@ -41,7 +42,7 @@ func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 func TestClaudeAgentFeedbackCallsMatchMCPSchema(t *testing.T) {
 	agents := []string{
 		"ecommerce", "live-slicer", "moments", "montage",
-		"article", "seednote",
+		"wechat-article", "wechat-picture", "seednote",
 	}
 	allowedArgs := map[string]bool{
 		"task_id": true, "agent_name": true, "scores": true,
@@ -342,7 +343,7 @@ func TestClaudeAgentFeedbackFollowsDeliveryReport(t *testing.T) {
 		summaryTerms []string
 	}{
 		{
-			name:         "article",
+			name:         "wechat-article",
 			anchor:       "**产出**：`output/draft.json`",
 			summaryTerms: []string{"所选模板", "交付包状态", "内容审核通过率"},
 		},
@@ -697,11 +698,11 @@ func TestCodexDynamicLifecycleBoundary(t *testing.T) {
 	}
 
 	deliveryAnchors := map[string]string{
-		"article":     "完成后交付摘要",
-		"ecommerce":   "交付校验",
-		"live-slicer": "完成后交付摘要",
-		"moments":     "交付校验",
-		"seednote":    "交付校验",
+		"wechat-article": "完成后交付摘要",
+		"ecommerce":      "交付校验",
+		"live-slicer":    "完成后交付摘要",
+		"moments":        "交付校验",
+		"seednote":       "交付校验",
 	}
 	for name, deliveryAnchor := range deliveryAnchors {
 		body := readRepoFile(t, filepath.Join(root, "agents", name+".toml"))

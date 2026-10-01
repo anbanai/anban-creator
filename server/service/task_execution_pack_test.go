@@ -61,10 +61,10 @@ func artifactPathsForTest(artifacts []agentpack.ArtifactSpec) []string {
 
 func TestInheritAgentPackIdentityCopiesFrozenContracts(t *testing.T) {
 	source := &model.TaskExecution{
-		AgentPackID: "article", AgentPackVersion: "2.0.0", AgentPackDigest: "digest",
+		AgentPackID: "wechat-article", AgentPackVersion: "2.0.0", AgentPackDigest: "digest",
 		AgentPackDeliveryContract:         datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`),
 		AgentPackRequiredArtifactContract: datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown","required":true}]`),
-		RuntimeAdapter:                    "standard", RuntimeProfile: "article",
+		RuntimeAdapter:                    "standard", RuntimeProfile: "wechat",
 	}
 	target := &model.TaskExecution{}
 	if !inheritAgentPackIdentity(target, source) {
@@ -81,9 +81,9 @@ func TestInheritAgentPackIdentityCopiesFrozenContracts(t *testing.T) {
 
 func TestInheritAgentPackIdentityRejectsIncompleteContract(t *testing.T) {
 	source := &model.TaskExecution{
-		AgentPackID: "article", AgentPackVersion: "2.0.0", AgentPackDigest: "digest",
+		AgentPackID: "wechat-article", AgentPackVersion: "2.0.0", AgentPackDigest: "digest",
 		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`),
-		RuntimeAdapter:            "standard", RuntimeProfile: "article",
+		RuntimeAdapter:            "standard", RuntimeProfile: "wechat",
 	}
 	if inheritAgentPackIdentity(&model.TaskExecution{}, source) {
 		t.Fatal("incomplete frozen Agent Pack identity was inherited")
@@ -95,7 +95,7 @@ func TestResolveFrozenExecutionContractsRejectInvalidSnapshot(t *testing.T) {
 		AgentPackID: "removed-pack", AgentPackVersion: "99.0.0", AgentPackDigest: "digest",
 		AgentPackDeliveryContract:         datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`),
 		AgentPackRequiredArtifactContract: datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown","required":true}]`),
-		RuntimeAdapter:                    "standard", RuntimeProfile: "article",
+		RuntimeAdapter:                    "standard", RuntimeProfile: "wechat",
 	}
 	for _, tt := range []struct {
 		name   string

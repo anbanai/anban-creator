@@ -61,7 +61,7 @@ func TestContentAnalyticsCandidatesAllStatesAndIsolation(t *testing.T) {
 	ctx := context.Background()
 	f, _, _ := newWechatSelectionImport(t, [][]string{wechatSelectionRow("文章", "")})
 	for _, status := range []string{"pending", "running", "failed", "cancelled", "completed"} {
-		task := &model.Task{ID: uuid.NewString(), UserID: f.userID, ProjectID: f.projectID, Type: "article", Status: status, Title: "筛选 " + status}
+		task := &model.Task{ID: uuid.NewString(), UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: status, Title: "筛选 " + status}
 		if err := f.repo.Tasks().Create(ctx, task); err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +88,7 @@ func TestContentAnalyticsCandidatesAllStatesAndIsolation(t *testing.T) {
 func TestWechatAnalyticsTaskOnlySnapshotsAndRevocation(t *testing.T) {
 	ctx := context.Background()
 	f, svc, req := newWechatSelectionImport(t, [][]string{wechatSelectionRow("待处理任务", "https://mp.weixin.qq.com/s/task")})
-	task := &model.Task{ID: uuid.NewString(), UserID: f.userID, ProjectID: f.projectID, Type: "article", Status: "pending", Title: "待处理任务"}
+	task := &model.Task{ID: uuid.NewString(), UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: "pending", Title: "待处理任务"}
 	if err := f.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

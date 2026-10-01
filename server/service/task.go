@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/billing"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -55,6 +56,7 @@ type TaskService struct {
 	finalizationRenewEvery   time.Duration
 	finalizationRenewClaim   func(context.Context, string, string) (bool, error)
 	cleanupRetryBackoff      time.Duration
+	now                      func() time.Time
 	projectConcurrencyCap    int
 	logger                   *zerolog.Logger
 	enqueuer                 TaskEnqueuer
@@ -118,6 +120,7 @@ func NewTaskService(
 		finalizationLease:      time.Minute,
 		finalizationRenewEvery: 15 * time.Second,
 		cleanupRetryBackoff:    10 * time.Second,
+		now:                    time.Now,
 	}
 	svc.montageCfg = defaultMontageServiceConfig()
 
@@ -332,10 +335,42 @@ var (
 	ErrMontageInput                         = errors.New("视频生成输入无效")
 	ErrTaskCreationProjectInactive          = errors.New("task creation project is not active")
 	ErrViralAnalysisRequiresSeednoteProject = errors.New("viral analysis requires a Seednote project")
+	ErrTaskIdentityIncompatible             = errors.New("task identity is incompatible with project")
 )
 
 func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 	return append([]model.EntryAttachment(nil), in...)
+}
+
+func redactFrozenConfig(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	out := make(map[string]any, len(value))
+	for key, item := range value {
+		lower := strings.ToLower(strings.TrimSpace(key))
+		if strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "password") || strings.Contains(lower, "private_key") || lower == "app_key" {
+			continue
+		}
+		if nested, ok := item.(map[string]any); ok {
+			out[key] = redactFrozenConfig(nested)
+			continue
+		}
+		out[key] = item
+	}
+	return out
+}
+
+func (s *TaskService) freezeProjectAgentAndChannelConfig(ctx context.Context, projectID, agentID, channel string, snapshot *model.ProjectSnapshot) {
+	if s == nil || s.repo == nil || snapshot == nil {
+		return
+	}
+	if row, err := s.repo.ProjectAgentConfigs().Get(ctx, projectID, agentID); err == nil && row != nil {
+		snapshot.AgentConfig = redactFrozenConfig(row.Config.Data())
+	}
+	if row, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel); err == nil && row != nil {
+		snapshot.ChannelConfig = redactFrozenConfig(row.Config.Data())
+	}
 }
 
 // CreateManualParams holds the inputs for CreateManual. Fields map 1:1 to the
@@ -343,9 +378,15 @@ func cloneEntryAttachments(in []model.EntryAttachment) []model.EntryAttachment {
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID            string
-	ProjectID         string
-	ExecutionProfile  string
+	UserID           string
+	ProjectID        string
+	ExecutionProfile string
+	// AgentID, Channel, and TaskKind are the canonical task identity. Empty
+	// values are accepted only for legacy callers during the one-time migration;
+	// all HTTP/MCP callers should supply them explicitly.
+	AgentID           string
+	Channel           string
+	TaskKind          string
 	RequestedTaskType string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
@@ -413,6 +454,108 @@ type CreateManualParams struct {
 	// locators that originate from the source task rather than the destination
 	// project.
 	MontageSourceTaskID string
+}
+
+func resolveTaskIdentity(project *model.Project, p CreateManualParams) (agentID, channel, taskKind string, pack agentpack.Manifest, err error) {
+	agentID = strings.TrimSpace(p.AgentID)
+	channel = strings.TrimSpace(p.Channel)
+	taskKind = strings.TrimSpace(p.TaskKind)
+	requested := strings.TrimSpace(p.RequestedTaskType)
+	// New task admission is Agent-first. A project is shared context and never
+	// supplies execution identity. Internal plugin flows may use the explicit
+	// RequestedTaskType escape hatch; public callers provide all three fields.
+	if agentID == "" {
+		switch requested {
+		case model.TaskTypeWechatPicture:
+			agentID = model.AgentIDWechatPicture
+		case model.TaskTypeWechatArticle, model.PlatformWechat:
+			agentID = model.AgentIDArticle
+		case model.PlatformSeednote:
+			agentID = model.AgentIDSeednote
+		case model.PlatformMontage:
+			agentID = model.AgentIDChannelsVideo
+		case model.PlatformWhiteboardAnimation:
+			agentID = model.AgentIDWhiteboard
+		case model.PlatformHypit:
+			agentID = model.AgentIDHypit
+		case model.PlatformMoments, model.PlatformEcommerce:
+			// These plugin packs use their platform ID as the stable Agent ID.
+			agentID = requested
+		case model.TaskTypeViralAnalysis:
+			agentID = model.AgentIDSeednote
+		case model.TaskTypeProfileAnalysis:
+			agentID = model.AgentIDProfile
+		case model.TaskTypeLiveSlicer:
+			agentID = "live-slicer"
+		}
+	}
+	if channel == "" {
+		if inferred, ok := model.AgentChannel(agentID); ok {
+			channel = inferred
+		} else if candidate, ok := agentpack.Default().ForAgent(agentID); ok && candidate.Kind == agentpack.KindPlugin {
+			channel = agentID
+		}
+	}
+	if taskKind == "" {
+		switch requested {
+		case model.TaskTypeWechatArticle, model.PlatformWechat:
+			taskKind = model.TaskKindContentGeneration
+		case model.TaskTypeWechatPicture:
+			taskKind = model.TaskKindContentGeneration
+		case model.TaskTypeViralAnalysis:
+			taskKind = model.TaskTypeViralAnalysis
+		case model.TaskTypeProfileAnalysis:
+			taskKind = model.TaskTypeProfileAnalysis
+		case model.TaskTypeLiveSlicer:
+			taskKind = model.TaskKindLiveSlicer
+		case model.PlatformSeednote, model.PlatformMontage, model.PlatformWhiteboardAnimation:
+			taskKind = model.TaskKindContentGeneration
+		case model.PlatformHypit:
+			taskKind = model.PlatformHypit
+		case model.PlatformMoments, model.PlatformEcommerce:
+			taskKind = requested
+		}
+		if taskKind == "" {
+			switch agentID {
+			case model.AgentIDArticle, model.AgentIDWechatPicture, model.AgentIDSeednote:
+				taskKind = model.TaskKindContentGeneration
+			case model.AgentIDHypit:
+				taskKind = model.PlatformHypit
+			default:
+				taskKind = agentID
+			}
+		}
+	}
+	if agentID == "" || channel == "" || taskKind == "" {
+		return "", "", "", agentpack.Manifest{}, fmt.Errorf("agent_id, channel, and task_kind are required")
+	}
+	pack, ok := agentpack.Default().ForAgent(agentID)
+	if !ok {
+		return "", "", "", agentpack.Manifest{}, fmt.Errorf("unknown Agent %q", agentID)
+	}
+	if pack.Kind == agentpack.KindPlugin {
+		if channel != agentID {
+			return "", "", "", agentpack.Manifest{}, fmt.Errorf("plugin Agent %q must use channel %q", agentID, agentID)
+		}
+		return agentID, channel, taskKind, pack, nil
+	}
+	if !model.IsChannel(channel) {
+		return "", "", "", agentpack.Manifest{}, fmt.Errorf("unsupported channel %q", channel)
+	}
+	if pack.Channel != channel {
+		return "", "", "", agentpack.Manifest{}, fmt.Errorf("Agent %q is bound to channel %q, not %q", agentID, pack.Channel, channel)
+	}
+	if !pack.SupportsTaskKind(taskKind) {
+		return "", "", "", agentpack.Manifest{}, fmt.Errorf("Agent %q does not support task kind %q", agentID, taskKind)
+	}
+	// Project context bounds the managed content channel. Keep task identity
+	// explicit while rejecting cross-platform submissions at admission time.
+	if project != nil && strings.TrimSpace(project.Platform) != "" {
+		if agentPlatform := model.PlatformForChannel(channel); agentPlatform != "" && strings.TrimSpace(project.Platform) != agentPlatform {
+			return "", "", "", agentpack.Manifest{}, fmt.Errorf("%w: task channel %q is incompatible with project platform %q", ErrTaskIdentityIncompatible, channel, project.Platform)
+		}
+	}
+	return agentID, channel, taskKind, pack, nil
 }
 
 // ResolveTaskCreationProject loads the authoritative project once and applies
@@ -515,6 +658,25 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
+	// Project-scoped entry points historically accepted a project without an
+	// explicit Agent selection. Normalize that internal form before invoking
+	// the strict identity resolver; API/MCP callers can still pass all three
+	// canonical identity fields directly.
+	if strings.TrimSpace(p.AgentID) == "" && strings.TrimSpace(p.Channel) == "" && strings.TrimSpace(p.TaskKind) == "" && strings.TrimSpace(p.RequestedTaskType) == "" {
+		p.RequestedTaskType = strings.TrimSpace(project.Platform)
+		if p.RequestedTaskType == model.PlatformWechat {
+			p.RequestedTaskType = model.TaskTypeWechatArticle
+		}
+	}
+	// Preserve the specialized contract error for viral analysis before the
+	// generic channel/platform admission check below.
+	if p.RequestedTaskType == model.TaskTypeViralAnalysis && project.Platform != model.PlatformSeednote {
+		return nil, ErrViralAnalysisRequiresSeednoteProject
+	}
+	agentID, channel, taskKind, _, identityErr := resolveTaskIdentity(project, p)
+	if identityErr != nil {
+		return nil, identityErr
+	}
 	profile, err := resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
 	if err != nil {
 		return nil, err
@@ -524,7 +686,19 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAgentProfileSnapshotInvalid, err)
 	}
-	taskType := project.Platform
+	// Keep the legacy taskType local for specialized validation while persisting
+	// the canonical Agent/channel/task-kind identity below.
+	taskType := taskKind
+	if taskType == model.TaskKindContentGeneration {
+		switch agentID {
+		case model.AgentIDArticle:
+			taskType = model.TaskTypeWechatArticle
+		case model.AgentIDSeednote:
+			taskType = model.PlatformSeednote
+		case model.AgentIDChannelsVideo:
+			taskType = model.PlatformMontage
+		}
+	}
 	effectiveReferenceImageAssetID := p.ReferenceImageAssetID
 	if err := s.validateTaskCreationReferences(ctx, p.UserID, effectiveReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
 		return nil, err
@@ -537,13 +711,11 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		taskType = model.TaskTypeViralAnalysis
 	}
 	if p.RequestedTaskType == model.TaskTypeProfileAnalysis {
-		if project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote {
-			return nil, fmt.Errorf("profile analysis requires an article or seednote project")
-		}
 		taskType = model.TaskTypeProfileAnalysis
 	}
 	if p.FrozenTaskType != "" {
 		taskType = p.FrozenTaskType
+		taskKind = p.FrozenTaskType
 	}
 	if p.CoverUsePortrait {
 		portraitAssetID := project.PortraitReferenceImageAssetID
@@ -553,7 +725,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if !model.SupportsPortraitCover(taskType) || strings.TrimSpace(portraitAssetID) == "" {
 			return nil, ErrCoverPortraitUnavailable
 		}
-		if taskType == model.PlatformArticle && p.ArticleWithCover != nil && !*p.ArticleWithCover {
+		if (taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture) && p.ArticleWithCover != nil && !*p.ArticleWithCover {
 			return nil, ErrCoverPortraitUnavailable
 		}
 	}
@@ -569,16 +741,20 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		effectiveImageRatio = ""
 	}
 	if effectiveImageRatio == "" {
-		effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+		if taskType == model.TaskTypeWechatPicture {
+			effectiveImageRatio = model.DefaultImageRatio(taskType)
+		} else {
+			effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+		}
 	}
 	if isMontageTask && effectiveImageRatio == model.ImageRatioAuto {
 		effectiveImageRatio = ""
 	}
 	if effectiveImageRatio == "" {
-		effectiveImageRatio = model.DefaultImageRatio(project.Platform)
+		effectiveImageRatio = model.DefaultImageRatioForChannel(channel)
 	}
-	if len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
-		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+	if len(model.SupportedImageRatiosForChannel(channel)) > 0 && !model.IsBusinessImageRatioAllowedForChannel(channel, effectiveImageRatio) {
+		return nil, fmt.Errorf("%s for channel %s: %s", model.ValidImageRatioHint, channel, effectiveImageRatio)
 	}
 	agentInput, err := validateAndCloneAgentInput(taskType, p.AgentInput)
 	if err != nil {
@@ -718,7 +894,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		// already-set topic, so it will not re-claim during execution.
 		taskPrompt := p.Prompt
 		if taskPrompt == "" && !p.PreserveFrozenConfig && s.topicPoolSvc != nil &&
-			(taskType == model.PlatformArticle || taskType == model.PlatformSeednote || taskType == model.PlatformMoments) {
+			((taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture) || taskType == model.PlatformSeednote || taskType == model.PlatformMoments) {
 			claimed, claimErr := s.topicPoolSvc.ClaimForTask(ctx, p.UserID, p.ProjectID, taskID)
 			if claimErr != nil {
 				s.logger.Warn().Err(claimErr).Str("task_id", taskID).Msg("claim topic from pool failed, leaving prompt empty")
@@ -747,7 +923,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if p.ArticleWithContentImages != nil {
 			articleContent = *p.ArticleWithContentImages
 		}
-		if p.CoverUsePortrait && taskType == model.PlatformArticle && !articleCover {
+		if p.CoverUsePortrait && (taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture) && !articleCover {
 			return nil, ErrCoverPortraitUnavailable
 		}
 
@@ -755,6 +931,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			ID:                       taskID,
 			UserID:                   p.UserID,
 			ProjectID:                p.ProjectID,
+			AgentID:                  agentID,
+			Channel:                  channel,
+			TaskKind:                 taskKind,
 			Type:                     taskType,
 			Status:                   model.TaskStatusPending,
 			Prompt:                   taskPrompt,
@@ -775,9 +954,19 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			AgentProfileFingerprint:  profileFingerprint,
 		}
 		if p.ProjectSnapshot != nil {
-			task.SetProjectSnapshot(*p.ProjectSnapshot)
+			snapshot := *p.ProjectSnapshot
+			snapshot.AgentID = agentID
+			snapshot.Channel = channel
+			if strings.TrimSpace(snapshot.Platform) == "" {
+				snapshot.Platform = project.Platform
+			}
+			task.SetProjectSnapshot(snapshot)
 		} else {
-			task.SetProjectSnapshot(model.SnapshotProject(project))
+			snapshot := model.SnapshotProject(project)
+			snapshot.AgentID = agentID
+			snapshot.Channel = channel
+			s.freezeProjectAgentAndChannelConfig(ctx, project.ID, agentID, channel, &snapshot)
+			task.SetProjectSnapshot(snapshot)
 		}
 		if taskUsesFrozenImageCapability(taskType) {
 			task.SetImageCapabilitySnapshot(effectiveImageCapabilitySnapshot)
@@ -919,8 +1108,35 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		task.HasContentImage = false
 		return repo.Tasks().Update(ctx, task)
 	}
+	freeProfileAdmission := manualAdmission != nil && manualAdmission.ProfileAnalysisExpectedVersion != nil && len(tasks) == 1 && tasks[0].Type == model.TaskTypeProfileAnalysis
+	linkProfileTask := func(tx repository.Repository) error {
+		if !freeProfileAdmission {
+			return nil
+		}
+		project, err := tx.Projects().FindByIDForUpdate(ctx, tasks[0].ProjectID)
+		if err != nil {
+			return err
+		}
+		profile := projectProfileFor(project)
+		if profile.Version != *manualAdmission.ProfileAnalysisExpectedVersion {
+			return ErrProjectProfileVersionConflict
+		}
+		if profile.AnalysisTaskID != "" {
+			if existing, findErr := tx.Tasks().FindByID(ctx, profile.AnalysisTaskID); findErr == nil && (existing.Status == model.TaskStatusPending || existing.Status == model.TaskStatusRunning) {
+				return ErrProjectProfileAnalysisInProgress
+			}
+		}
+		profile.AnalysisTaskID = tasks[0].ID
+		profile.Status = model.ProfileStatusDraft
+		profile.InitializationStatus = model.ProfileInitializationQueued
+		project.Profile = datatypes.NewJSONType(profile)
+		if err := tx.Projects().Update(ctx, project); err != nil {
+			return err
+		}
+		return persistProfileState(ctx, tx, project.ID, profile)
+	}
 	if s.billingCatalogSvc == nil && s.billingWalletSvc == nil {
-		if manualAdmission != nil && manualAdmission.ProfileAnalysisExpectedVersion != nil {
+		if manualAdmission != nil && manualAdmission.ProfileAnalysisExpectedVersion != nil && !freeProfileAdmission {
 			return fmt.Errorf("profile analysis billing is not configured")
 		}
 		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
@@ -932,7 +1148,18 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 					return err
 				}
 			}
-			return nil
+			return linkProfileTask(tx)
+		})
+	}
+	if freeProfileAdmission {
+		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+			if err := lockProjectAdmission(tx); err != nil {
+				return err
+			}
+			if err := createTask(tx, tasks[0]); err != nil {
+				return err
+			}
+			return linkProfileTask(tx)
 		})
 	}
 	if s.billingCatalogSvc == nil || s.billingWalletSvc == nil {
@@ -1013,31 +1240,6 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 				return err
 			}
 		}
-		if manualAdmission != nil && manualAdmission.ProfileAnalysisExpectedVersion != nil {
-			if len(tasks) != 1 || tasks[0].Type != model.TaskTypeProfileAnalysis {
-				return fmt.Errorf("profile analysis admission must create one profile task")
-			}
-			project, err := tx.Projects().FindByIDForUpdate(ctx, tasks[0].ProjectID)
-			if err != nil {
-				return err
-			}
-			profile := projectProfileFor(project)
-			if profile.Version != *manualAdmission.ProfileAnalysisExpectedVersion {
-				return ErrProjectProfileVersionConflict
-			}
-			if profile.AnalysisTaskID != "" {
-				if existing, findErr := tx.Tasks().FindByID(ctx, profile.AnalysisTaskID); findErr == nil && (existing.Status == model.TaskStatusPending || existing.Status == model.TaskStatusRunning) {
-					return ErrProjectProfileAnalysisInProgress
-				}
-			}
-			profile.AnalysisTaskID = tasks[0].ID
-			profile.Status = model.ProfileStatusDraft
-			profile.Version++
-			project.Profile = datatypes.NewJSONType(profile)
-			if err := tx.Projects().Update(ctx, project); err != nil {
-				return err
-			}
-		}
 		return nil
 	})
 }
@@ -1079,8 +1281,13 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		}
 	}
 
-	// Derive task type from the project if ProjectID is set.
-	taskType := plan.Type
+	// Plan entries carry the canonical identity. The runtime-only fields are
+	// populated by CreateFromPlanEntry and never stored on the Plan row.
+	agentID := strings.TrimSpace(plan.AgentID)
+	channel := strings.TrimSpace(plan.Channel)
+	taskKind := strings.TrimSpace(plan.TaskKind)
+	// Legacy plans may omit the new identity during the one-time migration.
+	taskType := strings.TrimSpace(plan.Type)
 	var project *model.Project
 	if plan.ProjectID != "" {
 		found, err := s.ResolveTaskCreationProject(ctx, plan.UserID, plan.ProjectID)
@@ -1088,9 +1295,36 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 			return nil, err
 		}
 		project = found
-		taskType = found.Platform
 	}
-	if plan.CoverUsePortrait && (!model.SupportsPortraitCover(taskType) || project == nil || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" || (taskType == model.PlatformArticle && plan.ArticleWithCover != nil && !*plan.ArticleWithCover)) {
+	if agentID == "" || channel == "" || taskKind == "" {
+		if project != nil {
+			requested := taskType
+			if requested == "" {
+				switch project.Platform {
+				case model.PlatformWechat, "article":
+					requested = model.TaskTypeWechatArticle
+				case model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit:
+					requested = project.Platform
+				}
+			}
+			inferredAgent, inferredChannel, inferredKind, _, inferErr := resolveTaskIdentity(project, CreateManualParams{RequestedTaskType: requested})
+			if inferErr == nil {
+				agentID, channel, taskKind = inferredAgent, inferredChannel, inferredKind
+			}
+		}
+	}
+	if agentID == "" || channel == "" || taskKind == "" {
+		return nil, fmt.Errorf("plan entry identity requires agent_id, channel, and task_kind")
+	}
+	if pack, ok := agentpack.Default().ForAgent(agentID); !ok {
+		return nil, fmt.Errorf("unknown Agent %q", agentID)
+	} else if pack.Kind == agentpack.KindManaged && (pack.Channel != channel || !pack.SupportsTaskKind(taskKind)) {
+		return nil, fmt.Errorf("Agent %q does not support channel/task kind %q/%q", agentID, channel, taskKind)
+	}
+	if taskType == "" {
+		taskType = taskKind
+	}
+	if plan.CoverUsePortrait && (!model.SupportsPortraitCover(taskType) || project == nil || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" || ((taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture) && plan.ArticleWithCover != nil && !*plan.ArticleWithCover)) {
 		return nil, ErrCoverPortraitUnavailable
 	}
 	if taskType == model.PlatformWhiteboardAnimation {
@@ -1104,7 +1338,11 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		effectiveImageRatio = ""
 	}
 	if effectiveImageRatio == "" && project != nil {
-		effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+		if taskType == model.TaskTypeWechatPicture {
+			effectiveImageRatio = model.DefaultImageRatio(taskType)
+		} else {
+			effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
+		}
 	}
 	if isMontageTask && effectiveImageRatio == model.ImageRatioAuto {
 		effectiveImageRatio = ""
@@ -1112,8 +1350,8 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if effectiveImageRatio == "" {
 		effectiveImageRatio = model.DefaultImageRatio(taskType)
 	}
-	if project != nil && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, effectiveImageRatio) {
-		return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, effectiveImageRatio)
+	if len(model.SupportedImageRatiosForChannel(channel)) > 0 && !model.IsBusinessImageRatioAllowedForChannel(channel, effectiveImageRatio) {
+		return nil, fmt.Errorf("%s for channel %s: %s", model.ValidImageRatioHint, channel, effectiveImageRatio)
 	}
 	effectiveReferenceImageAssetID := plan.ReferenceImageAssetID
 	if err := s.validateTaskCreationReferences(ctx, plan.UserID, effectiveReferenceImageAssetID, project, nil); err != nil {
@@ -1183,6 +1421,9 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 		UserID:                   plan.UserID,
 		ProjectID:                plan.ProjectID,
 		PlanID:                   &plan.ID,
+		AgentID:                  agentID,
+		Channel:                  channel,
+		TaskKind:                 taskKind,
 		Type:                     taskType,
 		Status:                   model.TaskStatusPending,
 		Prompt:                   prompt,
@@ -1212,7 +1453,11 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
 	if project != nil {
-		task.SetProjectSnapshot(model.SnapshotProject(project))
+		snapshot := model.SnapshotProject(project)
+		snapshot.AgentID = agentID
+		snapshot.Channel = channel
+		s.freezeProjectAgentAndChannelConfig(ctx, project.ID, agentID, channel, &snapshot)
+		task.SetProjectSnapshot(snapshot)
 	}
 	if planHypitInput != nil {
 		task.SetHypitInput(*planHypitInput)
@@ -1251,6 +1496,73 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	}
 
 	return task, nil
+}
+
+// CreateFromPlanEntry creates a task for one Agent entry. Entries are
+// intentionally independent: callers can invoke this once per entry and
+// continue creating sibling tasks when one admission fails.
+func (s *TaskService) CreateFromPlanEntry(ctx context.Context, plan *model.Plan, entry *model.PlanEntry) (*model.Task, error) {
+	if plan == nil || entry == nil {
+		return nil, fmt.Errorf("plan and plan entry are required")
+	}
+	if entry.PlanID != "" && entry.PlanID != plan.ID {
+		return nil, fmt.Errorf("plan entry does not belong to plan")
+	}
+	copyPlan := *plan
+	copyPlan.AgentID = strings.TrimSpace(entry.AgentID)
+	copyPlan.Channel = strings.TrimSpace(entry.Channel)
+	copyPlan.TaskKind = strings.TrimSpace(entry.TaskKind)
+	copyPlan.Type = legacyTaskTypeForIdentity(copyPlan.AgentID, copyPlan.Channel, copyPlan.TaskKind)
+	copyPlan.ExecutionProfile = entry.ExecutionProfile
+	copyPlan.AgentInput = entry.AgentInput
+	// Image defaults are deliberately copied by key, so an entry can override
+	// only the image fields it owns without changing shared schedule settings.
+	for key, value := range entry.ImageDefaults.Data() {
+		switch key {
+		case "image_capability_key":
+			if v, ok := value.(string); ok {
+				copyPlan.ImageCapabilityKey = v
+			}
+		case "image_ratio":
+			if v, ok := value.(string); ok {
+				copyPlan.ImageRatio = v
+			}
+		case "watermark":
+			if v, ok := value.(bool); ok {
+				copyPlan.Watermark = v
+			}
+		}
+	}
+	return s.CreateFromPlan(ctx, &copyPlan)
+}
+
+func legacyTaskTypeForIdentity(agentID, channel, taskKind string) string {
+	switch agentID {
+	case model.AgentIDArticle:
+		return model.TaskTypeWechatArticle
+	case model.AgentIDWechatPicture:
+		return model.TaskTypeWechatPicture
+	case model.AgentIDSeednote:
+		return model.PlatformSeednote
+	case model.AgentIDChannelsVideo:
+		return model.PlatformMontage
+	case model.AgentIDWhiteboard:
+		return model.PlatformWhiteboardAnimation
+	}
+	switch channel {
+	case model.ChannelArticle:
+		return model.TaskTypeWechatArticle
+	case model.ChannelWechatPicture:
+		return model.TaskTypeWechatPicture
+	case model.ChannelSeednote:
+		return model.PlatformSeednote
+	case model.ChannelChannelsVideo:
+		return model.PlatformMontage
+	case model.ChannelWhiteboard:
+		return model.PlatformWhiteboardAnimation
+	default:
+		return taskKind
+	}
 }
 
 // GetByID returns a task by its ID.

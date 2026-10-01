@@ -21,7 +21,7 @@ func setupTaskFeedbackService(t *testing.T) (repository.Repository, *model.Task)
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := repository.New(db)
-	task := &model.Task{ID: uuid.NewString(), UserID: "user-1", Type: "article", Status: model.TaskStatusCompleted}
+	task := &model.Task{ID: uuid.NewString(), UserID: "user-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}
 	if err := repo.Tasks().Create(t.Context(), task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}

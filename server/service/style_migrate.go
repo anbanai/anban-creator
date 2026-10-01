@@ -33,7 +33,7 @@ func MigrateArticleStyleOverload(ctx context.Context, db *gorm.DB, log *zerolog.
 	var projects []*model.Project
 	// Only article projects with a non-empty Style can hold a stale writer key.
 	if err := db.WithContext(ctx).
-		Where("platform = ? AND style <> ?", model.PlatformArticle, "").
+		Where("platform = ? AND style <> ?", model.PlatformWechat, "").
 		Find(&projects).Error; err != nil {
 		return err
 	}

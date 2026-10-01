@@ -129,10 +129,12 @@ func (s *Service) CreateDraft(articles []*draft.Article) (*CreateDraftResult, er
 
 // DraftItem 草稿列表项
 type DraftItem struct {
-	MediaID    string `json:"media_id"`
-	Title      string `json:"title"`
-	Digest     string `json:"digest,omitempty"`
-	UpdateTime int64  `json:"update_time"`
+	MediaID       string   `json:"media_id"`
+	ArticleType   string   `json:"article_type,omitempty"`
+	Title         string   `json:"title"`
+	Digest        string   `json:"digest,omitempty"`
+	ImageMediaIDs []string `json:"image_media_ids,omitempty"`
+	UpdateTime    int64    `json:"update_time"`
 }
 
 // ListDraftsResult 草稿列表结果
@@ -144,11 +146,13 @@ type ListDraftsResult struct {
 
 // PublishedItem 已发布文章列表项
 type PublishedItem struct {
-	ArticleID  string `json:"article_id"`
-	Title      string `json:"title"`
-	Digest     string `json:"digest,omitempty"`
-	URL        string `json:"url,omitempty"`
-	UpdateTime int64  `json:"update_time"`
+	ArticleID     string   `json:"article_id"`
+	ArticleType   string   `json:"article_type,omitempty"`
+	Title         string   `json:"title"`
+	Digest        string   `json:"digest,omitempty"`
+	URL           string   `json:"url,omitempty"`
+	ImageMediaIDs []string `json:"image_media_ids,omitempty"`
+	UpdateTime    int64    `json:"update_time"`
 }
 
 // ListPublishedResult 已发布文章列表结果
@@ -160,10 +164,7 @@ type ListPublishedResult struct {
 
 // ListDrafts 获取草稿列表
 func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
-	oa := s.getOfficialAccount()
-	dm := oa.GetDraft()
-
-	list, err := dm.PaginateDraft(offset, count, true)
+	list, err := s.OfficialAPI().BatchGetDrafts(context.Background(), DraftBatchGetRequest{Offset: offset, Count: count, NoContent: true})
 	if err != nil {
 		s.log.Error().Err(err).Msg("list drafts failed")
 		if wErr := ParseWechatError(err); wErr != nil {
@@ -175,17 +176,31 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 	result := &ListDraftsResult{
 		TotalCount: list.TotalCount,
 		ItemCount:  list.ItemCount,
-		Items:      make([]DraftItem, 0, len(list.Item)),
+		Items:      make([]DraftItem, 0, len(list.Items)),
 	}
 
-	for _, item := range list.Item {
+	for _, item := range list.Items {
 		di := DraftItem{
 			MediaID:    item.MediaID,
 			UpdateTime: item.UpdateTime,
 		}
-		if len(item.Content.NewsItem) > 0 {
-			di.Title = item.Content.NewsItem[0].Title
-			di.Digest = item.Content.NewsItem[0].Digest
+		articleType := "news"
+		article := DraftArticle{}
+		if item.Content.NewspicInfo != nil {
+			articleType = "newspic"
+			article = *item.Content.NewspicInfo
+		} else if len(item.Content.NewsItems) > 0 {
+			article = item.Content.NewsItems[0]
+		}
+		if article.Title != "" || articleType == "newspic" {
+			di.ArticleType = articleType
+			di.Title = article.Title
+			di.Digest = article.Digest
+			if article.ImageInfo != nil {
+				for _, image := range article.ImageInfo.ImageList {
+					di.ImageMediaIDs = append(di.ImageMediaIDs, image.ImageMediaID)
+				}
+			}
 		}
 		result.Items = append(result.Items, di)
 	}
@@ -205,10 +220,7 @@ func (s *Service) ListPublishedWithContent(offset, count int64) (*ListPublishedR
 }
 
 func (s *Service) listPublished(offset, count int64, noReturnContent bool) (*ListPublishedResult, error) {
-	oa := s.getOfficialAccount()
-	fp := oa.GetFreePublish()
-
-	list, err := fp.Paginate(offset, count, noReturnContent)
+	list, err := s.OfficialAPI().BatchGetFreePublishes(context.Background(), FreePublishBatchGetRequest{Offset: offset, Count: count, NoContent: noReturnContent})
 	if err != nil {
 		if wErr := ParseWechatError(err); wErr != nil {
 			s.log.Debug().Int("errcode", wErr.ErrCode).Str("msg", wErr.UserMsg).Msg("list published failed")
@@ -221,9 +233,30 @@ func (s *Service) listPublished(offset, count int64, noReturnContent bool) (*Lis
 	result := &ListPublishedResult{
 		TotalCount: list.TotalCount,
 		ItemCount:  list.ItemCount,
-		Items:      mapPublishedItems(list.Item),
+		Items:      mapOfficialPublishedItems(list.Items),
 	}
 	return result, nil
+}
+
+func mapOfficialPublishedItems(items []FreePublishBatchItem) []PublishedItem {
+	result := make([]PublishedItem, 0, len(items))
+	for _, item := range items {
+		if item.Content.NewspicInfo != nil {
+			article := item.Content.NewspicInfo
+			mapped := PublishedItem{ArticleID: item.ArticleID, ArticleType: "newspic", Title: article.Title, Digest: article.Digest, UpdateTime: item.UpdateTime}
+			if article.ImageInfo != nil {
+				for _, image := range article.ImageInfo.ImageList {
+					mapped.ImageMediaIDs = append(mapped.ImageMediaIDs, image.ImageMediaID)
+				}
+			}
+			result = append(result, mapped)
+			continue
+		}
+		for _, article := range item.Content.NewsItems {
+			result = append(result, PublishedItem{ArticleID: item.ArticleID, ArticleType: "news", Title: article.Title, Digest: article.Digest, URL: article.URL, UpdateTime: item.UpdateTime})
+		}
+	}
+	return result
 }
 
 func mapPublishedItems(items []freepublish.ArticleListItem) []PublishedItem {
@@ -231,7 +264,7 @@ func mapPublishedItems(items []freepublish.ArticleListItem) []PublishedItem {
 	for _, item := range items {
 		for _, article := range item.Content.NewsItem {
 			result = append(result, PublishedItem{
-				ArticleID:  item.ArticleID,
+				ArticleID: item.ArticleID, ArticleType: "news",
 				Title:      article.Title,
 				Digest:     article.Digest,
 				URL:        article.URL,

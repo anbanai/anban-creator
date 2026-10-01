@@ -89,12 +89,19 @@ spec:
               value: /var/run/secrets/anban-internal-ca/ca.crt
             - name: ANBAN_AGENT_NAMESPACE
               value: ${namespace}
-            - name: ANBAN_AGENT_IMAGE_ARTICLE
-              value: ${article_agent_image_repo}
+            - name: ANBAN_AGENT_IMAGE_WECHAT
+              value: ${wechat_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_SEEDNOTE
               value: ${seednote_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_MONTAGE
               value: ${montage_agent_image_repo}
+<<<<<<< HEAD
+=======
+            - name: ANBAN_AGENT_IMAGE_PROFILE
+              value: ${profile_agent_image_repo}
+            - name: ANBAN_AGENT_IMAGE_FEEDBACK
+              value: ${feedback_agent_image_repo}
+>>>>>>> codex/tasks-infinite-scroll-review
             - name: ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION
               value: ${whiteboard_animation_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_HYPIT

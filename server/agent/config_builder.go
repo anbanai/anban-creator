@@ -114,7 +114,7 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 	// resolved set. For current tasks, the raw project already represents the
 	// frozen snapshot; legacy task overrides are applied only for old rows.
 	switch ch.Platform {
-	case model.ScopeArticle:
+	case model.ScopeWechat:
 		// Author is the publish署名 (goes to draft.json's author key at publish).
 		cfg.Wechat.Article.Author = resolved.Author
 		// Writer is the writer RESOURCE key (e.g. "dan-koe") — NOT the image
@@ -132,7 +132,7 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 	// Apply global image API config from server config.
 	if imageAPICfg != nil && imageAPICfg.API != nil {
 		switch ch.Platform {
-		case model.ScopeArticle:
+		case model.ScopeWechat:
 			cfg.Wechat.Article.Cover.Image = *imageAPICfg.API
 			cfg.Wechat.Article.Content.Image = *imageAPICfg.API
 		case model.ScopeSeednote:
@@ -149,7 +149,7 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 	}
 	if effectiveRatio != "" {
 		switch ch.Platform {
-		case model.ScopeArticle:
+		case model.ScopeWechat:
 			cfg.Wechat.Article.Cover.Image.Size = effectiveRatio
 			cfg.Wechat.Article.Content.Image.Size = effectiveRatio
 		case model.ScopeSeednote:
@@ -162,7 +162,7 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 	// style references are materialized separately for prompt analysis.
 	if hasTaskReference {
 		switch ch.Platform {
-		case model.ScopeArticle:
+		case model.ScopeWechat:
 			cfg.Wechat.Article.Cover.Image.Refer = TaskReferenceImagePath
 		case model.ScopeSeednote:
 			cfg.Seednote.Cover.Image.Refer = TaskReferenceImagePath
@@ -202,12 +202,34 @@ func writeProjectCLAUDEMD(workDir string, project *model.Project) error {
 
 // TaskTypeToAgent maps server task types to Claude Code agent names.
 func TaskTypeToAgent(taskType string) string {
+	// Legacy task-type callers are kept at this compatibility boundary. New
+	// admission and dispatch paths use Task.AgentID directly.
+	switch taskType {
+	case model.PlatformWechat, model.TaskTypeWechatArticle:
+		return "wechat-article"
+	case model.PlatformMontage:
+		return "montage"
+	case model.PlatformSeednote:
+		return model.AgentIDSeednote
+	case model.PlatformMoments:
+		return "moments"
+	case model.PlatformEcommerce:
+		return "ecommerce"
+	case model.TaskTypeLiveSlicer:
+		return "live-slicer"
+	}
 	agentName, _ := taskTypeToAgentRoute(taskType)
 	return agentName
 }
 
 func taskTypeToAgentRoute(taskType string) (string, bool) {
+	if taskType == model.PlatformWechat {
+		taskType = model.TaskTypeWechatArticle
+	}
 	if pack, ok := agentpack.Default().ForTaskType(taskType); ok {
+		return pack.Agent.Name, true
+	}
+	if pack, ok := agentpack.Default().ForProjectPlatform(taskType); ok {
 		return pack.Agent.Name, true
 	}
 	return model.PlatformSeednote, false
@@ -217,6 +239,9 @@ func taskTypeToAgentRoute(taskType string) (string, bool) {
 func TaskToAgent(task *model.Task) string {
 	if task == nil {
 		return TaskTypeToAgent("")
+	}
+	if strings.TrimSpace(task.AgentID) != "" {
+		return task.AgentID
 	}
 	return TaskTypeToAgent(task.Type)
 }

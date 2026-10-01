@@ -301,7 +301,7 @@ func TestRecoverWechatPublicationVisualsEnqueueFailureRestoresCompletedTask(t *t
 func TestRecoverWechatPublicationDoesNotCreateAdditionalTaskCharge(t *testing.T) {
 	ctx := context.Background()
 	svc, billing, enqueuer := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID, Prompt: "recovery billing", Quantity: 1})
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("CreateManual = %#v, %v", tasks, err)

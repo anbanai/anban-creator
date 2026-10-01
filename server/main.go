@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/auth"
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
 	"github.com/anbanai/anban-creator/server/config"
@@ -123,6 +125,20 @@ func main() {
 		} else {
 			log.Info().Msg("database migration completed")
 		}
+		if err := service.MigrateProjectProfiles(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate project profile read models")
+		}
+		// Migrate the legacy channel/account rows before identity backfill so
+		// credentials are available when they are copied into channel configs.
+		if err := service.MigrateChannelsToProjects(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate channels to projects")
+		}
+		if err := service.MigrateMultiAgentChannelIdentity(context.Background(), mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate multi-Agent channel identity")
+		}
+		if err := service.MigrateWechatIdentity(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate WeChat identities")
+		}
 		if err := service.MigrateDesktopExecutionRemoval(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to remove desktop execution schema")
 		}
@@ -149,7 +165,7 @@ func main() {
 		// article rows stored the writer key in Style; move it to WritingStyle and
 		// clear Style so the writer key is no longer read as a visual-style anchor.
 		if err := service.MigrateArticleStyleOverload(context.Background(), mysqlDB, log); err != nil {
-			log.Error().Err(err).Msg("failed to backfill article project style overload")
+			log.Fatal().Err(err).Msg("failed to backfill article project style overload")
 		}
 
 		// 6.2 One-time rename: the `channel` (WeChat account) concept became
@@ -157,12 +173,8 @@ func main() {
 		// the legacy `channels` table + `channel_id` foreign keys into `projects`
 		// / `project_id` while preserving all data. Idempotent; no-op on fresh or
 		// already-migrated databases.
-		if err := service.MigrateChannelsToProjects(context.Background(), mysqlDB, log); err != nil {
-			log.Error().Err(err).Msg("failed to migrate channels to projects")
-		}
-
 		if err := service.MigrateProjectPositioningToInstructions(context.Background(), mysqlDB, log); err != nil {
-			log.Error().Err(err).Msg("failed to migrate project positioning to instructions")
+			log.Fatal().Err(err).Msg("failed to migrate project positioning to instructions")
 		}
 
 	}
@@ -309,7 +321,7 @@ func main() {
 			log.Fatal().Err(err).Msg("failed to create Docker workload verifier")
 		}
 		log.Info().
-			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformArticle).Image).
+			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformWechat).Image).
 			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
 			Int64("memory_mb", cfg.Claude.Docker.MemoryMB).
 			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
@@ -333,7 +345,7 @@ func main() {
 		}
 		log.Info().
 			Str("namespace", cfg.Claude.Kubernetes.Namespace).
-			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformArticle).Image).
+			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformWechat).Image).
 			Msg("Kubernetes Job runtime client created")
 	default:
 		log.Fatal().Str("executor", cfg.Claude.Executor).Msg("unsupported Claude executor")
@@ -373,6 +385,8 @@ func main() {
 	var asynqClient *scheduler.AsynqClient
 	var analyticsRebuildManager *service.AnalyticsRebuildManager
 	var feedbackScheduler *service.FeedbackScheduler
+	var feedbackAttributionSvc *service.FeedbackAttributionService
+	var feedbackPromotionSvc *service.FeedbackPromotionService
 	hypitCapabilitySvc := service.NewHypitCapabilityService(cfg.Hypit)
 	montageCapabilitySvc := service.NewMontageCapabilityService(cfg.Montage)
 	if repo != nil {
@@ -385,7 +399,21 @@ func main() {
 		projectSvc.SetMontageCapabilityService(montageCapabilitySvc)
 		feedbackSvc = service.NewFeedbackService(repo, log)
 		publishingSvc = service.NewPublishingService(repo, log)
-		wechatPublicationSvc = service.NewWechatPublicationService(repo, nil, log)
+		wechatPublicationSvc = service.NewWechatPublicationService(repo, func(project *model.Project) (service.WechatPublicationAPI, error) {
+			appCfg, err := publishingSvc.BuildAppConfigForProject(project)
+			if err != nil {
+				return nil, err
+			}
+			return appwechat.NewService(appCfg, log).OfficialAPI(), nil
+		}, log)
+		wechatPublicationSvc.SetMaterialUploader(func(ctx context.Context, project *model.Project, data []byte, filename string) (*appwechat.UploadMaterialResult, error) {
+			publisher := service.NewPublishingService(repo, log)
+			appCfg, err := publisher.BuildAppConfigForProject(project)
+			if err != nil {
+				return nil, err
+			}
+			return appwechat.NewService(appCfg, log).UploadMaterialFromBytes(data, filename)
+		})
 		templateSvc = service.NewTemplateService(repo, log)
 		posterSvc = service.NewPosterService(repo, log)
 
@@ -404,7 +432,12 @@ func main() {
 		// leave queued rows with no worker able to claim them.
 		if asynqClient != nil {
 			feedbackScheduler = service.NewFeedbackScheduler(repo, asynqClient)
+			feedbackAttributionSvc = service.NewFeedbackAttributionService(repo, asynqClient)
 		}
+		if feedbackAttributionSvc != nil {
+			feedbackAttributionSvc.SetAgentProfileRegistry(agentProfiles)
+		}
+		feedbackPromotionSvc = service.NewFeedbackPromotionService(repo, projectMemoryStore)
 		wechatPublicationSvc.SetEnqueuer(asynqClient)
 
 		taskSvc = service.NewTaskService(repo, asynqClient, store, log, cfg.Claude.TaskLogDir, service.NewRedisPubSub(rdb, log), publishingSvc)
@@ -430,6 +463,7 @@ func main() {
 		}
 		taskSvc.SetTaskWorkspaceLifecycle(workspaceLifecycle)
 		projectSvc.SetProjectMemoryLifecycle(projectMemoryStore)
+		projectSvc.SetProjectProfileMemory(projectMemoryStore)
 		runtimeReconciler = agent.NewRuntimeReconciler(runtimeDispatcher, taskSvc, reconcilerConfig, *log)
 		taskSvc.SetNASResumeEnabled(true)
 		if cap := managedRuntimeProjectConcurrencyCap(cfg.Claude.Executor); cap > 0 {
@@ -633,6 +667,8 @@ func main() {
 			aiEntryHandler = handler.NewAIEntryHandler(aiEntrySvc, repo, store, log)
 		}
 		feedbackHandler = handler.NewFeedbackHandler(feedbackSvc, log)
+		feedbackHandler.SetAttributionService(feedbackAttributionSvc)
+		feedbackHandler.SetPromotionService(feedbackPromotionSvc)
 		templateHandler = handler.NewTemplateHandler(templateSvc, log)
 		templateHandler.SetReferenceAssetService(referenceAssetSvc)
 		imageAnalysisHandler = handler.NewImageAnalysisHandler(imageAnalysisSvc, log)
@@ -763,7 +799,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, cfg, log)
 		startAnalyticsRebuildRecovery(ctx, repo, asynqClient, log)
 	}
 
@@ -1109,8 +1145,11 @@ func requireServerOwnedArticlePublicationSchema(db *gorm.DB) error {
 	}
 	if !hasExecutions || !db.Migrator().HasColumn(&model.TaskExecution{}, "Purpose") ||
 		!hasPublications || !db.Migrator().HasColumn(&model.WechatPublication{}, "DraftAddAttempts") ||
-		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftRetryAuthorizedAt") {
-		return fmt.Errorf("existing database requires server/migrations/20260916_server_owned_article_publication.sql before startup")
+		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftRetryAuthorizedAt") ||
+		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftArticleType") ||
+		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftImageMediaIDs") ||
+		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftCoverCropPercentList") {
+		return fmt.Errorf("existing database requires server/migrations/20260916_server_owned_article_publication.sql and 20261001_wechat_picture_publication_evidence.sql before startup")
 	}
 	return nil
 }
@@ -1283,7 +1322,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1337,7 +1376,33 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	}
 	if feedbackScheduler != nil {
 		srv.RegisterFeedbackHandler(func(ctx context.Context, fingerprint string) error {
-			return service.ProcessFeedbackJob(ctx, repo, fingerprint)
+			job, err := repo.FeedbackLoop().FindJobByIDOrFingerprint(ctx, fingerprint)
+			if err != nil {
+				return err
+			}
+			if job.Status == model.FeedbackJobSkipped {
+				return nil
+			}
+			if job.Operation == "data_tracker" {
+				return service.ProcessFeedbackJob(ctx, repo, fingerprint)
+			}
+			if feedbackAttributionSvc == nil || taskSvc == nil {
+				return errors.New("feedback managed runtime unavailable")
+			}
+			task, err := feedbackAttributionSvc.EnsureManagedTask(ctx, job)
+			if err != nil {
+				return err
+			}
+			err = taskSvc.HandleExecutionFromPayload(ctx, task.ID, task.UserID)
+			if err != nil {
+				_ = repo.FeedbackLoop().ReleaseFeedbackLease(context.Background(), service.FeedbackAccountLeaseScope(job.AccountID), job.ID)
+				return err
+			}
+			latest, findErr := repo.Tasks().FindByID(ctx, task.ID)
+			if findErr == nil && model.IsTerminalTaskStatus(latest.Status) {
+				_ = repo.FeedbackLoop().ReleaseFeedbackLease(context.Background(), service.FeedbackAccountLeaseScope(job.AccountID), job.ID)
+			}
+			return nil
 		}, log)
 	}
 

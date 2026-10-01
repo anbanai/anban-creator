@@ -39,7 +39,7 @@ export const mockBillingCatalog: BillingCatalog = {
   catalog_id: 'retail-test-v1',
   currency: 'credits',
   skus: [
-    { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+    { id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
     { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
     { id: 'task.moments.effective', operation: 'task.moments', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'moments_artifacts_verified' },
     { id: 'task.viral-analysis.effective', operation: 'task.viral_analysis', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1200, delivery: 'viral_analysis_report_verified' },
@@ -121,7 +121,7 @@ export const mockPlans: PaginatedResponse<Plan> = {
   items: [
     {
       id: 'plan-1',
-      type: 'article',
+      type: 'wechat-article',
       title: '测试计划',
       description: '',
       cron_expr: '0 9 * * 1',
@@ -141,7 +141,7 @@ export const mockTasks: PaginatedResponse<Task> = {
   items: [
     {
       id: 'task-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '测试任务',
       status: 'completed',
       plan_id: null,
@@ -160,7 +160,7 @@ export const mockProjects: Project[] = [
   {
     id: 'ch-1',
     user_id: '1',
-    platform: 'article',
+    platform: 'wechat',
     name: '测试项目',
     avatar_url: '',
     profile_url: 'https://mp.weixin.qq.com/test',
@@ -196,7 +196,7 @@ export const mockProjectDetail: ProjectDetail = {
 
 export const mockPlatformConfigs: PlatformConfig[] = [
   {
-    id: 'article',
+    id: 'wechat',
     label: '公众号',
     badge_variant: 'success',
     supports_publishing: true,
@@ -263,8 +263,9 @@ const managedPack = (id: string, displayName: string, options: {
   display_name: displayName,
   description: `${displayName} workflow`,
   agent: { name: id, max_turns: 20 },
-  bindings: { project_platforms: options.projectPlatforms, task_types: options.taskTypes },
-  runtime: { profile: id === 'montage' ? 'montage' : 'article', adapter: id === 'montage' ? 'openmontage' : 'standard' },
+  channel: options.projectPlatforms?.[0] as AgentPackCatalog['packs'][number]['channel'],
+  bindings: { task_kinds: options.taskTypes },
+  runtime: { profile: id === 'montage' ? 'montage' : 'wechat', adapter: id === 'montage' ? 'openmontage' : 'standard' },
   surfaces: options.surfaces ?? ['plugin', 'project', 'task'],
   ui: { renderer: `custom:${id}` },
   digest: 'a'.repeat(64),
@@ -272,7 +273,7 @@ const managedPack = (id: string, displayName: string, options: {
 
 export const mockAgentPackCatalog: AgentPackCatalog = {
   packs: [
-    managedPack('article', '微信公众号文章', { projectPlatforms: ['article'], taskTypes: ['article'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
+    managedPack('wechat-article', '微信公众号文章', { projectPlatforms: ['wechat'], taskTypes: ['wechat-article'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
     managedPack('ecommerce', '电商素材', { projectPlatforms: ['ecommerce'], taskTypes: ['ecommerce'] }),
     managedPack('live-slicer', '直播切片', { taskTypes: ['live-slicer'], surfaces: ['plugin'] }),
     managedPack('moments', '朋友圈素材包', { projectPlatforms: ['moments'], taskTypes: ['moments'] }),

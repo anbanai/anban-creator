@@ -34,9 +34,9 @@ func TestFeedbackRecommendationsReflectEngagementBand(t *testing.T) {
 func TestFeedbackStrategyUsableRequiresActiveMatchingUnexpiredSnapshot(t *testing.T) {
 	now := time.Date(2026, 9, 29, 4, 0, 0, 0, time.UTC)
 	base := &model.StrategySnapshot{
-		Platform:        model.PlatformArticle,
+		Platform:        model.PlatformWechat,
 		Status:          "active",
-		ApplicableTasks: `["article"]`,
+		ApplicableTasks: `["wechat-article"]`,
 	}
 	cases := []struct {
 		name   string
@@ -56,7 +56,7 @@ func TestFeedbackStrategyUsableRequiresActiveMatchingUnexpiredSnapshot(t *testin
 			if tc.mutate != nil {
 				tc.mutate(&candidate)
 			}
-			if got := feedbackStrategyUsable(&candidate, model.PlatformArticle, model.PlatformArticle, now); got != tc.want {
+			if got := feedbackStrategyUsable(&candidate, model.TaskTypeWechatArticle, model.ChannelArticle, now); got != tc.want {
 				t.Fatalf("feedbackStrategyUsable() = %v, want %v", got, tc.want)
 			}
 		})
@@ -189,8 +189,8 @@ func TestFeedbackWindowOpenUsesCadenceSpecificLocalWindows(t *testing.T) {
 }
 
 func TestFeedbackAccountIDUsesPlatformIdentityAndProjectFallback(t *testing.T) {
-	wechatA := &model.Project{ID: "project-a", Platform: model.PlatformArticle, Config: model.ProjectConfig{WechatAppID: "wx-a"}}
-	wechatB := &model.Project{ID: "project-b", Platform: model.PlatformArticle, Config: model.ProjectConfig{WechatAppID: "wx-a"}}
+	wechatA := &model.Project{ID: "project-a", Platform: model.PlatformWechat, Config: model.ProjectConfig{WechatAppID: "wx-a"}}
+	wechatB := &model.Project{ID: "project-b", Platform: model.PlatformWechat, Config: model.ProjectConfig{WechatAppID: "wx-a"}}
 	if gotA, gotB := feedbackAccountID(wechatA), feedbackAccountID(wechatB); gotA != gotB || gotA != "wechat:wx-a" {
 		t.Fatalf("wechat account identity = %q, %q", gotA, gotB)
 	}

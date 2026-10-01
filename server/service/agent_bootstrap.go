@@ -55,10 +55,14 @@ type AgentRuntimeProfile struct {
 }
 
 type AgentBootstrapResponse struct {
-	ExecutionToken       string              `json:"execution_token"`
-	ExecutionID          string              `json:"execution_id"`
-	TaskID               string              `json:"task_id"`
-	TaskType             string              `json:"task_type"`
+	ExecutionToken string `json:"execution_token"`
+	ExecutionID    string `json:"execution_id"`
+	TaskID         string `json:"task_id"`
+	// TaskType is a deprecated wire alias. New runtimes consume TaskKind.
+	TaskType             string              `json:"task_type,omitempty"`
+	AgentID              string              `json:"agent_id"`
+	Channel              string              `json:"channel"`
+	TaskKind             string              `json:"task_kind"`
 	AgentPackID          string              `json:"agent_pack_id"`
 	AgentPackVersion     string              `json:"agent_pack_version"`
 	AgentPackDigest      string              `json:"agent_pack_digest"`
@@ -277,6 +281,11 @@ func (s *AgentBootstrapService) loadAndValidate(ctx context.Context, repo reposi
 }
 
 func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *model.TaskExecution, task *model.Task, project *model.Project, workloadDeadline time.Time) (*AgentBootstrapResponse, error) {
+	if task != nil && task.Type == model.TaskTypeProfileAnalysis {
+		if err := UpdateProfileLifecycle(ctx, s.repo, task.ProjectID, task.ID, model.ProfileInitializationRunning, ""); err != nil {
+			return nil, fmt.Errorf("mark profile analysis running: %w", err)
+		}
+	}
 	issuedAt := s.currentTime()
 	tokenTTL := s.cfg.TokenTTL
 	if task != nil && model.IsHypitPlatform(task.Type) {
@@ -313,7 +322,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 				return nil, fmt.Errorf("load frozen feedback strategy: %w", err)
 			}
 		} else if gc == nil {
-			strategy, err = s.repo.FeedbackLoop().FindActiveStrategy(ctx, task.ProjectID, project.Platform)
+			strategyChannel := strings.TrimSpace(task.Channel)
+			if strategyChannel == "" {
+				strategyChannel = strings.TrimSpace(project.Platform)
+			}
+			strategy, err = s.repo.FeedbackLoop().FindActiveStrategy(ctx, task.ProjectID, strategyChannel)
 			if err != nil {
 				return nil, fmt.Errorf("load feedback strategy: %w", err)
 			}
@@ -323,7 +336,15 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		// A strategy is validated when a new execution freezes it. A retry of the
 		// same execution keeps consuming that frozen snapshot even after it is
 		// retired by a newer monthly activation.
-		strategyUsable := strategy != nil && (frozenStrategy || feedbackStrategyUsable(strategy, task.Type, project.Platform, issuedAt))
+		strategyChannel := strings.TrimSpace(task.Channel)
+		if strategyChannel == "" {
+			strategyChannel = strings.TrimSpace(project.Platform)
+		}
+		strategyTaskKind := strings.TrimSpace(task.TaskKind)
+		if strategyTaskKind == "" {
+			strategyTaskKind = strings.TrimSpace(task.Type)
+		}
+		strategyUsable := strategy != nil && (frozenStrategy || feedbackStrategyUsable(strategy, strategyTaskKind, strategyChannel, issuedAt))
 		if strategyUsable {
 			gc.StrategySnapshotID, gc.StrategyRevision, gc.StrategyDigest = strategy.ID, strategy.Revision, strategy.Digest
 			strategyPayload = map[string]any{"mode": "advisory", "available": true, "strategy_snapshot_id": strategy.ID, "strategy_revision": strategy.Revision, "strategy_digest": strategy.Digest, "recommendations": json.RawMessage(strategy.Recommendations), "evidence": json.RawMessage(strategy.Evidence), "limitations": strategy.Limitations}
@@ -380,12 +401,24 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("marshal runtime settings: %w", err)
 	}
 	files = append(files, BootstrapFile{Path: ".anban-creator/settings.json", Text: string(settings), Mode: 0600, ReplaceExisting: true})
+	// Every execution receives a read-only snapshot of the current project
+	// profile. The runtime may read these files, but persistence is owned by the
+	// Server's profile service and the dedicated MCP submission capability.
+	profile := projectProfileFor(project)
+	files = append(files, BootstrapFile{Path: "AGENTS.md", Text: ProfileAgentsMarkdown(), Mode: 0644})
+	for _, dimension := range model.ProfileDimensions() {
+		content, err := ProfileDimensionMarkdown(dimension, profileDimension(profile, dimension))
+		if err != nil {
+			return nil, fmt.Errorf("render profile input %s: %w", dimension, err)
+		}
+		files = append(files, BootstrapFile{Path: "profile/" + dimension + ".md", Text: content, Mode: 0644})
+	}
 	if feedbackFile.Path != "" {
 		files = append(files, feedbackFile)
 	}
-	if instructions := strings.TrimSpace(effective.Instructions); instructions != "" {
-		files = append(files, BootstrapFile{Path: "CLAUDE.md", Text: "# CLAUDE.md\n\n## 项目定位\n\n" + instructions, Mode: 0644})
-	}
+	instructions := strings.TrimSpace(effective.Instructions)
+	claude := "# CLAUDE.md\n\n## 项目定位\n\n" + instructions + "\n\n## 项目画像\n\n请先阅读并遵循 AGENTS.md 及 profile/ 下的六个画像文件。"
+	files = append(files, BootstrapFile{Path: "CLAUDE.md", Text: claude, Mode: 0644})
 	attachments := task.InputAttachments.Data()
 	if taskReferenceAsset != nil {
 		signed, err := s.signedReferenceAssetURL(ctx, taskReferenceAsset, credentialDeadline)
@@ -443,8 +476,12 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err != nil {
 		return nil, err
 	}
+	bootstrapTaskType := legacyTaskTypeForIdentity(task.AgentID, task.Channel, task.TaskKind)
+	if bootstrapTaskType == "" {
+		bootstrapTaskType = task.Type
+	}
 	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{
-		TaskType: task.Type, Topic: task.Prompt, TaskID: task.ID, ProjectID: task.ProjectID,
+		TaskType: bootstrapTaskType, Topic: task.Prompt, TaskID: task.ID, ProjectID: task.ProjectID,
 		ImageRatio: task.ImageRatio, HasReferenceImage: taskReferenceAsset != nil,
 		HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage,
 		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,
@@ -472,32 +509,33 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			break
 		}
 	}
-	profile, err := s.resolveExecutionProfile(execution, task)
+	executionProfile, err := s.resolveExecutionProfile(execution, task)
 	if err != nil {
 		return nil, err
 	}
-	runtimeEnv := profile.RuntimeEnv()
+	runtimeEnv := executionProfile.RuntimeEnv()
 	if err := model.ValidateClaudeProfileEnvs(runtimeEnv, true); err != nil {
 		return nil, fmt.Errorf("%w: invalid Claude profile environment: %w", ErrAgentBootstrapUnavailable, err)
 	}
-	aliases := make(map[string]serveragent.ModelUsageIdentity, len(profile.ModelUsageAliases))
-	for raw, target := range profile.ModelUsageAliases {
-		aliases[raw] = serveragent.ModelUsageIdentity{Provider: profile.Provider, Model: target}
+	aliases := make(map[string]serveragent.ModelUsageIdentity, len(executionProfile.ModelUsageAliases))
+	for raw, target := range executionProfile.ModelUsageAliases {
+		aliases[raw] = serveragent.ModelUsageIdentity{Provider: executionProfile.Provider, Model: target}
 	}
 	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
 	return &AgentBootstrapResponse{
-		ExecutionToken: token, ExecutionID: execution.ID, TaskID: task.ID, TaskType: task.Type,
+		ExecutionToken: token, ExecutionID: execution.ID, TaskID: task.ID, TaskType: bootstrapTaskType,
+		AgentID: execution.AgentID, Channel: execution.Channel, TaskKind: execution.TaskKind,
 		AgentPackID: execution.AgentPackID, AgentPackVersion: execution.AgentPackVersion,
 		AgentPackDigest: execution.AgentPackDigest, RuntimeAdapter: execution.RuntimeAdapter, RuntimeProfile: execution.RuntimeProfile,
 		ProjectID: task.ProjectID, Prompt: prompt,
 		ExecutionProfile: AgentRuntimeProfile{
-			ProfileID: profile.ID, Provider: profile.Provider, Protocol: profile.Protocol,
-			DisplayName: profile.DisplayName, ProfileFingerprint: task.AgentProfileFingerprint,
+			ProfileID: executionProfile.ID, Provider: executionProfile.Provider, Protocol: executionProfile.Protocol,
+			DisplayName: executionProfile.DisplayName, ProfileFingerprint: task.AgentProfileFingerprint,
 			Envs: model.CloneClaudeProfileEnvs(runtimeEnv), ModelUsageAliases: aliases,
 		},
-		MaxTurns: serveragent.DefaultMaxTurns(task.Type, s.cfg.MaxTurns), AgentFlag: "anban:" + serveragent.TaskToAgent(task),
+		MaxTurns: serveragent.DefaultMaxTurns(execution.AgentPackID, s.cfg.MaxTurns), AgentFlag: "anban:" + execution.AgentID,
 		AgentMemoryDirectory: ".claude/agent-memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
 		Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
 		recoveryImages: recoveryImages,

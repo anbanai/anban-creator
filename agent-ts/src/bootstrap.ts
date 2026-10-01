@@ -20,7 +20,7 @@ const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
 export const AGENT_RUNTIME_CONTRACT_VERSION = 4;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
-  "execution_token", "execution_id", "task_id", "task_type", "project_id", "prompt",
+  "execution_token", "execution_id", "task_id", "task_type", "agent_id", "channel", "task_kind", "project_id", "prompt",
   "agent_pack_id", "agent_pack_version", "agent_pack_digest", "runtime_profile", "runtime_adapter",
   "execution_profile", "max_turns", "agent_flag", "agent_memory_directory",
   "resume_session_id", "resume_context_path", "env", "files", "artifact_transport",
@@ -108,7 +108,11 @@ export interface BootstrapResponse {
   execution_token: string;
   execution_id: string;
   task_id: string;
+  /** @deprecated compatibility alias; task_kind is canonical. */
   task_type: string;
+  agent_id: string;
+  channel: string;
+  task_kind: string;
   agent_pack_id: string;
   agent_pack_version: string;
   agent_pack_digest: string;
@@ -139,7 +143,7 @@ export interface AgentPack {
   version: string;
   digest: string;
   agent: { name: string };
-  bindings: { task_types?: string[] };
+  bindings: { task_kinds?: string[]; task_types?: string[] };
   runtime: { profile?: string; adapter?: string; max_turns?: number };
   artifacts: AgentPackArtifact[];
   artifacts_by_task_type?: Record<string, AgentPackArtifact[]>;
@@ -275,7 +279,19 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
   }
   if (data.execution_id !== executionID) throw new Error("bootstrap execution identity mismatch");
   validateExecutionToken(executionID, data);
-  if (!cleanString(data.task_type) || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(data.task_type)) throw new Error("bootstrap task type is invalid");
+  const taskKind = cleanString(data.task_kind) ? data.task_kind : data.task_type;
+  if (!cleanString(taskKind) || !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(taskKind)) throw new Error("bootstrap task kind is invalid");
+  // Older servers did not send the decomposed identity. Keep accepting those
+  // payloads while normalizing the new fields for the runner; current servers
+  // always provide all three explicitly.
+  if (!cleanString(data.agent_id)) data.agent_id = data.agent_pack_id;
+  if (!cleanString(data.channel)) data.channel = "legacy";
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_id)) throw new Error("bootstrap Agent ID is invalid");
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.channel)) throw new Error("bootstrap channel is invalid");
+  // Normalize the deprecated alias so the existing runner can continue to use
+  // one semantic task identity internally.
+  data.task_kind = taskKind;
+  if (!cleanString(data.task_type)) data.task_type = taskKind;
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_pack_id) || !/^\d+\.\d+\.\d+$/.test(data.agent_pack_version) || !/^[0-9a-f]{64}$/.test(data.agent_pack_digest)) throw new Error("bootstrap Agent Pack identity is invalid");
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.runtime_profile) || (data.runtime_adapter !== "standard" && data.runtime_adapter !== "openmontage")) throw new Error("bootstrap runtime identity is invalid");
   if (data.artifact_transport?.mode !== "direct" && data.artifact_transport?.mode !== "stream") throw new Error("bootstrap artifact transport is invalid");
@@ -299,9 +315,27 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
 
 export function validateAgentPackCatalog(data: BootstrapResponse, catalog: AgentPackCatalog): AgentPackCatalog["packs"][number] {
   validateAgentPackCatalogShape(catalog);
-  const matches = catalog.packs.filter((pack) => Array.isArray(pack.bindings?.task_types) && pack.bindings.task_types.includes(data.task_type));
-  if (matches.length !== 1) throw new Error("bootstrap task type does not resolve to exactly one Agent Pack");
-  const pack = matches[0]!;
+  const matches = catalog.packs.filter((pack) => {
+    const kinds = pack.bindings?.task_kinds ?? pack.bindings?.task_types;
+    return Array.isArray(kinds) && kinds.includes(data.task_kind);
+  });
+  const taskTypeMatches = matches.length > 0 ? matches : catalog.packs.filter((pack) => {
+    const kinds = pack.bindings?.task_types ?? pack.bindings?.task_kinds;
+    return Array.isArray(kinds) && kinds.includes(data.task_type);
+  });
+  if (taskTypeMatches.length === 0) {
+    const direct = catalog.packs.find((candidate) => candidate.id === data.agent_pack_id);
+    if (!direct) throw new Error("bootstrap task kind does not resolve to an Agent Pack");
+    return resolveAgentPackForTaskType(direct, data.task_kind);
+  }
+  // Several Agents can expose the same task kind (for example, both WeChat
+  // content packs use content_generation). The frozen Agent Pack ID is the
+  // execution identity; the deprecated task_type is only a hint for reporting
+  // drift when a test or stale runtime supplies a mismatched ID.
+  const pack = taskTypeMatches.find((candidate) => candidate.id === data.agent_pack_id)
+    ?? taskTypeMatches.find((candidate) => candidate.id === data.task_type)
+    ?? (taskTypeMatches.length === 1 ? taskTypeMatches[0] : undefined);
+  if (!pack) throw new Error("bootstrap Agent Pack identity does not resolve to the declared task kind");
   // Report only Pack identity fields; bootstrap also contains credentials and input files.
   const runtimeIdentity = {
     agent_pack_id: pack.id,
@@ -317,7 +351,7 @@ export function validateAgentPackCatalog(data: BootstrapResponse, catalog: Agent
   if (mismatches.length > 0) {
     throw new Error(`bootstrap Agent Pack identity does not match runtime Catalog (${mismatches.join("; ")}). Deploy Server and Agent images built from the same Agent Pack Catalog. If the execution predates that deployment, start a new task to refresh its frozen Pack identity.`);
   }
-  return resolveAgentPackForTaskType(pack, data.task_type);
+  return resolveAgentPackForTaskType(pack, data.task_kind);
 }
 
 function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPackCatalog {
@@ -328,10 +362,13 @@ function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPa
     }
     validateArtifactContract(rawPack.artifacts);
     if (rawPack.artifacts_by_task_type === undefined) continue;
-    if (!isRecord(rawPack.artifacts_by_task_type) || !isRecord(rawPack.bindings) || !Array.isArray(rawPack.bindings.task_types)) {
+    if (!isRecord(rawPack.artifacts_by_task_type) || !isRecord(rawPack.bindings) || !(Array.isArray(rawPack.bindings.task_kinds) || Array.isArray(rawPack.bindings.task_types))) {
       throw new Error("Agent Pack Catalog artifact overrides are invalid");
     }
-    const taskTypes = new Set(rawPack.bindings.task_types.filter((value): value is string => typeof value === "string"));
+    const declaredKinds: unknown[] = Array.isArray(rawPack.bindings.task_kinds)
+      ? rawPack.bindings.task_kinds
+      : (Array.isArray(rawPack.bindings.task_types) ? rawPack.bindings.task_types : []);
+    const taskTypes = new Set(declaredKinds.filter((value): value is string => typeof value === "string"));
     for (const [taskType, artifacts] of Object.entries(rawPack.artifacts_by_task_type)) {
       if (!taskTypes.has(taskType) || !Array.isArray(artifacts) || artifacts.length === 0) {
         throw new Error("Agent Pack Catalog artifact override is invalid");

@@ -192,7 +192,7 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 func TestRuntimeMemoryMountUsesFrozenAdapterCWD(t *testing.T) {
 	for _, tc := range []struct{ adapter, taskType, want string }{
 		{agentpack.AdapterStandard, model.PlatformMontage, "/workspace/.claude/agent-memory"},
-		{agentpack.AdapterOpenMontage, model.PlatformArticle, "/workspace/openmontage/.claude/agent-memory"},
+		{agentpack.AdapterOpenMontage, model.PlatformWechat, "/workspace/openmontage/.claude/agent-memory"},
 	} {
 		t.Run(tc.adapter, func(t *testing.T) {
 			execution := testExecution()
@@ -531,13 +531,13 @@ func TestBuildTaskWorkspacePVCUsesTaskIdentityAndNASStorageClass(t *testing.T) {
 func TestBuildKubernetesJobUsesTaskResourceProfile(t *testing.T) {
 	cfg := testJobConfig()
 	cfg.ResourceProfiles = map[string]srvconfig.KubernetesResourceConfig{
-		model.PlatformArticle: {
+		model.PlatformWechat: {
 			Requests: map[string]string{"cpu": "2", "memory": "4Gi"},
 			Limits:   map[string]string{"cpu": "4", "memory": "7Gi"},
 		},
 	}
 	task := testTask()
-	task.Type = model.PlatformArticle
+	task.Type = model.PlatformWechat
 	resources := buildKubernetesJob(cfg, testExecution(), task).Spec.Template.Spec.Containers[0].Resources
 	if resources.Requests.Cpu().String() != "2" || resources.Requests.Memory().String() != "4Gi" || resources.Limits.Cpu().String() != "4" || resources.Limits.Memory().String() != "7Gi" {
 		t.Fatalf("article resources = %#v, want task profile", resources)
@@ -1860,9 +1860,10 @@ func testJobConfig() kubernetesJobConfig {
 			},
 		},
 		RuntimeImages: srvconfig.RuntimeImages{
-			model.PlatformArticle:  "registry.example.com/creator-agent:v2",
-			model.PlatformSeednote: "registry.example.com/creator-agent-seednote:v2",
-			model.PlatformMontage:  "registry.example.com/creator-agent-montage:v2",
+			model.PlatformWechat:              "registry.example.com/creator-agent:v2",
+			model.PlatformSeednote:            "registry.example.com/creator-agent-seednote:v2",
+			model.PlatformMontage:             "registry.example.com/creator-agent-montage:v2",
+			model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation:v2",
 		},
 		ServerURL: "https://creator-server:8443",
 	}
@@ -1871,7 +1872,7 @@ func testJobConfig() kubernetesJobConfig {
 func testExecution() *model.TaskExecution {
 	return &model.TaskExecution{
 		ID: "execution-1", TaskID: "task-1", Attempt: 1, RuntimeScope: "anban", RuntimeWorkload: kubernetesJobName("execution-1"),
-		RuntimeAdapter: agentpack.AdapterStandard, RuntimeProfile: "article", RuntimeImage: testJobConfig().RuntimeImages.ForTask(model.PlatformArticle).Image,
+		RuntimeAdapter: agentpack.AdapterStandard, RuntimeProfile: "wechat", RuntimeImage: testJobConfig().RuntimeImages.ForTask(model.PlatformWechat).Image,
 	}
 }
 

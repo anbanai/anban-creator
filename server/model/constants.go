@@ -41,19 +41,150 @@ const (
 
 // Config scope constants.
 const (
-	ScopeArticle   = "article"
+	ScopeWechat    = "wechat"
 	ScopeSeednote  = "seednote"
 	ScopeMoments   = "moments"
 	ScopeEcommerce = "ecommerce"
 	ScopeMontage   = "montage"
 )
 
-// Managed task types that are not project platforms.
+// Agent IDs are stable execution identities. An Agent owns exactly one output
+// channel; task kind selects the workflow exposed by that Agent.
+const (
+	AgentIDArticle       = "wechat-article"
+	AgentIDSeednote      = "seednote"
+	AgentIDWechatPicture = "wechat-picture"
+	AgentIDChannelsVideo = "channels-video"
+	AgentIDHypit         = "hypit"
+	AgentIDFeedback      = "feedback"
+	AgentIDProfile       = "profile-analysis"
+	AgentIDWhiteboard    = "whiteboard-animation"
+)
+
+// Channel constants. Keep these values provider-neutral; labels belong to the
+// Studio and connector implementations.
+const (
+	ChannelArticle       = "wechat-article"
+	ChannelSeednote      = "seednote"
+	ChannelWechatPicture = "wechat-picture"
+	ChannelChannelsVideo = "channels-video"
+	ChannelHypit         = "hypit"
+	ChannelMoments       = "moments"
+	ChannelEcommerce     = "ecommerce"
+	ChannelLiveSlicer    = "live-slicer"
+	ChannelProfile       = "profile-analysis"
+	ChannelMontage       = "montage"
+	ChannelFeedback      = "feedback"
+	ChannelWhiteboard    = "whiteboard-animation"
+)
+
+// Task kinds are workflow identities within one Agent/channel.
+const (
+	TaskKindContentGeneration = "content_generation"
+	TaskKindViralAnalysis     = "viral_analysis"
+	TaskKindProfileAnalysis   = "profile_analysis"
+	TaskKindLiveSlicer        = "live_slicer"
+	TaskKindFeedbackAnalysis  = "feedback_analysis"
+)
+
+// Managed task types that are not project platforms (legacy aliases retained
+// for historical rows and migration readers).
 const (
 	TaskTypeLiveSlicer      = "live-slicer"
 	TaskTypeViralAnalysis   = "viral_analysis"
 	TaskTypeProfileAnalysis = "profile_analysis"
 )
+
+func IsChannel(value string) bool {
+	switch value {
+	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelFeedback, ChannelProfile, ChannelWhiteboard:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsAgentID(value string) bool {
+	switch value {
+	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDFeedback, AgentIDProfile, AgentIDWhiteboard:
+		return true
+	default:
+		return false
+	}
+}
+
+func AgentChannel(agentID string) (string, bool) {
+	switch agentID {
+	case AgentIDArticle:
+		return ChannelArticle, true
+	case AgentIDSeednote:
+		return ChannelSeednote, true
+	case AgentIDWechatPicture:
+		return ChannelWechatPicture, true
+	case AgentIDFeedback:
+		return ChannelFeedback, true
+	case AgentIDWhiteboard:
+		return ChannelWhiteboard, true
+	default:
+		return "", false
+	}
+}
+
+// PlatformForChannel is a compatibility helper for image/connector settings
+// that still use the legacy platform configuration registry internally. New
+// product identity and routing must use Channel directly.
+func PlatformForChannel(channel string) string {
+	switch channel {
+	case ChannelArticle, ChannelWechatPicture:
+		return PlatformWechat
+	case ChannelSeednote:
+		return PlatformSeednote
+	case ChannelWhiteboard:
+		return PlatformWhiteboardAnimation
+	default:
+		return ""
+	}
+}
+
+func SupportedImageRatiosForChannel(channel string) []string {
+	platform := PlatformForChannel(channel)
+	if platform == "" {
+		return nil
+	}
+	return SupportedImageRatios(platform)
+}
+
+func IsBusinessImageRatioAllowedForChannel(channel, ratio string) bool {
+	platform := PlatformForChannel(channel)
+	if platform == "" {
+		return ratio == ImageRatioAuto
+	}
+	return IsBusinessImageRatioAllowed(platform, ratio)
+}
+
+func DefaultImageRatioForChannel(channel string) string {
+	switch channel {
+	case ChannelWechatPicture:
+		return "3:4"
+	case ChannelArticle:
+		return "16:9"
+	case ChannelSeednote:
+		return "3:4"
+	default:
+		return "3:4"
+	}
+}
+
+func IsTaskKind(value string) bool {
+	switch value {
+	case TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis, TaskKindLiveSlicer,
+		TaskTypeLiveSlicer, TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit,
+		TaskTypeWechatArticle, TaskTypeWechatPicture:
+		return true
+	default:
+		return false
+	}
+}
 
 // File role constants.
 const (
@@ -80,7 +211,13 @@ const (
 
 // Platform constants.
 const (
+<<<<<<< HEAD
 	PlatformArticle             = "article"
+=======
+	PlatformWechat              = "wechat"
+	TaskTypeWechatArticle       = "wechat-article"
+	TaskTypeWechatPicture       = "wechat-picture"
+>>>>>>> codex/tasks-infinite-scroll-review
 	PlatformSeednote            = "seednote"
 	PlatformMoments             = "moments"
 	PlatformEcommerce           = "ecommerce"
@@ -94,7 +231,11 @@ const (
 // identities, but must not create new business identities by themselves.
 func IsProjectPlatform(value string) bool {
 	switch value {
+<<<<<<< HEAD
 	case PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit:
+=======
+	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit:
+>>>>>>> codex/tasks-infinite-scroll-review
 		return true
 	default:
 		return false
@@ -113,7 +254,7 @@ func IsAdminOnlyProjectPlatform(value string) bool {
 
 // IsTaskType reports whether value is an explicitly implemented task type.
 func IsTaskType(value string) bool {
-	return IsProjectPlatform(value) || value == TaskTypeLiveSlicer || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis
+	return value == TaskTypeWechatArticle || value == TaskTypeWechatPicture || IsProjectPlatform(value) || value == TaskTypeLiveSlicer || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis
 }
 
 func IsMontagePlatform(platform string) bool {
@@ -123,7 +264,7 @@ func IsMontagePlatform(platform string) bool {
 // SupportsPortraitCover identifies workflows with an independently selected project portrait cover.
 func SupportsPortraitCover(taskType string) bool {
 	switch taskType {
-	case PlatformArticle, PlatformSeednote, PlatformMontage, PlatformHypit:
+	case TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMontage, PlatformHypit:
 		return true
 	default:
 		return false
@@ -171,6 +312,9 @@ func SupportedImageRatios(platform string) []string {
 
 // DefaultImageRatio returns the default image ratio for a platform.
 func DefaultImageRatio(platform string) string {
+	if platform == TaskTypeWechatPicture {
+		return "3:4"
+	}
 	if cfg := GetPlatformConfig(platform); cfg != nil && cfg.DefaultImageRatio != "" {
 		return cfg.DefaultImageRatio
 	}

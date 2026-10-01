@@ -137,13 +137,14 @@ type createPlanRequest struct {
 	HasTailImage    *bool `json:"has_tail_image,omitempty"`
 	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
 	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
-	ArticleWithCover         *bool                   `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                   `json:"article_with_content_images,omitempty"`
-	CoverUsePortrait         bool                    `json:"cover_use_portrait,omitempty"`
-	MontageInput             *model.MontageInput     `json:"montage_input,omitempty"`
-	HypitInput               *model.HypitInput       `json:"hypit_input,omitempty"`
-	InputAttachments         []model.EntryAttachment `json:"input_attachments,omitempty"`
-	AgentInput               map[string]any          `json:"agent_input,omitempty"`
+	ArticleWithCover         *bool                    `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages *bool                    `json:"article_with_content_images,omitempty"`
+	CoverUsePortrait         bool                     `json:"cover_use_portrait,omitempty"`
+	MontageInput             *model.MontageInput      `json:"montage_input,omitempty"`
+	HypitInput               *model.HypitInput        `json:"hypit_input,omitempty"`
+	InputAttachments         []model.EntryAttachment  `json:"input_attachments,omitempty"`
+	AgentInput               map[string]any           `json:"agent_input,omitempty"`
+	Entries                  []createPlanEntryRequest `json:"entries,omitempty"`
 }
 
 type updatePlanRequest struct {
@@ -167,6 +168,112 @@ type updatePlanRequest struct {
 	AgentInput               *map[string]any                  `json:"agent_input,omitempty"`
 }
 
+type createPlanEntryRequest struct {
+	AgentID          string         `json:"agent_id"`
+	Channel          string         `json:"channel"`
+	TaskKind         string         `json:"task_kind"`
+	ExecutionProfile string         `json:"execution_profile"`
+	AgentInput       map[string]any `json:"agent_input"`
+	ImageDefaults    map[string]any `json:"image_defaults"`
+}
+
+type updatePlanEntryRequest struct {
+	AgentID          *string         `json:"agent_id"`
+	Channel          *string         `json:"channel"`
+	TaskKind         *string         `json:"task_kind"`
+	ExecutionProfile *string         `json:"execution_profile"`
+	AgentInput       *map[string]any `json:"agent_input"`
+	ImageDefaults    *map[string]any `json:"image_defaults"`
+	Status           *string         `json:"status"`
+}
+
+func (h *PlanHandler) CreateEntry(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req createPlanEntryRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	entry, err := h.service.CreateEntry(c.Context(), service.CreatePlanEntryParams{
+		UserID: userID, PlanID: c.Params("id"), AgentID: req.AgentID, Channel: req.Channel,
+		TaskKind: req.TaskKind, ExecutionProfile: req.ExecutionProfile,
+		AgentInput: req.AgentInput, ImageDefaults: req.ImageDefaults,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrDuplicatePlanAgent) {
+			return Error(c, fiber.StatusConflict, err.Error())
+		}
+		if strings.Contains(err.Error(), "not owned") {
+			return Forbidden(c, err.Error())
+		}
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	return Success(c, entry)
+}
+
+func (h *PlanHandler) ListEntries(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	entries, err := h.service.ListEntries(c.Context(), userID, c.Params("id"))
+	if err != nil {
+		if strings.Contains(err.Error(), "not owned") {
+			return Forbidden(c, err.Error())
+		}
+		return Error(c, fiber.StatusNotFound, "plan not found")
+	}
+	return Success(c, entries)
+}
+
+func (h *PlanHandler) UpdateEntry(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req updatePlanEntryRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	entry, err := h.service.UpdateEntry(c.Context(), service.UpdatePlanEntryParams{
+		UserID: userID, PlanID: c.Params("id"), EntryID: c.Params("entry_id"), AgentID: req.AgentID, Channel: req.Channel,
+		TaskKind: req.TaskKind, ExecutionProfile: req.ExecutionProfile,
+		AgentInput: req.AgentInput, ImageDefaults: req.ImageDefaults, Status: req.Status,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrPlanEntryNotFound) {
+			return Error(c, fiber.StatusNotFound, err.Error())
+		}
+		if errors.Is(err, service.ErrDuplicatePlanAgent) {
+			return Error(c, fiber.StatusConflict, err.Error())
+		}
+		if strings.Contains(err.Error(), "not owned") {
+			return Forbidden(c, err.Error())
+		}
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	return Success(c, entry)
+}
+
+func (h *PlanHandler) DeleteEntry(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	if err := h.service.DeleteEntry(c.Context(), userID, c.Params("id"), c.Params("entry_id")); err != nil {
+		if errors.Is(err, service.ErrPlanEntryNotFound) {
+			return Error(c, fiber.StatusNotFound, err.Error())
+		}
+		if strings.Contains(err.Error(), "not owned") {
+			return Forbidden(c, err.Error())
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to delete plan entry")
+	}
+	return Success(c, fiber.Map{"deleted": true})
+}
+
 // Create handles POST /api/v1/plans.
 func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if err := rejectRemovedRequestFields(c.Body()); err != nil {
@@ -179,8 +286,18 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
-	if strings.TrimSpace(req.ExecutionProfile) == "" {
+	if strings.TrimSpace(req.ExecutionProfile) == "" && len(req.Entries) == 0 {
 		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
+	}
+	if h.repo != nil {
+		if project, projectErr := h.repo.Projects().FindByID(c.Context(), req.ProjectID); projectErr == nil {
+			if project.Platform == model.PlatformMoments {
+				return Error(c, fiber.StatusBadRequest, "plans are not supported for moments projects")
+			}
+			if req.MontageInput != nil && !model.IsMontagePlatform(project.Platform) {
+				return Error(c, fiber.StatusBadRequest, "montage_input is only valid for video generation plans")
+			}
+		}
 	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
 		return Error(c, fiber.StatusBadRequest, "视频生成任务需要填写需求")
@@ -248,6 +365,10 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
+	entries := make([]service.CreatePlanEntryParams, 0, len(req.Entries))
+	for _, entry := range req.Entries {
+		entries = append(entries, service.CreatePlanEntryParams{AgentID: entry.AgentID, Channel: entry.Channel, TaskKind: entry.TaskKind, ExecutionProfile: entry.ExecutionProfile, AgentInput: entry.AgentInput, ImageDefaults: entry.ImageDefaults})
+	}
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
 		UserID:                   userID,
 		ProjectID:                req.ProjectID,
@@ -268,6 +389,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		HypitInput:               req.HypitInput,
 		InputAttachments:         req.InputAttachments,
 		AgentInput:               req.AgentInput,
+		Entries:                  entries,
 	})
 	if err != nil {
 		if handled, response := respondAgentProfileError(c, err); handled {
@@ -288,6 +410,12 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		}
 		if errors.Is(err, service.ErrInvalidAgentInput) {
 			return Error(c, fiber.StatusBadRequest, "invalid_agent_input: "+err.Error())
+		}
+		if errors.Is(err, service.ErrUnsupportedPlanPlatform) || strings.Contains(err.Error(), "montage_input") || strings.Contains(err.Error(), "image_ratio") || strings.Contains(err.Error(), "Agent ") {
+			return Error(c, fiber.StatusBadRequest, err.Error())
+		}
+		if strings.Contains(err.Error(), "plans are not supported for moments projects") {
+			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
 			return c.Status(fiber.StatusPaymentRequired).JSON(fiber.Map{
@@ -327,6 +455,11 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 	if err := h.presentPlanReferences(c.Context(), userID, plans); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	for _, plan := range plans {
+		if entries, entryErr := h.service.ListEntries(c.Context(), userID, plan.ID); entryErr == nil {
+			plan.Entries = entries
+		}
+	}
 
 	return Success(c, fiber.Map{
 		"items": planAPIResponses(plans, h.store),
@@ -356,6 +489,9 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 	}
 	if err := h.presentPlanReference(c.Context(), userID, plan); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
+	}
+	if entries, entryErr := h.service.ListEntries(c.Context(), userID, plan.ID); entryErr == nil {
+		plan.Entries = entries
 	}
 
 	return Success(c, planAPIResponse(plan, h.store))

@@ -35,6 +35,14 @@ func TestOfficialAPIUsesOfficialPublicationEndpointsAndStringIdentifiers(t *test
 			},
 		},
 		{
+			name: "newspic draft add", path: "/cgi-bin/draft/add", body: `{"articles":[{"article_type":"newspic","title":"picture","content":"caption","image_info":{"image_list":[{"image_media_id":"media-1"},{"image_media_id":"media-2"}]},"cover_info":{"crop_percent_list":[{"ratio":"1_1","x1":"0.0","y1":"0.0","x2":"1.0","y2":"1.0"}]}}]}`,
+			response: `{"media_id":"picture-draft"}`,
+			call: func(ctx context.Context, api *OfficialAPI) error {
+				_, err := api.AddDraft(ctx, DraftAddRequest{Articles: []DraftArticle{{ArticleType: "newspic", Title: "picture", Content: "caption", ImageInfo: &DraftImageInfo{ImageList: []DraftImage{{ImageMediaID: "media-1"}, {ImageMediaID: "media-2"}}}, CoverInfo: &DraftCoverInfo{CropPercentList: []DraftCropPercent{{Ratio: "1_1", X1: 0, Y1: 0, X2: 1, Y2: 1}}}}}})
+				return err
+			},
+		},
+		{
 			name: "draft batchget", path: "/cgi-bin/draft/batchget", body: `{"offset":0,"count":20,"no_content":false}`,
 			response: `{"total_count":1,"item_count":1,"item":[{"media_id":"draft-media","content":{"news_item":[{"title":"title"}]}}]}`,
 			call: func(ctx context.Context, api *OfficialAPI) error {

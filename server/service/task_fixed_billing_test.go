@@ -52,7 +52,7 @@ func addDurableArticleDelivery(t *testing.T, repo repository.Repository, store *
 func TestTaskFixedBillingBatchAdmissionChargesEachTaskOnce(t *testing.T) {
 	ctx := context.Background()
 	svc, f, enqueuer := newFixedTaskBillingFixture(t, 1_500, 0)
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "batch", Quantity: 2,
@@ -64,7 +64,7 @@ func TestTaskFixedBillingBatchAdmissionChargesEachTaskOnce(t *testing.T) {
 		t.Fatalf("created=%d enqueued=%d, want 2/2", len(tasks), len(enqueuer.enqueued))
 	}
 	for _, task := range tasks {
-		if task.BillingQuoteID == "" || task.BillingCatalogID != "retail-test-v1" || task.BillingSKUID != "task.article.v1" ||
+		if task.BillingQuoteID == "" || task.BillingCatalogID != "retail-test-v1" || task.BillingSKUID != "task.wechat_article.v1" ||
 			task.BillingPricingTier != string(model.TierFree) || task.BillingChargeID == nil || *task.BillingChargeID == "" || task.BillingPriceCredits != 500 {
 			t.Fatalf("task billing identity = %#v", task)
 		}
@@ -87,7 +87,7 @@ func TestTaskFixedBillingEnqueueCancellationStillFinalizesAndReverses(t *testing
 	ctx, cancel := context.WithCancel(context.Background())
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	svc.enqueuer = cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "enqueue failure", Quantity: 1,
@@ -122,7 +122,7 @@ func TestTaskFixedBillingRejectsDebtAndInsufficientBalanceBeforeEnqueue(t *testi
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			svc, f, enqueuer := newFixedTaskBillingFixture(t, tt.paid, tt.debt)
-			projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+			projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 				UserID: billingWalletUserID, ProjectID: projectID, Prompt: tt.name, Quantity: 1,
 			})
@@ -143,7 +143,7 @@ func TestTaskFixedBillingRejectsDebtAndInsufficientBalanceBeforeEnqueue(t *testi
 func TestTaskFixedBillingBatchAdmissionIsAtomicWhenTotalBalanceIsInsufficient(t *testing.T) {
 	ctx := context.Background()
 	svc, f, enqueuer := newFixedTaskBillingFixture(t, 700, 0)
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "atomic batch", Quantity: 2,
@@ -166,10 +166,10 @@ func TestTaskFixedBillingBatchAdmissionIsAtomicWhenTotalBalanceIsInsufficient(t 
 func TestTaskFixedBillingScheduledRunsResolveCurrentCatalog(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 2_000, 0)
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 	plan := &model.Plan{ExecutionProfile: "effective",
 		ID: "plan-current-catalog", UserID: billingWalletUserID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.PlanStatusActive, Prompt: "scheduled",
+		Type: model.TaskTypeWechatArticle, Status: model.PlanStatusActive, Prompt: "scheduled",
 	}
 
 	first, err := svc.CreateFromPlan(ctx, plan)
@@ -193,7 +193,7 @@ func TestTaskFixedBillingScheduledRunsResolveCurrentCatalog(t *testing.T) {
 	if err != nil || second == nil || second.BillingCatalogID != "retail-test-v2" || second.BillingPriceCredits != 700 {
 		t.Fatalf("second scheduled task = %#v, %v", second, err)
 	}
-	if first.BillingCatalogID != "retail-test-v1" || first.BillingSKUID != "task.article.v1" {
+	if first.BillingCatalogID != "retail-test-v1" || first.BillingSKUID != "task.wechat_article.v1" {
 		t.Fatalf("first task price identity changed: %#v", first)
 	}
 }
@@ -201,7 +201,7 @@ func TestTaskFixedBillingScheduledRunsResolveCurrentCatalog(t *testing.T) {
 func TestTaskFixedBillingResumeKeepsOriginalCharge(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "first", Quantity: 1,
 	})

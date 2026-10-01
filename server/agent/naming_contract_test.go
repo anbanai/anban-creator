@@ -23,7 +23,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(root, "CLAUDE.md"),
 		filepath.Join(root, "harness", "README.md"),
-		filepath.Join(root, "deploy/docker/Dockerfile.agent-article"),
+		filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat"),
 		filepath.Join(root, "deploy/docker/Dockerfile.server"),
 		filepath.Join(root, "studio", "src", "pages", "PluginsPage.tsx"),
 		filepath.Join(root, "studio", "public", "claude", "index.html"),
@@ -44,10 +44,10 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban:<agent>")
 	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "claude plugin install --scope user anban@anbanai")
 	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "/anban:anban-setup")
-	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "/anban:article")
-	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "--agent anban:article")
-	assertFileNotExists(t, filepath.Join(root, "harness", "agents", "wechat"+"article.md"))
-	assertFileNotExists(t, filepath.Join(root, "harness", "agents", "wechat"+"article.toml"))
+	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "/anban:wechat-article")
+	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "--agent anban:wechat-article")
+	assertFileNotExists(t, filepath.Join(root, "harness", "agents", "article.md"))
+	assertFileNotExists(t, filepath.Join(root, "harness", "agents", "article.toml"))
 	assertFileNotContains(t, filepath.Join(root, "harness", "README.md"), "--dangerously-skip-permissions")
 	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "插件内的 MCP server key 固定为 `creator`")
 	assertFileNotExists(t, filepath.Join(root, "harness", "CLAUDE.md"))

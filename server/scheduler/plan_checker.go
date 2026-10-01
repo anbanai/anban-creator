@@ -197,21 +197,54 @@ func TriggerPlanNow(ctx context.Context, repo repository.Repository, taskSvc *se
 func triggerPlan(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, plan *model.Plan, logger *zerolog.Logger) error {
 	planLogger := logger.With().
 		Str("plan_id", plan.ID).
-		Str("type", plan.Type).
 		Str("user_id", plan.UserID).
 		Logger()
 
-	task, err := taskSvc.CreateFromPlan(ctx, plan)
+	entries, err := repo.PlanEntries().ListByPlanID(ctx, plan.ID)
 	if err != nil {
-		return fmt.Errorf("create task from plan %s: %w", plan.ID, err)
+		lower := strings.ToLower(err.Error())
+		if !strings.Contains(lower, "no such table") && !strings.Contains(lower, "doesn't exist") && !strings.Contains(lower, "does not exist") {
+			return fmt.Errorf("list plan entries for %s: %w", plan.ID, err)
+		}
+		return fmt.Errorf("plan entries are unavailable for %s; migration is required", plan.ID)
 	}
-
-	if task == nil {
-		planLogger.Info().Msg("plan task not created")
+	if len(entries) > 0 {
+		var failures int
+		for _, entry := range entries {
+			if entry == nil || entry.Status != model.PlanEntryStatusActive {
+				continue
+			}
+			task, createErr := taskSvc.CreateFromPlanEntry(ctx, plan, entry)
+			if createErr != nil {
+				failures++
+				planLogger.Error().Err(createErr).Str("entry_id", entry.ID).Str("agent_id", entry.AgentID).Msg("failed to create task from plan entry")
+				continue
+			}
+			if task != nil {
+				planLogger.Info().Str("entry_id", entry.ID).Str("task_id", task.ID).Msg("task created from plan entry")
+			}
+		}
+		if _, err := advancePlanNextRun(ctx, repo, plan); err != nil {
+			return fmt.Errorf("advance plan %s next_run_at: %w", plan.ID, err)
+		}
+		if failures > 0 {
+			return fmt.Errorf("%d plan entries failed", failures)
+		}
 		return nil
 	}
-
-	planLogger.Info().Str("task_id", task.ID).Msg("task created from plan")
+	// A migrated database can still contain a historical plan whose entry rows
+	// were not backfilled. Use the legacy plan service once so the schedule does
+	// not silently advance without producing its task; newly created plans always
+	// have at least one entry and use the branch above.
+	task, err := taskSvc.CreateFromPlan(ctx, plan)
+	if err != nil {
+		return fmt.Errorf("create task from legacy plan %s: %w", plan.ID, err)
+	}
+	if task == nil {
+		planLogger.Info().Msg("legacy plan task not created")
+		return nil
+	}
+	planLogger.Info().Str("task_id", task.ID).Msg("legacy plan task created")
 
 	nextRun, err := advancePlanNextRun(ctx, repo, plan)
 	if err != nil {

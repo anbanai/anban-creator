@@ -16,7 +16,7 @@ export function ProjectSelector({ value, onChange, platform, excludePlatforms = 
     queryFn: () => api.projects.list({ status: 'active', platform }),
   })
 
-  const visibleProjects = projects.filter((ch) => !excludePlatforms.includes(ch.platform))
+  const visibleProjects = projects.filter((ch) => !excludePlatforms.includes(ch.platform ?? ''))
 
   return (
     <ProjectContextControl

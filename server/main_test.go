@@ -201,7 +201,7 @@ func TestServerOwnedArticlePublicationSchemaReadiness(t *testing.T) {
 	if err := legacy.Exec("CREATE TABLE wechat_publications (id text primary key)").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := requireServerOwnedArticlePublicationSchema(legacy); err == nil || !strings.Contains(err.Error(), "20260916_server_owned_article_publication.sql") {
+	if err := requireServerOwnedArticlePublicationSchema(legacy); err == nil || !strings.Contains(err.Error(), "20261001_wechat_picture_publication_evidence.sql") {
 		t.Fatalf("legacy publication schema readiness = %v, want migration instruction", err)
 	}
 

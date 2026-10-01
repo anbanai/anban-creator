@@ -40,7 +40,7 @@ func analyticsDecimal(raw string, fallback *float64, rate bool) (*model.Analytic
 	return &result, nil
 }
 func analyticsWechatInput(candidate AnalyticsCandidate, row *model.WechatAnalyticsImportRow, batch *model.WechatAnalyticsImportBatch, now time.Time) (AnalyticsObservationInput, error) {
-	content := model.AnalyticsContent{ProjectID: batch.ProjectID, Platform: model.PlatformArticle, Title: candidate.Title, ContentType: candidate.ContentType, Status: candidate.Status, URL: candidate.URL, Date: candidate.Date}
+	content := model.AnalyticsContent{ProjectID: batch.ProjectID, Channel: model.ChannelArticle, Platform: model.PlatformWechat, Title: candidate.Title, ContentType: candidate.ContentType, Status: candidate.Status, URL: candidate.URL, Date: candidate.Date}
 	if candidate.Task != nil {
 		content.ID = "task:" + candidate.Task.ID
 		content.TaskID = candidate.Task.ID
@@ -66,7 +66,7 @@ func analyticsWechatInput(candidate AnalyticsCandidate, row *model.WechatAnalyti
 	return AnalyticsObservationInput{Content: content, Observation: model.AnalyticsObservation{ID: "wechat_import:" + row.ID, ProjectID: batch.ProjectID, ContentID: content.ID, BatchID: batch.ID, MetricBasis: "cumulative", StatDate: seednoteAnalyticsDate(batch.DataAsOfAt), Source: "wechat_import", SourcePriority: 100, EffectiveAt: batch.DataAsOfAt, ReceivedAt: now, AnalyticsMetrics: metrics}, RawPayload: row.RawData}, nil
 }
 func analyticsSeednoteInput(post *model.SeednotePost, row *model.SeednoteImportRow, batch *model.SeednoteImportBatch, basis string, now time.Time) (AnalyticsObservationInput, error) {
-	content := model.AnalyticsContent{ID: "seednote_post:" + post.ID, PostID: post.ID, TaskID: post.TaskID, ProjectID: batch.ProjectID, Platform: model.PlatformSeednote, Title: post.Title, ContentType: analyticsSeednoteType(post.Genre), URL: post.NoteURL, Date: post.FirstPublishedAt}
+	content := model.AnalyticsContent{ID: "seednote_post:" + post.ID, PostID: post.ID, TaskID: post.TaskID, ProjectID: batch.ProjectID, Channel: model.ChannelSeednote, Platform: model.PlatformSeednote, Title: post.Title, ContentType: analyticsSeednoteType(post.Genre), URL: post.NoteURL, Date: post.FirstPublishedAt}
 	metrics := model.AnalyticsMetrics{ExposureCount: row.ExposureCount, ViewCount: row.ViewCount, LikeCount: row.LikeCount, CommentCount: row.CommentCount, CollectCount: row.CollectCount, FollowerGainCount: row.FollowerGainCount, ShareCount: row.ShareCount, BarrageCount: row.BarrageCount}
 	var raw map[string]string
 	_ = json.Unmarshal([]byte(row.RawData), &raw)

@@ -70,8 +70,13 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if claudeManifest.Version == "" || claudeManifest.Version != codexManifest.Version {
 		t.Fatalf("native manifest versions = %q/%q, want one aligned version", claudeManifest.Version, codexManifest.Version)
 	}
+<<<<<<< HEAD
 	if claudeManifest.Version != "4.2.17" {
 		t.Fatalf("native manifest version = %q, want 4.2.17 for the current plugin surface", claudeManifest.Version)
+=======
+	if claudeManifest.Version != "4.2.21" {
+		t.Fatalf("native manifest version = %q, want 4.2.21 for the current plugin surface", claudeManifest.Version)
+>>>>>>> codex/tasks-infinite-scroll-review
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")
@@ -98,8 +103,13 @@ func TestUnifiedPluginLayout(t *testing.T) {
 
 	markdownAgents := pluginAgentNames(t, filepath.Join(pluginRoot, "agents"), ".md")
 	tomlAgents := pluginAgentNames(t, filepath.Join(pluginRoot, "agents"), ".toml")
+<<<<<<< HEAD
 	if len(markdownAgents) != 10 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
 		t.Fatalf("native Agent sets differ: Claude=%v Codex=%v", markdownAgents, tomlAgents)
+=======
+	if len(markdownAgents) != 12 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
+		t.Fatalf("native Agent sets differ or count drifted: Claude=%v Codex=%v", markdownAgents, tomlAgents)
+>>>>>>> codex/tasks-infinite-scroll-review
 	}
 }
 

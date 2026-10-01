@@ -1,5 +1,5 @@
 import { http, unwrap } from '@/lib/http-client'
-import type { Plan, CreatePlanRequest, UpdatePlanRequest, PaginatedResponse, ScheduleRecommendation } from '@/types'
+import type { Plan, PlanEntry, CreatePlanEntryRequest, UpdatePlanEntryRequest, CreatePlanRequest, UpdatePlanRequest, PaginatedResponse, ScheduleRecommendation } from '@/types'
 
 export const plansApi = {
   scheduleRecommendation: () =>
@@ -24,4 +24,16 @@ export const plansApi = {
 
   resume: (id: string) =>
     unwrap<void>(http.post(`/plans/${id}/resume`)),
+
+  listEntries: (id: string) =>
+    unwrap<PlanEntry[]>(http.get(`/plans/${id}/entries`)),
+
+  createEntry: (id: string, data: CreatePlanEntryRequest) =>
+    unwrap<PlanEntry>(http.post(`/plans/${id}/entries`, data)),
+
+  updateEntry: (planId: string, entryId: string, data: UpdatePlanEntryRequest) =>
+    unwrap<PlanEntry>(http.put(`/plans/${planId}/entries/${entryId}`, data)),
+
+  deleteEntry: (planId: string, entryId: string) =>
+    unwrap<void>(http.delete(`/plans/${planId}/entries/${entryId}`)),
 }

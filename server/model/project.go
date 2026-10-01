@@ -37,12 +37,14 @@ func (p *Project) SetEcommerceDefaults(ec EcommerceProjectDefaults) {
 // DB column names use the current public contract directly. Explicitly marked
 // legacy columns remain only where startup migrations still need them.
 type Project struct {
-	ID         string `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID     string `gorm:"type:char(36);index;not null" json:"user_id"`
-	Platform   string `gorm:"type:varchar(20);not null" json:"platform"` // article, seednote, moments, ecommerce, montage
+	ID     string `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID string `gorm:"type:char(36);index;not null" json:"user_id"`
+	// Platform is retained only as an internal migration bridge. New API
+	// contracts are channel-neutral and never serialize or validate it.
+	Platform   string `gorm:"type:varchar(20);not null" json:"-"`
 	Name       string `gorm:"type:varchar(100);not null" json:"name"`
 	AvatarURL  string `gorm:"type:varchar(500)" json:"avatar_url"`
-	ProfileURL string `gorm:"type:varchar(500)" json:"profile_url"` // 平台主页链接
+	ProfileURL string `gorm:"type:varchar(500)" json:"-"` // legacy platform homepage link
 	// Positioning is the legacy project-positioning column. New code writes and
 	// reads Instructions; this column remains only for migration/backward reads.
 	Positioning string `gorm:"type:text" json:"positioning,omitempty"`
@@ -79,7 +81,7 @@ type Project struct {
 	// fall back to the platform default (Asia/Shanghai).
 	Timezone       string        `gorm:"type:varchar(64);default:'Asia/Shanghai'" json:"timezone"`
 	FeedbackPaused bool          `gorm:"not null;default:false" json:"feedback_paused"`
-	Config         ProjectConfig `gorm:"type:json;serializer:json" json:"config"` // 平台特有配置
+	Config         ProjectConfig `gorm:"type:json;serializer:json" json:"-"` // legacy credentials; channel configs are canonical
 	// EcommerceDefaults carries the reusable e-commerce defaults for platform=
 	// "ecommerce" projects. Zero value for non-ecommerce projects.
 	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`

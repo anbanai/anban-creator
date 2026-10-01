@@ -80,7 +80,7 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 		}
 	})
 
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Plan{}, &model.Task{}, &model.TaskExecution{}, &model.TaskFile{}, &model.Asset{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Plan{}, &model.PlanEntry{}, &model.Task{}, &model.TaskExecution{}, &model.TaskFile{}, &model.Asset{}, &model.ProjectAgentConfig{}, &model.ProjectChannelConfig{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -139,8 +139,8 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:                 projectID,
 		UserID:             userID,
-		Platform:           model.PlatformSeednote,
-		Name:               "Seednote",
+		Platform:           model.PlatformWechat,
+		Name:               "WeChat",
 		MaxConcurrentTasks: 1,
 		Status:             model.ProjectStatusActive,
 	}); err != nil {
@@ -154,7 +154,7 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 		ID:                    uuid.New().String(),
 		UserID:                userID,
 		ProjectID:             projectID,
-		Type:                  model.PlatformArticle,
+		Type:                  model.TaskTypeWechatArticle,
 		Title:                 "Fallback title",
 		CronExpr:              "0 * * * *",
 		Prompt:                "Write from this plan",
@@ -180,8 +180,8 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 		t.Fatalf("tasks total=%d len=%d, want one task", total, len(tasks))
 	}
 	task := tasks[0]
-	if task.Type != model.PlatformSeednote {
-		t.Fatalf("task type = %q, want project platform %q", task.Type, model.PlatformSeednote)
+	if task.Type != model.TaskTypeWechatArticle {
+		t.Fatalf("task type = %q, want canonical article task type", task.Type)
 	}
 	if task.Prompt != plan.Prompt {
 		t.Fatalf("task prompt = %q, want %q", task.Prompt, plan.Prompt)
@@ -222,12 +222,13 @@ func TestTriggerPlanNowRejectsInvalidReferenceBeforeTaskCreation(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "invalid-reference@example.com", Password: "hashed"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	plan := &model.Plan{ExecutionProfile: "effective",
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		CronExpr: "0 * * * *", Status: model.PlanStatusActive, NextRunAt: &nextRun,
+		ImageRatio:            "16:9",
 		ReferenceImageAssetID: "missing-asset",
 	}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
@@ -258,7 +259,7 @@ func TestAdvancePlanNextRunDoesNotOverwriteConcurrentReferenceUpdate(t *testing.
 	base, _, _, _ := setupPlanCheckerTest(t)
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 	plan := &model.Plan{ExecutionProfile: "effective",
-		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.TaskTypeWechatArticle,
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
 		Status: model.PlanStatusActive, NextRunAt: &oldNext,
 	}
@@ -306,7 +307,7 @@ func TestAdvancePlanNextRunSkipsConcurrentNextRunUpdate(t *testing.T) {
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 	concurrentNext := oldNext.Add(30 * time.Minute)
 	plan := &model.Plan{ExecutionProfile: "effective",
-		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.TaskTypeWechatArticle,
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
 		Status: model.PlanStatusActive, NextRunAt: &oldNext,
 	}
@@ -387,14 +388,14 @@ func TestPlanCheckerDoesNotRedispatchHistoricalPendingTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.Projects().Create(ctx, &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle,
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat,
 		Name: "Historical pending", Status: model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.TaskStatusPending,
+		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)

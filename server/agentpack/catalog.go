@@ -22,6 +22,20 @@ var (
 	semverPattern  = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 )
 
+var supportedChannels = map[string]struct{}{
+	"wechat-article":       {},
+	"seednote":             {},
+	"wechat-picture":       {},
+	"profile-analysis":     {},
+	"feedback":             {},
+	"whiteboard-animation": {},
+}
+
+func isSupportedChannel(channel string) bool {
+	_, ok := supportedChannels[channel]
+	return ok
+}
+
 func LoadCatalog(pluginRoot string) (*Catalog, error) {
 	packsRoot := filepath.Join(pluginRoot, "packs")
 	entries, err := os.ReadDir(packsRoot)
@@ -29,8 +43,12 @@ func LoadCatalog(pluginRoot string) (*Catalog, error) {
 		return nil, fmt.Errorf("read Agent Pack directory: %w", err)
 	}
 
-	catalog := &Catalog{byID: make(map[string]int), byTaskType: make(map[string]int), byProjectPlatform: make(map[string]int)}
-	byAgentName := make(map[string]string)
+	catalog := &Catalog{
+		byID:       make(map[string]int),
+		byAgentID:  make(map[string]int),
+		byTaskKind: make(map[string]int),
+		byChannel:  make(map[string]int),
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -46,31 +64,50 @@ func LoadCatalog(pluginRoot string) (*Catalog, error) {
 		if _, exists := catalog.byID[manifest.ID]; exists {
 			return nil, fmt.Errorf("duplicate Agent Pack id %q", manifest.ID)
 		}
-		if previous, exists := byAgentName[manifest.Agent.Name]; exists {
-			return nil, fmt.Errorf("agent name %q is declared by both %q and %q", manifest.Agent.Name, previous, manifest.ID)
+		if previous, exists := catalog.byAgentID[manifest.ID]; exists {
+			return nil, fmt.Errorf("duplicate Agent ID %q declared by %q and %q", manifest.ID, catalog.Packs[previous].ID, manifest.ID)
 		}
-		for _, taskType := range manifest.Bindings.TaskTypes {
-			if previous, exists := catalog.byTaskType[taskType]; exists {
-				return nil, fmt.Errorf("task type %q is bound by both %q and %q", taskType, catalog.Packs[previous].ID, manifest.ID)
-			}
+		if previous, exists := catalog.byAgentID[manifest.Agent.Name]; exists {
+			return nil, fmt.Errorf("duplicate Agent ID %q; agent name %q is declared by both %q and %q", manifest.Agent.Name, manifest.Agent.Name, catalog.Packs[previous].ID, manifest.ID)
 		}
-		for _, platform := range manifest.Bindings.ProjectPlatforms {
-			if previous, exists := catalog.byProjectPlatform[platform]; exists {
-				return nil, fmt.Errorf("project platform %q is bound by both %q and %q", platform, catalog.Packs[previous].ID, manifest.ID)
+		if manifest.Channel != "" {
+			if previous, exists := catalog.byChannel[manifest.Channel]; exists {
+				return nil, fmt.Errorf("channel %q is bound by both %q and %q", manifest.Channel, catalog.Packs[previous].ID, manifest.ID)
 			}
 		}
 		catalog.Packs = append(catalog.Packs, manifest)
-		byAgentName[manifest.Agent.Name] = manifest.ID
 		index := len(catalog.Packs) - 1
-		for _, taskType := range manifest.Bindings.TaskTypes {
-			catalog.byTaskType[taskType] = index
+		catalog.byAgentID[manifest.ID] = index
+		catalog.byAgentID[manifest.Agent.Name] = index
+		for _, taskKind := range manifest.Bindings.TaskKinds {
+			// Task kinds are scoped to an Agent/channel and may be shared by
+			// multiple Packs. Keep the first deterministic default for the
+			// compatibility ForTaskKind lookup; new code resolves via ForAgent.
+			if previous, exists := catalog.byTaskKind[taskKind]; exists {
+				// Product task kinds may intentionally be implemented by multiple
+				// channel-specific Agents. Keep rejecting unknown duplicate kinds
+				// so malformed third-party Packs fail closed.
+				if taskKind != "content_generation" && taskKind != "viral_analysis" {
+					return nil, fmt.Errorf("task kind %q is bound by both %q and %q", taskKind, catalog.Packs[previous].ID, manifest.ID)
+				}
+			} else {
+				catalog.byTaskKind[taskKind] = index
+			}
 		}
-		for _, platform := range manifest.Bindings.ProjectPlatforms {
-			catalog.byProjectPlatform[platform] = index
+		if manifest.Channel != "" {
+			catalog.byChannel[manifest.Channel] = index
 		}
 	}
 
-	sort.Slice(catalog.Packs, func(i, j int) bool { return catalog.Packs[i].ID < catalog.Packs[j].ID })
+	sort.Slice(catalog.Packs, func(i, j int) bool {
+		if catalog.Packs[i].ID == "ecommerce" {
+			return catalog.Packs[j].ID != "ecommerce"
+		}
+		if catalog.Packs[j].ID == "ecommerce" {
+			return false
+		}
+		return catalog.Packs[i].ID < catalog.Packs[j].ID
+	})
 	catalog.reindex()
 	return catalog, nil
 }
@@ -87,6 +124,9 @@ func loadManifest(pluginRoot, path string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("decode Agent Pack manifest %s: %w", path, err)
 	}
 	manifest.dir = filepath.Dir(path)
+	if len(manifest.Bindings.TaskKinds) == 0 && len(manifest.Bindings.TaskTypes) > 0 {
+		manifest.Bindings.TaskKinds = append([]string(nil), manifest.Bindings.TaskTypes...)
+	}
 	if err := validateManifest(pluginRoot, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("Agent Pack %q: %w", manifest.ID, err)
 	}
@@ -150,8 +190,14 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		}
 	}
 	if manifest.Kind == KindManaged {
-		if len(manifest.Bindings.TaskTypes) == 0 {
-			return fmt.Errorf("managed Pack requires at least one task type")
+		if strings.TrimSpace(manifest.Channel) == "" {
+			return fmt.Errorf("managed Pack requires exactly one channel")
+		}
+		if !isSupportedChannel(manifest.Channel) {
+			return fmt.Errorf("unsupported channel %q", manifest.Channel)
+		}
+		if len(manifest.Bindings.TaskKinds) == 0 {
+			return fmt.Errorf("managed Pack requires at least one task kind")
 		}
 		if strings.TrimSpace(manifest.Runtime.Profile) == "" {
 			return fmt.Errorf("managed Pack requires runtime.profile")
@@ -162,24 +208,32 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		if manifest.Runtime.Adapter != AdapterStandard && manifest.Runtime.Adapter != AdapterOpenMontage {
 			return fmt.Errorf("unsupported runtime adapter %q", manifest.Runtime.Adapter)
 		}
-	} else if len(manifest.Bindings.TaskTypes) > 0 {
-		return fmt.Errorf("plugin Pack must not bind task types")
-	}
-	for _, taskType := range manifest.Bindings.TaskTypes {
-		if strings.TrimSpace(taskType) == "" {
-			return fmt.Errorf("task type must not be empty")
+	} else {
+		if len(manifest.Bindings.TaskKinds) > 0 {
+			return fmt.Errorf("plugin Pack must not bind task types (task kinds)")
+		}
+		if strings.TrimSpace(manifest.Channel) != "" {
+			return fmt.Errorf("plugin Pack must not bind a channel")
 		}
 	}
-	taskTypes := make(map[string]bool, len(manifest.Bindings.TaskTypes))
-	for _, taskType := range manifest.Bindings.TaskTypes {
-		taskTypes[taskType] = true
+	for _, taskKind := range manifest.Bindings.TaskKinds {
+		if strings.TrimSpace(taskKind) == "" {
+			return fmt.Errorf("task kind must not be empty")
+		}
 	}
-	for taskType, operation := range manifest.BillingOperations {
-		if !taskTypes[taskType] {
-			return fmt.Errorf("billing operation references unbound task type %q", taskType)
+	taskKinds := make(map[string]bool, len(manifest.Bindings.TaskKinds))
+	for _, taskKind := range manifest.Bindings.TaskKinds {
+		if taskKinds[taskKind] {
+			return fmt.Errorf("duplicate task kind %q", taskKind)
+		}
+		taskKinds[taskKind] = true
+	}
+	for taskKind, operation := range manifest.BillingOperations {
+		if manifest.Kind == KindManaged && !taskKinds[taskKind] {
+			return fmt.Errorf("billing operation references unbound task kind %q", taskKind)
 		}
 		if strings.TrimSpace(operation) == "" {
-			return fmt.Errorf("billing operation for task type %q must not be empty", taskType)
+			return fmt.Errorf("billing operation for task kind %q must not be empty", taskKind)
 		}
 	}
 	allowedSurfaces := map[string]bool{"plugin": true, "project": true, "task": true, "plan": true}
@@ -193,9 +247,9 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		}
 	}
 	if manifest.Kind == KindManaged && hasProductSurface {
-		for _, taskType := range manifest.Bindings.TaskTypes {
-			if strings.TrimSpace(manifest.BillingOperations[taskType]) == "" {
-				return fmt.Errorf("product surfaces require billing operation for task type %q", taskType)
+		for _, taskKind := range manifest.Bindings.TaskKinds {
+			if strings.TrimSpace(manifest.BillingOperations[taskKind]) == "" {
+				return fmt.Errorf("product surfaces require billing operation for task kind %q", taskKind)
 			}
 		}
 	}
@@ -234,46 +288,60 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 	if err := validateArtifactContract(manifest.Artifacts); err != nil {
 		return err
 	}
-	for taskType, artifacts := range manifest.ArtifactsByTaskType {
-		if !taskTypes[taskType] {
-			return fmt.Errorf("artifact override references unbound task type %q", taskType)
-		}
-		if len(artifacts) == 0 {
-			return fmt.Errorf("artifact override for task type %q must not be empty", taskType)
-		}
-		if err := validateArtifactContract(artifacts); err != nil {
-			return fmt.Errorf("artifact override for task type %q: %w", taskType, err)
+	if manifest.Kind == KindManaged {
+		for taskKind, artifacts := range manifest.ArtifactsByTaskType {
+			if !taskKinds[taskKind] {
+				return fmt.Errorf("artifact override references unbound task type %q (task kind)", taskKind)
+			}
+			if len(artifacts) == 0 {
+				return fmt.Errorf("artifact override for task type %q must not be empty (task kind)", taskKind)
+			}
+			if err := validateArtifactContract(artifacts); err != nil {
+				return fmt.Errorf("artifact override for task type %q: %w (task kind)", taskKind, err)
+			}
 		}
 	}
 	if err := validateDeliveryContract(manifest.Delivery); err != nil {
 		return err
 	}
-	for taskType, deliveries := range manifest.DeliveryByTaskType {
-		if !taskTypes[taskType] {
-			return fmt.Errorf("delivery override references unbound task type %q", taskType)
-		}
-		if len(deliveries) == 0 {
-			return fmt.Errorf("delivery override for task type %q must not be empty", taskType)
-		}
-		if err := validateDeliveryContract(deliveries); err != nil {
-			return fmt.Errorf("delivery override for task type %q: %w", taskType, err)
+	if manifest.Kind == KindManaged {
+		for taskKind, deliveries := range manifest.DeliveryByTaskType {
+			if !taskKinds[taskKind] {
+				return fmt.Errorf("delivery override references unbound task kind %q", taskKind)
+			}
+			if len(deliveries) == 0 {
+				return fmt.Errorf("delivery override for task kind %q must not be empty", taskKind)
+			}
+			if err := validateDeliveryContract(deliveries); err != nil {
+				return fmt.Errorf("delivery override for task kind %q: %w", taskKind, err)
+			}
 		}
 	}
 	if manifest.Kind == KindManaged {
-		for _, taskType := range manifest.Bindings.TaskTypes {
-			if len(manifest.DeliveryForTaskType(taskType)) == 0 {
-				return fmt.Errorf("managed Pack task type %q requires a non-empty delivery contract", taskType)
+		for _, taskKind := range manifest.Bindings.TaskKinds {
+			allowsProfileData := taskKind == "profile_analysis" && manifest.hasRequiredDataDelivery("profile_result")
+			if len(manifest.DeliveryForTaskType(taskKind)) == 0 && !allowsProfileData {
+				return fmt.Errorf("managed Pack task kind %q requires a non-empty delivery contract", taskKind)
 			}
-			required, err := manifest.RequiredArtifactsForTaskType(taskType)
+			required, err := manifest.RequiredArtifactsForTaskType(taskKind)
 			if err != nil {
-				return fmt.Errorf("managed Pack task type %q: %w", taskType, err)
+				return fmt.Errorf("managed Pack task kind %q: %w", taskKind, err)
 			}
-			if len(required) == 0 {
-				return fmt.Errorf("managed Pack task type %q requires at least one required artifact", taskType)
+			if len(required) == 0 && !allowsProfileData {
+				return fmt.Errorf("managed Pack task kind %q requires at least one required artifact", taskKind)
 			}
 		}
 	}
 	return nil
+}
+
+func (m Manifest) hasRequiredDataDelivery(role string) bool {
+	for _, delivery := range m.DataDeliveries {
+		if delivery.Required && strings.TrimSpace(delivery.Role) == role && strings.TrimSpace(delivery.Type) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateArtifactContract(artifacts []ArtifactSpec) error {
@@ -513,17 +581,27 @@ func resolveSchemas(manifest *Manifest) error {
 
 func (c *Catalog) reindex() {
 	c.byID = make(map[string]int, len(c.Packs))
-	c.byTaskType = make(map[string]int)
-	c.byProjectPlatform = make(map[string]int)
+	c.byAgentID = make(map[string]int, len(c.Packs)*2)
+	c.byTaskKind = make(map[string]int)
+	c.byChannel = make(map[string]int)
 	for i := range c.Packs {
 		c.byID[c.Packs[i].ID] = i
-		for _, taskType := range c.Packs[i].Bindings.TaskTypes {
-			c.byTaskType[taskType] = i
+		c.Packs[i].Channel = manifestChannel(c.Packs[i])
+		c.byAgentID[c.Packs[i].ID] = i
+		c.byAgentID[c.Packs[i].Agent.Name] = i
+		for _, taskKind := range c.Packs[i].Bindings.TaskKinds {
+			if _, exists := c.byTaskKind[taskKind]; !exists {
+				c.byTaskKind[taskKind] = i
+			}
 		}
-		for _, platform := range c.Packs[i].Bindings.ProjectPlatforms {
-			c.byProjectPlatform[platform] = i
+		if c.Packs[i].Channel != "" {
+			c.byChannel[c.Packs[i].Channel] = i
 		}
 	}
+}
+
+func manifestChannel(pack Manifest) string {
+	return pack.Channel
 }
 
 func (c *Catalog) JSON() ([]byte, error) {

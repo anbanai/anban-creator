@@ -17,7 +17,7 @@ for (const directory of [process.env.HOME!, join(plugin, ".claude-plugin"), join
   await mkdir(directory, { recursive: true });
 }
 await writeFile(join(plugin, ".claude-plugin/plugin.json"), JSON.stringify({ name: "anban", version: "1.0.0" }));
-for (const name of ["article", "montage"]) {
+for (const name of ["wechat-article", "montage"]) {
   await writeFile(join(plugin, `agents/${name}.md`), `---\nname: ${name}\ndescription: Project memory regression fixture\nmodel: inherit\nmemory: project\n---\n${agentMarker}_${name}\n`);
 }
 process.env.CLAUDE_PLUGIN_ROOT = plugin;
@@ -76,7 +76,7 @@ const baseURL = `http://127.0.0.1:${address.port}`;
 const controller = new AbortController();
 const deadline = setTimeout(() => controller.abort(), 45_000);
 try {
-  for (const taskType of ["article", "montage"]) {
+  for (const taskType of ["wechat-article", "montage"]) {
     const adapter = taskType === "montage" ? "openmontage" : "standard";
     let previousMemoryRoot: string | undefined;
     requests = { write: [], recall: [], recovery: [] };

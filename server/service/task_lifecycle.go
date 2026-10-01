@@ -212,7 +212,7 @@ type wechatPublicationLifecycleProjection struct {
 // RefreshTaskPublicationLifecycle repairs a completed task's read model only
 // after ownership has been verified. A failed projection must not hide the task.
 func (s *TaskService) RefreshTaskPublicationLifecycle(ctx context.Context, userID string, task *model.Task) {
-	if task == nil || userID == "" || task.UserID != userID || task.Type != model.PlatformArticle ||
+	if task == nil || userID == "" || task.UserID != userID || task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture ||
 		task.Status != model.TaskStatusCompleted || task.Lifecycle.Data().Version != model.TaskLifecycleVersion {
 		return
 	}
@@ -500,7 +500,7 @@ func replanTaskLifecycle(current model.TaskLifecycle, executionID string, plan [
 }
 
 func taskServerLifecycleStages(ctx context.Context, repo repository.Repository, task *model.Task) ([]model.TaskLifecycleStage, error) {
-	if task == nil || task.Type != model.PlatformArticle {
+	if task == nil || task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture {
 		return nil, nil
 	}
 	if _, err := repo.Projects().FindByID(ctx, task.ProjectID); err != nil {

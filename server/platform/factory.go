@@ -6,11 +6,11 @@ import (
 )
 
 // NewProvider creates a PlatformDataProvider for the given platform.
-// For WeChat platforms (article), appID and secret are required.
+// For the WeChat platform, appID and secret are required.
 // For Seednote, seednoteClient is required.
 func NewProvider(platform, appID, secret string, seednoteClient *seednote.Client) PlatformDataProvider {
 	switch platform {
-	case model.PlatformArticle:
+	case model.PlatformWechat:
 		return NewWechatProvider(appID, secret)
 	case model.PlatformSeednote:
 		return NewSeednoteProvider(seednoteClient)

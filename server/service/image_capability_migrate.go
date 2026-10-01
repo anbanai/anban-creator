@@ -191,6 +191,7 @@ func migrateBusinessImageRatios(ctx context.Context, db *gorm.DB) error {
 }
 
 func normalizePersistedBusinessImageRatio(platform, ratio string) string {
+	platform = canonicalImageRatioPlatform(platform)
 	ratio = strings.TrimSpace(ratio)
 	if len(model.SupportedImageRatios(platform)) == 0 {
 		return ratio
@@ -199,6 +200,18 @@ func normalizePersistedBusinessImageRatio(platform, ratio string) string {
 		return ratio
 	}
 	return model.DefaultImageRatio(platform)
+}
+
+// Historical rows used "article" for the WeChat project/task surface. Keep
+// migration readers able to normalize those rows while new values use the
+// canonical "wechat" platform.
+func canonicalImageRatioPlatform(platform string) string {
+	switch strings.TrimSpace(platform) {
+	case "article", model.TaskTypeWechatArticle:
+		return model.PlatformWechat
+	default:
+		return strings.TrimSpace(platform)
+	}
 }
 
 func stringMapValue(value map[string]any, key string) string {

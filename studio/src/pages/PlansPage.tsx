@@ -53,9 +53,48 @@ import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFi
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
+<<<<<<< HEAD
 function isPlanType(value: string | undefined): value is PlanType {
   return value === 'seednote' || value === 'article' || value === 'montage' || value === 'whiteboard-animation' || value === 'hypit'
+=======
+function planTypeForProject(platform: string | undefined, currentType?: PlanType): PlanType | undefined {
+  if (platform === 'wechat') {
+    if (currentType === 'wechat-article' || currentType === 'wechat-picture') return currentType
+    return 'wechat-article'
+  }
+  if (platform === 'seednote') return 'seednote'
+  if (platform === 'montage') return 'montage'
+  if (platform === 'whiteboard-animation') return 'whiteboard-animation'
+  if (platform === 'hypit') return 'hypit'
+  if (currentType === 'wechat-article' || currentType === 'wechat-picture' || currentType === 'seednote' || currentType === 'montage' || currentType === 'whiteboard-animation' || currentType === 'hypit') return currentType
+  // Projects are channel-neutral. A plan still needs a presentation default
+  // before its independent Agent entries are selected.
+  return 'seednote'
+>>>>>>> codex/tasks-infinite-scroll-review
 }
+
+function planEntryForType(type: PlanType, executionProfile: AgentExecutionProfileID) {
+  switch (type) {
+    case 'seednote':
+      return { agent_id: 'seednote', channel: 'seednote', task_kind: 'content_generation', execution_profile: executionProfile }
+    case 'wechat-picture':
+      return { agent_id: 'wechat-picture', channel: 'wechat-picture', task_kind: 'content_generation', execution_profile: executionProfile }
+    case 'whiteboard-animation':
+      return { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', task_kind: 'whiteboard-animation', execution_profile: executionProfile }
+    case 'hypit':
+      return undefined
+    case 'wechat-article':
+    default:
+      return { agent_id: 'wechat-article', channel: 'wechat-article', task_kind: 'content_generation', execution_profile: executionProfile }
+  }
+}
+
+const PRODUCT_AGENT_OPTIONS = [
+  { agent_id: 'wechat-article', channel: 'wechat-article', label: '公众号文章' },
+  { agent_id: 'seednote', channel: 'seednote', label: '种草笔记' },
+  { agent_id: 'wechat-picture', channel: 'wechat-picture', label: '公众号贴图' },
+  { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', label: '白板动画' },
+] as const
 
 function planToFormValues(plan: Plan): PlanFormValues {
   return {
@@ -74,7 +113,7 @@ function planToFormValues(plan: Plan): PlanFormValues {
     has_tail_image: plan.has_tail_image ?? false,
     article_with_cover: plan.article_with_cover ?? true,
     article_with_content_images: plan.article_with_content_images ?? true,
-    cover_use_portrait: !!plan.cover_use_portrait && (plan.type !== 'article' || plan.article_with_cover !== false),
+    cover_use_portrait: !!plan.cover_use_portrait && (plan.type !== 'wechat-article' || plan.article_with_cover !== false),
     hypit_input: plan.type === 'hypit' ? initialHypitInput(plan.prompt || '', plan.hypit_input) : undefined,
     montage_input: plan.type === 'montage' ? initialMontageInput(plan.prompt || '', plan.montage_input) : undefined,
   }
@@ -112,6 +151,7 @@ export default function PlansPage() {
   const [montageUploading, setMontageUploading] = useState(false)
   const [montageReady, setMontageReady] = useState(false)
   const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
+  const [selectedPlanAgents, setSelectedPlanAgents] = useState<string[]>(['seednote'])
   const [scheduleValid, setScheduleValid] = useState(true)
   const { submit } = useSubmitLock()
   const highlightedPlanId = searchParams.get('highlight') || ''
@@ -219,7 +259,7 @@ export default function PlansPage() {
 					? '当前图像能力不可用，请重新选择。'
 					: null
 	const selectedAgentPack = useMemo(
-		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_types?.includes(watchedType)),
+		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_kinds?.includes(watchedType)),
 		[agentPacksQuery.data, watchedType],
 	)
 
@@ -282,7 +322,7 @@ export default function PlansPage() {
     return map
   }, [allProjects])
   const planContextProjects = useMemo(
-    () => (allProjects ?? []).filter((project) => isPlanType(project.platform)),
+    () => allProjects ?? [],
     [allProjects],
   )
   const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
@@ -384,15 +424,16 @@ export default function PlansPage() {
   })
 
   const openCreate = useCallback(() => {
-    const requestedType: PlanType = createIntent.type === 'article' || createIntent.type === 'montage' || createIntent.type === 'hypit'
+    const requestedType: PlanType = createIntent.type === 'wechat-article' || createIntent.type === 'wechat-picture' || createIntent.type === 'montage' || createIntent.type === 'hypit'
       ? createIntent.type
       : 'seednote'
     const intentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
-    const intentProjectType = isPlanType(intentProject?.platform) ? intentProject.platform : undefined
+    const intentProjectType = planTypeForProject(intentProject?.platform, requestedType)
     const selectedIntentProject = intentProject && intentProjectType
       ? intentProject
       : undefined
     const initialType = intentProjectType ?? requestedType
+    setSelectedPlanAgents([planEntryForType(initialType, 'effective')?.agent_id ?? 'seednote'])
     setEditingPlan(null)
     scheduleManuallyChangedRef.current = false
     setRecommendationUnavailable(false)
@@ -449,6 +490,8 @@ export default function PlansPage() {
   function openEdit(plan: Plan) {
     recommendationRequestRef.current++
     setEditingPlan(plan)
+    const existingAgents = (plan.entries ?? []).map((entry) => entry.agent_id).filter((agentID) => PRODUCT_AGENT_OPTIONS.some((option) => option.agent_id === agentID))
+    setSelectedPlanAgents(existingAgents.length > 0 ? existingAgents : [planEntryForType(plan.type, plan.execution_profile)?.agent_id ?? 'seednote'])
     setRecommendationUnavailable(false)
     setAttachmentSubmitError('')
     setMontageUploading(false)
@@ -473,6 +516,7 @@ export default function PlansPage() {
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingPlan(null)
+    setSelectedPlanAgents(['seednote'])
     setMontageUploading(false)
     setMontageReady(false)
     setAttachmentSubmitError('')
@@ -546,11 +590,18 @@ export default function PlansPage() {
       has_content_image: values.type === 'seednote' ? values.has_content_image : undefined,
       has_tail_image: values.type === 'seednote' ? values.has_tail_image : undefined,
       // Article image toggles (公众号文章): both default true; non-article omits.
-      article_with_cover: values.type === 'article' ? values.article_with_cover : undefined,
-      article_with_content_images: values.type === 'article' ? values.article_with_content_images : undefined,
-      cover_use_portrait: values.cover_use_portrait && (values.type !== 'article' || values.article_with_cover),
+      article_with_cover: values.type === 'wechat-article' ? values.article_with_cover : undefined,
+      article_with_content_images: values.type === 'wechat-article' ? values.article_with_content_images : undefined,
+      cover_use_portrait: values.cover_use_portrait && (values.type !== 'wechat-article' || values.article_with_cover),
       hypit_input: values.type === 'hypit' ? buildHypitInputForSubmit(values.prompt || '', values.hypit_input, selectedProject?.hypit_defaults) : undefined,
       montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
+      entries: selectedPlanAgents
+        .map((agentID) => {
+          const option = PRODUCT_AGENT_OPTIONS.find((candidate) => candidate.agent_id === agentID)
+          if (!option) return undefined
+          return { agent_id: option.agent_id, channel: option.channel, task_kind: option.agent_id === 'whiteboard-animation' ? 'whiteboard-animation' : 'content_generation', execution_profile: values.execution_profile as AgentExecutionProfileID }
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
     }
 
     if (editingPlan) {
@@ -561,7 +612,11 @@ export default function PlansPage() {
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
+<<<<<<< HEAD
 		if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && (montageUploading || !montageReady))) {
+=======
+    if (imageCapabilityBlocker || !scheduleValid || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && (montageUploading || !montageReady))) {
+>>>>>>> codex/tasks-infinite-scroll-review
       event?.preventDefault()
       return
     }
@@ -586,8 +641,9 @@ export default function PlansPage() {
           setMontageReady(false)
         }
         form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
-        if (!id || !isPlanType(project?.platform)) return
-        const nextType = project.platform
+        if (!id) return
+        const nextType = planTypeForProject(project?.platform, form.getValues('type'))
+        if (!nextType) return
         const fullProject = projectMap[id]
         form.setValue('cover_use_portrait', form.getValues('type') === nextType && form.getValues('cover_use_portrait') && Boolean(fullProject?.portrait_reference_image), { shouldDirty: true })
         form.setValue('type', nextType, { shouldDirty: true })
@@ -616,14 +672,22 @@ export default function PlansPage() {
       }}
       onSubmit={() => handlePlanSubmit()}
       attachmentController={attachmentController}
+<<<<<<< HEAD
 		attachmentPolicy={watchedType === 'whiteboard-animation' ? whiteboardAttachmentPolicy : GENERAL_AGENT_ATTACHMENT_POLICY}
+=======
+      attachmentPolicy={watchedType === 'whiteboard-animation' ? whiteboardAttachmentPolicy : GENERAL_AGENT_ATTACHMENT_POLICY}
+>>>>>>> codex/tasks-infinite-scroll-review
       attachmentsEnabled={watchedType !== 'hypit'}
       ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
       submitMode="external"
       placeholder={watchedType === 'hypit' ? '描述每次复刻需要保留和替换的内容' : '描述每次计划的创作方向、内容要求和素材使用方式...'}
       submitLabel={editingPlan ? '更新计划' : '创建计划'}
       submitting={isSubmitting}
+<<<<<<< HEAD
 		submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && !montageReady)}
+=======
+      submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && !montageReady)}
+>>>>>>> codex/tasks-infinite-scroll-review
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -761,6 +825,9 @@ export default function PlansPage() {
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
                     )}
                     <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {plan.entries && plan.entries.length > 0 && (
+                        <Badge variant="outline" className="text-[10px]">{plan.entries.length} 个 Agent</Badge>
+                      )}
                       <Badge variant={platformBadge} className={cn("text-[10px]", platformBadgeClassName[plan.type])}>
                         {contentTypeDisplayName(plan.type)}
                       </Badge>
@@ -847,6 +914,34 @@ export default function PlansPage() {
                   <FormDescription>到点自动创建任务并按项目默认配置执行；这里的修改只影响下一次执行。</FormDescription>
                 </FormItem>
               )} />
+
+              <div className="space-y-2 rounded-lg border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">执行 Agent</p>
+                  <p className="text-xs text-muted-foreground">每个选中的 Agent 在每次触发时独立创建一个任务；渠道由 Agent 固定。</p>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {PRODUCT_AGENT_OPTIONS.map((option) => {
+                    const checked = selectedPlanAgents.includes(option.agent_id)
+                    return (
+                      <label key={option.agent_id} className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${checked ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setSelectedPlanAgents((current) => checked ? current.filter((agentID) => agentID !== option.agent_id) : [...current, option.agent_id])}
+                          disabled={isSubmitting}
+                          aria-label={option.label}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium">{option.label}</span>
+                          <span className="block text-xs text-muted-foreground">{option.channel}</span>
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+                {selectedPlanAgents.length === 0 ? <p className="text-xs font-medium text-destructive">至少选择一个 Agent。</p> : null}
+              </div>
 
               {!isMontagePlan ? promptComposer : null}
 
@@ -936,7 +1031,7 @@ export default function PlansPage() {
               {/* Image composition (公众号 article): cover + content images each
                   independently toggleable — unlike seednote, the article cover is
                   NOT mandatory (both default on → legacy behavior). */}
-              {watchedType === 'article' && (
+              {watchedType === 'wechat-article' && (
                 <FormField control={form.control} name="article_with_cover" render={({ field }) => {
                   const withContent = form.watch('article_with_content_images')
                   const summary = field.value && withContent
@@ -989,7 +1084,7 @@ export default function PlansPage() {
                 type={watchedType}
                 project={selectedProject}
                 checked={!!form.watch('cover_use_portrait')}
-                coverEnabled={watchedType !== 'article' || !!form.watch('article_with_cover')}
+                coverEnabled={watchedType !== 'wechat-article' || !!form.watch('article_with_cover')}
                 onCheckedChange={(checked) => form.setValue('cover_use_portrait', checked, { shouldDirty: true })}
               />
 
@@ -1040,6 +1135,7 @@ export default function PlansPage() {
               loading={isSubmitting}
               disabled={
                 !watchedProjectId
+                || selectedPlanAgents.length === 0
                 || !watchedExecutionProfile
                 || executionProfilesQuery.isError
                 || !selectedExecutionProfileAvailable
@@ -1047,8 +1143,13 @@ export default function PlansPage() {
                 || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
                 || attachmentController.uploading
                 || attachmentController.hasFailures
+<<<<<<< HEAD
 				|| (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle)
 				|| (isMontagePlan && (montageUploading || !montageReady))}
+=======
+                || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle)
+                || (isMontagePlan && (montageUploading || !montageReady))}
+>>>>>>> codex/tasks-infinite-scroll-review
             >
               {editingPlan ? '更新' : '创建'}
             </Button>

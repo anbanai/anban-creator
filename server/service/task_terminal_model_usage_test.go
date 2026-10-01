@@ -21,7 +21,7 @@ func TestUpdateExecutionResultPersistsAllEvidenceWithOneUpdate(t *testing.T) {
 	ctx := context.Background()
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)
-	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	task := &model.Task{ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestUpdateExecutionResultPersistsTerminalModelUsageForEveryOutcome(t *testi
 			ctx := context.Background()
 			repo := repository.New(setupTaskTestDB(t))
 			task := &model.Task{
-				ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
+				ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.TaskTypeWechatArticle,
 				Status: model.TaskStatusRunning,
 			}
 			if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -126,7 +126,7 @@ func TestUpdateExecutionResultPersistsUnreconciledTerminalStatus(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.New(setupTaskTestDB(t))
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusFailed,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {

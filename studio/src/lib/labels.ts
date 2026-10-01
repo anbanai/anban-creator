@@ -34,7 +34,9 @@ export const timelineItemTypeLabel: Record<string, string> = {
 }
 
 export const taskTypeLabelCN: Record<string, string> = {
-  article: '公众号',
+  wechat: '公众号',
+  'wechat-article': '公众号文章',
+  'wechat-picture': '公众号贴图',
   seednote: '种草笔记',
   moments: '朋友圈',
   ecommerce: '电商出图',
@@ -51,7 +53,8 @@ export const taskTypeLabelCN: Record<string, string> = {
 // 计费的素材包），是另一个语义，保持不变。
 export const contentTypeLabel: Record<string, string> = {
   seednote: '种草笔记',
-  article: '公众号文章',
+  'wechat-article': '公众号文章',
+  'wechat-picture': '公众号贴图',
   moments: '朋友圈',
   ecommerce: '电商出图',
   viral_analysis: '爆文拆解',
@@ -144,7 +147,8 @@ export function taskFailurePresentation(task: Pick<Task, 'error_message'> & Part
 
 export const contentTypeOptions = [
   { value: 'seednote', label: '种草笔记' },
-  { value: 'article', label: '公众号文章' },
+  { value: 'wechat-article', label: '公众号文章' },
+  { value: 'wechat-picture', label: '公众号贴图' },
   { value: 'moments', label: '朋友圈' },
   { value: 'montage', label: '视频生成' },
   { value: 'whiteboard-animation', label: '白板动画' },
@@ -154,7 +158,7 @@ export const contentTypeOptions = [
 
 export const platformLabels: Record<string, string> = {
   seednote: '种草笔记',
-  article: '公众号',
+  wechat: '公众号',
   moments: '朋友圈',
   ecommerce: '电商出图',
   montage: '视频生成',
@@ -173,7 +177,7 @@ export function contentTypeDisplayName(type: string | null | undefined, fallback
 }
 
 export const platformDefaultRatio: Record<string, string> = {
-  article: '16:9',
+  wechat: '3:4',
   seednote: '3:4',
   moments: '3:4',
   ecommerce: '1:1',
@@ -183,7 +187,7 @@ export const platformDefaultRatio: Record<string, string> = {
 }
 
 export const platformRatioLabel: Record<string, string> = {
-  article: '16:9（公众号默认）',
+  wechat: '3:4（公众号贴图默认）',
   seednote: '3:4（种草笔记默认）',
   moments: '3:4（朋友圈默认）',
   ecommerce: '1:1（电商主图默认）',

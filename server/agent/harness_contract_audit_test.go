@@ -49,15 +49,15 @@ func TestHarnessImageToolExamplesCarryTaskIdentity(t *testing.T) {
 func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	checks := map[string][]string{
-		"harness/packs/article/agent.claude.md":      {"readiness.status", "blocked", "output/draft.json"},
-		"harness/packs/article/agent.codex.toml":     {"readiness.status", "blocked", "output/draft.json"},
-		"harness/packs/moments/agent.codex.toml":     {"不得询问", "结构化失败"},
-		"harness/packs/live-slicer/agent.claude.md":  {"runtime provides", "ffmpeg", "ffprobe"},
-		"harness/packs/live-slicer/agent.codex.toml": {"runtime provides", "ffmpeg", "ffprobe"},
-		"harness/packs/seednote/agent.claude.md":     {"viral_analysis", "quality_status=failed", "generate_image"},
-		"harness/packs/seednote/agent.codex.toml":    {"viral_analysis", "quality_status=failed", "generate_image"},
-		"harness/packs/montage/agent.codex.toml":     {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
-		"harness/packs/montage/agent.claude.md":      {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
+		"harness/packs/wechat-article/agent.claude.md":  {"readiness.status", "blocked", "output/draft.json"},
+		"harness/packs/wechat-article/agent.codex.toml": {"readiness.status", "blocked", "output/draft.json"},
+		"harness/packs/moments/agent.codex.toml":        {"不得询问", "结构化失败"},
+		"harness/packs/live-slicer/agent.claude.md":     {"runtime provides", "ffmpeg", "ffprobe"},
+		"harness/packs/live-slicer/agent.codex.toml":    {"runtime provides", "ffmpeg", "ffprobe"},
+		"harness/packs/seednote/agent.claude.md":        {"viral_analysis", "quality_status=failed", "generate_image"},
+		"harness/packs/seednote/agent.codex.toml":       {"viral_analysis", "quality_status=failed", "generate_image"},
+		"harness/packs/montage/agent.codex.toml":        {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
+		"harness/packs/montage/agent.claude.md":         {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
 	}
 	for rel, terms := range checks {
 		t.Run(rel, func(t *testing.T) {

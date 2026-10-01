@@ -351,10 +351,16 @@ claude:
         deepseek-flash: "deepseek-flash"
   executor: docker
   runtime_images:
-    article: "${ARTICLE_RUNTIME_IMAGE:-creator-agent-article:latest}"
+    wechat: "${WECHAT_RUNTIME_IMAGE:-creator-agent-wechat:latest}"
     seednote: "${SEEDNOTE_RUNTIME_IMAGE:-creator-agent-seednote:latest}"
     montage: "${MONTAGE_RUNTIME_IMAGE:-creator-agent-montage:latest}"
+<<<<<<< HEAD
     whiteboard-animation: "${WHITEBOARD_ANIMATION_RUNTIME_IMAGE:-creator-agent-whiteboard-animation:latest}"
+=======
+    profile: "${PROFILE_RUNTIME_IMAGE:-creator-agent-profile:latest}"
+    whiteboard-animation: "${WHITEBOARD_ANIMATION_RUNTIME_IMAGE:-creator-agent-whiteboard-animation:latest}"
+    feedback: "${FEEDBACK_RUNTIME_IMAGE:-creator-agent-feedback:latest}"
+>>>>>>> codex/tasks-infinite-scroll-review
   execution_token_secret: "runtime-smoke-execution-token-secret-32-bytes-minimum"
   agent_server_url: "http://server:8080"
   plugin_dir: "/anbanai"
@@ -366,7 +372,7 @@ claude:
     max_file_bytes: 65536
     max_preview_bytes: 262144
   max_turns:
-    article: 10
+    wechat: 10
     seednote: 10
     montage: 10
     whiteboard-animation: 10
@@ -480,13 +486,13 @@ runtime_smoke_main() {
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-  ARTICLE_RUNTIME_IMAGE=creator-agent-article:latest
+  WECHAT_RUNTIME_IMAGE=creator-agent-wechat:latest
   SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote:latest
   MONTAGE_RUNTIME_IMAGE=creator-agent-montage:latest
-  ARTICLE_DOCKERFILE=Dockerfile.agent-article
+  ARTICLE_DOCKERFILE=Dockerfile.agent-wechat
   SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote
   MONTAGE_DOCKERFILE=Dockerfile.agent-montage
-  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$WECHAT_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
 
@@ -531,7 +537,7 @@ runtime_smoke_main() {
   USER_ID="$(jq -er '.data.user.id' <<<"$registration")"
   catalog="$(api_get /api/v1/billing/catalog)"
   CATALOG_ID="$(jq -er '.data.catalog_id' <<<"$catalog")"
-  TASK_ADMISSION_CREDITS="$(jq -er '[.data.skus[] | select((.operation == "task.article" or .operation == "task.seednote" or .operation == "task.montage") and .execution_profile == "effective") | .price_credits] | if length == 3 then add else error("effective managed task billing SKUs are incomplete") end' <<<"$catalog")"
+  TASK_ADMISSION_CREDITS="$(jq -er '[.data.skus[] | select((.operation == "task.wechat_article" or .operation == "task.seednote" or .operation == "task.montage") and .execution_profile == "effective") | .price_credits] | if length == 3 then add else error("effective managed task billing SKUs are incomplete") end' <<<"$catalog")"
   TOP_UP_CREDITS=$((TASK_ADMISSION_CREDITS + 1000))
   TOP_UP_SOURCE="runtime-smoke-$USER_ID"
   top_up_body="$(jq -cn \
@@ -543,12 +549,12 @@ runtime_smoke_main() {
   ARTICLE_MARKER="ARTICLE_RUNTIME_SMOKE_$$"
   SEEDNOTE_MARKER="SEEDNOTE_RUNTIME_SMOKE_$$"
   MONTAGE_MARKER="MONTAGE_RUNTIME_SMOKE_$$"
-  create_project article "$ARTICLE_MARKER"
+  create_project wechat "$ARTICLE_MARKER"
   ARTICLE_PROJECT="$CREATED_PROJECT_ID"
-  create_task article "$ARTICLE_PROJECT" "$ARTICLE_MARKER"
+  create_task wechat-article "$ARTICLE_PROJECT" "$ARTICLE_MARKER"
   ARTICLE_TASK="$CREATED_TASK_ID"
   ARTICLE_EXECUTION="$(poll_execution_identity "$ARTICLE_TASK" 1 "$ARTICLE_TASK" "$ARTICLE_PROJECT")"
-  verify_persisted_runtime "$ARTICLE_EXECUTION" article "$ARTICLE_RUNTIME_IMAGE"
+  verify_persisted_runtime "$ARTICLE_EXECUTION" wechat-article "$WECHAT_RUNTIME_IMAGE"
 
   create_project seednote "$SEEDNOTE_MARKER"
   SEEDNOTE_PROJECT="$CREATED_PROJECT_ID"
@@ -570,7 +576,7 @@ runtime_smoke_main() {
   ARTICLE_VOLUME="$(task_volume "$ARTICLE_TASK")"
   SEEDNOTE_VOLUME="$(task_volume "$SEEDNOTE_TASK")"
   MONTAGE_VOLUME="$(task_volume "$MONTAGE_TASK")"
-  verify_output "$ARTICLE_VOLUME" "$ARTICLE_RUNTIME_IMAGE" "$ARTICLE_MARKER"
+  verify_output "$ARTICLE_VOLUME" "$WECHAT_RUNTIME_IMAGE" "$ARTICLE_MARKER"
   verify_output "$SEEDNOTE_VOLUME" "$SEEDNOTE_RUNTIME_IMAGE" "$SEEDNOTE_MARKER"
   verify_output "$MONTAGE_VOLUME" "$MONTAGE_RUNTIME_IMAGE" "$MONTAGE_MARKER"
   poll_container_removed "$(cut -d'|' -f7 <<<"$ARTICLE_EXECUTION")"
@@ -580,16 +586,16 @@ runtime_smoke_main() {
   RESUME_MARKER="ARTICLE_RESUMED_RUNTIME_SMOKE_$$"
   api_post "/api/v1/tasks/$ARTICLE_TASK/resume" "$(jq -cn --arg marker "$RESUME_MARKER" '{prompt:("Append the exact RESUMED marker " + $marker + " to /workspace/output/runtime-smoke.txt, call submit_agent_feedback once, then stop successfully."),input_attachments:[]}')" >/dev/null
   RESUME_EXECUTION="$(poll_execution_identity "$ARTICLE_TASK" 2 "$ARTICLE_TASK" "$ARTICLE_PROJECT")"
-  verify_persisted_runtime "$RESUME_EXECUTION" article "$ARTICLE_RUNTIME_IMAGE"
+  verify_persisted_runtime "$RESUME_EXECUTION" wechat-article "$WECHAT_RUNTIME_IMAGE"
   [[ "$(cut -d'|' -f3 <<<"$RESUME_EXECUTION")" == "$(cut -d'|' -f1 <<<"$ARTICLE_EXECUTION")" ]] || fail "resume parent execution identity mismatch"
   [[ "$(cut -d'|' -f5 <<<"$RESUME_EXECUTION")" == "$(cut -d'|' -f5 <<<"$ARTICLE_EXECUTION")" ]] || fail "resume did not inherit the original runtime image"
   [[ "$(cut -d'|' -f10 <<<"$RESUME_EXECUTION")" == "$(cut -d'|' -f10 <<<"$ARTICLE_EXECUTION")" ]] || fail "resume did not inherit the original resolved Docker image"
   [[ "$(task_volume "$ARTICLE_TASK")" == "$ARTICLE_VOLUME" ]] || fail "resume did not reuse the same Docker workspace volume"
   poll_task "$ARTICLE_TASK"
-  verify_output "$ARTICLE_VOLUME" "$ARTICLE_RUNTIME_IMAGE" "$RESUME_MARKER"
+  verify_output "$ARTICLE_VOLUME" "$WECHAT_RUNTIME_IMAGE" "$RESUME_MARKER"
   poll_container_removed "$(cut -d'|' -f7 <<<"$RESUME_EXECUTION")"
 
-  printf 'PASS: Docker runtime smoke completed article, seednote, montage, and article resume (%s)\n' "$COMPOSE_PROJECT"
+  printf 'PASS: Docker runtime smoke completed wechat-article, seednote, montage, and wechat-article resume (%s)\n' "$COMPOSE_PROJECT"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

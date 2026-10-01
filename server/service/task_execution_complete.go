@@ -30,6 +30,23 @@ var ErrTaskCompletionConflict = errors.New("task completion result conflicts wit
 var ErrFinalizationLeaseLost = errors.New("task execution finalization lease lost")
 var ErrCloudPublishingAmbiguous = errors.New("cloud draft publication outcome is ambiguous and requires reconciliation")
 
+func taskUsesChannel(task *model.Task, channel string) bool {
+	if task == nil {
+		return false
+	}
+	if strings.TrimSpace(task.Channel) != "" {
+		return strings.TrimSpace(task.Channel) == channel
+	}
+	switch channel {
+	case model.ChannelArticle:
+		return task.Type == model.TaskTypeWechatArticle
+	case model.ChannelWechatPicture:
+		return task.Type == model.TaskTypeWechatPicture
+	default:
+		return false
+	}
+}
+
 // CompleteCloudExecution records one attempt's immutable terminal outcome, then
 // resumes the durable business finalizer. Only the task's current attempt may
 // cross the terminal CAS; repeats of that attempt resume incomplete stages.
@@ -86,6 +103,11 @@ func (s *TaskService) CompleteCloudExecution(ctx context.Context, executionID st
 		execution.Result = encoded
 		execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
 	}
+	if task.Type == model.TaskTypeProfileAnalysis && terminal == model.TaskExecutionFailed {
+		if lifecycleErr := UpdateProfileLifecycle(ctx, s.repo, task.ProjectID, task.ID, model.ProfileInitializationFailed, normalized.Error); lifecycleErr != nil {
+			return lifecycleErr
+		}
+	}
 	return s.finalizeTaskFromExecution(ctx, task, execution)
 }
 
@@ -139,10 +161,42 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 	if missingResult {
 		result.RemoteArtifacts = true
 	}
+	if (task.Type == model.TaskTypeProfileAnalysis || task.TaskKind == model.TaskKindProfileAnalysis) && result.Success {
+		project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
+		if err != nil {
+			return "", "", nil, fmt.Errorf("verify profile analysis result: %w", err)
+		}
+		profile := projectProfileFor(project)
+		if profile.InitializationStatus != model.ProfileInitializationReady || profile.AnalysisTaskID != task.ID {
+			result.Success = false
+			result.Error = "profile result was not submitted to the Server"
+			result.RootErrorCode = "profile_result_missing"
+			result.TerminalReason = model.TaskBillingTerminalProviderError
+			failureReason = "profile_result_missing"
+		} else {
+			result.ResultSubtype = "profile_result"
+			result.ProfileRevision = profile.Version
+		}
+	}
 	if result.Success && agent.IsNestedAgentDelegationOnly(result.ToolUseSummary) {
 		result.Success, result.Error = false, agent.NestedAgentDelegationError
 		result.TerminalReason = model.TaskBillingTerminalPlatformError
 		failureReason = "nested_agent_delegation"
+	}
+	// Profile analysis delivers a validated structured result through MCP and
+	// the Server persists it before completion. It intentionally has no task
+	// file artifact or sealed manifest contract.
+	if task.Type == model.TaskTypeProfileAnalysis || task.TaskKind == model.TaskKindProfileAnalysis {
+		if result.Success {
+			return model.TaskExecutionSucceeded, "completed", result, nil
+		}
+		if strings.TrimSpace(result.Error) == "" {
+			result.Error = "execution returned unsuccessful result"
+		}
+		if !approvedTaskBillingTerminalReason(result.TerminalReason) {
+			result.TerminalReason = model.TaskBillingTerminalProviderError
+		}
+		return model.TaskExecutionFailed, failureReason, result, nil
 	}
 	wasSuccessful := result.Success
 	deliveryAccepted := false
@@ -379,6 +433,14 @@ func (s *TaskService) cloudFinalizationStep(task *model.Task, execution *model.T
 		}, nil
 	case model.TaskExecutionFinalizationArtifacts:
 		return model.TaskExecutionFinalizationResult, func(ctx context.Context) error {
+			if task != nil && task.TaskKind == model.TaskKindFeedbackAnalysis {
+				if err := s.finalizeFeedbackExecution(ctx, task, execution, result); err != nil {
+					// Feedback is advisory. Its failed validation is recorded on the
+					// FeedbackJob, but must not hold the generic Task finalizer or
+					// affect publication state and unrelated project work.
+					s.logger.Warn().Err(err).Str("task_id", task.ID).Msg("feedback result was rejected by finalizer")
+				}
+			}
 			return s.recordTerminalProviderCost(ctx, task, result)
 		}, nil
 	case model.TaskExecutionFinalizationResult:
@@ -479,7 +541,7 @@ func (s *TaskService) finalizeCloudDraftDelivery(ctx context.Context, task *mode
 	// callback cannot project them. Sync after recording every delivery result,
 	// including replays after an interrupted finalization.
 	defer func() {
-		if err == nil && task.Type == model.PlatformArticle {
+		if err == nil && (taskUsesChannel(task, model.ChannelArticle) || taskUsesChannel(task, model.ChannelWechatPicture)) {
 			_, err = s.SyncWechatPublicationLifecycle(ctx, task.ID)
 		}
 	}()
@@ -576,24 +638,26 @@ func (s *TaskService) resolveCloudDraftDelivery(ctx context.Context, task *model
 	}
 	publication, err := s.repo.WechatPublications().FindByTaskID(ctx, task.ID)
 	if err == nil && publication.ExecutionID == execution.ID {
-		finalHTML, found, readErr := s.readExecutionArtifact(ctx, execution.ID, "output/05-article.html", maxTaskDeliveryHTMLBytes)
-		if readErr != nil {
-			return "", nil, fmt.Errorf("read final article for durable draft validation: %w", readErr)
-		}
-		if !found || publication.DraftContentFingerprint == "" ||
-			WechatContentFingerprint(string(finalHTML)) != publication.DraftContentFingerprint {
-			reason := "final_html_missing"
-			if found {
-				reason = "content_fingerprint_mismatch"
+		if taskUsesChannel(task, model.ChannelArticle) {
+			finalHTML, found, readErr := s.readExecutionArtifact(ctx, execution.ID, "output/05-article.html", maxTaskDeliveryHTMLBytes)
+			if readErr != nil {
+				return "", nil, fmt.Errorf("read final article for durable draft validation: %w", readErr)
 			}
-			evidence, _ := json.Marshal(map[string]string{
-				"source": "durable_publication", "status": publication.Status, "reason": reason,
-			})
-			status := model.TaskExecutionDraftDeliveryFailed
-			if publication.DraftAddAttemptedAt != nil {
-				status = model.TaskExecutionDraftDeliveryAmbiguous
+			if !found || publication.DraftContentFingerprint == "" ||
+				WechatContentFingerprint(string(finalHTML)) != publication.DraftContentFingerprint {
+				reason := "final_html_missing"
+				if found {
+					reason = "content_fingerprint_mismatch"
+				}
+				evidence, _ := json.Marshal(map[string]string{
+					"source": "durable_publication", "status": publication.Status, "reason": reason,
+				})
+				status := model.TaskExecutionDraftDeliveryFailed
+				if publication.DraftAddAttemptedAt != nil {
+					status = model.TaskExecutionDraftDeliveryAmbiguous
+				}
+				return status, evidence, nil
 			}
-			return status, evidence, nil
 		}
 		if !draftRetryEligible(publication) {
 			status := draftDeliveryStatusFromPublication(publication)
@@ -605,8 +669,11 @@ func (s *TaskService) resolveCloudDraftDelivery(ctx context.Context, task *model
 		return "", nil, fmt.Errorf("find durable draft publication: %w", err)
 	}
 
-	if task.Type != model.PlatformArticle {
+	if !taskUsesChannel(task, model.ChannelArticle) && !taskUsesChannel(task, model.ChannelWechatPicture) {
 		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("finalizer", model.TaskExecutionDraftDeliveryNotRequested, "", false, ""), nil
+	}
+	if taskUsesChannel(task, model.ChannelWechatPicture) {
+		return s.finalizePicturePublication(ctx, task, execution)
 	}
 	return s.finalizeArticlePublication(ctx, task, execution)
 }
@@ -812,6 +879,178 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	return block(wechatDraftDeliveryFailureCode(createErr), "retry_draft")
 }
 
+type picturePublicationPackage struct {
+	SchemaVersion string   `json:"schema_version"`
+	Title         string   `json:"title"`
+	Digest        string   `json:"digest"`
+	Content       string   `json:"content"`
+	CoverPath     string   `json:"cover_path"`
+	ImagePaths    []string `json:"image_paths"`
+	Readiness     struct {
+		Status string `json:"status"`
+	} `json:"readiness"`
+}
+
+func (s *TaskService) finalizePicturePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
+	block := func(code, action string) (string, []byte, error) {
+		return model.TaskExecutionDraftDeliveryBlocked, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryBlocked, code, false, action), nil
+	}
+	if input := task.AgentInput.Data(); input != nil {
+		if publish, ok := input["picture_publish_draft"].(bool); ok && !publish {
+			return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
+		}
+	}
+	body, found, err := s.readExecutionArtifact(ctx, execution.ID, "output/publish-package.json", maxTaskDeliveryJSONBytes)
+	if err != nil {
+		return "", nil, err
+	}
+	if !found {
+		return block("publication_package_missing", "review_content")
+	}
+	var pkg picturePublicationPackage
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	if err := decoder.Decode(&pkg); err != nil || pkg.SchemaVersion != "1.0" || pkg.Readiness.Status != "ready" || strings.TrimSpace(pkg.Title) == "" {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+	}
+	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	byPath := make(map[string]*model.TaskFile, len(files))
+	for _, file := range files {
+		if file != nil && file.TaskID == task.ID && file.ExecutionID == execution.ID {
+			byPath[file.FilePath] = file
+		}
+	}
+	if s.wechatPublicationSvc == nil {
+		return block("publication_service_unavailable", "retry_draft")
+	}
+	paths := make([]string, 0, len(pkg.ImagePaths)+1)
+	if strings.TrimSpace(pkg.CoverPath) != "" {
+		paths = append(paths, strings.TrimSpace(pkg.CoverPath))
+	}
+	for _, path := range pkg.ImagePaths {
+		path = strings.TrimSpace(path)
+		if path == "" || path == pkg.CoverPath {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	if input := task.AgentInput.Data(); input != nil {
+		if raw, ok := input["picture_image_count"]; ok {
+			requested, valid := pictureImageCount(raw)
+			if !valid {
+				return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_invalid", false, "retry_visuals"), nil
+			}
+			if len(paths) > requested {
+				return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_exceeded", false, "retry_visuals"), nil
+			}
+		}
+	}
+	if len(paths) < 1 || len(paths) > 20 {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_invalid", false, "retry_visuals"), nil
+	}
+	images := make([]appwechat.DraftImage, 0, len(paths))
+	seen := map[string]struct{}{}
+	_, project, err := s.wechatPublicationSvc.ownedTaskProject(ctx, task.UserID, task.ID)
+	if err != nil {
+		return "", nil, fmt.Errorf("load picture publication account: %w", err)
+	}
+	for index, path := range paths {
+		file := byPath[path]
+		if file == nil || file.State != model.TaskFileStateDelivered {
+			return block("image_media_missing", "retry_visuals")
+		}
+		mediaID := strings.TrimSpace(file.MediaID)
+		if mediaID == "" {
+			if file.PublicationUploadStatus == "attempted" {
+				return block("image_upload_ambiguous", "check_wechat")
+			}
+			if s.wechatPublicationSvc.materialUploader == nil || strings.TrimSpace(file.OSSKey) == "" {
+				return block("image_media_missing", "retry_visuals")
+			}
+			data, readErr := storage.ReadObject(ctx, s.store, file.OSSKey, 20*1024*1024)
+			if readErr != nil {
+				return block("image_read_failed", "retry_visuals")
+			}
+			file, err = s.repo.TaskFiles().MarkPublicationUploadAttempt(ctx, file.ID, file.TaskID, file.ExecutionID, time.Now().UTC())
+			if err != nil || file == nil || file.PublicationUploadStatus != "attempted" {
+				return block("image_upload_ambiguous", "check_wechat")
+			}
+			result, uploadErr := s.wechatPublicationSvc.materialUploader(ctx, project, data, filepath.Base(file.FilePath))
+			if uploadErr != nil || result == nil || strings.TrimSpace(result.MediaID) == "" {
+				reason := "provider returned no media_id"
+				if uploadErr != nil {
+					reason = uploadErr.Error()
+				}
+				_ = s.repo.TaskFiles().RecordPublicationUploadFailure(ctx, file.ID, file.TaskID, file.ExecutionID, reason)
+				return block("image_upload_failed", "retry_draft")
+			}
+			mediaID = strings.TrimSpace(result.MediaID)
+			updated, updateErr := s.repo.TaskFiles().UpdatePublicationMetadata(ctx, file.ID, file.TaskID, file.ExecutionID, func() string {
+				if index == 0 {
+					return model.FileRoleCover
+				}
+				return model.FileRoleImage
+			}(), mediaID, strings.TrimSpace(result.WechatURL))
+			if updateErr != nil || updated == nil {
+				return block("image_upload_evidence_failed", "retry_draft")
+			}
+			file = updated
+		}
+		if _, ok := seen[mediaID]; ok {
+			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_media_duplicate", false, "retry_visuals"), nil
+		}
+		seen[mediaID] = struct{}{}
+		images = append(images, appwechat.DraftImage{ImageMediaID: mediaID})
+	}
+	request := appwechat.DraftAddRequest{Articles: []appwechat.DraftArticle{{ArticleType: "newspic", Title: strings.TrimSpace(pkg.Title), Digest: strings.TrimSpace(pkg.Digest), Content: strings.TrimSpace(pkg.Content), ImageInfo: &appwechat.DraftImageInfo{ImageList: images}, CoverInfo: pictureCoverInfo(task.ImageRatio)}}}
+	publication, createErr := s.wechatPublicationSvc.CreateDraft(ctx, task.UserID, task.ID, task.ProjectID, execution.ID, request)
+	attempted := publication != nil && publication.DraftAddAttemptedAt != nil
+	if createErr == nil && publication != nil && publication.DraftMediaID != "" {
+		return model.TaskExecutionDraftDeliverySucceeded, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliverySucceeded, "", true, ""), nil
+	}
+	if errors.Is(createErr, ErrWechatPublicationPending) && attempted {
+		return model.TaskExecutionDraftDeliveryAmbiguous, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryAmbiguous, "create_draft_pending_reconciliation", true, "check_wechat"), nil
+	}
+	if attempted {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, wechatDraftDeliveryFailureCode(createErr), true, "check_wechat"), nil
+	}
+	return block(wechatDraftDeliveryFailureCode(createErr), "retry_draft")
+}
+
+func pictureCoverInfo(ratio string) *appwechat.DraftCoverInfo {
+	ratio = strings.TrimSpace(ratio)
+	if ratio == "" || ratio == "auto" {
+		ratio = "3:4"
+	}
+	switch ratio {
+	case "9:16", "3:4", "1:1", "4:3", "16:9":
+	default:
+		ratio = "3:4"
+	}
+	return &appwechat.DraftCoverInfo{CropPercentList: []appwechat.DraftCropPercent{{Ratio: strings.ReplaceAll(ratio, ":", "_"), X1: 0, Y1: 0, X2: 1, Y2: 1}}}
+}
+
+func pictureImageCount(raw any) (int, bool) {
+	var count int
+	switch value := raw.(type) {
+	case int:
+		count = value
+	case float64:
+		count = int(value)
+	case json.Number:
+		parsed, err := value.Int64()
+		if err != nil {
+			return 0, false
+		}
+		count = int(parsed)
+	default:
+		return 0, false
+	}
+	return count, count >= 1 && count <= 20
+}
+
 func draftDeliveryStatusFromPublication(publication *model.WechatPublication) string {
 	if publication == nil {
 		return model.TaskExecutionDraftDeliveryNotRequested
@@ -923,7 +1162,7 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 	if err != nil {
 		return model.TaskOutcome{}, fmt.Errorf("list execution files for outcome: %w", err)
 	}
-	if task.Type == model.PlatformArticle {
+	if taskUsesChannel(task, model.ChannelArticle) || taskUsesChannel(task, model.ChannelWechatPicture) {
 		outcome.Visual.Status = articleVisualOutcome(task, files)
 		if outcome.Visual.Status == model.TaskVisualPartial {
 			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{

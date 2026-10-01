@@ -7,7 +7,7 @@ import (
 )
 
 func TestMCPTaskResponseExposesAgentInput(t *testing.T) {
-	task := &model.Task{ID: "task-1", Type: model.PlatformArticle}
+	task := &model.Task{ID: "task-1", Type: model.TaskTypeWechatArticle}
 	task.SetAgentInput(map[string]any{"format": "brief"})
 
 	response := mcpTaskResponse(task)

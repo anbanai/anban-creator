@@ -7,7 +7,7 @@ import (
 )
 
 func TestArticlePackHasOnlyCoreDeliveryRequirements(t *testing.T) {
-	raw, err := os.ReadFile("../../harness/packs/article/agent-pack.yaml")
+	raw, err := os.ReadFile("../../harness/packs/wechat-article/agent-pack.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +33,8 @@ func TestArticlePackHasOnlyCoreDeliveryRequirements(t *testing.T) {
 
 func TestArticleClaudeAgentUsesDynamicLifecycleTasks(t *testing.T) {
 	for _, path := range []string{
-		"../../harness/packs/article/agent.claude.md",
-		"../../harness/agents/article.md",
+		"../../harness/packs/wechat-article/agent.claude.md",
+		"../../harness/agents/wechat-article.md",
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -56,8 +56,8 @@ func TestArticleClaudeAgentUsesDynamicLifecycleTasks(t *testing.T) {
 
 func TestArticleAgentKeepsDraftDeliveryFileBacked(t *testing.T) {
 	for _, path := range []string{
-		"../../harness/packs/article/agent.claude.md",
-		"../../harness/agents/article.md",
+		"../../harness/packs/wechat-article/agent.claude.md",
+		"../../harness/agents/wechat-article.md",
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -101,9 +101,9 @@ func TestArticleInteractiveDraftUsesSingleAtomicAttempt(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		"../../harness/packs/article/agent.claude.md",
-		"../../harness/packs/article/agent.codex.toml",
-		"../../harness/packs/article/agent.dsh.yml",
+		"../../harness/packs/wechat-article/agent.claude.md",
+		"../../harness/packs/wechat-article/agent.codex.toml",
+		"../../harness/packs/wechat-article/agent.dsh.yml",
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -117,8 +117,8 @@ func TestArticleInteractiveDraftUsesSingleAtomicAttempt(t *testing.T) {
 
 func TestArticleAgentKeepsVisualFailuresIndependent(t *testing.T) {
 	for _, path := range []string{
-		"../../harness/packs/article/agent.claude.md",
-		"../../harness/agents/article.md",
+		"../../harness/packs/wechat-article/agent.claude.md",
+		"../../harness/agents/wechat-article.md",
 		"../../harness/skills/article/SKILL.md",
 		"../../harness/skills/article-visual-design/SKILL.md",
 		"../../harness/skills/article-cover-design/SKILL.md",
@@ -145,7 +145,7 @@ func TestArticleAgentKeepsVisualFailuresIndependent(t *testing.T) {
 
 func TestArticleImageModeHasNoCompatibilityDefault(t *testing.T) {
 	for _, path := range []string{
-		"../../harness/packs/article/agent.claude.md",
+		"../../harness/packs/wechat-article/agent.claude.md",
 		"../../harness/skills/article/SKILL.md",
 		"../../harness/skills/article-visual-design/SKILL.md",
 	} {

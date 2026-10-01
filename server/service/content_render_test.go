@@ -100,7 +100,7 @@ func logPhase(t *testing.T, phase int, msg string, args ...any) {
 func TestConvertMarkdown_FullDiagnosticTrace(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-trace-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	logPhase(t, 0, "Project created project_id=%s theme=autumn-warm", projectID)
 
@@ -150,7 +150,7 @@ func TestConvertMarkdown_DefaultTheme_NoPrompt(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-default-001"
 	// Project has EMPTY theme → resolves to autumn-warm.
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "")
 
 	logPhase(t, 0, "Project created with EMPTY theme (resolves to autumn-warm)")
 
@@ -177,7 +177,7 @@ func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-override-001"
 	// Project has autumn-warm but we override to spring-fresh.
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	result, err := svc.ConvertMarkdown(context.Background(), userID, projectID, "# Test", "spring-fresh", "")
 	if err != nil {
@@ -202,7 +202,7 @@ func TestConvertMarkdown_ExplicitThemeArg(t *testing.T) {
 func TestConvertMarkdown_WithImages(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-images-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	markdown := `# Article
 
@@ -254,7 +254,7 @@ func classifyImage(original string) string {
 func TestConvertMarkdown_NonexistentTheme_Error(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-theme-err-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "")
 
 	_, err := svc.ConvertMarkdown(context.Background(), userID, projectID, "# Test", "nonexistent-xyz-999", "")
 	if err == nil {
@@ -273,7 +273,7 @@ func TestConvertMarkdown_NonexistentTheme_Error(t *testing.T) {
 func TestConvertMarkdown_EmptyMarkdown(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-empty-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "")
 
 	_, err := svc.ConvertMarkdown(context.Background(), userID, projectID, "", "", "")
 	if err == nil {
@@ -309,7 +309,7 @@ func TestConvertMarkdown_ProjectOwnershipMismatch(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	ownerID := "user-owner-001"
 	otherID := "user-other-001"
-	projectID := createProjectWithTheme(t, repo, ownerID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, ownerID, model.PlatformWechat, "", "autumn-warm")
 
 	_, err := svc.ConvertMarkdown(context.Background(), otherID, projectID, "# Test", "", "")
 	if err == nil {

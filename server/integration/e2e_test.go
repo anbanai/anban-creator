@@ -71,6 +71,7 @@ func setupTestRouter(t *testing.T) (*fiber.App, func(), repository.Repository) {
 		&model.Task{},
 		&model.TaskFile{},
 		&model.BillingWalletAccount{},
+		&model.TaskExecution{}, &model.PlanEntry{},
 	); err != nil {
 		t.Fatalf("failed to auto-migrate: %v", err)
 	}
@@ -225,6 +226,9 @@ func TestE2E_FullUserFlow(t *testing.T) {
 	// Step 2: Create a manual task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"project_id":        testProject.ID,
+		"agent_id":          model.AgentIDSeednote,
+		"channel":           model.ChannelSeednote,
+		"task_kind":         model.TaskKindContentGeneration,
 		"prompt":            "TestTopic",
 		"execution_profile": "effective",
 	})
@@ -355,6 +359,9 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 	// Step 1: Create a plan.
 	planBody, _ := json.Marshal(map[string]string{
 		"project_id":        testProject.ID,
+		"agent_id":          model.AgentIDSeednote,
+		"channel":           model.ChannelSeednote,
+		"task_kind":         model.TaskKindContentGeneration,
 		"cron_expr":         "0 9 * * *",
 		"prompt":            "spring fashion",
 		"execution_profile": "effective",
@@ -576,7 +583,7 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 	testProject := &model.Project{
 		ID:       "test-project-ownership-1",
 		UserID:   userID1,
-		Platform: model.ScopeArticle,
+		Platform: model.ScopeWechat,
 		Name:     "User1 Article Project",
 		Status:   model.ProjectStatusActive,
 	}
@@ -587,6 +594,9 @@ func TestE2E_TaskOwnershipIsolation(t *testing.T) {
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"project_id":        testProject.ID,
+		"agent_id":          model.AgentIDArticle,
+		"channel":           model.ChannelArticle,
+		"task_kind":         model.TaskKindContentGeneration,
 		"prompt":            "User1 Article",
 		"execution_profile": "effective",
 	})

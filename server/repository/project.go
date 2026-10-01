@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -27,7 +28,7 @@ type ProjectStats struct {
 // ProjectListOptions for filtering project list queries.
 type ProjectListOptions struct {
 	Status   string // filter by status (active, archived)
-	Platform string // filter by platform (article, seednote, moments, ecommerce, video)
+	Platform string // filter by platform (wechat, seednote, moments, ecommerce, video)
 }
 
 // ProjectRepository defines the interface for project data access.
@@ -222,6 +223,17 @@ func (r *gormProjectRepository) GetStats(ctx context.Context, projectID string) 
 			MAX(completed_at) as last_activity_at
 		FROM tasks WHERE project_id = ?
 	`, projectID, model.TopicStatusUnused, projectID).Scan(&stats).Error
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table: topic_pool") {
+		err = r.db.WithContext(ctx).Raw(`
+			SELECT COUNT(*) as total_tasks,
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_tasks,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_tasks,
+			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_tasks,
+			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
+			0 as unused_topics, MAX(completed_at) as last_activity_at
+			FROM tasks WHERE project_id = ?
+		`, projectID).Scan(&stats).Error
+	}
 
 	if err != nil {
 		return nil, err

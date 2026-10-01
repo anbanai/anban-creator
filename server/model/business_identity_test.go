@@ -3,7 +3,11 @@ package model
 import "testing"
 
 func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
+<<<<<<< HEAD
 	for _, platform := range []string{PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation} {
+=======
+	for _, platform := range []string{PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage} {
+>>>>>>> codex/tasks-infinite-scroll-review
 		if !IsProjectPlatform(platform) {
 			t.Errorf("IsProjectPlatform(%q) = false", platform)
 		}
@@ -12,13 +16,20 @@ func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
 		t.Fatal("Pack-only value was accepted as a project platform")
 	}
 
+<<<<<<< HEAD
 	for _, taskType := range []string{PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, TaskTypeLiveSlicer, TaskTypeViralAnalysis} {
+=======
+	for _, taskType := range []string{TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, TaskTypeLiveSlicer, TaskTypeViralAnalysis} {
+>>>>>>> codex/tasks-infinite-scroll-review
 		if !IsTaskType(taskType) {
 			t.Errorf("IsTaskType(%q) = false", taskType)
 		}
 	}
 	if IsTaskType("future-pack-only") {
 		t.Fatal("Pack-only value was accepted as a task type")
+	}
+	if IsProjectPlatform("article") || IsTaskType("article") {
+		t.Fatal("legacy article identity is still accepted")
 	}
 }
 
@@ -38,7 +49,7 @@ func TestAdminOnlyProjectPlatforms(t *testing.T) {
 			t.Errorf("IsAdminOnlyProjectPlatform(%q) = false", platform)
 		}
 	}
-	for _, platform := range []string{PlatformArticle, PlatformSeednote, PlatformMontage} {
+	for _, platform := range []string{PlatformWechat, PlatformSeednote, PlatformMontage} {
 		if IsAdminOnlyProjectPlatform(platform) {
 			t.Errorf("IsAdminOnlyProjectPlatform(%q) = true", platform)
 		}

@@ -148,10 +148,12 @@ type ListDraftsResult struct {
 
 // DraftItem 草稿列表项
 type DraftItem struct {
-	MediaID    string `json:"media_id"`
-	Title      string `json:"title"`
-	Digest     string `json:"digest,omitempty"`
-	UpdateTime int64  `json:"update_time"`
+	MediaID       string   `json:"media_id"`
+	ArticleType   string   `json:"article_type,omitempty"`
+	Title         string   `json:"title"`
+	Digest        string   `json:"digest,omitempty"`
+	ImageMediaIDs []string `json:"image_media_ids,omitempty"`
+	UpdateTime    int64    `json:"update_time"`
 }
 
 // ListPublishedResult 已发布文章列表结果
@@ -164,11 +166,13 @@ type ListPublishedResult struct {
 
 // PublishedItem 已发布文章列表项
 type PublishedItem struct {
-	ArticleID  string `json:"article_id"`
-	Title      string `json:"title"`
-	Digest     string `json:"digest,omitempty"`
-	URL        string `json:"url,omitempty"`
-	UpdateTime int64  `json:"update_time"`
+	ArticleID     string   `json:"article_id"`
+	ArticleType   string   `json:"article_type,omitempty"`
+	Title         string   `json:"title"`
+	Digest        string   `json:"digest,omitempty"`
+	URL           string   `json:"url,omitempty"`
+	ImageMediaIDs []string `json:"image_media_ids,omitempty"`
+	UpdateTime    int64    `json:"update_time"`
 }
 
 // ListDrafts 获取草稿列表
@@ -186,10 +190,11 @@ func (s *Service) ListDrafts(offset, count int64) (*ListDraftsResult, error) {
 			items := make([]DraftItem, len(result.Items))
 			for i, item := range result.Items {
 				items[i] = DraftItem{
-					MediaID:    item.MediaID,
-					Title:      item.Title,
-					Digest:     item.Digest,
-					UpdateTime: item.UpdateTime,
+					MediaID: item.MediaID, ArticleType: item.ArticleType,
+					Title:         item.Title,
+					Digest:        item.Digest,
+					ImageMediaIDs: append([]string(nil), item.ImageMediaIDs...),
+					UpdateTime:    item.UpdateTime,
 				}
 			}
 			return items
@@ -212,11 +217,12 @@ func (s *Service) ListPublished(offset, count int64) (*ListPublishedResult, erro
 			items := make([]PublishedItem, len(result.Items))
 			for i, item := range result.Items {
 				items[i] = PublishedItem{
-					ArticleID:  item.ArticleID,
-					Title:      item.Title,
-					Digest:     item.Digest,
-					URL:        item.URL,
-					UpdateTime: item.UpdateTime,
+					ArticleID: item.ArticleID, ArticleType: item.ArticleType,
+					Title:         item.Title,
+					Digest:        item.Digest,
+					URL:           item.URL,
+					ImageMediaIDs: append([]string(nil), item.ImageMediaIDs...),
+					UpdateTime:    item.UpdateTime,
 				}
 			}
 			return items

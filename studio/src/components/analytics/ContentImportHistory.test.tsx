@@ -6,9 +6,9 @@ import type { Project } from '@/types'
 import ContentImportHistory from './ContentImportHistory'
 vi.mock('@/lib/api', () => ({ api: { wechatAnalyticsImport: { listBatches: vi.fn(), revoke: vi.fn() }, seednoteImport: { listBatches: vi.fn(), revoke: vi.fn() } } }))
 beforeEach(() => vi.clearAllMocks())
-for (const platform of ['article', 'seednote'] as const) describe(`${platform} 导入历史`, () => {
+for (const platform of ['wechat', 'seednote'] as const) describe(`${platform} 导入历史`, () => {
   it('confirms filename, retains error for retry, and refreshes revoked state', async () => {
-    const method = platform === 'article' ? api.wechatAnalyticsImport : api.seednoteImport
+    const method = platform === 'wechat' ? api.wechatAnalyticsImport : api.seednoteImport
     const batch = { id: 'b1', file_name: '数据.xlsx', data_as_of_at: '2026-09-24T12:00:00Z', status: 'completed', matched_rows: 2, resolved_rows: 2 }
     vi.mocked(method.listBatches).mockResolvedValue({ items: [batch], total: 1 } as never)
     vi.mocked(method.revoke).mockRejectedValueOnce(new Error('暂时失败')).mockImplementationOnce(async () => {

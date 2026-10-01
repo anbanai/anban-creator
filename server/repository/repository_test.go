@@ -600,7 +600,7 @@ func TestPlanRepository_CRUD(t *testing.T) {
 	plan := &model.Plan{
 		ID:       "plan-1",
 		UserID:   "user-plan-1",
-		Type:     model.ScopeArticle,
+		Type:     model.ScopeWechat,
 		Title:    "Daily articles",
 		CronExpr: "0 9 * * *",
 		Status:   model.PlanStatusActive,

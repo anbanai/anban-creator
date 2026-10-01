@@ -302,7 +302,7 @@ func TestAgentBootstrapArtifactTransportFollowsStorageProvider(t *testing.T) {
 			}
 			task := &model.Task{
 				ID: "task-1", UserID: "user-1", ProjectID: "project-1",
-				Type: model.PlatformArticle, Prompt: "write", Status: model.TaskStatusRunning,
+				Type: model.TaskTypeWechatArticle, Prompt: "write", Status: model.TaskStatusRunning,
 				ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 			}
 			execution := model.NewTaskExecutionAgentProfile(task.AgentProfileSnapshot, task.AgentProfileFingerprint)

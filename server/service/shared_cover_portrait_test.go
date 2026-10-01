@@ -15,7 +15,7 @@ import (
 )
 
 func TestCreateManualSharedCoverPortrait(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
 		for _, selected := range []bool{false, true} {
 			t.Run(platform+map[bool]string{false: "/disabled", true: "/selected"}[selected], func(t *testing.T) {
 				svc, repo := setupTaskServiceWithEnqueuer(t)
@@ -41,7 +41,7 @@ func TestCreateManualSharedCoverPortrait(t *testing.T) {
 				}
 				svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, nil))
 				params := CreateManualParams{UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Prompt: "create cover", ReferenceImageAssetID: product.ID, CoverUsePortrait: selected}
-				if platform != model.PlatformArticle {
+				if platform != model.PlatformWechat {
 					off := false
 					params.ArticleWithCover = &off // Article-only controls must not disable other covers.
 				}
@@ -119,7 +119,7 @@ func TestCreateManualRejectsUnavailableCoverPortrait(t *testing.T) {
 		portrait, coverOff       bool
 	}{
 		{name: "missing", platform: model.PlatformSeednote},
-		{name: "article cover off", platform: model.PlatformArticle, portrait: true, coverOff: true},
+		{name: "article cover off", platform: model.PlatformWechat, portrait: true, coverOff: true},
 		{name: "viral analysis", platform: model.PlatformSeednote, taskType: model.TaskTypeViralAnalysis, portrait: true},
 		{name: "unsupported", platform: model.PlatformMoments, portrait: true},
 	} {
@@ -152,7 +152,7 @@ func TestCreateManualRejectsUnavailableCoverPortrait(t *testing.T) {
 
 func TestSelectedCoverPortraitRequiresFrozenPortraitAtRuntime(t *testing.T) {
 	_, repo := setupTaskServiceWithEnqueuer(t)
-	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
 		task := &model.Task{Type: platform, CoverUsePortrait: true}
 		if _, err := resolveProjectPortraitReferenceAsset(t.Context(), repo, task); !errors.Is(err, ErrCoverPortraitUnavailable) {
 			t.Fatalf("%s missing frozen portrait error=%v", platform, err)
@@ -161,7 +161,7 @@ func TestSelectedCoverPortraitRequiresFrozenPortraitAtRuntime(t *testing.T) {
 }
 
 func TestSharedCoverPortraitPlanLifecycle(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
 		t.Run(platform, func(t *testing.T) {
 			tasks, repo := setupTaskServiceWithEnqueuer(t)
 			tasks.SetMontageConfig(montageIntegrationConfig())
@@ -181,7 +181,7 @@ func TestSharedCoverPortraitPlanLifecycle(t *testing.T) {
 			}
 			tasks.SetReferenceAssetService(NewReferenceAssetService(repo, nil, nil))
 			params := CreatePlanParams{UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", CronExpr: "0 9 * * *", Prompt: "create", CoverUsePortrait: true}
-			if platform != model.PlatformArticle {
+			if platform != model.PlatformWechat {
 				off := false
 				params.ArticleWithCover = &off
 			}

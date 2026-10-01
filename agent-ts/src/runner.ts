@@ -153,11 +153,12 @@ const MANAGED_ALLOWED_TOOLS = [
   "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "TodoWrite",
   "WebSearch", "WebFetch", "NotebookEdit", "mcp__anban__*",
 ];
-const MANAGED_PARALLEL_TASK_TYPES = new Set(["article", "seednote", "viral_analysis"]);
+const MANAGED_PARALLEL_TASK_TYPES = new Set(["wechat-article", "wechat-picture", "seednote", "viral_analysis"]);
 const MANAGED_READONLY_WORKER = "managed-readonly-worker";
 const MANAGED_READONLY_WORKER_TOOLS = ["Read", "Glob", "Grep"];
 const MANAGED_READONLY_WORKER_MCP_TOOLS: Record<string, string[]> = {
-  article: ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"],
+  "wechat-article": ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"],
+  "wechat-picture": ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"],
   seednote: [
     "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
     "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
@@ -168,7 +169,8 @@ const MANAGED_READONLY_WORKER_MCP_TOOLS: Record<string, string[]> = {
   ],
 };
 const MANAGED_READONLY_WORKER_SKILLS: Record<string, string[]> = {
-  article: ["article-research", "trending-topics", "seo-optimization"],
+  "wechat-article": ["article-research", "trending-topics", "seo-optimization"],
+  "wechat-picture": ["wechat-picture-research", "wechat-picture-writing"],
   seednote: ["seednote-research", "trending-topics", "seednote-viral-analysis"],
   viral_analysis: ["seednote-research", "trending-topics", "seednote-viral-analysis"],
 };
@@ -956,9 +958,11 @@ function runSeednoteGate(cwd: string, taskType: string, pluginRoot: string, sign
 }
 
 function requiredSkills(taskType: string): string[] {
+	if (taskType === "feedback_analysis") return ["anban:data-tracker", "anban:publish-analytics", "anban:performance-review", "anban:content-postmortem", "anban:strategy-advisor"];
+	if (taskType === "profile_analysis") return ["anban:profile-builder"];
   if (taskType === "seednote") return ["anban:seednote-research", "anban:seednote-viral-analysis", "anban:seednote-writing", "anban:seednote-visual-design", "anban:humanizer", "anban:portrait-cover-design"];
   if (taskType === "viral_analysis") return ["anban:seednote-research", "anban:seednote-viral-analysis"];
-  if (taskType === "article") return ["anban:humanizer", "anban:portrait-cover-design"];
+  if (taskType === "wechat-article") return ["anban:humanizer", "anban:portrait-cover-design"];
   if (taskType === "ecommerce") return ["anban:humanizer"];
   if (taskType === "live-slicer") return ["anban:live-slice", "anban:capcut-draft"];
   if (taskType === "montage") return ["anban:montage", "anban:portrait-cover-design"];
@@ -967,6 +971,8 @@ function requiredSkills(taskType: string): string[] {
 }
 
 function requiredMCPTools(taskType: string): string[] {
+	if (taskType === "feedback_analysis") return ["get_feedback_context", "submit_agent_feedback"];
+	if (taskType === "profile_analysis") return ["get_project_profile", "submit_profile_result"];
   if (taskType === "seednote") return ["analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback"];
   if (taskType === "viral_analysis") return ["get_project_profile", "list_project_titles", "submit_agent_feedback"];
   if (taskType === "montage") return ["analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"];

@@ -23,6 +23,7 @@ export interface AgentPackDeliverySpec {
 
 export interface AgentPack {
   id: string
+	channel?: 'wechat-article' | 'seednote' | 'wechat-picture'
   version: string
   kind: 'plugin' | 'managed'
   display_name: string
@@ -32,9 +33,8 @@ export interface AgentPack {
     skills?: string[]
     max_turns?: number
   }
-  bindings: {
-    project_platforms?: string[]
-    task_types?: string[]
+	bindings: {
+		task_kinds?: string[]
   }
   runtime: {
     profile?: string

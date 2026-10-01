@@ -35,7 +35,7 @@ func TestIlinkNotifier_EnqueuesTerminalNotificationIdempotently(t *testing.T) {
 
 	log := zerolog.Nop()
 	notifier := NewIlinkNotifier(repo, true, &log)
-	task := &model.Task{ID: taskID, UserID: userID, Type: model.PlatformArticle, Prompt: "夏日防晒指南"}
+	task := &model.Task{ID: taskID, UserID: userID, Type: model.TaskTypeWechatArticle, Prompt: "夏日防晒指南"}
 	notifier.NotifyTerminal(context.Background(), task, model.TaskStatusCompleted, "")
 	notifier.NotifyTerminal(context.Background(), task, model.TaskStatusCompleted, "")
 

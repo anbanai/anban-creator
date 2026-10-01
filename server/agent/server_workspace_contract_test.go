@@ -16,7 +16,7 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		"harness/agents/seednote.md",
 		"harness/agents/ecommerce.md",
 		"harness/agents/moments.md",
-		"harness/agents/article.md",
+		"harness/agents/wechat-article.md",
 		"harness/skills/ecommerce/SKILL.md",
 		"harness/skills/article/SKILL.md",
 		"harness/skills/seednote-visual-design/SKILL.md",
@@ -28,7 +28,7 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		"harness/agents/seednote.toml",
 		"harness/agents/ecommerce.toml",
 		"harness/agents/moments.toml",
-		"harness/agents/article.toml",
+		"harness/agents/wechat-article.toml",
 		"harness/skills/ecommerce/SKILL.md",
 		"harness/skills/article/SKILL.md",
 		"harness/skills/seednote-visual-design/SKILL.md",
@@ -72,8 +72,8 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		path    string
 		outputs []string
 	}{
-		{path: "harness/agents/article.md", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
-		{path: "harness/agents/article.toml", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
+		{path: "harness/agents/wechat-article.md", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
+		{path: "harness/agents/wechat-article.toml", outputs: []string{"output/04-article-final.md", "output/05-article.html", "output/final-review.md"}},
 		{path: "harness/agents/seednote.md", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
 		{path: "harness/agents/seednote.toml", outputs: []string{"output/content.md", "output/image-plan.md", "output/failure-state.json"}},
 		{path: "harness/agents/moments.md", outputs: []string{"output/material-analysis.md", "output/content.md", "output/image-prompts.md", "output/moments-image.png", "output/quality-review.md"}},
@@ -145,7 +145,7 @@ func TestServerDoesNotExposeHostWorkspacePathResolution(t *testing.T) {
 func TestNativeAgentPairsDeclareSameExplicitOutputPaths(t *testing.T) {
 	root := repoRoot(t)
 	for _, agentName := range []string{
-		"article",
+		"wechat-article",
 		"ecommerce",
 		"live-slicer",
 		"moments",

@@ -20,7 +20,7 @@ func TestHypitArtifactExtendsOnlyValidatedStreamReadDeadline(t *testing.T) {
 	for _, tc := range []struct {
 		name, kind, path string
 		wantOK           bool
-	}{{"hypit archive", model.PlatformHypit, "output/project.zip", true}, {"ordinary artifact", model.PlatformArticle, "output/article.md", false}} {
+	}{{"hypit archive", model.PlatformHypit, "output/project.zip", true}, {"ordinary artifact", model.PlatformWechat, "output/article.md", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			app, repo, task, _, token, _, store := setupExecutionScopedAgentAppForPack(t, tc.kind, "")
 			if tc.kind == model.PlatformHypit {

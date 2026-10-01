@@ -63,7 +63,7 @@ func TestCompleteCloudExecutionProjectsPreflightPublicationBlock(t *testing.T) {
 
 func TestFinalizeCloudDraftDeliveryReplaysPersistedBlockIntoLifecycle(t *testing.T) {
 	ctx := context.Background()
-	svc, repo, task, execution := setupTaskLifecycleTest(t, model.PlatformArticle)
+	svc, repo, task, execution := setupTaskLifecycleTest(t, model.TaskTypeWechatArticle)
 	if _, err := svc.SetTaskProgressPlan(ctx, task.ID, execution.ID, validLifecyclePlan()); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestCompleteFailedExecutionDoesNotRestoreSkippedPublicationStagesToPending(
 
 func TestGetTaskRepairsStalePublicationLifecycleWithoutCreatingDraft(t *testing.T) {
 	ctx := context.Background()
-	svc, repo, task, execution := setupTaskLifecycleTest(t, model.PlatformArticle)
+	svc, repo, task, execution := setupTaskLifecycleTest(t, model.TaskTypeWechatArticle)
 	if _, err := svc.SetTaskProgressPlan(ctx, task.ID, execution.ID, validLifecyclePlan()); err != nil {
 		t.Fatal(err)
 	}

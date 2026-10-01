@@ -425,7 +425,7 @@ describe('TaskDetailPage', () => {
       input_attachments: [{ type: 'image', file_name: 'tea-reference.jpg' }],
       project_snapshot: {
         project_name: '茶小茶',
-        platform: 'article',
+        platform: 'wechat',
         visual_style: '清新茶感摄影',
         image_ratio: '3:4',
       },
@@ -969,7 +969,7 @@ describe('TaskDetailPage', () => {
       input_attachments: [{ type: 'image', file_name: 'brief-reference.png' }],
       project_snapshot: {
         project_name: '创建时项目快照',
-        platform: 'article',
+        platform: 'wechat',
         visual_style: '明亮纪实摄影',
         image_ratio: '3:2',
         author: '安班编辑部',
@@ -1292,7 +1292,7 @@ describe('TaskDetailPage', () => {
 
   it('shows the WeChat publication lifecycle without URL binding', async () => {
     mockTask(taskWith({
-      type: 'article',
+      type: 'wechat-article',
       status: 'completed',
       lifecycle: {
         version: 1,
@@ -1333,7 +1333,7 @@ describe('TaskDetailPage', () => {
 
   it('keeps streaming lifecycle events after creative completion while publication is pending', async () => {
     mockTask(taskWith({
-      type: 'article',
+      type: 'wechat-article',
       status: 'completed',
       lifecycle: {
         version: 1,
@@ -1383,7 +1383,7 @@ describe('TaskDetailPage', () => {
 
   it('waits for project configuration before querying WeChat publication', async () => {
     mockTask(taskWith({
-      type: 'article',
+      type: 'wechat-article',
       status: 'completed',
     }))
     let resolveProject!: (value: typeof mockProjectDetail) => void
@@ -1548,7 +1548,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('links completed 公众号/种草笔记 tasks to their own 内容分析 page and hides it elsewhere', async () => {
-    mockTask(taskWith({ id: 'task-1', type: 'article', status: 'completed' }))
+    mockTask(taskWith({ id: 'task-1', type: 'wechat-article', status: 'completed' }))
 
     const { unmount } = render(<TaskDetailPage />)
 
@@ -1571,7 +1571,7 @@ describe('TaskDetailPage', () => {
   })
 
   it('omits the 内容分析 link until a task has content to report on', async () => {
-    mockTask(taskWith({ id: 'task-1', type: 'article', status: 'running' }))
+    mockTask(taskWith({ id: 'task-1', type: 'wechat-article', status: 'running' }))
 
     render(<TaskDetailPage />)
 
@@ -1896,7 +1896,7 @@ describe('TaskDetailPage', () => {
 
   it('shows project parameters without the low-value reference image preview', async () => {
     mockTask(taskWith({
-      type: 'article',
+      type: 'wechat-article',
       status: 'completed',
       billing_price_credits: 6000,
       billing_total_credits: 7300,
@@ -1905,7 +1905,7 @@ describe('TaskDetailPage', () => {
           id: 'task-charge',
           charge_kind: 'task',
           policy: 'task_admission',
-          sku_id: 'task.article.standard.v1',
+          sku_id: 'task.wechat_article.standard.v1',
           credits: 6000,
           created_at: '2026-07-10T00:00:00.000Z',
         },
@@ -1940,7 +1940,7 @@ describe('TaskDetailPage', () => {
       ],
       project_snapshot: {
         project_name: '快照项目',
-        platform: 'article',
+        platform: 'wechat',
         visual_style: '柔光生活摄影',
         image_ratio: '16:9',
         reference_image_asset_id: '44444444-4444-4444-8444-444444444444',
@@ -1985,7 +1985,7 @@ describe('TaskDetailPage', () => {
 
   it('opens project details in a dialog instead of navigating to the projects list', async () => {
     mockTask(taskWith({
-      type: 'article',
+      type: 'wechat-article',
       status: 'completed',
     }))
 

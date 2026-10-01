@@ -18,7 +18,7 @@ const uploadToOSSMock = vi.hoisted(() => vi.fn())
 const projectWithReference: Project = {
   id: 'ch-1',
   user_id: '1',
-  platform: 'article',
+  platform: 'wechat',
   name: '测试项目',
   avatar_url: '',
   profile_url: 'https://mp.weixin.qq.com/test',
@@ -215,7 +215,7 @@ describe('ProjectsPage', () => {
   })
 
   it('explains the project fields whose effect is invisible in the form', async () => {
-    window.history.pushState({}, '', '/projects?create=true&type=article&intent=new')
+    window.history.pushState({}, '', '/projects?create=true&type=wechat-article&intent=new')
 
     render(<ProjectsPage />)
 
@@ -252,7 +252,7 @@ describe('ProjectsPage', () => {
 
 	it('keeps the project composer usable when the optional Agent Pack catalog is partial', async () => {
 		vi.mocked(api.agentPacks.list).mockResolvedValueOnce({} as Awaited<ReturnType<typeof api.agentPacks.list>>)
-		window.history.pushState({}, '', '/projects?create=true&type=article&intent=new')
+		window.history.pushState({}, '', '/projects?create=true&type=wechat-article&intent=new')
 
 		render(<ProjectsPage />)
 
@@ -363,7 +363,7 @@ describe('ProjectsPage', () => {
     expect(screen.getByRole('button', { name: '创建' })).toBeEnabled()
   })
 
-  it.each(['article', 'seednote', 'montage', 'hypit'] as const)('uploads an independent portrait for a %s project', async (platform) => {
+  it.each(['wechat', 'seednote', 'montage', 'hypit'] as const)('uploads an independent portrait for a %s project', async (platform) => {
     const project = { ...projectWithReference, platform }
     vi.mocked(api.projects.list).mockResolvedValue([project])
     vi.mocked(api.projects.update).mockResolvedValue(project)

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"gorm.io/datatypes"
@@ -152,7 +153,12 @@ type StyleOverrides struct {
 // creation time. Runtime surfaces (MCP/settings/UI) read this when present so
 // later project edits do not change an already-created task.
 type ProjectSnapshot struct {
-	ProjectName                   string                   `json:"project_name,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
+	// AgentID and Channel are the immutable execution identity for new tasks.
+	// Platform is retained only so historical snapshots can still be rendered
+	// while the one-time migration drains old rows.
+	AgentID                       string                   `json:"agent_id,omitempty"`
+	Channel                       string                   `json:"channel,omitempty"`
 	Platform                      string                   `json:"platform,omitempty"`
 	Instructions                  string                   `json:"instructions,omitempty"`
 	Keywords                      string                   `json:"keywords,omitempty"`
@@ -167,16 +173,22 @@ type ProjectSnapshot struct {
 	HypitDefaults                 HypitDefaults            `json:"hypit_defaults,omitempty"`
 	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
 	AgentConfig                   map[string]any           `json:"agent_config,omitempty"`
+	ChannelConfig                 map[string]any           `json:"channel_config,omitempty"`
 	Profile                       ProjectProfile           `json:"profile,omitempty"`
 }
 
 // Task represents a content generation task.
 type Task struct {
-	ID                      string                                      `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID                  string                                      `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
-	ProjectID               string                                      `gorm:"type:char(36);index" json:"project_id"`
-	PlanID                  *string                                     `gorm:"type:char(36);index" json:"plan_id,omitempty"`
-	Type                    string                                      `gorm:"type:varchar(20);not null" json:"type"`
+	ID        string  `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID    string  `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
+	ProjectID string  `gorm:"type:char(36);index" json:"project_id"`
+	PlanID    *string `gorm:"type:char(36);index" json:"plan_id,omitempty"`
+	// New identity fields. Type is legacy storage used only by the migration and
+	// old read models; new admission and runtime code use AgentID/Channel/TaskKind.
+	AgentID                 string                                      `gorm:"type:varchar(80);index" json:"agent_id"`
+	Channel                 string                                      `gorm:"type:varchar(40);index" json:"channel"`
+	TaskKind                string                                      `gorm:"type:varchar(80);index" json:"task_kind"`
+	Type                    string                                      `gorm:"type:varchar(20);not null" json:"-"`
 	Status                  string                                      `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
 	Prompt                  string                                      `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
 	Title                   string                                      `gorm:"type:varchar(200)" json:"title,omitempty"`
@@ -299,6 +311,26 @@ func (t *Task) SetProjectSnapshot(s ProjectSnapshot) {
 	t.ProjectSnapshot = datatypes.NewJSONType(s)
 }
 
+// HasData reports whether a task carries a meaningful frozen project snapshot.
+// Snapshot fields are persisted independently of the public Project model, so
+// platform is not the only marker for the new channel-neutral identity.
+func (s ProjectSnapshot) HasData() bool {
+	return strings.TrimSpace(s.ProjectName) != "" ||
+		strings.TrimSpace(s.AgentID) != "" ||
+		strings.TrimSpace(s.Channel) != "" ||
+		strings.TrimSpace(s.Platform) != "" ||
+		strings.TrimSpace(s.Instructions) != "" ||
+		strings.TrimSpace(s.Keywords) != "" ||
+		strings.TrimSpace(s.VisualStyle) != "" ||
+		strings.TrimSpace(s.ReferenceImageAssetID) != "" ||
+		strings.TrimSpace(s.PortraitReferenceImageAssetID) != "" ||
+		strings.TrimSpace(s.ImageRatio) != "" ||
+		strings.TrimSpace(s.Writer) != "" ||
+		strings.TrimSpace(s.Theme) != "" ||
+		strings.TrimSpace(s.Author) != "" ||
+		s.Profile.SchemaVersion != 0 || len(s.AgentConfig) > 0 || len(s.ChannelConfig) > 0
+}
+
 func (t *Task) SetImageCapabilitySnapshot(snapshot ImageCapabilitySnapshot) {
 	t.ImageCapabilitySnapshot = datatypes.NewJSONType(snapshot)
 }
@@ -311,6 +343,8 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 	}
 	return ProjectSnapshot{
 		ProjectName:                   p.Name,
+		AgentID:                       "",
+		Channel:                       "",
 		Platform:                      p.Platform,
 		Instructions:                  p.Instructions,
 		Keywords:                      p.Keywords,
@@ -335,12 +369,12 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	if base == nil {
 		return nil
 	}
-	if snap.Platform == "" {
+	if !snap.HasData() {
 		return base
 	}
 	p := *base
 	p.Name = snap.ProjectName
-	p.Platform = snap.Platform
+	p.Platform = snapshotPlatform(base.Platform, snap)
 	p.Instructions = snap.Instructions
 	p.Keywords = snap.Keywords
 	p.VisualStyle = snap.VisualStyle
@@ -356,4 +390,28 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.SetAgentConfig(cloneAgentExtensionMap(snap.AgentConfig))
 	p.Profile = datatypes.NewJSONType(snap.Profile)
 	return &p
+}
+
+func snapshotPlatform(fallback string, snap ProjectSnapshot) string {
+	if platform := strings.TrimSpace(snap.Platform); platform != "" {
+		return platform
+	}
+	channel := strings.TrimSpace(snap.Channel)
+	if channel == "" {
+		if inferred, ok := AgentChannel(strings.TrimSpace(snap.AgentID)); ok {
+			channel = inferred
+		}
+	}
+	switch channel {
+	case ChannelArticle, ChannelWechatPicture:
+		return PlatformWechat
+	case ChannelSeednote:
+		return PlatformSeednote
+	case ChannelMontage:
+		return PlatformMontage
+	case ChannelHypit:
+		return PlatformHypit
+	default:
+		return fallback
+	}
 }

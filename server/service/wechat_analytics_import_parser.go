@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/anbanai/anban-creator/server/model"
 	"github.com/extrame/xls"
 	"github.com/tealeg/xlsx/v3"
 	"golang.org/x/text/unicode/norm"
@@ -221,9 +222,9 @@ func wechatAnalyticsContentType(raw map[string]string) string {
 	}
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "图文", "图文消息", "文章", "article", "news":
-		return "article"
+		return model.TaskTypeWechatArticle
 	case "图片", "图片消息", "贴图", "图集", "image":
-		return "image"
+		return model.TaskTypeWechatPicture
 	default:
 		return "unknown"
 	}

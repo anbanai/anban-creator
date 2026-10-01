@@ -139,7 +139,6 @@ function DetailRow({ label, value, copy }: { label: string; value: string; copy?
 
 function RuntimeDetail({ item, task, project, files, context, onResume }: { item: ContextItem; task: Task; project?: Project; files: TaskFile[]; context?: RuntimeContext; onResume?: () => void }) {
   const { projectName, profileLabel } = profileSummary(task, project)
-  const snapshot = task.project_snapshot
   const status = statusCopy[item.status]
   const StatusIcon = status.icon
   const artifactNames = (context?.artifacts.items.map((file) => file.label) || files.slice(0, 12).map((file) => file.file_name)).join('、') || '暂无'
@@ -164,7 +163,7 @@ function RuntimeDetail({ item, task, project, files, context, onResume }: { item
         <dl>
           <DetailRow label="项目" value={projectName} />
           <DetailRow label="执行配置" value={profileLabel} />
-          <DetailRow label="平台" value={contentTypeDisplayName(snapshot?.platform || task.type)} />
+          <DetailRow label="平台" value={contentTypeDisplayName(task.type)} />
           <DetailRow label="状态" value={context?.profile.changed_since_snapshot ? '项目已更新，任务继续执行时仍使用冻结版本' : '任务继续执行时仍使用冻结版本'} />
           <DetailRow label="快照 ID" value={context?.profile.snapshot_id || task.agent_profile_fingerprint || '未记录'} copy={Boolean(context?.profile.snapshot_id || task.agent_profile_fingerprint)} />
         </dl>

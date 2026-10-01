@@ -75,12 +75,24 @@ func ProcessFeedbackJob(ctx context.Context, repo repository.Repository, jobID s
 		job.LastError = ""
 		return nil
 	}
+	if job.Operation == "data_tracker" {
+		completed := time.Now().UTC()
+		job.SampleCount = summary.SampleCount
+		job.Status = model.FeedbackJobSucceeded
+		job.CompletedAt = &completed
+		job.LastError = ""
+		return nil
+	}
 	evidenceData["coverage"] = job.Coverage
 	evidenceData["period_start"] = job.PeriodStart
 	evidenceData["period_end"] = job.PeriodEnd
 	evidenceData["analytics_revision"] = job.AnalyticsRevision
 	evidence, _ := json.Marshal(evidenceData)
-	insight := &model.FeedbackInsight{ID: uuid.NewString(), JobID: job.ID, ProjectID: job.ProjectID, AnalyticsRevision: job.AnalyticsRevision, Kind: job.Operation, EvidenceJSON: string(evidence), Summary: feedbackInsightSummary(job.Operation, summary), Confidence: confidenceForSample(job.SampleCount), Limitations: "Correlation does not establish causation; coverage depends on imported platform observations."}
+	promotionStatus := model.FeedbackPromotionNone
+	if strings.TrimSpace(job.TargetContentID) != "" && job.Operation == "content_postmortem" {
+		promotionStatus = model.FeedbackPromotionCandidate
+	}
+	insight := &model.FeedbackInsight{ID: uuid.NewString(), JobID: job.ID, ProjectID: job.ProjectID, AnalyticsRevision: job.AnalyticsRevision, TargetContentID: job.TargetContentID, BaselineScope: "account_platform", Trigger: job.Trigger, Kind: job.Operation, EvidenceJSON: string(evidence), Summary: feedbackInsightSummary(job.Operation, summary), Confidence: confidenceForSample(job.SampleCount), Limitations: "Correlation does not establish causation; coverage depends on imported platform observations.", PromotionStatus: promotionStatus}
 	if err := repo.FeedbackLoop().CreateInsight(ctx, insight); err != nil {
 		markFeedbackFailure(job, err)
 		return err
@@ -94,7 +106,12 @@ func ProcessFeedbackJob(ctx context.Context, repo repository.Repository, jobID s
 			markFeedbackFailure(job, err)
 			return err
 		}
-		snapshot := &model.StrategySnapshot{ID: uuid.NewString(), ProjectID: job.ProjectID, Platform: job.Platform, Revision: revision, SourceRevision: job.AnalyticsRevision, Digest: hex.EncodeToString(digestBytes[:]), Status: "active", ApplicableTasks: "[\"article\",\"seednote\"]", Recommendations: string(recommendations), Evidence: string(evidence), Confidence: confidenceForSample(job.SampleCount), Limitations: "Advisory only; review sample coverage before applying."}
+		applicableTasks := []string{model.TaskTypeWechatArticle, model.TaskTypeWechatPicture, model.PlatformSeednote}
+		if strings.TrimSpace(job.Platform) == model.PlatformSeednote {
+			applicableTasks = []string{model.PlatformSeednote}
+		}
+		applicableJSON, _ := json.Marshal(applicableTasks)
+		snapshot := &model.StrategySnapshot{ID: uuid.NewString(), ProjectID: job.ProjectID, Platform: job.Platform, Revision: revision, SourceRevision: job.AnalyticsRevision, Digest: hex.EncodeToString(digestBytes[:]), Status: "active", ApplicableTasks: string(applicableJSON), Recommendations: string(recommendations), Evidence: string(evidence), Confidence: confidenceForSample(job.SampleCount), Limitations: "Advisory only; review sample coverage before applying."}
 		if err := repo.FeedbackLoop().CreateStrategy(ctx, snapshot); err != nil {
 			markFeedbackFailure(job, err)
 			return err
@@ -219,7 +236,7 @@ func feedbackMetricPresent(row model.AnalyticsObservation, column string) bool {
 
 func feedbackEngagementRate(row model.AnalyticsObservation, platform string) (float64, bool) {
 	var denominator, numerator int64
-	if platform == model.PlatformArticle || platform == model.ScopeArticle {
+	if platform == model.PlatformWechat || platform == model.ScopeWechat {
 		if row.ReadUsers == nil || *row.ReadUsers <= 0 {
 			return 0, false
 		}

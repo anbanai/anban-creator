@@ -62,7 +62,7 @@ describe('ProjectsPage layout contracts', () => {
     expect(source).toContain("new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])")
     expect(source).toContain("case 'montage':")
     expect(source).toContain('user?.is_admin === true')
-    expect(source).toContain('canViewPlatform(project.platform, isAdmin)')
+		expect(source).toContain("canViewPlatform(project.platform ?? 'wechat', isAdmin)")
     expect(source).toContain('canViewPlatform(opt.value, isAdmin)')
   })
 })

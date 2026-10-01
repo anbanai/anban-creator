@@ -13,12 +13,12 @@ func TestBuildRuntimeContextSanitizesAndGroupsTaskState(t *testing.T) {
 	now := time.Now()
 	task := &model.Task{
 		ID:                      "task-1",
-		Type:                    model.PlatformArticle,
+		Type:                    model.PlatformWechat,
 		Status:                  model.TaskStatusFailed,
 		CreatedAt:               now.Add(-time.Hour),
 		AgentProfileFingerprint: strings.Repeat("a", 64),
 		AgentProfileSnapshot:    model.AgentProfileSnapshot{ProfileID: "balanced", DisplayName: "均衡"},
-		ProjectSnapshot:         datatypes.NewJSONType(model.ProjectSnapshot{ProjectName: "春日生活号", Platform: model.PlatformArticle}),
+		ProjectSnapshot:         datatypes.NewJSONType(model.ProjectSnapshot{ProjectName: "春日生活号", Platform: model.PlatformWechat}),
 		Lifecycle:               datatypes.NewJSONType(model.TaskLifecycle{ExecutionID: "exec-1"}),
 		Outcome: &model.TaskOutcome{Diagnostic: &model.ExecutionDiagnostic{
 			Code: "artifact_upload_failed", Summary: "产物上传失败", Recoverable: true, ResumePoint: "image_generation",
@@ -53,7 +53,7 @@ func TestBuildRuntimeContextSanitizesAndGroupsTaskState(t *testing.T) {
 }
 
 func TestBuildRuntimeContextUsesFrozenArtifactContractAndSanitizedRuntimeFacts(t *testing.T) {
-	task := &model.Task{Type: model.PlatformArticle, Status: model.TaskStatusFailed, Outcome: &model.TaskOutcome{Diagnostic: &model.ExecutionDiagnostic{Code: "endpoint_timeout", Summary: "图片服务暂时不可用", Recoverable: true}}}
+	task := &model.Task{Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed, Outcome: &model.TaskOutcome{Diagnostic: &model.ExecutionDiagnostic{Code: "endpoint_timeout", Summary: "图片服务暂时不可用", Recoverable: true}}}
 	execution := &model.TaskExecution{
 		ID: "exec-2", Status: model.TaskExecutionFailed, RuntimeProfile: "balanced", RuntimeImage: "creator-agent@sha256:" + strings.Repeat("c", 64),
 		AgentPackRequiredArtifactContract: []byte(`[{"role":"markdown","path":"output/article.md","mime_type":"text/markdown","required":true},{"role":"cover","path":"output/cover.png","mime_type":"image/png","required":true}]`),
@@ -82,15 +82,15 @@ func TestBuildRuntimeContextUsesFrozenArtifactContractAndSanitizedRuntimeFacts(t
 func TestBuildRuntimeContextMarksProfileConflictWhenProjectChanged(t *testing.T) {
 	created := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	task := &model.Task{
-		Type:      model.PlatformArticle,
+		Type:      model.PlatformWechat,
 		Status:    model.TaskStatusCompleted,
 		CreatedAt: created,
 		ProjectID: "project-1",
 		ProjectSnapshot: datatypes.NewJSONType(model.ProjectSnapshot{
-			ProjectName: "旧项目", Platform: model.PlatformArticle, Profile: model.ProjectProfile{Version: 1},
+			ProjectName: "旧项目", Platform: model.PlatformWechat, Profile: model.ProjectProfile{Version: 1},
 		}),
 	}
-	project := &model.Project{ID: "project-1", Name: "新项目", Platform: model.PlatformArticle, UpdatedAt: created.Add(time.Hour)}
+	project := &model.Project{ID: "project-1", Name: "新项目", Platform: model.PlatformWechat, UpdatedAt: created.Add(time.Hour)}
 	project.Profile = datatypes.NewJSONType(model.ProjectProfile{Version: 2})
 	got := buildRuntimeContext(task, nil, project)
 	profile := got["profile"].(map[string]any)
@@ -130,7 +130,7 @@ func TestBuildRuntimeContextDoesNotCountArtifactsFromOlderExecution(t *testing.T
 }
 
 func TestBuildRuntimeContextRequiresArtifactRoleAndPath(t *testing.T) {
-	task := &model.Task{Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	task := &model.Task{Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}
 	execution := &model.TaskExecution{
 		ID:                                "current-execution",
 		Status:                            model.TaskExecutionSucceeded,

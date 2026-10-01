@@ -1,6 +1,6 @@
 import type { AgentExecutionProfileID, BillingCatalog, Project, Task, TaskType } from '@/types'
 import { projectsReturnHref } from '@/lib/command-center'
-import { taskCostFor } from '@/lib/pricing'
+import { taskCostFor, taskOperation } from '@/lib/pricing'
 import { workflowReadinessLabel } from '@/lib/workflow-readiness'
 import { taskStageSummary } from '@/lib/task-lifecycle'
 
@@ -54,7 +54,7 @@ export interface ProjectCreationDefaults {
 }
 
 export function getProjectCreationDefaults(project?: Project | null): ProjectCreationDefaults {
-  const type = (project?.platform || 'seednote') as TaskType
+  const type = (project?.platform === 'wechat' ? 'wechat-article' : project?.platform || 'seednote') as TaskType
   return {
     type,
     imageRatio: project?.image_ratio || 'auto',
@@ -62,6 +62,10 @@ export function getProjectCreationDefaults(project?: Project | null): ProjectCre
     selectedModules: project?.ecommerce_defaults?.default_selected_modules || {},
     targetPlatform: project?.ecommerce_defaults?.target_platform || '',
   }
+}
+
+export function defaultTaskImageRatio(type: TaskType, project?: Project | null): string {
+  return type === 'wechat-picture' ? '3:4' : project?.image_ratio || 'auto'
 }
 
 export interface CreationCostPreview {
@@ -90,7 +94,7 @@ export function taskCreationCostPreview({
 }): CreationCostPreview {
   const isEcommerce = type === 'ecommerce'
   const sku = catalog?.skus.find((item) => item.charge_policy === 'task_admission'
-    && item.operation === `task.${type}`
+    && item.operation === taskOperation(type)
     && (executionProfile === undefined || item.execution_profile === executionProfile))
   const resolvedPrice = taskCostFor(catalog, type, executionProfile)
   const priceAvailable = resolvedPrice !== undefined

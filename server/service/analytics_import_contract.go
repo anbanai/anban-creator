@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anbanai/anban-creator/server/model"
 )
 
 func validateAnalyticsImport(platform, basis, key string, at *time.Time) error {
@@ -17,7 +19,7 @@ func validateAnalyticsImport(platform, basis, key string, at *time.Time) error {
 	if strings.TrimSpace(key) == "" || len(key) > 128 {
 		return errors.New("idempotency_key 必须为 1 到 128 个字符")
 	}
-	if basis != "cumulative" && !(platform == "article" && basis == "") {
+	if basis != "cumulative" && !((platform == model.PlatformWechat || platform == model.ChannelArticle) && basis == "") {
 		return errors.New("内容数据必须使用累计口径 cumulative")
 	}
 	return nil

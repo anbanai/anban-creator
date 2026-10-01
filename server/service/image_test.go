@@ -314,7 +314,7 @@ func TestBuildProcessorWithoutTaskCapabilityUsesBaseConfigWhenResolverIsPresent(
 		}),
 		logger: &logger,
 	}
-	ch := &model.Project{Platform: model.ScopeArticle, UserID: "u1"}
+	ch := &model.Project{Platform: model.ScopeWechat, UserID: "u1"}
 
 	proc, err := svc.buildProcessor(context.Background(), ch, "content", "")
 	if err != nil {

@@ -68,13 +68,14 @@ type WechatPublicationAPI interface {
 type WechatPublicationAPIFactory func(*model.Project) (WechatPublicationAPI, error)
 
 type WechatPublicationService struct {
-	repo          repository.Repository
-	apiFactory    WechatPublicationAPIFactory
-	logger        *zerolog.Logger
-	enqueuer      TaskEnqueuer
-	now           func() time.Time
-	recovery      func(context.Context, string, string) (model.TaskPublicationOutcome, error)
-	lifecycleSync func(context.Context, string) (*model.TaskLifecycle, error)
+	repo             repository.Repository
+	apiFactory       WechatPublicationAPIFactory
+	logger           *zerolog.Logger
+	enqueuer         TaskEnqueuer
+	now              func() time.Time
+	recovery         func(context.Context, string, string) (model.TaskPublicationOutcome, error)
+	lifecycleSync    func(context.Context, string) (*model.TaskLifecycle, error)
+	materialUploader func(context.Context, *model.Project, []byte, string) (*appwechat.UploadMaterialResult, error)
 }
 
 // SetEnqueuer wires durable polling into the server's async worker. The
@@ -147,6 +148,10 @@ func NewWechatPublicationService(repo repository.Repository, factory WechatPubli
 	return &WechatPublicationService{repo: repo, apiFactory: factory, logger: logger, now: time.Now}
 }
 
+func (s *WechatPublicationService) SetMaterialUploader(uploader func(context.Context, *model.Project, []byte, string) (*appwechat.UploadMaterialResult, error)) {
+	s.materialUploader = uploader
+}
+
 // WechatContentFingerprint hashes a stable structural rendering of article
 // HTML. Attribute ordering and insignificant whitespace do not affect it.
 func WechatContentFingerprint(content string) string {
@@ -216,7 +221,8 @@ func (s *WechatPublicationService) ownedTaskProject(ctx context.Context, userID,
 	if task.UserID != userID {
 		return nil, nil, ErrWechatPublicationForbidden
 	}
-	if task.Type != model.PlatformArticle || task.ProjectID == "" {
+	if ((strings.TrimSpace(task.Channel) != "" && task.Channel != model.ChannelArticle && task.Channel != model.ChannelWechatPicture) ||
+		(strings.TrimSpace(task.Channel) == "" && task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture)) || task.ProjectID == "" {
 		return nil, nil, ErrWechatPublicationModeConflict
 	}
 	project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
@@ -225,6 +231,31 @@ func (s *WechatPublicationService) ownedTaskProject(ctx context.Context, userID,
 	}
 	if project.UserID != userID {
 		return nil, nil, ErrWechatPublicationForbidden
+	}
+	// WeChat credentials are owned by the task's channel configuration. Hydrate
+	// a private copy for the Server-owned connector; the response model never
+	// serializes these values. During the cutover, picture tasks may reuse the
+	// article connector row when a dedicated picture row has not been created.
+	channel := strings.TrimSpace(task.Channel)
+	if channel == "" {
+		if task.Type == model.TaskTypeWechatPicture {
+			channel = model.ChannelWechatPicture
+		} else {
+			channel = model.ChannelArticle
+		}
+	}
+	cfg, cfgErr := s.repo.ProjectChannelConfigs().Get(ctx, project.ID, channel)
+	if cfgErr != nil && channel == model.ChannelWechatPicture {
+		cfg, cfgErr = s.repo.ProjectChannelConfigs().Get(ctx, project.ID, model.ChannelArticle)
+	}
+	if cfgErr == nil && cfg != nil {
+		values := cfg.Config.Data()
+		if appID, ok := values["wechat_app_id"].(string); ok {
+			project.Config.WechatAppID = strings.TrimSpace(appID)
+		}
+		if secret, ok := values["wechat_secret"].(string); ok {
+			project.Config.WechatSecret = strings.TrimSpace(secret)
+		}
 	}
 	return task, project, nil
 }
@@ -446,16 +477,108 @@ func firstDraftArticle(request appwechat.DraftAddRequest) (appwechat.DraftArticl
 		return appwechat.DraftArticle{}, fmt.Errorf("%w: exactly one draft article is required", ErrWechatPublicationInvalidPayload)
 	}
 	article := normalizeDraftArticle(request.Articles[0])
-	if article.Title == "" || strings.TrimSpace(article.Content) == "" {
-		return article, fmt.Errorf("%w: draft title and content are required", ErrWechatPublicationInvalidPayload)
+	if article.ArticleType == "" {
+		article.ArticleType = "news"
 	}
-	if err := validateWechatHTMLFragment("draft article content", []byte(article.Content)); err != nil {
-		return article, fmt.Errorf("%w: %v", ErrWechatPublicationInvalidPayload, err)
+	if article.Title == "" {
+		return article, fmt.Errorf("%w: draft title is required", ErrWechatPublicationInvalidPayload)
 	}
-	if err := validateContentImageDiversity(article.Content); err != nil {
-		return article, fmt.Errorf("%w: %v", ErrWechatPublicationInvalidPayload, err)
+	switch article.ArticleType {
+	case "news":
+		if strings.TrimSpace(article.Content) == "" {
+			return article, fmt.Errorf("%w: draft content is required", ErrWechatPublicationInvalidPayload)
+		}
+		if err := validateWechatHTMLFragment("draft article content", []byte(article.Content)); err != nil {
+			return article, fmt.Errorf("%w: %v", ErrWechatPublicationInvalidPayload, err)
+		}
+		if err := validateContentImageDiversity(article.Content); err != nil {
+			return article, fmt.Errorf("%w: %v", ErrWechatPublicationInvalidPayload, err)
+		}
+	case "newspic":
+		if article.ImageInfo == nil || len(article.ImageInfo.ImageList) < 1 || len(article.ImageInfo.ImageList) > 20 {
+			return article, fmt.Errorf("%w: newspic requires 1 to 20 images", ErrWechatPublicationInvalidPayload)
+		}
+		seen := make(map[string]struct{}, len(article.ImageInfo.ImageList))
+		for _, image := range article.ImageInfo.ImageList {
+			mediaID := strings.TrimSpace(image.ImageMediaID)
+			if mediaID == "" {
+				return article, fmt.Errorf("%w: newspic image media_id is required", ErrWechatPublicationInvalidPayload)
+			}
+			if _, ok := seen[mediaID]; ok {
+				return article, fmt.Errorf("%w: newspic image media_ids must be unique", ErrWechatPublicationInvalidPayload)
+			}
+			seen[mediaID] = struct{}{}
+		}
+		if article.CoverInfo != nil {
+			for _, crop := range article.CoverInfo.CropPercentList {
+				if !isWechatCropRatio(crop.Ratio) || crop.X1 < 0 || crop.Y1 < 0 || crop.X2 > 1 || crop.Y2 > 1 || crop.X2 <= crop.X1 || crop.Y2 <= crop.Y1 {
+					return article, fmt.Errorf("%w: invalid newspic cover crop", ErrWechatPublicationInvalidPayload)
+				}
+			}
+		}
+	default:
+		return article, fmt.Errorf("%w: unsupported article_type %q", ErrWechatPublicationInvalidPayload, article.ArticleType)
 	}
 	return article, nil
+}
+
+func draftImageMediaIDs(article appwechat.DraftArticle) datatypes.JSON {
+	if article.ImageInfo == nil || len(article.ImageInfo.ImageList) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(article.ImageInfo.ImageList))
+	for _, image := range article.ImageInfo.ImageList {
+		ids = append(ids, strings.TrimSpace(image.ImageMediaID))
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return nil
+	}
+	return datatypes.JSON(encoded)
+}
+
+func draftAddAttemptEvidence(article appwechat.DraftArticle, result any) string {
+	evidence := map[string]any{
+		"article_type": article.ArticleType,
+		"title":        article.Title,
+		"image_media_ids": func() []string {
+			if article.ImageInfo == nil {
+				return nil
+			}
+			ids := make([]string, 0, len(article.ImageInfo.ImageList))
+			for _, image := range article.ImageInfo.ImageList {
+				ids = append(ids, strings.TrimSpace(image.ImageMediaID))
+			}
+			return ids
+		}(),
+		"cover_crop_percent_list": func() []appwechat.DraftCropPercent {
+			if article.CoverInfo == nil {
+				return nil
+			}
+			return article.CoverInfo.CropPercentList
+		}(),
+	}
+	switch value := result.(type) {
+	case *appwechat.DraftAddResponse:
+		evidence["provider_response"] = map[string]string{"media_id": valueOrDraftMediaID(value)}
+	case error:
+		evidence["provider_error"] = safeWechatPublicationError(value)
+		if code, ok := publicationWechatErrCode(value); ok {
+			evidence["wechat_code"] = code
+		}
+	}
+	encoded, err := json.Marshal(evidence)
+	if err != nil {
+		return "draft_add_evidence_unavailable"
+	}
+	return string(encoded)
+}
+
+func valueOrDraftMediaID(response *appwechat.DraftAddResponse) string {
+	if response == nil {
+		return ""
+	}
+	return strings.TrimSpace(response.MediaID)
 }
 
 var wechatPublicationMarketingBlockRules = []struct {
@@ -648,21 +771,60 @@ func isPublicationMarketingBlockElement(tag string) bool {
 }
 
 func normalizeDraftArticle(article appwechat.DraftArticle) appwechat.DraftArticle {
+	article.ArticleType = strings.TrimSpace(article.ArticleType)
+	if article.ArticleType == "" {
+		article.ArticleType = "news"
+	}
 	article.Title = strings.TrimSpace(article.Title)
 	article.Author = strings.TrimSpace(article.Author)
 	article.Digest = strings.TrimSpace(article.Digest)
 	article.ContentSourceURL = strings.TrimSpace(article.ContentSourceURL)
 	article.ThumbMediaID = strings.TrimSpace(article.ThumbMediaID)
 	article.URL = strings.TrimSpace(article.URL)
+	if article.ImageInfo != nil {
+		for i := range article.ImageInfo.ImageList {
+			article.ImageInfo.ImageList[i].ImageMediaID = strings.TrimSpace(article.ImageInfo.ImageList[i].ImageMediaID)
+		}
+	}
+	if article.CoverInfo != nil {
+		for i := range article.CoverInfo.CropPercentList {
+			article.CoverInfo.CropPercentList[i].Ratio = normalizeWechatCropRatio(article.CoverInfo.CropPercentList[i].Ratio)
+		}
+	}
+	if article.ArticleType == "newspic" && article.CoverInfo == nil {
+		article.CoverInfo = &appwechat.DraftCoverInfo{CropPercentList: []appwechat.DraftCropPercent{{Ratio: "3_4", X1: 0, Y1: 0, X2: 1, Y2: 1}}}
+	}
 	return article
+}
+
+func normalizeWechatCropRatio(value string) string {
+	return strings.ReplaceAll(strings.TrimSpace(value), ":", "_")
+}
+
+func isWechatCropRatio(value string) bool {
+	switch normalizeWechatCropRatio(value) {
+	case "9_16", "3_4", "1_1", "4_3", "16_9":
+		return true
+	default:
+		return false
+	}
 }
 
 func wechatDraftRequestFingerprint(article appwechat.DraftArticle) string {
 	article = normalizeDraftArticle(article)
-	article.Content = WechatContentFingerprint(article.Content)
+	if article.ArticleType == "news" {
+		article.Content = WechatContentFingerprint(article.Content)
+	}
 	encoded, _ := json.Marshal(article)
 	sum := sha256.Sum256(encoded)
 	return hex.EncodeToString(sum[:])
+}
+
+func draftContentFingerprint(article appwechat.DraftArticle) string {
+	if article.ArticleType == "newspic" {
+		return wechatDraftRequestFingerprint(article)
+	}
+	return WechatContentFingerprint(article.Content)
 }
 
 func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, taskID, projectID, executionID string, request appwechat.DraftAddRequest) (publication *model.WechatPublication, resultErr error) {
@@ -696,6 +858,15 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	if err != nil {
 		return nil, err
 	}
+	expectedType := "news"
+	if taskUsesChannel(task, model.ChannelWechatPicture) {
+		expectedType = "newspic"
+	} else if !taskUsesChannel(task, model.ChannelArticle) {
+		return nil, fmt.Errorf("%w: task is not a supported WeChat channel", ErrWechatPublicationInvalidPayload)
+	}
+	if article.ArticleType != expectedType {
+		return nil, fmt.Errorf("%w: task channel requires article_type %q", ErrWechatPublicationInvalidPayload, expectedType)
+	}
 	if err := s.validateDraftImageSources(ctx, task, article.Content); err != nil {
 		return nil, err
 	}
@@ -703,7 +874,7 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 		return nil, fmt.Errorf("%w: %s", ErrWechatPublicationMarketingBlocked, strings.Join(blocked, ","))
 	}
 	request.Articles[0] = article
-	fingerprint := WechatContentFingerprint(article.Content)
+	fingerprint := draftContentFingerprint(article)
 	requestFingerprint := wechatDraftRequestFingerprint(article)
 
 	existing, findErr := s.repo.WechatPublications().FindByTaskID(ctx, task.ID)
@@ -784,10 +955,16 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 		}
 	} else {
 		now := s.now()
+		imageMediaIDs := draftImageMediaIDs(article)
+		var cropPercentList datatypes.JSON
+		if article.CoverInfo != nil && len(article.CoverInfo.CropPercentList) > 0 {
+			cropPercentList, _ = json.Marshal(article.CoverInfo.CropPercentList)
+		}
 		existing = &model.WechatPublication{
 			ID: uuid.NewString(), TaskID: task.ID, ExecutionID: executionID, UserID: userID, ProjectID: project.ID,
 			DraftTitle: article.Title, DraftAuthor: article.Author, DraftDigest: article.Digest,
 			DraftThumbMediaID: article.ThumbMediaID, DraftContentFingerprint: fingerprint, DraftRequestFingerprint: requestFingerprint,
+			DraftArticleType: article.ArticleType, DraftImageMediaIDs: imageMediaIDs, DraftCoverCropPercentList: cropPercentList,
 			Source: model.WechatPublicationSourceAnbanAPI, Status: model.WechatPublicationStatusDrafting,
 			DraftCreatedAt: &now, ClaimToken: uuid.NewString(), ClaimedAt: &now,
 		}
@@ -885,6 +1062,11 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	draftAddAttemptedAt := s.now()
 	draftRecoveryAt := draftAddAttemptedAt.Add(10 * time.Minute)
 	draftDeliveryAttempt := 0
+	draftAttempt := &model.WechatPublicationAttempt{
+		ID: uuid.NewString(), PublicationID: existing.ID, Operation: "draft_add",
+		RequestFingerprint: requestFingerprint, StartedAt: draftAddAttemptedAt, ResultStatus: "attempted",
+		DurableEvidence: draftAddAttemptEvidence(article, nil),
+	}
 	var won bool
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		var started bool
@@ -904,7 +1086,7 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 		if !won {
 			return ErrWechatPublicationConflict
 		}
-		return nil
+		return tx.WechatPublications().CreateAttempt(ctx, draftAttempt)
 	})
 	if err != nil {
 		return existing, err
@@ -923,6 +1105,21 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	}()
 	publication = existing
 	response, err := api.AddDraft(ctx, request)
+	completedAt := s.now()
+	draftAttempt.CompletedAt = &completedAt
+	if err != nil {
+		draftAttempt.ResultStatus = "failed"
+		draftAttempt.DurableEvidence = draftAddAttemptEvidence(article, err)
+		if code, ok := publicationWechatErrCode(err); ok {
+			draftAttempt.WechatCode = code
+		}
+	} else {
+		draftAttempt.ResultStatus = "accepted"
+		draftAttempt.DurableEvidence = draftAddAttemptEvidence(article, response)
+	}
+	if evidenceErr := s.repo.WechatPublications().UpdateAttempt(context.WithoutCancel(ctx), draftAttempt); evidenceErr != nil && s.logger != nil {
+		s.logger.Error().Err(evidenceErr).Str("publication_id", existing.ID).Msg("record WeChat draft provider evidence")
+	}
 	draftClaimToken := existing.ClaimToken
 	if err != nil {
 		if code, definitive := definitiveWechatPublicationError(err); definitive {
@@ -1308,13 +1505,23 @@ func exactWechatDraftMatch(publication *model.WechatPublication, items []appwech
 	matches := make([]appwechat.DraftBatchItem, 0, 1)
 	createdAt := valueOrTime(publication.DraftCreatedAt, publication.CreatedAt)
 	for _, item := range items {
-		if item.UpdateTime <= 0 || item.UpdateTime < createdAt.Unix() || len(item.Content.NewsItems) != 1 {
+		if item.UpdateTime <= 0 || item.UpdateTime < createdAt.Unix() {
 			continue
 		}
-		article := normalizeDraftArticle(item.Content.NewsItems[0])
-		if WechatContentFingerprint(article.Content) == publication.DraftContentFingerprint &&
-			wechatDraftRequestFingerprint(article) == publication.DraftRequestFingerprint {
-			matches = append(matches, item)
+		articles := append([]appwechat.DraftArticle(nil), item.Content.NewsItems...)
+		if item.Content.NewspicInfo != nil {
+			articles = append(articles, *item.Content.NewspicInfo)
+		}
+		for _, candidate := range articles {
+			article := normalizeDraftArticle(candidate)
+			if publication.DraftArticleType != "" && article.ArticleType != "" && article.ArticleType != publication.DraftArticleType {
+				continue
+			}
+			if draftContentFingerprintForPublication(publication, article) == publication.DraftContentFingerprint &&
+				wechatDraftRequestFingerprint(article) == publication.DraftRequestFingerprint {
+				matches = append(matches, item)
+				break
+			}
 		}
 	}
 	if len(matches) != 1 {
@@ -1968,6 +2175,7 @@ type publishedWechatArticle struct {
 	Digest       string
 	ThumbMediaID string
 	Content      string
+	Draft        appwechat.DraftArticle
 	Index        int
 	PublishedAt  time.Time
 }
@@ -1982,14 +2190,19 @@ func publishedArticles(response *appwechat.FreePublishBatchGetResponse) []publis
 			continue
 		}
 		publishedAt := time.Unix(item.UpdateTime, 0)
-		if len(item.Content.NewsItems) == 0 {
+		var article appwechat.DraftArticle
+		switch {
+		case len(item.Content.NewsItems) > 0:
+			article = item.Content.NewsItems[0]
+		case item.Content.NewspicInfo != nil:
+			article = *item.Content.NewspicInfo
+		default:
 			continue
 		}
-		article := item.Content.NewsItems[0]
 		if strings.TrimSpace(item.ArticleID) == "" || strings.TrimSpace(article.URL) == "" {
 			continue
 		}
-		result = append(result, publishedWechatArticle{ArticleID: item.ArticleID, URL: article.URL, Title: strings.TrimSpace(article.Title), Digest: strings.TrimSpace(article.Digest), ThumbMediaID: strings.TrimSpace(article.ThumbMediaID), Content: article.Content, Index: 1, PublishedAt: publishedAt})
+		result = append(result, publishedWechatArticle{ArticleID: item.ArticleID, URL: article.URL, Title: strings.TrimSpace(article.Title), Digest: strings.TrimSpace(article.Digest), ThumbMediaID: strings.TrimSpace(article.ThumbMediaID), Content: article.Content, Draft: article, Index: 1, PublishedAt: publishedAt})
 	}
 	return result
 }
@@ -2525,7 +2738,11 @@ func (s *WechatPublicationService) matchPublished(ctx context.Context, publicati
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, err
 		}
-		if WechatContentFingerprint(article.Content) == publication.DraftContentFingerprint {
+		candidate := article.Draft
+		if strings.TrimSpace(candidate.Title) == "" {
+			candidate = appwechat.DraftArticle{Title: article.Title, Digest: article.Digest, ThumbMediaID: article.ThumbMediaID, Content: article.Content}
+		}
+		if draftContentFingerprintForPublication(publication, candidate) == publication.DraftContentFingerprint {
 			fingerprint = append(fingerprint, article)
 			continue
 		}
@@ -2539,6 +2756,13 @@ func (s *WechatPublicationService) matchPublished(ctx context.Context, publicati
 	}
 	exact := dedupePublishedWechatArticles(append(fingerprint, metadata...))
 	return exact, weak, nil
+}
+
+func draftContentFingerprintForPublication(publication *model.WechatPublication, article appwechat.DraftArticle) string {
+	if publication != nil && publication.DraftArticleType == "newspic" {
+		article.ArticleType = "newspic"
+	}
+	return draftContentFingerprint(article)
 }
 
 func reconciledWechatPublicationSource(publication *model.WechatPublication) string {

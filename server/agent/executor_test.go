@@ -43,7 +43,7 @@ func TestBuildAppConfig(t *testing.T) {
 		{
 			name: "basic article config",
 			ch: &model.Project{
-				Platform:    model.ScopeArticle,
+				Platform:    model.ScopeWechat,
 				Name:        "Test Account",
 				Keywords:    "写作,效率",
 				Positioning: "个人成长",
@@ -117,7 +117,7 @@ func TestBuildAppConfig(t *testing.T) {
 		{
 			name: "article portrait reference is cover only",
 			ch: &model.Project{
-				Platform: model.ScopeArticle,
+				Platform: model.ScopeWechat,
 				Name:     "Portrait Account",
 			},
 			wantErr:      false,
@@ -172,7 +172,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 	}{
 		{
 			name:            "article model config does not inject business defaults",
-			platform:        model.ScopeArticle,
+			platform:        model.ScopeWechat,
 			imageAPICfg:     &srvconfig.ImageAPIConfig{},
 			wantCoverSize:   "",
 			wantContentSize: "",
@@ -186,7 +186,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 		},
 		{
 			name:     "explicit image config size is preserved",
-			platform: model.ScopeArticle,
+			platform: model.ScopeWechat,
 			imageAPICfg: &srvconfig.ImageAPIConfig{
 				API: &appconfig.ImageAPI{
 					Provider: "gemini",
@@ -199,7 +199,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 		},
 		{
 			name:            "nil imageAPICfg does not panic",
-			platform:        model.ScopeArticle,
+			platform:        model.ScopeWechat,
 			imageAPICfg:     nil,
 			wantCoverSize:   "",
 			wantContentSize: "",
@@ -231,7 +231,7 @@ func TestBuildAppConfig_PlatformSizes(t *testing.T) {
 // getPlatformSizes extracts cover and content sizes for a given platform.
 func getPlatformSizes(cfg *appconfig.Config, platform string) (cover, content string) {
 	switch platform {
-	case model.ScopeArticle:
+	case model.ScopeWechat:
 		return cfg.Wechat.Article.Cover.Image.Size, cfg.Wechat.Article.Content.Image.Size
 	case model.ScopeSeednote:
 		if cfg.Seednote != nil {
@@ -255,7 +255,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 		{
 			name: "both empty leaves size to skill workflow",
 			project: &model.Project{
-				Platform:   model.ScopeArticle,
+				Platform:   model.ScopeWechat,
 				Name:       "Test",
 				ImageRatio: "",
 			},
@@ -267,7 +267,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 		{
 			name: "project ratio is applied",
 			project: &model.Project{
-				Platform:   model.ScopeArticle,
+				Platform:   model.ScopeWechat,
 				Name:       "Test",
 				ImageRatio: "1:1",
 			},
@@ -279,7 +279,7 @@ func TestBuildAppConfig_ImageRatioOverride(t *testing.T) {
 		{
 			name: "task ratio overrides project ratio",
 			project: &model.Project{
-				Platform:   model.ScopeArticle,
+				Platform:   model.ScopeWechat,
 				Name:       "Test",
 				ImageRatio: "1:1",
 			},
@@ -325,7 +325,7 @@ func TestTaskTypeToAgent(t *testing.T) {
 		taskType string
 		want     string
 	}{
-		{model.ScopeArticle, "article"},
+		{model.ScopeWechat, "wechat-article"},
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
@@ -355,14 +355,14 @@ func TestTaskTypeToAgentViralAnalysisIsAnExplicitRoute(t *testing.T) {
 
 func TestDefaultMaxTurns(t *testing.T) {
 	maxTurns := map[string]int{
-		"article":  100,
-		"seednote": 60,
+		"wechat-article": 100,
+		"seednote":       60,
 	}
 	tests := []struct {
 		taskType string
 		want     int
 	}{
-		{model.ScopeArticle, 100},
+		{model.ScopeWechat, 100},
 		{model.ScopeSeednote, 60},
 		{model.TaskTypeViralAnalysis, 60},
 		{"unknown", 40},
@@ -384,7 +384,7 @@ func TestDefaultMaxTurnsUsesManagedRuntimeBudget(t *testing.T) {
 		taskType string
 		want     int
 	}{
-		{model.PlatformArticle, 60},
+		{model.PlatformWechat, 60},
 		{model.PlatformSeednote, 20},
 		{model.TaskTypeViralAnalysis, 20},
 		{model.PlatformMoments, 25},
@@ -504,10 +504,10 @@ func TestBuildUserPrompt(t *testing.T) {
 			wantAbsence: []string{"视觉风格要求", "Use the", "agent"},
 		},
 		{
-			name:         "article with topic runs workflow",
-			taskType:     "article",
+			name:         "wechat article with topic runs workflow",
+			taskType:     model.TaskTypeWechatArticle,
 			topic:        "时间管理技巧",
-			wantContains: []string{"Run the full article creation workflow", "create content about: 时间管理技巧"},
+			wantContains: []string{"Run the full wechat-article creation workflow", "create content about: 时间管理技巧"},
 			wantAbsence:  []string{"视觉风格要求", "Use the", "agent"},
 		},
 		{
@@ -576,7 +576,7 @@ func TestBuildUserPrompt_MontageVideoSemantics(t *testing.T) {
 		},
 		{
 			name:              "non montage omits video semantics",
-			taskType:          model.PlatformArticle,
+			taskType:          model.PlatformWechat,
 			imageRatio:        "9:16",
 			hasReferenceImage: true,
 			wantAbsent: []string{
@@ -787,7 +787,7 @@ func TestBuildUserPrompt_SeednoteImageComposition(t *testing.T) {
 	// A default article task (both image toggles on) must NOT get the seednote
 	// image-composition directive, nor any long-form image instruction.
 	articleGot := BuildUserPrompt(UserPromptParams{
-		TaskType:                 "article",
+		TaskType:                 model.TaskTypeWechatArticle,
 		Topic:                    "时间管理",
 		HasContentImage:          true,
 		HasTailImage:             true,
@@ -843,7 +843,7 @@ func TestBuildUserPrompt_ArticleImageComposition(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := BuildUserPrompt(UserPromptParams{
-				TaskType:                 "article",
+				TaskType:                 model.TaskTypeWechatArticle,
 				Topic:                    "时间管理",
 				ArticleWithCover:         tc.withCover,
 				ArticleWithContentImages: tc.withContent,
@@ -863,7 +863,7 @@ func TestBuildUserPrompt_ArticleImageComposition(t *testing.T) {
 }
 
 func TestBuildUserPrompt_SharedCoverPortraitControls(t *testing.T) {
-	for _, taskType := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
+	for _, taskType := range []string{model.TaskTypeWechatArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit} {
 		for _, selected := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/selected=%t", taskType, selected), func(t *testing.T) {
 				got := BuildUserPrompt(UserPromptParams{TaskType: taskType, CoverUsePortrait: selected})
@@ -880,7 +880,7 @@ func TestBuildUserPrompt_SharedCoverPortraitControls(t *testing.T) {
 			})
 		}
 	}
-	got := BuildUserPrompt(UserPromptParams{TaskType: model.PlatformArticle, ArticleWithCover: ptrBool(false), CoverUsePortrait: true})
+	got := BuildUserPrompt(UserPromptParams{TaskType: model.TaskTypeWechatArticle, ArticleWithCover: ptrBool(false), CoverUsePortrait: true})
 	if !strings.Contains(got, "cover_portrait=disabled") {
 		t.Fatalf("cover-off must disable portrait: %q", got)
 	}

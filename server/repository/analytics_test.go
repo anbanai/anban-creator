@@ -24,7 +24,7 @@ func TestAnalyticsResolveContentTaskAliasThroughWechatPublication(t *testing.T) 
 	if err := db.Create(&model.AnalyticsContent{
 		ID:            "wechat_publication:pub-1",
 		ProjectID:     "project-1",
-		Platform:      model.PlatformArticle,
+		Platform:      model.PlatformWechat,
 		PublicationID: "pub-1",
 	}).Error; err != nil {
 		t.Fatal(err)

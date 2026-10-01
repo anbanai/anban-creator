@@ -62,6 +62,10 @@ func (s *PublishingService) buildAppConfig(ch *model.Project) (*appconfig.Config
 	return agent.BuildAppConfig(ch, ResolveStyle(ch, nil), nil, "", false)
 }
 
+func (s *PublishingService) BuildAppConfigForProject(ch *model.Project) (*appconfig.Config, error) {
+	return s.buildAppConfig(ch)
+}
+
 // defaultCreateDraftService creates a draft.Service for the given project.
 func (s *PublishingService) defaultCreateDraftService(ch *model.Project) (draftClient, error) {
 	appCfg, err := s.buildAppConfig(ch)

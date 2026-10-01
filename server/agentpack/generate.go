@@ -49,9 +49,10 @@ func generateTo(pluginRoot, agentsDir, dshPresetsDir, catalogPath string) (Gener
 	}
 	changed := false
 	for _, pack := range catalog.Packs {
+		agentFileStem := pack.Agent.Name
 		for source, destination := range map[string]string{
-			pack.Agent.ClaudeSource: filepath.Join(agentsDir, pack.Agent.Name+".md"),
-			pack.Agent.CodexSource:  filepath.Join(agentsDir, pack.Agent.Name+".toml"),
+			pack.Agent.ClaudeSource: filepath.Join(agentsDir, agentFileStem+".md"),
+			pack.Agent.CodexSource:  filepath.Join(agentsDir, agentFileStem+".toml"),
 		} {
 			body, err := os.ReadFile(filepath.Join(pack.dir, source))
 			if err != nil {
@@ -90,9 +91,10 @@ func CheckRepository(pluginRoot, catalogPath string) error {
 	}
 	expectedAgents := make(map[string][]byte, len(catalog.Packs)*2)
 	for _, pack := range catalog.Packs {
+		agentFileStem := pack.Agent.Name
 		for source, name := range map[string]string{
-			pack.Agent.ClaudeSource: pack.Agent.Name + ".md",
-			pack.Agent.CodexSource:  pack.Agent.Name + ".toml",
+			pack.Agent.ClaudeSource: agentFileStem + ".md",
+			pack.Agent.CodexSource:  agentFileStem + ".toml",
 		} {
 			body, err := os.ReadFile(filepath.Join(pack.dir, source))
 			if err != nil {

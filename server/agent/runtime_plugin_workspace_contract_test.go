@@ -50,7 +50,7 @@ func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, taskType := range []string{"article", "seednote", "moments", "ecommerce", "montage", "live-slicer"} {
+	for _, taskType := range []string{"wechat", "seednote", "moments", "ecommerce", "montage", "live-slicer"} {
 		if containsString(managedRequiredMCPTools(taskType), "prepare_workspace") {
 			t.Errorf("managed runtime policy for %s names forbidden prepare_workspace tool", taskType)
 		}

@@ -58,11 +58,11 @@ var ValidCategories = []Category{CategoryTheme, CategoryWriter, CategoryLayout, 
 func (c Category) IsPlatformRelevant(platform string) bool {
 	switch c {
 	case CategoryTheme, CategoryWriter:
-		return platform == "article"
+		return platform == "wechat"
 	case CategoryLayout:
-		return platform == "article"
+		return platform == "wechat"
 	case CategoryArticleTemplate:
-		return platform == "article"
+		return platform == "wechat"
 	}
 	return false
 }

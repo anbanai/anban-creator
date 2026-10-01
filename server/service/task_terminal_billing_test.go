@@ -113,7 +113,7 @@ func TestFailStaleRunningTaskForInfrastructureRevalidatesCurrentState(t *testing
 func TestFailStaleRunningTaskForInfrastructureRollsBackWhenReversalEnqueueFails(t *testing.T) {
 	ctx := context.Background()
 	svc, fixture, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformWechat)
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{
 		ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID,
 		Prompt: "stale billed task", Quantity: 1,

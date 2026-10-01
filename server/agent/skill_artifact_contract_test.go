@@ -106,7 +106,10 @@ func TestJSONOutputContractsDeclareSharedMetadata(t *testing.T) {
 			body := readRepoFile(t, file)
 			var hasJSON bool
 			for _, artifact := range append(append([]agentpack.ArtifactSpec{}, pack.Artifacts...), flattenArtifactOverrides(pack.ArtifactsByTaskType)...) {
-				if strings.HasSuffix(artifact.Path, ".json") {
+				// Progress and failure state are runner-owned envelopes. They do not
+				// make the Agent's domain output a JSON result requiring the shared
+				// analytics metadata contract.
+				if artifact.Role != "progress_state" && artifact.Role != "failure_state" && strings.HasSuffix(artifact.Path, ".json") {
 					hasJSON = true
 					break
 				}

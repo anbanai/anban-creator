@@ -11,12 +11,12 @@ import (
 func registerResourceTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
 		Name:        "list_resources",
-		Description: "List available embedded resources (themes, writers, layouts, article templates). Returns metadata for each resource including name, description, and category-specific fields.",
+		Description: "List available embedded resources (themes, writers, layouts, WeChat article templates). Returns metadata for each resource including name, description, and category-specific fields.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"category": map[string]any{"type": "string", "enum": []any{"themes", "writers", "layouts", "article_templates"}, "description": "Resource category to list"},
-				"platform": map[string]any{"type": "string", "description": "Filter by platform: article or seednote (optional)"},
+				"platform": map[string]any{"type": "string", "description": "Filter by platform: wechat or seednote (optional)"},
 			},
 			"required": []any{"category"},
 		},

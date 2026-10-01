@@ -109,6 +109,19 @@ func (r *feedbackLoopRepository) UpdateJob(ctx context.Context, job *model.Feedb
 	return r.db.WithContext(ctx).Save(job).Error
 }
 
+// ClaimTaskID atomically binds a managed Task to a FeedbackJob. The expected
+// value is part of the compare-and-swap so concurrent scheduler retries cannot
+// create two Tasks for one job; a terminal task may be replaced by a retry.
+func (r *feedbackLoopRepository) ClaimTaskID(ctx context.Context, jobID, expectedTaskID, taskID string) (bool, error) {
+	if strings.TrimSpace(jobID) == "" || strings.TrimSpace(taskID) == "" {
+		return false, errors.New("feedback job and task IDs are required")
+	}
+	result := r.db.WithContext(ctx).Model(&model.FeedbackJob{}).
+		Where("id = ? AND task_id = ?", jobID, expectedTaskID).
+		Update("task_id", taskID)
+	return result.RowsAffected == 1, result.Error
+}
+
 func (r *feedbackLoopRepository) ListJobs(ctx context.Context, projectID, cadence string, limit int) ([]*model.FeedbackJob, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -158,6 +171,64 @@ func (r *feedbackLoopRepository) listRunning(ctx context.Context, field, value, 
 func (r *feedbackLoopRepository) CreateInsight(ctx context.Context, insight *model.FeedbackInsight) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "job_id"}, {Name: "kind"}}, DoNothing: true}).Create(insight).Error
 }
+
+func (r *feedbackLoopRepository) FindInsightByID(ctx context.Context, id string) (*model.FeedbackInsight, error) {
+	var insight model.FeedbackInsight
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&insight).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &insight, nil
+}
+
+func (r *feedbackLoopRepository) UpdateInsight(ctx context.Context, insight *model.FeedbackInsight) error {
+	if insight == nil || strings.TrimSpace(insight.ID) == "" {
+		return errors.New("feedback insight identity is required")
+	}
+	return r.db.WithContext(ctx).Save(insight).Error
+}
+
+func (r *feedbackLoopRepository) PromoteInsight(ctx context.Context, insightID string, memoryRevision int64) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.FeedbackInsight{}).
+		Where("id = ? AND promotion_status = ?", insightID, model.FeedbackPromotionValidated).
+		Updates(map[string]any{"promotion_status": model.FeedbackPromotionPromoted, "memory_revision": memoryRevision})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *feedbackLoopRepository) FindValidatedInsight(ctx context.Context, projectID, targetContentID string, beforeRevision int64) (*model.FeedbackInsight, error) {
+	var insight model.FeedbackInsight
+	q := r.db.WithContext(ctx).Where("project_id = ? AND target_content_id = ? AND promotion_status = ?", projectID, targetContentID, model.FeedbackPromotionValidated).Order("analytics_revision desc")
+	if beforeRevision > 0 {
+		q = q.Where("analytics_revision < ?", beforeRevision)
+	}
+	if err := q.First(&insight).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &insight, nil
+}
+
+func (r *feedbackLoopRepository) FindSuccessfulAttribution(ctx context.Context, projectID, targetContentID string, revision int64) (*model.FeedbackJob, error) {
+	var job model.FeedbackJob
+	err := r.db.WithContext(ctx).
+		Where("project_id = ? AND target_content_id = ? AND analytics_revision = ? AND status = ?", projectID, targetContentID, revision, model.FeedbackJobSucceeded).
+		Order("completed_at desc").First(&job).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &job, err
+}
+
+func (r *feedbackLoopRepository) ListInsightsByTarget(ctx context.Context, projectID, targetContentID string) ([]*model.FeedbackInsight, error) {
+	var insights []*model.FeedbackInsight
+	err := r.db.WithContext(ctx).Where("project_id = ? AND target_content_id = ?", projectID, targetContentID).Order("analytics_revision asc, created_at asc").Find(&insights).Error
+	return insights, err
+}
+
 func (r *feedbackLoopRepository) CreateStrategy(ctx context.Context, snapshot *model.StrategySnapshot) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var previous model.StrategySnapshot
@@ -197,7 +268,16 @@ func (r *feedbackLoopRepository) NextStrategyRevision(ctx context.Context, proje
 
 func (r *feedbackLoopRepository) FindActiveStrategy(ctx context.Context, projectID, platform string) (*model.StrategySnapshot, error) {
 	var snapshot model.StrategySnapshot
-	q := r.db.WithContext(ctx).Where("project_id = ? AND platform = ? AND status = ?", projectID, platform, "active").Order("revision desc").Limit(1)
+	identities := []string{strings.TrimSpace(platform)}
+	switch strings.TrimSpace(platform) {
+	case model.ChannelArticle, model.PlatformWechat:
+		identities = append(identities, model.ChannelArticle, model.TaskTypeWechatArticle, model.PlatformWechat)
+	case model.ChannelSeednote:
+		identities = append(identities, model.PlatformSeednote)
+	case model.ChannelWechatPicture:
+		identities = append(identities, model.TaskTypeWechatPicture)
+	}
+	q := r.db.WithContext(ctx).Where("project_id = ? AND platform IN ? AND status = ?", projectID, identities, "active").Order("revision desc").Limit(1)
 	err := q.First(&snapshot).Error
 	if isMissingFeedbackTable(err) {
 		return nil, nil

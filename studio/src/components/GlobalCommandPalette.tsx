@@ -136,7 +136,7 @@ export default function GlobalCommandPalette() {
             </CommandItem>
           ))}
           {nextActions.length === 0 && (
-            <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: defaultProject?.platform, projectId: defaultProject?.id, intent: 'new' })))}>
+            <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: defaultProject?.platform === 'wechat' ? 'wechat-article' : defaultProject?.platform, projectId: defaultProject?.id, intent: 'new' })))}>
               <Plus className="mr-2 h-4 w-4" />
               新建创作任务
             </CommandItem>
@@ -146,7 +146,7 @@ export default function GlobalCommandPalette() {
         <CommandSeparator />
 
         <CommandGroup heading="创建">
-          <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: 'article', projectId: defaultProject?.platform === 'article' ? defaultProject.id : undefined, intent: 'new' })))}>
+          <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: 'wechat-article', projectId: defaultProject?.platform === 'wechat' ? defaultProject.id : undefined, intent: 'new' })))}>
             <FileText className="mr-2 h-4 w-4" />
             新建公众号文章
           </CommandItem>
@@ -154,7 +154,7 @@ export default function GlobalCommandPalette() {
             <Plus className="mr-2 h-4 w-4" />
             新建种草笔记
           </CommandItem>
-          <CommandItem onSelect={() => handleSelect(() => navigate('/plans?create=true&type=article&intent=schedule'))}>
+          <CommandItem onSelect={() => handleSelect(() => navigate('/plans?create=true&type=wechat-article&intent=schedule'))}>
             <ListChecks className="mr-2 h-4 w-4" />
             创建自动计划
           </CommandItem>

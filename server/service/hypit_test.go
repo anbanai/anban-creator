@@ -252,7 +252,7 @@ func TestHypitDurableDeliveryAcceptsArchiveAboveLegacyLimit(t *testing.T) {
 	if err := svc.validateStoredDeliveryObject(t.Context(), task, file.ExecutionID, file, spec); err != nil {
 		t.Fatalf("valid 1GiB archive rejected: %v", err)
 	}
-	task.Type = model.PlatformArticle
+	task.Type = model.PlatformWechat
 	if svc.validateStoredDeliveryObject(t.Context(), task, file.ExecutionID, file, spec) == nil {
 		t.Fatal("legacy task got expanded archive allowance")
 	}

@@ -120,9 +120,9 @@ func TestArticleCoverDesignDefinesPortraitReferenceContract(t *testing.T) {
 func TestArticleAgentWiresPortraitReferenceOnlyIntoCoverStep(t *testing.T) {
 	root := repoRoot(t)
 	for _, relative := range []string{
-		"harness/packs/article/agent.claude.md",
-		"harness/packs/article/agent.codex.toml",
-		"harness/packs/article/agent.dsh.yml",
+		"harness/packs/wechat-article/agent.claude.md",
+		"harness/packs/wechat-article/agent.codex.toml",
+		"harness/packs/wechat-article/agent.dsh.yml",
 	} {
 		body := readRepoFile(t, filepath.Join(root, relative))
 		for _, want := range []string{

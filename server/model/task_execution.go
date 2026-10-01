@@ -22,6 +22,9 @@ type TaskExecution struct {
 	ParentExecutionID string `gorm:"type:char(36);index" json:"parent_execution_id,omitempty"`
 	ResumeSessionID   string `gorm:"type:varchar(128)" json:"resume_session_id,omitempty"`
 	AgentPackID       string `gorm:"type:varchar(80);index" json:"agent_pack_id,omitempty"`
+	AgentID           string `gorm:"type:varchar(80);index" json:"agent_id,omitempty"`
+	Channel           string `gorm:"type:varchar(40);index" json:"channel,omitempty"`
+	TaskKind          string `gorm:"type:varchar(80);index" json:"task_kind,omitempty"`
 	AgentPackVersion  string `gorm:"type:varchar(32)" json:"agent_pack_version,omitempty"`
 	AgentPackDigest   string `gorm:"type:char(64);index" json:"agent_pack_digest,omitempty"`
 	// AgentPackDeliveryContract freezes the user-facing delivery contract for

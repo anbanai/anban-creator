@@ -13,7 +13,7 @@ function project(overrides: Partial<Project> = {}): Project {
   return {
     id: 'project-1',
     user_id: 'user-1',
-    platform: 'article',
+    platform: 'wechat',
     name: '公众号项目',
     avatar_url: '',
     profile_url: '',
@@ -36,7 +36,7 @@ function project(overrides: Partial<Project> = {}): Project {
 function task(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
-    type: 'article',
+    type: 'wechat-article',
     title: '任务',
     prompt: '写文章',
     status: 'completed',
@@ -105,14 +105,14 @@ describe('studio business UX helpers', () => {
           catalog_id: 'retail-v1',
           currency: 'credits',
           skus: [{
-            id: 'task.article.effective',
-            operation: 'task.article',
+            id: 'task.wechat_article.effective',
+            operation: 'task.wechat_article',
             charge_policy: 'task_admission',
             price_credits: 6000,
             delivery: 'article_artifacts_verified',
           }],
         },
-        type: 'article',
+        type: 'wechat-article',
         quantity: 2,
         balance: 30000,
       }),
@@ -129,7 +129,7 @@ describe('studio business UX helpers', () => {
   it('marks task creation pricing unavailable when no active SKU can be resolved', () => {
     expect(taskCreationCostPreview({
       catalog: undefined,
-      type: 'article',
+      type: 'wechat-article',
       quantity: 1,
       balance: 30000,
     })).toMatchObject({

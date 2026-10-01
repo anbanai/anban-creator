@@ -195,6 +195,11 @@ func (s *TaskService) verifyPendingFailureCommitted(ctx context.Context, task *m
 }
 
 func (s *TaskService) finalizeFailedExecutionPostCommit(ctx context.Context, task *model.Task, errorMsg string) error {
+	if task != nil && (task.Type == model.TaskTypeProfileAnalysis || task.TaskKind == model.TaskKindProfileAnalysis) {
+		if err := UpdateProfileLifecycle(ctx, s.repo, task.ProjectID, task.ID, model.ProfileInitializationFailed, errorMsg); err != nil {
+			return fmt.Errorf("update failed profile lifecycle: %w", err)
+		}
+	}
 	if task.ProjectID != "" && s.pubsub != nil {
 		running, err := s.repo.Tasks().CountRunningByProject(ctx, task.ProjectID)
 		if err != nil {

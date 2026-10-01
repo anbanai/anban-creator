@@ -212,7 +212,7 @@ func (m *AnalyticsRebuildManager) migrateLegacy(ctx context.Context, job *model.
 				if id := strings.TrimPrefix(in.content.ID, "wechat_publication:"); id != in.content.ID {
 					if v, ok := pubByID[id]; ok {
 						in.content.Title = v.DraftTitle
-						in.content.ContentType = "article"
+						in.content.ContentType = normalizeWechatContentType(v.DraftArticleType)
 						in.content.Status = v.Status
 						in.content.URL = v.ArticleURL
 						in.content.Date = v.PublishedAt
@@ -387,7 +387,7 @@ func (m *AnalyticsRebuildManager) migrateWechatImports(ctx context.Context, proj
 				continue
 			}
 			metrics := model.AnalyticsMetrics{ReadUsers: v.ReadUsers, ShareUsers: v.ShareUsers, ReadToFollowUsers: v.ReadToFollowUsers, DeliveredUsers: v.DeliveredUsers, ReadCompletionRate: decimalFromFloatPtr(v.ReadCompletionRate), DeliveryCompletionRate: decimalFromFloatPtr(v.DeliveryCompletionRate)}
-			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformArticle, TaskID: v.TaskID, PublicationID: v.PublicationID}, obs: model.AnalyticsObservation{ID: "legacy:wechat_import:" + v.ID, ProjectID: project, ContentID: contentID, BatchID: v.BatchID, MetricBasis: "cumulative", StatDate: dateShanghai(v.DataAsOfAt), Source: "wechat_import", SourcePriority: 100, EffectiveAt: v.DataAsOfAt.UTC(), ReceivedAt: v.ImportedAt.UTC(), RevokedAt: legacyRevoked(v.BatchRevokedAt), AnalyticsMetrics: metrics}, raw: v.RawData}
+			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformWechat, TaskID: v.TaskID, PublicationID: v.PublicationID}, obs: model.AnalyticsObservation{ID: "legacy:wechat_import:" + v.ID, ProjectID: project, ContentID: contentID, BatchID: v.BatchID, MetricBasis: "cumulative", StatDate: dateShanghai(v.DataAsOfAt), Source: "wechat_import", SourcePriority: 100, EffectiveAt: v.DataAsOfAt.UTC(), ReceivedAt: v.ImportedAt.UTC(), RevokedAt: legacyRevoked(v.BatchRevokedAt), AnalyticsMetrics: metrics}, raw: v.RawData}
 			if err := queue(in); err != nil {
 				return err
 			}
@@ -440,7 +440,7 @@ func (m *AnalyticsRebuildManager) migrateWechatOfficial(ctx context.Context, pro
 				continue
 			}
 			metrics := model.AnalyticsMetrics{ReadUsers: int64ptr(v.ReadUsers), ShareUsers: int64ptr(v.ShareUsers), CollectionUsers: int64ptr(v.CollectionUsers), LikeUsers: int64ptr(v.LikeUsers), ZaikanUsers: int64ptr(v.ZaikanUsers), CommentCount: int64ptr(v.CommentCount), ReadToFollowUsers: int64ptr(v.ReadToSubscribeUsers), ReadCompletionRate: decimalFromFloat(v.ReadFinishRate), AverageReadActiveTime: decimalFromFloat(v.AverageReadActiveTime)}
-			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformArticle, TaskID: taskID, PublicationID: publicationID}, obs: model.AnalyticsObservation{ID: "legacy:wechat_official:" + v.ID, TrackingID: v.TrackingID, ProjectID: project, ContentID: contentID, MetricBasis: "cumulative", StatDate: v.StatDate, Source: "wechat_api", SourcePriority: 200, EffectiveAt: v.CapturedAt.UTC(), ReceivedAt: v.CapturedAt.UTC(), AnalyticsMetrics: metrics}, raw: string(v.RawResponse)}
+			in := legacyMigrationInput{content: model.AnalyticsContent{ID: contentID, ProjectID: project, Platform: model.PlatformWechat, TaskID: taskID, PublicationID: publicationID}, obs: model.AnalyticsObservation{ID: "legacy:wechat_official:" + v.ID, TrackingID: v.TrackingID, ProjectID: project, ContentID: contentID, MetricBasis: "cumulative", StatDate: v.StatDate, Source: "wechat_api", SourcePriority: 200, EffectiveAt: v.CapturedAt.UTC(), ReceivedAt: v.CapturedAt.UTC(), AnalyticsMetrics: metrics}, raw: string(v.RawResponse)}
 			if err := queue(in); err != nil {
 				return err
 			}

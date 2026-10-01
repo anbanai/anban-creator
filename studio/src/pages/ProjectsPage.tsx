@@ -50,7 +50,7 @@ import { useAuth } from '@/contexts/AuthContext'
 
 const platformOptions: { value: ProjectPlatform; label: string }[] = [
   { value: 'seednote', label: '种草笔记' },
-  { value: 'article', label: '公众号' },
+  { value: 'wechat', label: '公众号' },
   { value: 'moments', label: '朋友圈' },
   { value: 'ecommerce', label: '电商出图' },
   { value: 'montage', label: '视频生成' },
@@ -70,15 +70,8 @@ const statusTabs: { label: string; value: string }[] = [
   { label: '已归档', value: 'archived' },
 ]
 
-const profileQuestionGroups = [
-  { key: 'basic', label: '基础平台与账号信息', placeholder: '账号名称、平台、主页定位、代表栏目或作品。' },
-  { key: 'intent', label: '运营意图、方向和差异化', placeholder: '运营目标、长期方向、希望被记住的差异化。' },
-  { key: 'content', label: '内容偏好、形式、调性和受众', placeholder: '常做主题、内容形式、语气、视觉偏好和目标受众。' },
-  { key: 'boundaries', label: '不做内容、合作边界和合规红线', placeholder: '明确不做的内容、合作限制、敏感信息和合规要求。' },
-] as const
-
 const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
-  platform: 'article',
+  platform: 'wechat',
   agent_config: {},
   name: '',
   profile_url: '',
@@ -109,15 +102,17 @@ const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
     delivery_targets: [],
   },
   reference_image: null,
-  image_ratio: '3:4',
+  image_ratio: 'auto',
 }
 
-function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): ProjectPlatform {
+function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): ProjectFormValues['platform'] {
   switch (type) {
-    case 'article':
+    case 'wechat':
+    case 'wechat-article':
+    case 'wechat-picture':
     case 'seednote':
     case 'montage':
-      return type
+      return type === 'wechat-article' || type === 'wechat-picture' ? 'wechat' : type
     case 'hypit':
     case 'moments':
     case 'ecommerce':
@@ -129,7 +124,7 @@ function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): 
 
 function projectToForm(ch: Project): ProjectFormValues {
   return {
-    platform: ch.platform,
+    platform: ch.platform ?? CHANNEL_FORM_DEFAULTS.platform,
     agent_config: ch.agent_config ?? {},
     name: ch.name || '',
     profile_url: ch.profile_url || '',
@@ -184,12 +179,8 @@ export default function ProjectsPage() {
   const [montageDefaultsReady, setMontageDefaultsReady] = useState(false)
   const [profileProject, setProfileProject] = useState<Project | null>(null)
   const [profileDraft, setProfileDraft] = useState<ProjectProfile | null>(null)
-  const [profileAnswers, setProfileAnswers] = useState<Record<string, string>>({})
   const [profileDraftText, setProfileDraftText] = useState<Record<string, string>>({})
   const [profileJsonError, setProfileJsonError] = useState<string | null>(null)
-  const [profileQuote, setProfileQuote] = useState<{ id: string; price_credits: number; list_price_credits: number; currency: string; expires_at: string } | null>(null)
-  const [profileSamples, setProfileSamples] = useState<string[]>([''])
-  const [profileQuoteOpen, setProfileQuoteOpen] = useState(false)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const { submit } = useSubmitLock()
 
@@ -201,10 +192,10 @@ export default function ProjectsPage() {
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
   const watchedAgentConfig = useWatch({ control: form.control, name: 'agent_config' }) ?? {}
   const selectedAgentPack = useMemo(
-    () => agentPacksQuery.data?.packs.find((pack) => pack.bindings.project_platforms?.includes(selectedPlatform)),
+		() => agentPacksQuery.data?.packs.find((pack) => pack.channel === selectedPlatform),
     [agentPacksQuery.data, selectedPlatform],
   )
-  const isWechat = selectedPlatform === 'article'
+  const isWechat = selectedPlatform === 'wechat'
   const isSeednote = selectedPlatform === 'seednote'
   const isMoments = selectedPlatform === 'moments'
 	const isEcommerce = selectedPlatform === 'ecommerce'
@@ -329,7 +320,7 @@ export default function ProjectsPage() {
   })
 
   const visibleProjects = useMemo(
-    () => (projects ?? []).filter((project) => canViewPlatform(project.platform, isAdmin)),
+    () => (projects ?? []).filter((project) => canViewPlatform(project.platform ?? 'wechat', isAdmin)),
     [isAdmin, projects],
   )
 
@@ -382,15 +373,12 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       const createdProject = created.project
-      if (createdProject?.id && (createdProject.platform === 'article' || createdProject.platform === 'seednote')) {
-        openProfile(createdProject)
-      }
       if (returnTo && createdProject?.id) {
         closeProfile()
         resetModal()
         navigate(projectCreatedReturnHref({
           returnTo,
-          type: createdProject.platform,
+          type: createIntent.type,
           projectId: createdProject.id,
           intent: createIntent.intent,
         }))
@@ -417,7 +405,7 @@ export default function ProjectsPage() {
   const profileAnalysisQuery = useQuery({
     queryKey: ['project-profile-analysis', profileProject?.id, profileDraft?.analysis_task_id],
     queryFn: () => api.projects.profileAnalysis(profileProject!.id),
-    enabled: profileModalOpen && Boolean(profileProject?.id && profileDraft?.analysis_task_id && profileDraft.status !== 'confirmed'),
+    enabled: profileModalOpen && Boolean(profileProject?.id && profileDraft?.analysis_task_id),
     refetchInterval: (query) => {
       const status = query.state.data?.status
       return status === 'pending' || status === 'running' ? 2000 : false
@@ -426,47 +414,31 @@ export default function ProjectsPage() {
   useEffect(() => {
     const result = profileAnalysisQuery.data
     if (!result) return
-    if (result.draft) {
-      setProfileDraft(result.draft)
-      setProfileDraftText(Object.fromEntries(Object.entries(result.draft.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
-      setProfileJsonError(null)
-    }
+    setProfileDraft(result.profile)
+    setProfileDraftText(Object.fromEntries(Object.entries(result.profile.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
+    setProfileJsonError(null)
   }, [profileAnalysisQuery.data])
-  const profileQuoteMutation = useMutation({
-    mutationFn: () => api.projects.profileQuote(profileProject!.id, {
-      answers: Object.fromEntries(Object.entries(profileAnswers).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
-      samples: profileSamples.map((sample) => sample.trim()).filter(Boolean),
-    }),
-    onSuccess: (quote) => {
-      setProfileQuote(quote)
-      setProfileQuoteOpen(true)
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err, '无法获取画像分析报价')),
-  })
   const profileAnalysisMutation = useMutation({
-    mutationFn: (quoteConfirmed: boolean) => api.projects.startProfileAnalysis(profileProject!.id, {
-      quote_confirmed: quoteConfirmed,
-      quote_id: profileQuote!.id,
-      answers: Object.fromEntries(Object.entries(profileAnswers).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
-      samples: profileSamples.map((sample) => sample.trim()).filter(Boolean),
-    }),
+    mutationFn: (retry: boolean) => retry
+      ? api.projects.retryProfile(profileProject!.id, profileDraft!.version)
+      : api.projects.refreshProfile(profileProject!.id, profileDraft!.version),
     onSuccess: (result) => {
-      setProfileQuoteOpen(false)
       setProfileDraft(result.profile)
-      setProfileJsonError(null)
-      toast.success('画像分析任务已启动')
+      queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
+      toast.success('画像任务已加入队列')
     },
-    onError: (err) => toast.error(getApiErrorMessage(err, '画像分析启动失败')),
+    onError: (err) => {
+      if (getApiErrorMessage(err, '').includes('profile_revision_conflict')) {
+        toast.error('画像版本已变化，请刷新后再试')
+        queryClient.invalidateQueries({ queryKey: ['project-profile', profileProject?.id] })
+      } else toast.error(getApiErrorMessage(err, '画像更新失败'))
+    },
   })
 
   function resetProfileFlow() {
     setProfileDraft(null)
-    setProfileAnswers({})
-    setProfileSamples([''])
     setProfileDraftText({})
     setProfileJsonError(null)
-    setProfileQuote(null)
-    setProfileQuoteOpen(false)
   }
 
   function openProfile(project: Project) {
@@ -482,15 +454,20 @@ export default function ProjectsPage() {
     resetProfileFlow()
   }
 
-  const profileConfirmMutation = useMutation({
-    mutationFn: () => api.projects.confirmAccountProfile(profileProject!.id, profileDraft!),
+  const profileDimensionMutation = useMutation({
+    mutationFn: ({ name, dimension }: { name: string; dimension: ProjectProfile['dimensions'][keyof ProjectProfile['dimensions']] }) => api.projects.updateProfileDimension(profileProject!.id, name, profileDraft!.version, dimension),
     onSuccess: (profile) => {
       setProfileDraft(profile)
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-      toast.success('账号画像已确认')
-      closeProfile()
+      queryClient.setQueryData(['project-profile', profileProject?.id], profile)
+      queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
+      toast.success('画像文件已保存')
     },
-    onError: (err) => toast.error(getApiErrorMessage(err, '画像确认失败，请刷新后重试')),
+    onError: (err) => {
+      if (getApiErrorMessage(err, '').includes('profile_revision_conflict')) {
+        toast.error('画像版本冲突，正在重新加载当前内容')
+        queryClient.invalidateQueries({ queryKey: ['project-profile', profileProject?.id] })
+      } else toast.error(getApiErrorMessage(err, '画像保存失败'))
+    },
   })
 
   const updateMutation = useMutation({
@@ -616,7 +593,7 @@ export default function ProjectsPage() {
       instructions: values.instructions?.trim() || undefined,
       writer: values.writer?.trim() || undefined,
       theme: values.theme?.trim() || undefined,
-      author: values.platform === 'article' || values.platform === 'moments'
+      author: values.platform === 'wechat' || values.platform === 'moments'
         ? values.author?.trim() || undefined
         : undefined,
       image_ratio: values.image_ratio,
@@ -780,13 +757,13 @@ export default function ProjectsPage() {
                   <FormControl>
                     <Select
                       value={field.value}
-                      onValueChange={(v) => {
+                      onValueChange={(value) => {
                         setMontageDefaultsReady(false)
-                        field.onChange(v)
+                        field.onChange(value)
                         form.setValue('agent_config', {}, { shouldDirty: true })
                         form.setValue(
                           'image_ratio',
-                          (v ? platformConfigMap[v]?.default_image_ratio : 'auto') as ProjectFormValues['image_ratio'],
+                          (value ? platformConfigMap[value]?.default_image_ratio : 'auto') as ProjectFormValues['image_ratio'],
                           { shouldDirty: true, shouldValidate: true },
                         )
                         form.setValue('wechat_app_id', '')
@@ -797,8 +774,8 @@ export default function ProjectsPage() {
                       <SelectTrigger className="w-full">
                         {selectedPlatform ? (
                           <span className="flex items-center gap-1.5">
-                            {selectedPlatform ? renderPlatformIcon(selectedPlatform) : null}
-                            {platformOptions.find(o => o.value === selectedPlatform)?.label || selectedPlatform}
+                            {renderPlatformIcon(selectedPlatform)}
+                            {platformOptions.find((option) => option.value === selectedPlatform)?.label || selectedPlatform}
                           </span>
                         ) : (
                           <SelectValue placeholder="选择平台" />
@@ -819,6 +796,11 @@ export default function ProjectsPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+
+              <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                <p className="font-medium">项目公共上下文</p>
+                <p className="mt-1 text-xs text-muted-foreground">项目保存定位、关键词、视觉风格和素材等共享信息。创建任务或计划时再选择 Agent；每个 Agent 固定一个输出渠道。</p>
+              </div>
 
               <AgentPackSchemaFields
                 pack={selectedAgentPack}
@@ -1165,42 +1147,25 @@ export default function ProjectsPage() {
       <Dialog open={profileModalOpen} onOpenChange={(open) => { if (!open) closeProfile() }}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>配置账号画像</DialogTitle>
+            <DialogTitle>项目画像</DialogTitle>
           </DialogHeader>
           <div className="max-h-[70vh] space-y-4 overflow-y-auto">
-            <p className="text-sm text-muted-foreground">画像分析只使用你提供的公开资料和补充信息，结果先作为草稿保存，确认后才会进入项目。</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {profileQuestionGroups.map((group) => (
-                <div key={group.key} className="space-y-1.5">
-                  <label className="text-sm font-medium" htmlFor={`profile-answer-${group.key}`}>{group.label}</label>
-                  <Textarea
-                    id={`profile-answer-${group.key}`}
-                    value={profileAnswers[group.key] ?? ''}
-                    onChange={(event) => setProfileAnswers((current) => ({ ...current, [group.key]: event.target.value }))}
-                    placeholder={group.placeholder}
-                    className="min-h-[92px]"
-                  />
-                </div>
-              ))}
+            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+              <div>
+                <p className="text-sm font-medium">初始化状态：{profileDraft?.initialization_status ?? 'not_started'}</p>
+                {profileDraft?.last_error && <p className="text-xs text-destructive" role="alert">{profileDraft.last_error}</p>}
+              </div>
+              {profileDraft && <Button variant="outline" size="sm" loading={profileAnalysisMutation.isPending} disabled={profileAnalysisRunning} onClick={() => profileAnalysisMutation.mutate(profileAnalysisFailed)}>更新画像</Button>}
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium" htmlFor="profile-samples">可选内容样本</label>
-              <Textarea
-                id="profile-samples"
-                value={profileSamples[0] ?? ''}
-                onChange={(event) => setProfileSamples([event.target.value])}
-                placeholder="粘贴代表性公开内容、标题或样本；抓取受限时用于补充分析依据。"
-                className="min-h-[110px]"
-              />
-              <p className="text-xs text-muted-foreground">仅提交公开资料。敏感信息请先删除。</p>
-            </div>
-            {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像分析进行中，完成后会显示草稿。此窗口可以关闭，稍后从项目再次打开。</p>}
-            {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像分析{profileAnalysisStatus === 'cancelled' ? '已取消' : '失败'}，正式画像没有被覆盖，可以重新分析。</p>}
-            {profileAnalysisStatus === 'completed' && !profileAnalysisQuery.data?.draft && <p className="text-sm text-amber-600" role="alert">分析已完成但没有找到草稿产物，请重新分析。</p>}
+            {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像任务执行中，完成后会自动刷新。</p>}
+            {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像任务失败，当前画像保持不变，可以重试。</p>}
+            <table className="w-full text-left text-xs"><thead><tr className="border-b"><th className="py-2 pr-3">引用路径</th><th className="py-2">用途</th></tr></thead><tbody>
+              {Object.entries(profileDimensionLabels).map(([key, label]) => <tr key={key} className="border-b"><td className="py-2 pr-3 font-mono">profile/{key}.md</td><td className="py-2">{label}</td></tr>)}
+            </tbody></table>
             {profileDraft && (
               <div className="space-y-3">
                 {Object.entries(profileDraft.dimensions).map(([key, dimension]) => (
-                  <div key={key} className="rounded-md border p-3">
+                  <div key={key} className="space-y-2 rounded-md border p-3">
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-sm font-medium">{profileDimensionLabels[key] || key}</span>
                       <span className="text-xs text-muted-foreground">{dimension.sources.join('、') || '[待补充]'}</span>
@@ -1219,6 +1184,7 @@ export default function ProjectsPage() {
                       }}
                       className="min-h-[76px] font-mono text-xs"
                     />
+                    <Button size="sm" variant="secondary" disabled={Boolean(profileJsonError) || profileDimensionMutation.isPending || profileAnalysisRunning} onClick={() => profileDimensionMutation.mutate({ name: key, dimension })}>保存文件</Button>
                     {dimension.missing_fields.length > 0 && <p className="mt-1 text-xs text-amber-600">待补充：{dimension.missing_fields.join('、')}</p>}
                   </div>
                 ))}
@@ -1228,36 +1194,10 @@ export default function ProjectsPage() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={closeProfile}>跳过</Button>
-            <Button
-              variant="outline"
-              loading={profileQuoteMutation.isPending || profileAnalysisMutation.isPending}
-              disabled={!profileProject || profileAnalysisRunning}
-              onClick={() => profileQuoteMutation.mutate()}
-            >{profileAnalysisFailed ? '重新分析' : '分析画像'}</Button>
-            <Button
-              disabled={!profileDraft || profileConfirmMutation.isPending || Boolean(profileJsonError) || profileAnalysisRunning}
-              loading={profileConfirmMutation.isPending}
-              onClick={() => profileDraft && profileConfirmMutation.mutate()}
-            >{profileDraft?.status === 'confirmed' ? '保存画像' : '确认画像'}</Button>
+            <Button variant="secondary" onClick={closeProfile}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={profileQuoteOpen} onOpenChange={setProfileQuoteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认画像分析报价</AlertDialogTitle>
-            <AlertDialogDescription>
-              本次分析将消耗 {profileQuote?.price_credits ?? 0} {profileQuote?.currency === 'credits' ? '积分' : (profileQuote?.currency ?? '')}，报价有效期至 {profileQuote?.expires_at ? new Date(profileQuote.expires_at).toLocaleString() : '未知'}。分析结果只会生成草稿，确认后才写入项目画像。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => profileAnalysisMutation.mutate(true)} disabled={!profileQuote?.id}>确认开始</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Dirty form confirmation */}
       <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>

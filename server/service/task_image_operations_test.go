@@ -210,10 +210,10 @@ func newTaskImageOperationsCropFixture(t *testing.T) *taskImageOperationsCropFix
 	ctx := context.Background()
 	logger := zerolog.Nop()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -843,9 +843,9 @@ func TestTaskImageOperationsRejectHostRuntimePathsAndRecordRemoteAnalysisCost(t 
 	ctx := context.Background()
 	logger := zerolog.Nop()
 	userID := "task-image-operations-user"
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	taskID := "task-image-operations-task"
-	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -893,9 +893,9 @@ func TestTaskImageOperationsRejectForeignTaskBeforeDelegation(t *testing.T) {
 	ctx := context.Background()
 	logger := zerolog.Nop()
 	ownerID := "task-image-owner"
-	projectID := createTestProject(t, repo, ownerID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, ownerID, model.PlatformWechat)
 	taskID := "task-image-foreign"
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: ownerID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: ownerID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
 	understanding := &fakeTaskImageUnderstandingClient{}
@@ -915,7 +915,7 @@ func TestTaskImageOperationsRejectsForeignProjectWithoutTaskBeforeDelegation(t *
 	ctx := context.Background()
 	logger := zerolog.Nop()
 	ownerID := "task-image-project-owner-no-task"
-	projectID := createTestProject(t, repo, ownerID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, ownerID, model.PlatformWechat)
 	imagePath := filepath.Join(t.TempDir(), "image.png")
 	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"), 0o644); err != nil {
 		t.Fatal(err)
@@ -937,9 +937,9 @@ func TestTaskImageOperationsRejectsProjectMismatchBeforeDelegation(t *testing.T)
 	ctx := context.Background()
 	logger := zerolog.Nop()
 	userID := "task-image-project-owner"
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	taskID := "task-image-project-mismatch"
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
 	understanding := &fakeTaskImageUnderstandingClient{}
@@ -956,7 +956,7 @@ func TestTaskImageOperationsRejectsInvalidLocalAndRemoteImageSources(t *testing.
 	ctx := context.Background()
 	logger := zerolog.Nop()
 	userID := "task-image-invalid-source-user"
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	localText := filepath.Join(t.TempDir(), "not-image.txt")
 	if err := os.WriteFile(localText, []byte("plain text"), 0o644); err != nil {
@@ -1036,7 +1036,7 @@ func TestTaskImageAnalysisCostEvidenceLifecycle(t *testing.T) {
 	ctx := context.Background()
 	logger := zerolog.Nop()
 	userID := "task-image-cost-user"
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	tasks := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	tests := []struct {
 		name             string

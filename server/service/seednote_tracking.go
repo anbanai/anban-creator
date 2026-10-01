@@ -144,7 +144,7 @@ func (s *SeednoteTrackingService) BindTask(ctx context.Context, userID, taskID s
 	if task.UserID != userID {
 		return fmt.Errorf("task does not belong to user")
 	}
-	if task.Type != model.PlatformSeednote {
+	if (strings.TrimSpace(task.Channel) != "" && task.Channel != model.ChannelSeednote) || (strings.TrimSpace(task.Channel) == "" && task.Type != model.PlatformSeednote) {
 		return fmt.Errorf("task is not a seednote task")
 	}
 

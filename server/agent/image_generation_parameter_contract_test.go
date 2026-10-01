@@ -42,8 +42,8 @@ func generatingSkillContractPaths(t *testing.T, root string) []string {
 func TestGeneratingAgentsUseBusinessAspectRatios(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		"harness/agents/article.md",
-		"harness/agents/article.toml",
+		"harness/agents/wechat-article.md",
+		"harness/agents/wechat-article.toml",
 		"harness/agents/seednote.md",
 		"harness/agents/seednote.toml",
 		"harness/agents/moments.md",
@@ -118,8 +118,8 @@ func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.
 func TestEveryDocumentedGenerateImageCallPassesAspectRatio(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		"harness/agents/article.md",
-		"harness/agents/article.toml",
+		"harness/agents/wechat-article.md",
+		"harness/agents/wechat-article.toml",
 		"harness/agents/seednote.md",
 		"harness/agents/seednote.toml",
 		"harness/agents/moments.md",
@@ -243,10 +243,10 @@ func TestImageSkillGuidanceDoesNotOverrideEffectiveRatioOrRestoreLegacyRoutes(t 
 func TestArticleExactCoverIsCroppedBeforeTheUploadedCoverIsSelected(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		"harness/agents/article.md",
-		"harness/agents/article.toml",
-		"harness/packs/article/agent.claude.md",
-		"harness/packs/article/agent.codex.toml",
+		"harness/agents/wechat-article.md",
+		"harness/agents/wechat-article.toml",
+		"harness/packs/wechat-article/agent.claude.md",
+		"harness/packs/wechat-article/agent.codex.toml",
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
@@ -274,7 +274,7 @@ func TestImageGuidanceDoesNotDescribeImplicitPlatformCropping(t *testing.T) {
 			body := readImageGenerationContractFile(t, filepath.Join(root, rel))
 			for _, stale := range []string{
 				"硬编码官方比例",
-				"服务端按 `platform=article + image_type=cover` 精确中心裁剪",
+				"服务端按 `platform=wechat + image_type=cover` 精确中心裁剪",
 			} {
 				if strings.Contains(body, stale) {
 					t.Fatalf("%s still describes removed implicit image behavior %q", rel, stale)

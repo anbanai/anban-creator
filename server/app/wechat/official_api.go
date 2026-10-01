@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -37,16 +38,52 @@ func NewOfficialAPI(client *http.Client, baseURL string, accessToken AccessToken
 }
 
 type DraftArticle struct {
-	Title              string `json:"title"`
-	Author             string `json:"author,omitempty"`
-	Digest             string `json:"digest,omitempty"`
-	Content            string `json:"content,omitempty"`
-	ContentSourceURL   string `json:"content_source_url,omitempty"`
-	ThumbMediaID       string `json:"thumb_media_id,omitempty"`
-	ShowCoverPic       int    `json:"show_cover_pic,omitempty"`
-	NeedOpenComment    int    `json:"need_open_comment,omitempty"`
-	OnlyFansCanComment int    `json:"only_fans_can_comment,omitempty"`
-	URL                string `json:"url,omitempty"`
+	ArticleType        string          `json:"article_type,omitempty"`
+	Title              string          `json:"title"`
+	Author             string          `json:"author,omitempty"`
+	Digest             string          `json:"digest,omitempty"`
+	Content            string          `json:"content,omitempty"`
+	ContentSourceURL   string          `json:"content_source_url,omitempty"`
+	ThumbMediaID       string          `json:"thumb_media_id,omitempty"`
+	ShowCoverPic       int             `json:"show_cover_pic,omitempty"`
+	NeedOpenComment    int             `json:"need_open_comment,omitempty"`
+	OnlyFansCanComment int             `json:"only_fans_can_comment,omitempty"`
+	URL                string          `json:"url,omitempty"`
+	ImageInfo          *DraftImageInfo `json:"image_info,omitempty"`
+	CoverInfo          *DraftCoverInfo `json:"cover_info,omitempty"`
+}
+
+type DraftImageInfo struct {
+	ImageList []DraftImage `json:"image_list"`
+}
+
+type DraftImage struct {
+	ImageMediaID string `json:"image_media_id"`
+}
+
+type DraftCoverInfo struct {
+	CropPercentList []DraftCropPercent `json:"crop_percent_list,omitempty"`
+}
+
+type DraftCropPercent struct {
+	Ratio string  `json:"ratio"`
+	X1    float64 `json:"x1"`
+	Y1    float64 `json:"y1"`
+	X2    float64 `json:"x2"`
+	Y2    float64 `json:"y2"`
+}
+
+// MarshalJSON emits the string coordinates required by the official newspic
+// endpoint while keeping numeric fields convenient for validation.
+func (p DraftCropPercent) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Ratio string `json:"ratio"`
+		X1    string `json:"x1"`
+		Y1    string `json:"y1"`
+		X2    string `json:"x2"`
+		Y2    string `json:"y2"`
+	}
+	return json.Marshal(wire{Ratio: p.Ratio, X1: strconv.FormatFloat(p.X1, 'f', 1, 64), Y1: strconv.FormatFloat(p.Y1, 'f', 1, 64), X2: strconv.FormatFloat(p.X2, 'f', 1, 64), Y2: strconv.FormatFloat(p.Y2, 'f', 1, 64)})
 }
 
 type DraftAddRequest struct {
@@ -71,7 +108,8 @@ type DraftBatchItem struct {
 	UpdateTime int64        `json:"update_time"`
 }
 type DraftContent struct {
-	NewsItems []DraftArticle `json:"news_item"`
+	NewsItems   []DraftArticle `json:"news_item"`
+	NewspicInfo *DraftArticle  `json:"newspic_info,omitempty"`
 }
 type FreePublishSubmitRequest struct {
 	MediaID string `json:"media_id"`
@@ -126,7 +164,8 @@ type FreePublishBatchItem struct {
 	UpdateTime int64              `json:"update_time"`
 }
 type FreePublishContent struct {
-	NewsItems []DraftArticle `json:"news_item"`
+	NewsItems   []DraftArticle `json:"news_item"`
+	NewspicInfo *DraftArticle  `json:"newspic_info,omitempty"`
 }
 
 type ArticleTotalDetailRequest struct {

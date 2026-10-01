@@ -541,7 +541,7 @@ export default function TaskDetailPage() {
   const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
   const canResume = task.status === 'failed' || task.status === 'cancelled'
   // 内容分析 only covers 公众号/种草笔记 账号，montage 等任务没有对应的数据看板。
-  const canViewContentAnalytics = task.status === 'completed' && (task.type === 'article' || task.type === 'seednote')
+  const canViewContentAnalytics = task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote')
   const currentTask = task
   const snapshot = task.project_snapshot
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
@@ -711,7 +711,7 @@ export default function TaskDetailPage() {
             onRetryFiles={() => void refetchFiles()}
           />
 
-          {task.type === 'article' && task.status === 'completed' && project && (
+          {task.type === 'wechat-article' && task.status === 'completed' && project && (
             <WechatAnalyticsPanel taskId={task.id} />
           )}
 
@@ -843,7 +843,7 @@ export default function TaskDetailPage() {
                   <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{project.visual_style || snapshot?.visual_style || '—'}</p>
                 </div>
               </div>
-              {projectDialogPlatform === 'article' && (
+              {projectDialogPlatform === 'wechat' && (
                 <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
                   <div>
                     <p className="text-xs text-muted-foreground">署名</p>

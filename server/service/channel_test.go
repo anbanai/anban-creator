@@ -33,7 +33,7 @@ func setupTestProjectService(t *testing.T) (*ProjectService, repository.Reposito
 // that contract: the stored fields stay empty, and the default surfaces only via
 // ResolveStyle.
 func TestProjectServiceDoesNotBakeArticleWriter(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle} {
+	for _, platform := range []string{model.PlatformWechat} {
 		t.Run(platform, func(t *testing.T) {
 			svc, _ := setupTestProjectService(t)
 			ch, err := svc.Create(context.Background(), "user-1", &model.Project{
@@ -79,7 +79,7 @@ func TestProjectServiceDoesNotDefaultSeednoteStyle(t *testing.T) {
 func TestProjectServiceUpdateDoesNotBakeArticleWriter(t *testing.T) {
 	svc, _ := setupTestProjectService(t)
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article Project",
 		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	})
@@ -88,7 +88,7 @@ func TestProjectServiceUpdateDoesNotBakeArticleWriter(t *testing.T) {
 	}
 
 	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
-		Platform:    model.PlatformArticle,
+		Platform:    model.PlatformWechat,
 		Name:        "Article Project",
 		VisualStyle: "",
 	})
@@ -110,7 +110,7 @@ func TestProjectServiceUpdateDoesNotBakeArticleWriter(t *testing.T) {
 func TestProjectServiceUpdatePreservesExistingWriterWhenOmitted(t *testing.T) {
 	svc, _ := setupTestProjectService(t)
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article Project",
 		Writer:   "casual-science",
 		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
@@ -122,7 +122,7 @@ func TestProjectServiceUpdatePreservesExistingWriterWhenOmitted(t *testing.T) {
 	// Update omits Writer entirely; the stored value must be preserved
 	// (PATCH "non-empty = set" semantics).
 	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Renamed Article Project",
 	})
 	if err != nil {
@@ -180,7 +180,7 @@ func TestProjectServiceCreateRequiresWechatCredentials(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			svc, _ := setupTestProjectService(t)
 			_, err := svc.Create(context.Background(), "user-1", &model.Project{
-				Platform: model.PlatformArticle,
+				Platform: model.PlatformWechat,
 				Name:     "Article",
 				Config:   tt.config,
 			})
@@ -194,7 +194,7 @@ func TestProjectServiceCreateRequiresWechatCredentials(t *testing.T) {
 func TestProjectServiceUpdatePreservesWechatCredentialsWhenOmitted(t *testing.T) {
 	svc, _ := setupTestProjectService(t)
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article",
 		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	})

@@ -77,14 +77,14 @@ func (c *stubDraftClient) ListPublished(offset, count int64) (*appdraft.ListPubl
 // setupTestDB creates an in-memory SQLite database for testing.
 func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
-		&model.Asset{},
+		&model.Asset{}, &model.PlanEntry{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestPlanServiceRequiresExecutionProfileOnCreateAndUpdate(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	if _, err := svc.Create(ctx, CreatePlanParams{
 		UserID: userID, ProjectID: projectID, CronExpr: "0 9 * * *", Prompt: "topic",
@@ -166,7 +166,7 @@ func TestPlanServiceRequiresExecutionProfileOnCreateAndUpdate(t *testing.T) {
 	}
 
 	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		ExecutionProfile: "effective", CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
 	}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
@@ -196,7 +196,7 @@ func TestPlanServiceValidatesProfileTierAndPersistsSelection(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierPro}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	plan, err := svc.Create(ctx, CreatePlanParams{
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "balanced",
 		CronExpr: "0 9 * * *", Prompt: "topic",
@@ -230,7 +230,7 @@ func createTestWechatProject(t *testing.T, repo repository.Repository, userID st
 	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Test WeChat Project",
 		Status:   model.ProjectStatusActive,
 		Config: model.ProjectConfig{
@@ -250,7 +250,7 @@ func TestPlanService_Create(t *testing.T) {
 
 	// Create test projects for the user.
 	chID1 := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	chID2 := createTestProject(t, repo, "user-1", model.PlatformArticle)
+	chID2 := createTestProject(t, repo, "user-1", model.PlatformWechat)
 
 	tests := []struct {
 		name      string
@@ -451,7 +451,7 @@ func TestPlanServiceRejectsMontageInputForOtherPlatforms(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	userID := "user-om-plan-reject"
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -509,7 +509,7 @@ func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 func TestPlanService_ImageRatioPersistsAndUpdates(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
-	projectID := createTestProject(t, repo, "user-1", model.PlatformArticle)
+	projectID := createTestProject(t, repo, "user-1", model.PlatformWechat)
 
 	plan, err := svc.Create(ctx, CreatePlanParams{
 		ExecutionProfile: "effective",
@@ -549,7 +549,7 @@ func TestPlanService_ImageRatioPersistsAndUpdates(t *testing.T) {
 func TestPlanService_Create_ArticleImageToggles(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
-	chID := createTestProject(t, repo, "user-1", model.PlatformArticle)
+	chID := createTestProject(t, repo, "user-1", model.PlatformWechat)
 
 	cover, content := false, false
 	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
@@ -591,7 +591,7 @@ func TestPlanService_Create_ArticleImageToggles(t *testing.T) {
 func TestPlanServiceCreateRequiresAndPersistsArticleCoverPortrait(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := t.Context()
-	projectID := createTestProject(t, repo, "user-1", model.PlatformArticle)
+	projectID := createTestProject(t, repo, "user-1", model.PlatformWechat)
 	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
@@ -614,7 +614,7 @@ func TestPlanServiceCreateRequiresAndPersistsArticleCoverPortrait(t *testing.T) 
 	taskSvc, taskRepo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.NewString()
 	ensureTestUser(t, taskRepo, userID)
-	spawnProjectID := createTestProject(t, taskRepo, userID, model.PlatformArticle)
+	spawnProjectID := createTestProject(t, taskRepo, userID, model.PlatformWechat)
 	portrait := referenceAssetFixture("portrait", userID, DirectUploadPurposeProjectPortraitReference)
 	seedReferenceAsset(t, taskRepo, portrait)
 	spawnProject, err := taskRepo.Projects().FindByID(ctx, spawnProjectID)
@@ -627,7 +627,7 @@ func TestPlanServiceCreateRequiresAndPersistsArticleCoverPortrait(t *testing.T) 
 	}
 	taskSvc.SetReferenceAssetService(NewReferenceAssetService(taskRepo, nil, nil))
 	spawned, err := taskSvc.CreateFromPlan(ctx, &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: spawnProjectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: spawnProjectID, Type: model.TaskTypeWechatArticle,
 		ExecutionProfile: "effective", CoverUsePortrait: true,
 	})
 	if err != nil {
@@ -704,7 +704,7 @@ func TestPlanService_List(t *testing.T) {
 	// Create a test project for the user.
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	// Create a different project for user-2.
-	chID2 := createTestProject(t, repo, "user-2", model.PlatformArticle)
+	chID2 := createTestProject(t, repo, "user-2", model.PlatformWechat)
 
 	// Create multiple plans for user-1.
 	for i := 0; i < 5; i++ {
@@ -1082,7 +1082,7 @@ func TestPlanServicePauseResumeDoNotOverwriteConcurrentEditableFields(t *testing
 			ctx := context.Background()
 			next := time.Now().Add(time.Hour).Truncate(time.Second)
 			plan := &model.Plan{
-				ID: uuid.NewString(), UserID: "user-1", Type: model.PlatformArticle,
+				ID: uuid.NewString(), UserID: "user-1", Type: model.TaskTypeWechatArticle,
 				Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
 				Status: tt.initial, NextRunAt: &next,
 			}
@@ -1180,7 +1180,7 @@ func TestPlanServicePauseCancelsPendingBacklogAndReversesAdmission(t *testing.T)
 	billingTaskSvc, fixture, _ := newFixedTaskBillingFixture(t, 2_000, 0)
 	repo := fixture.repo
 	svc := newTestPlanService(t, repo)
-	projectID := createTestProject(t, repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, billingWalletUserID, model.PlatformWechat)
 	nextRun := time.Now().Add(time.Hour)
 	plan := &model.Plan{ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Status: model.PlanStatusActive, CronExpr: "0 6 * * *", NextRunAt: &nextRun, ExecutionProfile: "effective"}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
@@ -1224,7 +1224,7 @@ func TestPlanServicePauseCancelsPendingBacklogAndReversesAdmission(t *testing.T)
 func TestFindPendingByProjectExcludesPausedPlanTasks(t *testing.T) {
 	_, repo := setupTestPlanService(t)
 	ctx := context.Background()
-	projectID := createTestProject(t, repo, "user-dispatch", model.PlatformArticle)
+	projectID := createTestProject(t, repo, "user-dispatch", model.PlatformWechat)
 	activeID, pausedID := uuid.NewString(), uuid.NewString()
 	for _, plan := range []*model.Plan{
 		{ID: activeID, UserID: "user-dispatch", ProjectID: projectID, Status: model.PlanStatusActive, CronExpr: "0 6 * * *"},
@@ -1235,7 +1235,7 @@ func TestFindPendingByProjectExcludesPausedPlanTasks(t *testing.T) {
 		}
 	}
 	for _, planID := range []*string{nil, &activeID, &pausedID} {
-		task := &model.Task{ID: uuid.NewString(), UserID: "user-dispatch", ProjectID: projectID, PlanID: planID, Type: model.PlatformArticle, Status: model.TaskStatusPending}
+		task := &model.Task{ID: uuid.NewString(), UserID: "user-dispatch", ProjectID: projectID, PlanID: planID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending}
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			t.Fatal(err)
 		}
@@ -1405,7 +1405,7 @@ func TestCreatePlanRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	_, err := svc.Create(ctx, CreatePlanParams{
 		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,
@@ -1420,7 +1420,7 @@ func TestCreatePlanPersistsEmptyAgentInputSnapshot(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	plan, err := svc.Create(ctx, CreatePlanParams{
 		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,

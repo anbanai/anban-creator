@@ -17,12 +17,12 @@ afterEach(async () => {
 });
 
 const pack: AgentPack = {
-  id: "article",
+  id: "wechat-article",
   version: "1.0.0",
   digest: "a".repeat(64),
-  agent: { name: "article" },
-  bindings: { task_types: ["article"] },
-  runtime: { profile: "article", adapter: "standard" },
+  agent: { name: "wechat-article" },
+  bindings: { task_types: ["wechat-article"] },
+  runtime: { profile: "wechat", adapter: "standard" },
   artifacts: [
     { role: "analysis", path: "output/topic-analysis.md", required: true },
     { role: "final", path: "output/final.md", required: true },

@@ -33,15 +33,16 @@ export function ProjectCard({ project, stats, onEdit, onProfile, archiving, rest
   const [periodStart, setPeriodStart] = useState('')
   const [periodEnd, setPeriodEnd] = useState('')
   const queryClient = useQueryClient()
-  const platformLabel = platformDisplayName(project.platform)
-  const platformBadge = platformBadgeVariant[project.platform] || ('secondary' as const)
+  const platform = project.platform ?? 'wechat'
+  const platformLabel = platformDisplayName(platform)
+  const platformBadge = platformBadgeVariant[platform] || ('secondary' as const)
   const positioning = project.instructions || project.positioning || ''
   const isArchived = project.status === 'archived'
   const unusedTopics = stats?.unused_topics
   const cardTone = isArchived
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
-  const feedbackEnabled = project.platform === 'article' || project.platform === 'seednote'
+  const feedbackEnabled = platform === 'wechat' || platform === 'seednote'
   const feedbackQuery = useQuery({
     queryKey: ['project-feedback', project.id],
     queryFn: ({ signal }) => api.projects.feedback(project.id, signal),
@@ -84,11 +85,11 @@ export function ProjectCard({ project, stats, onEdit, onProfile, archiving, rest
     <div className={`flex h-full flex-col rounded-lg border p-4 transition-[border-color,box-shadow] ${cardTone}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={project.platform} size="lg" />
+          <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={platform} size="lg" />
           <div className="min-w-0">
             <h3 className="truncate text-sm font-semibold text-foreground">{project.name}</h3>
-            <Badge variant={platformBadge} className={`mt-1 text-[10px] font-normal ${platformBadgeClassName[project.platform] || ''}`}>
-              {renderPlatformIcon(project.platform)}
+            <Badge variant={platformBadge} className={`mt-1 text-[10px] font-normal ${platformBadgeClassName[platform] || ''}`}>
+              {renderPlatformIcon(platform)}
               {platformLabel}
             </Badge>
           </div>
@@ -166,10 +167,10 @@ export function ProjectCard({ project, stats, onEdit, onProfile, archiving, rest
               编辑
             </Button>
           )}
-          {onProfile && (project.platform === 'article' || project.platform === 'seednote') && (
-            <Button variant="ghost" size="xs" onClick={() => onProfile(project)} aria-label={`配置账号画像：${project.name}`}>
+          {onProfile && (platform === 'wechat' || platform === 'seednote' || platform === 'moments') && (
+            <Button variant="ghost" size="xs" onClick={() => onProfile(project)} aria-label={`项目画像：${project.name}`}>
               <UserRound />
-              账号画像
+              项目画像
             </Button>
           )}
           <Button variant="ghost" size="xs" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`}>

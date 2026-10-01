@@ -19,6 +19,8 @@ export type {
   ProjectPlatform,
   ProjectStatus,
   ProjectConfig,
+  ProjectAgentConfig,
+  ProjectChannelConfig,
   Project,
   ProjectStats,
   ProjectDetail,
@@ -48,7 +50,11 @@ export { isImageAnalysisActive, isImageAnalysisUpdateOlder } from './image-analy
 export type {
   PlanType,
   PlanStatus,
+  PlanEntryStatus,
+  PlanEntry,
   Plan,
+  CreatePlanEntryRequest,
+  UpdatePlanEntryRequest,
   CreatePlanRequest,
   UpdatePlanRequest,
 } from './plan'

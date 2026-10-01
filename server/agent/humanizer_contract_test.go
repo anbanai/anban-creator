@@ -130,7 +130,7 @@ func TestHumanizerSourceAndUpdateCommandAreDeclared(t *testing.T) {
 func TestHumanizerIsDeferredUntilAgentsNeedIt(t *testing.T) {
 	root := repoRoot(t)
 	for _, relPath := range []string{
-		"harness/agents/article.md",
+		"harness/agents/wechat-article.md",
 		"harness/agents/ecommerce.md",
 		"harness/agents/moments.md",
 		"harness/agents/seednote.md",
@@ -143,7 +143,7 @@ func TestHumanizerIsDeferredUntilAgentsNeedIt(t *testing.T) {
 	}
 
 	for _, relPath := range []string{
-		"harness/agents/article.toml",
+		"harness/agents/wechat-article.toml",
 		"harness/agents/ecommerce.toml",
 		"harness/agents/moments.toml",
 		"harness/agents/seednote.toml",
@@ -166,7 +166,7 @@ func TestHumanizerIsDeferredUntilAgentsNeedIt(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		dockerfile := readRepoFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, want := range []string{
 			"COPY harness/ /anbanai/",

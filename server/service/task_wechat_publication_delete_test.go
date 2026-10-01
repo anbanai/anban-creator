@@ -50,10 +50,10 @@ func newWechatDeleteFixture(t *testing.T, status string) *wechatDeleteFixture {
 	if err := repo.Users().Create(ctx, &model.User{ID: f.userID, Email: f.userID + "@delete.test", Password: "x", InviteCode: f.userID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Name: "WeChat", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Name: "WeChat", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)

@@ -124,15 +124,15 @@ func TestAgentProjectProfileIncludesMatchingFeedbackStrategy(t *testing.T) {
 	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
 	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{}, agentProjectProfileImageCapabilityResolver(), repo)
 	userID := uuid.NewString()
-	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "feedback project"}
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "feedback project"}
 	if err := repo.Projects().Create(context.Background(), project); err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&model.StrategySnapshot{ID: uuid.NewString(), ProjectID: project.ID, Platform: model.PlatformArticle, Revision: 1, SourceRevision: 3, Digest: "digest", Status: "active", ApplicableTasks: `["article"]`, Recommendations: `["keep"]`, Evidence: `{"sample_count":10}`, Confidence: "medium", Limitations: "advisory"}).Error; err != nil {
+	if err := db.Create(&model.StrategySnapshot{ID: uuid.NewString(), ProjectID: project.ID, Platform: model.PlatformWechat, Revision: 1, SourceRevision: 3, Digest: "digest", Status: "active", ApplicableTasks: `["wechat-article"]`, Recommendations: `["keep"]`, Evidence: `{"sample_count":10}`, Confidence: "medium", Limitations: "advisory"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	profile, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: task.ID})
@@ -206,7 +206,7 @@ func TestAgentProjectProfileOnlyExposesConfirmedAccountProfile(t *testing.T) {
 	svc := NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), config.MontageConfig{}, agentProjectProfileImageCapabilityResolver())
 
 	userID := uuid.NewString()
-	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "profile gate"}
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "profile gate"}
 	draft := model.NewProjectProfile()
 	draft.Dimensions.Identity.Content["name"] = "inferred"
 	project.Profile = datatypes.NewJSONType(draft)

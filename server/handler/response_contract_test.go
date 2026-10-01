@@ -127,7 +127,7 @@ func TestTaskAPIResponseDropsEmptyProfileAndCleansProgressLog(t *testing.T) {
 		ID:          uuid.NewString(),
 		UserID:      uuid.NewString(),
 		ProjectID:   uuid.NewString(),
-		Type:        model.PlatformArticle,
+		Type:        model.PlatformWechat,
 		Status:      model.TaskStatusCompleted,
 		Prompt:      "测试",
 		ProgressLog: "Using tool: Read\n完成\n",

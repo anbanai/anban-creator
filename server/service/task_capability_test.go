@@ -240,7 +240,7 @@ func TestTaskServiceListTitlesForUserChecksProjectOwnership(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	ownerID := uuid.NewString()
-	projectID := createTestProject(t, repo, ownerID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, ownerID, model.PlatformWechat)
 
 	if _, err := svc.ListTitlesForUser(ctx, uuid.NewString(), projectID); err == nil {
 		t.Fatal("ListTitlesForUser accepted a non-owner")
@@ -254,7 +254,7 @@ func TestTaskServiceGetVisibleFilesForUserChecksTaskOwnership(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	ownerID := uuid.NewString()
-	projectID := createTestProject(t, repo, ownerID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, ownerID, model.PlatformWechat)
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: ownerID, ProjectID: projectID, Quantity: 1, Prompt: "topic",
 	})

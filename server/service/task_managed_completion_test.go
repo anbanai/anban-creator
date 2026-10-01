@@ -353,7 +353,7 @@ func TestValidateMontageCompletionArtifactsRequiresCanonicalPathCase(t *testing.
 }
 
 func TestCompleteCloudExecutionRejectsNestedAgentOnlyResult(t *testing.T) {
-	f := newManagedCompletionFixture(t, model.PlatformArticle)
+	f := newManagedCompletionFixture(t, model.TaskTypeWechatArticle)
 	result := &agent.ExecutionResult{
 		Success: true, RemoteArtifacts: true,
 		ToolUseSummary: map[string]int{"Agent": 1, "TaskUpdate": 2},
@@ -382,7 +382,7 @@ func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
 			svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-			projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
+			projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
 			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 				UserID: billingWalletUserID, ProjectID: projectID, Prompt: test.name, Quantity: 1,
 			})
@@ -438,7 +438,7 @@ func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 func TestCompleteCloudExecutionRollsBackInsertedSettlementWithCoreTransaction(t *testing.T) {
 	ctx := context.Background()
 	svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{
 		ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID,
 		Prompt: "atomic cloud reversal", Quantity: 1,
@@ -491,7 +491,7 @@ func TestCompleteCloudExecutionRollsBackInsertedSettlementWithCoreTransaction(t 
 func TestReconcileResumedExecutionFailureKeepsChargeForPriorPublishedDelivery(t *testing.T) {
 	ctx := context.Background()
 	svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "original request", Quantity: 1,
 	})

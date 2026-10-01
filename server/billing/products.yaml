@@ -7,24 +7,43 @@ task_time_pricing:
     - { start: "14:00", end: "18:00" }
   off_peak_rate_percent: 80
 skus:
-  - id: "task.article.effective"
-    operation: "task.article"
+  - id: "task.wechat_article.effective"
+    operation: "task.wechat_article"
     execution_profile: "effective"
     charge_policy: "task_admission"
     price_credits: 4800
     delivery: "article_artifacts_verified"
-  - id: "task.article.balanced"
-    operation: "task.article"
+  - id: "task.wechat_article.balanced"
+    operation: "task.wechat_article"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 6000
     delivery: "article_artifacts_verified"
-  - id: "task.article.quality"
-    operation: "task.article"
+  - id: "task.wechat_article.quality"
+    operation: "task.wechat_article"
     execution_profile: "quality"
     charge_policy: "task_admission"
     price_credits: 18000
     delivery: "article_artifacts_verified"
+
+  - id: "task.wechat_picture.effective"
+    operation: "task.wechat_picture"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 4800
+    delivery: "wechat_picture_artifacts_verified"
+  - id: "task.wechat_picture.balanced"
+    operation: "task.wechat_picture"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 6000
+    delivery: "wechat_picture_artifacts_verified"
+  - id: "task.wechat_picture.quality"
+    operation: "task.wechat_picture"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 18000
+    delivery: "wechat_picture_artifacts_verified"
 
   - id: "task.seednote.effective"
     operation: "task.seednote"

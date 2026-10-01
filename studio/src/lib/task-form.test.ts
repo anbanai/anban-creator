@@ -116,6 +116,19 @@ describe('task form mapping', () => {
     expect(taskFormValuesToRequest(values)).toMatchObject({ execution_profile: 'balanced' })
   })
 
+  it.each([
+    ['wechat-article', 'wechat-article'],
+    ['seednote', 'seednote'],
+    ['wechat-picture', 'wechat-picture'],
+  ] as const)('freezes the selected Agent and its single channel for %s', (type, channel) => {
+    const values = { ...createTaskFormDefaults(project()), type, execution_profile: 'balanced' as const }
+    expect(taskFormValuesToRequest(values)).toMatchObject({
+      agent_id: channel,
+      channel,
+      task_kind: 'content_generation',
+    })
+  })
+
   it('preserves the source execution profile when cloning', () => {
     const defaults = cloneTaskFormDefaults(task({ execution_profile: 'quality' }))
     expect(defaults.execution_profile).toBe('quality')
@@ -170,7 +183,7 @@ describe('task form mapping', () => {
     })
 
     const current = {
-      ...createTaskFormDefaults(project({ platform: 'article' })),
+      ...createTaskFormDefaults(project({ platform: 'wechat' })),
       prompt: 'Keep this prompt',
       quantity: 3,
       input_attachments: [{ type: 'document' as const, key: 'brief' }],
@@ -269,7 +282,7 @@ describe('task form mapping', () => {
     const current = {
       ...createTaskFormDefaults(project({
         id: 'source-article',
-        platform: 'article',
+        platform: 'wechat',
         image_ratio: '1:1',
         ecommerce_defaults: { image_capability_key: 'source-capability' },
       })),
@@ -278,14 +291,14 @@ describe('task form mapping', () => {
     }
     const destination = project({
       id: 'destination-article',
-      platform: 'article',
+      platform: 'wechat',
       image_ratio: '16:9',
       ecommerce_defaults: { image_capability_key: 'destination-capability' },
     })
 
     expect(switchTaskFormDefaults(current, destination)).toMatchObject({
       project_id: 'destination-article',
-      type: 'article',
+      type: 'wechat-article',
       image_ratio: '16:9',
       image_capability_key: 'destination-capability',
       article_with_cover: false,
@@ -445,7 +458,7 @@ describe('task form mapping', () => {
   })
 
   it.each([
-    ['article', { article_with_cover: false, article_with_content_images: false }],
+    ['wechat-article', { article_with_cover: false, article_with_content_images: false }],
     ['seednote', { has_content_image: false, has_tail_image: false }],
     ['ecommerce', { selected_modules: { hero: 2 }, product_photos: ['oss://product.png'], target_platform: 'tmall', selling_points: 'Lightweight', language: 'zh-CN' }],
     ['montage', { montage_input: { brief: 'Launch video', pipeline_key: 'launch', source_assets: [{ type: 'image_url', url: 'oss://asset.png' }], preferences: { duration_seconds: 30 }, delivery_targets: ['douyin'], advanced: { render: { fps: 30 } } } }],
@@ -508,9 +521,9 @@ describe('task form mapping', () => {
       has_tail_image: false,
       article_with_cover: false,
       article_with_content_images: false,
-      reference_image: type === 'article' ? null : { asset_id: 'asset-1' },
+      reference_image: type === 'wechat-article' ? null : { asset_id: 'asset-1' },
       input_attachments: [
-        ...(type === 'article' ? [] : [{ type: 'image' as const, asset_id: 'asset-1', file_name: 'reference.png', content_type: 'image/png', size: 10 }]),
+        ...(type === 'wechat-article' ? [] : [{ type: 'image' as const, asset_id: 'asset-1', file_name: 'reference.png', content_type: 'image/png', size: 10 }]),
         { type: 'document', key: 'keep', role: 'brief', instruction: 'use this' },
       ],
       ...platformFields,
@@ -627,7 +640,7 @@ describe('task form mapping', () => {
     {
       name: 'article omits empty prompt and inactive platform fields while retaining explicit false article settings',
       values: {
-        type: 'article' as const,
+        type: 'wechat-article' as const,
         prompt: '   ',
         has_content_image: false,
         has_tail_image: false,
@@ -742,12 +755,12 @@ describe('task form mapping', () => {
     })
   })
 
-  it.each(['article', 'seednote', 'montage', 'hypit'] as const)('serializes explicit portrait selection and cloned settings for %s', (platform) => {
+  it.each(['wechat', 'seednote', 'montage', 'hypit'] as const)('serializes explicit portrait selection and cloned settings for %s', (platform) => {
     const values = createTaskFormDefaults(project({ platform }))
     expect(values.cover_use_portrait).toBe(false)
     expect(taskFormValuesToRequest(values).cover_use_portrait).toBe(false)
     expect(taskFormValuesToRequest({ ...values, cover_use_portrait: true }).cover_use_portrait).toBe(true)
-    expect(cloneTaskFormDefaults(task({ type: platform, cover_use_portrait: true })).cover_use_portrait).toBe(true)
+    expect(cloneTaskFormDefaults(task({ type: platform === 'wechat' ? 'wechat-article' : platform, cover_use_portrait: true })).cover_use_portrait).toBe(true)
   })
 
   it.each(['viral_analysis', 'ecommerce', 'moments'] as const)('omits portrait selection for unsupported %s tasks', (type) => {
@@ -755,22 +768,22 @@ describe('task form mapping', () => {
   })
 
   it('clears an enabled portrait requirement from an article request with no cover', () => {
-    expect(taskFormValuesToRequest({ ...createTaskFormDefaults(project({ platform: 'article' })), article_with_cover: false, cover_use_portrait: true }).cover_use_portrait).toBe(false)
+    expect(taskFormValuesToRequest({ ...createTaskFormDefaults(project({ platform: 'wechat' })), article_with_cover: false, cover_use_portrait: true }).cover_use_portrait).toBe(false)
   })
 
   it('clears portrait selection when cloning an article without cover generation', () => {
-    expect(cloneTaskFormDefaults(task({ type: 'article', article_with_cover: false, cover_use_portrait: true })).cover_use_portrait).toBe(false)
+    expect(cloneTaskFormDefaults(task({ type: 'wechat-article', article_with_cover: false, cover_use_portrait: true })).cover_use_portrait).toBe(false)
   })
 
   it('keeps project portraits optional unless the cover requirement is selected', () => {
-    const values = createTaskFormDefaults(project({ platform: 'article' }))
+    const values = createTaskFormDefaults(project({ platform: 'wechat' }))
     expect(values.cover_use_portrait).toBe(false)
     expect(taskFormValuesToRequest(values)).toMatchObject({ cover_use_portrait: false })
     expect(taskFormValuesToRequest({ ...values, article_with_cover: false })).toMatchObject({ cover_use_portrait: false })
   })
 
   it('submits an explicit project portrait requirement for article covers', () => {
-    const values = createTaskFormDefaults(project({ platform: 'article' }))
+    const values = createTaskFormDefaults(project({ platform: 'wechat' }))
     expect(taskFormValuesToRequest({ ...values, cover_use_portrait: true })).toMatchObject({
       cover_use_portrait: true,
     })
@@ -778,8 +791,9 @@ describe('task form mapping', () => {
 
   it('keeps a cloned article portrait out of general input attachments', () => {
     const cloned = cloneTaskFormDefaults(task({
-      type: 'article',
+      type: 'wechat-article',
       article_with_cover: true,
+      cover_use_portrait: true,
       project_snapshot: { portrait_reference_image_asset_id: '11111111-1111-4111-8111-111111111111' },
       input_attachments: [{ type: 'document', key: 'brief', role: 'brief' }],
       reference_image: {
@@ -797,15 +811,15 @@ describe('task form mapping', () => {
   })
 
   it('preserves the required portrait setting when cloning an article task', () => {
-    const cloned = cloneTaskFormDefaults(task({ type: 'article', cover_use_portrait: true }))
+    const cloned = cloneTaskFormDefaults(task({ type: 'wechat-article', cover_use_portrait: true }))
     expect(cloned.cover_use_portrait).toBe(true)
   })
 
   it('clears the required portrait option when switching to an article project without a portrait', () => {
-    const current = { ...createTaskFormDefaults(project({ platform: 'article' })), cover_use_portrait: true }
+    const current = { ...createTaskFormDefaults(project({ platform: 'wechat' })), cover_use_portrait: true }
     const switched = switchTaskFormDefaults(current, project({
       id: 'project-without-portrait',
-      platform: 'article',
+      platform: 'wechat',
       portrait_reference_image: null,
     }))
     expect(switched.cover_use_portrait).toBe(false)

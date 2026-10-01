@@ -31,7 +31,7 @@ const catalog: BillingCatalog = {
   currency: 'credits',
   skus: [{
     id: 'article-effective',
-    operation: 'task.article',
+    operation: 'task.wechat_article',
     charge_policy: 'task_admission',
     execution_profile: 'effective',
     price_credits: 4800,
@@ -53,7 +53,7 @@ describe('TaskComposerParameters', () => {
           value: 'effective',
           onChange: onExecutionProfileChange,
           catalog,
-          taskType: 'article',
+          taskType: 'wechat-article',
         }}
         image={{
           ratios: ['16:9', '4:3'],

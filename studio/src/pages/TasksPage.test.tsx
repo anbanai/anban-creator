@@ -36,7 +36,7 @@ const fixtures = vi.hoisted(() => {
   const project = {
     id: 'project-1',
     user_id: 'user-1',
-    platform: 'article',
+    platform: 'wechat',
     name: '公众号项目',
     avatar_url: '',
     profile_url: '',
@@ -55,7 +55,7 @@ const fixtures = vi.hoisted(() => {
   }
   const failedTask = {
     id: 'failed-task',
-    type: 'article',
+    type: 'wechat-article',
     title: '失败文章',
     prompt: '失败任务',
     status: 'failed',
@@ -70,7 +70,7 @@ const fixtures = vi.hoisted(() => {
   }
   const completedTask = {
     id: 'approval-task',
-    type: 'article',
+    type: 'wechat-article',
     title: '已完成文章',
     prompt: '文章任务',
     status: 'completed',
@@ -119,7 +119,7 @@ vi.mock('@/lib/api', async () => {
           catalog_id: 'retail-test-v1',
           currency: 'credits',
           skus: [
-            { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+            { id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
             { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
             { id: 'task.ecommerce.effective', operation: 'task.ecommerce', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
             { id: 'task.montage.effective', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
@@ -237,7 +237,7 @@ describe('TasksPage unified prompt composer', () => {
       id: 'created-task',
       status: 'pending',
     } as Task)
-    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+    renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
     await screen.findByRole('dialog', { name: '新建任务' })
     await waitFor(() => expect(screen.getByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号项目'))
@@ -255,7 +255,7 @@ describe('TasksPage unified prompt composer', () => {
       contentType: file.type,
       size: file.size,
     }))
-    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+    renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
     await screen.findByRole('dialog', { name: '新建任务' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
@@ -367,7 +367,7 @@ describe('TasksPage URL-driven recovery filters', () => {
 
   it('uses the active catalog price for article tasks', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
-    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+    renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
     expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
     expect(await screen.findByText(/固定任务价：6,000 × 1 =/)).toBeInTheDocument()
@@ -382,7 +382,7 @@ describe('TasksPage URL-driven recovery filters', () => {
       .mockRejectedValueOnce(new Error('catalog unavailable'))
       .mockRejectedValueOnce(new Error('catalog unavailable'))
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
-    renderTasksPage('/tasks?create=true&type=article&project_id=project-1&intent=new')
+    renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
     const parametersControl = await screen.findByRole('button', { name: /^创作参数：/ })
     fireEvent.click(parametersControl)
@@ -422,9 +422,9 @@ describe('TasksPage bulk clone execution profile', () => {
       catalog_id: 'retail-test-v1',
       currency: 'credits',
       skus: [
-        { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
-        { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-        { id: 'task.article.quality', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
+        { id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+        { id: 'task.wechat_article.balanced', operation: 'task.wechat_article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+        { id: 'task.wechat_article.quality', operation: 'task.wechat_article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
       ],
     })
   })
@@ -434,7 +434,7 @@ describe('TasksPage bulk clone execution profile', () => {
       catalog_id: 'retail-test-v1',
       currency: 'credits',
       skus: [
-        { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+        { id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
         { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
         { id: 'task.ecommerce.effective', operation: 'task.ecommerce', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'ecommerce_artifacts_verified' },
         { id: 'task.montage.effective', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
@@ -480,7 +480,7 @@ describe('TasksPage bulk clone execution profile', () => {
       catalog_id: 'retail-test-v1',
       currency: 'credits',
       skus: [
-        { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
+        { id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, delivery: 'article_artifacts_verified' },
       ],
     })
     const dialog = await openBulkCloneDialog()

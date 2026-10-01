@@ -64,12 +64,12 @@ func TestTimelineIncludesLifecycleForRunningTaskOutsideSelectedDateRange(t *test
 	repo, logger := setupTimelineHandler(t)
 	ctx := t.Context()
 	userID := "user-running-stage"
-	project := &model.Project{ID: "project-running-stage", UserID: userID, Platform: model.ScopeArticle, Name: "Article", Status: model.ProjectStatusActive}
+	project := &model.Project{ID: "project-running-stage", UserID: userID, Platform: model.ScopeWechat, Name: "Article", Status: model.ProjectStatusActive}
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
 	task := &model.Task{
-		ID: "task-running-stage", UserID: userID, ProjectID: project.ID, Type: model.ScopeArticle,
+		ID: "task-running-stage", UserID: userID, ProjectID: project.ID, Type: model.ScopeWechat,
 		Status: model.TaskStatusRunning, Prompt: "Running outside selected range",
 		CreatedAt: time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC),
 		Lifecycle: datatypes.NewJSONType(model.TaskLifecycle{Version: 1, Revision: 2, Stages: []model.TaskLifecycleStage{
@@ -146,7 +146,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	task2 := &model.Task{
 		ID:        "task-2",
 		UserID:    userID,
-		Type:      model.ScopeArticle,
+		Type:      model.ScopeWechat,
 		Status:    model.TaskStatusPending,
 		Prompt:    "Test topic 2",
 		CreatedAt: time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC),
@@ -186,7 +186,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	plan2 := &model.Plan{
 		ID:        "plan-2",
 		UserID:    userID,
-		Type:      model.ScopeArticle,
+		Type:      model.ScopeWechat,
 		Title:     "Far Future Plan",
 		CronExpr:  "0 9 * * 1-5",
 		Status:    model.PlanStatusActive,

@@ -254,7 +254,7 @@ func TestProductionLoaderRejectsUnknownDuplicateAndAmbiguousMappings(t *testing.
 		},
 		{
 			name: "duplicate SKU ID",
-			products: products + `  - id: "task.article.balanced"
+			products: products + `  - id: "task.wechat_article.balanced"
     operation: "task.duplicate"
     execution_profile: "balanced"
     charge_policy: "task_admission"
@@ -265,8 +265,8 @@ func TestProductionLoaderRejectsUnknownDuplicateAndAmbiguousMappings(t *testing.
 		},
 		{
 			name: "ambiguous billable identity",
-			products: products + `  - id: "task.article.alternate"
-    operation: "task.article"
+			products: products + `  - id: "task.wechat_article.alternate"
+    operation: "task.wechat_article"
     execution_profile: "balanced"
     charge_policy: "task_admission"
     price_credits: 1
@@ -417,7 +417,8 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		id, operation, delivery string
 		balanced                int64
 	}{
-		{"article", "task.article", "article_artifacts_verified", 6000},
+		{"wechat_article", "task.wechat_article", "article_artifacts_verified", 6000},
+		{"wechat_picture", "task.wechat_picture", "wechat_picture_artifacts_verified", 6000},
 		{"seednote", "task.seednote", "seednote_artifacts_verified", 5000},
 		{"moments", "task.moments", "moments_artifacts_verified", 3000},
 		{"ecommerce", "task.ecommerce", "ecommerce_artifacts_verified", 3000},

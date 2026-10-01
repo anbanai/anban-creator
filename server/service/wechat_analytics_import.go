@@ -139,7 +139,7 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 		req.MetricBasis = "cumulative"
 	}
 
-	if err := validateAnalyticsImport("article", req.MetricBasis, req.IdempotencyKey, req.DataAsOfAt); err != nil {
+	if err := validateAnalyticsImport("wechat", req.MetricBasis, req.IdempotencyKey, req.DataAsOfAt); err != nil {
 		return nil, err
 	}
 	project, asset, parsed, data, err := s.readWorkbook(ctx, req)
@@ -314,9 +314,6 @@ func (s *WechatAnalyticsImportService) readWorkbook(ctx context.Context, req Wec
 	}
 	if project.UserID != req.UserID {
 		return nil, nil, nil, nil, errors.New("project does not belong to user")
-	}
-	if project.Platform != model.PlatformArticle {
-		return nil, nil, nil, nil, errors.New("project is not a WeChat article project")
 	}
 	asset, err := s.repo.Assets().FindOwnedByID(ctx, strings.TrimSpace(req.UploadID), req.UserID)
 	if err != nil {

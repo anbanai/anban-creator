@@ -15,6 +15,7 @@ type Repository interface {
 	Users() UserRepository
 	Sessions() SessionRepository
 	Plans() PlanRepository
+	PlanEntries() PlanEntryRepository
 	Tasks() TaskRepository
 	TaskExecutions() TaskExecutionRepository
 	TaskFiles() TaskFileRepository
@@ -22,6 +23,10 @@ type Repository interface {
 	Assets() AssetRepository
 	ImageAnalyses() ImageAnalysisRepository
 	Projects() ProjectRepository
+	ProjectProfileRevisions() ProjectProfileRevisionRepository
+	ProjectProfileStates() ProjectProfileStateRepository
+	ProjectAgentConfigs() ProjectAgentConfigRepository
+	ProjectChannelConfigs() ProjectChannelConfigRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
 	TaskFeedbacks() TaskFeedbackRepository
@@ -104,6 +109,18 @@ type PlanRepository interface {
 	ListActiveByUserID(ctx context.Context, userID string, projectID string) ([]*model.Plan, error)
 	ListDue(ctx context.Context, now time.Time) ([]*model.Plan, error)
 	CountByUserID(ctx context.Context, userID string, projectID string) (int64, error)
+}
+
+// PlanEntryRepository provides persistence for independently executable Agent
+// entries belonging to a scheduled plan.
+type PlanEntryRepository interface {
+	Create(ctx context.Context, entry *model.PlanEntry) error
+	FindByID(ctx context.Context, id string) (*model.PlanEntry, error)
+	FindByPlanIDAndAgentID(ctx context.Context, planID, agentID string) (*model.PlanEntry, error)
+	ListByPlanID(ctx context.Context, planID string) ([]*model.PlanEntry, error)
+	Update(ctx context.Context, entry *model.PlanEntry) error
+	Delete(ctx context.Context, id string) error
+	DeleteByPlanID(ctx context.Context, planID string) error
 }
 
 // TaskRepository provides access to the tasks table.
@@ -198,6 +215,9 @@ type TaskFileRepository interface {
 	DiscardCurrentExecution(ctx context.Context, taskID, executionID string) error
 	UpsertPendingCurrentExecution(ctx context.Context, taskID, executionID string, file *model.TaskFile) (*model.TaskFile, error)
 	UpdatePendingCurrentExecutionMetadata(ctx context.Context, original *model.TaskFile, role, mediaID, wechatURL string) (*model.TaskFile, error)
+	UpdatePublicationMetadata(ctx context.Context, fileID, taskID, executionID, role, mediaID, wechatURL string) (*model.TaskFile, error)
+	MarkPublicationUploadAttempt(ctx context.Context, fileID, taskID, executionID string, attemptedAt time.Time) (*model.TaskFile, error)
+	RecordPublicationUploadFailure(ctx context.Context, fileID, taskID, executionID, reason string) error
 	ReplacePendingCurrentExecution(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 	ReplacePendingCurrentExecutionPreservingMCPArtifacts(ctx context.Context, taskID, executionID string, files []*model.TaskFile) error
 }
@@ -450,6 +470,7 @@ type FeedbackLoopRepository interface {
 	FindJobByIDOrFingerprint(ctx context.Context, identity string) (*model.FeedbackJob, error)
 	FindRunningJob(ctx context.Context, projectID, operation string) (*model.FeedbackJob, error)
 	ClaimQueuedJob(ctx context.Context, identity string, now time.Time) (*model.FeedbackJob, bool, error)
+	ClaimTaskID(ctx context.Context, jobID, expectedTaskID, taskID string) (bool, error)
 	AcquireFeedbackLease(ctx context.Context, scope, jobID string, now time.Time, ttl time.Duration) (bool, error)
 	ReleaseFeedbackLease(ctx context.Context, scope, jobID string) error
 	UpdateJob(ctx context.Context, job *model.FeedbackJob) error
@@ -458,6 +479,12 @@ type FeedbackLoopRepository interface {
 	ListRunningByUser(ctx context.Context, userID string, limit int) ([]*model.FeedbackJob, error)
 	ListRunningByProject(ctx context.Context, projectID string, limit int) ([]*model.FeedbackJob, error)
 	CreateInsight(ctx context.Context, insight *model.FeedbackInsight) error
+	FindInsightByID(ctx context.Context, id string) (*model.FeedbackInsight, error)
+	UpdateInsight(ctx context.Context, insight *model.FeedbackInsight) error
+	PromoteInsight(ctx context.Context, insightID string, memoryRevision int64) (bool, error)
+	FindValidatedInsight(ctx context.Context, projectID, targetContentID string, beforeRevision int64) (*model.FeedbackInsight, error)
+	ListInsightsByTarget(ctx context.Context, projectID, targetContentID string) ([]*model.FeedbackInsight, error)
+	FindSuccessfulAttribution(ctx context.Context, projectID, targetContentID string, revision int64) (*model.FeedbackJob, error)
 	CreateStrategy(ctx context.Context, snapshot *model.StrategySnapshot) error
 	NextStrategyRevision(ctx context.Context, projectID, platform string) (int64, error)
 	FindStrategyByID(ctx context.Context, id string) (*model.StrategySnapshot, error)
@@ -483,6 +510,7 @@ type repository struct {
 	users                   UserRepository
 	sessions                SessionRepository
 	plans                   PlanRepository
+	planEntries             PlanEntryRepository
 	tasks                   TaskRepository
 	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
@@ -490,6 +518,10 @@ type repository struct {
 	assets                  AssetRepository
 	imageAnalyses           ImageAnalysisRepository
 	projects                ProjectRepository
+	projectProfileRevisions ProjectProfileRevisionRepository
+	projectProfileStates    ProjectProfileStateRepository
+	projectAgentConfigs     ProjectAgentConfigRepository
+	projectChannelConfigs   ProjectChannelConfigRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
 	taskFeedbacks           TaskFeedbackRepository
@@ -531,6 +563,8 @@ func New(db *gorm.DB) Repository {
 	assets := newAssetRepository(db)
 	imageAnalyses := newImageAnalysisRepository(db)
 	projects := newProjectRepository(db)
+	projectAgentConfigs := newProjectAgentConfigRepository(db)
+	projectChannelConfigs := newProjectChannelConfigRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
 	taskFeedbacks := newTaskFeedbackRepository(db)
@@ -564,6 +598,7 @@ func New(db *gorm.DB) Repository {
 		users:                   users,
 		sessions:                sessions,
 		plans:                   plans,
+		planEntries:             newPlanEntryRepository(db),
 		tasks:                   tasks,
 		taskExecutions:          taskExecutions,
 		files:                   files,
@@ -571,6 +606,10 @@ func New(db *gorm.DB) Repository {
 		assets:                  assets,
 		imageAnalyses:           imageAnalyses,
 		projects:                projects,
+		projectProfileRevisions: newProjectProfileRevisionRepository(db),
+		projectProfileStates:    newProjectProfileStateRepository(db),
+		projectAgentConfigs:     projectAgentConfigs,
+		projectChannelConfigs:   projectChannelConfigs,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
 		taskFeedbacks:           taskFeedbacks,
@@ -601,16 +640,28 @@ func New(db *gorm.DB) Repository {
 	}
 }
 
-func (r *repository) Users() UserRepository                         { return r.users }
-func (r *repository) Sessions() SessionRepository                   { return r.sessions }
-func (r *repository) Plans() PlanRepository                         { return r.plans }
-func (r *repository) Tasks() TaskRepository                         { return r.tasks }
-func (r *repository) TaskExecutions() TaskExecutionRepository       { return r.taskExecutions }
-func (r *repository) TaskFiles() TaskFileRepository                 { return r.files }
-func (r *repository) UploadSessions() UploadSessionRepository       { return r.uploadSessions }
-func (r *repository) Assets() AssetRepository                       { return r.assets }
-func (r *repository) ImageAnalyses() ImageAnalysisRepository        { return r.imageAnalyses }
-func (r *repository) Projects() ProjectRepository                   { return r.projects }
+func (r *repository) Users() UserRepository                   { return r.users }
+func (r *repository) Sessions() SessionRepository             { return r.sessions }
+func (r *repository) Plans() PlanRepository                   { return r.plans }
+func (r *repository) PlanEntries() PlanEntryRepository        { return r.planEntries }
+func (r *repository) Tasks() TaskRepository                   { return r.tasks }
+func (r *repository) TaskExecutions() TaskExecutionRepository { return r.taskExecutions }
+func (r *repository) TaskFiles() TaskFileRepository           { return r.files }
+func (r *repository) UploadSessions() UploadSessionRepository { return r.uploadSessions }
+func (r *repository) Assets() AssetRepository                 { return r.assets }
+func (r *repository) ImageAnalyses() ImageAnalysisRepository  { return r.imageAnalyses }
+func (r *repository) Projects() ProjectRepository             { return r.projects }
+func (r *repository) ProjectProfileRevisions() ProjectProfileRevisionRepository {
+	return r.projectProfileRevisions
+}
+
+func (r *repository) ProjectProfileStates() ProjectProfileStateRepository {
+	return r.projectProfileStates
+}
+func (r *repository) ProjectAgentConfigs() ProjectAgentConfigRepository { return r.projectAgentConfigs }
+func (r *repository) ProjectChannelConfigs() ProjectChannelConfigRepository {
+	return r.projectChannelConfigs
+}
 func (r *repository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *repository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
 func (r *repository) TaskFeedbacks() TaskFeedbackRepository         { return r.taskFeedbacks }
@@ -682,6 +733,7 @@ type txRepository struct {
 	users                   UserRepository
 	sessions                SessionRepository
 	plans                   PlanRepository
+	planEntries             PlanEntryRepository
 	tasks                   TaskRepository
 	taskExecutions          TaskExecutionRepository
 	files                   TaskFileRepository
@@ -689,6 +741,10 @@ type txRepository struct {
 	assets                  AssetRepository
 	imageAnalyses           ImageAnalysisRepository
 	projects                ProjectRepository
+	projectProfileRevisions ProjectProfileRevisionRepository
+	projectProfileStates    ProjectProfileStateRepository
+	projectAgentConfigs     ProjectAgentConfigRepository
+	projectChannelConfigs   ProjectChannelConfigRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
 	taskFeedbacks           TaskFeedbackRepository
@@ -724,6 +780,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		users:                   newUserRepository(tx),
 		sessions:                newSessionRepository(tx),
 		plans:                   newPlanRepository(tx),
+		planEntries:             newPlanEntryRepository(tx),
 		tasks:                   newTaskRepository(tx),
 		taskExecutions:          newTaskExecutionRepository(tx),
 		files:                   newTaskFileRepository(tx),
@@ -731,6 +788,10 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		assets:                  newAssetRepository(tx),
 		imageAnalyses:           newImageAnalysisRepository(tx),
 		projects:                newProjectRepository(tx),
+		projectProfileRevisions: newProjectProfileRevisionRepository(tx),
+		projectProfileStates:    newProjectProfileStateRepository(tx),
+		projectAgentConfigs:     newProjectAgentConfigRepository(tx),
+		projectChannelConfigs:   newProjectChannelConfigRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
 		feedbacks:               newFeedbackRepository(tx),
 		taskFeedbacks:           newTaskFeedbackRepository(tx),
@@ -761,16 +822,30 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 	}
 }
 
-func (r *txRepository) Users() UserRepository                         { return r.users }
-func (r *txRepository) Sessions() SessionRepository                   { return r.sessions }
-func (r *txRepository) Plans() PlanRepository                         { return r.plans }
-func (r *txRepository) Tasks() TaskRepository                         { return r.tasks }
-func (r *txRepository) TaskExecutions() TaskExecutionRepository       { return r.taskExecutions }
-func (r *txRepository) TaskFiles() TaskFileRepository                 { return r.files }
-func (r *txRepository) UploadSessions() UploadSessionRepository       { return r.uploadSessions }
-func (r *txRepository) Assets() AssetRepository                       { return r.assets }
-func (r *txRepository) ImageAnalyses() ImageAnalysisRepository        { return r.imageAnalyses }
-func (r *txRepository) Projects() ProjectRepository                   { return r.projects }
+func (r *txRepository) Users() UserRepository                   { return r.users }
+func (r *txRepository) Sessions() SessionRepository             { return r.sessions }
+func (r *txRepository) Plans() PlanRepository                   { return r.plans }
+func (r *txRepository) PlanEntries() PlanEntryRepository        { return r.planEntries }
+func (r *txRepository) Tasks() TaskRepository                   { return r.tasks }
+func (r *txRepository) TaskExecutions() TaskExecutionRepository { return r.taskExecutions }
+func (r *txRepository) TaskFiles() TaskFileRepository           { return r.files }
+func (r *txRepository) UploadSessions() UploadSessionRepository { return r.uploadSessions }
+func (r *txRepository) Assets() AssetRepository                 { return r.assets }
+func (r *txRepository) ImageAnalyses() ImageAnalysisRepository  { return r.imageAnalyses }
+func (r *txRepository) Projects() ProjectRepository             { return r.projects }
+func (r *txRepository) ProjectProfileRevisions() ProjectProfileRevisionRepository {
+	return r.projectProfileRevisions
+}
+
+func (r *txRepository) ProjectProfileStates() ProjectProfileStateRepository {
+	return r.projectProfileStates
+}
+func (r *txRepository) ProjectAgentConfigs() ProjectAgentConfigRepository {
+	return r.projectAgentConfigs
+}
+func (r *txRepository) ProjectChannelConfigs() ProjectChannelConfigRepository {
+	return r.projectChannelConfigs
+}
 func (r *txRepository) APIKeys() APIKeyRepository                     { return r.apiKeys }
 func (r *txRepository) Feedbacks() FeedbackRepository                 { return r.feedbacks }
 func (r *txRepository) TaskFeedbacks() TaskFeedbackRepository         { return r.taskFeedbacks }

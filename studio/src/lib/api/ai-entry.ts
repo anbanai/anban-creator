@@ -11,6 +11,9 @@ export type AIEntryAttachmentType = InputAttachmentType
 export type { InputAttachment, InputAttachmentType }
 
 export interface AIEntrySubmitRequest {
+  /** Required by the Server admission contract; optional here for legacy test fixtures. */
+  agent_id?: string
+  task_kind?: string
   channel: 'studio' | 'ilink' | string
   project_id: string
   text: string
