@@ -12,12 +12,12 @@ import * as runner from "../src/runner.js";
 const { buildExecutionEnvironment, classifyProviderFailure, terminalModelUsage, validateManagedInit } = runner;
 
 const articlePack: AgentPack = {
-  id: "article",
+  id: "wechat-article",
   version: "1.0.0",
   digest: "a".repeat(64),
-  agent: { name: "article" },
-  bindings: { task_types: ["article"] },
-  runtime: { profile: "article", adapter: "standard" },
+  agent: { name: "wechat-article" },
+  bindings: { task_types: ["wechat-article"] },
+  runtime: { profile: "wechat", adapter: "standard" },
   artifacts: [{ role: "analysis", path: "output/topic-analysis.md", required: true }],
 };
 
@@ -41,15 +41,15 @@ const finalArtifactPack: AgentPack = {
 const validBootstrap = () => ({
   execution_token: "execution-token",
   execution_id: "execution-1",
-  task_type: "article",
-  agent_pack_id: "article",
+  task_type: "wechat-article",
+  agent_pack_id: "wechat-article",
   agent_pack_version: "1.0.0",
   agent_pack_digest: "a".repeat(64),
-  runtime_profile: "article",
+  runtime_profile: "wechat",
   runtime_adapter: "standard",
   project_id: "project-1",
   max_turns: 10,
-  agent_flag: "anban:article",
+  agent_flag: "anban:wechat-article",
   prompt: "write",
   artifact_transport: { mode: "stream" },
   resolved_agent_pack: articlePack,
@@ -113,7 +113,7 @@ async function progressWorkspace(withResearchArtifact = false): Promise<string> 
 
 describe("validateManagedInit", () => {
   test("requires the configured remote MCP and article plugin skill", () => {
-    expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], tools: [], skills: [] }, "article")).toThrow("anban:humanizer");
+    expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], tools: [], skills: [] }, "wechat-article")).toThrow("anban:humanizer");
   });
 
   test("requires Seednote core tools and all publishing skills while research tools remain optional", () => {
@@ -184,9 +184,23 @@ describe("validateManagedInit", () => {
     expect(() => validateManagedInit(message, "viral_analysis")).toThrow("anban:seednote-research");
   });
 
+  test("requires the profile builder and structured result MCP tool", () => {
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: ["mcp__anban__get_project_profile", "mcp__anban__submit_profile_result"],
+      skills: ["anban:profile-builder"],
+    };
+    expect(() => validateManagedInit(message, "profile_analysis")).not.toThrow();
+    expect(() => validateManagedInit({ ...message, skills: [] }, "profile_analysis")).toThrow("anban:profile-builder");
+    expect(() => validateManagedInit({ ...message, tools: ["mcp__anban__get_project_profile"] }, "profile_analysis")).toThrow("submit_profile_result");
+  });
+
   test("does not implicitly require legacy progress for other managed task types", () => {
     const taskTypes = [
-      { taskType: "article", tool: "get_project_profile", skills: ["anban:humanizer", "anban:portrait-cover-design"] },
+      { taskType: "wechat-article", tool: "get_project_profile", skills: ["anban:humanizer", "anban:portrait-cover-design"] },
       { taskType: "ecommerce", tool: "get_project_profile", skills: ["anban:humanizer"] },
       { taskType: "live-slicer", tool: "analyze_video", skills: ["anban:live-slice", "anban:capcut-draft"] },
       { taskType: "moments", tool: "get_project_profile", skills: [] },
@@ -236,7 +250,7 @@ describe("validateManagedInit", () => {
     }
   });
 
-  test.each(["article", "seednote", "hypit"])("requires the shared portrait cover skill for %s", (taskType) => {
+  test.each(["wechat-article", "seednote", "hypit"])("requires the shared portrait cover skill for %s", (taskType) => {
     const message = {
       type: "system" as const,
       subtype: "init" as const,
@@ -303,7 +317,7 @@ describe("buildQueryOptions", () => {
     }, "/workspace");
 
     for (const options of [article, seednote, viral]) {
-      expect(options.agent).toMatch(/^anban:(article|seednote)$/);
+      expect(options.agent).toMatch(/^anban:(wechat-article|seednote)$/);
       expect(options.allowedTools).toContain("Agent");
       expect(options.disallowedTools).not.toContain("Agent");
       const worker = options.agents?.["managed-readonly-worker"];
@@ -925,7 +939,7 @@ describe("buildExecutionEnvironment", () => {
     expect(managed).not.toHaveProperty("ANBAN_EXECUTION_TOKEN");
     const isolated = buildExecutionEnvironment(
       { ANTHROPIC_API_KEY: "inherited-api-key", CLAUDE_CODE_USE_BEDROCK: "true", CLAUDE_CODE_USE_VERTEX: "true" },
-      { task_type: "article", task_id: "task-1", execution_id: "execution-1", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } } },
+      { task_type: "wechat-article", task_id: "task-1", execution_id: "execution-1", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "runtime-model" } } },
       "https://server.example.com",
       "execution-jwt",
     );
@@ -991,7 +1005,7 @@ describe("buildExecutionEnvironment", () => {
 
     const environment = buildExecutionEnvironment(
       inherited,
-      { task_type: "article", task_id: "task-1", execution_id: "execution-1", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "frozen-model" } } },
+      { task_type: "wechat-article", task_id: "task-1", execution_id: "execution-1", project_id: "project-1", execution_profile: { envs: { ANTHROPIC_MODEL: "frozen-model" } } },
       "https://server.example.com",
       "execution-jwt",
     );

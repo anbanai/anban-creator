@@ -164,13 +164,13 @@ func TestClaudeCodePluginAgentsFollowOfficialBestPractices(t *testing.T) {
 func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 	root := repoRoot(t)
 	expected := map[string][]string{
-		"ecommerce":   {"ecommerce-product-analysis", "ecommerce-copywriting", "ecommerce-visual-design", "ecommerce-platform-specs"},
-		"live-slicer": {"live-slice", "capcut-draft"},
-		"moments":     {"moments"},
-		"hypit":       {},
-		"montage":     {"montage"},
-		"seednote":    {"seednote-research", "seednote-writing", "seednote-visual-design"},
-		"article":     {"content-writing", "article-visual-design", "article-cover-design", "article-research"},
+		"ecommerce":      {"ecommerce-product-analysis", "ecommerce-copywriting", "ecommerce-visual-design", "ecommerce-platform-specs"},
+		"live-slicer":    {"live-slice", "capcut-draft"},
+		"moments":        {"moments"},
+		"hypit":          {},
+		"montage":        {"montage"},
+		"seednote":       {"seednote-research", "seednote-writing", "seednote-visual-design"},
+		"wechat-article": {"content-writing", "article-visual-design", "article-cover-design", "article-research"},
 	}
 
 	for agentName, want := range expected {
@@ -223,6 +223,9 @@ func TestClaudeCodeSkillsHaveRuntimeOwner(t *testing.T) {
 		"ecommerce":              true,
 		"portrait-pose-variants": true,
 		"short-video-cover":      true,
+		"data-tracker":           true, // Server-scheduled deterministic analytics projection.
+		"post-scorer":            true, // Invoked inside generation Agents' final quality gate.
+		"publish-log":            true, // Server-owned lightweight publication fact logger.
 		"writers":                true,
 	}
 	entries, err := os.ReadDir(skillsRoot)
@@ -272,7 +275,7 @@ func TestCodexAgentSkillConfigsPointToBundledSkills(t *testing.T) {
 
 func TestArticleCodexAgentDeclaresOwnedSkills(t *testing.T) {
 	root := repoRoot(t)
-	path := filepath.Join(root, "harness", "agents", "article.toml")
+	path := filepath.Join(root, "harness", "agents", "wechat-article.toml")
 	body := readRepoFile(t, path)
 	skillPathRE := regexp.MustCompile(`path\s*=\s*"__PLUGIN_ROOT__/skills/([^/]+)/SKILL\.md"`)
 	matches := skillPathRE.FindAllStringSubmatch(body, -1)
@@ -310,9 +313,9 @@ func TestTopicSelectionSkillsAreLoadedByCodexAgents(t *testing.T) {
 	root := repoRoot(t)
 	want := []string{"trending-topics", "trend-rider", "topic-evaluator"}
 	for _, path := range []string{
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 		filepath.Join(root, "harness", "agents", "seednote.toml"),
-		filepath.Join(root, "harness", "packs", "article", "agent.codex.toml"),
+		filepath.Join(root, "harness", "packs", "wechat-article", "agent.codex.toml"),
 		filepath.Join(root, "harness", "packs", "seednote", "agent.codex.toml"),
 	} {
 		body := readRepoFile(t, path)
@@ -328,9 +331,9 @@ func TestTopicSelectionSkillsAreLoadedByCodexAgents(t *testing.T) {
 func TestCodexAgentsDoNotPreloadDuplicateUmbrellaSkills(t *testing.T) {
 	root := repoRoot(t)
 	for agentName, umbrellaSkill := range map[string]string{
-		"ecommerce": "ecommerce",
-		"seednote":  "seednote",
-		"article":   "article",
+		"ecommerce":      "ecommerce",
+		"seednote":       "seednote",
+		"wechat-article": "article",
 	} {
 		path := filepath.Join(root, "harness", "agents", agentName+".toml")
 		body := readRepoFile(t, path)

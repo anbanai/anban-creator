@@ -45,7 +45,7 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		"ANBAN_BILLING_ADMIN_API_KEY":        "test-billing-admin-key",
 		"ANBAN_AGENT_EXECUTOR":               "docker",
 		"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "0123456789abcdef0123456789abcdef",
-		"ANBAN_AGENT_IMAGE_ARTICLE":          "creator-agent-article:latest",
+		"ANBAN_AGENT_IMAGE_WECHAT":           "creator-agent-wechat:latest",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
 		"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
 		"ANBAN_JWT_SECRET_KEY":               "0123456789abcdef0123456789abcdef",

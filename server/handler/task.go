@@ -143,6 +143,9 @@ func (h *TaskHandler) presentCloneTaskReference(ctx context.Context, userID stri
 
 type createTaskRequest struct {
 	ProjectID          string                           `json:"project_id"`
+	AgentID            string                           `json:"agent_id"`
+	Channel            string                           `json:"channel"`
+	TaskKind           string                           `json:"task_kind"`
 	Type               string                           `json:"type"`
 	ExecutionProfile   string                           `json:"execution_profile"`
 	Prompt             string                           `json:"prompt"`
@@ -332,7 +335,7 @@ func taskCreationReferencePurposes(source *model.Task, selection service.Referen
 	if source != nil && assetID != "" && assetID == strings.TrimSpace(source.ReferenceImageAssetID) {
 		allowed = append(allowed, service.DirectUploadPurposeAIEntryAttachment)
 	}
-	if targetPlatform != model.PlatformArticle && trustedTaskCreationProjectReference(source, assetID) {
+	if targetPlatform != model.PlatformWechat && trustedTaskCreationProjectReference(source, assetID) {
 		allowed = append(allowed, service.DirectUploadPurposeProjectReference)
 	}
 	return allowed
@@ -425,6 +428,17 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if strings.TrimSpace(req.ExecutionProfile) == "" {
 		return nil, Error(c, fiber.StatusBadRequest, "execution_profile is required")
 	}
+	if source != nil {
+		if strings.TrimSpace(req.AgentID) == "" {
+			req.AgentID = source.AgentID
+		}
+		if strings.TrimSpace(req.Channel) == "" {
+			req.Channel = source.Channel
+		}
+		if strings.TrimSpace(req.TaskKind) == "" {
+			req.TaskKind = source.TaskKind
+		}
+	}
 	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
 		return nil, Error(c, fiber.StatusBadRequest, "视频生成任务需要填写需求")
 	}
@@ -436,16 +450,45 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err != nil {
 		return nil, respondTaskCreationProjectError(c, h.logger, err)
 	}
-	requestedTaskType := strings.TrimSpace(req.Type)
-	switch {
-	case requestedTaskType == "":
-		requestedTaskType = project.Platform
-	case requestedTaskType == model.TaskTypeViralAnalysis:
-		if project.Platform != model.PlatformSeednote {
-			return nil, Error(c, fiber.StatusBadRequest, "viral_analysis requires a Seednote project")
+	// Canonical task identity is derived from the project only for migrated
+	// internal callers that omit the fields. Public callers may still provide
+	// an explicit identity, while the service rejects obsolete aliases.
+	if source == nil && strings.TrimSpace(req.AgentID) == "" && strings.TrimSpace(req.Channel) == "" && strings.TrimSpace(req.TaskKind) == "" {
+		req.Type = strings.TrimSpace(req.Type)
+		if req.Type == "article" {
+			return nil, Error(c, fiber.StatusBadRequest, "unsupported task type article")
 		}
-	case requestedTaskType != project.Platform:
-		return nil, Error(c, fiber.StatusBadRequest, "type must match project platform")
+		if req.Type == "" {
+			switch project.Platform {
+			case model.PlatformWechat:
+				req.Type = model.TaskTypeWechatArticle
+			case model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit:
+				req.Type = project.Platform
+			}
+		}
+	}
+	requestedTaskType := strings.TrimSpace(req.Type)
+	// Project is shared context. Resolve and validate execution identity from the
+	// request; never derive Agent/channel from the owning project.
+	requestedChannel := strings.TrimSpace(req.Channel)
+	if requestedChannel == "" && strings.TrimSpace(req.AgentID) != "" {
+		requestedChannel, _ = model.AgentChannel(strings.TrimSpace(req.AgentID))
+	}
+	if requestedChannel == "" {
+		switch requestedTaskType {
+		case model.TaskTypeWechatArticle, model.PlatformWechat:
+			requestedChannel = model.ChannelArticle
+		case model.TaskTypeWechatPicture:
+			requestedChannel = model.ChannelWechatPicture
+		case model.PlatformSeednote, model.TaskTypeViralAnalysis:
+			requestedChannel = model.ChannelSeednote
+		}
+	}
+	if source == nil {
+		if requestedPlatform := model.PlatformForChannel(requestedChannel); requestedPlatform != "" &&
+			strings.TrimSpace(project.Platform) != "" && requestedPlatform != strings.TrimSpace(project.Platform) {
+			return nil, Error(c, fiber.StatusBadRequest, "task channel is incompatible with project platform")
+		}
 	}
 	projectSnapshot := model.SnapshotProject(project)
 
@@ -455,7 +498,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		if h.referenceAssets == nil {
 			return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
 		}
-		allowed := taskCreationReferencePurposes(source, *req.ReferenceImage, project.Platform)
+		allowed := taskCreationReferencePurposes(source, *req.ReferenceImage, model.PlatformForChannel(requestedChannel))
 		resolved, err := h.referenceAssets.ResolveSelection(c.Context(), userID, *req.ReferenceImage, allowed)
 		if err != nil {
 			return nil, respondReferenceAssetError(c, h.logger, err)
@@ -482,7 +525,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		pending = h.repo
 	}
 	allowedAttachmentTypes := allAgentAttachmentTypes
-	if project.Platform == model.PlatformSeednote {
+	if requestedChannel == model.ChannelSeednote {
 		allowedAttachmentTypes = map[string]bool{"image": true}
 	}
 	attachmentValidation := InputAttachmentValidationOptions{
@@ -506,7 +549,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if quantity > 5 {
 		return nil, Error(c, fiber.StatusBadRequest, "quantity must be between 1 and 5")
 	}
-	if req.ImageRatio != "" && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, req.ImageRatio) {
+	if req.ImageRatio != "" && len(model.SupportedImageRatiosForChannel(requestedChannel)) > 0 && !model.IsBusinessImageRatioAllowedForChannel(requestedChannel, req.ImageRatio) {
 		return nil, Error(c, fiber.StatusBadRequest, model.ValidImageRatioHint)
 	}
 	for _, u := range req.ProductPhotos {
@@ -586,6 +629,9 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		params: service.CreateManualParams{
 			UserID:                   userID,
 			ProjectID:                req.ProjectID,
+			AgentID:                  strings.TrimSpace(req.AgentID),
+			Channel:                  strings.TrimSpace(req.Channel),
+			TaskKind:                 strings.TrimSpace(req.TaskKind),
 			RequestedTaskType:        requestedTaskType,
 			ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
 			Prompt:                   prompt,
@@ -620,6 +666,9 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	if errors.Is(err, service.ErrViralAnalysisRequiresSeednoteProject) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
+	if errors.Is(err, service.ErrTaskIdentityIncompatible) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	if errors.Is(err, service.ErrCoverPortraitUnavailable) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -639,7 +688,7 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 			"msg":  "billing_task_admission_rejected",
 		})
 	}
-	return Error(c, fiber.StatusInternalServerError, fallbackMessage)
+	return Error(c, fiber.StatusInternalServerError, fallbackMessage+": "+err.Error())
 }
 
 func respondTaskCreationProjectError(c fiber.Ctx, logger *zerolog.Logger, err error) error {
@@ -978,6 +1027,9 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		}
 		creationReq := createTaskRequest{
 			ProjectID:                req.ProjectID,
+			AgentID:                  task.AgentID,
+			Channel:                  task.Channel,
+			TaskKind:                 task.TaskKind,
 			ExecutionProfile:         req.ExecutionProfile,
 			Prompt:                   prompt,
 			Quantity:                 req.Quantity,

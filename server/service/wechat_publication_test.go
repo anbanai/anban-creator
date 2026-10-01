@@ -161,6 +161,13 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+		if err := db.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := model.AutoMigrate(db); err != nil {
 		t.Fatal(err)
 	}
@@ -177,10 +184,10 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 	if err := repo.Users().Create(ctx, &model.User{ID: f.userID, Email: f.userID + "@publication.test", Password: "x", InviteCode: f.userID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformArticle, Name: "WeChat", Status: model.ProjectStatusActive, Config: model.ProjectConfig{WechatAppID: "app", WechatSecret: "secret"}}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformWechat, Name: "WeChat", Status: model.ProjectStatusActive, Config: model.ProjectConfig{WechatAppID: "app", WechatSecret: "secret"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &f.executionID}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &f.executionID}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
@@ -626,6 +633,66 @@ func TestCreateDraftAcceptsBodyImageRegisteredByCurrentExecution(t *testing.T) {
 	}
 	if f.api.addCalls != 1 {
 		t.Fatalf("provider add calls = %d, want 1", f.api.addCalls)
+	}
+}
+
+func TestCreateDraftPersistsPictureMediaOrderAndProviderEvidence(t *testing.T) {
+	f := newUnavailableFormalPublishFixture(t)
+	task, err := f.repo.Tasks().FindByID(context.Background(), f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Type = model.TaskTypeWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	if err := f.repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "picture-draft-1"}
+	request := appwechat.DraftAddRequest{Articles: []appwechat.DraftArticle{{
+		ArticleType: "newspic", Title: "图片消息", Content: "图下注释",
+		ImageInfo: &appwechat.DraftImageInfo{ImageList: []appwechat.DraftImage{{ImageMediaID: "image-1"}, {ImageMediaID: "image-2"}}},
+		CoverInfo: &appwechat.DraftCoverInfo{CropPercentList: []appwechat.DraftCropPercent{{Ratio: "3_4", X1: 0, Y1: 0, X2: 1, Y2: 1}}},
+	}}}
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	var mediaIDs []string
+	if err := json.Unmarshal(publication.DraftImageMediaIDs, &mediaIDs); err != nil {
+		t.Fatalf("decode persisted image media IDs: %v", err)
+	}
+	if got, want := strings.Join(mediaIDs, ","), "image-1,image-2"; got != want {
+		t.Fatalf("persisted image media order = %q, want %q", got, want)
+	}
+	var attempt model.WechatPublicationAttempt
+	if err := f.db.Where("publication_id = ? AND operation = ?", publication.ID, "draft_add").First(&attempt).Error; err != nil {
+		t.Fatalf("find draft attempt: %v", err)
+	}
+	if attempt.ResultStatus != "accepted" || !strings.Contains(attempt.DurableEvidence, `"media_id":"picture-draft-1"`) || !strings.Contains(attempt.DurableEvidence, `"image_media_ids":["image-1","image-2"]`) {
+		t.Fatalf("draft provider evidence = %q", attempt.DurableEvidence)
+	}
+}
+
+func TestCreateDraftAcceptsWechatPictureTask(t *testing.T) {
+	f := newUnavailableFormalPublishFixture(t)
+	if err := f.db.Model(&model.Task{}).Where("id = ?", f.taskID).Updates(map[string]any{
+		"type": model.TaskTypeWechatPicture, "channel": model.ChannelWechatPicture,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "picture-draft-1"}
+	request := appwechat.DraftAddRequest{Articles: []appwechat.DraftArticle{{
+		ArticleType: "newspic", Title: "图片消息", Content: "图下注释",
+		ImageInfo: &appwechat.DraftImageInfo{ImageList: []appwechat.DraftImage{{ImageMediaID: "image-1"}}},
+	}}}
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if publication.DraftArticleType != "newspic" || publication.DraftMediaID != "picture-draft-1" {
+		t.Fatalf("publication = %#v, want newspic draft", publication)
 	}
 }
 
@@ -2756,7 +2823,7 @@ func TestWechatPublicationRecoverDueDispatchesDatabaseBackedWork(t *testing.T) {
 	}
 
 	manualTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: manualTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: manualTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	manual := &model.WechatPublication{
@@ -3183,7 +3250,7 @@ func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testin
 	f := newPublicationFixture(t)
 	first := f.seedDrafted(t)
 	secondTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	created := f.now.Add(-time.Hour)
@@ -3713,7 +3780,7 @@ func TestConcurrentSelectionHasOneAtomicArticleBindingWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	created := f.now.Add(-time.Hour)

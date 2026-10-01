@@ -60,7 +60,7 @@ func (f *fakeTrackingEnqueuer) EnqueueIn(taskType string, payload []byte, delay 
 
 func setupSeednoteTrackingServiceTest(t *testing.T) (*SeednoteTrackingService, repository.Repository, *fakeTrackingEnqueuer) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

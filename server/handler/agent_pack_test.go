@@ -29,8 +29,9 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 				ID       string   `json:"id"`
 				Kind     string   `json:"kind"`
 				Surfaces []string `json:"surfaces"`
+				Channel  string   `json:"channel"`
 				Bindings struct {
-					TaskTypes []string `json:"task_types"`
+					TaskKinds []string `json:"task_kinds"`
 				} `json:"bindings"`
 			} `json:"packs"`
 		} `json:"data"`
@@ -38,19 +39,30 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || len(envelope.Data.Packs) != 9 {
+	if envelope.Code != 0 || len(envelope.Data.Packs) != 11 {
 		t.Fatalf("catalog response = %#v", envelope)
 	}
-	if envelope.Data.Packs[0].ID != "article" {
-		t.Fatalf("first Pack = %q, want deterministic article", envelope.Data.Packs[0].ID)
+	if envelope.Data.Packs[0].ID != "ecommerce" {
+		t.Fatalf("first Pack = %q, want deterministic ecommerce", envelope.Data.Packs[0].ID)
 	}
 	for _, pack := range envelope.Data.Packs {
-		if pack.ID == "hypit" {
-			if pack.Kind != "managed" || !slices.Equal(pack.Surfaces, []string{"plugin", "project", "task", "plan"}) || !slices.Equal(pack.Bindings.TaskTypes, []string{"hypit"}) {
-				t.Fatalf("video replication must expose the managed Studio task route: %#v", pack)
+		if pack.ID == "hypit" || pack.ID == "channels-video" {
+			if pack.Kind != "plugin" || !slices.Equal(pack.Surfaces, []string{"plugin"}) || pack.Channel != "" {
+				t.Fatalf("plugin-only Pack exposed as a channel Agent: %#v", pack)
 			}
-			return
 		}
 	}
-	t.Fatal("catalog must expose the video replication Pack")
+	for _, id := range []string{"wechat-article", "seednote", "wechat-picture"} {
+		found := false
+		for _, pack := range envelope.Data.Packs {
+			if pack.ID != id {
+				continue
+			}
+			found = pack.Kind == "managed" && pack.Channel == id && len(pack.Bindings.TaskKinds) > 0
+			break
+		}
+		if !found {
+			t.Fatalf("channel Agent %q not found with a single matching channel", id)
+		}
+	}
 }

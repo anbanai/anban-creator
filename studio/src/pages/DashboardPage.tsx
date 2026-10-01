@@ -117,8 +117,20 @@ export default function DashboardPage() {
     [platformConfigsQuery.data],
   )
   const supportedImageRatios = platformConfigMap.get(selectedProject?.platform ?? '')?.supported_image_ratios ?? []
+  const selectedPlatform = selectedProject?.platform ?? ''
+  const aiEntryIdentity = selectedPlatform === 'seednote'
+    ? { agent_id: 'seednote', channel: 'seednote', task_kind: 'content_generation' }
+    : selectedPlatform === 'montage'
+      ? { agent_id: 'channels-video', channel: 'channels-video', task_kind: 'content_generation' }
+      : selectedPlatform === 'hypit'
+        ? { agent_id: 'hypit', channel: 'hypit', task_kind: 'hypit' }
+        : selectedPlatform === 'moments'
+          ? { agent_id: 'moments', channel: 'moments', task_kind: 'content_generation' }
+          : selectedPlatform === 'ecommerce'
+            ? { agent_id: 'ecommerce', channel: 'ecommerce', task_kind: 'content_generation' }
+            : { agent_id: 'wechat-article', channel: 'wechat-article', task_kind: 'content_generation' }
   const taskQuantityMax = selectedProject
-    && ['article', 'seednote', 'moments'].includes(selectedProject.platform)
+    && ['wechat', 'seednote', 'moments'].includes(selectedPlatform)
     ? 5
     : 1
   const selectedImageCapabilityAvailable = imageCapabilities.some((capability) => (
@@ -140,7 +152,7 @@ export default function DashboardPage() {
     selectedProject?.platform ?? '',
   )
   const executionProfilePrice = selectedProject && executionProfile
-    ? taskCostFor(billingCatalogQuery.data, selectedProject.platform, executionProfile)
+    ? taskCostFor(billingCatalogQuery.data, selectedPlatform, executionProfile)
     : undefined
   const selectedExecutionProfile = profilesQuery.data?.find((profile) => profile.id === executionProfile)
   const executionProfileReady = Boolean(
@@ -162,10 +174,11 @@ export default function DashboardPage() {
     }
     if (selectedProjectId !== nextProject.id) {
       setSelectedProjectId(nextProject.id)
+      const nextPlatform = nextProject.platform ?? ''
       setImageRatio(normalizeImageRatio(
-        nextProject.image_ratio || platformConfigMap.get(nextProject.platform)?.default_image_ratio,
+        nextProject.image_ratio || platformConfigMap.get(nextPlatform)?.default_image_ratio,
       ))
-      const nextQuantityMax = ['article', 'seednote', 'moments'].includes(nextProject.platform) ? 5 : 1
+      const nextQuantityMax = ['wechat', 'seednote', 'moments'].includes(nextPlatform) ? 5 : 1
       setQuantity((current) => Math.min(current, nextQuantityMax))
     }
   }, [activeProjects, platformConfigMap, platformConfigsQuery.isError, platformConfigsQuery.isLoading, projectsLoading, selectedProjectId])
@@ -174,7 +187,7 @@ export default function DashboardPage() {
     if (!selectedProject || !defaultExecutionProfile) return
     const selectedProfile = profilesQuery.data?.find((profile) => profile.id === executionProfile)
     const selectionIsValid = selectedProfile?.available
-      && taskCostFor(billingCatalogQuery.data, selectedProject.platform, executionProfile || undefined) !== undefined
+      && taskCostFor(billingCatalogQuery.data, selectedPlatform, executionProfile || undefined) !== undefined
     if (!selectionIsValid) setExecutionProfile(defaultExecutionProfile)
   }, [billingCatalogQuery.data, defaultExecutionProfile, executionProfile, profilesQuery.data, selectedProject])
 
@@ -255,7 +268,7 @@ export default function DashboardPage() {
     }
     setEntryError(null)
     await submitMutation.mutateAsync({
-      channel: 'studio',
+      ...aiEntryIdentity,
       project_id: selectedProject.id,
       text,
       execution_profile: executionProfile as AgentExecutionProfileID,
@@ -276,10 +289,11 @@ export default function DashboardPage() {
       setImageRatio('auto')
       return
     }
-    const nextQuantityMax = ['article', 'seednote', 'moments'].includes(nextProject.platform) ? 5 : 1
+    const nextPlatform = nextProject.platform ?? ''
+    const nextQuantityMax = ['wechat', 'seednote', 'moments'].includes(nextPlatform) ? 5 : 1
     setQuantity((current) => Math.min(current, nextQuantityMax))
     setImageRatio(normalizeImageRatio(
-      nextProject.image_ratio || platformConfigMap.get(nextProject.platform)?.default_image_ratio,
+      nextProject.image_ratio || platformConfigMap.get(nextPlatform)?.default_image_ratio,
     ))
   }
 

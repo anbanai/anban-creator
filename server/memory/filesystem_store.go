@@ -60,6 +60,67 @@ type FilesystemStore struct {
 	limits   Limits
 }
 
+// WriteMarkdownFile atomically replaces one project-scoped Markdown file.
+// Profile and AGENTS.md projections use this method so callers never expose a
+// partially-written document to a subsequent Agent bootstrap.
+func (s *FilesystemStore) WriteMarkdownFile(ctx context.Context, projectID, relativePath, content string) error {
+	projectDir, err := s.projectDir(projectID)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	clean := filepath.Clean(filepath.FromSlash(strings.TrimSpace(relativePath)))
+	if clean == "." || !filepath.IsLocal(clean) || strings.EqualFold(filepath.Ext(clean), ".") {
+		return errUnsafePath
+	}
+	if int64(len([]byte(content))) > s.limits.MaxFileBytes {
+		return fmt.Errorf("project memory file exceeds %d bytes", s.limits.MaxFileBytes)
+	}
+	if !utf8.ValidString(content) {
+		return fmt.Errorf("project memory file must be valid UTF-8")
+	}
+	if err := s.EnsureProject(ctx, projectID); err != nil {
+		return err
+	}
+	parent := filepath.Dir(clean)
+	if parent != "." {
+		if err := os.MkdirAll(filepath.Join(projectDir, parent), 0o700); err != nil {
+			return fmt.Errorf("create project memory parent: %w", err)
+		}
+	}
+	if _, err := openProjectDirectoryNoSymlinks(projectDir, parent); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Join(projectDir, parent), ".profile-write-*")
+	if err != nil {
+		return fmt.Errorf("create project memory temporary file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("secure project memory temporary file: %w", err)
+	}
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write project memory file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync project memory file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close project memory file: %w", err)
+	}
+	target := filepath.Join(projectDir, clean)
+	if err := os.Rename(tmpPath, target); err != nil {
+		return fmt.Errorf("replace project memory file: %w", err)
+	}
+	return s.checkQuota(ctx, projectDir)
+}
+
 func NewFilesystemStore(root string, limits Limits) (*FilesystemStore, error) {
 	root = filepath.Clean(strings.TrimSpace(root))
 	if root == "." || !filepath.IsAbs(root) {

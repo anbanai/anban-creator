@@ -9,7 +9,7 @@ import { TaskDetailsSheet, type TaskDetailsSheetProps } from './TaskDetailsSheet
 const project: Project = {
   id: 'project-1',
   user_id: 'user-1',
-  platform: 'article',
+  platform: 'wechat',
   name: '当前项目名称',
   avatar_url: '',
   profile_url: '',
@@ -29,7 +29,7 @@ const project: Project = {
 
 const articleTask: Task = {
   id: 'task-1',
-  type: 'article',
+  type: 'wechat-article',
   title: '夏日选题',
   prompt: '写一篇夏日生活文章',
   status: 'completed',
@@ -38,7 +38,7 @@ const articleTask: Task = {
   execution_profile: 'effective',
   project_snapshot: {
     project_name: '创建时项目名称',
-    platform: 'article',
+    platform: 'wechat',
     visual_style: '柔光生活摄影',
     image_ratio: '3:2',
     author: '安班编辑部',
@@ -280,7 +280,7 @@ describe('TaskDetailsSheet', () => {
     const partialSnapshotTask: Task = {
       ...articleTask,
       image_capability_key: undefined,
-      project_snapshot: { platform: 'article' },
+      project_snapshot: { platform: 'wechat' },
     }
     render(
       <ControlledTaskDetailsSheet
@@ -384,7 +384,7 @@ describe('TaskDetailsSheet', () => {
       ...articleTask,
       project_snapshot: {
         project_name: '冻结项目',
-        platform: 'article',
+        platform: 'wechat',
         visual_style: '冻结视觉',
         image_ratio: '3:2',
         author: '冻结作者',

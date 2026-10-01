@@ -14,6 +14,7 @@ import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFi
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
+import { defaultTaskImageRatio } from '@/lib/studio-ux'
 import { Button } from '@/components/common/button'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
@@ -22,6 +23,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
@@ -49,7 +51,19 @@ const SEEDNOTE_ATTACHMENT_POLICY = {
   maxBytes: GENERAL_AGENT_ATTACHMENT_POLICY.maxBytes,
 } as const
 const SEEDNOTE_ATTACHMENT_BLOCKER = '种草笔记仅支持图片附件，请移除其他附件后继续。'
-const BATCH_TASK_TYPES = new Set<TaskType>(['article', 'seednote', 'moments'])
+const BATCH_TASK_TYPES = new Set<TaskType>(['wechat-article', 'wechat-picture', 'seednote', 'moments'])
+
+const PRODUCT_AGENT_OPTIONS = [
+  { agent_id: 'wechat-article', channel: 'wechat-article', label: '公众号文章' },
+  { agent_id: 'seednote', channel: 'seednote', label: '种草笔记' },
+  { agent_id: 'wechat-picture', channel: 'wechat-picture', label: '公众号贴图' },
+] as const
+
+function agentIDForTaskType(type: TaskType) {
+  if (type === 'seednote' || type === 'viral_analysis') return 'seednote'
+  if (type === 'wechat-picture') return 'wechat-picture'
+  return 'wechat-article'
+}
 
 function maxTaskQuantity(type: TaskType) {
   return BATCH_TASK_TYPES.has(type) ? 5 : 1
@@ -68,6 +82,9 @@ export interface TaskFormDialogProps {
 
 function createInitialDefaults(project?: Project, initialType?: TaskType): TaskFormDefaults {
   const defaults = createTaskFormDefaults(project)
+  if (initialType === 'wechat-picture' && project?.platform === 'wechat') {
+    return { ...defaults, type: initialType, image_ratio: defaultTaskImageRatio(initialType, project) as TaskFormDefaults['image_ratio'] }
+  }
   if (initialType === 'viral_analysis') {
     return {
       ...createTaskFormDefaults(project?.platform === 'seednote' ? project : undefined),
@@ -175,6 +192,8 @@ export function TaskFormDialog({
   const coverUsePortrait = useWatch({ control: form.control, name: 'cover_use_portrait' }) ?? false
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
+  const pictureImageCount = Number((watchedAgentInput as Record<string, unknown>).picture_image_count ?? 6)
+  const picturePublishDraft = (watchedAgentInput as Record<string, unknown>).picture_publish_draft !== false
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage' || watchedType === 'hypit'
   const isViralAnalysisTask = watchedType === 'viral_analysis'
@@ -189,7 +208,7 @@ export function TaskFormDialog({
 	)
 	const selectedProject = projectMap.get(watchedProjectId ?? '')
 	const selectedAgentPack = useMemo(
-		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_types?.includes(watchedType)),
+		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_kinds?.includes(watchedType)),
 		[agentPacksQuery.data, watchedType],
 	)
 	const imageCapabilityOptionsForValue = useMemo(() => {
@@ -237,7 +256,8 @@ export function TaskFormDialog({
           const cloned = cloneTaskFormDefaults(sourceTask)
           const sourceProject = projectMap.get(sourceTask.project_id ?? '')
           return sourceProject
-            ? cloned.type === sourceProject.platform
+            ? (cloned.type === sourceProject.platform
+              || (sourceProject.platform === 'wechat' && (cloned.type === 'wechat-article' || cloned.type === 'wechat-picture')))
               ? { ...cloned, project_id: sourceProject.id }
               : switchTaskFormDefaults(cloned, sourceProject)
             : { ...cloned, project_id: '' }
@@ -447,6 +467,51 @@ export function TaskFormDialog({
     />
   )
 
+  const selectedAgentID = agentIDForTaskType(watchedType)
+  const agentControl = (
+    <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+      <div>
+        <p className="text-sm font-medium text-foreground">执行 Agent</p>
+        <p className="text-xs text-muted-foreground">Agent 负责生成内容，并固定一个输出渠道。</p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Select
+          value={selectedAgentID}
+          onValueChange={(value) => {
+            if (value === 'seednote') {
+              setFormValue('type', watchedType === 'viral_analysis' ? 'viral_analysis' : 'seednote')
+              return
+            }
+            setFormValue('type', value as TaskType)
+          }}
+          disabled={isSubmitting || mode === 'clone'}
+        >
+          <FormControl><SelectTrigger aria-label="执行 Agent"><SelectValue placeholder="选择 Agent" /></SelectTrigger></FormControl>
+          <SelectContent>
+            {PRODUCT_AGENT_OPTIONS.map((option) => <SelectItem key={option.agent_id} value={option.agent_id}>{option.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {selectedAgentID === 'seednote' ? (
+          <Select
+            value={watchedType === 'viral_analysis' ? 'viral_analysis' : 'content_generation'}
+            onValueChange={(value) => setFormValue('type', value === 'viral_analysis' ? 'viral_analysis' : 'seednote')}
+            disabled={isSubmitting}
+          >
+            <FormControl><SelectTrigger aria-label="任务类别"><SelectValue placeholder="选择任务类别" /></SelectTrigger></FormControl>
+            <SelectContent>
+              <SelectItem value="content_generation">内容生成</SelectItem>
+              <SelectItem value="viral_analysis">爆款分析</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : (
+          <div className="flex items-center rounded-md border border-border bg-background px-3 text-sm text-muted-foreground">
+            固定渠道：{PRODUCT_AGENT_OPTIONS.find((option) => option.agent_id === selectedAgentID)?.channel}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
   const promptComposer = isViralAnalysisTask ? (
     <div data-slot="viral-analysis-prompt" className="flex flex-col gap-2">
       <Textarea
@@ -510,6 +575,7 @@ export function TaskFormDialog({
           </DialogHeader>
           <Form {...form}>
             <form id="task-create-form" onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+              {agentControl}
               {selectedProject && watchedType !== 'viral_analysis' ? (
                 <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-3">
                   <p className="text-xs font-medium text-foreground/80">将使用项目「{selectedProject.name}」的快照</p>
@@ -519,7 +585,7 @@ export function TaskFormDialog({
                     ) : (
                       <>视觉风格 {selectedProject.visual_style || '—'}</>
                     )}
-                    {watchedType === 'article' ? (
+                    {watchedType === 'wechat-article' ? (
                       <> · 署名 {selectedProject.author || '—'} · 写作风格 {selectedProject.writer || '—'} · 排版 {selectedProject.theme || '默认'}</>
                     ) : null}
                   </p>
@@ -622,7 +688,7 @@ export function TaskFormDialog({
                   </div>
                 ) : null}
 
-                {watchedType === 'article' ? (
+                {watchedType === 'wechat-article' ? (
                   <div className="rounded-lg border border-border p-3">
                     <div className="flex items-start gap-3">
                       <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
@@ -662,11 +728,31 @@ export function TaskFormDialog({
                   </div>
                 ) : null}
 
+                {watchedType === 'wechat-picture' ? (
+                  <div className="rounded-lg border border-border p-3">
+                    <div className="flex items-start gap-3">
+                      <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground">贴图消息设置</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">首图作为封面，默认使用竖版移动阅读比例。</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="text-sm">图片数量
+                        <Input className="mt-1" type="number" min={1} max={20} value={pictureImageCount} onChange={(event) => setFormValue('agent_input', { ...watchedAgentInput, picture_image_count: Math.max(1, Math.min(20, Number(event.target.value) || 1)) })} />
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm">创建公众号草稿
+                        <Switch checked={picturePublishDraft} onCheckedChange={(checked) => setFormValue('agent_input', { ...watchedAgentInput, picture_publish_draft: checked })} />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
                 <PortraitCoverControl
                   type={watchedType}
                   project={selectedProject}
                   checked={coverUsePortrait}
-                  coverEnabled={watchedType !== 'article' || articleWithCover}
+                  coverEnabled={watchedType !== 'wechat-article' || articleWithCover}
                   onCheckedChange={(checked) => setFormValue('cover_use_portrait', checked)}
                 />
 

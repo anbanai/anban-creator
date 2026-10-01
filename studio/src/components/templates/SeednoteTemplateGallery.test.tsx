@@ -102,7 +102,7 @@ describe('SeednoteTemplateGallery', () => {
   })
 
   it('非种草笔记项目不显示也不请求模板', () => {
-    renderGallery({ platform: 'article' })
+    renderGallery({ platform: 'wechat' })
 
     expect(screen.queryByText('参考模板')).not.toBeInTheDocument()
     expect(api.templates.list).not.toHaveBeenCalled()

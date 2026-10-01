@@ -29,7 +29,7 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformWechat)
 
 	const seeded = "三个月喝懂普洱：从生普到熟普的进阶路线"
 	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {
@@ -40,7 +40,7 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.PlanStatusActive,
 		// Prompt and Title intentionally empty → must claim from pool.
 	}
@@ -73,7 +73,7 @@ func TestTopicPoolClaimTopicOwnsTaskBranching(t *testing.T) {
 	_, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformWechat)
 	if _, err := topicSvc.Add(ctx, userID, projectID, []string{"first", "second"}); err != nil {
 		t.Fatalf("seed topics: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestCreateFromPlan_DoesNotClaimWhenPromptSet(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformWechat)
 
 	// Seed a topic that must remain UNUSED.
 	const seeded = "不应被消费的选题"
@@ -151,7 +151,7 @@ func TestCreateFromPlan_DoesNotClaimWhenPromptSet(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Prompt:    explicit,
 		Status:    model.PlanStatusActive,
 	}
@@ -181,7 +181,7 @@ func TestCreateFromPlan_TitleAlsoBlocksClaim(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformWechat)
 
 	if _, err := topicSvc.Add(ctx, userID, projectID, []string{"不应被消费"}); err != nil {
 		t.Fatalf("seed topic: %v", err)
@@ -192,7 +192,7 @@ func TestCreateFromPlan_TitleAlsoBlocksClaim(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Title:     titleTopic,
 		Status:    model.PlanStatusActive,
 	}
@@ -216,14 +216,14 @@ func TestCreateFromPlan_EmptyPoolFallsBack(t *testing.T) {
 	svc, _ := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformWechat)
 
 	// No topic seeded → pool empty.
 	plan := &model.Plan{ExecutionProfile: "effective",
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.PlanStatusActive,
 	}
 
@@ -246,7 +246,7 @@ func TestCreateManual_ClaimsTopicFromPool_Article(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformWechat)
 
 	const seeded = "三个月喝懂普洱：从生普到熟普的进阶路线"
 	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {
@@ -288,7 +288,7 @@ func TestCreateManual_DoesNotClaimWhenPromptSet(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformWechat)
 
 	const seeded = "不应被消费的选题"
 	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {
@@ -368,7 +368,7 @@ func TestCreateManual_ClaimsOnePerTask(t *testing.T) {
 	svc, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, svc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, svc.repo, userID, model.PlatformWechat)
 
 	const t1, t2 = "选题一：慢炖锅选购指南", "选题二：通勤背包横评"
 	if _, err := topicSvc.Add(ctx, userID, projectID, []string{t1, t2}); err != nil {
@@ -425,7 +425,7 @@ func TestClaimForTask_IdempotentPerTask(t *testing.T) {
 	_, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformWechat)
 
 	const t1, t2 = "幂等选题一", "幂等选题二"
 	if _, err := topicSvc.Add(ctx, userID, projectID, []string{t1, t2}); err != nil {
@@ -478,7 +478,7 @@ func TestReleaseForTask_ReturnsTopicToPool(t *testing.T) {
 	_, topicSvc := setupTaskServiceWithTopicPool(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, topicSvc.repo, userID, model.PlatformWechat)
 
 	const seeded = "待回滚的选题"
 	if _, err := topicSvc.Add(ctx, userID, projectID, []string{seeded}); err != nil {

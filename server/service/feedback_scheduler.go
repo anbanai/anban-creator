@@ -138,7 +138,7 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 		if s.maxPerRun > 0 && out.Enqueued >= s.maxPerRun {
 			break
 		}
-		if p == nil || (p.Platform != model.ScopeArticle && p.Platform != model.ScopeSeednote) {
+		if p == nil || (p.Platform != model.ScopeWechat && p.Platform != model.ScopeSeednote) {
 			continue
 		}
 		if windowed && !feedbackWindowOpen(cadence, at, p.Timezone) {
@@ -436,7 +436,13 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 			return nil, err
 		}
 		digest := contentDigest(contentIDs, observationCount, from, to, state.Revision)
-		fingerprintInput := FeedbackEligibilityInput{ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, AnalyticsRevision: state.Revision, ContentSetDigest: digest}
+		strategyRevision := int64(0)
+		if strategy, strategyErr := s.repo.FeedbackLoop().FindActiveStrategy(ctx, p.ID, p.Platform); strategyErr != nil {
+			return nil, strategyErr
+		} else if strategy != nil {
+			strategyRevision = strategy.Revision
+		}
+		fingerprintInput := FeedbackEligibilityInput{ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, AnalyticsRevision: state.Revision, ContentSetDigest: digest, StrategyRevision: strategyRevision}
 		fingerprint := FeedbackJobFingerprint(fingerprintInput)
 		alreadySucceeded, running := false, false
 		prior, err := s.repo.FeedbackLoop().FindJobByFingerprint(ctx, fingerprint)
@@ -463,7 +469,7 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 		in.AlreadySucceeded = alreadySucceeded
 		in.RunningDuplicate = running
 		decision := EvaluateFeedbackEligibility(in)
-		job := model.FeedbackJob{ID: uuid.NewString(), UserID: p.UserID, ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, MaturityCutoff: maturityCutoff, AnalyticsRevision: state.Revision, ContentSetDigest: digest, Fingerprint: fingerprint, Status: model.FeedbackJobQueued, SampleCount: int(observationCount), Coverage: "partial"}
+		job := model.FeedbackJob{ID: uuid.NewString(), UserID: p.UserID, ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, Trigger: cadence, PeriodStart: from, PeriodEnd: to, MaturityCutoff: maturityCutoff, AnalyticsRevision: state.Revision, ContentSetDigest: digest, StrategyRevision: strategyRevision, Fingerprint: fingerprint, Status: model.FeedbackJobQueued, SampleCount: int(observationCount), Coverage: "partial"}
 		if decision.Status != FeedbackJobEligible {
 			job.Status = model.FeedbackJobSkipped
 			job.SkipReason = decision.SkipReason
@@ -540,7 +546,7 @@ func feedbackAccountID(p *model.Project) string {
 	if p == nil {
 		return ""
 	}
-	if p.Platform == model.ScopeArticle || p.Platform == model.PlatformArticle {
+	if p.Platform == model.ScopeWechat || p.Platform == model.PlatformWechat {
 		if id := strings.TrimSpace(p.GetWechatAppID()); id != "" {
 			return "wechat:" + id
 		}

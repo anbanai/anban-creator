@@ -161,7 +161,7 @@ func TestRuntimeSmokeGeneratedServerConfigUsesProfileEnvs(t *testing.T) {
 
 func TestArticleDockerfileVerifiesManagedBootstrapContract(t *testing.T) {
 	repoRoot := runtimeSmokeRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "Dockerfile.agent-article"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "Dockerfile.agent-wechat"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestArticleDockerfileVerifiesManagedBootstrapContract(t *testing.T) {
 }
 
 func TestRuntimeSmokeCreateTaskUsesEffectiveExecutionProfile(t *testing.T) {
-	for _, profile := range []string{"article", "montage"} {
+	for _, profile := range []string{"wechat", "montage"} {
 		t.Run(profile, func(t *testing.T) {
 			requestPath := filepath.Join(t.TempDir(), "create-task.json")
 			body := `
@@ -299,9 +299,9 @@ query_execution() {
   count=$((count + 1))
   printf '%s' "$count" >"$TEST_STATE_FILE"
   if [[ "$count" == 1 ]]; then
-    printf '%s\n' 'execution-1|1||article|creator-agent-article:latest|docker|workload-1|instance-1|running'
+    printf '%s\n' 'execution-1|1||article|creator-agent-wechat:latest|docker|workload-1|instance-1|running'
   else
-    printf '%s\n' 'execution-2|2|execution-1|article|creator-agent-article:latest|docker|workload-2|instance-2|running'
+    printf '%s\n' 'execution-2|2|execution-1|article|creator-agent-wechat:latest|docker|workload-2|instance-2|running'
   fi
 }
 row=$(poll_execution_identity "$TEST_TASK_ID" 2 "$TEST_TASK_ID" "$TEST_PROJECT_ID")
@@ -621,7 +621,7 @@ func TestRuntimeSmokeScriptCoversManagedDockerLifecycle(t *testing.T) {
 
 	required := []string{
 		"set -euo pipefail",
-		"docker compose", "up -d", "creator-agent-article:latest",
+		"docker compose", "up -d", "creator-agent-wechat:latest",
 		"creator-agent-seednote:latest", "creator-agent-montage:latest", "Dockerfile.agent-montage",
 		"/api/v1/auth/register", "/api/admin/billing/topups", "/api/v1/projects", "/api/v1/tasks",
 		"/resume", "runtime_workload", "runtime_image", "/workspace/output/runtime-smoke.txt",
@@ -674,7 +674,7 @@ func TestRuntimeSmokeMakeTargetDelegatesBuildsToDockerOnlyScript(t *testing.T) {
 			t.Errorf("Makefile contains unsupported runtime smoke indirection %q", forbidden)
 		}
 	}
-	for _, dockerfile := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, dockerfile := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		if !strings.Contains(script, "docker build") || !strings.Contains(script, dockerfile) {
 			t.Errorf("runtime smoke script does not own Docker build for %s", dockerfile)
 		}

@@ -11,10 +11,10 @@ import (
 func TestTaskJSONHidesInternalProviderCostEvidence(t *testing.T) {
 	value := int64(10)
 	task := Task{
-		ID: "task-1", UserID: "user-1", Type: PlatformArticle,
+		ID: "task-1", UserID: "user-1", Type: PlatformWechat,
 		TerminalModelUsage: datatypes.NewJSONType([]ModelTokenUsage{{Provider: "provider", Model: "model", InputTokens: 1}}),
 		CostStatus:         "reconciled", InputTokens: &value, OutputTokens: &value, CacheReadTokens: &value, CacheCreationTokens: &value,
-		BillingCatalogID: "retail-v1", BillingSKUID: "task.article.v1", BillingPriceCredits: 6000,
+		BillingCatalogID: "retail-v1", BillingSKUID: "task.wechat_article.v1", BillingPriceCredits: 6000,
 		AgentProfileSnapshot: validAgentProfileSnapshot(),
 	}
 	raw, err := json.Marshal(task)

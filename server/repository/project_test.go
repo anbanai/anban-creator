@@ -12,9 +12,9 @@ func TestProjectStatsIncludeUnusedTopics(t *testing.T) {
 	ctx := t.Context()
 
 	projects := []*model.Project{
-		{ID: "project-stats-1", UserID: "user-1", Platform: model.PlatformArticle, Name: "one", Status: model.ProjectStatusActive},
-		{ID: "project-stats-2", UserID: "user-1", Platform: model.PlatformArticle, Name: "two", Status: model.ProjectStatusActive},
-		{ID: "project-stats-3", UserID: "user-1", Platform: model.PlatformArticle, Name: "three", Status: model.ProjectStatusActive},
+		{ID: "project-stats-1", UserID: "user-1", Platform: model.PlatformWechat, Name: "one", Status: model.ProjectStatusActive},
+		{ID: "project-stats-2", UserID: "user-1", Platform: model.PlatformWechat, Name: "two", Status: model.ProjectStatusActive},
+		{ID: "project-stats-3", UserID: "user-1", Platform: model.PlatformWechat, Name: "three", Status: model.ProjectStatusActive},
 	}
 	for _, project := range projects {
 		if err := repo.Projects().Create(ctx, project); err != nil {
@@ -23,8 +23,8 @@ func TestProjectStatsIncludeUnusedTopics(t *testing.T) {
 	}
 
 	for _, task := range []*model.Task{
-		{ID: "task-stats-1", UserID: "user-1", ProjectID: projects[0].ID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted},
-		{ID: "task-stats-2", UserID: "user-1", ProjectID: projects[0].ID, Type: model.PlatformArticle, Status: model.TaskStatusPending},
+		{ID: "task-stats-1", UserID: "user-1", ProjectID: projects[0].ID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted},
+		{ID: "task-stats-2", UserID: "user-1", ProjectID: projects[0].ID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending},
 	} {
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			t.Fatalf("create task %s: %v", task.ID, err)
@@ -69,7 +69,7 @@ func TestProjectStatsIncludeUnusedTopics(t *testing.T) {
 func TestProjectUpdateIfReferenceImageAssetID(t *testing.T) {
 	repo := New(setupTestDB(t))
 	project := &model.Project{
-		ID: "project-cas", UserID: "user-1", Platform: model.PlatformArticle,
+		ID: "project-cas", UserID: "user-1", Platform: model.PlatformWechat,
 		Name: "before", ReferenceImageAssetID: "asset-a", Status: model.ProjectStatusActive,
 	}
 	if err := repo.Projects().Create(t.Context(), project); err != nil {
@@ -125,7 +125,7 @@ func TestProjectUpdateIfReferenceImageAssetIDMatchesEmptyAndNull(t *testing.T) {
 			db := setupTestDB(t)
 			repo := New(db)
 			project := &model.Project{
-				ID: tt.id, UserID: "user-1", Platform: model.PlatformArticle,
+				ID: tt.id, UserID: "user-1", Platform: model.PlatformWechat,
 				Name: "before", Status: model.ProjectStatusActive,
 			}
 			if err := repo.Projects().Create(t.Context(), project); err != nil {

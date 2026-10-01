@@ -77,7 +77,7 @@ type lateCommitAfterErrorDispatcher struct {
 func (*lateCommitAfterErrorDispatcher) Scope() string { return "docker" }
 
 func (*lateCommitAfterErrorDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
-	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
 }
 
 func (*lateCommitAfterErrorDispatcher) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
@@ -126,7 +126,7 @@ type staleWinnerDispatcher struct {
 func (*staleWinnerDispatcher) Scope() string { return "docker" }
 
 func (*staleWinnerDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
-	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
 }
 
 func (d *staleWinnerDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
@@ -161,7 +161,7 @@ func (d *staleWinnerDispatcher) Delete(_ context.Context, execution *model.TaskE
 func (*lateCreatingDispatcher) Scope() string { return "docker" }
 
 func (*lateCreatingDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
-	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
 }
 
 func (d *lateCreatingDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
@@ -199,7 +199,7 @@ func (d *lateCreatingDispatcher) Delete(_ context.Context, execution *model.Task
 }
 
 func (*activationOrderingDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
-	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
 }
 
 func (*activationOrderingDispatcher) Scope() string { return "docker" }
@@ -256,7 +256,7 @@ func (d *dispatchTestDispatcher) ResolveRuntime(string) serverconfig.RuntimeImag
 	if d.runtimeSelection.Profile != "" || d.runtimeSelection.Image != "" {
 		return d.runtimeSelection
 	}
-	return serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
 }
 
 func (d *dispatchTestDispatcher) Scope() string { return "docker" }
@@ -585,7 +585,7 @@ func setupDispatchTest(t *testing.T) (*TaskService, repository.Repository, *gorm
 		ID:                      uuid.NewString(),
 		UserID:                  uuid.NewString(),
 		ProjectID:               uuid.NewString(),
-		Type:                    model.PlatformArticle,
+		Type:                    model.TaskTypeWechatArticle,
 		Status:                  model.TaskStatusPending,
 		Prompt:                  "dispatch me",
 		ImageCapabilityKey:      "standard",
@@ -1001,7 +1001,7 @@ func TestCreateCurrentExecutionRejectsEmptyRuntimeScope(t *testing.T) {
 
 func TestCreateCurrentExecutionRejectsIncompleteRuntimeSelection(t *testing.T) {
 	svc, _, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "article"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "wechat"}
 	if _, _, err := svc.createCurrentExecution(context.Background(), task); err == nil || !strings.Contains(err.Error(), "returned incomplete identity") {
 		t.Fatalf("create error = %v, want incomplete runtime selection", err)
 	}
@@ -1047,7 +1047,7 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 	}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed, Result: result,
-		RuntimeProfile: model.PlatformArticle, RuntimeImage: "registry/content@sha256:parent",
+		RuntimeProfile: model.PlatformWechat, RuntimeImage: "registry/content@sha256:parent",
 	}
 	if err := applyAgentPackIdentity(parent, task.Type); err != nil {
 		t.Fatal(err)
@@ -1078,7 +1078,7 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 func TestDispatchAutocompactThrashingStartsFreshClaudeSessionAndRuntime(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{
-		Profile: "article", Image: "registry/content@sha256:current",
+		Profile: "wechat", Image: "registry/content@sha256:current",
 	}
 	ctx := context.Background()
 	result, err := json.Marshal(&agent.ExecutionResult{
@@ -1112,17 +1112,17 @@ func TestDispatchAutocompactThrashingStartsFreshClaudeSessionAndRuntime(t *testi
 	if current.ResumeSessionID != "" {
 		t.Fatalf("resume session = %q, want a fresh Claude session after autocompact thrashing", current.ResumeSessionID)
 	}
-	if current.RuntimeProfile != model.PlatformArticle || current.RuntimeImage != "registry/content@sha256:current" {
+	if current.RuntimeProfile != model.PlatformWechat || current.RuntimeImage != "registry/content@sha256:current" {
 		t.Fatalf("resumed runtime = %q %q, want current deployed runtime", current.RuntimeProfile, current.RuntimeImage)
 	}
 }
 
 func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:new"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:new"}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
-		RuntimeProfile: model.PlatformArticle, RuntimeImage: "registry/content@sha256:original",
+		RuntimeProfile: model.PlatformWechat, RuntimeImage: "registry/content@sha256:original",
 	}
 	if err := applyAgentPackIdentity(parent, task.Type); err != nil {
 		t.Fatal(err)
@@ -1146,10 +1146,10 @@ func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 
 func TestResumeExecutionWithoutFrozenAgentPackUsesCurrentRuntimeImage(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformArticle, Image: "registry/content@sha256:current"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformWechat, Image: "registry/content@sha256:current"}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
-		RuntimeProfile: model.PlatformArticle, RuntimeImage: "registry/content@sha256:legacy",
+		RuntimeProfile: model.PlatformWechat, RuntimeImage: "registry/content@sha256:legacy",
 	}
 	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
 		t.Fatal(err)
@@ -1163,14 +1163,14 @@ func TestResumeExecutionWithoutFrozenAgentPackUsesCurrentRuntimeImage(t *testing
 		t.Fatalf("HandleExecutionFromPayload: %v", err)
 	}
 	current := mustCurrentExecution(t, repo, task.ID)
-	if current.RuntimeImage != "registry/content@sha256:current" || current.AgentPackID != "article" || current.ParentExecutionID != parent.ID {
+	if current.RuntimeImage != "registry/content@sha256:current" || current.AgentPackID != model.AgentIDArticle || current.ParentExecutionID != parent.ID {
 		t.Fatalf("resumed execution = %#v, want current image with preserved lineage", current)
 	}
 }
 
 func TestResumeExecutionWithIncompleteFrozenAgentPackStartsFreshSession(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformArticle, Image: "registry/content@sha256:current"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformWechat, Image: "registry/content@sha256:current"}
 	result, err := json.Marshal(&agent.ExecutionResult{Success: false, Error: "max turns", SessionID: "legacy-session", RemoteArtifacts: true})
 	if err != nil {
 		t.Fatal(err)
@@ -1199,7 +1199,7 @@ func TestResumeExecutionWithIncompleteFrozenAgentPackStartsFreshSession(t *testi
 	if current.ResumeSessionID != "" {
 		t.Fatalf("resume session = %q, want a fresh session when the parent Pack identity is incomplete", current.ResumeSessionID)
 	}
-	if current.RuntimeImage != "registry/content@sha256:current" || current.AgentPackID != "article" || current.ParentExecutionID != parent.ID {
+	if current.RuntimeImage != "registry/content@sha256:current" || current.AgentPackID != model.AgentIDArticle || current.ParentExecutionID != parent.ID {
 		t.Fatalf("resumed execution = %#v, want current Pack and runtime with preserved lineage", current)
 	}
 }
@@ -1663,14 +1663,14 @@ func TestHandleExecutionFromPayloadWithoutDispatcherFinalizesPendingTask(t *test
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	profile := testAgentProfiles()[0]
 	snapshot, fingerprint, err := profile.Freeze()
 	if err != nil {
 		t.Fatal(err)
 	}
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
 		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 	}
@@ -1699,7 +1699,7 @@ func TestHandleExecutionFromPayloadWithoutDispatcherFinalizesPendingTask(t *test
 func TestPendingDispatchFailureRetriesAtomicBillingReversal(t *testing.T) {
 	ctx := context.Background()
 	creationSvc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
 
 	logger := zerolog.New(io.Discard)
 	tasks, err := creationSvc.CreateManual(ctx, CreateManualParams{
@@ -1742,7 +1742,7 @@ func TestPendingDispatchFailureRetriesAtomicBillingReversal(t *testing.T) {
 func TestPendingFailureAmbiguousCommitVerifiesTerminalBillingBeforePostCommit(t *testing.T) {
 	ctx := context.Background()
 	creationSvc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
-	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
 	tasks, err := creationSvc.CreateManual(ctx, CreateManualParams{
 		ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID,
 		Prompt: "ambiguous terminal commit", Quantity: 1,
@@ -1784,14 +1784,14 @@ func TestPreDispatchFailureDoesNotReprocessFailedTask(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	profile := testAgentProfiles()[0]
 	snapshot, fingerprint, err := profile.Freeze()
 	if err != nil {
 		t.Fatal(err)
 	}
-	failedTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
-	pendingTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
+	failedTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ReferenceImageAssetID: "missing"}
+	pendingTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
 	if err := repo.Tasks().Create(ctx, failedTask); err != nil {
 		t.Fatal(err)
 	}
@@ -1821,8 +1821,8 @@ func TestHandleExecutionFromPayloadReferenceFailureFinalizesRunningTask(t *testi
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1862,8 +1862,8 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureRetriesTerminalPersist
 	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1905,8 +1905,8 @@ func TestHandleExecutionFromPayloadPendingReferenceFailureAtomicallyRetriesRefun
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1965,8 +1965,8 @@ func TestHandleExecutionFromPayloadReferenceFailureDoesNotOverwriteConcurrentCan
 	baseRepo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "asset-1"}
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "asset-1"}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2006,12 +2006,12 @@ func TestEnqueueExecutionFallbackUsesPendingReferenceFailureFinalization(t *test
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2051,7 +2051,7 @@ func TestEnqueueExecutionFallbackFinalizesPendingDispatchFailure(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
@@ -2063,7 +2063,7 @@ func TestEnqueueExecutionFallbackFinalizesPendingDispatchFailure(t *testing.T) {
 	}
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard",
+		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard",
 		ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 	}
 	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
@@ -2105,12 +2105,12 @@ func TestEnqueueExecutionFallbackRetriesPendingFailurePersistence(t *testing.T) 
 	if err := baseRepo.Users().Create(ctx, &model.User{ID: userID, OpenID: "openid-" + userID}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformWechat)
 	project, err := baseRepo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "missing"}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2183,12 +2183,12 @@ func TestEnqueueExecutionFallbackReleasesOnlyOwnedSlotWhenPreparationCASLoses(t 
 	baseRepo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformWechat)
 	project, err := baseRepo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "asset-1"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ReferenceImageAssetID: "asset-1"}
 	if err := baseRepo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2227,7 +2227,7 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 	baseRepo := repository.New(db)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformWechat)
 	project, err := baseRepo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
@@ -2238,7 +2238,7 @@ func TestEnqueueExecutionFallbackDoesNotReleaseReplacementSlotAfterCancelWins(t 
 		t.Fatal(err)
 	}
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusPending, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
 		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 	}

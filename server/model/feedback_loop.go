@@ -25,6 +25,12 @@ const (
 	FeedbackSkipRevokedBatch        = "revoked_batch"
 	FeedbackSkipIdentityMismatch    = "identity_mismatch"
 	FeedbackSkipResourceLimit       = "resource_limit"
+	FeedbackPromotionNone           = "none"
+	FeedbackPromotionCandidate      = "candidate"
+	FeedbackPromotionConfirmed      = "confirmed"
+	FeedbackPromotionValidated      = "validated"
+	FeedbackPromotionPromoted       = "promoted"
+	FeedbackPromotionRejected       = "rejected"
 	FeedbackMaxAttempts             = 4
 )
 
@@ -44,6 +50,10 @@ type FeedbackJob struct {
 	AnalyticsRevision int64      `gorm:"not null;default:0" json:"analytics_revision"`
 	ContentSetDigest  string     `gorm:"type:char(64);not null;default:''" json:"content_set_digest"`
 	StrategyRevision  int64      `gorm:"not null;default:0" json:"strategy_revision"`
+	TargetContentID   string     `gorm:"type:varchar(100);index;not null;default:''" json:"target_content_id,omitempty"`
+	Trigger           string     `gorm:"column:trigger_source;type:varchar(32);index;not null;default:''" json:"trigger,omitempty"`
+	TaskID            string     `gorm:"type:char(36);index;not null;default:''" json:"task_id,omitempty"`
+	ExecutionID       string     `gorm:"type:char(36);index;not null;default:''" json:"execution_id,omitempty"`
 	Fingerprint       string     `gorm:"type:char(64);uniqueIndex;not null" json:"fingerprint"`
 	Status            string     `gorm:"type:varchar(20);index;not null" json:"status"`
 	SkipReason        string     `gorm:"type:varchar(64);index;not null;default:''" json:"skip_reason,omitempty"`
@@ -74,16 +84,30 @@ func (FeedbackLease) TableName() string { return "feedback_leases" }
 
 // FeedbackInsight stores explainable deterministic facts or LLM interpretations.
 type FeedbackInsight struct {
-	ID                string    `gorm:"type:char(36);primaryKey" json:"id"`
-	JobID             string    `gorm:"type:char(36);uniqueIndex:idx_feedback_insight_job_kind;index;not null" json:"job_id"`
-	ProjectID         string    `gorm:"type:char(36);index;not null" json:"project_id"`
-	AnalyticsRevision int64     `gorm:"not null" json:"analytics_revision"`
-	Kind              string    `gorm:"type:varchar(40);uniqueIndex:idx_feedback_insight_job_kind;index;not null" json:"kind"`
-	EvidenceJSON      string    `gorm:"type:json;not null" json:"evidence"`
-	Summary           string    `gorm:"type:text;not null" json:"summary"`
-	Confidence        string    `gorm:"type:varchar(16);not null;default:'unknown'" json:"confidence"`
-	Limitations       string    `gorm:"type:text;not null" json:"limitations"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                   string     `gorm:"type:char(36);primaryKey" json:"id"`
+	JobID                string     `gorm:"type:char(36);uniqueIndex:idx_feedback_insight_job_kind;index;not null" json:"job_id"`
+	ExecutionID          string     `gorm:"type:char(36);index;not null;default:''" json:"execution_id,omitempty"`
+	ProjectID            string     `gorm:"type:char(36);index;not null" json:"project_id"`
+	AnalyticsRevision    int64      `gorm:"not null" json:"analytics_revision"`
+	TargetContentID      string     `gorm:"type:varchar(100);index;not null;default:''" json:"target_content_id,omitempty"`
+	BaselineScope        string     `gorm:"type:varchar(64);not null;default:''" json:"baseline_scope,omitempty"`
+	Trigger              string     `gorm:"column:trigger_source;type:varchar(32);index;not null;default:''" json:"trigger,omitempty"`
+	Kind                 string     `gorm:"type:varchar(40);uniqueIndex:idx_feedback_insight_job_kind;index;not null" json:"kind"`
+	EvidenceJSON         string     `gorm:"type:json;not null" json:"evidence"`
+	Summary              string     `gorm:"type:text;not null" json:"summary"`
+	Confidence           string     `gorm:"type:varchar(16);not null;default:'unknown'" json:"confidence"`
+	Limitations          string     `gorm:"type:text;not null" json:"limitations"`
+	PromotionStatus      string     `gorm:"type:varchar(16);index;not null;default:'none'" json:"promotion_status"`
+	ConfirmedBy          string     `gorm:"type:char(36);index;not null;default:''" json:"confirmed_by,omitempty"`
+	ConfirmedAt          *time.Time `json:"confirmed_at,omitempty"`
+	ValidatedAt          *time.Time `json:"validated_at,omitempty"`
+	MemoryRevision       int64      `gorm:"not null;default:0" json:"memory_revision,omitempty"`
+	AgentPackDigest      string     `gorm:"type:char(64);not null;default:''" json:"agent_pack_digest,omitempty"`
+	AnalysisArtifactPath string     `gorm:"type:varchar(500);not null;default:''" json:"-"`
+	EvidenceArtifactPath string     `gorm:"type:varchar(500);not null;default:''" json:"-"`
+	AnalysisArtifactHash string     `gorm:"type:char(64);not null;default:''" json:"-"`
+	EvidenceArtifactHash string     `gorm:"type:char(64);not null;default:''" json:"-"`
+	CreatedAt            time.Time  `json:"created_at"`
 }
 
 func (FeedbackInsight) TableName() string { return "feedback_insights" }

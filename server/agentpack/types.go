@@ -1,6 +1,9 @@
 package agentpack
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const (
 	KindPlugin  = "plugin"
@@ -11,7 +14,10 @@ const (
 )
 
 type Manifest struct {
-	ID                  string                    `yaml:"id" json:"id"`
+	ID string `yaml:"id" json:"id"`
+	// Channel is the single output channel owned by this Pack. Plugin-only
+	// Packs leave it empty; managed product Packs must declare exactly one.
+	Channel             string                    `yaml:"channel,omitempty" json:"channel,omitempty"`
 	Version             string                    `yaml:"version" json:"version"`
 	Kind                string                    `yaml:"kind" json:"kind"`
 	DisplayName         string                    `yaml:"display_name" json:"display_name"`
@@ -25,6 +31,7 @@ type Manifest struct {
 	Artifacts           []ArtifactSpec            `yaml:"artifacts" json:"artifacts,omitempty"`
 	ArtifactsByTaskType map[string][]ArtifactSpec `yaml:"artifacts_by_task_type" json:"artifacts_by_task_type,omitempty"`
 	Delivery            []DeliverySpec            `yaml:"delivery" json:"delivery,omitempty"`
+	DataDeliveries      []DataDeliverySpec        `yaml:"data_delivery" json:"data_delivery,omitempty"`
 	DeliveryByTaskType  map[string][]DeliverySpec `yaml:"delivery_by_task_type" json:"delivery_by_task_type,omitempty"`
 	SchemaFiles         SchemaRefs                `yaml:"schemas" json:"-"`
 	Schemas             *SchemaDocuments          `yaml:"-" json:"schemas,omitempty"`
@@ -32,6 +39,15 @@ type Manifest struct {
 	Digest              string                    `yaml:"-" json:"digest"`
 
 	dir string
+}
+
+func (m Manifest) SupportsTaskKind(taskKind string) bool {
+	for _, supported := range m.Bindings.TaskKinds {
+		if supported == taskKind {
+			return true
+		}
+	}
+	return false
 }
 
 type AgentSpec struct {
@@ -44,8 +60,11 @@ type AgentSpec struct {
 }
 
 type Bindings struct {
-	ProjectPlatforms []string `yaml:"project_platforms" json:"project_platforms,omitempty"`
-	TaskTypes        []string `yaml:"task_types" json:"task_types,omitempty"`
+	TaskKinds []string `yaml:"task_kinds" json:"task_kinds,omitempty"`
+	// Deprecated source fields are accepted only while old plugin manifests are
+	// converted; generated catalogs never emit them.
+	ProjectPlatforms []string `yaml:"project_platforms,omitempty" json:"-"`
+	TaskTypes        []string `yaml:"task_types,omitempty" json:"-"`
 }
 
 type RuntimeSpec struct {
@@ -65,9 +84,19 @@ type ArtifactSpec struct {
 // part of a user-facing task result. Path accepts an exact output path or a
 // path.Match-compatible pattern.
 type DeliverySpec struct {
+	Role         string `yaml:"role" json:"role"`
+	Path         string `yaml:"path" json:"path"`
+	MIMEType     string `yaml:"mime_type" json:"mime_type"`
+	InternalOnly bool   `yaml:"internal_only" json:"internal_only,omitempty"`
+}
+
+// DataDeliverySpec describes a server-side structured handoff that is not a
+// task file artifact. Profile analysis uses this contract to signal that its
+// required result is submitted through MCP and persisted by the Server.
+type DataDeliverySpec struct {
 	Role     string `yaml:"role" json:"role"`
-	Path     string `yaml:"path" json:"path"`
-	MIMEType string `yaml:"mime_type" json:"mime_type"`
+	Type     string `yaml:"type" json:"type"`
+	Required bool   `yaml:"required" json:"required"`
 }
 
 type SchemaRefs struct {
@@ -91,9 +120,10 @@ type UISpec struct {
 type Catalog struct {
 	Packs []Manifest `json:"packs"`
 
-	byID              map[string]int
-	byTaskType        map[string]int
-	byProjectPlatform map[string]int
+	byID       map[string]int
+	byAgentID  map[string]int
+	byTaskKind map[string]int
+	byChannel  map[string]int
 }
 
 // DeliveryForTaskType returns the task-type-specific delivery contract when
@@ -103,6 +133,10 @@ func (m Manifest) DeliveryForTaskType(taskType string) []DeliverySpec {
 		return delivery
 	}
 	return m.Delivery
+}
+
+func (m Manifest) DeliveryForTaskKind(taskKind string) []DeliverySpec {
+	return m.DeliveryForTaskType(taskKind)
 }
 
 // ArtifactsForTaskType returns a complete task-type override when present.
@@ -125,6 +159,10 @@ func (m Manifest) RequiredArtifactsForTaskType(taskType string) ([]ArtifactSpec,
 	return required, nil
 }
 
+func (m Manifest) RequiredArtifactsForTaskKind(taskKind string) ([]ArtifactSpec, error) {
+	return m.RequiredArtifactsForTaskType(taskKind)
+}
+
 func (c *Catalog) Pack(id string) (Manifest, bool) {
 	if c == nil {
 		return Manifest{}, false
@@ -136,26 +174,79 @@ func (c *Catalog) Pack(id string) (Manifest, bool) {
 	return c.Packs[i], true
 }
 
-func (c *Catalog) ForTaskType(taskType string) (Manifest, bool) {
+// ForAgent resolves the stable Agent Pack identity.
+func (c *Catalog) ForAgent(agentID string) (Manifest, bool) {
 	if c == nil {
 		return Manifest{}, false
 	}
-	i, ok := c.byTaskType[taskType]
+	i, ok := c.byAgentID[strings.TrimSpace(agentID)]
 	if !ok {
 		return Manifest{}, false
 	}
 	return c.Packs[i], true
 }
 
-func (c *Catalog) ForProjectPlatform(platform string) (Manifest, bool) {
+// ForChannel resolves the Pack that owns channel. A channel is unique across
+// channel-bound Packs, so this lookup is deterministic.
+func (c *Catalog) ForChannel(channel string) (Manifest, bool) {
 	if c == nil {
 		return Manifest{}, false
 	}
-	i, ok := c.byProjectPlatform[platform]
+	i, ok := c.byChannel[strings.TrimSpace(channel)]
 	if !ok {
 		return Manifest{}, false
 	}
 	return c.Packs[i], true
+}
+
+// ForTaskKind resolves a workflow task kind to its owning Pack.
+func (c *Catalog) ForTaskKind(taskKind string) (Manifest, bool) {
+	if c == nil {
+		return Manifest{}, false
+	}
+	i, ok := c.byTaskKind[strings.TrimSpace(taskKind)]
+	if !ok {
+		return Manifest{}, false
+	}
+	return c.Packs[i], true
+}
+
+// ForTaskType resolves a canonical task type. Task types are also the task
+// kinds for managed product Packs; this method remains named for callers that
+// operate on the persisted Task.Type field.
+func (c *Catalog) ForTaskType(taskType string) (Manifest, bool) {
+	switch strings.TrimSpace(taskType) {
+	case "wechat-article":
+		return c.ForAgent("wechat-article")
+	case "wechat-picture":
+		return c.ForAgent("wechat-picture")
+	}
+	if pack, ok := c.ForTaskKind(taskType); ok {
+		return pack, true
+	}
+	if pack, ok := c.Pack(taskType); ok {
+		return pack, true
+	}
+	if taskType == "viral_analysis" {
+		return c.Pack("seednote")
+	}
+	if taskType == "profile_analysis" {
+		return c.Pack("profile-analysis")
+	}
+	return c.ForChannel(taskType)
+}
+
+// ForProjectPlatform resolves a project platform to its default output
+// channel. A WeChat project exposes separate article and picture task types;
+// long-form articles remain the default project workflow.
+func (c *Catalog) ForProjectPlatform(platform string) (Manifest, bool) {
+	if platform == "wechat" {
+		return c.ForChannel("wechat-article")
+	}
+	if pack, ok := c.ForChannel(platform); ok {
+		return pack, true
+	}
+	return c.ForTaskType(platform)
 }
 
 func (c *Catalog) BillingOperation(taskType string) (string, bool) {
@@ -163,8 +254,17 @@ func (c *Catalog) BillingOperation(taskType string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	operation := pack.BillingOperations[taskType]
-	return operation, operation != ""
+	if operation := strings.TrimSpace(pack.BillingOperations[taskType]); operation != "" {
+		return operation, true
+	}
+	// Managed packs persist a canonical task type but declare billing by the
+	// bound task kind. Resolve that indirection without requiring every pack to
+	// duplicate the same operation under both identities.
+	if len(pack.Bindings.TaskKinds) == 1 {
+		operation := strings.TrimSpace(pack.BillingOperations[pack.Bindings.TaskKinds[0]])
+		return operation, operation != ""
+	}
+	return "", false
 }
 
 type GenerateResult struct {

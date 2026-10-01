@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
@@ -258,6 +258,74 @@ type projectRequest struct {
 	LegacyWechatPublishMode *string `json:"wechat_publish_mode"`
 }
 
+type projectConfigResponse struct {
+	ID        string         `json:"id"`
+	ProjectID string         `json:"project_id"`
+	AgentID   string         `json:"agent_id,omitempty"`
+	Channel   string         `json:"channel,omitempty"`
+	Config    map[string]any `json:"config"`
+}
+
+type projectConfigRequest struct {
+	Config map[string]any `json:"config"`
+}
+
+func redactProjectConfigValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		redacted := make(map[string]any, len(typed))
+		for key, item := range typed {
+			lower := strings.ToLower(strings.TrimSpace(key))
+			if strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "password") || strings.Contains(lower, "private_key") || lower == "app_key" {
+				continue
+			}
+			redacted[key] = redactProjectConfigValue(item)
+		}
+		return redacted
+	case []any:
+		redacted := make([]any, len(typed))
+		for i, item := range typed {
+			redacted[i] = redactProjectConfigValue(item)
+		}
+		return redacted
+	default:
+		return value
+	}
+}
+
+func redactedProjectConfig(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	redacted, ok := redactProjectConfigValue(value).(map[string]any)
+	if !ok || redacted == nil {
+		return map[string]any{}
+	}
+	return redacted
+}
+
+func projectAgentConfigResponse(config *model.ProjectAgentConfig) projectConfigResponse {
+	return projectConfigResponse{ID: config.ID, ProjectID: config.ProjectID, AgentID: config.AgentID, Config: redactedProjectConfig(config.Config.Data())}
+}
+
+func projectChannelConfigResponse(config *model.ProjectChannelConfig) projectConfigResponse {
+	return projectConfigResponse{ID: config.ID, ProjectID: config.ProjectID, Channel: config.Channel, Config: redactedProjectConfig(config.Config.Data())}
+}
+
+func (h *ProjectHandler) respondProjectConfigError(c fiber.Ctx, err error) error {
+	if errors.Is(err, service.ErrProjectNotFound) {
+		return Error(c, fiber.StatusNotFound, "project not found")
+	}
+	if errors.Is(err, service.ErrProjectOwnedByUser) {
+		return Forbidden(c, "you do not have access to this project")
+	}
+	if errors.Is(err, service.ErrInvalidProjectAgent) || errors.Is(err, service.ErrInvalidProjectChannel) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	h.logger.Error().Err(err).Msg("project config operation failed")
+	return Error(c, fiber.StatusInternalServerError, "project config operation failed")
+}
+
 func hasJSONField(body []byte, field string) bool {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
@@ -351,7 +419,11 @@ func (h *ProjectHandler) List(c fiber.Ctx) error {
 		}
 	}
 
-	return Success(c, projects)
+	items := make([]map[string]any, 0, len(projects))
+	for _, project := range projects {
+		items = append(items, projectAPIResponse(project))
+	}
+	return Success(c, items)
 }
 
 // Stats handles GET /projects/stats?ids=a,b,c and returns a per-project stats map.
@@ -425,10 +497,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
 	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 
-	if req.Platform == "" {
-		return Error(c, fiber.StatusBadRequest, "platform is required")
-	}
-	if model.IsAdminOnlyProjectPlatform(req.Platform) && !projectUserIsAdmin(c) {
+	if req.Platform != "" && model.IsAdminOnlyProjectPlatform(req.Platform) && !projectUserIsAdmin(c) {
 		return Forbidden(c, "project platform is currently available to administrators only")
 	}
 
@@ -520,11 +589,59 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 			}
 		}
 	}
+	profileInitialization := h.ensureProfileInitialization(c.Context(), userID, created)
 
 	return Success(c, fiber.Map{
-		"project":               created,
-		"recommended_templates": recommended,
+		"project":                projectAPIResponse(created),
+		"recommended_templates":  recommended,
+		"profile_initialization": profileInitialization,
 	})
+}
+
+func (h *ProjectHandler) ensureProfileInitialization(ctx context.Context, userID string, project *model.Project) map[string]any {
+	result := map[string]any{"status": "not_started"}
+	if h.tasks == nil || project == nil || !profileInitializationSupported(project.Platform) {
+		return result
+	}
+	profile, err := h.service.GetProfile(ctx, userID, project.ID)
+	if err != nil {
+		return map[string]any{"status": model.ProfileInitializationFailed, "error": err.Error()}
+	}
+	if strings.TrimSpace(profile.AnalysisTaskID) != "" {
+		if existing, getErr := h.tasks.GetByID(ctx, profile.AnalysisTaskID); getErr == nil && existing.UserID == userID && existing.ProjectID == project.ID && (existing.Status == model.TaskStatusPending || existing.Status == model.TaskStatusRunning) {
+			return map[string]any{"status": profile.InitializationStatus, "task_id": existing.ID, "revision": profile.Version}
+		}
+	}
+	expectedVersion := profile.Version
+	tasks, err := h.tasks.CreateManual(ctx, service.CreateManualParams{
+		UserID: userID, ProjectID: project.ID, ExecutionProfile: "effective",
+		AgentID: model.AgentIDProfile, Channel: model.ChannelProfile, TaskKind: model.TaskKindProfileAnalysis,
+		Prompt:     project.ProfileURL,
+		AgentInput: profileAgentInput(project, map[string]any{}, nil),
+		Quantity:   1, ProfileAnalysisExpectedVersion: &expectedVersion,
+	})
+	if err != nil || len(tasks) == 0 {
+		message := "profile initialization task was not created"
+		if err != nil {
+			message = err.Error()
+		}
+		h.logger.Warn().Err(err).Str("project_id", project.ID).Msg("profile initialization admission failed")
+		return map[string]any{"status": model.ProfileInitializationFailed, "error": message, "revision": profile.Version}
+	}
+	profile, err = h.service.GetProfile(ctx, userID, project.ID)
+	if err != nil {
+		return map[string]any{"status": model.ProfileInitializationQueued, "task_id": tasks[0].ID, "revision": expectedVersion}
+	}
+	return map[string]any{"status": profile.InitializationStatus, "task_id": tasks[0].ID, "revision": profile.Version}
+}
+
+func profileInitializationSupported(platform string) bool {
+	switch strings.TrimSpace(platform) {
+	case model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments:
+		return true
+	default:
+		return false
+	}
 }
 
 // Get handles GET /projects/:id.
@@ -560,9 +677,125 @@ func (h *ProjectHandler) Get(c fiber.Ctx) error {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 	return Success(c, fiber.Map{
-		"project": ch,
+		"project": projectAPIResponse(ch),
 		"stats":   stats,
 	})
+}
+
+func (h *ProjectHandler) ListAgentConfigs(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	configs, err := h.service.ListAgentConfigs(c.Context(), userID, c.Params("id"))
+	if err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	result := make([]projectConfigResponse, 0, len(configs))
+	for _, config := range configs {
+		result = append(result, projectAgentConfigResponse(config))
+	}
+	return Success(c, result)
+}
+
+func (h *ProjectHandler) GetAgentConfig(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	config, err := h.service.GetAgentConfig(c.Context(), userID, c.Params("id"), c.Params("agent_id"))
+	if err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	if config == nil {
+		return Error(c, fiber.StatusNotFound, "agent config not found")
+	}
+	return Success(c, projectAgentConfigResponse(config))
+}
+
+func (h *ProjectHandler) UpsertAgentConfig(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req projectConfigRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid agent config body")
+	}
+	config, err := h.service.UpsertAgentConfig(c.Context(), userID, c.Params("id"), c.Params("agent_id"), req.Config)
+	if err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	return Success(c, projectAgentConfigResponse(config))
+}
+
+func (h *ProjectHandler) DeleteAgentConfig(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	if err := h.service.DeleteAgentConfig(c.Context(), userID, c.Params("id"), c.Params("agent_id")); err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	return Success(c, fiber.Map{"deleted": true})
+}
+
+func (h *ProjectHandler) ListChannelConfigs(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	configs, err := h.service.ListChannelConfigs(c.Context(), userID, c.Params("id"))
+	if err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	result := make([]projectConfigResponse, 0, len(configs))
+	for _, config := range configs {
+		result = append(result, projectChannelConfigResponse(config))
+	}
+	return Success(c, result)
+}
+
+func (h *ProjectHandler) GetChannelConfig(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	config, err := h.service.GetChannelConfig(c.Context(), userID, c.Params("id"), c.Params("channel"))
+	if err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	if config == nil {
+		return Error(c, fiber.StatusNotFound, "channel config not found")
+	}
+	return Success(c, projectChannelConfigResponse(config))
+}
+
+func (h *ProjectHandler) UpsertChannelConfig(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req projectConfigRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid channel config body")
+	}
+	config, err := h.service.UpsertChannelConfig(c.Context(), userID, c.Params("id"), c.Params("channel"), req.Config)
+	if err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	return Success(c, projectChannelConfigResponse(config))
+}
+
+func (h *ProjectHandler) DeleteChannelConfig(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	if err := h.service.DeleteChannelConfig(c.Context(), userID, c.Params("id"), c.Params("channel")); err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	return Success(c, fiber.Map{"deleted": true})
 }
 
 // Memory handles GET /projects/:id/memory.
@@ -609,8 +842,10 @@ type profileUpdateRequest struct {
 }
 
 type profileDimensionRequest struct {
-	Version int64                  `json:"version"`
-	Value   model.ProfileDimension `json:"value"`
+	Version          int64                  `json:"version"`
+	ExpectedRevision *int64                 `json:"expected_revision"`
+	Value            model.ProfileDimension `json:"value"`
+	Content          map[string]any         `json:"content"`
 }
 
 func (h *ProjectHandler) GetProfile(c fiber.Ctx) error {
@@ -619,6 +854,42 @@ func (h *ProjectHandler) GetProfile(c fiber.Ctx) error {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
 	profile, err := h.service.GetProfile(c.Context(), userID, c.Params("id"))
+	if err != nil {
+		return h.respondProfileError(c, err)
+	}
+	return Success(c, profile)
+}
+
+func (h *ProjectHandler) GetProfileRevisions(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	revisions, err := h.service.ProfileRevisions(c.Context(), userID, c.Params("id"))
+	if err != nil {
+		return h.respondProfileError(c, err)
+	}
+	return Success(c, revisions)
+}
+
+func (h *ProjectHandler) RestoreProfileRevision(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req struct {
+		ExpectedRevision int64 `json:"expected_revision"`
+	}
+	if len(c.Body()) > 0 {
+		if err := c.Bind().Body(&req); err != nil {
+			return Error(c, fiber.StatusBadRequest, "invalid revision restore body")
+		}
+	}
+	var revision int64
+	if _, err := fmt.Sscan(c.Params("revision"), &revision); err != nil || revision < 0 {
+		return Error(c, fiber.StatusBadRequest, "invalid profile revision")
+	}
+	profile, err := h.service.RestoreProfileRevision(c.Context(), userID, c.Params("id"), revision, req.ExpectedRevision)
 	if err != nil {
 		return h.respondProfileError(c, err)
 	}
@@ -639,6 +910,9 @@ func (h *ProjectHandler) respondProfileError(c fiber.Ctx, err error) error {
 		return Error(c, fiber.StatusConflict, err.Error())
 	}
 	if errors.Is(err, service.ErrProjectProfileAnalysisInProgress) {
+		return Error(c, fiber.StatusConflict, err.Error())
+	}
+	if errors.Is(err, service.ErrProjectProfileResultAlreadyStored) {
 		return Error(c, fiber.StatusConflict, err.Error())
 	}
 	h.logger.Error().Err(err).Msg("project profile request failed")
@@ -673,13 +947,11 @@ func normalizeProfileAnalysisInput(req profileAnalysisInput) (profileAnalysisInp
 func profileAnalysisRequestFingerprint(project *model.Project, profile model.ProjectProfile, req profileAnalysisInput) (string, string, error) {
 	payload := struct {
 		ProjectID        string         `json:"project_id"`
-		Platform         string         `json:"platform"`
-		ProfileURL       string         `json:"profile_url"`
 		ProfileVersion   int64          `json:"profile_version"`
 		ExecutionProfile string         `json:"execution_profile"`
 		Answers          map[string]any `json:"answers"`
 		Samples          []string       `json:"samples"`
-	}{project.ID, project.Platform, project.ProfileURL, profile.Version, req.ExecutionProfile, req.Answers, req.Samples}
+	}{project.ID, profile.Version, req.ExecutionProfile, req.Answers, req.Samples}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return "", "", err
@@ -723,6 +995,12 @@ func (h *ProjectHandler) UpdateProfileDimension(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid profile dimension body")
 	}
+	if req.ExpectedRevision != nil {
+		req.Version = *req.ExpectedRevision
+	}
+	if req.Content != nil {
+		req.Value.Content = req.Content
+	}
 	profile, err := h.service.UpdateProfileDimension(c.Context(), userID, c.Params("id"), c.Params("dimension"), req.Version, req.Value)
 	if err != nil {
 		return h.respondProfileError(c, err)
@@ -735,15 +1013,9 @@ func (h *ProjectHandler) ProfileAnalysisQuote(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
-	project, _, err := h.service.Get(c.Context(), userID, c.Params("id"))
+	_, _, err := h.service.Get(c.Context(), userID, c.Params("id"))
 	if err != nil {
 		return h.respondProfileError(c, err)
-	}
-	if project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote {
-		return Error(c, fiber.StatusBadRequest, service.ErrProjectProfileUnsupportedPlatform.Error())
-	}
-	if h.billingCatalog == nil {
-		return Error(c, fiber.StatusServiceUnavailable, "billing catalog unavailable")
 	}
 	var req profileAnalysisInput
 	if len(c.Body()) > 0 {
@@ -755,21 +1027,7 @@ func (h *ProjectHandler) ProfileAnalysisQuote(c fiber.Ctx) error {
 	if err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	profile := project.Profile.Data()
-	if profile.SchemaVersion == 0 {
-		profile = model.NewProjectProfile()
-	}
-	fingerprint, key, err := profileAnalysisRequestFingerprint(project, profile, req)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("fingerprint profile analysis quote failed")
-		return Error(c, fiber.StatusServiceUnavailable, "profile analysis quote unavailable")
-	}
-	quote, err := h.billingCatalog.CreateTaskQuote(c.Context(), service.TaskQuoteRequest{UserID: userID, TaskType: model.TaskTypeProfileAnalysis, ExecutionProfile: req.ExecutionProfile, RequestFingerprint: fingerprint, IdempotencyScope: "profile-analysis-quote", IdempotencyKey: key})
-	if err != nil {
-		h.logger.Error().Err(err).Msg("create profile analysis quote failed")
-		return h.respondTaskError(c, err)
-	}
-	return Success(c, profileAnalysisQuoteResponse(quote))
+	return Success(c, fiber.Map{"id": "free-profile-analysis", "operation": "task.profile_analysis", "execution_profile": req.ExecutionProfile, "price_credits": 0, "list_price_credits": 0, "currency": "credits", "expires_at": time.Now().UTC().Add(24 * time.Hour)})
 }
 
 func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
@@ -786,38 +1044,27 @@ func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
 		QuoteID          string         `json:"quote_id"`
 		Answers          map[string]any `json:"answers"`
 		Samples          []string       `json:"samples"`
+		ExpectedRevision *int64         `json:"expected_revision"`
 	}
-	if err := c.Bind().Body(&req); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid analysis body")
-	}
-	if !req.QuoteConfirmed {
-		return Error(c, fiber.StatusBadRequest, "quote confirmation required")
+	if len(c.Body()) > 0 {
+		if err := c.Bind().Body(&req); err != nil {
+			return Error(c, fiber.StatusBadRequest, "invalid analysis body")
+		}
 	}
 	project, _, err := h.service.Get(c.Context(), userID, c.Params("id"))
 	if err != nil {
 		return h.respondProfileError(c, err)
 	}
-	if project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote {
-		return Error(c, fiber.StatusBadRequest, service.ErrProjectProfileUnsupportedPlatform.Error())
-	}
 	profile := project.Profile.Data()
 	if profile.SchemaVersion == 0 {
 		profile = model.NewProjectProfile()
 	}
+	if req.ExpectedRevision != nil && *req.ExpectedRevision != profile.Version {
+		return Error(c, fiber.StatusConflict, "profile_revision_conflict")
+	}
 	analysisInput, err := normalizeProfileAnalysisInput(profileAnalysisInput{ExecutionProfile: req.ExecutionProfile, Answers: req.Answers, Samples: req.Samples})
 	if err != nil {
 		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-	fingerprint, key, err := profileAnalysisRequestFingerprint(project, profile, analysisInput)
-	if err != nil {
-		return Error(c, fiber.StatusInternalServerError, "profile analysis quote unavailable")
-	}
-	if strings.TrimSpace(req.QuoteID) == "" || h.billingCatalog == nil {
-		return Error(c, fiber.StatusBadRequest, "profile analysis quote is required")
-	}
-	quote, err := h.billingCatalog.CreateTaskQuote(c.Context(), service.TaskQuoteRequest{UserID: userID, TaskType: model.TaskTypeProfileAnalysis, ExecutionProfile: analysisInput.ExecutionProfile, RequestFingerprint: fingerprint, IdempotencyScope: "profile-analysis-quote", IdempotencyKey: key})
-	if err != nil || quote.ID != strings.TrimSpace(req.QuoteID) {
-		return Error(c, fiber.StatusConflict, "profile analysis quote does not match the request")
 	}
 	// A second click while the current analysis is still admitted must not
 	// create another billable task. Failed and cancelled analyses may be retried.
@@ -828,9 +1075,12 @@ func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
 			return Success(c, fiber.Map{"task": existing, "profile": profile})
 		}
 	}
-	input := map[string]any{"project_id": project.ID, "platform": project.Platform, "profile_url": project.ProfileURL, "answers": analysisInput.Answers, "samples": analysisInput.Samples}
+	input := profileAgentInput(project, analysisInput.Answers, analysisInput.Samples)
 	expectedVersion := profile.Version
-	tasks, err := h.tasks.CreateManual(c.Context(), service.CreateManualParams{UserID: userID, ProjectID: project.ID, ExecutionProfile: analysisInput.ExecutionProfile, RequestedTaskType: model.TaskTypeProfileAnalysis, Prompt: project.ProfileURL, AgentInput: input, Quantity: 1, BillingQuoteID: quote.ID, BillingRequestFingerprint: fingerprint, ProfileAnalysisExpectedVersion: &expectedVersion})
+	if strings.TrimSpace(analysisInput.ExecutionProfile) == "" {
+		analysisInput.ExecutionProfile = "effective"
+	}
+	tasks, err := h.tasks.CreateManual(c.Context(), service.CreateManualParams{UserID: userID, ProjectID: project.ID, ExecutionProfile: analysisInput.ExecutionProfile, RequestedTaskType: model.TaskTypeProfileAnalysis, Prompt: project.ProfileURL, AgentInput: input, Quantity: 1, ProfileAnalysisExpectedVersion: &expectedVersion})
 	if err != nil {
 		return h.respondTaskError(c, err)
 	}
@@ -844,8 +1094,32 @@ func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
 	return Success(c, fiber.Map{"task": tasks[0], "profile": profile})
 }
 
-// GetProfileAnalysis returns the task state and, once delivered, the validated
-// draft artifact. It never writes the draft into the official project profile.
+// profileAgentInput keeps task input JSON-shaped before it reaches Pack schema
+// validation. In particular, []string is not a JSON array when passed through
+// the schema validator's generic map representation.
+func profileAgentInput(project *model.Project, answers map[string]any, samples []string) map[string]any {
+	values := make([]any, 0, len(samples))
+	for _, sample := range samples {
+		values = append(values, sample)
+	}
+	return map[string]any{
+		"project_id":  project.ID,
+		"platform":    project.Platform,
+		"profile_url": project.ProfileURL,
+		"answers":     answers,
+		"samples":     values,
+	}
+}
+
+// RefreshProfile and RetryProfile are free, explicit aliases for the same
+// server-owned profile Agent flow. They intentionally do not expose quote or
+// confirmation UI concepts.
+func (h *ProjectHandler) RefreshProfile(c fiber.Ctx) error { return h.StartProfileAnalysis(c) }
+func (h *ProjectHandler) RetryProfile(c fiber.Ctx) error   { return h.StartProfileAnalysis(c) }
+
+// GetProfileAnalysis returns only server-owned profile state and task metadata.
+// Profile results are submitted structurally through MCP and are never exposed
+// as downloadable task draft artifacts.
 func (h *ProjectHandler) GetProfileAnalysis(c fiber.Ctx) error {
 	userID := GetUserID(c)
 	if userID == "" {
@@ -866,42 +1140,6 @@ func (h *ProjectHandler) GetProfileAnalysis(c fiber.Ctx) error {
 		return Error(c, fiber.StatusNotFound, "profile analysis task not found")
 	}
 	result := fiber.Map{"status": task.Status, "task": taskAPIResponse(task, h.store), "profile": profile}
-	if task.Status != model.TaskStatusCompleted {
-		return Success(c, result)
-	}
-	files, err := h.tasks.GetVisibleFiles(c.Context(), task.ID)
-	if err != nil {
-		return Error(c, fiber.StatusInternalServerError, "failed to load profile analysis artifact")
-	}
-	var draftFile *model.TaskFile
-	for _, file := range files {
-		if file != nil && (file.FilePath == "output/profile-draft.json" || file.Role == "profile_draft") {
-			draftFile = file
-			break
-		}
-	}
-	if draftFile == nil {
-		return Success(c, result)
-	}
-	stream, _, err := h.tasks.GetFileStream(c.Context(), draftFile.ID)
-	if err != nil {
-		return Error(c, fiber.StatusInternalServerError, "failed to read profile analysis artifact")
-	}
-	defer stream.Close()
-	const maxProfileDraftBytes = 2 << 20
-	data, err := io.ReadAll(io.LimitReader(stream, maxProfileDraftBytes+1))
-	if err != nil || len(data) > maxProfileDraftBytes {
-		return Error(c, fiber.StatusBadRequest, "profile analysis artifact is invalid")
-	}
-	var draft model.ProjectProfile
-	if err := json.Unmarshal(data, &draft); err != nil || draft.Status != model.ProfileStatusDraft || draft.Validate() != nil {
-		return Error(c, fiber.StatusBadRequest, "profile analysis artifact is invalid")
-	}
-	// The Agent artifact deliberately contains only the draft schema. Keep the
-	// server-owned version and task link from the current project so Studio can
-	// submit the reviewed draft through the optimistic-concurrency confirmation
-	// endpoint without trusting client-provided bookkeeping.
-	result["draft"] = decorateProfileDraft(draft, profile)
 	return Success(c, result)
 }
 

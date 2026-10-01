@@ -47,12 +47,27 @@ func TestProjectRequestMapsAgentConfig(t *testing.T) {
 	}
 }
 
+func TestProjectConfigResponseRedactsSecrets(t *testing.T) {
+	redacted := redactedProjectConfig(map[string]any{
+		"app_id":     "public",
+		"app_secret": "hidden",
+		"nested":     map[string]any{"access_token": "hidden", "label": "kept"},
+	})
+	if redacted["app_secret"] != nil {
+		t.Fatalf("app_secret leaked: %#v", redacted)
+	}
+	nested, ok := redacted["nested"].(map[string]any)
+	if !ok || nested["access_token"] != nil || nested["label"] != "kept" {
+		t.Fatalf("nested secrets were not redacted: %#v", redacted)
+	}
+}
+
 func TestProjectHandlerRejectsInvalidAgentConfigWithStableBadRequest(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
 
 	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
-		"platform": model.PlatformArticle,
+		"platform": model.PlatformWechat,
 		"name":     "Article",
 		"agent_config": map[string]any{
 			"unexpected": true,
@@ -64,7 +79,7 @@ func TestProjectHandlerRejectsInvalidAgentConfigWithStableBadRequest(t *testing.
 	}
 
 	project := &model.Project{
-		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat,
 		Name: "Article", Status: model.ProjectStatusActive,
 	}
 	if err := repo.Projects().Create(context.Background(), project); err != nil {
@@ -84,7 +99,7 @@ func TestProjectHandlerRejectsLegacyWechatPublishMode(t *testing.T) {
 	userID := uuid.NewString()
 
 	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
-		"platform":            model.PlatformArticle,
+		"platform":            model.PlatformWechat,
 		"name":                "Article",
 		"wechat_publish_mode": "manual",
 	})
@@ -94,7 +109,7 @@ func TestProjectHandlerRejectsLegacyWechatPublishMode(t *testing.T) {
 	}
 
 	project := &model.Project{
-		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat,
 		Name: "Article", Status: model.ProjectStatusActive,
 	}
 	if err := repo.Projects().Create(context.Background(), project); err != nil {
@@ -246,7 +261,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
 	projectIDs := make(map[string]string)
-	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformHypit} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformHypit} {
 		projectID := uuid.NewString()
 		if err := repo.Projects().Create(t.Context(), &model.Project{
 			ID: projectID, UserID: userID, Platform: platform,
@@ -266,7 +281,11 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("non-admin projects = %#v, want article, seednote, and montage", items)
 	}
 	for _, item := range items {
-		platform := item.(map[string]any)["platform"].(string)
+		platformValue := item.(map[string]any)["platform"]
+		platform, _ := platformValue.(string)
+		if platform == "" {
+			t.Fatalf("project response omitted canonical platform: %#v", item)
+		}
 		if model.IsAdminOnlyProjectPlatform(platform) {
 			t.Fatalf("non-admin list exposed %q", platform)
 		}
@@ -289,7 +308,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("non-admin get montage project status = %d, want 200", resp.StatusCode)
 	}
 
-	resp = doProjectRequestAsNonAdmin(t, app, http.MethodPut, "/api/v1/projects/"+projectIDs[model.PlatformArticle], userID, map[string]any{
+	resp = doProjectRequestAsNonAdmin(t, app, http.MethodPut, "/api/v1/projects/"+projectIDs[model.PlatformWechat], userID, map[string]any{
 		"platform": model.PlatformMontage,
 		"name":     "Public montage",
 	})
@@ -318,6 +337,57 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	}
 	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 6 {
 		t.Fatalf("admin platform configs = %#v, want all six configured platforms", configs)
+	}
+}
+
+func TestProjectHandlerCreateAutomaticallyQueuesFreeProfileAnalysis(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	projectSvc := service.NewProjectService(repo, &logger)
+	h := NewProjectHandler(projectSvc, &logger)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc.SetRuntimeDispatcher(&availableRuntimeDispatcher{})
+	h.SetTaskService(taskSvc)
+
+	userID := uuid.NewString()
+	if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: uuid.NewString() + "@test.local", Password: "x", InviteCode: uuid.NewString()[:12], Tier: model.TierFree}); err != nil {
+		t.Fatal(err)
+	}
+	app := fiber.New()
+	app.Post("/projects", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		c.Locals("user", &model.User{ID: userID, IsAdmin: true})
+		return h.Create(c)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(`{"platform":"wechat","name":"自动画像项目","wechat_app_id":"wx-test","wechat_secret":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("create status = %d, body = %s", resp.StatusCode, readResponseBody(t, resp))
+	}
+	data := decodeBody(t, resp)["data"].(map[string]any)
+	initialization := data["profile_initialization"].(map[string]any)
+	if initialization["status"] != model.ProfileInitializationQueued {
+		t.Fatalf("profile initialization = %#v, want queued", initialization)
+	}
+	project := data["project"].(map[string]any)
+	projectID := project["id"].(string)
+	tasks, err := repo.Tasks().FindByUserID(t.Context(), userID, projectID, "", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Type != model.TaskTypeProfileAnalysis || tasks[0].BillingPriceCredits != 0 {
+		t.Fatalf("created profile tasks = %#v, want one free profile task", tasks)
+	}
+	h.ensureProfileInitialization(t.Context(), userID, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat})
+	tasks, err = repo.Tasks().FindByUserID(t.Context(), userID, projectID, "", 0, 10)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("repeated initialization created duplicate tasks: count=%d err=%v", len(tasks), err)
 	}
 }
 
@@ -438,7 +508,7 @@ func TestProjectHandler_AcceptsImageRatioForMontage(t *testing.T) {
 func TestProjectHandler_RejectsMontageDefaultsForArticle(t *testing.T) {
 	app, _ := setupProjectDeleteHandlerTest(t)
 	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", uuid.NewString(), map[string]any{
-		"platform": model.PlatformArticle,
+		"platform": model.PlatformWechat,
 		"name":     "Article",
 		"montage_defaults": map[string]any{
 			"default_pipeline": "social-short",
@@ -616,7 +686,7 @@ func TestProjectCreateFinalizesReferenceSessionAndPersistsAssetID(t *testing.T) 
 	}
 
 	resp := doRequest(t, app, "POST", "/api/v1/projects", userID, map[string]any{
-		"platform":      model.PlatformArticle,
+		"platform":      model.PlatformWechat,
 		"name":          "公众号项目",
 		"wechat_app_id": "wx-app",
 		"wechat_secret": "secret",
@@ -686,7 +756,7 @@ func TestProjectUpdateReferenceNullClearsAndOmissionPreserves(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.Projects().Create(t.Context(), &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "brand",
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "brand",
 		ReferenceImageAssetID: asset.ID, Status: model.ProjectStatusActive,
 		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
@@ -718,7 +788,7 @@ func TestProjectUpdateReferenceSelectionReplacesAndFinalizes(t *testing.T) {
 	projectID := uuid.NewString()
 	sessionID := "replacement-session"
 	if err := repo.Projects().Create(t.Context(), &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "brand",
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "brand",
 		ReferenceImageAssetID: "old-asset", Status: model.ProjectStatusActive,
 		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
@@ -784,7 +854,7 @@ func TestProjectReferenceSelectionMapsErrorsBeforePersistence(t *testing.T) {
 			}
 			store.statErr = tt.storeError
 			resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
-				"platform": model.PlatformArticle, "name": "brand", "reference_image": tt.selection,
+				"platform": model.PlatformWechat, "name": "brand", "reference_image": tt.selection,
 			})
 			if resp.StatusCode != tt.wantStatus {
 				t.Fatalf("status = %d want %d body=%v", resp.StatusCode, tt.wantStatus, decodeBody(t, resp))
@@ -809,7 +879,7 @@ func TestProjectReferenceViewsAreSignedForCreateUpdateGetAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
-		"platform": model.PlatformArticle, "name": "brand", "wechat_app_id": "wx-app", "wechat_secret": "secret",
+		"platform": model.PlatformWechat, "name": "brand", "wechat_app_id": "wx-app", "wechat_secret": "secret",
 		"reference_image": map[string]any{"asset_id": asset.ID},
 	})
 	if created.StatusCode != fiber.StatusOK {
@@ -860,7 +930,7 @@ func TestProjectCreateSigningFailureDoesNotPersist(t *testing.T) {
 	store.downloadErr = errors.New("signer unavailable")
 
 	resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{
-		"platform": model.PlatformArticle, "name": "must-not-persist",
+		"platform": model.PlatformWechat, "name": "must-not-persist",
 		"reference_image": map[string]any{"asset_id": asset.ID},
 	})
 	if resp.StatusCode != fiber.StatusServiceUnavailable {
@@ -899,7 +969,7 @@ func TestProjectUpdateSigningFailureDoesNotMutate(t *testing.T) {
 				}
 			}
 			if err := repo.Projects().Create(t.Context(), &model.Project{
-				ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "before",
+				ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "before",
 				ReferenceImageAssetID: "asset-current", Status: model.ProjectStatusActive,
 			}); err != nil {
 				t.Fatal(err)
@@ -938,7 +1008,7 @@ func TestProjectUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testi
 		}
 	}
 	if err := base.Projects().Create(t.Context(), &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "before",
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "before",
 		ReferenceImageAssetID: "asset-a", Status: model.ProjectStatusActive,
 		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
@@ -1000,7 +1070,7 @@ func TestProjectUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *
 		}
 	}
 	if err := base.Projects().Create(t.Context(), &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "before",
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "before",
 		ReferenceImageAssetID: assetIDs[0], Status: model.ProjectStatusActive,
 		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
@@ -1050,7 +1120,7 @@ func TestProjectUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := uuid.NewString()
 	if err := base.Projects().Create(t.Context(), &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle,
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat,
 		Name: "before", Status: model.ProjectStatusActive,
 		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
@@ -1090,7 +1160,7 @@ func TestProjectHandler_UpdateFinalizesAvatarUploadSession(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "公众号项目",
 		Status:   model.ProjectStatusActive,
 		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
@@ -1210,7 +1280,7 @@ func TestProjectHandler_DeleteDoesNotExposeMemoryProviderFailure(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := uuid.NewString()
 	if err := repo.Projects().Create(ctx, &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive,
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -1243,7 +1313,7 @@ func TestProjectHandlerMemoryPreviewRequiresOwnershipAndDoesNotCache(t *testing.
 	ctx := context.Background()
 	ownerID := uuid.NewString()
 	projectID := uuid.NewString()
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformArticle, Name: "Memory", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformWechat, Name: "Memory", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
@@ -1300,7 +1370,7 @@ func TestProjectHandlerMemoryPreviewBoundsSerializedResponse(t *testing.T) {
 	ctx := context.Background()
 	ownerID := uuid.NewString()
 	projectID := uuid.NewString()
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformArticle, Name: "Memory", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformWechat, Name: "Memory", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()

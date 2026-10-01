@@ -10,7 +10,7 @@ function project(overrides: Partial<Project> = {}): Project {
   return {
     id: 'project-1',
     user_id: 'user-1',
-    platform: 'article',
+    platform: 'wechat',
     name: '公众号项目',
     avatar_url: '',
     profile_url: '',
@@ -33,7 +33,7 @@ function project(overrides: Partial<Project> = {}): Project {
 describe('ProjectCard', () => {
   beforeEach(() => {
     vi.spyOn(api.projects, 'feedback').mockResolvedValue({
-      project_id: 'project-1', platform: 'article', timezone: 'Asia/Shanghai', feedback_paused: false,
+      project_id: 'project-1', platform: 'wechat', timezone: 'Asia/Shanghai', feedback_paused: false,
       analytics: { revision: 3, status: 'ready', content_count: 6, valid_observation_count: 5 },
       queue: { counts: { queued: 1, running: 0, succeeded: 2, failed: 0, skipped: 1, blocked: 0 }, last_success_at: null },
       next_runs: {}, strategy: { id: '', revision: 0, status: 'unavailable' },
@@ -98,6 +98,15 @@ describe('ProjectCard', () => {
     const topicPoolButton = screen.getByRole('button', { name: '选题池：公众号项目' })
     expect(topicPoolButton).toHaveTextContent('选题池')
     expect(topicPoolButton).not.toHaveTextContent('0')
+  })
+
+  it.each(['wechat', 'seednote', 'moments'] as const)('shows the project profile action for %s projects', (platform) => {
+    const onProfile = vi.fn()
+    render(<ProjectCard project={project({ platform })} onProfile={onProfile} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '项目画像：公众号项目' }))
+    expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ platform }))
+    expect(screen.queryByRole('button', { name: /配置账号画像/ })).not.toBeInTheDocument()
   })
 
   it('shows restore instead of archive for archived projects', () => {

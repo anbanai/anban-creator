@@ -30,7 +30,7 @@ type reconcileTestDispatcher struct {
 var _ RuntimeDispatcher = (*reconcileTestDispatcher)(nil)
 
 func (*reconcileTestDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
-	return srvconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+	return srvconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
 }
 
 func (*reconcileTestDispatcher) Scope() string { return "test" }

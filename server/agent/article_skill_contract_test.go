@@ -75,8 +75,8 @@ func TestArticleSkillContracts_ImageControlsSizesAndTextPolicy(t *testing.T) {
 func TestArticleIdentityFailuresAreNonRetryableAndRecoverable(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "harness", "skills", "article-visual-design", "SKILL.md"),
 	}
@@ -99,8 +99,8 @@ func TestArticleIdentityFailuresAreNonRetryableAndRecoverable(t *testing.T) {
 func TestArticleClaudeAgentUsesDynamicLifecycleTasks(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "packs", "article", "agent.claude.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "packs", "wechat-article", "agent.claude.md"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -122,8 +122,8 @@ func TestArticleClaudeAgentUsesDynamicLifecycleTasks(t *testing.T) {
 func TestArticleCodexAgentUsesDynamicLifecycleTools(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "harness", "agents", "article.toml"),
-		filepath.Join(root, "harness", "packs", "article", "agent.codex.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
+		filepath.Join(root, "harness", "packs", "wechat-article", "agent.codex.toml"),
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -148,9 +148,9 @@ func TestArticleAgentsBindMarketingScanToFinalMarkdown(t *testing.T) {
 		path        string
 		scannerPath string
 	}{
-		{filepath.Join(root, "harness", "packs", "article", "agent.claude.md"), "$CLAUDE_PLUGIN_ROOT/skills/content-writing/scripts/scan-article-marketing.mjs"},
-		{filepath.Join(root, "harness", "packs", "article", "agent.codex.toml"), "__PLUGIN_ROOT__/skills/content-writing/scripts/scan-article-marketing.mjs"},
-		{filepath.Join(root, "harness", "packs", "article", "agent.dsh.yml"), "$DSH_HOME/.agent-presets/article/skills/content-writing/scripts/scan-article-marketing.mjs"},
+		{filepath.Join(root, "harness", "packs", "wechat-article", "agent.claude.md"), "$CLAUDE_PLUGIN_ROOT/skills/content-writing/scripts/scan-article-marketing.mjs"},
+		{filepath.Join(root, "harness", "packs", "wechat-article", "agent.codex.toml"), "__PLUGIN_ROOT__/skills/content-writing/scripts/scan-article-marketing.mjs"},
+		{filepath.Join(root, "harness", "packs", "wechat-article", "agent.dsh.yml"), "$DSH_HOME/.agent-presets/wechat-article/skills/content-writing/scripts/scan-article-marketing.mjs"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
@@ -248,7 +248,7 @@ func TestArticleSkillUsesRuntimeOwnedOutputDirectory(t *testing.T) {
 func TestArticleSkillContracts_ContentOnlyDoesNotRequireCoverReference(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
 		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "harness", "skills", "article-visual-design", "SKILL.md"),
 	}
@@ -338,8 +338,8 @@ func TestArticleSkillContracts_WechatPreflightLivesInSkills(t *testing.T) {
 
 	articlePaths := []string{
 		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 	}
 	for _, path := range articlePaths {
 		t.Run(path, func(t *testing.T) {
@@ -389,8 +389,8 @@ func TestArticleSkillContracts_WechatVisualQualityGate(t *testing.T) {
 	root := articleContractRepoRoot(t)
 
 	for _, path := range []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 	} {
 		t.Run(path, func(t *testing.T) {
 			text := readArticleContractFile(t, path)
@@ -569,8 +569,8 @@ func TestArticleSkillContracts_WechatPublishGateRequiresViralAuditAndCoverEffect
 	root := articleContractRepoRoot(t)
 
 	for _, path := range []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
 	} {
 		t.Run(path, func(t *testing.T) {
@@ -656,8 +656,8 @@ func TestArticleAgentsSeparateCoreFailuresFromVisualWarnings(t *testing.T) {
 		path       string
 		errorCodes []string
 	}{
-		{filepath.Join(root, "harness", "agents", "article.md"), []string{"article_image_mode_missing", "article_mcp_call_failed"}},
-		{filepath.Join(root, "harness", "agents", "article.toml"), []string{"article_image_mode_missing", "article_mcp_call_failed"}},
+		{filepath.Join(root, "harness", "agents", "wechat-article.md"), []string{"article_image_mode_missing", "article_mcp_call_failed"}},
+		{filepath.Join(root, "harness", "agents", "wechat-article.toml"), []string{"article_image_mode_missing", "article_mcp_call_failed"}},
 		{filepath.Join(root, "harness", "skills", "article", "SKILL.md"), []string{"article_image_mode_missing", "article_mcp_call_failed"}},
 	}
 	for _, tc := range coreCases {
@@ -690,8 +690,8 @@ func TestArticleAgentsSeparateCoreFailuresFromVisualWarnings(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
 		filepath.Join(root, "harness", "skills", "article-cover-design", "SKILL.md"),
 		filepath.Join(root, "harness", "skills", "article-visual-design", "SKILL.md"),
@@ -768,8 +768,8 @@ func TestArticleRenderTemplateFailureHasNoConvertMarkdownFallback(t *testing.T) 
 
 	root := articleContractRepoRoot(t)
 	for _, path := range []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
 	} {
 		if scopes := articleConvertMarkdownFallbackScopes(readArticleContractFile(t, path)); len(scopes) != 0 {
@@ -781,8 +781,8 @@ func TestArticleRenderTemplateFailureHasNoConvertMarkdownFallback(t *testing.T) 
 func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 		filepath.Join(root, "harness", "skills", "article", "SKILL.md"),
 	}
 
@@ -791,10 +791,10 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 		normalizedBody := strings.ReplaceAll(body, "`", "")
 		for _, required := range []string{
 			"托管上下文提供的项目 ID",
-			"恰好一个归属当前用户的 Article 项目",
-			"零个或多个归属当前用户的 Article 项目",
+			"返回恰好一个归属当前用户的 公众号项目",
+			"返回零个或多个归属当前用户的 公众号项目",
 			"不得让用户选择",
-			"article_project_resolution_failed",
+			"wechat_project_resolution_failed",
 			`"stage":"project_resolution"`,
 			`"resume_from":"project_resolution"`,
 			"必需 MCP 能力调用不可用或失败",
@@ -855,8 +855,8 @@ func TestArticleSkillsDoNotReferenceRemovedGenerationMCPTools(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	removed := []string{"write_article", "research_topics", "optimize_seo", "generate_outline"}
 	files := []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 	}
 	for _, plugin := range []string{"harness"} {
 		for _, skill := range []string{"content-writing", "article-research", "seo-optimization"} {
@@ -911,8 +911,8 @@ func TestArticleSkillsDeclareSkillOwnedGenerationAndServerDiscoveryTools(t *test
 func TestArticleAgentsRouteCreativeGenerationToSkills(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	for _, file := range []string{
-		filepath.Join(root, "harness", "agents", "article.md"),
-		filepath.Join(root, "harness", "agents", "article.toml"),
+		filepath.Join(root, "harness", "agents", "wechat-article.md"),
+		filepath.Join(root, "harness", "agents", "wechat-article.toml"),
 	} {
 		body := readArticleContractFile(t, file)
 		assertArticleContractContainsAll(t, file, body,

@@ -102,7 +102,7 @@ func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 
 func TestDockerDispatcherFencesTagRaceBeforeCopyingWorkloadToken(t *testing.T) {
 	const (
-		mutableTag   = "registry.example.com/creator-agent-article:latest"
+		mutableTag   = "registry.example.com/creator-agent-wechat:latest"
 		racedImageID = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	)
 	engine := newFakeDockerEngine()
@@ -112,7 +112,7 @@ func TestDockerDispatcherFencesTagRaceBeforeCopyingWorkloadToken(t *testing.T) {
 		dockerDispatcherTestImageID: dockerDispatcherTestImageID,
 	}
 	runtimeImages := dockerDispatcherTestImages()
-	runtimeImages[model.PlatformArticle] = mutableTag
+	runtimeImages[model.PlatformWechat] = mutableTag
 	dispatcher, err := NewDockerDispatcher(
 		runtimeImages, dockerDispatcherTestConfig(), "http://server:8080",
 		dockerDispatcherTestTokens(t), engine, &testProjectMemoryStore{}, time.Now,
@@ -485,7 +485,7 @@ func TestDockerDispatcherValidatesBeforeDockerMutation(t *testing.T) {
 	}{
 		{name: "missing execution", task: dockerDispatcherTestTask(), want: "execution is required"},
 		{name: "incomplete task", execution: dockerDispatcherTestExecution(), task: &model.Task{ID: "docker-task-1"}, want: "task identity is required"},
-		{name: "task mismatch", execution: dockerDispatcherTestExecution(), task: &model.Task{ID: "other", UserID: "u", ProjectID: "p", Type: model.PlatformArticle}, want: "execution task identity mismatch"},
+		{name: "task mismatch", execution: dockerDispatcherTestExecution(), task: &model.Task{ID: "other", UserID: "u", ProjectID: "p", Type: model.TaskTypeWechatArticle}, want: "execution task identity mismatch"},
 		{name: "missing runtime", execution: func() *model.TaskExecution { e := dockerDispatcherTestExecution(); e.RuntimeImage = ""; return e }(), task: dockerDispatcherTestTask(), want: "runtime identity is required"},
 		{name: "initial runtime drift", execution: func() *model.TaskExecution { e := dockerDispatcherTestExecution(); e.RuntimeImage = "other"; return e }(), task: dockerDispatcherTestTask(), want: "initial runtime identity mismatch"},
 	}
@@ -683,16 +683,18 @@ func dockerDispatcherTestConfig() srvconfig.DockerConfig {
 
 func dockerDispatcherTestImages() srvconfig.RuntimeImages {
 	return srvconfig.RuntimeImages{
-		model.PlatformArticle:  "registry.example.com/creator-agent-article@sha256:article",
+		model.PlatformWechat:   "registry.example.com/creator-agent-wechat@sha256:article",
 		model.PlatformSeednote: "registry.example.com/creator-agent-seednote@sha256:seednote",
 		model.PlatformMontage:  "registry.example.com/creator-agent-montage@sha256:montage",
+		"profile":              "registry.example.com/creator-agent-profile@sha256:profile",
+		"feedback":             "registry.example.com/creator-agent-feedback@sha256:feedback",
 	}
 }
 
 func dockerDispatcherTestExecution() *model.TaskExecution {
 	return &model.TaskExecution{
 		ID: "docker-execution-1", TaskID: "docker-task-1", Attempt: 1,
-		RuntimeProfile: model.PlatformArticle, RuntimeImage: dockerDispatcherTestImages()[model.PlatformArticle],
+		RuntimeProfile: model.PlatformWechat, RuntimeImage: dockerDispatcherTestImages()[model.PlatformWechat],
 	}
 }
 
@@ -703,7 +705,7 @@ func bindDockerRuntimeIdentity(execution *model.TaskExecution, identity *model.R
 }
 
 func dockerDispatcherTestTask() *model.Task {
-	return &model.Task{ID: "docker-task-1", UserID: "docker-user-1", ProjectID: "docker-project-1", Type: model.PlatformArticle}
+	return &model.Task{ID: "docker-task-1", UserID: "docker-user-1", ProjectID: "docker-project-1", Type: model.TaskTypeWechatArticle}
 }
 
 func dockerDispatcherTestImage() imageTypes.InspectResponse {
@@ -760,7 +762,7 @@ func newFakeDockerEngine() *fakeDockerEngine {
 	image := dockerDispatcherTestImage()
 	return &fakeDockerEngine{
 		images: map[string]imageTypes.InspectResponse{
-			dockerDispatcherTestImages()[model.PlatformArticle]:        image,
+			dockerDispatcherTestImages()[model.PlatformWechat]:         image,
 			"registry.example.com/creator-agent-montage@sha256:parent": image,
 		},
 		volumes: map[string]volume.Volume{}, containers: map[string]containertypes.InspectResponse{},

@@ -41,7 +41,7 @@ func TestPlatformImageRatiosMatchBusinessContracts(t *testing.T) {
 		want     []string
 	}{
 		{PlatformSeednote, []string{"3:4", "1:1", "4:3"}},
-		{PlatformArticle, []string{"16:9", "4:3", "1:1"}},
+		{PlatformWechat, []string{"16:9", "4:3", "1:1", "3:4"}},
 		{PlatformMoments, []string{"3:4", "1:1"}},
 		{PlatformEcommerce, []string{"1:1", "3:4", "4:3", "16:9"}},
 		{PlatformMontage, []string{"9:16", "16:9", "1:1"}},

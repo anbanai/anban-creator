@@ -647,7 +647,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-	requiredRuntimeProfiles := []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage}
+	requiredRuntimeProfiles := []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, "profile", "feedback"}
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -659,7 +659,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != model.PlatformArticle && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformHypit {
+		if profile != model.PlatformWechat && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformHypit && profile != "profile" && profile != "feedback" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -713,7 +713,7 @@ func canonicalRuntimeProfile(taskType string) string {
 	if pack, ok := agentpack.Default().ForTaskType(strings.TrimSpace(taskType)); ok {
 		return pack.Runtime.Profile
 	}
-	return model.PlatformArticle
+	return model.PlatformWechat
 }
 
 func (c RuntimeImages) ForTask(taskType string) RuntimeImageSelection {
@@ -1019,6 +1019,15 @@ func expandEnvVars(data []byte) []byte {
 
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
+	if c.Claude.RuntimeImages == nil {
+		c.Claude.RuntimeImages = RuntimeImages{}
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["profile"]) == "" {
+		c.Claude.RuntimeImages["profile"] = "creator-agent-profile:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["feedback"]) == "" {
+		c.Claude.RuntimeImages["feedback"] = "creator-agent-feedback:latest"
+	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080
 	}

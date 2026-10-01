@@ -7,7 +7,7 @@ import (
 	"github.com/anbanai/anban-creator/server/agentpack"
 )
 
-func TestHypitManagedPackDeliveryContract(t *testing.T) {
+func TestHypitPluginDeliveryContract(t *testing.T) {
 	catalog, err := agentpack.LoadCatalog(filepath.Join("..", "..", "harness"))
 	if err != nil {
 		t.Fatal(err)
@@ -18,7 +18,7 @@ func TestHypitManagedPackDeliveryContract(t *testing.T) {
 			if !ok {
 				t.Fatal("video replication has no managed task route")
 			}
-			if pack.Kind != agentpack.KindManaged || pack.Runtime.Profile != "hypit" || pack.Runtime.Adapter != agentpack.AdapterStandard {
+			if pack.Kind != agentpack.KindPlugin || pack.Runtime.Profile != "hypit" || pack.Runtime.Adapter != agentpack.AdapterStandard {
 				t.Fatalf("wrong execution route: %#v", pack)
 			}
 			project, ok := c.ForProjectPlatform("hypit")

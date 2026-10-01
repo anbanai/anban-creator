@@ -148,7 +148,7 @@ test("large bootstrap scope and streaming digest mismatch rollback", async () =>
     content_sha256: "a".repeat(64),
   };
   expect(() => preflightBootstrapFiles([asset], "hypit")).not.toThrow();
-  expect(() => preflightBootstrapFiles([asset], "article")).toThrow();
+  expect(() => preflightBootstrapFiles([asset], "wechat-article")).toThrow();
   expect(() =>
     preflightBootstrapFiles(
       [{ ...asset, path: "runtime-profile.json" }],

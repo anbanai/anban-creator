@@ -120,7 +120,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "article", "moments", "viral_analysis", "profile_analysis", "ecommerce", "montage", "hypit"]),
+  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral_analysis", "profile_analysis", "ecommerce", "montage", "hypit"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -213,7 +213,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 export const planSchema = z.object({
   project_id: z.string().optional(),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "article", "montage", "hypit"]),
+  type: z.enum(["seednote", "wechat-article", "wechat-picture", "montage", "hypit"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_capability_key: z.string().max(50).optional(),
@@ -252,7 +252,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "article", "moments", "ecommerce", "montage", "hypit"]),
+  platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "hypit"]).or(z.literal('')),
   agent_config: z.record(z.string(), z.unknown()).default({}),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
@@ -280,7 +280,7 @@ export const projectSchema = z.object({
   portrait_reference_image: referenceImageSelectionSchema.nullable().optional(),
   image_ratio: imageRatioSchema.optional(),
 }).refine((data) => {
-  if (data.platform === 'article') {
+  if (data.platform === 'wechat') {
     return !!data.wechat_app_id?.trim()
   }
   return true

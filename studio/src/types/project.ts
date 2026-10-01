@@ -3,20 +3,41 @@ import type { MontagePreferences } from './montage'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { ImageAnalysis } from './image-analysis'
 
-export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'hypit'
+/** @deprecated Projects are channel-neutral; keep this only for migrated API rows. */
+export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'hypit'
+// The open string branch keeps migrated/plugin-only rows readable while the
+// product picker exposes only the three supported channels above.
+export type OutputChannel = 'wechat-article' | 'seednote' | 'wechat-picture' | (string & {})
 export type ProjectStatus = 'active' | 'archived'
 export interface ProjectConfig {
   wechat_app_id?: string
   wechat_secret?: string
 }
 
+export interface ProjectAgentConfig {
+  id: string
+  project_id: string
+  agent_id: string
+  /** Server redacts credential-like keys before returning this object. */
+  config: Record<string, unknown>
+}
+
+export interface ProjectChannelConfig {
+  id: string
+  project_id: string
+  channel: string
+  /** Server redacts credential-like keys before returning this object. */
+  config: Record<string, unknown>
+}
+
 export interface Project {
   id: string
   user_id: string
-  platform: ProjectPlatform
+	/** @deprecated Present only on migrated legacy rows. */
+	platform?: ProjectPlatform
   name: string
   avatar_url: string
-  profile_url: string
+	profile_url?: string
   description?: string
   /** @deprecated use instructions */
   positioning?: string
@@ -38,7 +59,8 @@ export interface Project {
   max_concurrent_tasks: number
   timezone?: string
   feedback_paused?: boolean
-  config: ProjectConfig
+	/** @deprecated credentials now live in project channel configs. */
+	config?: ProjectConfig
   status: ProjectStatus
   stats?: ProjectStats
   created_at: string
@@ -105,6 +127,8 @@ export interface ProfileDimension {
 export interface ProjectProfile {
   schema_version: number
   status: 'draft' | 'confirmed'
+  initialization_status: 'not_started' | 'queued' | 'running' | 'ready' | 'failed'
+  last_error?: string
   version: number
   analysis_task_id?: string
   dimensions: Record<'identity' | 'style' | 'audience' | 'platforms' | 'preferences' | 'memory', ProfileDimension>
@@ -120,7 +144,6 @@ export interface ProfileAnalysisResponse {
   status: ProfileAnalysisStatus
   task?: { id: string; status: TaskStatusLike; error_message?: string }
   profile: ProjectProfile
-  draft?: ProjectProfile
 }
 
 export interface ProjectMemoryFile {
@@ -139,7 +162,8 @@ export interface ProjectMemory {
 }
 
 export interface CreateProjectRequest {
-  platform: string
+  /** @deprecated ignored for new projects; retained for migration compatibility. */
+  platform?: string
   name?: string
   profile_url?: string
   avatar_url?: string

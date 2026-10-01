@@ -142,7 +142,6 @@ export function TaskContextSummary({
   const snapshot = task.project_snapshot
   const hasSnapshot = Boolean(snapshot?.platform)
   const projectName = hasSnapshot ? snapshot?.project_name || '—' : project?.name || '—'
-  const platform = hasSnapshot ? snapshot?.platform || task.type : project?.platform || task.type
   const visualStyle = hasSnapshot
     ? snapshot?.visual_style
     : task.overrides?.visual_style || project?.visual_style
@@ -189,7 +188,7 @@ export function TaskContextSummary({
             icon={SlidersHorizontal}
             index={1}
             label="创作配置"
-            value={contentTypeDisplayName(platform)}
+            value={contentTypeDisplayName(task.type)}
             detail={configurationDetail}
             neutral={configurationDetail === '未设置'}
             onClick={() => onOpenTab('configuration')}

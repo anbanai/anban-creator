@@ -20,7 +20,11 @@ func setupTaskLifecycleTest(t *testing.T, taskType string) (*TaskService, reposi
 	ctx := context.Background()
 	repo := repository.New(setupTaskTestDB(t))
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, taskType)
+	projectPlatform := taskType
+	if taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture {
+		projectPlatform = model.PlatformWechat
+	}
+	projectID := createTestProject(t, repo, userID, projectPlatform)
 	executionID := uuid.NewString()
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: taskType,
@@ -178,7 +182,7 @@ func TestTaskLifecycleAdvancesSequentiallyAndIsIdempotent(t *testing.T) {
 
 func TestArticleLifecycleAppendsServerOwnedPublicationStages(t *testing.T) {
 	ctx := context.Background()
-	svc, _, task, execution := setupTaskLifecycleTest(t, model.PlatformArticle)
+	svc, _, task, execution := setupTaskLifecycleTest(t, model.TaskTypeWechatArticle)
 	lifecycle, err := svc.SetTaskProgressPlan(ctx, task.ID, execution.ID, validLifecyclePlan())
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +240,7 @@ func TestWechatPublicationLifecycleMapping(t *testing.T) {
 
 func TestSyncWechatPublicationLifecyclePersistsOnlyVisibleChanges(t *testing.T) {
 	ctx := context.Background()
-	svc, repo, task, execution := setupTaskLifecycleTest(t, model.PlatformArticle)
+	svc, repo, task, execution := setupTaskLifecycleTest(t, model.TaskTypeWechatArticle)
 	created, err := svc.SetTaskProgressPlan(ctx, task.ID, execution.ID, validLifecyclePlan())
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +274,7 @@ func TestSyncWechatPublicationLifecyclePersistsOnlyVisibleChanges(t *testing.T) 
 
 func TestSyncWechatPublicationLifecycleIgnoresPreviousExecutionPublication(t *testing.T) {
 	ctx := context.Background()
-	svc, repo, task, execution := setupTaskLifecycleTest(t, model.PlatformArticle)
+	svc, repo, task, execution := setupTaskLifecycleTest(t, model.TaskTypeWechatArticle)
 	if _, err := svc.SetTaskProgressPlan(ctx, task.ID, execution.ID, validLifecyclePlan()); err != nil {
 		t.Fatal(err)
 	}

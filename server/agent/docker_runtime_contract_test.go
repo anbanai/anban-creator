@@ -55,11 +55,11 @@ func TestCreatorAgentImageNamingContract(t *testing.T) {
 }
 
 func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.T) {
-	validMakefile := "AGENT_IMAGE := creator-agent-article:latest\n"
+	validMakefile := "AGENT_IMAGE := creator-agent-wechat:latest\n"
 	validCompose := `services:
 	  server:
 	    environment:
-	      ANBAN_AGENT_IMAGE_ARTICLE: "creator-agent-article:latest"
+	      ANBAN_AGENT_IMAGE_WECHAT: "creator-agent-wechat:latest"
 `
 
 	for _, tc := range []struct {
@@ -69,12 +69,12 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 	}{
 		{
 			name:     "Make variable name decoy",
-			makefile: "LEGACY_AGENT_IMAGE := creator-agent-article:latest\n",
+			makefile: "LEGACY_AGENT_IMAGE := creator-agent-wechat:latest\n",
 			compose:  validCompose,
 		},
 		{
 			name:     "commented Make assignment",
-			makefile: "# AGENT_IMAGE := creator-agent-article:latest\n",
+			makefile: "# AGENT_IMAGE := creator-agent-wechat:latest\n",
 			compose:  validCompose,
 		},
 		{
@@ -97,14 +97,14 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 			makefile: validMakefile,
 			compose: `services:
 	  server:
-	    image: creator-agent-article:latest
+	    image: creator-agent-wechat:latest
 `,
 		},
 		{
 			name:     "persistent Agent service remains",
 			makefile: validMakefile,
 			compose: validCompose + `  agent:
-	    image: creator-agent-article:latest
+	    image: creator-agent-wechat:latest
 `,
 		},
 		{
@@ -117,7 +117,7 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 		{
 			name:     "duplicate Compose environment overrides expected value",
 			makefile: validMakefile,
-			compose:  validCompose + "      ANBAN_AGENT_IMAGE_ARTICLE: \"wrong-agent:latest\"\n",
+			compose:  validCompose + "      ANBAN_AGENT_IMAGE_WECHAT: \"wrong-agent:latest\"\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,8 +133,8 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 		return fmt.Errorf("Makefile must not retain anban-creator-agent or anban-agent identities")
 	}
 	makeValues := makeVariableAssignments(makefile, "AGENT_IMAGE")
-	if len(makeValues) != 1 || makeValues[0] != "creator-agent-article:latest" {
-		return fmt.Errorf("Makefile must define AGENT_IMAGE exactly once with value creator-agent-article:latest")
+	if len(makeValues) != 1 || makeValues[0] != "creator-agent-wechat:latest" {
+		return fmt.Errorf("Makefile must define AGENT_IMAGE exactly once with value creator-agent-wechat:latest")
 	}
 
 	if containsRetiredAgentIdentity(compose) {
@@ -143,8 +143,8 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 	if strings.Contains("\n"+compose, "\n  agent:\n") {
 		return fmt.Errorf("docker-compose.yml must not define a persistent agent service")
 	}
-	values := composeEnvironmentAssignments(compose, "server", "ANBAN_AGENT_IMAGE_ARTICLE")
-	if len(values) != 1 || values[0] != `"creator-agent-article:latest"` {
+	values := composeEnvironmentAssignments(compose, "server", "ANBAN_AGENT_IMAGE_WECHAT")
+	if len(values) != 1 || values[0] != `"creator-agent-wechat:latest"` {
 		return fmt.Errorf("docker-compose.yml must configure the Server Article runtime image exactly once")
 	}
 	return nil
@@ -336,7 +336,7 @@ func makeVariableAssignments(text, variable string) []string {
 
 func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 	root := repositoryRoot(t)
-	articlePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-article")
+	articlePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat")
 	seednotePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote")
 	article := readTextFile(t, articlePath)
 	seednote := readTextFile(t, seednotePath)
@@ -373,7 +373,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 
 func TestDockerRuntimeProfiles(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"deploy/docker/Dockerfile.agent-article", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage"} {
+	for _, name := range []string{"deploy/docker/Dockerfile.agent-wechat", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage"} {
 		path := filepath.Join(root, name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
@@ -530,7 +530,7 @@ func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
 }
 
 func TestArticleAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
-	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-article")
+	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-wechat")
 	body := readTextFile(t, path)
 	from := strings.Index(body, "FROM node:bookworm-slim")
 	if from < 0 {
@@ -573,7 +573,7 @@ func TestDockerRuntimeAgentImageAndKubernetesJobAgreeOnNumericIdentity(t *testin
 		t.Fatalf("Job identity = %d:%d, want numeric 1000:1000", kubernetesAgentUID, kubernetesAgentGID)
 	}
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage", "Dockerfile.agent-hypit"} {
+	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage", "Dockerfile.agent-hypit"} {
 		path := filepath.Join(root, "deploy", "docker", name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
@@ -618,7 +618,7 @@ func TestDockerRuntimeAgentSourceUsesFixedOneShotIdentity(t *testing.T) {
 
 func TestDockerRuntimeAgentLoadsImmutablePluginDirectly(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		path := filepath.Join(root, "deploy", "docker", name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
@@ -646,7 +646,7 @@ func TestDockerRuntimeAgentLoadsImmutablePluginDirectly(t *testing.T) {
 }
 
 func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {
-	body := readTextFile(t, filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-article"))
+	body := readTextFile(t, filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-wechat"))
 	for _, want := range []string{
 		`find /anbanai -type l -print -quit`,
 		`chown -R root:root /anbanai`,
@@ -655,12 +655,12 @@ func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {
 		`CMD ["job"]`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("deploy/docker/Dockerfile.agent-article missing immutable one-shot contract %q", want)
+			t.Fatalf("deploy/docker/Dockerfile.agent-wechat missing immutable one-shot contract %q", want)
 		}
 	}
 	for _, forbidden := range []string{`CMD ["sleep", "infinity"]`, `USER root\nWORKDIR /workspace`} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("deploy/docker/Dockerfile.agent-article retains reusable runtime contract %q", forbidden)
+			t.Fatalf("deploy/docker/Dockerfile.agent-wechat retains reusable runtime contract %q", forbidden)
 		}
 	}
 }
@@ -685,7 +685,7 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 
 func TestAgentDockerfilesAreCentralized(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		if _, err := os.Stat(filepath.Join(root, "deploy", "docker", name)); err != nil {
 			t.Fatalf("deploy/docker/%s must exist: %v", name, err)
 		}
@@ -729,7 +729,7 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		contains []string
 	}{
 		{
-			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-article"),
+			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat"),
 			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
 		},
 		{
@@ -788,10 +788,12 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	root := repositoryRoot(t)
 	got := trackedDockerfiles(t, root)
 	want := []string{
-		"deploy/docker/Dockerfile.agent-article",
+		"deploy/docker/Dockerfile.agent-feedback",
 		"deploy/docker/Dockerfile.agent-hypit",
 		"deploy/docker/Dockerfile.agent-montage",
+		"deploy/docker/Dockerfile.agent-profile",
 		"deploy/docker/Dockerfile.agent-seednote",
+		"deploy/docker/Dockerfile.agent-wechat",
 		"deploy/docker/Dockerfile.server",
 		"deploy/docker/Dockerfile.sidecar-ilink",
 		"deploy/docker/Dockerfile.sidecar-seednote",
@@ -944,11 +946,13 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"agent-build:",
 		"docker-seednote-agent-image:",
 		"docker-montage-agent-image:",
+		"docker-profile-agent-image:",
+		"docker-feedback-agent-image:",
 		"docker-sidecar-ilink-image:",
 		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
-		"docker build -f deploy/docker/Dockerfile.agent-article -t $(AGENT_IMAGE) .",
+		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-profile-agent-image docker-feedback-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
+		"docker build -f deploy/docker/Dockerfile.agent-wechat -t $(AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",
 		"--build-arg OPENMONTAGE_REPO=\"$(OPENMONTAGE_SOURCE_REPO)\"",
@@ -1020,7 +1024,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		"ANBAN_AGENT_EXECUTOR: \"docker\"",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
 		"ANBAN_AGENT_EXECUTION_TOKEN_SECRET:",
-		"ANBAN_AGENT_IMAGE_ARTICLE: \"creator-agent-article:latest\"",
+		"ANBAN_AGENT_IMAGE_WECHAT: \"creator-agent-wechat:latest\"",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE: \"creator-agent-seednote:latest\"",
 		"ANBAN_AGENT_IMAGE_MONTAGE: \"creator-agent-montage:latest\"",
 		"ANBAN_AGENT_DOCKER_NETWORK: \"creator-runtime-network\"",
@@ -1054,7 +1058,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
 			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
-			"article: \"${ANBAN_AGENT_IMAGE_ARTICLE}\"",
+			"wechat: \"${ANBAN_AGENT_IMAGE_WECHAT}\"",
 			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE}\"",
 			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE}\"",
 			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}\"",
@@ -1107,9 +1111,11 @@ func TestDockerRuntimeContract(t *testing.T) {
 		}
 		for name, want := range map[string]string{
 			"ANBAN_AGENT_EXECUTOR":               "docker",
-			"ANBAN_AGENT_IMAGE_ARTICLE":          "creator-agent-article:latest",
+			"ANBAN_AGENT_IMAGE_WECHAT":           "creator-agent-wechat:latest",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
 			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
+			"ANBAN_AGENT_IMAGE_PROFILE":          "${ANBAN_AGENT_IMAGE_PROFILE:-creator-agent-profile:latest}",
+			"ANBAN_AGENT_IMAGE_FEEDBACK":         "${ANBAN_AGENT_IMAGE_FEEDBACK:-creator-agent-feedback:latest}",
 			"ANBAN_AGENT_DOCKER_NETWORK":         "creator-runtime-network",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
 			"ANBAN_BILLING_ADMIN_API_KEY":        "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
@@ -1167,7 +1173,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_BILLING_ADMIN_API_KEY",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
 			"ANBAN_AGENT_EXECUTOR",
-			"ANBAN_AGENT_IMAGE_ARTICLE",
+			"ANBAN_AGENT_IMAGE_WECHAT",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE",
 			"ANBAN_AGENT_IMAGE_MONTAGE",
 			"ANBAN_JWT_SECRET_KEY",
@@ -1220,9 +1226,11 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_AGENT_EXECUTOR":               "docker",
 			"ANBAN_CLAUDE_AGENT_SERVER_URL":      "http://server:8080",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "0123456789abcdef0123456789abcdef",
-			"ANBAN_AGENT_IMAGE_ARTICLE":          "creator-agent-article:latest",
+			"ANBAN_AGENT_IMAGE_WECHAT":           "creator-agent-wechat:latest",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
 			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
+			"ANBAN_AGENT_IMAGE_PROFILE":          "creator-agent-profile:latest",
+			"ANBAN_AGENT_IMAGE_FEEDBACK":         "creator-agent-feedback:latest",
 			"ANBAN_JWT_SECRET_KEY":               "0123456789abcdef0123456789abcdef",
 			"ANBAN_OSS_ENDPOINT":                 "oss-cn-test.aliyuncs.com",
 			"ANBAN_OSS_ACCESS_KEY_ID":            "test-access-key-id",
@@ -1284,7 +1292,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 
 		for _, want := range []string{
 			"ANBAN_AGENT_EXECUTOR",
-			"ANBAN_AGENT_IMAGE_ARTICLE",
+			"ANBAN_AGENT_IMAGE_WECHAT",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE",
 			"ANBAN_AGENT_IMAGE_MONTAGE",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",

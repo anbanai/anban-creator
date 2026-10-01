@@ -181,13 +181,13 @@ func TestActiveRuntimeFeedbackScoresAreSerialized(t *testing.T) {
 		"harness/agents/seednote.md",
 		"harness/agents/live-slicer.md",
 		"harness/agents/ecommerce.md",
-		"harness/agents/article.md",
+		"harness/agents/wechat-article.md",
 		"harness/agents/montage.md",
 		"harness/agents/moments.toml",
 		"harness/agents/seednote.toml",
 		"harness/agents/live-slicer.toml",
 		"harness/agents/ecommerce.toml",
-		"harness/agents/article.toml",
+		"harness/agents/wechat-article.toml",
 		"harness/agents/montage.toml",
 	}
 	for _, relativePath := range paths {
@@ -209,11 +209,11 @@ func TestChangedRuntimeFeedbackOwnership(t *testing.T) {
 		{path: "harness/agents/seednote.md", reportMarker: "#### 步骤 11：最终报告"},
 		{path: "harness/agents/ecommerce.md", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
 		{path: "harness/agents/moments.md", reportMarker: "最终摘要包含"},
-		{path: "harness/agents/article.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
+		{path: "harness/agents/wechat-article.md", reportMarker: "步骤 9 的最终验收都已写入报告后"},
 		{path: "harness/agents/seednote.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
 		{path: "harness/agents/ecommerce.toml", reportMarker: "#### 步骤 10：生成 manifest 与最终报告"},
 		{path: "harness/agents/moments.toml", reportMarker: "最终摘要包含"},
-		{path: "harness/agents/article.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
+		{path: "harness/agents/wechat-article.toml", reportMarker: "## 完成后交付摘要（运行结束时执行）"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {

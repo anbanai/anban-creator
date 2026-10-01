@@ -80,13 +80,13 @@ type AnalyticsMetrics struct {
 }
 
 // Map preserves nil separately from an observed zero and exact decimal JSON numbers.
-func (m AnalyticsMetrics) Map(platform string) map[string]any {
+func (m AnalyticsMetrics) Map(channel string) map[string]any {
 	out := map[string]any{}
 	v := reflect.ValueOf(m)
 	t := v.Type()
 	for i := 0; i < v.NumField(); i++ {
 		key := t.Field(i).Tag.Get("json")
-		if !AnalyticsMetricForPlatform(key, platform) {
+		if !AnalyticsMetricForChannel(key, channel) {
 			continue
 		}
 		out[key] = nil
@@ -116,15 +116,24 @@ func (m AnalyticsMetrics) Validate() error {
 	}
 	return nil
 }
-func AnalyticsMetricForPlatform(key, platform string) bool {
-	if platform == "" {
+func AnalyticsMetricForChannel(key, channel string) bool {
+	if channel == "" {
 		return true
 	}
 	wechat := map[string]bool{"delivered_users": true, "delivery_completion_rate": true, "read_users": true, "share_users": true, "collection_users": true, "like_users": true, "zaikan_users": true, "comment_count": true, "read_to_follow_users": true, "read_completion_rate": true, "average_read_active_time": true}
-	if platform == "article" || platform == "wechat" {
+	if channel == ChannelArticle {
 		return wechat[key]
 	}
 	return !wechat[key] || key == "comment_count"
+}
+
+// AnalyticsMetricForPlatform is retained as a source compatibility alias for
+// historical import code. New routing must pass the Task/Content channel.
+func AnalyticsMetricForPlatform(key, platform string) bool {
+	if platform == PlatformWechat || platform == TaskTypeWechatArticle {
+		platform = ChannelArticle
+	}
+	return AnalyticsMetricForChannel(key, platform)
 }
 func AnalyticsMetricColumns() []string {
 	return []string{"delivered_users", "read_users", "share_users", "collection_users", "like_users", "zaikan_users", "comment_count", "read_to_follow_users", "exposure_count", "view_count", "like_count", "collect_count", "follower_gain_count", "share_count", "barrage_count", "read_completion_rate", "average_read_active_time", "cover_click_rate", "avg_watch_duration", "delivery_completion_rate"}
@@ -143,7 +152,8 @@ type AnalyticsState struct {
 type AnalyticsContent struct {
 	ID            string     `gorm:"type:varchar(100);primaryKey" json:"id"`
 	ProjectID     string     `gorm:"type:char(36);index:idx_analytics_content_project" json:"-"`
-	Platform      string     `gorm:"type:varchar(20)" json:"-"`
+	Channel       string     `gorm:"type:varchar(40);index" json:"-"`
+	Platform      string     `gorm:"type:varchar(20)" json:"-"` // legacy migration source only
 	TaskID        string     `gorm:"type:char(36);index" json:"-"`
 	PublicationID string     `gorm:"type:char(36);index" json:"-"`
 	PostID        string     `gorm:"type:char(36);index" json:"-"`

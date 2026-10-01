@@ -73,7 +73,7 @@ claude:
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
-    article: creator-agent-article:latest
+    wechat: creator-agent-wechat:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
 `

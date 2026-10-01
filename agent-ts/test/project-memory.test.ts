@@ -13,7 +13,7 @@ async function workspace() {
   roots.push(root);
   return root;
 }
-const data = { agent_flag: "anban:article", agent_memory_directory: ".claude/agent-memory", runtime_adapter: "standard" } as const;
+const data = { agent_flag: "anban:wechat-article", agent_memory_directory: ".claude/agent-memory", runtime_adapter: "standard" } as const;
 
 test("refuses a missing shared memory directory instead of creating task-local memory", async () => {
   const root = await workspace();
@@ -24,7 +24,7 @@ test("refuses a missing shared memory directory instead of creating task-local m
 
 test("checks writability without replacing existing memory or leaving probe files", async () => {
   const root = await workspace();
-  const agentDir = join(root, ".claude/agent-memory/anban-article");
+  const agentDir = join(root, ".claude/agent-memory/anban-wechat-article");
   await mkdir(agentDir, { recursive: true });
   await writeFile(join(agentDir, "MEMORY.md"), "remember this");
   await prepareProjectMemory(root, data);
@@ -42,7 +42,7 @@ test("reports unwritable shared memory before starting the model", async () => {
   finally { await chmod(memoryRoot, 0o700); }
 });
 
-test.each([".claude", ".claude/agent-memory", ".claude/agent-memory/anban-article"])("rejects a symlink at %s", async (unsafePath) => {
+test.each([".claude", ".claude/agent-memory", ".claude/agent-memory/anban-wechat-article"])("rejects a symlink at %s", async (unsafePath) => {
   const root = await workspace();
   const target = await workspace();
   const parts = unsafePath.split("/");

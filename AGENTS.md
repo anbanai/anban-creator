@@ -1,5 +1,14 @@
 # AGENTS.md
 
+## Feedback attribution boundary
+
+Feedback attribution is a Server-owned, execution-scoped workflow. The
+Feedback Agent may read only the frozen FeedbackJob context and write private
+JSON evidence; the Server validates and persists the result. A single insight
+is only a candidate until user confirmation and an independent later
+analytics revision validate it. Runtime executions must never modify this
+file, `CLAUDE.md`, project profiles, prompts, or an active generation context.
+
 This file provides guidance to AI coding assistants when working in this repository.
 
 ## Project Overview
@@ -86,11 +95,11 @@ make docker-server-image
 
 All repository-owned Docker build definitions live under `deploy/docker/`; keep
 the repository root as the build context. Agent profiles use independent
-`Dockerfile.agent-article`, `Dockerfile.agent-seednote`, and
+`Dockerfile.agent-wechat`, `Dockerfile.agent-seednote`, and
 `Dockerfile.agent-montage` files rather than stages inherited from one business
 image.
 
-The managed runtime uses four independent images: `creator-agent-article` for the
+The managed runtime uses four independent images: `creator-agent-wechat` for the
 minimal Article runtime, `creator-agent-seednote` for the independent Seednote
 workflow, `creator-agent-montage` for OpenMontage/Remotion/ffmpeg, and
 `creator-agent-hypit` for video replication from unmodified official Hypit source. Seednote
@@ -108,7 +117,7 @@ its official distribution read-only under `/opt/hypit` and its independent
 project at `/workspace/project`; its profile and credentials are Server-configured.
 
 Configure dispatch with `ANBAN_AGENT_EXECUTOR`,
-`ANBAN_AGENT_IMAGE_ARTICLE`, `ANBAN_AGENT_IMAGE_SEEDNOTE`,
+`ANBAN_AGENT_IMAGE_WECHAT`, `ANBAN_AGENT_IMAGE_SEEDNOTE`,
 `ANBAN_AGENT_IMAGE_MONTAGE`, `ANBAN_AGENT_IMAGE_HYPIT`, and `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`. The
 Server never builds a missing runtime image; build or publish all selected
 images before dispatch and prefer immutable digests outside local development.

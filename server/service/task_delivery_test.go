@@ -139,12 +139,12 @@ func TestTaskService_DeliveryAndRetainedZipContainOnlyTheirOwnState(t *testing.T
 	svc.store = store
 	ctx := context.Background()
 	taskID, executionID := "task-state-zip", "execution-state-zip"
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
 		ID: executionID, TaskID: taskID, Attempt: 1, Status: model.TaskExecutionSucceeded,
-		AgentPackID: "article", AgentPackVersion: "1.0.4", AgentPackDigest: "digest",
+		AgentPackID: "wechat-article", AgentPackVersion: "1.0.4", AgentPackDigest: "digest",
 		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"article","path":"output/delivered.md","mime_type":"text/markdown"}]`),
 	}); err != nil {
 		t.Fatal(err)
@@ -202,7 +202,7 @@ func TestTaskService_RetainedZipFailsWhenAnyArtifactIsUnavailable(t *testing.T) 
 	svc.store = store
 	ctx := context.Background()
 	taskID := "task-retained-incomplete"
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
@@ -448,14 +448,14 @@ func TestValidateExecutionDeliveryRejectsUnsafeHTMLTags(t *testing.T) {
 			ctx := context.Background()
 			task := &model.Task{
 				ID: "unsafe-html-task-" + tag, UserID: "unsafe-html-user", ProjectID: "unsafe-html-project",
-				Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+				Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 			}
 			if err := repo.Tasks().Create(ctx, task); err != nil {
 				t.Fatal(err)
 			}
 			execution := &model.TaskExecution{
 				ID: "unsafe-html-execution-" + tag, TaskID: task.ID, Attempt: 1,
-				AgentPackID: "article", AgentPackVersion: "1.0.4", AgentPackDigest: "frozen-digest",
+				AgentPackID: "wechat-article", AgentPackVersion: "1.0.4", AgentPackDigest: "frozen-digest",
 				AgentPackDeliveryContract:         datatypes.JSON(`[{"role":"html","path":"output/05-article.html","mime_type":"text/html"}]`),
 				AgentPackRequiredArtifactContract: datatypes.JSON(`[{"role":"html","path":"output/05-article.html","mime_type":"text/html","required":true}]`),
 			}
@@ -497,14 +497,14 @@ func TestValidateExecutionDeliveryRejectsExecutableHTMLAttributes(t *testing.T) 
 			task := &model.Task{
 				ID:     "unsafe-attribute-task-" + strings.ReplaceAll(tt.name, " ", "-"),
 				UserID: "unsafe-attribute-user", ProjectID: "unsafe-attribute-project",
-				Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+				Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 			}
 			if err := repo.Tasks().Create(ctx, task); err != nil {
 				t.Fatal(err)
 			}
 			execution := &model.TaskExecution{
 				ID: "unsafe-attribute-execution-" + strings.ReplaceAll(tt.name, " ", "-"), TaskID: task.ID, Attempt: 1,
-				AgentPackID: "article", AgentPackVersion: "1.0.4", AgentPackDigest: "frozen-digest",
+				AgentPackID: "wechat-article", AgentPackVersion: "1.0.4", AgentPackDigest: "frozen-digest",
 				AgentPackDeliveryContract:         datatypes.JSON(`[{"role":"html","path":"output/05-article.html","mime_type":"text/html"}]`),
 				AgentPackRequiredArtifactContract: datatypes.JSON(`[{"role":"html","path":"output/05-article.html","mime_type":"text/html","required":true}]`),
 			}
@@ -564,7 +564,7 @@ func validateArticleCoreFixture(t *testing.T, markdown, htmlBody []byte) error {
 	task := &model.Task{
 		ID:     "article-core-task-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")),
 		UserID: "article-core-user", ProjectID: "article-core-project",
-		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -572,7 +572,7 @@ func validateArticleCoreFixture(t *testing.T, markdown, htmlBody []byte) error {
 	execution := &model.TaskExecution{
 		ID:     "article-core-execution-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")),
 		TaskID: task.ID, Attempt: 1,
-		AgentPackID: "article", AgentPackVersion: "1.0.4", AgentPackDigest: "frozen-digest",
+		AgentPackID: "wechat-article", AgentPackVersion: "1.0.4", AgentPackDigest: "frozen-digest",
 		AgentPackDeliveryContract: datatypes.JSON(`[
 			{"role":"content","path":"output/04-article-final.md","mime_type":"text/markdown"},
 			{"role":"html","path":"output/05-article.html","mime_type":"text/html"}

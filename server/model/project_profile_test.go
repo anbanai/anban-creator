@@ -46,3 +46,15 @@ func TestProjectProfileValidateRequiresCompleteDimensionsAndKnownSources(t *test
 		t.Fatal("unknown schema should be rejected")
 	}
 }
+
+func TestProjectProfileSupportsLifecycleStateAndUserEdits(t *testing.T) {
+	profile := NewProjectProfile()
+	if profile.InitializationStatus != ProfileInitializationNotStarted {
+		t.Fatalf("initialization status = %q, want %q", profile.InitializationStatus, ProfileInitializationNotStarted)
+	}
+	profile.InitializationStatus = ProfileInitializationReady
+	profile.Dimensions.Identity.Sources = []string{"[用户编辑]"}
+	if err := profile.Validate(); err != nil {
+		t.Fatalf("user-edited ready profile should validate: %v", err)
+	}
+}

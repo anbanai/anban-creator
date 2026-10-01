@@ -4,12 +4,29 @@ import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID } from './agent-profile'
 
-export type PlanType = 'seednote' | 'article' | 'montage' | 'hypit'
+export type PlanType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'montage' | 'hypit'
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
-export interface Plan {
+export type PlanEntryStatus = 'active' | 'paused' | 'failed'
+
+export interface PlanEntry {
   id: string
-  type: PlanType
+  plan_id: string
+  agent_id: string
+  channel: string
+  task_kind: string
+  execution_profile: AgentExecutionProfileID
+  agent_input?: Record<string, unknown>
+  image_defaults?: Record<string, unknown>
+  status: PlanEntryStatus
+  created_at: string
+  updated_at: string
+}
+
+export interface Plan {
+	id: string
+	/** @deprecated Plan identity lives in entries. */
+	type: PlanType
   title: string
   description: string
   cron_expr: string
@@ -37,11 +54,32 @@ export interface Plan {
   montage_input?: MontageInput
   created_at: string
   updated_at: string
+  entries?: PlanEntry[]
+}
+
+export interface CreatePlanEntryRequest {
+  agent_id: string
+  channel: string
+  task_kind: string
+  execution_profile: AgentExecutionProfileID
+  agent_input?: Record<string, unknown>
+  image_defaults?: Record<string, unknown>
+}
+
+export interface UpdatePlanEntryRequest {
+  agent_id?: string
+  channel?: string
+  task_kind?: string
+  execution_profile?: AgentExecutionProfileID
+  agent_input?: Record<string, unknown>
+  image_defaults?: Record<string, unknown>
+  status?: PlanEntryStatus
 }
 
 export interface CreatePlanRequest {
-  type: PlanType
-  execution_profile: AgentExecutionProfileID
+  /** @deprecated plan identity lives in entries. */
+  type?: PlanType
+  execution_profile?: AgentExecutionProfileID
   cron_expr: string
   prompt?: string
   project_id?: string
@@ -62,10 +100,11 @@ export interface CreatePlanRequest {
   cover_use_portrait?: boolean
   hypit_input?: HypitInput
   montage_input?: MontageInput
+  entries?: CreatePlanEntryRequest[]
 }
 
 export interface UpdatePlanRequest {
-  execution_profile: AgentExecutionProfileID
+  execution_profile?: AgentExecutionProfileID
   cron_expr?: string
   prompt?: string
   image_capability_key?: string

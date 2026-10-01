@@ -34,7 +34,7 @@ const {
   const articleProject = {
     id: 'project-1',
     user_id: 'user-1',
-    platform: 'article',
+    platform: 'wechat',
     name: '公众号项目',
     description: '品牌公众号数据',
     avatar_url: '',
@@ -120,8 +120,8 @@ const {
       catalog_id: 'catalog-1',
       currency: 'credits',
       skus: [
-        { id: 'task.article.effective', operation: 'task.article', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'effective', delivery: 'task' },
-        { id: 'task.article.balanced', operation: 'task.article', charge_policy: 'task_admission', price_credits: 6000, execution_profile: 'balanced', delivery: 'task' },
+        { id: 'task.wechat_article.effective', operation: 'task.wechat_article', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'effective', delivery: 'task' },
+        { id: 'task.wechat_article.balanced', operation: 'task.wechat_article', charge_policy: 'task_admission', price_credits: 6000, execution_profile: 'balanced', delivery: 'task' },
         { id: 'task.seednote.effective', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 3200, execution_profile: 'effective', delivery: 'task' },
         { id: 'task.seednote.balanced', operation: 'task.seednote', charge_policy: 'task_admission', price_credits: 4000, execution_profile: 'balanced', delivery: 'task' },
         { id: 'task.montage.effective', operation: 'task.montage', charge_policy: 'task_admission', price_credits: 1600, execution_profile: 'effective', delivery: 'task' },
@@ -129,7 +129,7 @@ const {
       ],
     } as const,
     platformConfigs: [
-      { id: 'article', label: '公众号文章', badge_variant: 'default', supports_publishing: true, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '4:3', '3:4', '1:1'], fields: [] },
+      { id: 'wechat', label: '公众号', badge_variant: 'success', supports_publishing: true, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '4:3', '3:4', '1:1'], fields: [] },
       { id: 'seednote', label: '种草笔记', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1', '4:3'], fields: [] },
       { id: 'moments', label: '朋友圈', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '1:1', supported_image_ratios: ['1:1', '3:4'], fields: [] },
       { id: 'ecommerce', label: '电商图', badge_variant: 'default', supports_publishing: false, supports_auto_fetch: false, profile_url_pattern: '', default_image_ratio: '4:3', supported_image_ratios: ['4:3', '1:1', '3:4', '16:9'], fields: [] },
@@ -145,7 +145,7 @@ const {
     } as const,
     createdTask: {
       id: 'task-ai-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '帮我写一篇新品发布公众号文章',
       status: 'pending',
       plan_id: null,
@@ -334,7 +334,9 @@ describe('DashboardPage AI entry', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
-      channel: 'studio',
+      agent_id: 'wechat-article',
+      channel: 'wechat-article',
+      task_kind: 'content_generation',
       project_id: 'project-1',
       text: '写一篇新品介绍',
       execution_profile: 'balanced',
@@ -363,7 +365,9 @@ describe('DashboardPage AI entry', () => {
     fireEvent.click(submit)
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
-      channel: 'studio',
+      agent_id: 'channels-video',
+      channel: 'channels-video',
+      task_kind: 'content_generation',
       project_id: 'project-5',
       text: '做一条新品发布短片',
       execution_profile: 'effective',
@@ -675,7 +679,7 @@ describe('DashboardPage AI entry', () => {
     ])
     vi.mocked(api.billing.catalog).mockResolvedValueOnce({
       ...billingCatalog,
-      skus: billingCatalog.skus.filter((sku) => sku.operation === 'task.article'),
+      skus: billingCatalog.skus.filter((sku) => sku.operation === 'task.wechat_article'),
     })
     render(<DashboardPage />)
 
@@ -758,7 +762,9 @@ describe('DashboardPage AI entry', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
-      channel: 'studio',
+      agent_id: 'wechat-article',
+      channel: 'wechat-article',
+      task_kind: 'content_generation',
       project_id: 'project-1',
       text: '帮我写一篇新品发布公众号文章',
       execution_profile: 'effective',

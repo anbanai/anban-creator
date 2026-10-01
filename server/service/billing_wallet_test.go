@@ -201,7 +201,7 @@ func TestBillingTopUpInTxCatalogFailureDoesNotPoisonCallerTransaction(t *testing
 			t.Fatalf("TopUpInTx error = %v, want ErrBillingCatalogNotFound", err)
 		}
 		return tx.Tasks().Create(context.Background(), &model.Task{
-			ID: markerID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusPending,
+			ID: markerID, UserID: billingWalletUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending,
 		})
 	}); err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestBillingTopUpInTxCatalogFailureDoesNotPoisonCallerTransaction(t *testing
 func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.T) {
 	t.Run("debt", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 1)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-debt")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-debt")
 		_, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-debt", "charge-debt"))
 		if !errors.Is(err, ErrBillingDebtOutstanding) {
 			t.Fatalf("ChargeTaskAdmission error = %v, want ErrBillingDebtOutstanding", err)
@@ -226,7 +226,7 @@ func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.
 
 	t.Run("insufficient", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 499, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-insufficient")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-insufficient")
 		_, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-insufficient", "charge-insufficient"))
 		if !errors.Is(err, ErrBillingInsufficientForTask) {
 			t.Fatalf("ChargeTaskAdmission error = %v, want ErrBillingInsufficientForTask", err)
@@ -235,7 +235,7 @@ func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.
 
 	t.Run("replay and conflict", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-replay")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-replay")
 		req := taskChargeRequest(quote, "task-replay", "charge-replay")
 		first, err := f.wallet.ChargeTaskAdmission(context.Background(), req)
 		if err != nil {
@@ -259,7 +259,7 @@ func TestBillingWalletTaskAdmissionDebtInsufficientReplayAndConflict(t *testing.
 
 func TestBillingWalletTaskAdmissionInTxRollsBackWithCaller(t *testing.T) {
 	f := newBillingWalletFixture(t, 500, 0, 0)
-	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-caller-tx")
+	quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-caller-tx")
 	req := taskChargeRequest(quote, "task-caller-tx", "charge-caller-tx")
 	errRollback := errors.New("rollback caller transaction")
 	err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
@@ -294,7 +294,7 @@ func TestBillingWalletTaskAdmissionInTxRollsBackWithCaller(t *testing.T) {
 
 func TestBillingWalletTaskAdmissionInTxInsufficientDoesNotPartiallyMutateCommittedCaller(t *testing.T) {
 	f := newBillingWalletFixture(t, 499, 0, 0)
-	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-insufficient-commit")
+	quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-insufficient-commit")
 	req := taskChargeRequest(quote, "task-insufficient-commit", "charge-insufficient-commit")
 	markerID := uuid.NewString()
 	if err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
@@ -302,7 +302,7 @@ func TestBillingWalletTaskAdmissionInTxInsufficientDoesNotPartiallyMutateCommitt
 			t.Fatalf("admission error = %v, want insufficient", err)
 		}
 		return tx.Tasks().Create(context.Background(), &model.Task{
-			ID: markerID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusPending,
+			ID: markerID, UserID: billingWalletUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending,
 		})
 	}); err != nil {
 		t.Fatalf("commit caller transaction: %v", err)
@@ -334,7 +334,7 @@ func TestBillingWalletRejectsQuoteWithMismatchedSKUSnapshot(t *testing.T) {
 		charge    func(*billingWalletFixture, *model.BillingQuote) error
 	}{
 		{
-			name: "task", operation: "task.article",
+			name: "task", operation: "task.wechat_article",
 			charge: func(f *billingWalletFixture, quote *model.BillingQuote) error {
 				_, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-snapshot", "charge-snapshot"))
 				return err
@@ -379,7 +379,7 @@ func TestBillingWalletDoesNotMapLotDatabaseErrorToInsufficient(t *testing.T) {
 		charge    func(*billingWalletFixture, *model.BillingQuote) error
 	}{
 		{
-			name: "task", operation: "task.article",
+			name: "task", operation: "task.wechat_article",
 			charge: func(f *billingWalletFixture, quote *model.BillingQuote) error {
 				_, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-db-error", "charge-db-error"))
 				return err
@@ -478,7 +478,7 @@ func TestBillingWalletTaskOperationUsesFrozenTierAfterUserChange(t *testing.T) {
 	})
 	taskID := uuid.NewString()
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID: taskID, UserID: billingCatalogUserID, Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		ID: taskID, UserID: billingCatalogUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 		BillingCatalogID: bundle.Products.CatalogID, BillingSKUID: bundle.Products.SKUs[0].ID,
 		BillingPricingTier: string(model.TierPro),
 	}); err != nil {
@@ -537,13 +537,13 @@ func TestBillingWalletTaskOperationUsesFrozenTierAfterUserChange(t *testing.T) {
 func TestBillingWalletChargeReplayRejectsImmutableIdentityDrift(t *testing.T) {
 	t.Run("task identity", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 1000, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-identity")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-identity")
 		req := taskChargeRequest(quote, "task-identity", "task-identity-key")
 		if _, err := f.wallet.ChargeTaskAdmission(context.Background(), req); err != nil {
 			t.Fatal(err)
 		}
 		secondQuote, err := f.catalog.CreateQuote(context.Background(), QuoteRequest{
-			UserID: billingWalletUserID, Operation: "task.article", ExecutionProfile: "effective", RequestFingerprint: quote.RequestFingerprint,
+			UserID: billingWalletUserID, Operation: "task.wechat_article", ExecutionProfile: "effective", RequestFingerprint: quote.RequestFingerprint,
 			IdempotencyScope: "quote", IdempotencyKey: "task-identity-second-quote",
 		})
 		if err != nil {
@@ -596,7 +596,7 @@ func TestBillingWalletPromotionEligibilityAndExpiryBoundary(t *testing.T) {
 	f.wallet.promotionEligible = func(lot model.BillingCreditLot, sku model.BillingSKU) bool {
 		return lot.SourceID != "promo-ineligible"
 	}
-	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-promo-ineligible")
+	quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-promo-ineligible")
 	charge, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-promo-ineligible", "charge-promo-ineligible"))
 	if err != nil || charge.PaidCredits != 500 || charge.PromotionalCredits != 0 {
 		t.Fatalf("ineligible promotion charge = %+v, %v", charge, err)
@@ -604,7 +604,7 @@ func TestBillingWalletPromotionEligibilityAndExpiryBoundary(t *testing.T) {
 
 	f2 := newBillingWalletFixture(t, 0, 0, 0)
 	f2.addPromotion(t, "promo-at-boundary", 500, f2.now)
-	quote2 := f2.quote(t, billingWalletUserID, "task.article", "", "task-promo-expired")
+	quote2 := f2.quote(t, billingWalletUserID, "task.wechat_article", "", "task-promo-expired")
 	if _, err := f2.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote2, "task-promo-expired", "charge-promo-expired")); !errors.Is(err, ErrBillingInsufficientForTask) {
 		t.Fatalf("expiry boundary error = %v, want insufficient", err)
 	}
@@ -729,7 +729,7 @@ func TestBillingWalletPromotionCannotRepayDebt(t *testing.T) {
 func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 	t.Run("allowlisted task failure", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-reversal-policy")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-reversal-policy")
 		original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-reversal-policy", "charge-reversal-policy"))
 		if err != nil {
 			t.Fatal(err)
@@ -743,7 +743,7 @@ func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 	for _, reason := range []string{"user_cancel", "different_reason"} {
 		t.Run("reject reason "+reason, func(t *testing.T) {
 			f := newBillingWalletFixture(t, 500, 0, 0)
-			quote := f.quote(t, billingWalletUserID, "task.article", "", "task-reject-"+reason)
+			quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-reject-"+reason)
 			original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-reject-"+reason, "charge-reject-"+reason))
 			if err != nil {
 				t.Fatal(err)
@@ -756,7 +756,7 @@ func TestBillingWalletReversalPolicyAndChargeKind(t *testing.T) {
 
 	t.Run("disabled policy", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "task-reversal-disabled")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-reversal-disabled")
 		original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-reversal-disabled", "charge-reversal-disabled"))
 		if err != nil {
 			t.Fatal(err)
@@ -814,7 +814,7 @@ func TestBillingWalletTopUpAndReplayDoNotScanWalletLedger(t *testing.T) {
 func TestBillingWalletReversalDoesNotReviveExpiredPromotion(t *testing.T) {
 	f := newBillingWalletFixture(t, 0, 0, 0)
 	f.addPromotion(t, "promo-reverse-expired", 500, f.now.Add(time.Minute))
-	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-promo-reverse")
+	quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-promo-reverse")
 	original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-promo-reverse", "charge-promo-reverse"))
 	if err != nil || original.PromotionalCredits != 500 {
 		t.Fatalf("promotional task charge = %+v, %v", original, err)
@@ -975,7 +975,7 @@ func TestBillingWalletConcurrentIdempotency(t *testing.T) {
 func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 	t.Run("task admission", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "post-lock-task")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "post-lock-task")
 		req := taskChargeRequest(quote, "post-lock-task", "post-lock-task")
 		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
 		if err != nil {
@@ -1052,7 +1052,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 
 	t.Run("reversal", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "post-lock-reversal")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "post-lock-reversal")
 		original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "post-lock-reversal", "post-lock-reversal"))
 		if err != nil {
 			t.Fatal(err)
@@ -1101,7 +1101,7 @@ func TestBillingWalletPostLockCurrentReadReplaysWithoutMutation(t *testing.T) {
 func TestBillingWalletPostLockCurrentReadConflictsAreTypedAndDoNotMutate(t *testing.T) {
 	t.Run("task caller commits conflict", func(t *testing.T) {
 		f := newBillingWalletFixture(t, 500, 0, 0)
-		quote := f.quote(t, billingWalletUserID, "task.article", "", "post-lock-task-conflict")
+		quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "post-lock-task-conflict")
 		req := taskChargeRequest(quote, "post-lock-task-conflict", "post-lock-task-conflict")
 		sku, err := f.repo.Billing().FindSKU(context.Background(), req.CatalogID, req.SKUID)
 		if err != nil {
@@ -1227,7 +1227,7 @@ func TestBillingWalletOwningResourceAndSettlementRollbackTogether(t *testing.T) 
 	rollbackErr := errors.New("rollback owning resource")
 	err := f.repo.WithTx(context.Background(), func(tx repository.Repository) error {
 		if err := tx.Tasks().Create(context.Background(), &model.Task{
-			ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusPending,
+			ID: taskID, UserID: billingWalletUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending,
 		}); err != nil {
 			return err
 		}
@@ -1251,8 +1251,8 @@ func TestBillingWalletSettlementOutboxRetryNoDuplicateAndFencing(t *testing.T) {
 	f := newBillingWalletFixture(t, 1000, 0, 0)
 	taskID := uuid.NewString()
 	if err := f.repo.Tasks().Create(context.Background(), &model.Task{
-		ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
-		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+		ID: taskID, UserID: billingWalletUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1310,8 +1310,8 @@ func TestBillingWalletSettlementOutboxUsesSettlementIDForDownstreamIdentity(t *t
 	for index, scope := range []string{"settlement-a", "settlement-b"} {
 		taskID := uuid.NewString()
 		if err := f.repo.Tasks().Create(context.Background(), &model.Task{
-			ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
-			BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+			ID: taskID, UserID: billingWalletUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted,
+			BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1346,7 +1346,7 @@ func TestBillingWalletSettlementOutboxUsesSettlementIDForDownstreamIdentity(t *t
 
 func TestBillingWalletSettlementOutboxPersistsComparesAndAppliesReversalReason(t *testing.T) {
 	f := newBillingWalletFixture(t, 500, 0, 0)
-	quote := f.quote(t, billingWalletUserID, "task.article", "", "task-outbox-reversal")
+	quote := f.quote(t, billingWalletUserID, "task.wechat_article", "", "task-outbox-reversal")
 	original, err := f.wallet.ChargeTaskAdmission(context.Background(), taskChargeRequest(quote, "task-outbox-reversal", "charge-outbox-reversal"))
 	if err != nil {
 		t.Fatal(err)
@@ -1419,7 +1419,7 @@ func TestBillingWalletSettlementOutboxTerminatesPermanentFailure(t *testing.T) {
 		t.Fatalf("terminal row = %+v, %v", row, err)
 	}
 	if err := f.repo.Tasks().Create(context.Background(), &model.Task{
-		ID: missingTask, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+		ID: missingTask, UserID: billingWalletUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1969,8 +1969,8 @@ func acceptedOperationRequest(userID, taskID, attemptID, callID, identity string
 func seedAcceptedOperationTask(t *testing.T, f *billingWalletFixture, taskID string, tier model.Tier) {
 	t.Helper()
 	if err := f.repo.Tasks().Create(context.Background(), &model.Task{
-		ID: taskID, UserID: billingWalletUserID, Type: model.PlatformArticle, Status: model.TaskStatusRunning,
-		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(tier),
+		ID: taskID, UserID: billingWalletUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(tier),
 	}); err != nil {
 		t.Fatal(err)
 	}

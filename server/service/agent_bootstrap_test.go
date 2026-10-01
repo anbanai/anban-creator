@@ -155,7 +155,7 @@ func TestBootstrapPublicationRecoveryRejectsInvalidSourceArtifacts(t *testing.T)
 			name: "source execution belongs to another task",
 			setup: func(t *testing.T, repo repository.Repository, db *gorm.DB, task *model.Task, source *model.TaskExecution) {
 				t.Helper()
-				if err := repo.Tasks().Create(t.Context(), &model.Task{ID: "foreign-task", UserID: task.UserID, ProjectID: task.ProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+				if err := repo.Tasks().Create(t.Context(), &model.Task{ID: "foreign-task", UserID: task.UserID, ProjectID: task.ProjectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 					t.Fatal(err)
 				}
 				if err := db.Model(&model.TaskExecution{}).Where("id = ?", source.ID).Update("task_id", "foreign-task").Error; err != nil {
@@ -402,7 +402,7 @@ func TestBootstrapDoesNotMaterializeLegacyTaskContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, SkipReferenceImage: true}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, SkipReferenceImage: true}
 	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: &signFakeStore{}, TokenTTL: time.Hour}, zerolog.Nop())
 
 	response, err := buildBootstrapTestResponse(t, svc, t.Context(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, time.Now().Add(time.Hour))
@@ -656,7 +656,7 @@ func TestBootstrapRejectsTextOnlyResponseWhenSafeLifetimeExpiresDuringBuild(t *t
 		clockSamples = clockSamples[1:]
 		return sampled
 	}
-	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "topic", SkipReferenceImage: true}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Prompt: "topic", SkipReferenceImage: true}
 	if _, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-1"}, task, &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: task.Type}, jobDeadline); err == nil {
 		t.Fatal("text-only bootstrap issued a token without a positive whole-second lifetime")
 	}
@@ -1078,8 +1078,8 @@ func newBootstrapRaceFixture(t *testing.T) (*AgentBootstrapService, *bootstrapRa
 	profiledExecution.RuntimeScope, profiledExecution.RuntimeWorkload = "daemon-a", "exec-1"
 	state := &bootstrapRaceState{
 		execution: profiledExecution,
-		task:      model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint, Status: model.TaskStatusRunning, Prompt: "topic", SkipReferenceImage: true, CurrentExecutionID: &executionID},
-		project:   model.Project{ID: "project-1", UserID: "user-1", Platform: model.PlatformArticle, Name: "project", Status: model.ProjectStatusActive},
+		task:      model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint, Status: model.TaskStatusRunning, Prompt: "topic", SkipReferenceImage: true, CurrentExecutionID: &executionID},
+		project:   model.Project{ID: "project-1", UserID: "user-1", Platform: model.PlatformWechat, Name: "project", Status: model.ProjectStatusActive},
 		user:      model.User{ID: "user-1"},
 	}
 	repo := &bootstrapRaceRepository{state: state}
@@ -1241,7 +1241,7 @@ func TestBuildMontageBootstrapFiles(t *testing.T) {
 	if got := svc.montageEnv(&model.Task{Type: model.PlatformMontage}); got["NEW_PROVIDER_TOKEN"] != "future-secret" {
 		t.Fatalf("Montage env = %#v, want future provider key", got)
 	}
-	if got := svc.montageEnv(&model.Task{Type: model.PlatformArticle}); len(got) != 0 {
+	if got := svc.montageEnv(&model.Task{Type: model.TaskTypeWechatArticle}); len(got) != 0 {
 		t.Fatalf("article env = %#v, want empty", got)
 	}
 }
@@ -1587,7 +1587,7 @@ func TestBuildResponseSignsAssetBackedReferenceImage(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store, TokenTTL: 10 * time.Minute, SignedURLTTL: 60}, zerolog.Nop())
 	svc.now = func() time.Time { return now }
-	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Prompt: "write", Status: model.TaskStatusRunning}
+	task := &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Prompt: "write", Status: model.TaskStatusRunning}
 	attachment := model.EntryAttachment{AssetID: "reference-upload", Type: "image", FileName: "reference.png", ContentType: "image/png", Size: 1}
 	task.ReferenceImageAssetID = attachment.AssetID
 	task.SetInputAttachments([]model.EntryAttachment{attachment})

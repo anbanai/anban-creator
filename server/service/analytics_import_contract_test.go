@@ -12,14 +12,14 @@ func TestAnalyticsImportRequiresExplicitSemantics(t *testing.T) {
 		at                         *time.Time
 		valid                      bool
 	}{
-		{"wechat cumulative", "article", "cumulative", "key", &now, true},
-		{"wechat fixed default", "article", "", "key", &now, true},
+		{"wechat cumulative", "wechat", "cumulative", "key", &now, true},
+		{"wechat fixed default", "wechat", "", "key", &now, true},
 		{"seednote cumulative", "seednote", "cumulative", "key", &now, true},
 		{"seednote daily rejected", "seednote", "daily", "key", &now, false},
 		{"seednote missing basis", "seednote", "", "key", &now, false},
-		{"wechat daily forbidden", "article", "daily", "key", &now, false},
-		{"missing date", "article", "cumulative", "key", nil, false},
-		{"missing request key", "article", "cumulative", "", &now, false},
+		{"wechat daily forbidden", "wechat", "daily", "key", &now, false},
+		{"missing date", "wechat", "cumulative", "key", nil, false},
+		{"missing request key", "wechat", "cumulative", "", &now, false},
 		{"interval forbidden", "seednote", "interval", "key", &now, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

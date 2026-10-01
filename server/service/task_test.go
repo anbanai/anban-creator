@@ -70,7 +70,9 @@ func setupTaskTestDB(t *testing.T) *gorm.DB {
 		&model.BillingSettlementOutbox{},
 		&model.TopicPool{},
 		&model.IlinkBinding{}, &model.IlinkNotification{}, &model.UploadSession{}, &model.Asset{},
+		&model.ProjectAgentConfig{}, &model.ProjectChannelConfig{}, &model.WechatPublicationAttempt{},
 		&model.WechatPublication{}, &model.WechatPublicationBinding{},
+		&model.PlanEntry{},
 		&model.WechatArticleTracking{}, &model.WechatMetricSnapshot{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
@@ -141,7 +143,7 @@ func setupTaskServiceWithEnqueuer(t *testing.T) (*TaskService, repository.Reposi
 func TestTaskServiceCreateManualRejectsMissingExecutionProfile(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	_, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID: userID, ProjectID: projectID, Prompt: "topic", Quantity: 1,
@@ -151,10 +153,49 @@ func TestTaskServiceCreateManualRejectsMissingExecutionProfile(t *testing.T) {
 	}
 }
 
+func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	expectedRevision := int64(0)
+	input := map[string]any{
+		"project_id":  projectID,
+		"platform":    model.PlatformWechat,
+		"profile_url": "https://example.com/profile",
+		"answers":     map[string]any{},
+		"samples":     []any{},
+	}
+	params := CreateManualParams{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
+		AgentID: model.AgentIDProfile, Channel: model.ChannelProfile, TaskKind: model.TaskKindProfileAnalysis,
+		RequestedTaskType: model.TaskTypeProfileAnalysis, Prompt: "https://example.com/profile",
+		AgentInput: input, Quantity: 1, ProfileAnalysisExpectedVersion: &expectedRevision,
+	}
+	tasks, err := svc.CreateManual(ctx, params)
+	if err != nil {
+		t.Fatalf("CreateManual profile analysis: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].BillingPriceCredits != 0 || tasks[0].BillingQuoteID != "" {
+		t.Fatalf("profile task billing = %#v, want free admission", tasks)
+	}
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := projectProfileFor(project)
+	if profile.AnalysisTaskID != tasks[0].ID || profile.InitializationStatus != model.ProfileInitializationQueued {
+		t.Fatalf("profile lifecycle = %+v, want queued and linked to task", profile)
+	}
+	if _, err := svc.CreateManual(ctx, params); !errors.Is(err, ErrProjectProfileAnalysisInProgress) {
+		t.Fatalf("duplicate profile admission error = %v, want in-progress conflict", err)
+	}
+}
+
 func TestTaskServiceCreateManualRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	_, err := svc.CreateManual(context.Background(), CreateManualParams{
 		UserID: userID, ProjectID: projectID, Prompt: "topic", Quantity: 1,
@@ -182,7 +223,7 @@ func TestTaskServiceCreateManualViralAnalysisRequiresSeednoteProject(t *testing.
 		t.Fatalf("tasks = %#v, want one viral_analysis task", tasks)
 	}
 
-	articleProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	articleProjectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	params.ProjectID = articleProjectID
 	_, err = svc.CreateManual(ctx, params)
 	if !errors.Is(err, ErrViralAnalysisRequiresSeednoteProject) {
@@ -228,7 +269,7 @@ func TestTaskServiceCreateManualValidatesTierAndFreezesProfileSnapshot(t *testin
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierPro}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{
 		UserID: userID, ProjectID: projectID, Prompt: "topic", Quantity: 1,
@@ -261,9 +302,9 @@ func TestTaskServiceCreateFromPlanInheritsAndFreezesExecutionProfile(t *testing.
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierPro}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		ExecutionProfile: "balanced", Status: model.PlanStatusActive, Prompt: "scheduled topic", ImageRatio: "4:3",
 	}
 	plan.SetAgentInput(map[string]any{})
@@ -290,7 +331,7 @@ func TestTaskServiceCreateFromPlanRevalidatesCapabilityBeforeAdmission(t *testin
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierFree}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
@@ -311,7 +352,7 @@ func TestTaskServiceCreateFromPlanRevalidatesCapabilityBeforeAdmission(t *testin
 	}
 	setter.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, cfg))
 	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		ExecutionProfile: "effective", Status: model.PlanStatusActive,
 		ImageCapabilityKey: "professional", ImageRatio: "1:1",
 	}
@@ -332,7 +373,7 @@ func TestTaskServiceCreateFromPlanUsesBusinessRatioIndependentOfGenerationSpecs(
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Tier: model.TierEnterprise}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	cfg := &serverconfig.Config{ModelRoutes: serverconfig.ModelRoutesConfig{ImageGeneration: serverconfig.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]serverconfig.ImageGenerationRouteConfig{
@@ -347,7 +388,7 @@ func TestTaskServiceCreateFromPlanUsesBusinessRatioIndependentOfGenerationSpecs(
 	}}}
 	svc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, cfg))
 	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		ExecutionProfile: "effective", Status: model.PlanStatusActive,
 		ImageCapabilityKey: "professional", ImageRatio: "16:9",
 	}
@@ -365,8 +406,8 @@ func TestTaskService_ResumeRequiresNASCapability(t *testing.T) {
 	svc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -775,7 +816,7 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 	project := &model.Project{
 		ID:                    uuid.New().String(),
 		UserID:                userID,
-		Platform:              model.PlatformArticle,
+		Platform:              model.PlatformWechat,
 		Name:                  "旧项目名",
 		Status:                model.ProjectStatusActive,
 		Instructions:          "旧定位",
@@ -1111,12 +1152,12 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	src := &model.Task{ExecutionProfile: "effective",
 		ID:                 uuid.New().String(),
 		UserID:             userID,
 		ProjectID:          projectID,
-		Type:               model.PlatformArticle,
+		Type:               model.TaskTypeWechatArticle,
 		Status:             model.TaskStatusCompleted,
 		Prompt:             "finished topic",
 		ImageRatio:         "16:9",
@@ -1182,13 +1223,13 @@ func TestCloneArticlePreservesDirectReferenceOutsideGenericAttachments(t *testin
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
 	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard",
 	}
 	source.SetInputAttachments([]model.EntryAttachment{
@@ -1253,13 +1294,13 @@ func TestCloneKeepsProjectSnapshotReferenceOutOfAttachments(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeProjectReference)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ImageCapabilityKey: "standard"}
-	source.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformArticle, ReferenceImageAssetID: asset.ID})
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ImageCapabilityKey: "standard"}
+	source.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformWechat, ReferenceImageAssetID: asset.ID})
 	source.SetInputAttachments([]model.EntryAttachment{{Type: "text", Text: "notes", FileName: "notes.txt"}})
 	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
@@ -1280,16 +1321,16 @@ func TestCloneExcludesDirectReferenceDuplicatedFromProjectSnapshot(t *testing.T)
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeProjectReference)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
 	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, ImageCapabilityKey: "standard",
 	}
-	source.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformArticle, ReferenceImageAssetID: asset.ID})
+	source.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformWechat, ReferenceImageAssetID: asset.ID})
 	source.SetInputAttachments([]model.EntryAttachment{{Type: "text", Text: "notes", FileName: "notes.txt"}})
 	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
@@ -1394,7 +1435,7 @@ func TestCloneArticleEditableOverridesPreserveDirectReferenceOutsideGenericAttac
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
 	seedReferenceAsset(t, repo, asset)
 	portrait := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeProjectPortraitReference)
@@ -1410,7 +1451,7 @@ func TestCloneArticleEditableOverridesPreserveDirectReferenceOutsideGenericAttac
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
 	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID, CoverUsePortrait: true,
 	}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
@@ -1447,13 +1488,13 @@ func TestCloneArticleEditableOverridesCanClearDirectReference(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	asset := referenceAssetFixture(uuid.NewString(), userID, DirectUploadPurposeTaskReference)
 	seedReferenceAsset(t, repo, asset)
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
 	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ReferenceImageAssetID: asset.ID,
 	}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
@@ -1485,7 +1526,7 @@ func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	user, err := repo.Users().FindByID(ctx, userID)
 	if err != nil {
 		t.Fatal(err)
@@ -1512,7 +1553,7 @@ func TestTaskServiceCloneRefreezesCurrentProfileConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusCompleted, Prompt: "historical", ExecutionProfile: current.ID,
 		AgentProfileSnapshot: historical, AgentProfileFingerprint: historicalFingerprint, ImageCapabilityKey: "standard",
 	}
@@ -1543,7 +1584,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 	}))
 	ctx := context.Background()
 	userID := uuid.NewString()
-	sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	sourceProjectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	destinationProject := &model.Project{
 		ID:           uuid.NewString(),
 		UserID:       userID,
@@ -1575,7 +1616,7 @@ func TestTaskService_CloneAppliesFullEditableOverrides(t *testing.T) {
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            sourceProjectID,
-		Type:                 model.PlatformArticle,
+		Type:                 model.TaskTypeWechatArticle,
 		Status:               model.TaskStatusCompleted,
 		Prompt:               "source prompt",
 		InputSourceTaskID:    "root-source-task",
@@ -1653,8 +1694,8 @@ func TestTaskService_CloneKeepsProjectStyleReferencesOutOfArticlePortraitField(t
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	destinationProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	sourceProjectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	destinationProjectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	inherited := &model.Asset{
 		ID:          uuid.NewString(),
 		UserID:      userID,
@@ -1700,7 +1741,7 @@ func TestTaskService_CloneKeepsProjectStyleReferencesOutOfArticlePortraitField(t
 	}
 	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
 
-	source := &model.Task{ExecutionProfile: "effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+	source := &model.Task{ExecutionProfile: "effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}
 	source.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: inherited.ID})
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
@@ -1820,9 +1861,9 @@ func TestTaskService_CloneAppliesTypeSpecificEditableOverrides(t *testing.T) {
 			svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
 			ctx := context.Background()
 			userID := uuid.NewString()
-			sourceProjectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			sourceProjectID := createTestProject(t, repo, userID, model.PlatformWechat)
 			destinationProjectID := createTestProject(t, repo, userID, tt.platform)
-			source := &model.Task{ExecutionProfile: "effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}
+			source := &model.Task{ExecutionProfile: "effective", ID: uuid.NewString(), UserID: userID, ProjectID: sourceProjectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}
 			if err := repo.Tasks().Create(ctx, source); err != nil {
 				t.Fatalf("create source task: %v", err)
 			}
@@ -1849,12 +1890,12 @@ func TestTaskServiceClonePreservesRootInputSource(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	src := &model.Task{ExecutionProfile: "effective",
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            projectID,
-		Type:                 model.PlatformArticle,
+		Type:                 model.TaskTypeWechatArticle,
 		Status:               model.TaskStatusCompleted,
 		Prompt:               "clone lineage",
 		ImageCapabilityKey:   "standard",
@@ -1886,12 +1927,12 @@ func TestTaskServiceCloneRepairsPartialInputSource(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	src := &model.Task{ExecutionProfile: "effective",
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            projectID,
-		Type:                 model.PlatformArticle,
+		Type:                 model.TaskTypeWechatArticle,
 		Status:               model.TaskStatusCompleted,
 		Prompt:               "partial clone lineage",
 		ImageCapabilityKey:   "standard",
@@ -1977,7 +2018,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	completedAt := time.Now().Add(-time.Minute)
 	resultJSON := `{"success":true}`
 	workflowStatus := `{"current_stage":"done"}`
@@ -1985,7 +2026,7 @@ func TestTaskService_ResumeReusesTaskAndPersistsPromptAndFiles(t *testing.T) {
 		ID:             uuid.New().String(),
 		UserID:         userID,
 		ProjectID:      projectID,
-		Type:           model.PlatformArticle,
+		Type:           model.TaskTypeWechatArticle,
 		Status:         model.TaskStatusFailed,
 		Prompt:         "finished topic",
 		Result:         &resultJSON,
@@ -2065,11 +2106,11 @@ func TestTaskServiceResumeRejectsCompletedTaskWithoutMutation(t *testing.T) {
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	completedAt := time.Now().Add(-time.Minute)
 	result := `{"success":true}`
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusCompleted, Result: &result, CompletedAt: &completedAt,
 	}
 	freezeTestTaskProfile(t, task)
@@ -2101,10 +2142,10 @@ func TestTaskServiceResumeRejectsUnfinishedCurrentFinalization(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	executionID := uuid.NewString()
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID,
 	}
 	freezeTestTaskProfile(t, task)
@@ -2136,7 +2177,7 @@ func TestTaskServiceResumeRejectsDeletedFrozenProviderBeforeMutation(t *testing.
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := t.Context()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	executionID := uuid.NewString()
 	profile := testAgentProfiles()[0]
 	snapshot, fingerprint, err := profile.Freeze()
@@ -2144,7 +2185,7 @@ func TestTaskServiceResumeRejectsDeletedFrozenProviderBeforeMutation(t *testing.
 		t.Fatal(err)
 	}
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID, ExecutionProfile: profile.ID,
 		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint, ImageCapabilityKey: "standard",
 	}
@@ -2197,11 +2238,11 @@ func TestTaskServiceResumeClearsPreviousTerminalEvidence(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	executionID := uuid.NewString()
 	resultJSON := `{"success":false,"cost_status":"reconciled"}`
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusFailed, CurrentExecutionID: &executionID, Result: &resultJSON,
 		Outcome:            &model.TaskOutcome{CoreDelivery: model.TaskCoreDeliveryOutcome{Status: model.TaskCoreDeliveryNone}},
 		TerminalModelUsage: datatypes.NewJSONType([]model.ModelTokenUsage{{Provider: "provider", Model: "old", InputTokens: 9}}),
@@ -2251,12 +2292,12 @@ func TestTaskService_ResumePersistsFilesWithoutResultOrLocalWorkspace(t *testing
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusFailed,
 		Prompt:    "finished remotely",
 	}
@@ -2328,12 +2369,12 @@ func TestTaskService_ResumeStorageFailureCleansPartialUploads(t *testing.T) {
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	task := &model.Task{
 		ID:        uuid.NewString(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusFailed,
 	}
 	freezeTestTaskProfile(t, task)
@@ -2382,8 +2423,8 @@ func TestTaskService_ResumeRejectsNonPortableFilenameAndCleansPartialUploads(t *
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
 	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -2424,8 +2465,8 @@ func TestTaskService_ResumeDeletesSupersededResumeFilesAfterCAS(t *testing.T) {
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
 	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	task.SetInputAttachments([]model.EntryAttachment{
@@ -2463,8 +2504,8 @@ func TestTaskService_DeletePreventsConcurrentResumeFromRestoringAuthority(t *tes
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
 	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -2506,8 +2547,8 @@ func TestTaskService_ResumeEnqueueFailureReturnsTaskToFailed(t *testing.T) {
 	svc := newTestTaskService(repo, cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}, nil, &logger, "", nil, nil)
 	svc.SetNASResumeEnabled(true)
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
 	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -2550,8 +2591,8 @@ func TestTaskService_ConcurrentResumeKeepsOnlyWinningUpload(t *testing.T) {
 	svc.SetNASResumeEnabled(true)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}
 	freezeTestTaskProfile(t, task)
 	freezeTestTaskImageCapability(t, task, "standard", testImageCapabilityRoute("image.standard"))
 	if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -2596,7 +2637,7 @@ func TestTaskServiceLegacyProjectConcurrencyCapOverridesProjectLimit(t *testing.
 	svc.SetProjectConcurrencyCap(1)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatalf("find project: %v", err)
@@ -2609,7 +2650,7 @@ func TestTaskServiceLegacyProjectConcurrencyCapOverridesProjectLimit(t *testing.
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusRunning,
 		Prompt:    "already running",
 	}
@@ -2620,7 +2661,7 @@ func TestTaskServiceLegacyProjectConcurrencyCapOverridesProjectLimit(t *testing.
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusPending,
 		Prompt:    "next task",
 	}
@@ -2642,7 +2683,7 @@ func TestTaskServiceRuntimeDispatcherHonorsConfiguredProjectConcurrencyCap(t *te
 	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
@@ -2655,7 +2696,7 @@ func TestTaskServiceRuntimeDispatcherHonorsConfiguredProjectConcurrencyCap(t *te
 	for _, status := range []string{model.TaskStatusRunning, model.TaskStatusPending} {
 		created := &model.Task{
 			ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-			Type: model.PlatformArticle, Status: status,
+			Type: model.TaskTypeWechatArticle, Status: status,
 		}
 		if err := repo.Tasks().Create(ctx, created); err != nil {
 			t.Fatal(err)
@@ -2697,12 +2738,12 @@ func TestTaskService_ResumeRejectsNoInputAndNonTerminal(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusCompleted,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
@@ -2728,12 +2769,12 @@ func TestTaskRepository_ResetRetryableTaskForResumeOnlyOneStatusSwap(t *testing.
 	_, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusFailed,
 		Lifecycle: datatypes.NewJSONType(model.TaskLifecycle{Version: 1, Revision: 8, Stages: []model.TaskLifecycleStage{
 			{ID: "research", Title: "选题研究", Source: model.TaskLifecycleSourceAgent, Kind: model.TaskLifecycleKindWork, State: model.TaskLifecycleStateComplete},
@@ -2774,12 +2815,12 @@ func TestTaskService_ResumePersistsPromptWithoutResultOrLocalWorkspace(t *testin
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusFailed,
 	}
 	freezeTestTaskProfile(t, task)
@@ -2811,7 +2852,7 @@ func TestTaskService_ResumePersistsPromptWithoutResultOrLocalWorkspace(t *testin
 func TestTaskService_CreateManual(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -2857,7 +2898,7 @@ func TestTaskService_CreateManual_NoProject(t *testing.T) {
 func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	_, err := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    "wrong-user",
@@ -2872,7 +2913,7 @@ func TestTaskService_CreateManual_WrongUser(t *testing.T) {
 func TestTaskService_GetByID(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -2901,7 +2942,7 @@ func TestTaskService_GetByID_NotFound(t *testing.T) {
 func TestTaskService_Cancel(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -2924,7 +2965,7 @@ func TestTaskService_Cancel(t *testing.T) {
 func TestTaskService_CancelEnqueuesIlinkNotification(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	if err := repo.IlinkBindings().Create(context.Background(), &model.IlinkBinding{
 		ID:                uuid.NewString(),
 		UserID:            userID,
@@ -2963,7 +3004,7 @@ func TestTaskService_CancelEnqueuesIlinkNotification(t *testing.T) {
 func TestTaskService_List(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -2991,7 +3032,7 @@ func TestTaskService_List(t *testing.T) {
 func TestTaskService_List_ByStatus(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
 	taskSlice, _ := svc.CreateManual(context.Background(), CreateManualParams{ExecutionProfile: "effective",
 		UserID:    userID,
@@ -3302,12 +3343,12 @@ func TestTaskService_RebuildWorkflowStatus(t *testing.T) {
 
 	ctx := context.Background()
 	userID := uuid.New().String()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	task := &model.Task{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusCompleted,
 		Prompt:    "workflow task",
 	}

@@ -24,7 +24,7 @@ describe('ProjectIdentity', () => {
         project={{
           id: 'article-1',
           name: 'Morning Brief',
-          platform: 'article',
+          platform: 'wechat',
           avatar_url: 'https://example.com/morning.png',
           description: 'Daily editorial briefing',
         }}

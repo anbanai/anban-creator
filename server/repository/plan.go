@@ -137,7 +137,12 @@ func (r *planRepository) UpdateNextRunAtIf(ctx context.Context, id string, nextR
 }
 
 func (r *planRepository) Delete(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Plan{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.WithContext(ctx).Where("plan_id = ?", id).Delete(&model.PlanEntry{}).Error; err != nil {
+			return err
+		}
+		return tx.WithContext(ctx).Where("id = ?", id).Delete(&model.Plan{}).Error
+	})
 }
 
 func (r *planRepository) ListActive(ctx context.Context) ([]*model.Plan, error) {

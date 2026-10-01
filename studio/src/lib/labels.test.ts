@@ -88,8 +88,8 @@ describe('video platform labels', () => {
   })
 
   it('keeps content type wording distinct from platform wording', () => {
-    expect(contentTypeDisplayName('article')).toBe('公众号文章')
-    expect(platformDisplayName('article')).toBe('公众号')
+    expect(contentTypeDisplayName('wechat-article')).toBe('公众号文章')
+    expect(platformDisplayName('wechat')).toBe('公众号')
     expect(contentTypeDisplayName('montage')).toBe('视频生成')
     expect(contentTypeDisplayName('hypit')).toBe('视频复刻')
     expect(contentTypeDisplayName('viral_analysis')).toBe('爆文拆解')

@@ -106,7 +106,7 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	llm := &fakeAIEntryLLM{responses: []string{
 		`{"prompt":"写一篇新品发布公众号文章","notes":"优先参考第一张图"}`,
 	}}
@@ -285,7 +285,7 @@ func TestAIEntryServiceSubmitPropagatesProfileAndSKUErrorsFromTaskCreation(t *te
 				db := setupTaskTestDB(t)
 				baseRepo := repository.New(db)
 				userID := uuid.NewString()
-				projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+				projectID := createTestProject(t, baseRepo, userID, model.PlatformWechat)
 				projects := &aiEntryProjectErrorRepository{ProjectRepository: baseRepo.Projects(), err: injected}
 				repo := &aiEntryRepositoryOverride{Repository: baseRepo, projects: projects}
 				logger := zerolog.New(io.Discard)
@@ -307,7 +307,7 @@ func TestAIEntryServiceSubmitKeepsUnrelatedTaskCreationFailureAsStatusError(t *t
 	db := setupTaskTestDB(t)
 	baseRepo := repository.New(db)
 	userID := uuid.NewString()
-	projectID := createTestProject(t, baseRepo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, baseRepo, userID, model.PlatformWechat)
 	projects := &aiEntryProjectErrorRepository{ProjectRepository: baseRepo.Projects(), err: errors.New("database unavailable")}
 	repo := &aiEntryRepositoryOverride{Repository: baseRepo, projects: projects}
 	logger := zerolog.New(io.Discard)
@@ -323,7 +323,7 @@ func TestAIEntryServiceSubmitKeepsUnrelatedTaskCreationFailureAsStatusError(t *t
 }
 
 func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle, model.PlatformMoments} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformMoments} {
 		t.Run(platform, func(t *testing.T) {
 			taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 			ctx := context.Background()
@@ -338,7 +338,7 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 				t.Fatal(err)
 			}
 			project.ReferenceImageAssetID = projectAsset.ID
-			if platform == model.PlatformArticle {
+			if platform == model.PlatformWechat {
 				portrait := referenceAssetFixture("project-portrait", userID, DirectUploadPurposeProjectPortraitReference)
 				seedReferenceAsset(t, repo, portrait)
 				project.PortraitReferenceImageAssetID = portrait.ID
@@ -403,7 +403,7 @@ func TestAIEntryPresentsInheritedProjectReferenceBeforeTaskCreation(t *testing.T
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	asset := referenceAssetFixture("project-reference", userID, DirectUploadPurposeProjectReference)
 	seedReferenceAsset(t, repo, asset)
 	project, err := repo.Projects().FindByID(ctx, projectID)
@@ -487,7 +487,7 @@ func TestAIEntrySeednotePresentsInheritedProjectReferenceAndKeepsAttachments(t *
 }
 
 func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote} {
 		t.Run(platform, func(t *testing.T) {
 			base := repository.New(setupTaskTestDB(t))
 			ctx := context.Background()
@@ -567,7 +567,7 @@ func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(
 				Repository: base,
 				assets:     flakyAssets,
 			}
-			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 			project, err := repo.Projects().FindByID(ctx, projectID)
 			if err != nil {
 				t.Fatal(err)
@@ -610,7 +610,7 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	llm := &fakeAIEntryLLM{responses: []string{
 		`{"prompt":"写一篇新品发布文章","image_ratio":"2:1","image_capability_key":"custom"}`,
 	}}
@@ -633,7 +633,7 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find task: %v", err)
 	}
-	if found.ImageRatio != model.DefaultImageRatio(model.PlatformArticle) {
+	if found.ImageRatio != model.DefaultImageRatio(model.PlatformWechat) {
 		t.Fatalf("image_ratio = %q, want invalid LLM ratio dropped and platform default frozen", found.ImageRatio)
 	}
 	if found.ImageCapabilityKey != "standard" {
@@ -645,7 +645,7 @@ func TestAIEntryServiceSubmitUsesExplicitImageParametersForEveryTask(t *testing.
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	user, err := repo.Users().FindByID(ctx, userID)
 	if err != nil {
 		t.Fatal(err)
@@ -693,7 +693,7 @@ func TestAIEntryServiceSubmitRejectsUnauthorizedExplicitImageCapability(t *testi
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	taskSvc.SetImageCapabilityResolver(NewImageCapabilityResolver(repo, &srvconfig.Config{
 		ModelRoutes: srvconfig.ModelRoutesConfig{ImageGeneration: srvconfig.ImageGenerationRoutesConfig{
 			DefaultCapability: "standard",
@@ -736,7 +736,7 @@ func TestAIEntryServiceSubmitFailsClosedWhenExplicitImageCapabilityResolverIsUna
 	taskSvc.SetImageCapabilityResolver(nil)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}
 	costs := &fakeProviderTokenCostRecorder{}
 	logger := zerolog.New(io.Discard)
@@ -777,7 +777,7 @@ func TestAIEntryServiceSubmitRejectsInvalidExplicitParametersBeforeIntentParsing
 			taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 			ctx := context.Background()
 			userID := uuid.NewString()
-			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 			llm := &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}
 			costs := &fakeProviderTokenCostRecorder{}
 			logger := zerolog.New(io.Discard)
@@ -994,7 +994,7 @@ func TestAIEntryRequiresServerInternalClientBeforeTaskCreation(t *testing.T) {
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, nil, nil, AIEntryModelConfig{}, &logger)
 
@@ -1021,7 +1021,7 @@ func TestAIEntryRecordsEverySuccessfulServerInternalResponse(t *testing.T) {
 	costs := &fakeProviderTokenCostRecorder{}
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	logger := zerolog.New(io.Discard)
 	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
@@ -1052,7 +1052,7 @@ func TestAIEntryRecordsMissingUsageAsUnreconciled(t *testing.T) {
 	costs := &fakeProviderTokenCostRecorder{}
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	logger := zerolog.New(io.Discard)
 	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
@@ -1079,7 +1079,7 @@ func TestAIEntryRecordsTotalOnlyUsageAsUnreconciled(t *testing.T) {
 	costs := &fakeProviderTokenCostRecorder{}
 	taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	logger := zerolog.New(io.Discard)
 	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
@@ -1139,7 +1139,7 @@ func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceAsset(t *testing.T) {
 }
 
 func TestAIEntryArticleAndMomentsDoNotPersistURLOnlyReference(t *testing.T) {
-	for _, platform := range []string{model.PlatformArticle, model.PlatformMoments} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformMoments} {
 		t.Run(platform, func(t *testing.T) {
 			taskSvc, repo := setupTaskServiceWithEnqueuer(t)
 			ctx := context.Background()

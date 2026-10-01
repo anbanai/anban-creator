@@ -29,7 +29,7 @@ const currentProject: Project = {
 
 const snapshotTask: Task = {
   id: 'task-1',
-  type: 'seednote',
+  type: 'wechat-article',
   prompt: '写一篇茶饮文章',
   status: 'completed',
   project_id: 'project-1',
@@ -39,7 +39,7 @@ const snapshotTask: Task = {
   plan_id: null,
   project_snapshot: {
     project_name: '茶小茶',
-    platform: 'article',
+    platform: 'wechat',
     visual_style: '清新茶感摄影',
     image_ratio: '3:4',
   },
@@ -225,7 +225,7 @@ describe('TaskContextSummary', () => {
     renderSummary({
       task: {
         ...snapshotTask,
-        type: 'article',
+        type: 'wechat-article',
         project_snapshot: {},
         input_attachments: [],
       },
@@ -240,7 +240,7 @@ describe('TaskContextSummary', () => {
     })
 
     expect(screen.getByText('当前项目')).toBeInTheDocument()
-    expect(screen.getByText('种草笔记')).toBeInTheDocument()
+    expect(screen.getByText('公众号文章')).toBeInTheDocument()
     expect(screen.getByText('未设置')).toBeInTheDocument()
     expect(screen.getByText('0 项输入')).toBeInTheDocument()
     expect(screen.getByText('仅任务输入')).toBeInTheDocument()

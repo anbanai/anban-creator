@@ -3,8 +3,9 @@ import type { MontageInput } from './montage'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
+import type { ProjectPlatform, OutputChannel } from './project'
 
-export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'hypit'
+export type TaskType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'hypit'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection
@@ -79,8 +80,11 @@ export interface StyleOverrides {
 }
 
 export interface ProjectSnapshot {
-  project_name?: string
-  platform?: TaskType
+	project_name?: string
+	/** @deprecated New snapshots use agent_id and channel. */
+	platform?: ProjectPlatform
+  agent_id?: string
+  channel?: OutputChannel
   instructions?: string
   keywords?: string
   visual_style?: string
@@ -100,7 +104,11 @@ export interface ProjectSnapshot {
 
 export interface Task {
   id: string
-  type: TaskType
+	agent_id?: string
+	channel?: string
+	task_kind?: string
+	/** @deprecated New task identity is agent_id/channel/task_kind. */
+	type: TaskType
   agent_input?: Record<string, unknown>
   title?: string
   topic?: string
@@ -269,6 +277,9 @@ export interface TaskFile {
 }
 
 export interface CreateTaskRequest {
+	agent_id?: string
+	channel?: OutputChannel
+	task_kind?: string
   type: TaskType
   execution_profile: AgentExecutionProfileID
   topic?: string

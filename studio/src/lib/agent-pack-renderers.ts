@@ -1,5 +1,6 @@
 const customRendererKeys = new Set([
-  'article',
+  'wechat-article',
+  'wechat-picture',
   'seednote',
   'moments',
   'ecommerce',

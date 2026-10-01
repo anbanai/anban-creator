@@ -30,7 +30,7 @@ vi.mock('@/lib/api', async () => {
         list: vi.fn().mockResolvedValue({
           items: [{
             id: 'failed-task',
-            type: 'article',
+            type: 'wechat-article',
             title: '失败文章',
             prompt: '失败任务',
             status: 'failed',
@@ -49,7 +49,7 @@ vi.mock('@/lib/api', async () => {
         list: vi.fn().mockResolvedValue([{
           id: 'project-1',
           user_id: 'user-1',
-          platform: 'article',
+          platform: 'wechat',
           name: '公众号项目',
           avatar_url: '',
           profile_url: '',

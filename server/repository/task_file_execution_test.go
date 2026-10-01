@@ -409,10 +409,10 @@ func seedCurrentTaskForArtifacts(t *testing.T, repo Repository, taskID, executio
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: taskID + "@example.com", Password: "x", InviteCode: taskID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "p", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "p", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionRunning, Started: true, ManifestStatus: model.TaskExecutionManifestPending}); err != nil {

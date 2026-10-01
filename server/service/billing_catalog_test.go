@@ -24,7 +24,7 @@ const billingCatalogUserID = "40000000-0000-4000-8000-000000000001"
 func TestBillingCatalogCanonicalRequestValidationPrecedesSQL(t *testing.T) {
 	bundle := testBillingBundle()
 	validQuote := QuoteRequest{
-		UserID: billingCatalogUserID, CatalogID: bundle.Products.CatalogID, Operation: "task.article",
+		UserID: billingCatalogUserID, CatalogID: bundle.Products.CatalogID, Operation: "task.wechat_article",
 		ExecutionProfile:   "balanced",
 		RequestFingerprint: billingFingerprint("canonical-quote"), IdempotencyScope: "quote", IdempotencyKey: "canonical-quote",
 	}
@@ -64,8 +64,8 @@ func TestBillingCatalogCanonicalRequestValidationPrecedesSQL(t *testing.T) {
 	}{
 		{name: "empty operation", catalogID: bundle.Products.CatalogID, operation: " "},
 		{name: "operation too long", catalogID: bundle.Products.CatalogID, operation: strings.Repeat("o", 129)},
-		{name: "route too long", catalogID: bundle.Products.CatalogID, operation: "task.article", route: strings.Repeat("r", 129)},
-		{name: "catalog too long", catalogID: strings.Repeat("c", 129), operation: "task.article"},
+		{name: "route too long", catalogID: bundle.Products.CatalogID, operation: "task.wechat_article", route: strings.Repeat("r", 129)},
+		{name: "catalog too long", catalogID: strings.Repeat("c", 129), operation: "task.wechat_article"},
 	}
 	for _, tt := range resolveCases {
 		t.Run("resolve "+tt.name, func(t *testing.T) {
@@ -90,7 +90,7 @@ func TestBillingCatalogCanonicalQuoteTrimsPersistedIdentity(t *testing.T) {
 	}
 	quote, err := svc.CreateQuote(context.Background(), QuoteRequest{
 		UserID: "  " + billingCatalogUserID + "  ", CatalogID: "  " + bundle.Products.CatalogID + "  ",
-		Operation: "  task.article  ", ExecutionProfile: "  balanced  ", Route: "  ", RequestFingerprint: "  " + billingFingerprint("trimmed") + "  ",
+		Operation: "  task.wechat_article  ", ExecutionProfile: "  balanced  ", Route: "  ", RequestFingerprint: "  " + billingFingerprint("trimmed") + "  ",
 		IdempotencyScope: "  quote  ", IdempotencyKey: "  trimmed  ",
 	})
 	if err != nil {
@@ -174,11 +174,11 @@ func TestBillingCatalogParsesProductionAndResolvesExactRoute(t *testing.T) {
 		t.Fatalf("Publish production catalog: %v", err)
 	}
 
-	taskSKU, err := svc.ResolveSKUForExecutionProfile(context.Background(), bundle.Products.CatalogID, "task.article", "balanced")
-	if err != nil || taskSKU.SKUID != "task.article.balanced" {
+	taskSKU, err := svc.ResolveSKUForExecutionProfile(context.Background(), bundle.Products.CatalogID, "task.wechat_article", "balanced")
+	if err != nil || taskSKU.SKUID != "task.wechat_article.balanced" {
 		t.Fatalf("ResolveSKUForExecutionProfile task balanced = %+v, %v", taskSKU, err)
 	}
-	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "task.article", ""); !errors.Is(err, ErrBillingSKUNotFound) {
+	if _, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "task.wechat_article", ""); !errors.Is(err, ErrBillingSKUNotFound) {
 		t.Fatalf("route resolution matched task profile SKU: %v", err)
 	}
 	standard, err := svc.ResolveSKU(context.Background(), bundle.Products.CatalogID, "image.generate", "image_generation.capabilities.standard")
@@ -236,9 +236,9 @@ func TestBillingCatalogQuoteSeparatesAgentProfilesFromOperationRoutes(t *testing
 		name   string
 		mutate func(*QuoteRequest)
 	}{
-		{name: "agent task requires profile", mutate: func(req *QuoteRequest) { req.Operation = "task.article" }},
+		{name: "agent task requires profile", mutate: func(req *QuoteRequest) { req.Operation = "task.wechat_article" }},
 		{name: "agent task rejects route", mutate: func(req *QuoteRequest) {
-			req.Operation = "task.article"
+			req.Operation = "task.wechat_article"
 			req.ExecutionProfile = "balanced"
 			req.Route = "legacy"
 		}},
@@ -265,7 +265,7 @@ func TestBillingCatalogQuoteSeparatesAgentProfilesFromOperationRoutes(t *testing
 	}
 
 	valid := base
-	valid.Operation = "task.article"
+	valid.Operation = "task.wechat_article"
 	valid.ExecutionProfile = "balanced"
 	valid.IdempotencyKey = "valid-balanced"
 	quote, err := svc.CreateQuote(ctx, valid)
@@ -276,7 +276,7 @@ func TestBillingCatalogQuoteSeparatesAgentProfilesFromOperationRoutes(t *testing
 	if err := json.Unmarshal(quote.SKUSnapshot, &frozen); err != nil {
 		t.Fatal(err)
 	}
-	if frozen.ExecutionProfile != "balanced" || frozen.ID != "task.article.balanced" {
+	if frozen.ExecutionProfile != "balanced" || frozen.ID != "task.wechat_article.balanced" {
 		t.Fatalf("frozen SKU = %#v", frozen)
 	}
 }
@@ -297,7 +297,7 @@ func TestCreateTaskQuoteRequiresAProfiledCurrentCatalogSKU(t *testing.T) {
 	}
 	svc.SetAgentProfileRegistry(registry)
 	request := TaskQuoteRequest{
-		UserID: billingCatalogUserID, TaskType: "article", RequestFingerprint: billingFingerprint("public-agent-task-quote"),
+		UserID: billingCatalogUserID, TaskType: "wechat-article", RequestFingerprint: billingFingerprint("public-agent-task-quote"),
 		IdempotencyScope: "public-agent-task-quote", IdempotencyKey: "public-agent-task-quote",
 	}
 	if _, err := svc.CreateTaskQuote(ctx, request); !errors.Is(err, ErrBillingInvalid) {
@@ -322,7 +322,7 @@ func TestCreateTaskQuoteRequiresAProfiledCurrentCatalogSKU(t *testing.T) {
 	}
 	request.ExecutionProfile = "balanced"
 	quote, err := svc.CreateTaskQuote(ctx, request)
-	if err != nil || quote.CatalogID != currentBundle.Products.CatalogID || quote.SKUID != "task.article.v1" {
+	if err != nil || quote.CatalogID != currentBundle.Products.CatalogID || quote.SKUID != "task.wechat_article.v1" {
 		t.Fatalf("profiled public task quote = %#v, %v", quote, err)
 	}
 }
@@ -402,7 +402,7 @@ func TestCreateTaskQuoteEnforcesProfileAndWalletAdmissionBeforePersisting(t *tes
 		t.Fatal(err)
 	}
 	request := TaskQuoteRequest{
-		UserID: billingCatalogUserID, TaskType: "article", ExecutionProfile: "balanced",
+		UserID: billingCatalogUserID, TaskType: "wechat-article", ExecutionProfile: "balanced",
 		RequestFingerprint: billingFingerprint("admission"), IdempotencyScope: "quote", IdempotencyKey: "admission",
 	}
 
@@ -515,7 +515,7 @@ func TestBillingCatalogQuoteReplayAndConflict(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 	req := QuoteRequest{
-		UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("quote-request"),
+		UserID: billingCatalogUserID, Operation: "task.wechat_article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("quote-request"),
 		IdempotencyScope: "quote", IdempotencyKey: "quote-key-1",
 	}
 	first, err := svc.CreateQuote(ctx, req)
@@ -560,7 +560,7 @@ func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
 			t.Fatal(err)
 		}
 		quote, err := svc.CreateQuote(ctx, QuoteRequest{
-			UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("tier", string(tt.tier)),
+			UserID: billingCatalogUserID, Operation: "task.wechat_article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("tier", string(tt.tier)),
 			IdempotencyScope: "tier-quote", IdempotencyKey: string(tt.tier),
 		})
 		if err != nil {
@@ -587,7 +587,7 @@ func TestBillingCatalogTierPricesAndQuoteFreeze(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := QuoteRequest{
-		UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("frozen-quote"),
+		UserID: billingCatalogUserID, Operation: "task.wechat_article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("frozen-quote"),
 		IdempotencyScope: "frozen-tier-quote", IdempotencyKey: "stable",
 	}
 	first, err := svc.CreateQuote(ctx, req)
@@ -642,7 +642,7 @@ func TestBillingCatalogTaskTimePricingBoundariesAndTierFloor(t *testing.T) {
 				t.Fatal(err)
 			}
 			quote, err := svc.CreateQuote(ctx, QuoteRequest{
-				UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced",
+				UserID: billingCatalogUserID, Operation: "task.wechat_article", ExecutionProfile: "balanced",
 				RequestFingerprint: billingFingerprint(tt.name), IdempotencyScope: "time", IdempotencyKey: tt.name,
 			})
 			if err != nil {
@@ -722,7 +722,7 @@ func TestBillingCatalogQuoteUsesOneServerTimestampForTimePriceAndCreation(t *tes
 		t.Fatal(err)
 	}
 	call = 0
-	quote, err := svc.CreateQuote(ctx, QuoteRequest{UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("single-time"), IdempotencyScope: "time", IdempotencyKey: "single-time"})
+	quote, err := svc.CreateQuote(ctx, QuoteRequest{UserID: billingCatalogUserID, Operation: "task.wechat_article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("single-time"), IdempotencyScope: "time", IdempotencyKey: "single-time"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +776,7 @@ func TestCreateTaskQuoteUsesOneServerTimestampForAdmissionAndQuote(t *testing.T)
 	}
 	call = 0
 	quote, err := svc.CreateTaskQuote(ctx, TaskQuoteRequest{
-		UserID: billingCatalogUserID, TaskType: "article", ExecutionProfile: "balanced",
+		UserID: billingCatalogUserID, TaskType: "wechat-article", ExecutionProfile: "balanced",
 		RequestFingerprint: billingFingerprint("single-task-time"), IdempotencyScope: "time", IdempotencyKey: "single-task-time",
 	})
 	if err != nil {
@@ -813,7 +813,7 @@ func TestBillingCatalogQuoteReplaySurvivesLatestCatalogRollover(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := QuoteRequest{
-		UserID: billingCatalogUserID, Operation: "task.article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("rollover"),
+		UserID: billingCatalogUserID, Operation: "task.wechat_article", ExecutionProfile: "balanced", RequestFingerprint: billingFingerprint("rollover"),
 		IdempotencyScope: "quote", IdempotencyKey: "rollover",
 	}
 	first, err := firstService.CreateQuote(ctx, req)
@@ -1036,7 +1036,7 @@ func testBillingBundle() billing.Bundle {
 			CatalogID: "retail-test-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
 			TaskTimePricing: billing.TaskTimePricing{Timezone: "Asia/Shanghai", PeakWindows: []billing.TimeWindow{{Start: "00:15", End: "24:00"}}, OffPeakWindows: []billing.TimeWindow{{Start: "00:00", End: "00:15"}}, OffPeakRatePercent: 80},
 			SKUs: []billing.SKUConfig{
-				{ID: "task.article.v1", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
+				{ID: "task.wechat_article.v1", Operation: "task.wechat_article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
 				{ID: "image.cover.v1", Operation: "mcp.generate_image", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Route: "image.cover", Delivery: "image"},
 				{ID: "image.standalone.v1", Operation: "image.generate", ChargePolicy: "standalone_operation", PriceCredits: 100, Route: "image_generation.capabilities.standard", Delivery: "image"},
 			},

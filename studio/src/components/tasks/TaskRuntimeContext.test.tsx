@@ -6,7 +6,7 @@ import { TaskRuntimeContext } from './TaskRuntimeContext'
 
 const task = {
   id: 'task-runtime',
-  type: 'article',
+  type: 'wechat-article',
   prompt: '写一篇春日生活文章',
   status: 'failed',
   project_id: 'project-1',
@@ -15,7 +15,7 @@ const task = {
   created_at: '2026-09-29T08:00:00.000Z',
   started_at: '2026-09-29T08:00:01.000Z',
   completed_at: '2026-09-29T08:02:00.000Z',
-  project_snapshot: { project_name: '春日生活号', platform: 'article' },
+  project_snapshot: { project_name: '春日生活号', platform: 'wechat' },
   runtime_context: {
     profile: {
       status: 'conflict',

@@ -351,9 +351,11 @@ claude:
   runtime_diagnostic_retention_seconds: 600
   # 所有托管执行器共享同一组 canonical runtime 镜像。
   runtime_images:
-    article: "${ANBAN_AGENT_IMAGE_ARTICLE}"
+    wechat: "${ANBAN_AGENT_IMAGE_WECHAT}"
     seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"
     montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"
+    profile: "${ANBAN_AGENT_IMAGE_PROFILE}"
+    feedback: "${ANBAN_AGENT_IMAGE_FEEDBACK}"
     hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
   # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
   execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
@@ -410,7 +412,7 @@ claude:
       moments:
         requests: { cpu: "500m", memory: "1Gi" }
         limits: { cpu: "1", memory: "2Gi" }
-      article:
+      wechat:
         requests: { cpu: "1", memory: "2Gi" }
         limits: { cpu: "2", memory: "4Gi" }
       seednote:

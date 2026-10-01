@@ -58,13 +58,13 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 	userID := uuid.NewString()
 	projectID := uuid.NewString()
 	if err := repo.Projects().Create(context.Background(), &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle,
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat,
 		Name: "Cloud completion", Status: model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusRunning, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
 		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 	}
@@ -892,7 +892,7 @@ func TestCompleteCloudExecutionPublishesReadyArticleExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	withoutContentImages := false
 	task.ArticleWithContentImages = &withoutContentImages
-	task.SetProjectSnapshot(model.ProjectSnapshot{Author: "Frozen Author", Platform: model.PlatformArticle})
+	task.SetProjectSnapshot(model.ProjectSnapshot{Author: "Frozen Author", Platform: model.PlatformWechat})
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1648,16 +1648,16 @@ func TestFinalizationDispatchReplayDoesNotDuplicateQueueOrInflateSlot(t *testing
 	repo := repository.New(db)
 	ctx := context.Background()
 	userID, projectID := uuid.NewString(), uuid.NewString()
-	project := &model.Project{ID: projectID, UserID: userID, Name: "dispatch", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+	project := &model.Project{ID: projectID, UserID: userID, Name: "dispatch", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
 	executionID := uuid.NewString()
-	completedTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
+	completedTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
 	if err := repo.Tasks().Create(ctx, completedTask); err != nil {
 		t.Fatal(err)
 	}
-	pendingTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusPending}
+	pendingTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending}
 	if err := repo.Tasks().Create(ctx, pendingTask); err != nil {
 		t.Fatal(err)
 	}
@@ -1801,7 +1801,7 @@ func (r *failingCleanupIdentityExecutions) SetCleanupRuntimeIdentity(context.Con
 }
 
 func (*cancelOrderingDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
-	return srvconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+	return srvconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
 }
 
 func (d *cancelOrderingDispatcher) Scope() string {

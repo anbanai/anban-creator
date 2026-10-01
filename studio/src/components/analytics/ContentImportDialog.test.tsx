@@ -65,7 +65,7 @@ describe('统一导入确认', () => {
     client.clear()
   })
   it('fixes WeChat imports to cumulative while using the default date', async () => {
-    const wechat = { ...project, platform: 'article' as const }
+    const wechat = { ...project, platform: 'wechat' as const }
     render(<ContentImportDialog project={wechat} onClose={vi.fn()} />)
     await upload()
     expect(screen.queryByLabelText('导入统计口径')).not.toBeInTheDocument()

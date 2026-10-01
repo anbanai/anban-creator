@@ -106,7 +106,7 @@ func TestCreatePlanRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "planagentinput"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,7 +174,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
@@ -183,6 +183,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	planSvc := newHandlerPlanService(t, repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
+	h.SetRepository(repo)
 	h.SetImageCapabilities(config.ImageGenerationRoutesConfig{
 		DefaultCapability: "standard",
 		Capabilities: map[string]config.ImageGenerationRouteConfig{
@@ -204,7 +205,8 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 		t.Fatalf("request failed: %v", err)
 	}
 	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
 
 	plans, err := repo.Plans().FindByUserID(ctx, userID, projectID, 0, 10)
@@ -384,7 +386,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
@@ -468,6 +470,7 @@ func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	planSvc := newHandlerPlanService(t, repo, &logger)
 	h := NewPlanHandler(planSvc, &logger)
+	h.SetRepository(repo)
 
 	app := fiber.New()
 	app.Post("/plans", func(c fiber.Ctx) error {
@@ -676,7 +679,7 @@ func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.
 		}
 	}
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Type: model.PlatformArticle, Prompt: "before",
+		ID: planID, UserID: userID, Type: model.TaskTypeWechatArticle, Prompt: "before",
 		CronExpr: "0 9 * * *", ReferenceImageAssetID: "asset-a", Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)
@@ -739,7 +742,7 @@ func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *tes
 		}
 	}
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Type: model.PlatformArticle, Prompt: "before",
+		ID: planID, UserID: userID, Type: model.TaskTypeWechatArticle, Prompt: "before",
 		CronExpr: "0 9 * * *", ReferenceImageAssetID: assetIDs[0], Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)
@@ -790,7 +793,7 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	planID := uuid.NewString()
 	seedPlanHandlerUser(t, base, userID)
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Type: model.PlatformArticle, Prompt: "before",
+		ID: planID, UserID: userID, Type: model.TaskTypeWechatArticle, Prompt: "before",
 		CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)

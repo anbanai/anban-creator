@@ -44,6 +44,59 @@ type CloneTaskOverrides struct {
 	HypitInput               *model.HypitInput
 }
 
+func cloneRequestedTaskTypeForProject(project *model.Project) string {
+	if project == nil {
+		return ""
+	}
+	switch strings.TrimSpace(project.Platform) {
+	case model.PlatformWechat:
+		return model.TaskTypeWechatArticle
+	case model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit:
+		return strings.TrimSpace(project.Platform)
+	default:
+		return strings.TrimSpace(project.Platform)
+	}
+}
+
+func cloneTaskIdentity(src *model.Task) (agentID, channel, taskKind string) {
+	if src == nil {
+		return "", "", ""
+	}
+	agentID, channel, taskKind = strings.TrimSpace(src.AgentID), strings.TrimSpace(src.Channel), strings.TrimSpace(src.TaskKind)
+	legacyType := strings.TrimSpace(src.Type)
+	if agentID == "" {
+		switch legacyType {
+		case model.TaskTypeWechatArticle, model.PlatformWechat:
+			agentID = model.AgentIDArticle
+		case model.TaskTypeWechatPicture:
+			agentID = model.AgentIDWechatPicture
+		case model.PlatformSeednote, model.TaskTypeViralAnalysis:
+			agentID = model.AgentIDSeednote
+		case model.PlatformHypit:
+			agentID = model.AgentIDHypit
+		default:
+			agentID = legacyType
+		}
+	}
+	if channel == "" {
+		if inferred, ok := model.AgentChannel(agentID); ok {
+			channel = inferred
+		} else {
+			channel = agentID
+		}
+	}
+	if taskKind == "" {
+		if legacyType == model.TaskTypeViralAnalysis {
+			taskKind = model.TaskKindViralAnalysis
+		} else if legacyType == model.PlatformHypit {
+			taskKind = model.PlatformHypit
+		} else {
+			taskKind = model.TaskKindContentGeneration
+		}
+	}
+	return agentID, channel, taskKind
+}
+
 func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
 	cloneParams.ExecutionProfile = strings.TrimSpace(cloneParams.ExecutionProfile)
 	if cloneParams.ExecutionProfile == "" {
@@ -53,6 +106,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	if err != nil {
 		return nil, fmt.Errorf("find task: %w", err)
 	}
+	cloneAgentID, cloneChannel, cloneTaskKind := cloneTaskIdentity(src)
 
 	// Defensive guard; the handler also enforces this for a clean 400, but the
 	// service is the source of truth for the business rule. Active tasks cannot
@@ -80,7 +134,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		}
 		attachments := cloneEntryAttachments(override.InputAttachments)
 		referenceAssetID := strings.TrimSpace(override.ReferenceImageAssetID)
-		preserveArticleReference := destinationProject.Platform == model.PlatformArticle
+		preserveArticleReference := destinationProject.Platform == model.PlatformWechat
 		if preserveArticleReference {
 			attachments = removeAttachmentAsset(attachments, referenceAssetID)
 			if override.ArticleWithCover != nil && !*override.ArticleWithCover {
@@ -108,6 +162,9 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		params := CreateManualParams{
 			UserID:                   src.UserID,
 			ProjectID:                override.ProjectID,
+			AgentID:                  cloneAgentID,
+			Channel:                  cloneChannel,
+			TaskKind:                 cloneTaskKind,
 			ExecutionProfile:         cloneParams.ExecutionProfile,
 			Prompt:                   override.Prompt,
 			Quantity:                 override.Quantity,
@@ -129,6 +186,12 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			MontageInput:             override.MontageInput,
 			HypitInput:               override.HypitInput,
 			MontageSourceTaskID:      src.ID,
+		}
+		if model.PlatformForChannel(cloneChannel) != strings.TrimSpace(destinationProject.Platform) {
+			params.AgentID = ""
+			params.Channel = ""
+			params.TaskKind = ""
+			params.RequestedTaskType = cloneRequestedTaskTypeForProject(destinationProject)
 		}
 		tasks, err := s.CreateManual(ctx, params)
 		if err != nil {
@@ -161,7 +224,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 		prompt = strings.TrimSpace(*cloneParams.Prompt)
 	}
 	preservedReferenceAssetID := ""
-	if src.Type == model.PlatformArticle {
+	if src.Type == model.TaskTypeWechatArticle || src.Type == model.TaskTypeWechatPicture {
 		directReferenceAssetID := strings.TrimSpace(src.ReferenceImageAssetID)
 		if (src.ArticleWithCover == nil || *src.ArticleWithCover) && directReferenceAssetID != strings.TrimSpace(snapshot.ReferenceImageAssetID) {
 			preservedReferenceAssetID = directReferenceAssetID
@@ -170,6 +233,9 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	params := CreateManualParams{
 		UserID:                        src.UserID,
 		ProjectID:                     src.ProjectID,
+		AgentID:                       cloneAgentID,
+		Channel:                       cloneChannel,
+		TaskKind:                      cloneTaskKind,
 		ExecutionProfile:              cloneParams.ExecutionProfile,
 		FrozenTaskType:                src.Type,
 		PreserveFrozenConfig:          true,
@@ -206,7 +272,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 	} else if attachments := cloneOriginalInputAttachments(src.InputAttachments.Data()); len(attachments) > 0 {
 		params.InputAttachments = attachments
 	}
-	if src.Type == model.PlatformArticle {
+	if src.Type == model.TaskTypeWechatArticle || src.Type == model.TaskTypeWechatPicture {
 		params.InputAttachments = removeAttachmentAsset(params.InputAttachments, src.ReferenceImageAssetID)
 	} else {
 		params.InputAttachments, err = s.prependClonedReferenceAttachment(ctx, src, params.InputAttachments)

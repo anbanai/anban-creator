@@ -135,19 +135,19 @@ func TestParseWechatAnalyticsRateAndMissingValues(t *testing.T) {
 
 func TestWechatAnalyticsContentTypeRequiresExplicitEvidence(t *testing.T) {
 	for _, tc := range []struct{ name, column, value, source, want string }{
-		{"article", "内容类型", "图文", "公众号后台", "article"},
-		{"image", "消息类型", "图片", "公众号后台", "image"},
-		{"sticker image type", "内容类型", "贴图", "公众号后台", "image"},
-		{"gallery image type", "作品类型", "图集", "公众号后台", "image"},
-		{"sticker image source", "", "", "贴图", "image"},
-		{"gallery image source", "", "", "图集", "image"},
-		{"alternate type", "作品类型", "文章", "公众号后台", "article"},
-		{"english type", "类型", "image", "公众号后台", "image"},
-		{"explicit source", "", "", "图文", "article"},
+		{"article", "内容类型", "图文", "公众号后台", model.TaskTypeWechatArticle},
+		{"image", "消息类型", "图片", "公众号后台", model.TaskTypeWechatPicture},
+		{"sticker image type", "内容类型", "贴图", "公众号后台", model.TaskTypeWechatPicture},
+		{"gallery image type", "作品类型", "图集", "公众号后台", model.TaskTypeWechatPicture},
+		{"sticker image source", "", "", "贴图", model.TaskTypeWechatPicture},
+		{"gallery image source", "", "", "图集", model.TaskTypeWechatPicture},
+		{"alternate type", "作品类型", "文章", "公众号后台", model.TaskTypeWechatArticle},
+		{"english type", "类型", "image", "公众号后台", model.TaskTypeWechatPicture},
+		{"explicit source", "", "", "图文", model.TaskTypeWechatArticle},
 		{"generic source", "", "", "数据来源概况", "unknown"},
 		{"missing type", "", "", "公众号后台", "unknown"},
 		{"unsupported explicit type", "内容类型", "视频", "图文", "unknown"},
-		{"explicit type wins", "内容类型", "图片", "图文", "image"},
+		{"explicit type wins", "内容类型", "图片", "图文", model.TaskTypeWechatPicture},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			columns := map[string]int{}

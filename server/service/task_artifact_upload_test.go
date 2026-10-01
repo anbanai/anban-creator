@@ -279,12 +279,12 @@ func newTaskArtifactTestService(t *testing.T) (*TaskService, repository.Reposito
 	store := &fakeTaskArtifactStorage{name: "oss"}
 	svc := newTestTaskService(repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	task := &model.Task{
 		ID:        uuid.NewString(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusRunning,
 	}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
@@ -1630,11 +1630,11 @@ func TestFinalizeTaskArtifactManifestPreservesWechatMetadataForSettledGeneratedI
 	store := &fakeTaskArtifactStorage{name: "oss"}
 	svc := newTestTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetBillingWalletService(fixture.wallet)
-	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformWechat)
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
-		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -1703,13 +1703,13 @@ func TestGeneratedCoverWechatMetadataSurvivesManifestAndReachesDraftAdd(t *testi
 	}
 	svc := newTestTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetBillingWalletService(fixture.wallet)
-	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformWechat)
 	withCover, withContentImages := true, false
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 		ArticleWithCover: &withCover, ArticleWithContentImages: &withContentImages,
-		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -1817,11 +1817,11 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 	store := &fakeTaskArtifactStorage{name: "oss"}
 	svc := newTestTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetBillingWalletService(fixture.wallet)
-	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformWechat)
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
-		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
-		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -2156,10 +2156,10 @@ func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomicall
 	store := &fakeTaskArtifactStorage{name: "oss"}
 	svc := newTestTaskService(fixture.repo, &mockEnqueuer{}, store, &logger, "", nil, nil)
 	svc.SetBillingWalletService(fixture.wallet)
-	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformArticle)
+	projectID := createTestProject(t, fixture.repo, billingWalletUserID, model.PlatformWechat)
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning,
-		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.article.v1", BillingPricingTier: string(model.TierFree),
+		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
+		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)

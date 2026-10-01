@@ -683,7 +683,13 @@ func deliveryMetadataFromContract(contract []agentpack.DeliverySpec, file *model
 	if file == nil || file.State != model.TaskFileStateDelivered {
 		return "", false
 	}
-	return agentpack.MatchDeliveryPath(contract, filepath.ToSlash(file.FilePath))
+	public := make([]agentpack.DeliverySpec, 0, len(contract))
+	for _, spec := range contract {
+		if !spec.InternalOnly {
+			public = append(public, spec)
+		}
+	}
+	return agentpack.MatchDeliveryPath(public, filepath.ToSlash(file.FilePath))
 }
 
 func taskFilePreviewURL(taskID, fileID string) string {

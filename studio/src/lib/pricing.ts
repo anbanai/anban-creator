@@ -1,5 +1,14 @@
 import type { AgentExecutionProfileCapability, AgentExecutionProfileID, BillingCatalog } from '@/types'
 
+export function taskOperation(type: string) {
+  // Dashboard pricing is keyed by the selected project platform, while
+  // task forms use the concrete task type. A WeChat project defaults to the
+  // long-form article workflow unless the picture task is selected explicitly.
+  if (type === 'wechat' || type === 'wechat-article') return 'task.wechat_article'
+  if (type === 'wechat-picture') return 'task.wechat_picture'
+  return `task.${type}`
+}
+
 export function taskCostFor(
   catalog: BillingCatalog | undefined,
   type: string,
@@ -7,7 +16,7 @@ export function taskCostFor(
 ) {
   return catalog?.skus.find((sku) =>
     sku.charge_policy === 'task_admission'
-      && sku.operation === `task.${type}`
+      && sku.operation === taskOperation(type)
       && (executionProfile === undefined || sku.execution_profile === executionProfile),
   )?.price_credits
 }
@@ -41,7 +50,7 @@ export function taskTimePriceInfo(
   selectedTime?: string,
 ) {
   const sku = catalog?.skus.find((item) => item.charge_policy === 'task_admission'
-    && item.operation === `task.${type}`
+    && item.operation === taskOperation(type)
     && (executionProfile === undefined || item.execution_profile === executionProfile))
   const period = taskPeriodForTime(catalog, selectedTime)
   if (!sku || !period || sku.peak_price_credits === undefined || sku.off_peak_price_credits === undefined) return undefined
@@ -60,8 +69,9 @@ export function executionProfilePriceInfo(
   priceUnit: 'task' | 'run' = 'task',
 ) {
   const chargePolicy = priceUnit === 'run' ? 'task_admission' : 'task_admission'
-  const price = catalog?.skus.find((sku) => sku.charge_policy === chargePolicy && sku.operation === `task.${type}` && sku.execution_profile === profile)?.price_credits
-  const prices = catalog?.skus.filter((sku) => sku.charge_policy === chargePolicy && sku.operation === `task.${type}` && sku.price_credits > 0).map((sku) => sku.price_credits) ?? []
+  const operation = taskOperation(type)
+  const price = catalog?.skus.find((sku) => sku.charge_policy === chargePolicy && sku.operation === operation && sku.execution_profile === profile)?.price_credits
+  const prices = catalog?.skus.filter((sku) => sku.charge_policy === chargePolicy && sku.operation === operation && sku.price_credits > 0).map((sku) => sku.price_credits) ?? []
   const baseline = prices.length ? Math.min(...prices) : undefined
   return { price, multiplier: price !== undefined && baseline ? price / baseline : undefined }
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -165,7 +166,7 @@ func (availableRuntimeDispatcher) Scope() string { return "docker" }
 
 func (availableRuntimeDispatcher) ResolveRuntime(taskType string) config.RuntimeImageSelection {
 	return config.RuntimeImages{
-		model.PlatformArticle:  "creator-agent-article:test",
+		model.PlatformWechat:   "creator-agent-wechat:test",
 		model.PlatformSeednote: "creator-agent-seednote:test",
 		model.PlatformMontage:  "creator-agent-montage:test",
 	}.ForTask(taskType)
@@ -331,7 +332,7 @@ func TestTaskAndPlanCreateRejectLegacyExecutionProfileIDs(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Projects().Create(ctx, &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle,
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat,
 		Name: "Article", Status: model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -383,7 +384,7 @@ func TestCreateTaskRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "taskagentinput"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -496,8 +497,8 @@ func TestCreateViralAnalysisTaskValidatesRequestedTypeAgainstProjectPlatform(t *
 		platform string
 		taskType string
 	}{
-		{name: "viral analysis requires seednote", platform: model.PlatformArticle, taskType: model.TaskTypeViralAnalysis},
-		{name: "ordinary type must match project", platform: model.PlatformSeednote, taskType: model.PlatformArticle},
+		{name: "viral analysis requires seednote", platform: model.PlatformWechat, taskType: model.TaskTypeViralAnalysis},
+		{name: "ordinary type must match project", platform: model.PlatformSeednote, taskType: model.TaskTypeWechatArticle},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupTaskHandlerTestDB(t)
@@ -574,11 +575,11 @@ func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
 		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
-		Type: model.PlatformArticle, Status: model.TaskStatusRunning,
+		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformArticle, model.TaskStatusCompleted)
+	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.TaskTypeWechatArticle, model.TaskStatusCompleted)
 	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
 		ID:              fileID,
 		TaskID:          taskID,
@@ -1122,7 +1123,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
@@ -1147,7 +1148,8 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 		t.Fatalf("request failed: %v", err)
 	}
 	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
 
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 10)
@@ -1397,7 +1399,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
@@ -1408,7 +1410,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 		ID:               taskID,
 		UserID:           userID,
 		ProjectID:        projectID,
-		Type:             model.PlatformArticle,
+		Type:             model.TaskTypeWechatArticle,
 		ExecutionProfile: "effective",
 		Status:           model.TaskStatusCompleted,
 		Prompt:           "clone this completed task",
@@ -1448,10 +1450,20 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 		"input_attachments":[{"type":"text","text":"edited exact attachment","file_name":"brief.txt"}]
 	}`)
 	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
 	var env struct {
-		Data model.Task `json:"data"`
+		Data struct {
+			ID                   string                                      `json:"id"`
+			ProjectID            string                                      `json:"project_id"`
+			Type                 string                                      `json:"type"`
+			Status               string                                      `json:"status"`
+			Prompt               string                                      `json:"prompt"`
+			ExecutionProfile     string                                      `json:"execution_profile"`
+			AgentProfileSnapshot model.AgentProfileSnapshot                  `json:"agent_profile_snapshot"`
+			InputAttachments     datatypes.JSONType[[]model.EntryAttachment] `json:"input_attachments"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -1465,7 +1477,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	if env.Data.ExecutionProfile != "balanced" || env.Data.AgentProfileSnapshot.ProfileID != "balanced" {
 		t.Fatalf("exact clone profile = %q snapshot=%#v, want balanced", env.Data.ExecutionProfile, env.Data.AgentProfileSnapshot)
 	}
-	if env.Data.ProjectID != projectID || env.Data.Type != model.PlatformArticle || env.Data.Prompt != "edited exact clone prompt" {
+	if env.Data.ProjectID != projectID || env.Data.Type != model.TaskTypeWechatArticle || env.Data.Prompt != "edited exact clone prompt" {
 		t.Fatalf("exact clone destination/config = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Type, env.Data.Prompt)
 	}
 	attachments := env.Data.InputAttachments.Data()
@@ -1556,7 +1568,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	destinationProject := &model.Project{
 		ID:           uuid.NewString(),
 		UserID:       userID,
-		Platform:     model.PlatformArticle,
+		Platform:     model.PlatformWechat,
 		Name:         "Destination article",
 		Status:       model.ProjectStatusActive,
 		Instructions: "current destination instructions",
@@ -1611,12 +1623,16 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
 	}
 	var env struct {
-		Data model.Task `json:"data"`
+		Data struct {
+			ProjectID string `json:"project_id"`
+			Type      string `json:"type"`
+			Prompt    string `json:"prompt"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if env.Data.ProjectID != destinationProject.ID || env.Data.Type != model.PlatformArticle || env.Data.Prompt != "edited full clone prompt" {
+	if env.Data.ProjectID != destinationProject.ID || env.Data.Type != model.TaskTypeWechatArticle || env.Data.Prompt != "edited full clone prompt" {
 		t.Fatalf("response task = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Type, env.Data.Prompt)
 	}
 
@@ -1632,7 +1648,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 			t.Fatalf("clone profile = %q snapshot=%#v, want balanced", task.ExecutionProfile, task.AgentProfileSnapshot)
 		}
 		snapshot := task.ProjectSnapshot.Data()
-		if task.Type != destinationProject.Platform || snapshot.Platform != destinationProject.Platform || snapshot.ProjectName != destinationProject.Name || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
+		if task.Type != model.TaskTypeWechatArticle || snapshot.Platform != destinationProject.Platform || snapshot.ProjectName != destinationProject.Name || snapshot.Instructions != destinationProject.Instructions || snapshot.VisualStyle != destinationProject.VisualStyle {
 			t.Fatalf("destination snapshot = %#v task type=%q", snapshot, task.Type)
 		}
 		if task.ImageRatio != "1:1" || task.ImageCapabilityKey != "free-image" || !task.SkipReferenceImage || task.ReferenceImageAssetID != "" || !task.Watermark {
@@ -1671,12 +1687,12 @@ func TestCloneTask_FullEditableRejectsProjectStyleReferenceAsArticlePortrait(t *
 	sourceProject := &model.Project{
 		ID:                    uuid.NewString(),
 		UserID:                userID,
-		Platform:              model.PlatformArticle,
+		Platform:              model.PlatformWechat,
 		Name:                  "source",
 		Status:                model.ProjectStatusActive,
 		ReferenceImageAssetID: inherited.ID,
 	}
-	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "destination", Status: model.ProjectStatusActive}
 	for _, project := range []*model.Project{sourceProject, destinationProject} {
 		if err := repo.Projects().Create(ctx, project); err != nil {
 			t.Fatalf("create project: %v", err)
@@ -1878,8 +1894,8 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 		}
 	}
 
-	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
-	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "source", Status: model.ProjectStatusActive}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "destination", Status: model.ProjectStatusActive}
 	for _, project := range []*model.Project{sourceProject, destinationProject} {
 		if err := repo.Projects().Create(ctx, project); err != nil {
 			t.Fatalf("create project: %v", err)
@@ -2044,7 +2060,7 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: tt.name + "-clone@example.com", Password: "hashed", InviteCode: tt.name + "clone"}); err != nil {
 				t.Fatal(err)
 			}
-			sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
+			sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "source", Status: model.ProjectStatusActive}
 			destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: tt.platform, Name: tt.name, Status: model.ProjectStatusActive}
 			if tt.platform == model.PlatformEcommerce {
 				destinationProject.SetEcommerceDefaults(model.EcommerceProjectDefaults{DefaultSelectedModules: map[string]int{"main_images": 1}})
@@ -2129,8 +2145,8 @@ func setupCloneSourceReuseFixtureWithStore(t *testing.T, destinationPlatform str
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: uuid.NewString() + "@source-reuse.test", Password: "hashed", InviteCode: strings.ReplaceAll(uuid.NewString(), "-", "")[:16]}); err != nil {
 		t.Fatal(err)
 	}
-	rootProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "root source", Status: model.ProjectStatusActive}
-	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "intermediate source", Status: model.ProjectStatusActive}
+	rootProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "root source", Status: model.ProjectStatusActive}
+	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "intermediate source", Status: model.ProjectStatusActive}
 	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: destinationPlatform, Name: "destination", Status: model.ProjectStatusActive}
 	if destinationPlatform == model.PlatformEcommerce {
 		destinationProject.SetEcommerceDefaults(model.EcommerceProjectDefaults{DefaultSelectedModules: map[string]int{"main_images": 1}})
@@ -2302,7 +2318,7 @@ func TestCloneTask_FullEditableEnforcesTrustedRootSourceReusePolicy(t *testing.T
 		platform   string
 		wantStatus int
 	}{
-		{platform: model.PlatformArticle, wantStatus: fiber.StatusBadRequest},
+		{platform: model.PlatformWechat, wantStatus: fiber.StatusBadRequest},
 		{platform: model.PlatformMontage, wantStatus: fiber.StatusOK},
 	} {
 		t.Run(tt.platform, func(t *testing.T) {
@@ -2344,7 +2360,7 @@ func TestCloneTask_FullEditableEnforcesTrustedRootSourceReusePolicy(t *testing.T
 }
 
 func TestCloneTask_FullEditableAllowsTaskAPIAttachmentSourceReuse(t *testing.T) {
-	fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+	fixture := setupCloneSourceReuseFixture(t, model.PlatformWechat)
 	apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
 		AssetID: fixture.sourceAsset.ID,
 	})
@@ -2391,7 +2407,7 @@ func TestCloneTask_FullEditableRejectsUntrustedTaskAPIAttachmentSourceReuse(t *t
 	}
 	for _, mismatch := range mismatches {
 		t.Run(mismatch.name, func(t *testing.T) {
-			fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+			fixture := setupCloneSourceReuseFixture(t, model.PlatformWechat)
 			userID, projectID, taskID := mismatch.ids(fixture)
 			apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
 				Type:        "image",
@@ -2404,7 +2420,7 @@ func TestCloneTask_FullEditableRejectsUntrustedTaskAPIAttachmentSourceReuse(t *t
 	}
 
 	t.Run("URL and key identify different objects", func(t *testing.T) {
-		fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+		fixture := setupCloneSourceReuseFixture(t, model.PlatformWechat)
 		apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
 			Type:        "image",
 			URL:         cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png"),
@@ -2416,7 +2432,7 @@ func TestCloneTask_FullEditableRejectsUntrustedTaskAPIAttachmentSourceReuse(t *t
 	})
 
 	t.Run("untrusted key only", func(t *testing.T) {
-		fixture := setupCloneSourceReuseFixture(t, model.PlatformArticle)
+		fixture := setupCloneSourceReuseFixture(t, model.PlatformWechat)
 		apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
 			Type:        "image",
 			Key:         strings.TrimPrefix(cloneSourceTaskURL(uuid.NewString(), fixture.rootProjectID, fixture.rootTaskID, "source.png"), "/api/v1/files/"),
@@ -2450,7 +2466,7 @@ func TestCloneTask_FullEditableRejectsKeyOnlyReuseWithoutOwnedProviderURL(t *tes
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fixture := setupCloneSourceReuseFixtureWithStore(t, model.PlatformArticle, tt.store)
+			fixture := setupCloneSourceReuseFixtureWithStore(t, model.PlatformWechat, tt.store)
 			apiAttachment := cloneSourceAttachmentAPIShape(t, fixture, model.EntryAttachment{
 				Type:        "image",
 				Key:         strings.TrimPrefix(cloneSourceTaskURL(fixture.userID, fixture.rootProjectID, fixture.rootTaskID, "source.png"), "/api/v1/files/"),
@@ -2510,7 +2526,7 @@ func TestCloneTask_FullEditableRejectsUntrustedTaskScopedSourceURLs(t *testing.T
 			return f.userID, f.rootProjectID, uuid.NewString()
 		}},
 	}
-	for _, platform := range []string{model.PlatformArticle, model.PlatformEcommerce, model.PlatformMontage} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformEcommerce, model.PlatformMontage} {
 		for _, mismatch := range mismatches {
 			t.Run(platform+"/"+mismatch.name, func(t *testing.T) {
 				fixture := setupCloneSourceReuseFixture(t, platform)
@@ -2607,7 +2623,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: tt.name + "@example.com", Password: "hashed", InviteCode: strings.ReplaceAll(tt.name, " ", "")}); err != nil {
 				t.Fatal(err)
 			}
-			sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
+			sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "source", Status: model.ProjectStatusActive}
 			if err := repo.Projects().Create(t.Context(), sourceProject); err != nil {
 				t.Fatal(err)
 			}
@@ -2615,7 +2631,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			if err := repo.Tasks().Create(t.Context(), source); err != nil {
 				t.Fatal(err)
 			}
-			destination := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+			destination := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "destination", Status: model.ProjectStatusActive}
 			body := tt.prepare(t, repo, userID, destination)
 
 			store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
@@ -2656,14 +2672,14 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "clone-insufficient@example.com", Password: "hashed", InviteCode: "cloneinsufficient"}); err != nil {
 		t.Fatal(err)
 	}
-	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "source", Status: model.ProjectStatusActive}
-	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformArticle, Name: "destination", Status: model.ProjectStatusActive}
+	sourceProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "source", Status: model.ProjectStatusActive}
+	destinationProject := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "destination", Status: model.ProjectStatusActive}
 	for _, project := range []*model.Project{sourceProject, destinationProject} {
 		if err := repo.Projects().Create(ctx, project); err != nil {
 			t.Fatal(err)
 		}
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -2680,7 +2696,7 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 			Currency:         "credits",
 			TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
 			SKUs: []billing.SKUConfig{{
-				ID: "task.article.effective", Operation: "task.article", ExecutionProfile: "effective", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article",
+				ID: "task.wechat_article.effective", Operation: "task.wechat_article", ExecutionProfile: "effective", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article",
 			}},
 		},
 	}
@@ -2734,7 +2750,7 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
@@ -2745,7 +2761,7 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 		ID:        taskID,
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.PlatformWechat,
 		Status:    model.TaskStatusFailed,
 		Prompt:    "failed task",
 	}
@@ -2927,7 +2943,7 @@ func TestResumeTask_MapsDeletedFrozenProviderError(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "resume-profile@example.com", Password: "hashed", InviteCode: "resumeprofile"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	frozen := handlerTestProfile("effective", "Cost effective", "", "deleted", "model-v1", model.TierFree)
@@ -2937,7 +2953,7 @@ func TestResumeTask_MapsDeletedFrozenProviderError(t *testing.T) {
 	}
 	taskID := uuid.NewString()
 	task := &model.Task{
-		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed,
+		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed,
 		ExecutionProfile: frozen.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint, ImageCapabilityKey: "standard",
 	}
 	freezeHandlerTaskImageCapability(t, task, "standard", handlerTestImageCapabilityRoute("image.standard", model.TierFree))
@@ -2975,11 +2991,11 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "resume-storage@example.com", Password: "hashed", InviteCode: "resume-storage"}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	taskID := uuid.NewString()
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
@@ -3030,7 +3046,7 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{
 		ID:       projectID,
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "Article",
 		Status:   model.ProjectStatusActive,
 	}); err != nil {
@@ -3041,7 +3057,7 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 		ID:        taskID,
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformArticle,
+		Type:      model.PlatformWechat,
 		Status:    model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -3087,14 +3103,14 @@ func TestTaskResponsesIncludeTotalBillingAndChargeDetails(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	if err := repo.Projects().Create(ctx, &model.Project{
-		ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive,
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive,
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	if err := repo.Tasks().Create(ctx, &model.Task{
-		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle,
+		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusCompleted, Prompt: "详情固定价格展示",
-		BillingQuoteID: "quote-v1", BillingCatalogID: "retail-v1", BillingSKUID: "task.article.standard.v1",
+		BillingQuoteID: "quote-v1", BillingCatalogID: "retail-v1", BillingSKUID: "task.wechat_article.standard.v1",
 		BillingChargeID: &chargeID, BillingPriceCredits: 6000,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -3108,7 +3124,7 @@ func TestTaskResponsesIncludeTotalBillingAndChargeDetails(t *testing.T) {
 	if err := repo.WithTx(ctx, func(tx repository.Repository) error {
 		charges := []*model.BillingCharge{
 			{
-				ID: chargeID, UserID: userID, CatalogID: "retail-v1", SKUID: "task.article.standard.v1",
+				ID: chargeID, UserID: userID, CatalogID: "retail-v1", SKUID: "task.wechat_article.standard.v1",
 				ResourceType: "task", ResourceID: taskID, Kind: model.BillingChargeKindTask,
 				Policy: "task_admission", Status: model.BillingChargeStatusPosted,
 				PriceCredits: 6000, PaidCredits: 6000, TaskID: &taskID,
@@ -3183,7 +3199,7 @@ func TestTaskResponsesIncludeTotalBillingAndChargeDetails(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	if body.Data.ID != taskID || body.Data.BillingCatalogID != "retail-v1" ||
-		body.Data.BillingSKUID != "task.article.standard.v1" || body.Data.BillingChargeID == nil ||
+		body.Data.BillingSKUID != "task.wechat_article.standard.v1" || body.Data.BillingChargeID == nil ||
 		*body.Data.BillingChargeID != chargeID || body.Data.BillingPriceCredits != 6000 ||
 		body.Data.BillingTotalCredits != 6800 || len(body.Data.BillingChargeDetails) != 3 ||
 		body.Data.BillingChargeDetails[1].SKUID != "image.seedream.content.v1" ||

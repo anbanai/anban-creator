@@ -2,7 +2,6 @@ import type { ComponentType } from 'react'
 import { useCallback } from 'react'
 import { BookOpen, MessageCircle, ShoppingBag, Signature } from 'lucide-react'
 import { motion, useAnimation, useReducedMotion, type Variants } from 'motion/react'
-import type { TaskType } from '@/types'
 
 type PlatformIconComponent = ComponentType<{ className?: string }>
 
@@ -114,9 +113,14 @@ function VideoReplicationIcon(props: { className?: string }) {
   return <VideoPlatformIcon platform="hypit" {...props} />
 }
 
-export const platformIcon: Record<TaskType, PlatformIconComponent> = {
+// Projects use the platform key `wechat`, while tasks use the more specific
+// `wechat-article` and `wechat-picture` task types. Keep one visual identity
+// for all three values without making `wechat` a task type.
+export const platformIcon: Record<string, PlatformIconComponent> = {
   seednote: BookOpen,
-  article: Signature,
+  wechat: Signature,
+  'wechat-article': Signature,
+  'wechat-picture': Signature,
   moments: MessageCircle,
   ecommerce: ShoppingBag,
   viral_analysis: BookOpen,
@@ -125,9 +129,11 @@ export const platformIcon: Record<TaskType, PlatformIconComponent> = {
   hypit: VideoReplicationIcon,
 }
 
-export const platformIconColor: Record<TaskType, string> = {
+export const platformIconColor: Record<string, string> = {
   seednote: 'text-[#FF2442]',
-  article: 'text-[#07C160]',
+  wechat: 'text-[#07C160]',
+  'wechat-article': 'text-[#07C160]',
+  'wechat-picture': 'text-[#07C160]',
   moments: 'text-[#2F855A]',
   ecommerce: 'text-[#FF6A00]',
   viral_analysis: 'text-[#7C3AED]',
@@ -137,7 +143,9 @@ export const platformIconColor: Record<TaskType, string> = {
 }
 
 export const platformBorderColor: Record<string, string> = {
-  article: 'border-l-[#07C160]',
+  wechat: 'border-l-[#07C160]',
+  'wechat-article': 'border-l-[#07C160]',
+  'wechat-picture': 'border-l-[#07C160]',
   seednote: 'border-l-[#FF2442]',
   moments: 'border-l-[#2F855A]',
   ecommerce: 'border-l-[#FF6A00]',
@@ -147,7 +155,9 @@ export const platformBorderColor: Record<string, string> = {
 }
 
 export const platformHoverBorderColor: Record<string, string> = {
-  article: 'hover:border-l-[#07C160]/50',
+  wechat: 'hover:border-l-[#07C160]/50',
+  'wechat-article': 'hover:border-l-[#07C160]/50',
+  'wechat-picture': 'hover:border-l-[#07C160]/50',
   seednote: 'hover:border-l-[#FF2442]/50',
   moments: 'hover:border-l-[#2F855A]/50',
   ecommerce: 'hover:border-l-[#FF6A00]/50',
@@ -157,7 +167,8 @@ export const platformHoverBorderColor: Record<string, string> = {
 }
 
 export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  article: 'secondary',
+  'wechat-article': 'secondary',
+  'wechat-picture': 'secondary',
   seednote: 'destructive',
   moments: 'secondary',
   ecommerce: 'default',
@@ -173,7 +184,9 @@ export const platformBadgeClassName: Record<string, string> = {
 }
 
 export const platformBgColor: Record<string, string> = {
-  article: 'bg-[#07C160]/10',
+  wechat: 'bg-[#07C160]/10',
+  'wechat-article': 'bg-[#07C160]/10',
+  'wechat-picture': 'bg-[#07C160]/10',
   seednote: 'bg-[#FF2442]/10',
   moments: 'bg-[#2F855A]/10',
   ecommerce: 'bg-[#FF6A00]/10',
@@ -183,7 +196,7 @@ export const platformBgColor: Record<string, string> = {
 }
 
 export function renderPlatformIcon(type: string) {
-  const Icon = platformIcon[type as TaskType]
+  const Icon = platformIcon[type]
   if (!Icon) return null
-  return <Icon className={platformIconColor[type as TaskType]} />
+  return <Icon className={platformIconColor[type]} />
 }

@@ -20,7 +20,7 @@ func TestContentMetadataServiceSubmitIsIdempotentPerExecution(t *testing.T) {
 	}
 	svc := NewContentMetadataService(repository.New(db), nil)
 	repo := repository.New(db)
-	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-1", TaskID: "task-1", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
@@ -64,7 +64,7 @@ func TestContentMetadataServiceRejectsUnknownDimension(t *testing.T) {
 	}
 	svc := NewContentMetadataService(repository.New(db), nil)
 	repo := repository.New(db)
-	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-invalid", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-invalid", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-invalid", TaskID: "task-invalid", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
@@ -90,7 +90,7 @@ func TestContentMetadataServiceNormalizesVocabularyAliasAndPersistsDisplayName(t
 	}
 	svc := NewContentMetadataService(repository.New(db), nil)
 	repo := repository.New(db)
-	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-vocab", UserID: "user-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-vocab", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-vocab", TaskID: "task-vocab", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
@@ -118,7 +118,7 @@ func TestContentMetadataServiceRejectsForeignAuthenticatedUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := repository.New(db)
-	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-owned", UserID: "owner-1", ProjectID: "project-1", Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-owned", UserID: "owner-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-owned", TaskID: "task-owned", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {

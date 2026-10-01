@@ -4,11 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+
+	"gorm.io/datatypes"
 )
 
 const (
 	ProfileStatusDraft     = "draft"
 	ProfileStatusConfirmed = "confirmed"
+
+	ProfileInitializationNotStarted = "not_started"
+	ProfileInitializationQueued     = "queued"
+	ProfileInitializationRunning    = "running"
+	ProfileInitializationReady      = "ready"
+	ProfileInitializationFailed     = "failed"
 )
 
 // ProfileDimension is intentionally map-shaped: Easel's six files are semantic
@@ -31,13 +40,38 @@ type ProjectProfileDimensions struct {
 }
 
 type ProjectProfile struct {
-	SchemaVersion     int                      `json:"schema_version"`
-	Status            string                   `json:"status"`
-	Version           int64                    `json:"version"`
-	AnalysisTaskID    string                   `json:"analysis_task_id,omitempty"`
-	Dimensions        ProjectProfileDimensions `json:"dimensions"`
-	AnalysisLimits    []string                 `json:"analysis_limits"`
-	FollowUpQuestions []string                 `json:"follow_up_questions"`
+	SchemaVersion        int                      `json:"schema_version"`
+	Status               string                   `json:"status"`
+	InitializationStatus string                   `json:"initialization_status"`
+	LastError            string                   `json:"last_error,omitempty"`
+	Version              int64                    `json:"version"`
+	AnalysisTaskID       string                   `json:"analysis_task_id,omitempty"`
+	Dimensions           ProjectProfileDimensions `json:"dimensions"`
+	AnalysisLimits       []string                 `json:"analysis_limits"`
+	FollowUpQuestions    []string                 `json:"follow_up_questions"`
+}
+
+// ProjectProfileRevision is the immutable database history for a project
+// profile. The current Project.Profile column remains a fast read model; this
+// table is the audit trail and source for restore/query operations.
+type ProjectProfileRevision struct {
+	ID            string         `gorm:"type:char(36);primaryKey" json:"id"`
+	ProjectID     string         `gorm:"type:char(36);index:idx_profile_revision,priority:1;not null" json:"project_id"`
+	Revision      int64          `gorm:"index:idx_profile_revision,priority:2;not null" json:"revision"`
+	SixDimensions datatypes.JSON `gorm:"type:json;not null" json:"six_dimensions"`
+	SourceTaskID  string         `gorm:"type:char(36);index" json:"source_task_id,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+}
+
+// ProjectProfileState is the queryable lifecycle read model for the current
+// profile. Project.Profile remains the compatibility snapshot of dimensions.
+type ProjectProfileState struct {
+	ProjectID    string    `gorm:"type:char(36);primaryKey" json:"project_id"`
+	Status       string    `gorm:"type:varchar(20);not null" json:"status"`
+	Revision     int64     `gorm:"not null;default:0" json:"revision"`
+	ActiveTaskID string    `gorm:"type:char(36);index" json:"active_task_id,omitempty"`
+	LastError    string    `gorm:"type:text" json:"last_error,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func ProfileDimensions() []string {
@@ -50,8 +84,9 @@ func emptyProfileDimension() ProfileDimension {
 
 func NewProjectProfile() ProjectProfile {
 	return ProjectProfile{
-		SchemaVersion: 1,
-		Status:        ProfileStatusDraft,
+		SchemaVersion:        1,
+		Status:               ProfileStatusDraft,
+		InitializationStatus: ProfileInitializationNotStarted,
 		Dimensions: ProjectProfileDimensions{
 			Identity: emptyProfileDimension(), Style: emptyProfileDimension(), Audience: emptyProfileDimension(),
 			Platforms: emptyProfileDimension(), Preferences: emptyProfileDimension(), Memory: emptyProfileDimension(),
@@ -66,6 +101,7 @@ func (p ProjectProfile) IsConfirmed() bool {
 
 var profileSourceTags = map[string]struct{}{
 	"[用户确认]":  {},
+	"[用户编辑]":  {},
 	"[链接分析]":  {},
 	"[推断待确认]": {},
 	"[待补充]":   {},
@@ -80,6 +116,12 @@ func (p ProjectProfile) Validate() error {
 	}
 	if p.Status != ProfileStatusDraft && p.Status != ProfileStatusConfirmed {
 		return fmt.Errorf("invalid profile status")
+	}
+	switch p.InitializationStatus {
+	case ProfileInitializationNotStarted, ProfileInitializationQueued, ProfileInitializationRunning,
+		ProfileInitializationReady, ProfileInitializationFailed:
+	default:
+		return fmt.Errorf("invalid profile initialization status")
 	}
 	for name, dimension := range map[string]ProfileDimension{
 		"identity": p.Dimensions.Identity, "style": p.Dimensions.Style,

@@ -208,7 +208,7 @@ forbidden output: FAKE_SECRET, Authorization value, query string, raw response b
 
 - 新增：`agent-ts/test/artifact-delivery.integration.test.ts`，本地 HTTP fixtures 与真实传输路径组合测试。
 - 更新：本计划的执行结果和发布记录，填写实际构建摘要与验证结果，不改写计划中的验收要求。
-- 验证已有部署定义：`deploy/docker/Dockerfile.agent-article`、`deploy/docker/Dockerfile.agent-seednote`、`deploy/docker/Dockerfile.agent-montage`，保持根目录 build context。
+- 验证已有部署定义：`deploy/docker/Dockerfile.agent-wechat`、`deploy/docker/Dockerfile.agent-seednote`、`deploy/docker/Dockerfile.agent-montage`，保持根目录 build context。
 
 - [ ] 集成 fixture 创建包含必需报告的 16 个文件，不调用图片生成服务；分别注入 prepare reset/503、PUT 中途断连、manifest 成功后断连、持续 503、400、取消和 deadline。
 - [ ] 断言临时故障最终 16/16、持续故障 15 个保留且准确归因、生成次数恒为 1、无重复清单/结算、所有请求次数和总时限符合上限。

@@ -1,9 +1,9 @@
-import type { AgentExecutionProfileID, CreateTaskRequest, HypitDefaults, Project, ReferenceImageSelection, Task } from '@/types'
+import type { AgentExecutionProfileID, CreateTaskRequest, HypitDefaults, Project, ReferenceImageSelection, Task, TaskType } from '@/types'
 import type { CreateTaskFormValues } from '@/lib/schemas'
 import { buildHypitInputForSubmit, initialHypitInput } from '@/lib/hypit-form'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
 import { supportsPortraitCover } from '@/lib/portrait-cover'
-import { getProjectCreationDefaults } from '@/lib/studio-ux'
+import { defaultTaskImageRatio, getProjectCreationDefaults } from '@/lib/studio-ux'
 
 export interface TaskFormDefaults extends CreateTaskFormValues {
   quantity: number
@@ -13,6 +13,19 @@ export interface TaskFormDefaults extends CreateTaskFormValues {
   article_with_cover: boolean
   article_with_content_images: boolean
   cover_use_portrait: boolean
+}
+
+function taskIdentity(type: TaskType): { agent_id: string; channel: 'wechat-article' | 'seednote' | 'wechat-picture'; task_kind: string } {
+  switch (type) {
+    case 'seednote':
+    case 'viral_analysis':
+      return { agent_id: 'seednote', channel: 'seednote', task_kind: type === 'viral_analysis' ? 'viral_analysis' : 'content_generation' }
+    case 'wechat-picture':
+      return { agent_id: 'wechat-picture', channel: 'wechat-picture', task_kind: 'content_generation' }
+    case 'wechat-article':
+    default:
+      return { agent_id: 'wechat-article', channel: 'wechat-article', task_kind: 'content_generation' }
+  }
 }
 
 function cloneValue<T>(value: T): T {
@@ -42,7 +55,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     topic: undefined,
     prompt: '',
     quantity: 1,
-    image_ratio: defaults.imageRatio as TaskFormDefaults['image_ratio'],
+    image_ratio: defaultTaskImageRatio(defaults.type, project) as TaskFormDefaults['image_ratio'],
     image_capability_key: defaults.imageCapabilityKey,
     skip_reference_image: false,
     reference_image: null,
@@ -69,12 +82,12 @@ export function switchTaskFormDefaults(
   current: TaskFormDefaults,
   project?: Project | null,
 ): TaskFormDefaults {
-  if (project && (current.type === project.platform || (current.type === 'viral_analysis' && project.platform === 'seednote'))) {
+  if (project && ((project.platform === 'wechat' && (current.type === 'wechat-article' || current.type === 'wechat-picture')) || current.type === project.platform || (current.type === 'viral_analysis' && project.platform === 'seednote'))) {
     const defaults = createTaskFormDefaults(project)
     const switched = {
       ...cloneValue(current),
       project_id: project.id,
-      image_ratio: defaults.image_ratio,
+      image_ratio: defaultTaskImageRatio(current.type, project) as TaskFormDefaults['image_ratio'],
       image_capability_key: defaults.image_capability_key,
       cover_use_portrait: current.cover_use_portrait && Boolean(project.portrait_reference_image),
     }
@@ -123,14 +136,14 @@ function taskReferenceSelection(task: Task): ReferenceImageSelection | null {
 export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
   const ecommerce = task.ecommerce
   const directReference = task.reference_image
-  const articleUsesPortrait = task.type === 'article'
+  const articleUsesPortrait = task.type === 'wechat-article'
     && task.article_with_cover !== false
-    && directReference != null
-    && directReference.asset_id === task.project_snapshot?.portrait_reference_image_asset_id
+    && task.cover_use_portrait === true
+    && (directReference == null || task.project_snapshot?.portrait_reference_image_asset_id === undefined || directReference.asset_id === task.project_snapshot.portrait_reference_image_asset_id)
   const clonedAttachments = (task.input_attachments ?? [])
     .filter((attachment) => attachment.role !== 'resume_latest' && attachment.role !== 'resume_file')
     .map((attachment) => cloneValue(attachment))
-  if (task.type !== 'article' && directReference && directReference.asset_id !== task.project_snapshot?.reference_image_asset_id) {
+  if (task.type !== 'wechat-article' && directReference && directReference.asset_id !== task.project_snapshot?.reference_image_asset_id) {
     const withoutDuplicate = clonedAttachments.filter((attachment) => attachment.asset_id !== directReference.asset_id)
     clonedAttachments.splice(0, clonedAttachments.length, {
       type: 'image', asset_id: directReference.asset_id, file_name: directReference.file_name,
@@ -148,7 +161,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     image_ratio: (task.image_ratio || 'auto') as TaskFormDefaults['image_ratio'],
     image_capability_key: task.image_capability_key ?? '',
     skip_reference_image: task.skip_reference_image ?? false,
-    reference_image: task.type === 'article' && !articleUsesPortrait ? null : taskReferenceSelection(task),
+    reference_image: task.type === 'wechat-article' && !articleUsesPortrait ? null : taskReferenceSelection(task),
     input_attachments: clonedAttachments,
     agent_input: cloneValue(task.agent_input ?? {}),
     watermark: task.watermark ?? false,
@@ -156,7 +169,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     has_tail_image: task.has_tail_image ?? false,
     article_with_cover: task.article_with_cover ?? true,
     article_with_content_images: task.article_with_content_images ?? true,
-    cover_use_portrait: !!task.cover_use_portrait && supportsPortraitCover(task.type) && (task.type !== 'article' || task.article_with_cover !== false),
+    cover_use_portrait: !!task.cover_use_portrait && supportsPortraitCover(task.type) && (task.type !== 'wechat-article' || task.article_with_cover !== false),
     product_photos: cloneValue(ecommerce?.product_photos ?? []),
     selected_modules: cloneValue(ecommerce?.selected_modules ?? {}),
     target_platform: ecommerce?.target_platform ?? '',
@@ -171,6 +184,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
 
 export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?: HypitDefaults): CreateTaskRequest {
   const prompt = values.prompt?.trim() || undefined
+  const identity = taskIdentity(values.type)
   if (values.type === 'viral_analysis') {
     return {
       type: values.type,
@@ -185,6 +199,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
   const sellingPoints = values.selling_points?.trim() || undefined
   const hasActiveModules = Object.values(values.selected_modules ?? {}).some((quantity) => quantity >= 1)
   return {
+    ...identity,
     type: values.type,
     execution_profile: values.execution_profile as AgentExecutionProfileID,
     topic: values.topic,
@@ -198,18 +213,21 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
     input_attachments: cloneValue(values.input_attachments),
     agent_input: cloneValue(values.agent_input),
     watermark: values.watermark,
-    ...(supportsPortraitCover(values.type) ? { cover_use_portrait: values.cover_use_portrait && (values.type !== 'article' || values.article_with_cover) } : {}),
+    ...(supportsPortraitCover(values.type) ? { cover_use_portrait: values.cover_use_portrait && (values.type !== 'wechat-article' || values.article_with_cover) } : {}),
     ...(values.type === 'seednote'
       ? {
           has_content_image: values.has_content_image,
           has_tail_image: values.has_tail_image,
         }
       : {}),
-    ...(values.type === 'article'
+    ...(values.type === 'wechat-article'
       ? {
           article_with_cover: values.article_with_cover,
           article_with_content_images: values.article_with_content_images,
         }
+      : {}),
+    ...(values.type === 'wechat-picture'
+      ? { agent_input: { ...cloneValue(values.agent_input), picture_image_count: Number((values.agent_input as Record<string, unknown>)?.picture_image_count ?? 6), picture_publish_draft: (values.agent_input as Record<string, unknown>)?.picture_publish_draft !== false } }
       : {}),
     ...(values.type === 'ecommerce'
       ? {

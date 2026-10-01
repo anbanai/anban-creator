@@ -13,7 +13,7 @@ type runtimeDispatcherTestFake struct{}
 func (*runtimeDispatcherTestFake) Scope() string { return "docker" }
 
 func (*runtimeDispatcherTestFake) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
-	return srvconfig.RuntimeImageSelection{Profile: "article", Image: "registry/content@sha256:test"}
+	return srvconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
 }
 
 func (*runtimeDispatcherTestFake) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {

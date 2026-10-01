@@ -548,7 +548,7 @@ func TestAgentAPIKeyCannotCompleteExecutionsWithoutSideEffects(t *testing.T) {
 			if target == "" {
 				target = "kubernetes"
 			}
-			app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", target, model.TaskExecutionRunning)
+			app, repo, task, executionID, _, rawAPIKey, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformWechat, "", target, model.TaskExecutionRunning)
 			if tt.mutate != nil {
 				tt.mutate(t, repo, task, executionID)
 			}
@@ -604,7 +604,7 @@ func sameTimePointer(left, right *time.Time) bool {
 }
 
 func TestAgentExecutionJWTRejectsConflictingCompletionBodyExecution(t *testing.T) {
-	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning)
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformWechat, "", "kubernetes", model.TaskExecutionRunning)
 	body := `{"task_id":"` + task.ID + `","execution_id":"` + uuid.NewString() + `","result":{"success":false,"error":"must reject"}}`
 	req := agentJSONRequest("/agent/complete", body)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -633,7 +633,7 @@ func TestAgentCompletionResponseLossRetryIsIdempotentForExecutionTokens(t *testi
 		{name: "cloud", target: "kubernetes"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning)
+			app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformWechat, "", test.target, model.TaskExecutionRunning)
 			body := `{"task_id":"` + task.ID + `","result":{"success":false,"error":"agent failed","tool_use_summary":{"Write":1}}}`
 			for attempt := 1; attempt <= 2; attempt++ {
 				req := agentJSONRequest("/agent/complete", body)
@@ -668,7 +668,7 @@ func TestAgentCompletionResponseLossRetryIsIdempotentForExecutionTokens(t *testi
 }
 
 func TestAgentCompletionPersistsRecoverableFailureIdentity(t *testing.T) {
-	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning)
+	app, repo, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatus(t, model.PlatformWechat, "", "kubernetes", model.TaskExecutionRunning)
 	body := `{"task_id":"` + task.ID + `","result":{"success":false,"error":"执行环境未建立，暂时无法生成或结算图片","terminal_reason":"platform_error","root_error_code":"execution_identity_unavailable","failure_stage":"image_generation","resume_from":"image_generation"}}`
 	req := agentJSONRequest("/agent/complete", body)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -751,7 +751,7 @@ func TestAgentCompletionCorruptStoredResultReturns409ForExecutionTokens(t *testi
 			t.Run(test.name+suffix, func(t *testing.T) {
 				var corruptRepo *completionCorruptResultRepository
 				app, _, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
-					t, model.PlatformArticle, "", test.target, model.TaskExecutionRunning,
+					t, model.PlatformWechat, "", test.target, model.TaskExecutionRunning,
 					func(base repository.Repository) repository.Repository {
 						corruptRepo = &completionCorruptResultRepository{Repository: base, suffix: suffix}
 						return corruptRepo
@@ -808,7 +808,7 @@ func (r *completionFindExecutionErrorTaskExecutions) FindByID(ctx context.Contex
 
 func TestAgentCompletionRepositoryErrorAfterAuthorizationReturns500(t *testing.T) {
 	app, _, task, _, token, _, _ := setupExecutionScopedAgentAppForPackTargetAndStatusWithRepositoryDecorator(
-		t, model.PlatformArticle, "", "kubernetes", model.TaskExecutionRunning,
+		t, model.PlatformWechat, "", "kubernetes", model.TaskExecutionRunning,
 		func(base repository.Repository) repository.Repository {
 			return &completionFindExecutionErrorRepository{Repository: base}
 		}, nil,
@@ -935,7 +935,7 @@ func TestAgentArtifactManifestPersistenceFailureIsRedacted(t *testing.T) {
 }
 
 func setupExecutionScopedAgentApp(t *testing.T) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
-	return setupExecutionScopedAgentAppForPack(t, model.PlatformArticle, "")
+	return setupExecutionScopedAgentAppForPack(t, model.PlatformWechat, "")
 }
 
 func setupExecutionScopedAgentAppForPack(t *testing.T, taskType, packID string) (*fiber.App, repository.Repository, *model.Task, string, string, string, *fakeAgentArtifactStorage) {
@@ -1558,10 +1558,10 @@ func setupAgentArtifactApp(t *testing.T) (*fiber.App, repository.Repository, *mo
 			t.Fatal(err)
 		}
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Name: "P", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "P", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusRunning}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

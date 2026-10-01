@@ -22,8 +22,8 @@ func TestMarginReconciliationProjectsRevenueReceivablesCostAndAdjustments(t *tes
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@margin.test", Password: "x", InviteCode: "MARGIN01"}); err != nil {
 		t.Fatal(err)
 	}
-	projectID := createTestProject(t, repo, userID, model.PlatformArticle)
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusFailed}); err != nil {
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}); err != nil {
 		t.Fatal(err)
 	}
 	attemptID, toolCallID := uuid.NewString(), "ark-margin-1"

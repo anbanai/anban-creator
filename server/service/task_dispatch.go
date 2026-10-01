@@ -389,7 +389,11 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 				return fmt.Errorf("resume parent execution runtime identity is missing: execution %s", parent.ID)
 			}
 		} else {
-			runtime = s.runtimeDispatcher.ResolveRuntime(dispatchTask.Type)
+			runtimeKey := strings.TrimSpace(dispatchTask.AgentID)
+			if runtimeKey == "" {
+				runtimeKey = dispatchTask.Type
+			}
+			runtime = s.runtimeDispatcher.ResolveRuntime(runtimeKey)
 			if model.IsHypitPlatform(dispatchTask.Type) {
 				if snap := readHypitSnapshot(dispatchTask); snap.Image != "" {
 					runtime.Image = snap.Image
@@ -410,7 +414,11 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		execution = &profiledExecution
 		if parent == nil || refreshRuntime || !inheritAgentPackIdentity(execution, parent) {
 			resumeSessionID = ""
-			if err := applyAgentPackIdentity(execution, dispatchTask.Type); err != nil {
+			agentID, channel, taskKind := taskExecutionIdentity(dispatchTask)
+			execution.AgentID = agentID
+			execution.Channel = channel
+			execution.TaskKind = taskKind
+			if err := applyAgentPackIdentity(execution, agentID); err != nil {
 				return err
 			}
 		}
@@ -438,6 +446,25 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 		execution.Status = model.TaskExecutionCreated
 		if err := txRepo.TaskExecutions().Create(ctx, execution); err != nil {
 			return fmt.Errorf("create task execution: %w", err)
+		}
+		if dispatchTask.TaskKind == model.TaskKindFeedbackAnalysis || dispatchTask.Type == model.TaskKindFeedbackAnalysis {
+			input := dispatchTask.AgentInput.Data()
+			jobID, _ := input["feedback_job_id"].(string)
+			jobID = strings.TrimSpace(jobID)
+			if jobID == "" {
+				return fmt.Errorf("feedback task %s has no feedback_job_id", dispatchTask.ID)
+			}
+			job, findErr := txRepo.FeedbackLoop().FindJobByIDOrFingerprint(ctx, jobID)
+			if findErr != nil {
+				return fmt.Errorf("find feedback job for execution: %w", findErr)
+			}
+			if job.TaskID != dispatchTask.ID {
+				return fmt.Errorf("feedback job %s is not owned by task %s", job.ID, dispatchTask.ID)
+			}
+			job.ExecutionID = execution.ID
+			if err := txRepo.FeedbackLoop().UpdateJob(ctx, job); err != nil {
+				return fmt.Errorf("link feedback execution: %w", err)
+			}
 		}
 		if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
 			input := dispatchTask.AgentInput.Data()
@@ -501,7 +528,8 @@ func (s *TaskService) validateFrozenTaskImageCapability(ctx context.Context, tas
 }
 
 func taskUsesFrozenImageCapability(taskType string) bool {
-	return strings.TrimSpace(taskType) != model.TaskTypeViralAnalysis && strings.TrimSpace(taskType) != model.TaskTypeProfileAnalysis
+	trimmed := strings.TrimSpace(taskType)
+	return trimmed != model.TaskTypeViralAnalysis && trimmed != model.TaskTypeProfileAnalysis && trimmed != model.TaskKindFeedbackAnalysis
 }
 
 func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, bool, error) {

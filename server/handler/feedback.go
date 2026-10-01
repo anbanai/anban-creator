@@ -13,13 +13,86 @@ import (
 
 // FeedbackHandler handles feedback-related HTTP endpoints.
 type FeedbackHandler struct {
-	service *service.FeedbackService
-	logger  *zerolog.Logger
+	service     *service.FeedbackService
+	attribution *service.FeedbackAttributionService
+	promotion   *service.FeedbackPromotionService
+	logger      *zerolog.Logger
 }
 
 // NewFeedbackHandler creates a new FeedbackHandler.
 func NewFeedbackHandler(svc *service.FeedbackService, logger *zerolog.Logger) *FeedbackHandler {
 	return &FeedbackHandler{service: svc, logger: logger}
+}
+
+func (h *FeedbackHandler) SetAttributionService(svc *service.FeedbackAttributionService) {
+	h.attribution = svc
+}
+func (h *FeedbackHandler) SetPromotionService(svc *service.FeedbackPromotionService) {
+	h.promotion = svc
+}
+
+type attributionRequest struct {
+	ContentID         string `json:"content_id"`
+	ObservationWindow string `json:"observation_window"`
+}
+
+func (h *FeedbackHandler) CreateAttribution(c fiber.Ctx) error {
+	if h.attribution == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "feedback attribution unavailable")
+	}
+	var req attributionRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid attribution request")
+	}
+	result, err := h.attribution.CreateAttribution(c.Context(), service.AttributionRequest{UserID: GetUserID(c), TaskID: c.Params("id"), ContentID: req.ContentID, ObservationWindow: req.ObservationWindow})
+	if err != nil {
+		return respondAttributionError(c, err)
+	}
+	return c.Status(fiber.StatusAccepted).JSON(Response{Code: 0, Msg: "accepted", Data: result})
+}
+
+func (h *FeedbackHandler) ConfirmInsight(c fiber.Ctx) error {
+	if h.promotion == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "feedback promotion unavailable")
+	}
+	insight, err := h.promotion.Confirm(c.Context(), c.Params("id"), GetUserID(c))
+	if err != nil {
+		return respondAttributionError(c, err)
+	}
+	return Success(c, insight)
+}
+
+func (h *FeedbackHandler) ValidateInsight(c fiber.Ctx) error {
+	if h.promotion == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "feedback promotion unavailable")
+	}
+	insight, err := h.promotion.Validate(c.Context(), c.Params("id"), GetUserID(c))
+	if err != nil {
+		return respondAttributionError(c, err)
+	}
+	return Success(c, insight)
+}
+
+func (h *FeedbackHandler) PromoteInsight(c fiber.Ctx) error {
+	if h.promotion == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "feedback promotion unavailable")
+	}
+	insight, err := h.promotion.Promote(c.Context(), c.Params("id"), GetUserID(c))
+	if err != nil {
+		return respondAttributionError(c, err)
+	}
+	return Success(c, insight)
+}
+
+func respondAttributionError(c fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, service.ErrAttributionTaskNotFound), errors.Is(err, service.ErrAttributionContentNotOwned), errors.Is(err, service.ErrFeedbackInsightNotFound):
+		return Error(c, fiber.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrAttributionWindowNotMature), errors.Is(err, service.ErrAttributionNoObservation), errors.Is(err, service.ErrAttributionAlreadySucceeded), errors.Is(err, service.ErrAttributionAccountBusy), errors.Is(err, service.ErrFeedbackInsightNotConfirmable), errors.Is(err, service.ErrFeedbackInsightNotValidated):
+		return Error(c, fiber.StatusConflict, err.Error())
+	default:
+		return Error(c, fiber.StatusInternalServerError, err.Error())
+	}
 }
 
 type createFeedbackRequest struct {

@@ -14,7 +14,9 @@ import (
 )
 
 type aiEntrySubmitBody struct {
+	AgentID            string                  `json:"agent_id"`
 	Channel            string                  `json:"channel"`
+	TaskKind           string                  `json:"task_kind"`
 	ProjectID          string                  `json:"project_id"`
 	ExecutionProfile   string                  `json:"execution_profile"`
 	Text               string                  `json:"text"`
@@ -57,7 +59,9 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 	}
 	req := service.AIEntrySubmitRequest{
 		UserID:             userID,
+		AgentID:            strings.TrimSpace(body.AgentID),
 		Channel:            strings.TrimSpace(body.Channel),
+		TaskKind:           strings.TrimSpace(body.TaskKind),
 		ProjectID:          strings.TrimSpace(body.ProjectID),
 		ExecutionProfile:   strings.TrimSpace(body.ExecutionProfile),
 		Text:               strings.TrimSpace(body.Text),
@@ -65,9 +69,6 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 		Quantity:           quantity,
 		ImageRatio:         strings.TrimSpace(body.ImageRatio),
 		ImageCapabilityKey: strings.TrimSpace(body.ImageCapabilityKey),
-	}
-	if req.Channel == "" {
-		req.Channel = "studio"
 	}
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")

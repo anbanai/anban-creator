@@ -281,7 +281,7 @@ func TestApplySlotsToMarkdown_DedupFooterAlreadyInlined(t *testing.T) {
 func TestRenderTemplate_LongFormEssay(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-render-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	markdown := "# 标题\n\n引言。\n\n## 第一节\n\n正文一。\n\n## 第二节\n\n正文二。\n"
 
@@ -327,7 +327,7 @@ func TestRenderTemplate_LongFormEssay(t *testing.T) {
 func TestRenderTemplate_Listicle(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-listicle-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	markdown := "# 三个清单\n\n## 第一项\n\nA.\n\n## 第二项\n\nB.\n\n## 第三项\n\nC.\n"
 
@@ -363,7 +363,7 @@ func TestRenderTemplate_Listicle(t *testing.T) {
 func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-all-rendered-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	markdown := "# T\n\n## S1\n\nbody.\n\n## S2\n\nbody.\n"
 	plan := &LayoutPlan{
@@ -400,7 +400,7 @@ func TestRenderTemplate_AllSlotsRendered(t *testing.T) {
 func TestRenderTemplate_DedupInlineAndSlotSameURL(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-dedup-int-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	markdown := "# 标题\n\n![hero](https://cdn/hero.png)\n\n## 第一节\n\n正文。\n"
 	plan := &LayoutPlan{
@@ -423,7 +423,7 @@ func TestRenderTemplate_DedupInlineAndSlotSameURL(t *testing.T) {
 func TestRenderTemplate_UsesSlotImageSizeForInlineStyles(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-image-size-style-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	markdown := "# 标题\n\n## 第一节\n\n第一段。\n\n第二段。\n"
 	plan := &LayoutPlan{
@@ -449,7 +449,7 @@ func TestRenderTemplate_UsesSlotImageSizeForInlineStyles(t *testing.T) {
 func TestRenderTemplate_RendersLayoutModuleFromSlotVars(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-module-render-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	markdown := "# 标题\n\n## 第一节\n\n正文。\n"
 	plan := &LayoutPlan{
@@ -489,7 +489,7 @@ func TestRenderTemplate_RendersLayoutModuleFromSlotVars(t *testing.T) {
 func TestRenderTemplate_RejectsLayoutModuleMissingRequiredVars(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-module-missing-vars-001"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	plan := &LayoutPlan{
 		ArticleType: "long-form-essay",
@@ -511,7 +511,7 @@ func TestRenderTemplate_ThemeFallbackToProjectTheme(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-theme-fallback-001"
 	// Project has no theme set → should default to "autumn-warm".
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "")
 
 	markdown := "# Title\n"
 	plan := &LayoutPlan{
@@ -550,7 +550,7 @@ func TestRenderTemplate_ThemeArgOverridesProjectTheme(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-theme-override-001"
 	// Project has autumn-warm but we override to spring-fresh.
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "autumn-warm")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "autumn-warm")
 
 	markdown := "# Title\n"
 	plan := &LayoutPlan{
@@ -572,7 +572,7 @@ func TestRenderTemplate_ThemeArgOverridesProjectTheme(t *testing.T) {
 func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-empty-md"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "")
 
 	plan := &LayoutPlan{
 		ArticleType: "long-form-essay",
@@ -589,7 +589,7 @@ func TestRenderTemplate_EmptyMarkdown(t *testing.T) {
 func TestRenderTemplate_NilPlan(t *testing.T) {
 	svc, repo := setupConvertTest(t)
 	userID := "user-nil-plan"
-	projectID := createProjectWithTheme(t, repo, userID, model.PlatformArticle, "", "")
+	projectID := createProjectWithTheme(t, repo, userID, model.PlatformWechat, "", "")
 
 	_, err := svc.RenderTemplate(context.Background(), userID, projectID, "# Hello", nil, "", "")
 	if err == nil {

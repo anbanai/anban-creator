@@ -85,6 +85,7 @@ func RegisterTools(server *mcp.Server) {
 	registerTrendTools(server)
 	registerProgressTools(server)
 	registerAgentFeedbackTools(server)
+	registerProfileTools(server)
 	registerContentMetadataTools(server)
 }
 
@@ -133,7 +134,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"status":   map[string]any{"type": "string", "enum": []any{"active", "archived"}, "description": "Filter by status"},
-				"platform": map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage", "hypit"}, "description": "Filter by platform type"},
+				"platform": map[string]any{"type": "string", "enum": []any{"wechat", "seednote", "moments", "ecommerce", "montage", "hypit"}, "description": "Filter by platform type"},
 			},
 		},
 	}, projectListHandler)
@@ -157,7 +158,7 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"article", "seednote", "moments", "ecommerce", "montage", "hypit"}, "description": "Optional legacy output-shape hint."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"wechat", "seednote", "moments", "ecommerce", "montage", "hypit"}, "description": "Optional output-shape hint."},
 				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID for resolving its frozen project_snapshot; it must belong to the same project and user."},
 			},
 			"required": []any{"project_id"},
@@ -261,11 +262,14 @@ func registerPlanTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"project_id":        map[string]any{"type": "string", "description": "Project ID"},
-				"execution_profile": map[string]any{"type": "string", "description": "Execution profile ID"},
+				"execution_profile": map[string]any{"type": "string", "description": "Shared fallback execution profile ID"},
 				"cron_expr":         map[string]any{"type": "string", "description": "Cron expression (e.g. '0 9 * * *' for daily at 9am)"},
 				"prompt":            map[string]any{"type": "string", "description": "Optional prompt/instructions for auto-generated content"},
+				"entries": map[string]any{"type": "array", "description": "Independent Agent entries; each entry creates one task per run", "items": map[string]any{"type": "object", "properties": map[string]any{
+					"agent_id": map[string]any{"type": "string"}, "channel": map[string]any{"type": "string"}, "task_kind": map[string]any{"type": "string"}, "execution_profile": map[string]any{"type": "string"}, "agent_input": map[string]any{"type": "object"}, "image_defaults": map[string]any{"type": "object"},
+				}, "required": []any{"agent_id", "channel", "task_kind", "execution_profile"}}},
 			},
-			"required": []any{"project_id", "cron_expr", "execution_profile"},
+			"required": []any{"project_id", "cron_expr"},
 		},
 	}, planCreateHandler)
 }
@@ -377,7 +381,9 @@ func taskGetHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToo
 	}
 	resp := map[string]any{
 		"id":            task.ID,
-		"type":          task.Type,
+		"agent_id":      task.AgentID,
+		"channel":       task.Channel,
+		"task_kind":     task.TaskKind,
 		"status":        task.Status,
 		"prompt":        task.Prompt,
 		"agent_input":   task.AgentInput.Data(),
@@ -476,9 +482,25 @@ func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 	cronExpr, _ := args["cron_expr"].(string)
 	prompt, _ := args["prompt"].(string)
 	executionProfile, _ := args["execution_profile"].(string)
-
-	if projectID == "" || cronExpr == "" || strings.TrimSpace(executionProfile) == "" {
-		return errorResult("project_id, cron_expr and execution_profile are required"), nil
+	entries := make([]service.CreatePlanEntryParams, 0)
+	if raw, ok := args["entries"].([]any); ok {
+		for _, item := range raw {
+			obj, ok := item.(map[string]any)
+			if !ok {
+				return errorResult("entries must contain objects"), nil
+			}
+			entry := service.CreatePlanEntryParams{UserID: userID, AgentID: stringArg(obj, "agent_id"), Channel: stringArg(obj, "channel"), TaskKind: stringArg(obj, "task_kind"), ExecutionProfile: stringArg(obj, "execution_profile")}
+			if value, ok := obj["agent_input"].(map[string]any); ok {
+				entry.AgentInput = value
+			}
+			if value, ok := obj["image_defaults"].(map[string]any); ok {
+				entry.ImageDefaults = value
+			}
+			entries = append(entries, entry)
+		}
+	}
+	if projectID == "" || cronExpr == "" || (len(entries) == 0 && strings.TrimSpace(executionProfile) == "") {
+		return errorResult("project_id and cron_expr are required; provide entries or execution_profile"), nil
 	}
 
 	plan, err := svcs.PlanSvc.Create(context.Background(), service.CreatePlanParams{
@@ -487,6 +509,7 @@ func planCreateHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Call
 		ExecutionProfile: strings.TrimSpace(executionProfile),
 		CronExpr:         cronExpr,
 		Prompt:           prompt,
+		Entries:          entries,
 	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("create plan: %v", err)), nil

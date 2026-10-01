@@ -147,7 +147,7 @@ func formatTerminalMessage(task *model.Task, status, errMsg string) string {
 
 func taskTypeLabel(t string) string {
 	switch t {
-	case model.PlatformArticle:
+	case model.PlatformWechat:
 		return "文章"
 	case model.PlatformSeednote:
 		return "种草笔记"

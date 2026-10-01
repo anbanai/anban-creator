@@ -16,7 +16,7 @@ import (
 
 func TestMigrateBillingTierPricesBackfillsLegacyFlatCatalogAndIsIdempotent(t *testing.T) {
 	db := newBillingTierMigrationDB(t)
-	sku := seedBillingTierMigrationSKU(t, db, "retail-legacy", "task.article.legacy", 101)
+	sku := seedBillingTierMigrationSKU(t, db, "retail-legacy", "task.wechat_article.legacy", 101)
 	var logs bytes.Buffer
 	logger := zerolog.New(&logs)
 
@@ -53,7 +53,7 @@ func TestMigrateBillingTierPricesBackfillsLegacyFlatCatalogAndIsIdempotent(t *te
 
 func TestMigrateBillingTierPricesPreservesCompleteCatalog(t *testing.T) {
 	db := newBillingTierMigrationDB(t)
-	sku := seedBillingTierMigrationSKU(t, db, "retail-tiered", "task.article.balanced", 101)
+	sku := seedBillingTierMigrationSKU(t, db, "retail-tiered", "task.wechat_article.balanced", 101)
 	want := map[model.Tier]int64{model.TierFree: 101, model.TierPro: 90, model.TierEnterprise: 80}
 	for tier, price := range want {
 		row := model.BillingSKUTierPrice{
@@ -85,7 +85,7 @@ func TestMigrateBillingTierPricesPreservesCompleteCatalog(t *testing.T) {
 
 func TestMigrateBillingTierPricesRejectsPartialCatalog(t *testing.T) {
 	db := newBillingTierMigrationDB(t)
-	sku := seedBillingTierMigrationSKU(t, db, "retail-corrupt", "task.article.partial", 100)
+	sku := seedBillingTierMigrationSKU(t, db, "retail-corrupt", "task.wechat_article.partial", 100)
 	price := model.BillingSKUTierPrice{
 		ID: uuid.NewString(), CatalogID: sku.CatalogID, SKUID: sku.SKUID, Tier: model.TierFree,
 		PriceCredits: 100, RuleID: "existing", Snapshot: []byte(`{}`), CreatedAt: time.Now().UTC(),
@@ -129,7 +129,7 @@ func seedBillingTierMigrationSKU(t *testing.T, db *gorm.DB, catalogID, skuID str
 		t.Fatal(err)
 	}
 	sku := model.BillingSKU{
-		ID: uuid.NewString(), CatalogID: catalogID, SKUID: skuID, Operation: "task.article", ExecutionProfile: "balanced",
+		ID: uuid.NewString(), CatalogID: catalogID, SKUID: skuID, Operation: "task.wechat_article", ExecutionProfile: "balanced",
 		PriceCredits: price, Policy: "task_admission", Delivery: "verified", Snapshot: []byte(`{}`), CreatedAt: now,
 	}
 	if err := db.Create(&sku).Error; err != nil {

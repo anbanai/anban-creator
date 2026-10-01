@@ -16,7 +16,7 @@ func TestFinalizeTaskForExecutionNormalizesLifecycleAtomically(t *testing.T) {
 	executionID := uuid.NewString()
 	now := time.Now().Add(-time.Minute)
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusRunning, CurrentExecutionID: &executionID,
 		Lifecycle: datatypes.NewJSONType(model.TaskLifecycle{
 			Version: 1, Revision: 3, ExecutionID: executionID, UpdatedAt: now,

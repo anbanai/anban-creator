@@ -82,10 +82,10 @@ func newPublishingToolFixture(t *testing.T) *publishingToolFixture {
 	if err := repo.Users().Create(ctx, &model.User{ID: f.userID, Email: f.userID + "@mcp.test", Password: "x", InviteCode: f.userID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformArticle, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, CurrentExecutionID: &f.executionID}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, CurrentExecutionID: &f.executionID}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
@@ -319,15 +319,15 @@ func TestCreateDraftHandlerAllowsBodyImageURLsAndWarningOnlyClaims(t *testing.T)
 func TestCreateDraftHandlerRejectsOwnershipAndProjectMismatchBeforeWechat(t *testing.T) {
 	f := newPublishingToolFixture(t)
 	otherProjectID := uuid.NewString()
-	if err := f.repo.Projects().Create(context.Background(), &model.Project{ID: otherProjectID, UserID: f.userID, Platform: model.PlatformArticle, Name: "Other", Status: model.ProjectStatusActive}); err != nil {
+	if err := f.repo.Projects().Create(context.Background(), &model.Project{ID: otherProjectID, UserID: f.userID, Platform: model.PlatformWechat, Name: "Other", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	foreignProjectID := uuid.NewString()
-	if err := f.repo.Projects().Create(context.Background(), &model.Project{ID: foreignProjectID, UserID: uuid.NewString(), Platform: model.PlatformArticle, Name: "Foreign", Status: model.ProjectStatusActive}); err != nil {
+	if err := f.repo.Projects().Create(context.Background(), &model.Project{ID: foreignProjectID, UserID: uuid.NewString(), Platform: model.PlatformWechat, Name: "Foreign", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	foreignProjectTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: foreignProjectTaskID, UserID: f.userID, ProjectID: foreignProjectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: foreignProjectTaskID, UserID: f.userID, ProjectID: foreignProjectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	tests := []struct {

@@ -130,7 +130,7 @@ func TestBillingHandler(t *testing.T) {
 		f := newBillingHandlerFixture(t)
 		f.provisionQuoteWallet(t, model.TierPro, 500, 0)
 		body := map[string]any{
-			"task_type": "article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("a", 64),
+			"task_type": "wechat-article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("a", 64),
 			"idempotency_scope": "quote", "idempotency_key": "quote-1",
 		}
 		resp := f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
@@ -145,7 +145,7 @@ func TestBillingHandler(t *testing.T) {
 				t.Fatalf("quote response missing %s: %#v", field, data)
 			}
 		}
-		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{"task_type": "article"})
+		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{"task_type": "wechat-article"})
 		assertBillingHTTP(t, resp, http.StatusBadRequest, BillingCodeInvalid)
 		resp = f.publicRequest(t, http.MethodPost, "/api/billing/quotes", map[string]any{
 			"task_type": "unknown", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("b", 64), "idempotency_scope": "quote", "idempotency_key": "missing",
@@ -160,7 +160,7 @@ func TestBillingHandler(t *testing.T) {
 		f := newBillingHandlerFixture(t)
 		f.provisionQuoteWallet(t, model.TierPro, 500, 0)
 		body := map[string]any{
-			"task_type": "article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("d", 64),
+			"task_type": "wechat-article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("d", 64),
 			"idempotency_scope": "agent-task-quote", "idempotency_key": "agent-task-quote-1",
 		}
 		resp := f.publicRequest(t, http.MethodPost, "/api/billing/quotes", body)
@@ -473,7 +473,7 @@ func TestBillingHandler(t *testing.T) {
 			{http.MethodGet, "/api/billing/wallet", nil},
 			{http.MethodGet, "/api/billing/transactions?offset=0&limit=20", nil},
 			{http.MethodGet, "/api/billing/referral", nil},
-			{http.MethodPost, "/api/billing/quotes", map[string]any{"task_type": "article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("c", 64), "idempotency_scope": "quote", "idempotency_key": "safe-dto"}},
+			{http.MethodPost, "/api/billing/quotes", map[string]any{"task_type": "wechat-article", "execution_profile": "balanced", "request_fingerprint": strings.Repeat("c", 64), "idempotency_scope": "quote", "idempotency_key": "safe-dto"}},
 		} {
 			resp := f.publicRequest(t, endpoint.method, endpoint.path, endpoint.body)
 			assertBillingHTTP(t, resp, http.StatusOK, 0)
@@ -565,7 +565,7 @@ func billingHandlerBundle() serverbilling.Bundle {
 		},
 		Products: serverbilling.ProductCatalog{CatalogID: "retail-handler-v1", Currency: "credits", TierRatesPercent: map[string]int64{"free": 100, "pro": 90, "enterprise": 80},
 			TaskTimePricing: serverbilling.TaskTimePricing{Timezone: "Asia/Shanghai", PeakWindows: []serverbilling.TimeWindow{{Start: "09:00", End: "12:00"}, {Start: "14:00", End: "18:00"}}, OffPeakWindows: []serverbilling.TimeWindow{{Start: "00:00", End: "09:00"}, {Start: "12:00", End: "14:00"}, {Start: "18:00", End: "24:00"}}, OffPeakRatePercent: 80}, SKUs: []serverbilling.SKUConfig{
-				{ID: "task.article.balanced", Operation: "task.article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
+				{ID: "task.wechat_article.balanced", Operation: "task.wechat_article", ExecutionProfile: "balanced", ChargePolicy: "task_admission", PriceCredits: 500, Delivery: "article"},
 				{ID: "image.cover", Operation: "mcp.generate_image", Route: "image.cover", ChargePolicy: "accepted_task_operation", PriceCredits: 100, Delivery: "image"},
 			}},
 		Promotions: serverbilling.PromotionCatalog{CatalogID: "promotion-handler-v1", Programs: []serverbilling.ReferralProgram{{

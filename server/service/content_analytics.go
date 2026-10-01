@@ -63,10 +63,7 @@ func (s *ContentAnalyticsService) Candidates(ctx context.Context, userID, projec
 	if project.UserID != userID {
 		return nil, 0, errors.New("project does not belong to user")
 	}
-	if project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote {
-		return nil, 0, errors.New("project does not support content analytics")
-	}
-	rows, total, err := s.repo.Analytics().CandidatePage(ctx, userID, projectID, project.Platform, search, offset, limit)
+	rows, total, err := s.repo.Analytics().CandidatePage(ctx, userID, projectID, "", search, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -85,9 +82,6 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 	if project.UserID != userID {
 		return nil, errors.New("project does not belong to user")
 	}
-	if project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote {
-		return nil, errors.New("project does not support content analytics")
-	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 0)
 	if err != nil {
 		return nil, err
@@ -103,13 +97,16 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 			title = task.Prompt
 		}
 		byTask[task.ID] = len(result)
-		contentType := task.Type
-		if contentType == model.PlatformSeednote || contentType == "" {
+		contentType := strings.TrimSpace(task.Channel)
+		if contentType == "" {
+			contentType = strings.TrimSpace(task.TaskKind)
+		}
+		if contentType == "" {
 			contentType = "unknown"
 		}
 		result = append(result, AnalyticsCandidate{Target: AnalyticsTarget{"task", task.ID}, Title: title, ContentType: contentType, Status: task.Status, Date: &task.CreatedAt, Task: task})
 	}
-	if project.Platform == model.PlatformArticle {
+	{
 		pubs, err := repo.WechatPublications().ListByProject(ctx, projectID)
 		if err != nil {
 			return nil, err
@@ -118,7 +115,8 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 			if pub.ProjectID != projectID || pub.UserID != userID {
 				continue
 			}
-			c := AnalyticsCandidate{Target: AnalyticsTarget{"wechat_publication", pub.ID}, Title: pub.DraftTitle, ContentType: "article", Status: pub.Status, Date: pub.PublishedAt, URL: pub.ArticleURL, Publication: pub, matchDate: pub.PublishedAt}
+			contentType := normalizeWechatContentType(pub.DraftArticleType)
+			c := AnalyticsCandidate{Target: AnalyticsTarget{"wechat_publication", pub.ID}, Title: pub.DraftTitle, ContentType: contentType, Status: pub.Status, Date: pub.PublishedAt, URL: pub.ArticleURL, Publication: pub, matchDate: pub.PublishedAt}
 			if i, ok := byTask[pub.TaskID]; ok {
 				old := result[i]
 				c.Target = old.Target
@@ -137,7 +135,8 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 				result = append(result, c)
 			}
 		}
-	} else {
+	}
+	{
 		posts, total, err := repo.SeednotePosts().ListByProject(ctx, projectID, "", 0, 100)
 		if err != nil {
 			return nil, err
@@ -183,7 +182,7 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 			result = append(result, c)
 		}
 	}
-	if project.Platform == model.PlatformArticle {
+	{
 		for i := range result {
 			var snapshots []*model.WechatAnalyticsSnapshot
 			if result[i].Task != nil {

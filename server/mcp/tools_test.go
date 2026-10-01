@@ -733,7 +733,7 @@ func TestBuildAccountInfo_ArticleScope_TaskStyleOverride(t *testing.T) {
 	ch := &model.Project{
 		ID:          uuid.New().String(),
 		UserID:      userID,
-		Platform:    model.PlatformArticle,
+		Platform:    model.PlatformWechat,
 		Name:        "article-project",
 		VisualStyle: "project-article-style",
 	}
@@ -741,7 +741,7 @@ func TestBuildAccountInfo_ArticleScope_TaskStyleOverride(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 	task := createAccountInfoTask(t, repo, userID, ch.ID, "task-article-style")
-	task.Type = model.PlatformArticle
+	task.Type = model.PlatformWechat
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatalf("update task type: %v", err)
 	}
@@ -778,7 +778,7 @@ func TestBuildAccountInfo_ArticleWriterDefault(t *testing.T) {
 	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "article-project",
 	}
 	if err := repo.Projects().Create(ctx, ch); err != nil {
@@ -842,7 +842,7 @@ func TestBuildAccountInfo_AuthorAndWriter(t *testing.T) {
 	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "article-project",
 		Author:   "老李",
 		Writer:   "dan-koe",
@@ -895,7 +895,7 @@ func TestBuildAccountInfo_TaskAuthorOverridesProject(t *testing.T) {
 	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "article-project",
 		Author:   "项目作者",
 	}
@@ -906,7 +906,7 @@ func TestBuildAccountInfo_TaskAuthorOverridesProject(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: ch.ID,
-		Type:      model.PlatformArticle,
+		Type:      model.PlatformWechat,
 		Status:    model.TaskStatusPending,
 	}
 	task.SetOverrides(model.StyleOverrides{Author: "任务作者"})
@@ -942,7 +942,7 @@ func TestBuildAccountInfo_AuthorFallbackToProject(t *testing.T) {
 	ch := &model.Project{
 		ID:       uuid.New().String(),
 		UserID:   userID,
-		Platform: model.PlatformArticle,
+		Platform: model.PlatformWechat,
 		Name:     "article-project",
 		Author:   "项目作者",
 	}
@@ -954,7 +954,7 @@ func TestBuildAccountInfo_AuthorFallbackToProject(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: ch.ID,
-		Type:      model.PlatformArticle,
+		Type:      model.PlatformWechat,
 		Status:    model.TaskStatusPending,
 	}
 	freezeAccountInfoTaskImageCapability(t, task, "")

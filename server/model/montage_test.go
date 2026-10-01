@@ -54,7 +54,7 @@ func TestMontagePreferencesDiscardLegacyAspectRatio(t *testing.T) {
 }
 
 func TestAgentConfigSurvivesProjectSnapshotRoundTripWithoutAliasing(t *testing.T) {
-	project := &Project{Name: "Research", Platform: PlatformArticle}
+	project := &Project{Name: "Research", Platform: PlatformWechat}
 	project.SetAgentConfig(map[string]any{
 		"audience": "developers",
 		"filters":  map[string]any{"language": "zh-CN"},
@@ -71,5 +71,17 @@ func TestAgentConfigSurvivesProjectSnapshotRoundTripWithoutAliasing(t *testing.T
 	filters := restored.AgentConfig.Data()["filters"].(map[string]any)
 	if got := filters["language"]; got != "zh-CN" {
 		t.Fatalf("filters.language = %v, want frozen zh-CN", got)
+	}
+}
+
+func TestProjectSnapshotDerivesPlatformFromCanonicalChannel(t *testing.T) {
+	snapshot := ProjectSnapshot{
+		ProjectName: "Frozen WeChat",
+		AgentID:     AgentIDArticle,
+		Channel:     ChannelArticle,
+	}
+	restored := ProjectFromSnapshot(&Project{Platform: PlatformSeednote}, snapshot)
+	if restored.Platform != PlatformWechat {
+		t.Fatalf("platform = %q, want %q", restored.Platform, PlatformWechat)
 	}
 }

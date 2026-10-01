@@ -292,7 +292,7 @@ func TestChannelsTrackingStopsBeforePaidFetchAtDurationLimit(t *testing.T) {
 
 func TestChannelsTrackingRejectsNonVideoTaskAndProviderFailure(t *testing.T) {
 	svc, repo, provider, _ := setupChannelsTrackingServiceTest(t)
-	userID, taskID := createChannelsTrackingFixtures(t, repo, model.PlatformArticle)
+	userID, taskID := createChannelsTrackingFixtures(t, repo, model.PlatformWechat)
 	if err := svc.BindTask(context.Background(), userID, taskID, "https://weixin.qq.com/sph/video"); err == nil || !strings.Contains(err.Error(), "not a video task") {
 		t.Fatalf("error = %v", err)
 	}

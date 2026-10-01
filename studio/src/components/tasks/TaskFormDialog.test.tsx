@@ -37,7 +37,7 @@ const fixtures = vi.hoisted(() => {
   const articleProject = {
     id: 'article-project',
     user_id: 'user-1',
-    platform: 'article',
+    platform: 'wechat',
     name: '公众号项目',
     avatar_url: '',
     profile_url: '',
@@ -98,7 +98,7 @@ const fixtures = vi.hoisted(() => {
   } as Project
   const sourceTask = {
     id: 'source-task',
-    type: 'article',
+    type: 'wechat-article',
     title: '源文章',
     prompt: '复制后的完整创作要求',
     status: 'completed',
@@ -145,7 +145,7 @@ vi.mock('@/lib/api', async () => {
         ...actual.api.projects,
         list: vi.fn(),
         platformConfigs: vi.fn().mockResolvedValue([
-          { id: 'article', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '4:3', '1:1'], fields: [] },
+          { id: 'wechat', default_image_ratio: '16:9', supported_image_ratios: ['16:9', '4:3', '1:1'], fields: [] },
           { id: 'seednote', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1', '4:3'], fields: [] },
           { id: 'moments', default_image_ratio: '3:4', supported_image_ratios: ['3:4', '1:1'], fields: [] },
           { id: 'ecommerce', default_image_ratio: '1:1', supported_image_ratios: ['1:1', '3:4', '4:3', '16:9'], fields: [] },
@@ -251,9 +251,9 @@ beforeEach(() => {
     currency: 'credits',
     task_time_pricing: { timezone: 'Asia/Shanghai', peak_windows: [{ start: '09:00', end: '12:00' }, { start: '14:00', end: '18:00' }], off_peak_windows: [{ start: '00:00', end: '09:00' }, { start: '12:00', end: '14:00' }, { start: '18:00', end: '24:00' }], off_peak_rate_percent: 80, current_period: 'peak', server_time: '2026-07-31T10:00:00+08:00', next_transition_at: '2026-07-31T12:00:00+08:00' },
     skus: [
-      { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, peak_price_credits: 4800, off_peak_price_credits: 3840, delivery: 'article_artifacts_verified' },
-      { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-      { id: 'task.article.quality', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
+      { id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, peak_price_credits: 4800, off_peak_price_credits: 3840, delivery: 'article_artifacts_verified' },
+      { id: 'task.wechat_article.balanced', operation: 'task.wechat_article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+      { id: 'task.wechat_article.quality', operation: 'task.wechat_article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
       { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'seednote_artifacts_verified' },
       { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
       { id: 'task.moments.effective', operation: 'task.moments', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 3000, delivery: 'moments_artifacts_verified' },
@@ -344,7 +344,7 @@ describe('TaskFormDialog', () => {
     expect(vi.mocked(api.tasks.create).mock.calls[0][0]).toMatchObject({ cover_use_portrait: true })
   })
 
-  it.each(['article', 'seednote', 'montage', 'hypit'] as const)('offers an unselected portrait cover for %s tasks', async (platform) => {
+  it.each(['wechat', 'seednote', 'montage', 'hypit'] as const)('offers an unselected portrait cover for %s tasks', async (platform) => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, platform }])
     renderDialog()
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
@@ -558,7 +558,7 @@ describe('TaskFormDialog', () => {
     vi.mocked(api.billing.catalog).mockResolvedValueOnce({
       catalog_id: 'retail-tiered-v1', currency: 'credits', pricing_tier: 'pro',
       skus: [{
-        id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission',
+        id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission',
         list_price_credits: 6000, price_credits: 5400, discount_credits: 600, pricing_tier: 'pro',
         delivery: 'article_artifacts_verified',
       }],
@@ -716,7 +716,7 @@ describe('TaskFormDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '克隆' }))
 
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('source-task', expect.objectContaining({
-      type: 'article',
+      type: 'wechat-article',
       execution_profile: 'effective',
       project_id: 'article-project',
       prompt: '复制后的完整创作要求',

@@ -11,7 +11,7 @@ const projects: ProjectContextProject[] = [
   {
     id: 'article-1',
     name: 'Morning Brief',
-    platform: 'article',
+    platform: 'wechat',
     avatar_url: 'https://example.com/morning.png',
     description: 'Daily editorial briefing',
   },
@@ -46,7 +46,7 @@ describe('ProjectContextControl', () => {
     expect(popup).toHaveClass('w-[min(36rem,calc(100vw-2rem))]')
     expect(popup?.querySelector('[data-slot="combobox-list"]')).toHaveClass('sm:grid-cols-2')
     const articleGroup = (await screen.findByText('公众号')).closest('[data-platform]')
-    expect(articleGroup).toHaveAttribute('data-platform', 'article')
+    expect(articleGroup).toHaveAttribute('data-platform', 'wechat')
     expect(articleGroup?.closest('[data-slot="combobox-label"]')).toHaveClass('py-0.5')
     expect(articleGroup?.closest('[data-slot="combobox-label"]')).not.toHaveTextContent('1 个')
     expect(screen.getByText('种草笔记')).toBeInTheDocument()

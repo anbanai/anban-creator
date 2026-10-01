@@ -69,9 +69,9 @@ vi.mock('@/lib/api', async () => {
           currency: 'credits',
           task_time_pricing: { timezone: 'Asia/Shanghai', peak_windows: [{ start: '09:00', end: '12:00' }, { start: '14:00', end: '18:00' }], off_peak_windows: [{ start: '00:00', end: '09:00' }, { start: '12:00', end: '14:00' }, { start: '18:00', end: '24:00' }], off_peak_rate_percent: 80, current_period: 'peak', server_time: '2026-07-31T10:00:00+08:00', next_transition_at: '2026-07-31T12:00:00+08:00' },
           skus: [
-            { id: 'task.article.effective', operation: 'task.article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, peak_price_credits: 4800, off_peak_price_credits: 3840, delivery: 'article_artifacts_verified' },
-            { id: 'task.article.balanced', operation: 'task.article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-            { id: 'task.article.quality', operation: 'task.article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
+            { id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, peak_price_credits: 4800, off_peak_price_credits: 3840, delivery: 'article_artifacts_verified' },
+            { id: 'task.wechat_article.balanced', operation: 'task.wechat_article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
+            { id: 'task.wechat_article.quality', operation: 'task.wechat_article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
             { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, peak_price_credits: 4000, off_peak_price_credits: 3200, delivery: 'seednote_artifacts_verified' },
             { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
             { id: 'task.seednote.quality', operation: 'task.seednote', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 15000, delivery: 'seednote_artifacts_verified' },
@@ -167,7 +167,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     vi.mocked(api.plans.list).mockResolvedValue({
       items: [{
         id: 'plan-1',
-        type: 'article',
+        type: 'wechat-article',
         title: '测试计划',
         description: '',
         cron_expr: '0 9 * * 1',
@@ -184,7 +184,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     vi.mocked(api.projects.list).mockResolvedValue([{
       id: 'ch-1',
       user_id: '1',
-      platform: 'article',
+      platform: 'wechat',
       name: '测试项目',
       avatar_url: '',
       profile_url: 'https://mp.weixin.qq.com/test',
@@ -216,7 +216,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
   it('keeps the plan composer usable when the optional Agent Pack catalog is partial', async () => {
     vi.mocked(api.agentPacks.list).mockResolvedValueOnce({} as Awaited<ReturnType<typeof api.agentPacks.list>>)
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
 
     render(<PlansPage />)
 
@@ -224,7 +224,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   })
 
   it('automatically supplies the plan project portrait as optional input', async () => {
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
@@ -236,10 +236,10 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
     expect(vi.mocked(api.plans.create).mock.calls[0][0]).toHaveProperty('cover_use_portrait', false)
   })
 
-  it.each(['article', 'seednote'] as const)('submits the %s portrait requirement for recurring plans', async (platform) => {
+  it.each(['wechat', 'seednote'] as const)('submits the %s portrait requirement for recurring plans', async (platform) => {
     const projects = await api.projects.list()
     vi.mocked(api.projects.list).mockResolvedValue([{ ...projects[0], platform }])
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
     const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
@@ -251,9 +251,9 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
   it('disables a plan portrait when the project has no configured image', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'ch-1', user_id: '1', platform: 'article', name: '测试项目', avatar_url: '', profile_url: '', instructions: '测试定位', keywords: '测试', visual_style: '', writer: '', theme: '', author: '作者', image_ratio: '16:9', max_concurrent_tasks: 2, config: { wechat_app_id: 'wx123' }, status: 'active', created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z', portrait_reference_image: null,
+      id: 'ch-1', user_id: '1', platform: 'wechat', name: '测试项目', avatar_url: '', profile_url: '', instructions: '测试定位', keywords: '测试', visual_style: '', writer: '', theme: '', author: '作者', image_ratio: '16:9', max_concurrent_tasks: 2, config: { wechat_app_id: 'wx123' }, status: 'active', created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z', portrait_reference_image: null,
     } as Project])
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
@@ -262,7 +262,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
   it('creates a plan with the selected server-backed execution profile and exact price', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
@@ -274,7 +274,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
     await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       execution_profile: 'balanced',
     })))
   })
@@ -416,7 +416,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   })
 
   it('blocks submission when a weekly schedule has no selected day', async () => {
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
 
@@ -458,7 +458,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   })
 
   it('opens create dialog from URL intent with the project context preselected', async () => {
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
 
     render(<PlansPage />)
 
@@ -468,7 +468,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
   })
 
   it('rejects a stale project from the URL intent', async () => {
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=missing-project&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=missing-project&intent=schedule')
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
@@ -488,7 +488,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
       created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z',
     } as Project
     vi.mocked(api.projects.list).mockResolvedValueOnce([momentsProject])
-    window.history.pushState({}, '', `/plans?create=true&type=article&project_id=${momentsProject.id}&intent=schedule`)
+    window.history.pushState({}, '', `/plans?create=true&type=wechat-article&project_id=${momentsProject.id}&intent=schedule`)
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
@@ -501,7 +501,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
   it('shows and blocks an image capability query failure for an article plan', async () => {
     vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('capability unavailable'))
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
@@ -518,7 +518,7 @@ describe('PlansPage — mutation failure feedback (no silent failure)', () => {
 
   it('uses the cheapest available profile price for article plan runs', async () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
-    window.history.pushState({}, '', '/plans?create=true&type=article&project_id=ch-1&intent=schedule')
+    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
 
     render(<PlansPage />)
 
@@ -1010,7 +1010,7 @@ describe('PlansPage Montage input', () => {
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ hypit_input: expect.objectContaining({ brief: '修改后复刻要求', preferences: { duration_seconds: 12, aspect_ratio: '1:1' } }) })))
   })
 
-  it.each(['article', 'seednote', 'montage', 'hypit'] as const)('saves a disabled %s portrait cover and restores it when editing again', async (platform) => {
+  it.each(['wechat', 'seednote', 'montage', 'hypit'] as const)('saves a disabled %s portrait cover and restores it when editing again', async (platform) => {
     const project: Project = {
       ...montageProject,
       platform,
@@ -1018,7 +1018,7 @@ describe('PlansPage Montage input', () => {
     }
     let savedPlan: Plan = {
       ...savedMontagePlan,
-      type: platform,
+      type: platform === 'wechat' ? 'wechat-article' : platform,
       prompt: '使用项目人物介绍新品',
       cover_use_portrait: true,
       montage_input: platform === 'montage' ? savedMontagePlan.montage_input : undefined,
@@ -1120,7 +1120,7 @@ describe('PlansPage Montage input', () => {
   })
 
   it('uses the preselected project platform when the URL type conflicts', async () => {
-    window.history.pushState({}, '', `/plans?create=true&type=article&project_id=${montageProject.id}&intent=schedule`)
+    window.history.pushState({}, '', `/plans?create=true&type=wechat-article&project_id=${montageProject.id}&intent=schedule`)
     render(<PlansPage />)
 
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })

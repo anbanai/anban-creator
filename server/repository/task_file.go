@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/google/uuid"
@@ -567,6 +568,49 @@ func (r *taskFileRepository) UpdatePendingCurrentExecutionMetadata(ctx context.C
 		return nil, err
 	}
 	return &persisted, nil
+}
+
+// UpdatePublicationMetadata records provider-owned media identity after an
+// execution manifest has been delivered. It is limited to the immutable file
+// identity and never changes path, bytes, or delivery state.
+func (r *taskFileRepository) UpdatePublicationMetadata(ctx context.Context, fileID, taskID, executionID, role, mediaID, wechatURL string) (*model.TaskFile, error) {
+	var file model.TaskFile
+	query := r.db.WithContext(ctx).Where("id = ? AND task_id = ? AND execution_id = ?", fileID, taskID, executionID).First(&file)
+	if query.Error != nil {
+		return nil, query.Error
+	}
+	updates := map[string]any{"media_id": strings.TrimSpace(mediaID), "wechat_url": strings.TrimSpace(wechatURL), "publication_upload_status": "succeeded", "publication_upload_error": ""}
+	if strings.TrimSpace(role) != "" {
+		updates["role"] = role
+	}
+	if err := r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("id = ? AND task_id = ? AND execution_id = ?", fileID, taskID, executionID).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	return &file, r.db.WithContext(ctx).Where("id = ?", fileID).First(&file).Error
+}
+
+// MarkPublicationUploadAttempt durably records the boundary before calling
+// WeChat's non-idempotent permanent-material endpoint. A retry that observes
+// this marker must reconcile or surface ambiguity instead of uploading again.
+func (r *taskFileRepository) MarkPublicationUploadAttempt(ctx context.Context, fileID, taskID, executionID string, attemptedAt time.Time) (*model.TaskFile, error) {
+	var file model.TaskFile
+	if err := r.db.WithContext(ctx).Where("id = ? AND task_id = ? AND execution_id = ?", fileID, taskID, executionID).First(&file).Error; err != nil {
+		return nil, err
+	}
+	updates := map[string]any{"publication_upload_status": "attempted", "publication_upload_attempted_at": attemptedAt, "publication_upload_error": ""}
+	if err := r.db.WithContext(ctx).Model(&model.TaskFile{}).Where("id = ? AND task_id = ? AND execution_id = ? AND COALESCE(media_id, '') = ''", fileID, taskID, executionID).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Where("id = ?", fileID).First(&file).Error; err != nil {
+		return nil, err
+	}
+	return &file, nil
+}
+
+func (r *taskFileRepository) RecordPublicationUploadFailure(ctx context.Context, fileID, taskID, executionID, reason string) error {
+	return r.db.WithContext(ctx).Model(&model.TaskFile{}).
+		Where("id = ? AND task_id = ? AND execution_id = ? AND COALESCE(media_id, '') = ''", fileID, taskID, executionID).
+		Updates(map[string]any{"publication_upload_status": "failed", "publication_upload_error": strings.TrimSpace(reason)}).Error
 }
 
 // ReplacePendingCurrentExecution atomically replaces only the current running attempt's unpublished manifest.

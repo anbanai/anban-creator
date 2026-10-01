@@ -45,7 +45,7 @@ func TestTopicSkillsUseServerTrendContract(t *testing.T) {
 		}
 	}
 
-	for _, pack := range []string{"article", "seednote"} {
+	for _, pack := range []string{"wechat-article", "seednote"} {
 		path := filepath.Join(root, "harness", "packs", pack, "agent-pack.yaml")
 		raw, err := os.ReadFile(path)
 		if err != nil {

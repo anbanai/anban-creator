@@ -27,15 +27,15 @@ type PlatformConfig struct {
 // PlatformConfigs defines all supported platforms and their form configurations.
 var PlatformConfigs = map[string]*PlatformConfig{
 	PlatformHypit: {ID: PlatformHypit, Label: "视频复刻", BadgeVariant: "secondary", DefaultImageRatio: "9:16", SupportedImageRatios: []string{"9:16", "16:9", "1:1", "4:3", "3:4"}, Fields: []PlatformFieldConfig{{Key: "name", Label: "项目名称", Type: "text", Group: "basic", Required: true}, {Key: "instructions", Label: "创作要求", Type: "textarea", Group: "basic"}}},
-	PlatformArticle: {
-		ID:                   PlatformArticle,
+	PlatformWechat: {
+		ID:                   PlatformWechat,
 		Label:                "公众号",
 		BadgeVariant:         "success",
 		SupportsPublishing:   true,
 		SupportsAutoFetch:    false,
 		ProfileURLPattern:    `^https?://mp\.weixin\.qq\.com`,
 		DefaultImageRatio:    "16:9",
-		SupportedImageRatios: []string{"16:9", "4:3", "1:1"},
+		SupportedImageRatios: []string{"16:9", "4:3", "1:1", "3:4"},
 		Fields: []PlatformFieldConfig{
 			{Key: "name", Label: "项目名称", Placeholder: "例如 我的科技博客", Required: true, Type: "text", Group: "basic"},
 			{Key: "avatar_url", Label: "头像", Placeholder: "自动获取或手动填写", Type: "url", Group: "basic", AutoFetched: true},
@@ -122,12 +122,15 @@ var PlatformConfigs = map[string]*PlatformConfig{
 
 // GetPlatformConfig returns the config for a given platform, or nil if not found.
 func GetPlatformConfig(platform string) *PlatformConfig {
+	if platform == ChannelArticle {
+		platform = PlatformWechat
+	}
 	return PlatformConfigs[platform]
 }
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce, PlatformMontage, PlatformHypit}
+	order := []string{PlatformSeednote, PlatformMoments, PlatformWechat, PlatformEcommerce, PlatformMontage, PlatformHypit}
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {

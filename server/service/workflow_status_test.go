@@ -64,7 +64,7 @@ func TestBuildWorkflowStatusArticleWithReview(t *testing.T) {
 		"next_actions": ["微调标题"]
 	}`)
 
-	status, err := BuildWorkflowStatus(model.ScopeArticle, files, review)
+	status, err := BuildWorkflowStatus(model.ScopeWechat, files, review)
 	if err != nil {
 		t.Fatalf("BuildWorkflowStatus() unexpected error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestBuildWorkflowStatusWarnsOnInvalidReview(t *testing.T) {
 		{FileName: "review.json", MimeType: "application/json", FilePath: "review.json"},
 	}
 
-	status, err := BuildWorkflowStatus(model.ScopeArticle, files, []byte(`{"overall_score":`))
+	status, err := BuildWorkflowStatus(model.ScopeWechat, files, []byte(`{"overall_score":`))
 	if err != nil {
 		t.Fatalf("BuildWorkflowStatus() unexpected error: %v", err)
 	}

@@ -210,7 +210,7 @@ func setupAgentFeedbackRepo(t *testing.T) repository.Repository {
 func seedFeedbackTask(t *testing.T, repo repository.Repository, taskID string) {
 	t.Helper()
 	if err := repo.Tasks().Create(context.Background(), &model.Task{
-		ID: taskID, UserID: uuid.NewString(), ProjectID: uuid.NewString(), Type: model.PlatformArticle, Status: model.TaskStatusCompleted,
+		ID: taskID, UserID: uuid.NewString(), ProjectID: uuid.NewString(), Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("seed feedback task: %v", err)
 	}

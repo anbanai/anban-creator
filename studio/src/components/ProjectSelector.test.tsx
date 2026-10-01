@@ -18,7 +18,7 @@ const projects: Project[] = [
   {
     id: 'article-1',
     user_id: 'user-1',
-    platform: 'article',
+    platform: 'wechat',
     name: 'Morning Brief',
     avatar_url: 'https://example.com/morning.png',
     profile_url: 'https://example.com/morning',
@@ -103,14 +103,14 @@ describe('ProjectSelector', () => {
       <ProjectSelector
         value=""
         onChange={vi.fn()}
-        platform="article"
+        platform="wechat"
         excludePlatforms={['seednote']}
       />,
     )
 
     const trigger = await screen.findByRole('combobox', { name: '筛选项目' })
     await waitFor(() => {
-      expect(api.projects.list).toHaveBeenCalledWith({ status: 'active', platform: 'article' })
+      expect(api.projects.list).toHaveBeenCalledWith({ status: 'active', platform: 'wechat' })
     })
     fireEvent.click(trigger)
     expect(await screen.findByRole('option', { name: /Morning Brief/ })).toBeInTheDocument()

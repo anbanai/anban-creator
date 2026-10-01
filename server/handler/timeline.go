@@ -15,7 +15,7 @@ import (
 type TimelineItem struct {
 	ID           string             `json:"id"`
 	Type         string             `json:"type"`         // "task" or "plan"
-	ContentType  string             `json:"content_type"` // "seednote", "article"
+	ContentType  string             `json:"content_type"` // "seednote", "wechat-article", "wechat-picture"
 	Title        string             `json:"title"`
 	Status       string             `json:"status"`
 	ProjectID    string             `json:"project_id,omitempty"`
@@ -88,7 +88,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 
 	projectID := c.Query("project_id", "")
 	itemType := c.Query("item_type", "")       // "task" or "plan"
-	contentType := c.Query("content_type", "") // "article", "seednote"
+	contentType := c.Query("content_type", "") // "wechat-article", "wechat-picture", "seednote"
 	statusFilter := c.Query("status", "")      // any valid task or plan status
 
 	ctx := c.Context()

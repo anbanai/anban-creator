@@ -105,7 +105,7 @@ func TestProjectDeleteRemovesDeterministicMemoryPVC(t *testing.T) {
 	if err := repo.Users().Create(ctx, user); err != nil {
 		t.Fatal(err)
 	}
-	project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+	project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestProjectUpdatePlatformWithoutRatioUsesNewPlatformDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	project := &model.Project{
-		ID: uuid.NewString(), UserID: userID, Name: "article", Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, Name: "article", Platform: model.PlatformWechat,
 		ImageRatio: "16:9", Status: model.ProjectStatusActive,
 	}
 	if err := repo.Projects().Create(ctx, project); err != nil {
@@ -161,7 +161,7 @@ func TestProjectDeleteMemoryFailurePreservesProjectForRetry(t *testing.T) {
 	if err := repo.Users().Create(ctx, user); err != nil {
 		t.Fatal(err)
 	}
-	project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+	project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestProjectDeleteBlocksConcurrentTaskAndPlanCreation(t *testing.T) {
 			if err := repo.Users().Create(ctx, user); err != nil {
 				t.Fatal(err)
 			}
-			project := &model.Project{ID: uuid.NewString(), UserID: userID, Name: "delete-race", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+			project := &model.Project{ID: uuid.NewString(), UserID: userID, Name: "delete-race", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
 			if err := repo.Projects().Create(ctx, project); err != nil {
 				t.Fatal(err)
 			}
@@ -293,7 +293,7 @@ func TestProjectDeleteDependencyCheckFailurePreservesProjectMemory(t *testing.T)
 			if err := baseRepo.Users().Create(ctx, user); err != nil {
 				t.Fatal(err)
 			}
-			project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+			project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
 			if err := baseRepo.Projects().Create(ctx, project); err != nil {
 				t.Fatal(err)
 			}
@@ -325,7 +325,7 @@ func TestProjectDeleteRetryCannotReleaseAnotherDeleteBarrier(t *testing.T) {
 	if err := baseRepo.Users().Create(ctx, user); err != nil {
 		t.Fatal(err)
 	}
-	project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+	project := &model.Project{ID: uuid.NewString(), UserID: user.ID, Name: "delete", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
 	if err := baseRepo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestProjectServiceValidatesMontageDefaults(t *testing.T) {
 		duration int64
 		wantErr  string
 	}{
-		{name: "rejects defaults on article", platform: model.PlatformArticle, duration: 30, wantErr: "montage_defaults"},
+		{name: "rejects defaults on article", platform: model.PlatformWechat, duration: 30, wantErr: "montage_defaults"},
 		{name: "rejects negative duration", platform: model.PlatformMontage, duration: -1, wantErr: "duration_seconds"},
 		{name: "accepts empty duration", platform: model.PlatformMontage, duration: 0},
 		{name: "accepts maximum duration", platform: model.PlatformMontage, duration: 600},
@@ -466,7 +466,7 @@ func TestProjectServiceValidatesMontageDefaults(t *testing.T) {
 func TestProjectServiceRevalidatesExistingAgentConfigWhenPlatformChanges(t *testing.T) {
 	svc, repo, ctx, userID := setupProjectServiceTest(t)
 	project := &model.Project{
-		ID: uuid.NewString(), UserID: userID, Name: "configured", Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, Name: "configured", Platform: model.PlatformWechat,
 		Status: model.ProjectStatusActive,
 	}
 	project.SetAgentConfig(map[string]any{"legacy": true})
@@ -486,7 +486,7 @@ func TestProjectUpdateReferenceImageAssetIDOnlyWhenExplicitlySet(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	project := &model.Project{
-		ID: uuid.NewString(), UserID: userID, Name: "brand", Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: userID, Name: "brand", Platform: model.PlatformWechat,
 		ReferenceImageAssetID: "asset-old", Status: model.ProjectStatusActive,
 		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}
@@ -524,7 +524,7 @@ func TestProjectServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWritin
 	logger := zerolog.New(io.Discard)
 	svc := NewProjectService(base, &logger)
 	project := &model.Project{
-		ID: uuid.NewString(), UserID: "user-1", Name: "before", Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: "user-1", Name: "before", Platform: model.PlatformWechat,
 		ReferenceImageAssetID: "asset-b", Status: model.ProjectStatusActive,
 		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}
@@ -554,7 +554,7 @@ func TestProjectServiceUpdateMergesAfterTransactionalLock(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	svc := NewProjectService(repo, &logger)
 	project := &model.Project{
-		ID: uuid.NewString(), UserID: "user-1", Name: "before", Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: "user-1", Name: "before", Platform: model.PlatformWechat,
 		Status: model.ProjectStatusActive, Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}
 	if err := base.Projects().Create(t.Context(), project); err != nil {

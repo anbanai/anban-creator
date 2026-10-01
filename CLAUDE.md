@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+## Feedback attribution boundary
+
+Feedback attribution is Server-owned and execution-scoped. The Feedback Agent
+uses the frozen FeedbackJob context and private JSON evidence only; it cannot
+change publication state, profiles, prompts, or active generation context.
+Insights require user confirmation plus an independent later analytics
+revision before Server promotion to project memory. Runtime tasks never edit
+`AGENTS.md` or `CLAUDE.md`.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
@@ -103,7 +112,7 @@ make docker-logs              # Follow container logs
 
 ### Agent (`agent-ts/`)
 
-TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes. The server dispatches managed tasks to one of three dependency profiles: `creator-agent-article`, `creator-agent-seednote`, or `creator-agent-montage`. All profiles contain the same canonical plugin; only their system runtimes differ.
+TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes. The server dispatches managed tasks to one of three dependency profiles: `creator-agent-wechat`, `creator-agent-seednote`, or `creator-agent-montage`. All profiles contain the same canonical plugin; only their system runtimes differ.
 
 - `src/main.ts` — Managed `job` lifecycle and terminal finalization
 - `src/runner.ts` — Claude Agent SDK query and stream handling
@@ -330,7 +339,7 @@ Scaffold from the repository root:
 
 ```bash
 make agent-pack-new ARGS="-id <kebab-id> -kind plugin"
-make agent-pack-new ARGS="-id <kebab-id> -kind managed -task-type <task-type> -runtime-profile article"
+make agent-pack-new ARGS="-id <kebab-id> -kind managed -task-type <task-type> -runtime-profile wechat"
 ```
 
 The command creates `harness/packs/<id>/agent-pack.yaml`, `agent.claude.md`, and `agent.codex.toml`. Treat these as canonical sources; never edit generated `harness/agents/<name>.md` or `.toml` directly. Put reusable, host-neutral workflow knowledge under `harness/skills/` and reference Skill IDs from `agent.skills`.
@@ -342,7 +351,7 @@ Keep `agent-pack.yaml` declarative and narrow:
 - `id`, `version`, `kind`, `display_name`, `description`: stable Pack identity and presentation.
 - `agent`: native source files, Skill dependencies, Agent name, and native-host `max_turns`.
 - `bindings.project_platforms` / `bindings.task_types`: explicit links to existing business identifiers. A plugin-only Pack has no managed bindings.
-- `runtime.profile`: the dependency image class. Reuse `article`, `seednote`, or `montage` unless the scenario has genuinely different system dependencies.
+- `runtime.profile`: the dependency image class. Reuse `wechat`, `seednote`, or `montage` unless the scenario has genuinely different system dependencies.
 - `runtime.adapter`: use `standard` by default. Use `openmontage` only when execution requires the OpenMontage workspace contract; do not create an adapter for ordinary workflow differences.
 - `runtime.max_turns`: the managed Server execution default. Keep it separate from `agent.max_turns`, because native interactive Agents and one-shot managed jobs have different operational budgets. `claude.max_turns` remains an optional operator override keyed by task type or Pack ID.
 - `surfaces`: any subset of `plugin`, `project`, `task`, and `plan`. The list must match implemented Server and Studio capabilities; for example, do not advertise `plan` when plan creation rejects that task type.

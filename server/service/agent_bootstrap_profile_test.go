@@ -178,7 +178,7 @@ func TestAgentBootstrapUsesFrozenExecutionProfileRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: "task-profile", UserID: "user-profile", ProjectID: "project-profile", Type: model.PlatformArticle, SkipReferenceImage: true, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
+	task := &model.Task{ID: "task-profile", UserID: "user-profile", ProjectID: "project-profile", Type: model.TaskTypeWechatArticle, SkipReferenceImage: true, ExecutionProfile: profile.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint}
 	execution := model.NewTaskExecutionAgentProfile(snapshot, fingerprint)
 	execution.ID = "execution-profile"
 	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: time.Hour, Registry: registry}, zerolog.Nop())

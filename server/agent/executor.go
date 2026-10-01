@@ -15,7 +15,7 @@ import (
 )
 
 type UserPromptParams struct {
-	TaskType  string // model.PlatformArticle / model.PlatformSeednote / model.PlatformMoments / ...
+	TaskType  string // model.PlatformWechat / model.PlatformSeednote / model.PlatformMoments / ...
 	Topic     string // user prompt; empty triggers autonomous research mode
 	TaskID    string // injected as task_id=<x> into the prompt body
 	ProjectID string // injected as project_id=<x> into the prompt body
@@ -125,12 +125,12 @@ func describeRuntimeControls(p UserPromptParams) string {
 	switch p.TaskType {
 	case model.PlatformSeednote:
 		controls = append(controls, "seednote_image_mode="+seednoteImageMode(p.HasContentImage, p.HasTailImage))
-	case model.PlatformArticle:
+	case model.TaskTypeWechatArticle:
 		controls = append(controls, "article_image_mode="+articleImageMode(defaultTrue(p.ArticleWithCover), defaultTrue(p.ArticleWithContentImages)))
 	}
 	if model.SupportsPortraitCover(p.TaskType) {
 		portraitMode := "disabled"
-		if p.CoverUsePortrait && (p.TaskType != model.PlatformArticle || defaultTrue(p.ArticleWithCover)) {
+		if p.CoverUsePortrait && (p.TaskType != model.TaskTypeWechatArticle || defaultTrue(p.ArticleWithCover)) {
 			portraitMode = "required_project_portrait"
 		}
 		controls = append(controls, "cover_portrait="+portraitMode)
@@ -174,10 +174,21 @@ func articleImageMode(withCover, withContent bool) string {
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
 // Falls back to 40 if the task type is not configured.
 func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
+	if taskType == model.PlatformWechat {
+		taskType = model.TaskTypeWechatArticle
+	}
 	if v, ok := maxTurns[taskType]; ok && v > 0 {
 		return v
 	}
 	if pack, ok := agentpack.Default().ForTaskType(taskType); ok {
+		if v, ok := maxTurns[pack.ID]; ok && v > 0 {
+			return v
+		}
+		if pack.Runtime.MaxTurns > 0 {
+			return pack.Runtime.MaxTurns
+		}
+	}
+	if pack, ok := agentpack.Default().ForProjectPlatform(taskType); ok {
 		if v, ok := maxTurns[pack.ID]; ok && v > 0 {
 			return v
 		}
@@ -259,6 +270,7 @@ type ExecutionResult struct {
 	FailureStage      string `json:"failure_stage,omitempty"`
 	ResumeFrom        string `json:"resume_from,omitempty"`
 	ResultSubtype     string `json:"result_subtype,omitempty"`
+	ProfileRevision   int64  `json:"profile_revision,omitempty"`
 	TerminalReason    string `json:"terminal_reason,omitempty"`
 	WorkDir           string `json:"work_dir,omitempty"`
 	RemoteArtifacts   bool   `json:"remote_artifacts,omitempty"`

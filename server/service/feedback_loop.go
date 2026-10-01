@@ -11,8 +11,11 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-func feedbackStrategyUsable(snapshot *model.StrategySnapshot, taskType, platform string, now time.Time) bool {
-	if snapshot == nil || snapshot.Status != "active" || strings.TrimSpace(taskType) == "" || strings.TrimSpace(platform) == "" || snapshot.Platform != platform {
+func feedbackStrategyUsable(snapshot *model.StrategySnapshot, taskType, channel string, now time.Time) bool {
+	if snapshot == nil || snapshot.Status != "active" || strings.TrimSpace(taskType) == "" || strings.TrimSpace(channel) == "" {
+		return false
+	}
+	if !feedbackStrategyIdentityMatches(snapshot.Platform, channel) {
 		return false
 	}
 	if snapshot.ExpiresAt != nil && !snapshot.ExpiresAt.After(now) {
@@ -23,9 +26,47 @@ func feedbackStrategyUsable(snapshot *model.StrategySnapshot, taskType, platform
 		return false
 	}
 	for _, value := range applicable {
-		if value == taskType {
+		if feedbackTaskKindMatches(value, taskType) {
 			return true
 		}
+	}
+	return false
+}
+
+// feedbackStrategyIdentityMatches accepts canonical channels and the legacy
+// platform values that may still exist until the one-time data migration runs.
+func feedbackStrategyIdentityMatches(stored, channel string) bool {
+	stored = strings.TrimSpace(stored)
+	channel = strings.TrimSpace(channel)
+	if stored == channel {
+		return true
+	}
+	switch channel {
+	case model.ChannelArticle:
+		return stored == model.PlatformWechat || stored == model.TaskTypeWechatArticle
+	case model.ChannelSeednote:
+		return stored == model.PlatformSeednote
+	case model.ChannelWechatPicture:
+		return stored == model.TaskTypeWechatPicture
+	default:
+		return false
+	}
+}
+
+func feedbackTaskKindMatches(stored, requested string) bool {
+	stored = strings.TrimSpace(stored)
+	requested = strings.TrimSpace(requested)
+	if stored == requested {
+		return true
+	}
+	if requested == model.TaskKindContentGeneration {
+		return stored == model.TaskKindContentGeneration
+	}
+	if requested == model.PlatformWechat || requested == model.TaskTypeWechatArticle || requested == model.ChannelArticle {
+		return stored == model.TaskTypeWechatArticle
+	}
+	if requested == model.ChannelSeednote {
+		return stored == model.TaskKindContentGeneration || stored == model.PlatformSeednote || stored == "seednote"
 	}
 	return false
 }
@@ -84,6 +125,7 @@ func feedbackSampleThreshold(operation string) int64 {
 
 type FeedbackEligibilityInput struct {
 	ProjectID, Platform, AccountID, Operation, Cadence                           string
+	TargetContentID                                                               string
 	PeriodStart, PeriodEnd, ContentSetDigest                                     string
 	AnalyticsRevision, StrategyRevision                                          int64
 	HasNewRevision, HasMatureContent, HasValidObservations, MeetsSampleThreshold bool
@@ -116,7 +158,7 @@ func EvaluateFeedbackEligibility(in FeedbackEligibilityInput) FeedbackEligibilit
 }
 
 func FeedbackJobFingerprint(in FeedbackEligibilityInput) string {
-	raw := strings.Join([]string{in.ProjectID, in.Platform, in.AccountID, in.Operation, in.Cadence, in.PeriodStart, in.PeriodEnd, fmt.Sprint(in.AnalyticsRevision), in.ContentSetDigest, fmt.Sprint(in.StrategyRevision)}, "|")
+	raw := strings.Join([]string{in.ProjectID, in.Platform, in.AccountID, in.Operation, in.Cadence, in.TargetContentID, in.PeriodStart, in.PeriodEnd, fmt.Sprint(in.AnalyticsRevision), in.ContentSetDigest, fmt.Sprint(in.StrategyRevision)}, "|")
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }

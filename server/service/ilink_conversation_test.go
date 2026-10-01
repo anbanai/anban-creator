@@ -35,7 +35,7 @@ func (f *fakeIlinkAIEntry) Submit(_ context.Context, req AIEntrySubmitRequest) (
 func TestIlinkConversationNaturalLanguageCreateUsesAIEntryService(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	sender := &fakeIlinkConversationSender{}
-	created := &model.Task{ID: uuid.NewString(), Type: model.PlatformArticle, Prompt: "夏日防晒指南"}
+	created := &model.Task{ID: uuid.NewString(), Type: model.TaskTypeWechatArticle, Prompt: "夏日防晒指南"}
 	entry := &fakeIlinkAIEntry{res: AIEntrySubmitResult{
 		Status:  AIEntryStatusCreated,
 		Tasks:   []*model.Task{created},

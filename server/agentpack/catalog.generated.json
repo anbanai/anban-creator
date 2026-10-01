@@ -1,232 +1,9 @@
 {
   "packs": [
     {
-      "id": "article",
-      "version": "2.0.6",
-      "kind": "managed",
-      "display_name": "微信公众号文章",
-      "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
-      "agent": {
-        "name": "article",
-        "skills": [
-          "portrait-cover-design",
-          "content-writing",
-          "humanizer",
-          "article-visual-design",
-          "article-cover-design",
-          "article-research",
-          "trending-topics",
-          "trend-rider",
-          "topic-evaluator",
-          "seo-optimization",
-          "article-viral-strategy",
-          "article-publishing"
-        ],
-        "max_turns": 300
-      },
-      "bindings": {
-        "project_platforms": [
-          "article"
-        ],
-        "task_types": [
-          "article"
-        ]
-      },
-      "runtime": {
-        "profile": "article",
-        "adapter": "standard",
-        "max_turns": 60
-      },
-      "surfaces": [
-        "plugin",
-        "project",
-        "task",
-        "plan"
-      ],
-      "features": [
-        "image-generation",
-        "reference-images"
-      ],
-      "billing_operations": {
-        "article": "task.article"
-      },
-      "artifacts": [
-        {
-          "role": "research",
-          "path": "output/01-research.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "outline",
-          "path": "output/02-outline.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "draft",
-          "path": "output/03-article.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "final_markdown",
-          "path": "output/04-article-final.md",
-          "mime_type": "text/markdown",
-          "required": true
-        },
-        {
-          "role": "html",
-          "path": "output/05-article.html",
-          "mime_type": "text/html",
-          "required": true
-        },
-        {
-          "role": "context",
-          "path": "output/context-brief.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "quality",
-          "path": "output/content-quality-report.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "seo",
-          "path": "output/seo-result.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "visual_plan",
-          "path": "output/visual-rhythm-plan.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "image_plan",
-          "path": "output/image-plan.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_plan",
-          "path": "output/cover-plan.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_prompt",
-          "path": "output/cover-prompt.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover",
-          "path": "output/cover.png",
-          "mime_type": "image/png",
-          "required": false
-        },
-        {
-          "role": "cover_exact",
-          "path": "output/cover-exact.png",
-          "mime_type": "image/png",
-          "required": false
-        },
-        {
-          "role": "portrait_failure_diagnosis",
-          "path": "output/failure-diagnosis.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_review",
-          "path": "output/cover-quality.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "images",
-          "path": "output/images.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "image",
-          "path": "output/img_*.png",
-          "mime_type": "image/png",
-          "required": false
-        },
-        {
-          "role": "review",
-          "path": "output/final-review.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "review",
-          "path": "output/marketing-scan.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "viral_audit",
-          "path": "output/viral-audit.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "other",
-          "path": "output/draft.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "failure_state",
-          "path": "output/failure-state.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "progress_state",
-          "path": "output/progress-state.json",
-          "mime_type": "application/json",
-          "required": false
-        }
-      ],
-      "delivery": [
-        {
-          "role": "final_markdown",
-          "path": "output/04-article-final.md",
-          "mime_type": "text/markdown"
-        },
-        {
-          "role": "html",
-          "path": "output/05-article.html",
-          "mime_type": "text/html"
-        },
-        {
-          "role": "cover",
-          "path": "output/cover*.png",
-          "mime_type": "image/png"
-        },
-        {
-          "role": "image",
-          "path": "output/img_*.png",
-          "mime_type": "image/png"
-        }
-      ],
-      "ui": {
-        "renderer": "custom:article"
-      },
-      "digest": "a8af4cef1bbb26ab60aabd8cc75f03092b7e41dfd2cfb5d8281459ea4aa8b0cb"
-    },
-    {
       "id": "ecommerce",
       "version": "2.0.2",
-      "kind": "managed",
+      "kind": "plugin",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
       "agent": {
@@ -240,16 +17,9 @@
         ],
         "max_turns": 120
       },
-      "bindings": {
-        "project_platforms": [
-          "ecommerce"
-        ],
-        "task_types": [
-          "ecommerce"
-        ]
-      },
+      "bindings": {},
       "runtime": {
-        "profile": "article",
+        "profile": "wechat",
         "adapter": "standard",
         "max_turns": 90
       },
@@ -373,52 +143,85 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "d6af7cd65a8b83ab05fdbdf0bfaf75d606d0d65cb1ba0e2c281f0c80edc768d6"
+      "digest": "19b60dd524f1a5c709e78c5f8f676820593c776522b26318bddb885fff6a9254"
     },
     {
-      "id": "feedback",
-      "version": "1.0.1",
+      "id": "channels-video",
+      "version": "2.0.4",
       "kind": "plugin",
-      "display_name": "反馈分析",
-      "description": "周期性分析公众号与种草笔记数据并生成可追溯的反馈证据。",
+      "display_name": "视频生成",
+      "description": "从素材和业务输入生成最终视频与交付清单。",
       "agent": {
-        "name": "feedback",
+        "name": "channels-video",
         "skills": [
-          "publish-log",
-          "data-tracker",
-          "publish-analytics",
-          "performance-review",
-          "content-postmortem",
-          "post-scorer",
-          "strategy-advisor"
+          "montage",
+          "portrait-cover-design"
         ],
-        "max_turns": 80
+        "max_turns": 180
       },
       "bindings": {},
-      "runtime": {},
+      "runtime": {
+        "profile": "montage",
+        "adapter": "openmontage",
+        "max_turns": 40
+      },
       "surfaces": [
         "plugin"
       ],
       "features": [
-        "feedback"
+        "video-generation",
+        "source-assets"
       ],
+      "billing_operations": {
+        "content_generation": "task.montage"
+      },
       "artifacts": [
         {
-          "role": "analysis_result",
-          "path": "output/feedback-analysis.json",
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "project_manifest",
+          "path": "output/montage-project.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_prompt",
+          "path": "output/cover-prompt.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-quality.json",
           "mime_type": "application/json",
           "required": false
         },
         {
-          "role": "evidence",
-          "path": "output/feedback-evidence.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "skipped",
-          "path": "output/feedback-skipped.json",
-          "mime_type": "application/json",
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
           "required": false
         },
         {
@@ -434,13 +237,108 @@
           "required": false
         }
       ],
+      "delivery": [
+        {
+          "role": "final_video",
+          "path": "output/final.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "delivery_manifest",
+          "path": "output/delivery-manifest.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:montage"
+      },
+      "digest": "415d095b799ed6adf924e48e453e301b5c6622fb7703cbc0fcf872c61c016e37"
+    },
+    {
+      "id": "feedback",
+      "channel": "feedback",
+      "version": "1.0.1",
+      "kind": "managed",
+      "display_name": "反馈分析",
+      "description": "周期性分析公众号与种草笔记数据并生成可追溯的反馈证据。",
+      "agent": {
+        "name": "feedback",
+        "skills": [
+          "data-tracker",
+          "publish-analytics",
+          "performance-review",
+          "content-postmortem",
+          "strategy-advisor"
+        ],
+        "max_turns": 80
+      },
+      "bindings": {
+        "task_kinds": [
+          "feedback_analysis"
+        ]
+      },
+      "runtime": {
+        "profile": "feedback",
+        "adapter": "standard",
+        "max_turns": 40
+      },
+      "surfaces": [
+        "plugin",
+        "task"
+      ],
+      "features": [
+        "feedback"
+      ],
+      "billing_operations": {
+        "feedback_analysis": "feedback_analysis"
+      },
+      "artifacts": [
+        {
+          "role": "analysis_result",
+          "path": "output/feedback-analysis.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "evidence",
+          "path": "output/feedback-evidence.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "skipped",
+          "path": "output/feedback-skipped.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "delivery": [
+        {
+          "role": "analysis_result",
+          "path": "output/feedback-analysis.json",
+          "mime_type": "application/json",
+          "internal_only": true
+        },
+        {
+          "role": "evidence",
+          "path": "output/feedback-evidence.json",
+          "mime_type": "application/json",
+          "internal_only": true
+        }
+      ],
       "ui": {},
-      "digest": "4d0d5138ef4edaba3815afe2622d919e2f8701b156d7e4ebcb70b3f85e211f7b"
+      "digest": "c268bc3ad802774208960457697d22c6d31a5b2d683c2816881b7061850105cc"
     },
     {
       "id": "hypit",
       "version": "2.0.4",
-      "kind": "managed",
+      "kind": "plugin",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
       "agent": {
@@ -450,24 +348,14 @@
         ],
         "max_turns": 180
       },
-      "bindings": {
-        "project_platforms": [
-          "hypit"
-        ],
-        "task_types": [
-          "hypit"
-        ]
-      },
+      "bindings": {},
       "runtime": {
         "profile": "hypit",
         "adapter": "standard",
         "max_turns": 180
       },
       "surfaces": [
-        "plugin",
-        "project",
-        "task",
-        "plan"
+        "plugin"
       ],
       "features": [
         "video-replication",
@@ -613,12 +501,12 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "66f65ff40a9b5403fa80755efc3176574c777b0dfced240e2dcf53946583a579"
+      "digest": "3145cc414f92bb2a65949a4a81e736bc465d7e6979f9012edeeb8ed9993768b9"
     },
     {
       "id": "live-slicer",
       "version": "2.0.2",
-      "kind": "managed",
+      "kind": "plugin",
       "display_name": "直播切片",
       "description": "从直播视频转写、规划并批量导出短视频切片。",
       "agent": {
@@ -629,11 +517,7 @@
         ],
         "max_turns": 160
       },
-      "bindings": {
-        "task_types": [
-          "live-slicer"
-        ]
-      },
+      "bindings": {},
       "runtime": {
         "profile": "montage",
         "adapter": "standard",
@@ -809,12 +693,12 @@
         }
       ],
       "ui": {},
-      "digest": "dbaf5e37aae20f6ef3ba133f5d2bbd63cc9361015a0fffe0f0b6c168e9f7be0d"
+      "digest": "0dadfdd3da20b250226895631e9ee6f8dc36e02baf0433591d595052a1d07b8c"
     },
     {
       "id": "moments",
       "version": "2.0.2",
-      "kind": "managed",
+      "kind": "plugin",
       "display_name": "朋友圈素材包",
       "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
       "agent": {
@@ -825,16 +709,9 @@
         ],
         "max_turns": 20
       },
-      "bindings": {
-        "project_platforms": [
-          "moments"
-        ],
-        "task_types": [
-          "moments"
-        ]
-      },
+      "bindings": {},
       "runtime": {
-        "profile": "article",
+        "profile": "wechat",
         "adapter": "standard",
         "max_turns": 25
       },
@@ -908,12 +785,12 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "0c746d60ad1983238fd4599d3e344036bda7ac5f82e48231e10c67c47e307a51"
+      "digest": "4bffa7bcd6068fdcdf259accf67057569c1a31797be86103117a8cae736dfb30"
     },
     {
       "id": "montage",
       "version": "2.0.4",
-      "kind": "managed",
+      "kind": "plugin",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
       "agent": {
@@ -924,14 +801,7 @@
         ],
         "max_turns": 180
       },
-      "bindings": {
-        "project_platforms": [
-          "montage"
-        ],
-        "task_types": [
-          "montage"
-        ]
-      },
+      "bindings": {},
       "runtime": {
         "profile": "montage",
         "adapter": "openmontage",
@@ -1027,14 +897,15 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "907e9fa6dcf35fe75ba17632d501d3cf92affb52d389a1fd42ec4da164c2ce52"
+      "digest": "f0f69557e86af87f0d873b740d2b46402d97d9e04e7a5ffa624729ea25715abd"
     },
     {
       "id": "profile-analysis",
-      "version": "2.0.2",
+      "channel": "profile-analysis",
+      "version": "2.1.1",
       "kind": "managed",
       "display_name": "账号画像分析",
-      "description": "基于用户提供的公开资料和问答生成可确认的六维账号画像草稿。",
+      "description": "基于用户提供的公开资料和问答生成并提交六维项目账号画像。",
       "agent": {
         "name": "profile-analysis",
         "skills": [
@@ -1043,12 +914,12 @@
         "max_turns": 80
       },
       "bindings": {
-        "task_types": [
+        "task_kinds": [
           "profile_analysis"
         ]
       },
       "runtime": {
-        "profile": "article",
+        "profile": "profile",
         "adapter": "standard",
         "max_turns": 40
       },
@@ -1065,29 +936,17 @@
       },
       "artifacts": [
         {
-          "role": "profile_draft",
-          "path": "output/profile-draft.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "failure_state",
-          "path": "output/failure-state.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
           "role": "progress_state",
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
         }
       ],
-      "delivery": [
+      "data_delivery": [
         {
-          "role": "profile_draft",
-          "path": "output/profile-draft.json",
-          "mime_type": "application/json"
+          "role": "profile_result",
+          "type": "database",
+          "required": true
         }
       ],
       "schemas": {
@@ -1108,8 +967,9 @@
             "platform": {
               "type": "string",
               "enum": [
-                "article",
-                "seednote"
+                "wechat",
+                "seednote",
+                "moments"
               ]
             },
             "profile_url": {
@@ -1145,7 +1005,6 @@
           "type": "object",
           "required": [
             "schema_version",
-            "status",
             "dimensions",
             "analysis_limits",
             "follow_up_questions"
@@ -1156,12 +1015,6 @@
               "type": "integer",
               "enum": [
                 1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "draft"
               ]
             },
             "dimensions": {
@@ -1250,10 +1103,11 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "a335669a39eefc30481c0be82c1ebe35362efca3562b33643b38b53a9b8c1a71"
+      "digest": "b699f1437160de8cdff129320fea5276c2bdf9f75a88250aeb3c699d4ef38045"
     },
     {
       "id": "seednote",
+      "channel": "seednote",
       "version": "2.0.5",
       "kind": "managed",
       "display_name": "种草笔记",
@@ -1274,11 +1128,8 @@
         "max_turns": 20
       },
       "bindings": {
-        "project_platforms": [
-          "seednote"
-        ],
-        "task_types": [
-          "seednote",
+        "task_kinds": [
+          "content_generation",
           "viral_analysis"
         ]
       },
@@ -1299,7 +1150,7 @@
         "reference-images"
       ],
       "billing_operations": {
-        "seednote": "task.seednote",
+        "content_generation": "task.seednote",
         "viral_analysis": "task.viral_analysis"
       },
       "artifacts": [
@@ -1473,7 +1324,363 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "0dcc8378c007199414eef22f5b8ea4cbf3ef485181e46ea437729a7c52b06dcf"
+      "digest": "d9dc62e952730271ed0a072246f34c3255e54228e42eabcc6e5992eaf7a61d45"
+    },
+    {
+      "id": "wechat-article",
+      "channel": "wechat-article",
+      "version": "2.0.6",
+      "kind": "managed",
+      "display_name": "微信公众号文章",
+      "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
+      "agent": {
+        "name": "wechat-article",
+        "skills": [
+          "portrait-cover-design",
+          "content-writing",
+          "humanizer",
+          "article-visual-design",
+          "article-cover-design",
+          "article-research",
+          "trending-topics",
+          "trend-rider",
+          "topic-evaluator",
+          "seo-optimization",
+          "article-viral-strategy",
+          "article-publishing"
+        ],
+        "max_turns": 300
+      },
+      "bindings": {
+        "task_kinds": [
+          "content_generation"
+        ]
+      },
+      "runtime": {
+        "profile": "wechat",
+        "adapter": "standard",
+        "max_turns": 60
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task",
+        "plan"
+      ],
+      "features": [
+        "image-generation",
+        "reference-images"
+      ],
+      "billing_operations": {
+        "content_generation": "task.wechat_article"
+      },
+      "artifacts": [
+        {
+          "role": "research",
+          "path": "output/01-research.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "outline",
+          "path": "output/02-outline.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "draft",
+          "path": "output/03-article.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "final_markdown",
+          "path": "output/04-article-final.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "html",
+          "path": "output/05-article.html",
+          "mime_type": "text/html",
+          "required": true
+        },
+        {
+          "role": "context",
+          "path": "output/context-brief.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "quality",
+          "path": "output/content-quality-report.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "seo",
+          "path": "output/seo-result.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "visual_plan",
+          "path": "output/visual-rhythm-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "image_plan",
+          "path": "output/image-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_plan",
+          "path": "output/cover-plan.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_prompt",
+          "path": "output/cover-prompt.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "cover_exact",
+          "path": "output/cover-exact.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "portrait_failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "cover_review",
+          "path": "output/cover-quality.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "images",
+          "path": "output/images.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "image",
+          "path": "output/img_*.png",
+          "mime_type": "image/png",
+          "required": false
+        },
+        {
+          "role": "review",
+          "path": "output/final-review.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "review",
+          "path": "output/marketing-scan.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "viral_audit",
+          "path": "output/viral-audit.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "other",
+          "path": "output/draft.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "progress_state",
+          "path": "output/progress-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "delivery": [
+        {
+          "role": "final_markdown",
+          "path": "output/04-article-final.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "html",
+          "path": "output/05-article.html",
+          "mime_type": "text/html"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "image",
+          "path": "output/img_*.png",
+          "mime_type": "image/png"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:article"
+      },
+      "digest": "ac931181fb3353e245ecefa65d0a21f6623467db9421cb4ec55da05946db1ab8"
+    },
+    {
+      "id": "wechat-picture",
+      "channel": "wechat-picture",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "微信公众号贴图",
+      "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
+      "agent": {
+        "name": "wechat-picture",
+        "skills": [
+          "wechat-picture-research",
+          "wechat-picture-writing",
+          "wechat-picture-visual-design"
+        ],
+        "max_turns": 240
+      },
+      "bindings": {
+        "task_kinds": [
+          "content_generation"
+        ]
+      },
+      "runtime": {
+        "profile": "wechat",
+        "adapter": "standard",
+        "max_turns": 60
+      },
+      "surfaces": [
+        "plugin",
+        "project",
+        "task",
+        "plan"
+      ],
+      "features": [
+        "image-generation",
+        "reference-images",
+        "wechat-picture"
+      ],
+      "billing_operations": {
+        "content_generation": "task.wechat_picture"
+      },
+      "artifacts": [
+        {
+          "role": "research",
+          "path": "output/topic-analysis.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "content_dna",
+          "path": "output/content-dna.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "script",
+          "path": "output/content-script.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "content",
+          "path": "output/content.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "image_plan",
+          "path": "output/image-plan.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "image_prompts",
+          "path": "output/image-prompts.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
+          "role": "image",
+          "path": "output/image_*.png",
+          "mime_type": "image/png",
+          "required": true
+        },
+        {
+          "role": "publish_package",
+          "path": "output/publish-package.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "quality",
+          "path": "output/quality-review.md",
+          "mime_type": "text/markdown",
+          "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "delivery": [
+        {
+          "role": "content",
+          "path": "output/content.md",
+          "mime_type": "text/markdown"
+        },
+        {
+          "role": "cover",
+          "path": "output/cover.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "image",
+          "path": "output/image_*.png",
+          "mime_type": "image/png"
+        },
+        {
+          "role": "publish_package",
+          "path": "output/publish-package.json",
+          "mime_type": "application/json"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:wechat-picture"
+      },
+      "digest": "b9ab49c6703af868365fd77d79e89c06743376d3ebb84867b870ad80b186d6a6"
     }
   ]
 }

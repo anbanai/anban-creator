@@ -65,7 +65,7 @@ export interface WechatAnalyticsImportPreview {
   field_mapping: WechatAnalyticsFieldMapping[]
   rows: Array<{
     source_row: number
-    content_type: 'article' | 'image' | 'unknown'
+    content_type: 'wechat-article' | 'wechat-picture' | 'unknown'
     match_status: 'matched' | 'needs_review' | 'unmatched' | 'invalid'
     publication_id?: string
     source: string

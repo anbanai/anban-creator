@@ -99,7 +99,7 @@ describe('registerSchema', () => {
 
 describe('createTaskSchema', () => {
   it('accepts only the current execution profile IDs', () => {
-    const base = { project_id: 'ch-1', type: 'article', prompt: '测试主题' }
+    const base = { project_id: 'ch-1', type: 'wechat-article', prompt: '测试主题' }
 
     for (const executionProfile of ['effective', 'balanced', 'quality']) {
       expect(rawCreateTaskSchema.safeParse({ ...base, execution_profile: executionProfile }).success).toBe(true)
@@ -110,7 +110,7 @@ describe('createTaskSchema', () => {
   })
 
   it('requires a selected execution profile', () => {
-    const base = { project_id: 'ch-1', type: 'article', prompt: '测试主题' }
+    const base = { project_id: 'ch-1', type: 'wechat-article', prompt: '测试主题' }
     expect(rawCreateTaskSchema.safeParse(base).success).toBe(false)
     expect(rawCreateTaskSchema.safeParse({ ...base, execution_profile: '' }).success).toBe(false)
   })
@@ -118,7 +118,7 @@ describe('createTaskSchema', () => {
   it('accepts valid task creation data', () => {
     expect(createTaskSchema.safeParse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '测试主题',
     }).success).toBe(true)
   })
@@ -126,7 +126,7 @@ describe('createTaskSchema', () => {
   it('accepts the article portrait toggle without embedding an upload', () => {
     const base = {
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '测试主题',
     }
 
@@ -137,7 +137,7 @@ describe('createTaskSchema', () => {
   it('rejects missing project_id', () => {
     const result = createTaskSchema.safeParse({
       project_id: '',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '测试主题',
     })
     expect(result.success).toBe(false)
@@ -173,7 +173,7 @@ describe('createTaskSchema', () => {
   it('accepts optional prompt', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '',
     })
     expect(result.success).toBe(true)
@@ -182,7 +182,7 @@ describe('createTaskSchema', () => {
   it('accepts prompt at max length', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: 'a'.repeat(5120),
     })
     expect(result.success).toBe(true)
@@ -191,7 +191,7 @@ describe('createTaskSchema', () => {
   it('counts unicode prompt length like the API', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '😀'.repeat(5120),
     })
     expect(result.success).toBe(true)
@@ -200,14 +200,14 @@ describe('createTaskSchema', () => {
   it('rejects prompt exceeding max length', () => {
     const result = createTaskSchema.safeParse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: 'a'.repeat(5121),
     })
     expect(result.success).toBe(false)
   })
 
   it('accepts all valid content types', () => {
-    for (const type of ['seednote', 'article', 'moments', 'viral_analysis'] as const) {
+    for (const type of ['seednote', 'wechat-article', 'moments', 'viral_analysis'] as const) {
       expect(createTaskSchema.safeParse({
         project_id: type === 'viral_analysis' ? 'seednote-project' : 'ch-1',
         type,
@@ -219,7 +219,7 @@ describe('createTaskSchema', () => {
   it('applies default values for quantity and image_ratio', () => {
     const result = createTaskSchema.parse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '测试',
     })
     expect(result.quantity).toBe(1)
@@ -294,7 +294,7 @@ describe('createTaskSchema', () => {
   it('defaults article image toggles to true (legacy "always generate both")', () => {
     const result = createTaskSchema.parse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '测试',
     })
     expect(result.article_with_cover).toBe(true)
@@ -304,7 +304,7 @@ describe('createTaskSchema', () => {
   it('honors explicit article_with_cover=false', () => {
     const result = createTaskSchema.parse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '测试',
       article_with_cover: false,
       article_with_content_images: false,
@@ -316,7 +316,7 @@ describe('createTaskSchema', () => {
   it('strips retired strong-goal fields from legacy form data', () => {
     const result = createTaskSchema.parse({
       project_id: 'ch-1',
-      type: 'article',
+      type: 'wechat-article',
       prompt: '测试',
       goal_mode: true,
       goal: '字数 ≥ 1500',
@@ -407,7 +407,7 @@ describe('normalizeImageRatio', () => {
 
 describe('planSchema', () => {
   it('requires a selected execution profile', () => {
-    const base = { type: 'article', cron_expr: '0 9 * * 1' }
+    const base = { type: 'wechat-article', cron_expr: '0 9 * * 1' }
     expect(rawPlanSchema.safeParse(base).success).toBe(false)
     expect(rawPlanSchema.safeParse({ ...base, execution_profile: '' }).success).toBe(false)
   })
@@ -453,14 +453,14 @@ describe('planSchema', () => {
 
   it('accepts valid plan data', () => {
     expect(planSchema.safeParse({
-      type: 'article',
+      type: 'wechat-article',
       cron_expr: '0 9 * * 1',
     }).success).toBe(true)
   })
 
   it('accepts the plan portrait toggle without embedding an upload', () => {
     const base = {
-      type: 'article',
+      type: 'wechat-article',
       cron_expr: '0 9 * * 1',
     }
 
@@ -470,7 +470,7 @@ describe('planSchema', () => {
 
   it('accepts optional prompt', () => {
     const result = planSchema.safeParse({
-      type: 'article',
+      type: 'wechat-article',
       cron_expr: '0 9 * * 1',
       prompt: '写一篇护肤指南',
     })
@@ -479,7 +479,7 @@ describe('planSchema', () => {
 
   it('accepts prompt at max length', () => {
     const result = planSchema.safeParse({
-      type: 'article',
+      type: 'wechat-article',
       cron_expr: '0 9 * * 1',
       prompt: 'a'.repeat(5120),
     })
@@ -488,7 +488,7 @@ describe('planSchema', () => {
 
   it('counts unicode prompt length like the API', () => {
     const result = planSchema.safeParse({
-      type: 'article',
+      type: 'wechat-article',
       cron_expr: '0 9 * * 1',
       prompt: '😀'.repeat(5120),
     })
@@ -497,7 +497,7 @@ describe('planSchema', () => {
 
   it('rejects prompt exceeding max length', () => {
     const result = planSchema.safeParse({
-      type: 'article',
+      type: 'wechat-article',
       cron_expr: '0 9 * * 1',
       prompt: 'a'.repeat(5121),
     })
@@ -506,7 +506,7 @@ describe('planSchema', () => {
 
   it('rejects empty cron expression', () => {
     const result = planSchema.safeParse({
-      type: 'article',
+      type: 'wechat-article',
       cron_expr: '',
     })
     expect(result.success).toBe(false)
@@ -534,7 +534,7 @@ describe('planSchema', () => {
 
   it('defaults article image toggles to true', () => {
     const result = planSchema.parse({
-      type: 'article',
+      type: 'wechat-article',
       cron_expr: '0 9 * * 1',
       prompt: '主题方向',
     })
@@ -572,14 +572,14 @@ describe('planSchema', () => {
 describe('projectSchema', () => {
   it('accepts article platform with wechat_app_id', () => {
     expect(projectSchema.safeParse({
-      platform: 'article',
+      platform: 'wechat',
       wechat_app_id: 'wx123',
     }).success).toBe(true)
   })
 
   it('rejects article platform without wechat_app_id', () => {
     const result = projectSchema.safeParse({
-      platform: 'article',
+      platform: 'wechat',
     })
     expect(result.success).toBe(false)
   })
@@ -622,7 +622,7 @@ describe('projectSchema', () => {
 
   it('accepts all optional fields', () => {
     const result = projectSchema.safeParse({
-      platform: 'article',
+      platform: 'wechat',
       wechat_app_id: 'wx123',
       wechat_secret: 'secret',
       name: '项目名称',

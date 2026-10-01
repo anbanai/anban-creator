@@ -13,7 +13,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 		name string
 		from []string
 	}{
-		{name: "Dockerfile.agent-article", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
+		{name: "Dockerfile.agent-wechat", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
 		{name: "Dockerfile.agent-seednote", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
 		{name: "Dockerfile.agent-montage", from: []string{"FROM node:24-bookworm-slim AS builder", "FROM node:24-bookworm-slim"}},
 	} {
@@ -48,7 +48,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 
 func TestTypeScriptRuntimeDockerfilesShareLockedSDKWithOptionalPackages(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-article", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		body := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, required := range []string{
 			"COPY agent-ts/package.json agent-ts/package-lock.json ./",

@@ -41,11 +41,11 @@ agent:
   codex_source: agent.codex.toml
   skills: [demo-skill]
   max_turns: 60
+channel: wechat-article
 bindings:
-  project_platforms: [article]
-  task_types: [demo-task]
+  task_kinds: [demo-task]
 runtime:
-  profile: article
+  profile: wechat
   adapter: standard
   max_turns: 40
 surfaces: [project, task, plan]
@@ -71,7 +71,7 @@ delivery:
 	if !ok {
 		t.Fatal("demo-pack missing")
 	}
-	if pack.Agent.Name != "demo" || pack.Runtime.Profile != "article" || pack.Runtime.Adapter != AdapterStandard {
+	if pack.Agent.Name != "demo" || pack.Runtime.Profile != "wechat" || pack.Runtime.Adapter != AdapterStandard {
 		t.Fatalf("resolved pack = %#v", pack)
 	}
 	resolved, ok := catalog.ForTaskType("demo-task")
@@ -86,6 +86,84 @@ delivery:
 	}
 	if operation, ok := catalog.BillingOperation("demo-task"); !ok || operation != "task.demo" {
 		t.Fatalf("BillingOperation = %q, %v", operation, ok)
+	}
+}
+
+func TestLoadCatalogRequiresSingleSupportedChannelForManagedPacks(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(string) string
+		want string
+	}{
+		{name: "empty", edit: func(manifest string) string { return strings.Replace(manifest, "channel: wechat-article\n", "", 1) }, want: "requires exactly one channel"},
+		{name: "invalid", edit: func(manifest string) string {
+			return strings.Replace(manifest, "channel: wechat-article", "channel: douyin", 1)
+		}, want: "unsupported channel"},
+		{name: "multiple", edit: func(manifest string) string {
+			return strings.Replace(manifest, "channel: wechat-article", "channel: [wechat-article, seednote]", 1)
+		}, want: "cannot unmarshal !!seq"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writePackFixture(t, tt.edit(validFixtureManifest))
+			if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadCatalogRejectsDuplicateChannelAndAgentID(t *testing.T) {
+	root := writePackFixture(t, validFixtureManifest)
+	packDir := filepath.Join(root, "packs", "other-pack")
+	if err := os.MkdirAll(packDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := strings.Replace(validFixtureManifest, "id: demo-pack", "id: other-pack", 1)
+	manifest = strings.Replace(manifest, "demo-task", "other-task", -1)
+	manifest = strings.Replace(manifest, "name: demo", "name: other", 1)
+	for name, content := range map[string]string{
+		"agent-pack.yaml":  manifest,
+		"agent.claude.md":  "---\nname: other\nmaxTurns: 60\n---\n",
+		"agent.codex.toml": "name = \"other\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(packDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), `channel "wechat-article" is bound by both`) {
+		t.Fatalf("LoadCatalog duplicate channel error = %v", err)
+	}
+
+	root = writePackFixture(t, validFixtureManifest)
+	packDir = filepath.Join(root, "packs", "other-pack")
+	if err := os.MkdirAll(packDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest = strings.Replace(validFixtureManifest, "id: demo-pack", "id: other-pack", 1)
+	manifest = strings.Replace(manifest, "channel: wechat-article", "channel: seednote", 1)
+	manifest = strings.Replace(manifest, "demo-task", "other-task", -1)
+	for name, content := range map[string]string{
+		"agent-pack.yaml":  manifest,
+		"agent.claude.md":  "---\nname: demo\nmaxTurns: 60\n---\n",
+		"agent.codex.toml": "name = \"demo\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(packDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), `duplicate Agent ID "demo"`) {
+		t.Fatalf("LoadCatalog duplicate Agent ID error = %v", err)
+	}
+}
+
+func TestManifestSupportsTaskKind(t *testing.T) {
+	manifest := Manifest{Bindings: Bindings{TaskKinds: []string{"content_generation", "viral_analysis"}}}
+	if !manifest.SupportsTaskKind("content_generation") || !manifest.SupportsTaskKind("viral_analysis") {
+		t.Fatal("Manifest did not report declared task kind")
+	}
+	if manifest.SupportsTaskKind("unsupported") {
+		t.Fatal("Manifest accepted unsupported task kind")
 	}
 }
 
@@ -256,6 +334,16 @@ func TestLoadCatalogRejectsInvalidOrMissingDeliveryContracts(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogDoesNotAllowProfileDataDeliveryForOtherTaskKinds(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "task_kinds: [demo-task]", "task_kinds: [article]", 1)
+	manifest = strings.Replace(manifest, "demo-task: task.demo", "article: task.article", 1)
+	manifest = strings.Replace(manifest, "artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n    required: true\ndelivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n", "artifacts: []\ndelivery: []\ndata_delivery:\n  - role: profile_result\n    type: database\n    required: true\n", 1)
+	root := writePackFixture(t, manifest)
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "requires a non-empty delivery contract") {
+		t.Fatalf("LoadCatalog error = %v, want profile data delivery restricted to profile_analysis", err)
+	}
+}
+
 func TestLoadCatalogRejectsDuplicateArtifactPaths(t *testing.T) {
 	manifest := strings.Replace(validFixtureManifest,
 		"artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n    required: true",
@@ -267,7 +355,7 @@ func TestLoadCatalogRejectsDuplicateArtifactPaths(t *testing.T) {
 }
 
 func TestLoadCatalogResolvesArtifactContractByTaskType(t *testing.T) {
-	manifest := strings.Replace(validFixtureManifest, "task_types: [demo-task]", "task_types: [demo-task, viral-analysis]", 1)
+	manifest := strings.Replace(validFixtureManifest, "task_kinds: [demo-task]", "task_kinds: [demo-task, viral-analysis]", 1)
 	manifest = strings.Replace(manifest, "  demo-task: task.demo", "  demo-task: task.demo\n  viral-analysis: task.viral-analysis", 1)
 	manifest = strings.Replace(manifest, "artifacts:\n", `artifacts_by_task_type:
   viral-analysis:
@@ -437,7 +525,7 @@ func TestLoadCatalogRejectsDuplicateTaskTypeBindings(t *testing.T) {
 	}
 	manifest := strings.Replace(validFixtureManifest, "id: demo-pack", "id: other-pack", 1)
 	manifest = strings.Replace(manifest, "name: demo", "name: other", 1)
-	manifest = strings.Replace(manifest, "project_platforms: [article]", "project_platforms: [seednote]", 1)
+	manifest = strings.Replace(manifest, "channel: wechat-article", "channel: seednote", 1)
 	for name, content := range map[string]string{
 		"agent-pack.yaml":  manifest,
 		"agent.claude.md":  "---\nname: other\nmaxTurns: 60\n---\n\n# Other Claude\n",
@@ -449,7 +537,7 @@ func TestLoadCatalogRejectsDuplicateTaskTypeBindings(t *testing.T) {
 	}
 
 	_, err := LoadCatalog(root)
-	if err == nil || !strings.Contains(err.Error(), `task type "demo-task" is bound by both`) {
+	if err == nil || !strings.Contains(err.Error(), `task kind "demo-task" is bound by both`) {
 		t.Fatalf("LoadCatalog error = %v, want duplicate task type rejection", err)
 	}
 }
@@ -461,8 +549,8 @@ func TestLoadCatalogRejectsDuplicateAgentNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := strings.Replace(validFixtureManifest, "id: demo-pack", "id: other-pack", 1)
-	manifest = strings.Replace(manifest, "project_platforms: [article]", "project_platforms: [seednote]", 1)
-	manifest = strings.Replace(manifest, "task_types: [demo-task]", "task_types: [other-task]", 1)
+	manifest = strings.Replace(manifest, "channel: wechat-article", "channel: seednote", 1)
+	manifest = strings.Replace(manifest, "task_kinds: [demo-task]", "task_kinds: [other-task]", 1)
 	manifest = strings.Replace(manifest, "demo-task: task.demo", "other-task: task.other", 1)
 	for name, content := range map[string]string{
 		"agent-pack.yaml":  manifest,
@@ -862,8 +950,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 9 {
-		t.Fatalf("Pack count = %d, want 9", len(catalog.Packs))
+	if len(catalog.Packs) != 11 {
+		t.Fatalf("Pack count = %d, want 11", len(catalog.Packs))
 	}
 
 	wantRoutes := map[string]struct {
@@ -871,15 +959,15 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		profile string
 		adapter string
 	}{
-		"article":          {packID: "article", profile: "article", adapter: AdapterStandard},
-		"seednote":         {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"viral_analysis":   {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"moments":          {packID: "moments", profile: "article", adapter: AdapterStandard},
-		"ecommerce":        {packID: "ecommerce", profile: "article", adapter: AdapterStandard},
-		"hypit":            {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
-		"montage":          {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
-		"live-slicer":      {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
-		"profile_analysis": {packID: "profile-analysis", profile: "article", adapter: AdapterStandard},
+		"wechat-article": {packID: "wechat-article", profile: "wechat", adapter: AdapterStandard},
+		"wechat-picture": {packID: "wechat-picture", profile: "wechat", adapter: AdapterStandard},
+		"seednote":       {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
+		"viral_analysis": {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
+		"moments":        {packID: "moments", profile: "wechat", adapter: AdapterStandard},
+		"ecommerce":      {packID: "ecommerce", profile: "wechat", adapter: AdapterStandard},
+		"hypit":          {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
+		"montage":        {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
+		"live-slicer":    {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
 	}
 	for taskType, want := range wantRoutes {
 		pack, ok := catalog.ForTaskType(taskType)
@@ -890,9 +978,6 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		if pack.ID != want.packID || pack.Runtime.Profile != want.profile || pack.Runtime.Adapter != want.adapter {
 			t.Errorf("task type %q resolved to %s/%s/%s, want %s/%s/%s", taskType, pack.ID, pack.Runtime.Profile, pack.Runtime.Adapter, want.packID, want.profile, want.adapter)
 		}
-	}
-	if pack, ok := catalog.ForProjectPlatform("montage"); !ok || pack.ID != "montage" {
-		t.Fatalf("montage project Pack = %#v, %v", pack, ok)
 	}
 	if pack, ok := catalog.Pack("montage"); !ok {
 		t.Fatal("montage Pack missing")
@@ -915,14 +1000,12 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		t.Fatal("removed Designer Pack is still present")
 	}
 	for _, pack := range catalog.Packs {
-		for _, platform := range pack.Bindings.ProjectPlatforms {
-			if !model.IsProjectPlatform(platform) {
-				t.Errorf("Pack %q binds undeclared project platform %q", pack.ID, platform)
-			}
+		if pack.Channel != "" && !model.IsChannel(pack.Channel) {
+			t.Errorf("Pack %q binds undeclared channel %q", pack.ID, pack.Channel)
 		}
-		for _, taskType := range pack.Bindings.TaskTypes {
-			if !model.IsTaskType(taskType) {
-				t.Errorf("Pack %q binds undeclared task type %q", pack.ID, taskType)
+		for _, taskKind := range pack.Bindings.TaskKinds {
+			if !model.IsTaskKind(taskKind) {
+				t.Errorf("Pack %q binds undeclared task kind %q", pack.ID, taskKind)
 			}
 		}
 	}
@@ -930,7 +1013,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 
 func TestEmbeddedCatalogResolvesCurrentManagedRoutes(t *testing.T) {
 	catalog := Default()
-	for _, taskType := range []string{"article", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "live-slicer"} {
+	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "live-slicer"} {
 		if _, ok := catalog.ForTaskType(taskType); !ok {
 			t.Errorf("embedded Catalog has no route for %q", taskType)
 		}
@@ -1104,8 +1187,8 @@ func TestCheckRepositoryDetectsUnexpectedDSHRootWithoutSources(t *testing.T) {
 func TestScaffoldCreatesMinimalManagedPackWithoutOverwriting(t *testing.T) {
 	root := t.TempDir()
 	options := ScaffoldOptions{
-		ID: "new-scene", Kind: KindManaged, TaskType: "new-scene",
-		RuntimeProfile: "article", Adapter: AdapterStandard,
+		ID: "new-scene", Kind: KindManaged, Channel: "wechat-article", TaskKind: "new-scene",
+		RuntimeProfile: "wechat", Adapter: AdapterStandard,
 	}
 	if err := Scaffold(root, options); err != nil {
 		t.Fatalf("Scaffold: %v", err)
@@ -1115,7 +1198,7 @@ func TestScaffoldCreatesMinimalManagedPackWithoutOverwriting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read scaffold manifest: %v", err)
 	}
-	for _, want := range []string{"id: new-scene", "kind: managed", "task_types: [new-scene]", "profile: article", "adapter: standard"} {
+	for _, want := range []string{"id: new-scene", "kind: managed", "channel: wechat-article", "task_kinds: [new-scene]", "profile: wechat", "adapter: standard"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("scaffold manifest missing %q:\n%s", want, body)
 		}
@@ -1290,11 +1373,11 @@ agent:
   codex_source: agent.codex.toml
   skills: [demo-skill]
   max_turns: 60
+channel: wechat-article
 bindings:
-  project_platforms: [article]
-  task_types: [demo-task]
+  task_kinds: [demo-task]
 runtime:
-  profile: article
+  profile: wechat
   adapter: standard
   max_turns: 40
 surfaces: [project, task, plan]

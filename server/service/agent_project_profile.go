@@ -67,7 +67,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		if task.UserID != req.UserID || task.ProjectID != req.ProjectID {
 			return nil, errors.New("task does not belong to the requested project")
 		}
-		if snapshot := task.ProjectSnapshot.Data(); snapshot.Platform != "" {
+		if snapshot := task.ProjectSnapshot.Data(); snapshot.HasData() {
 			project = model.ProjectFromSnapshot(project, snapshot)
 			usesProjectSnapshot = true
 		}
@@ -178,7 +178,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		resolvedProfile["project_portrait_reference_path"] = serveragent.ProjectPortraitReferenceImagePath
 	}
 	profile["resolved_profile"] = resolvedProfile
-	if project.Platform == model.PlatformArticle || project.Platform == model.PlatformSeednote {
+	if project.Platform == model.PlatformWechat || project.Platform == model.PlatformSeednote {
 		feedbackStrategy, err := s.feedbackStrategyProfile(ctx, project, task)
 		if err != nil {
 			return nil, fmt.Errorf("load feedback strategy: %w", err)
@@ -258,15 +258,21 @@ func (s *AgentProjectProfileService) feedbackStrategyProfile(ctx context.Context
 	if s == nil || s.repo == nil || project == nil {
 		return payload, nil
 	}
-	taskType := project.Platform
-	if task != nil && strings.TrimSpace(task.Type) != "" {
-		taskType = task.Type
-	}
-	snapshot, err := s.repo.FeedbackLoop().FindActiveStrategy(ctx, project.ID, project.Platform)
+	channel, taskKind := feedbackIdentity(project, task)
+	snapshot, err := s.repo.FeedbackLoop().FindActiveStrategy(ctx, project.ID, channel)
 	if err != nil {
 		return nil, err
 	}
-	if !feedbackStrategyUsable(snapshot, taskType, project.Platform, time.Now().UTC()) {
+	// A pre-migration row may still be keyed by the old project platform. The
+	// repository resolves canonical and legacy aliases, but retain a direct
+	// fallback for custom repository implementations.
+	if snapshot == nil && channel != strings.TrimSpace(project.Platform) {
+		snapshot, err = s.repo.FeedbackLoop().FindActiveStrategy(ctx, project.ID, project.Platform)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !feedbackStrategyUsable(snapshot, taskKind, channel, time.Now().UTC()) {
 		return payload, nil
 	}
 	recommendations := json.RawMessage(snapshot.Recommendations)
@@ -283,6 +289,43 @@ func (s *AgentProjectProfileService) feedbackStrategyProfile(ctx context.Context
 	payload["evidence"] = evidence
 	payload["limitations"] = snapshot.Limitations
 	return payload, nil
+}
+
+func feedbackIdentity(project *model.Project, task *model.Task) (string, string) {
+	channel := ""
+	taskKind := ""
+	if task != nil {
+		channel = strings.TrimSpace(task.Channel)
+		taskKind = strings.TrimSpace(task.TaskKind)
+	}
+	if channel == "" && project != nil {
+		switch strings.TrimSpace(project.Platform) {
+		case model.PlatformWechat, model.TaskTypeWechatArticle:
+			channel = model.ChannelArticle
+		case model.PlatformSeednote:
+			channel = model.ChannelSeednote
+		case model.TaskTypeWechatPicture:
+			channel = model.ChannelWechatPicture
+		default:
+			channel = strings.TrimSpace(project.Platform)
+		}
+	}
+	if taskKind == "" && task != nil {
+		taskKind = strings.TrimSpace(task.Type)
+	}
+	if taskKind == "" {
+		switch channel {
+		case model.ChannelArticle:
+			taskKind = model.TaskTypeWechatArticle
+		case model.ChannelWechatPicture:
+			taskKind = model.TaskTypeWechatPicture
+		case model.ChannelSeednote:
+			taskKind = model.TaskKindContentGeneration
+		default:
+			taskKind = channel
+		}
+	}
+	return channel, taskKind
 }
 
 func (s *AgentProjectProfileService) montageProfile(project *model.Project, task *model.Task) map[string]any {

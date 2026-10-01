@@ -13,10 +13,12 @@ import (
 // tasks. Project/account style config is snapshotted from the project when the
 // task is created; plans no longer override visual/writer/author/theme.
 type Plan struct {
-	ID               string `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID           string `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID        string `gorm:"type:char(36);index" json:"project_id"`
-	Type             string `gorm:"type:varchar(20);not null" json:"type"` // seednote, article, ecommerce
+	ID        string `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID    string `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID string `gorm:"type:char(36);index" json:"project_id"`
+	// Type is retained only as a migration bridge. Plan identity now lives in
+	// Entries and this field is never serialized by the new API contract.
+	Type             string `gorm:"type:varchar(20);not null" json:"-"`
 	ExecutionProfile string `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
 	Title            string `gorm:"type:varchar(200)" json:"title"`
 	Description      string `gorm:"type:text" json:"description"`
@@ -55,9 +57,16 @@ type Plan struct {
 	Author      string `gorm:"type:varchar(200);default:''" json:"author,omitempty"`        // 作者署名 (publish author — never a writer persona name)
 	Theme       string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`          // 排版主题 key
 
-	NextRunAt *time.Time `gorm:"index" json:"next_run_at"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	NextRunAt *time.Time   `gorm:"index" json:"next_run_at"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt time.Time    `json:"updated_at"`
+	Entries   []*PlanEntry `gorm:"-" json:"entries,omitempty"`
+	// RuntimeIdentity is populated only while a PlanEntry is being admitted.
+	// It is deliberately not persisted: the durable identity belongs to the
+	// entry, while Plan keeps shared schedule data.
+	AgentID  string `gorm:"-" json:"-"`
+	Channel  string `gorm:"-" json:"-"`
+	TaskKind string `gorm:"-" json:"-"`
 }
 
 // TableName returns the database table name for Plan.

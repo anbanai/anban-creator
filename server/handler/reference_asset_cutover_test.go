@@ -57,7 +57,7 @@ func TestTaskHandlerRejectsInvalidReferenceBeforePersistenceOrCredits(t *testing
 			if err := repo.Users().Create(t.Context(), &model.User{ID: userID, OpenID: "openid-" + tt.name}); err != nil {
 				t.Fatal(err)
 			}
-			project := &model.Project{ID: uuid.NewString(), UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}
+			project := &model.Project{ID: uuid.NewString(), UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}
 			if err := repo.Projects().Create(t.Context(), project); err != nil {
 				t.Fatal(err)
 			}
@@ -127,7 +127,7 @@ func TestPlanAndTaskReadResponsesPresentRepositoryAssets(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "read-user"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	planAsset := cutoverAsset("plan-asset", userID, service.DirectUploadPurposeTaskReference, "plan.png", "image/png")
@@ -137,8 +137,8 @@ func TestPlanAndTaskReadResponsesPresentRepositoryAssets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.PlanStatusActive, ReferenceImageAssetID: planAsset.ID}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ReferenceImageAssetID: taskAsset.ID}
+	plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.PlanStatusActive, ReferenceImageAssetID: planAsset.ID}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, ReferenceImageAssetID: taskAsset.ID}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -199,14 +199,14 @@ func TestBulkCloneSigningFailureDoesNotCreateOrCharge(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "bulk-clone-user"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	asset := cutoverAsset("bulk-asset", userID, service.DirectUploadPurposeTaskReference, "ref.png", "image/png")
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.TaskStatusFailed, ReferenceImageAssetID: asset.ID}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Status: model.TaskStatusFailed, ReferenceImageAssetID: asset.ID}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestPlanMutationSigningFailureDoesNotPersist(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "plan-sign-user"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	asset := cutoverAsset("plan-sign-asset", userID, service.DirectUploadPurposeTaskReference, "ref.png", "image/png")
@@ -277,7 +277,7 @@ func TestPlanMutationSigningFailureDoesNotPersist(t *testing.T) {
 		t.Fatalf("plans after failed create = %d, %v", total, err)
 	}
 
-	baseline := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.PlanStatusActive, Prompt: "before"}
+	baseline := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.PlanStatusActive, Prompt: "before"}
 	if err := repo.Plans().Create(ctx, baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestPlanUpdateReferenceImageOmissionNullReplaceAndInvalidEmptySelection(t *
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "plan-update-reference"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	first := cutoverAsset("plan-first", userID, service.DirectUploadPurposeTaskReference, "first.png", "image/png")
@@ -319,7 +319,7 @@ func TestPlanUpdateReferenceImageOmissionNullReplaceAndInvalidEmptySelection(t *
 			t.Fatal(err)
 		}
 	}
-	plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.PlanStatusActive, Prompt: "before", ReferenceImageAssetID: first.ID}
+	plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Status: model.PlanStatusActive, Prompt: "before", ReferenceImageAssetID: first.ID}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestTaskCreateInheritedReferenceSigningFailureDoesNotCreateOrCharge(t *test
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive, ReferenceImageAssetID: asset.ID}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive, ReferenceImageAssetID: asset.ID}); err != nil {
 		t.Fatal(err)
 	}
 	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}, downloadErr: errors.New("signer unavailable")}
@@ -448,12 +448,12 @@ func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
 		{name: "missing", find: func(string, string) (*model.Project, error) { return nil, gorm.ErrRecordNotFound }, wantStatus: fiber.StatusNotFound},
 		{name: "repository error", find: func(string, string) (*model.Project, error) { return nil, rootCause }, wantStatus: fiber.StatusInternalServerError},
 		{name: "foreign", find: func(projectID, _ string) (*model.Project, error) {
-			return &model.Project{ID: projectID, UserID: "other-user", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}, nil
+			return &model.Project{ID: projectID, UserID: "other-user", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}, nil
 		}, wantStatus: fiber.StatusForbidden},
 		{name: "missing on service defense", failOnDefense: true, find: func(string, string) (*model.Project, error) { return nil, gorm.ErrRecordNotFound }, wantStatus: fiber.StatusNotFound},
 		{name: "repository error on service defense", failOnDefense: true, find: func(string, string) (*model.Project, error) { return nil, rootCause }, wantStatus: fiber.StatusInternalServerError},
 		{name: "foreign on service defense", failOnDefense: true, find: func(projectID, _ string) (*model.Project, error) {
-			return &model.Project{ID: projectID, UserID: "other-user", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}, nil
+			return &model.Project{ID: projectID, UserID: "other-user", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}, nil
 		}, wantStatus: fiber.StatusForbidden},
 	}
 	for _, tt := range tests {
@@ -468,7 +468,7 @@ func TestTaskCreateProjectLookupFailsClosedBeforeMutation(t *testing.T) {
 			projects := &taskHandlerProjectRepository{ProjectRepository: base.Projects()}
 			projects.find = func(context.Context, string) (*model.Project, error) {
 				if tt.failOnDefense && projects.findCalls == 1 {
-					return &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformArticle, Status: model.ProjectStatusActive}, nil
+					return &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Status: model.ProjectStatusActive}, nil
 				}
 				return tt.find(projectID, userID)
 			}
@@ -514,7 +514,7 @@ func TestTaskCreateInheritedProjectReferenceFreezesPreflightSnapshotAndAttachesV
 	if err := base.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	if err := base.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive, ReferenceImageAssetID: asset.ID}); err != nil {
+	if err := base.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive, ReferenceImageAssetID: asset.ID}); err != nil {
 		t.Fatal(err)
 	}
 	projects := &taskHandlerProjectRepository{ProjectRepository: base.Projects()}
@@ -553,14 +553,14 @@ func TestCloneResponseAttachesSignedReferenceView(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "clone-view-user"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	asset := cutoverAsset("clone-view-asset", userID, service.DirectUploadPurposeTaskReference, "ref.png", "image/png")
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted, ReferenceImageAssetID: asset.ID}
+	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted, ReferenceImageAssetID: asset.ID}
 	freezeHandlerTaskImageCapability(t, source, "standard", handlerTestImageCapabilityRoute("image.standard", model.TierFree))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
@@ -601,14 +601,14 @@ func TestResumeSigningFailureDoesNotMutateTask(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, OpenID: "resume-sign-user"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformArticle, Status: model.ProjectStatusActive}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "Article", Platform: model.PlatformWechat, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	asset := cutoverAsset("resume-sign-asset", userID, service.DirectUploadPurposeTaskReference, "ref.png", "image/png")
 	if err := repo.Assets().Create(ctx, asset); err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, Status: model.TaskStatusCompleted, ReferenceImageAssetID: asset.ID}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, ReferenceImageAssetID: asset.ID}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

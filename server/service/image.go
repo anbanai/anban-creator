@@ -515,7 +515,7 @@ func populateImageResultDimensions(result *ImageResult) error {
 	return nil
 }
 
-// UploadImage uploads a local image. For WeChat platforms (article), uploads
+// UploadImage uploads a local image. For the WeChat platform, uploads
 // to WeChat CDN. For other platforms (seednote), uploads to the configured storage provider.
 func (s *ImageService) UploadImage(
 	ctx context.Context,
@@ -527,7 +527,7 @@ func (s *ImageService) UploadImage(
 	}
 
 	// Non-WeChat platforms: upload to storage provider (local/OSS).
-	if ch.Platform != model.PlatformArticle {
+	if ch.Platform != model.PlatformWechat {
 		return s.uploadToStorage(ctx, filePath)
 	}
 

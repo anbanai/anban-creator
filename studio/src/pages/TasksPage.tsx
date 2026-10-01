@@ -572,7 +572,7 @@ export default function TasksPage() {
                         </div>
                       </div>
                     </Link>
-                    {task.status === 'completed' && (task.type === 'article' || task.type === 'seednote') && (
+                    {task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') && (
                       <Link
                         to={taskContentAnalyticsHref(task.project_id, task.id)}
                         aria-label="查看内容分析"

@@ -31,8 +31,12 @@ func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, sc
 	if taskID == "" {
 		return nil, fmt.Errorf("task_id is required")
 	}
-	if _, err := s.repo.Tasks().FindByID(ctx, taskID); err != nil {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
+	}
+	if task.TaskKind == model.TaskKindFeedbackAnalysis && agentName != model.AgentIDFeedback {
+		return nil, fmt.Errorf("feedback task requires agent_name=feedback")
 	}
 	if agentName == "" {
 		return nil, fmt.Errorf("agent_name is required")

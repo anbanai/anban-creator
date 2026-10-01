@@ -44,7 +44,7 @@ type Resolved struct {
 // "project" source bucket (it is the platform's built-in writer).
 func ResolveStyle(project *model.Project, task *model.Task) Resolved {
 	if task != nil {
-		if snap := task.ProjectSnapshot.Data(); snap.Platform != "" {
+		if snap := task.ProjectSnapshot.Data(); snap.HasData() {
 			r := Resolved{
 				VisualStyle:       snap.VisualStyle,
 				Writer:            snap.Writer,
@@ -55,7 +55,7 @@ func ResolveStyle(project *model.Project, task *model.Task) Resolved {
 				AuthorSource:      "snapshot",
 				ThemeSource:       "snapshot",
 			}
-			if snap.Platform == model.PlatformArticle && r.Writer == "" {
+			if snap.Channel == model.ChannelArticle && r.Writer == "" {
 				r.Writer = writer.DefaultStyleName
 			}
 			return r
@@ -88,7 +88,7 @@ func ResolveStyle(project *model.Project, task *model.Task) Resolved {
 	}
 	// Article always carries a writer voice; apply the platform default when the
 	// project left it empty. One place, every consumer agrees.
-	if project.Platform == model.PlatformArticle && r.Writer == "" {
+	if (project.Platform == model.PlatformWechat || (task != nil && task.Channel == model.ChannelArticle)) && r.Writer == "" {
 		r.Writer = writer.DefaultStyleName
 	}
 	return r

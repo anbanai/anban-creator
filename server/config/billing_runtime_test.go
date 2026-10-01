@@ -27,7 +27,7 @@ claude:
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
-    article: creator-agent-article:latest
+    wechat: creator-agent-wechat:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
 billing_runtime:
@@ -74,7 +74,7 @@ claude:
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
-    article: creator-agent-article:latest
+    wechat: creator-agent-wechat:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
 `
@@ -190,7 +190,7 @@ task_time_pricing:
     - {start: "14:00", end: "18:00"}
   off_peak_rate_percent: 80
 skus:
-  - {id: task.article.effective, operation: task.article, execution_profile: effective, charge_policy: task_admission, price_credits: 1000, delivery: verified}
+  - {id: task.wechat_article.effective, operation: task.wechat_article, execution_profile: effective, charge_policy: task_admission, price_credits: 1000, delivery: verified}
 `,
 		"costs.yaml": `currency_rates: {CNY: "1.00"}
 models:

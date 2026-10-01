@@ -24,7 +24,9 @@ const (
 
 type AIEntrySubmitRequest struct {
 	UserID             string                  `json:"-"`
+	AgentID            string                  `json:"agent_id"`
 	Channel            string                  `json:"channel"`
+	TaskKind           string                  `json:"task_kind"`
 	ProjectID          string                  `json:"project_id"`
 	ExecutionProfile   string                  `json:"execution_profile"`
 	Text               string                  `json:"text"`
@@ -105,6 +107,9 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	}
 	req.UserID = strings.TrimSpace(req.UserID)
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	req.AgentID = strings.TrimSpace(req.AgentID)
+	req.Channel = strings.TrimSpace(req.Channel)
+	req.TaskKind = strings.TrimSpace(req.TaskKind)
 	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
 	req.Text = strings.TrimSpace(req.Text)
 	if req.UserID == "" {
@@ -126,7 +131,31 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if project.Status != model.ProjectStatusActive {
 		return aiEntryNeedsConfiguration("当前项目已归档，请切换到活跃项目。", "/projects"), nil
 	}
-	usesImageSettings := len(model.SupportedImageRatios(project.Platform)) > 0
+	// The Studio composer used to submit a transport-only "studio" channel
+	// (or no identity at all). Resolve that UI form to the project's canonical
+	// Agent/channel/task-kind identity before validating the request. The
+	// resulting task always persists the canonical values.
+	if (req.AgentID == "" && req.Channel == "" && req.TaskKind == "") || req.Channel == "studio" {
+		switch project.Platform {
+		case model.PlatformWechat:
+			req.AgentID, req.Channel, req.TaskKind = model.AgentIDArticle, model.ChannelArticle, model.TaskKindContentGeneration
+		case model.PlatformSeednote:
+			req.AgentID, req.Channel, req.TaskKind = model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindContentGeneration
+		case model.PlatformMontage:
+			req.AgentID, req.Channel, req.TaskKind = model.AgentIDChannelsVideo, model.ChannelChannelsVideo, model.TaskKindContentGeneration
+		case model.PlatformHypit:
+			req.AgentID, req.Channel, req.TaskKind = model.AgentIDHypit, model.ChannelHypit, model.PlatformHypit
+		case model.PlatformMoments, model.PlatformEcommerce:
+			req.AgentID, req.Channel, req.TaskKind = project.Platform, project.Platform, project.Platform
+		}
+	}
+	if req.AgentID == "" || req.Channel == "" || req.TaskKind == "" {
+		return aiEntryNeedsConfiguration("请选择 Agent、输出渠道和任务类型。", "/tasks"), nil
+	}
+	usesImageSettings := len(model.SupportedImageRatiosForChannel(req.Channel)) > 0
+	if !usesImageSettings {
+		usesImageSettings = len(model.SupportedImageRatios(project.Platform)) > 0
+	}
 	quantity := req.Quantity
 	if quantity == 0 {
 		quantity = 1
@@ -135,8 +164,14 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		return aiEntryError("创建任务失败：quantity must be between 1 and 5"), nil
 	}
 	imageRatio := strings.TrimSpace(req.ImageRatio)
-	if usesImageSettings && imageRatio != "" && len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, imageRatio) {
-		return aiEntryError(fmt.Sprintf("创建任务失败：%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, imageRatio)), nil
+	if usesImageSettings && imageRatio != "" {
+		validRatio := model.IsBusinessImageRatioAllowedForChannel(req.Channel, imageRatio)
+		if model.PlatformForChannel(req.Channel) == "" {
+			validRatio = model.IsBusinessImageRatioAllowed(project.Platform, imageRatio)
+		}
+		if !validRatio {
+			return aiEntryError(fmt.Sprintf("创建任务失败：%s for channel %s: %s", model.ValidImageRatioHint, req.Channel, imageRatio)), nil
+		}
 	}
 	imageCapabilityKey := strings.TrimSpace(req.ImageCapabilityKey)
 	if usesImageSettings && imageCapabilityKey != "" {
@@ -167,7 +202,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if prompt == "" {
 		return aiEntryNeedsConfiguration("请先描述你想创建的内容。", "/"), nil
 	}
-	if usesImageSettings && imageRatio == "" && !model.IsMontagePlatform(project.Platform) {
+	if usesImageSettings && imageRatio == "" && req.Channel != model.ChannelChannelsVideo {
 		imageRatio = normalizeAIEntryImageRatio(intent.ImageRatio)
 	}
 
@@ -175,6 +210,9 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	params := CreateManualParams{
 		UserID:             req.UserID,
 		ProjectID:          req.ProjectID,
+		AgentID:            req.AgentID,
+		Channel:            req.Channel,
+		TaskKind:           req.TaskKind,
 		ExecutionProfile:   req.ExecutionProfile,
 		Prompt:             prompt,
 		Quantity:           quantity,
@@ -185,8 +223,8 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	}
 	var referenceView *model.AssetView
 
-	switch project.Platform {
-	case model.PlatformArticle, model.PlatformMoments:
+	switch req.Channel {
+	case model.ChannelArticle, model.ChannelWechatPicture, model.ChannelMoments:
 		if uploadSessionID := firstImageAttachmentUploadSessionID(req.Attachments); uploadSessionID != "" {
 			if s.referenceAssets == nil {
 				return nil, ErrReferenceAssetUnavailable
@@ -201,9 +239,11 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 				return nil, err
 			}
 		}
-	case model.PlatformSeednote:
+	case model.ChannelSeednote:
 		// Seednote uses InputAttachments as its only new per-run reference source.
-	case model.PlatformEcommerce:
+	case model.ChannelChannelsVideo:
+		params.MontageInput = aiEntryMontageInput(project, prompt)
+	case model.ChannelEcommerce:
 		photos := imageAttachmentURLs(req.Attachments)
 		if len(photos) == 0 {
 			return aiEntryNeedsConfiguration("创建电商任务需要至少上传一张产品图。", aiEntryTaskCreateActionURL(model.PlatformEcommerce, project.ID)), nil
@@ -222,10 +262,8 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 			SellingPoints:   firstNonEmptyString(intent.SellingPoints, req.Text),
 			Language:        intent.Language,
 		}
-	case model.PlatformMontage:
-		params.MontageInput = aiEntryMontageInput(project, prompt)
 	default:
-		return aiEntryNeedsConfiguration("当前项目平台暂不支持 AI 入口创建任务。", "/projects/"+project.ID), nil
+		return aiEntryNeedsConfiguration("当前 Agent/channel 暂不支持 AI 入口创建任务。", "/projects/"+project.ID), nil
 	}
 	if referenceView == nil && project.ReferenceImageAssetID != "" {
 		if s.referenceAssets == nil {
@@ -379,7 +417,7 @@ func aiEntryPrompt(project *model.Project, req AIEntrySubmitRequest) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "channel: %s\n", req.Channel)
 	if project != nil {
-		fmt.Fprintf(&b, "project_id: %s\nproject_name: %s\nproject_platform: %s\nproject_instructions: %s\n", project.ID, project.Name, project.Platform, project.Instructions)
+		fmt.Fprintf(&b, "project_id: %s\nproject_name: %s\nproject_instructions: %s\n", project.ID, project.Name, project.Instructions)
 	}
 	fmt.Fprintf(&b, "user_text: %s\n", req.Text)
 	if len(req.Attachments) > 0 {

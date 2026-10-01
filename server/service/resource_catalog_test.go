@@ -30,7 +30,7 @@ func TestResourceCatalogProjectsCategoryFieldsAndRaw(t *testing.T) {
 
 func TestResourceCatalogListsAndReturnsNotFound(t *testing.T) {
 	svc := NewResourceCatalogService(resources.Manager())
-	result, err := svc.Query(ResourceCatalogRequest{Category: "themes", Platform: "article"})
+	result, err := svc.Query(ResourceCatalogRequest{Category: "themes", Platform: "wechat"})
 	if err != nil {
 		t.Fatal(err)
 	}

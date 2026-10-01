@@ -45,7 +45,7 @@ func reloadProject(t *testing.T, db *gorm.DB, id string) *model.Project {
 func TestMigrateArticleStyleOverload_MovesWriter(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillProject(t, db, model.PlatformArticle, "dan-koe", "")
+	ch := createBackfillProject(t, db, model.PlatformWechat, "dan-koe", "")
 
 	if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {
 		t.Fatalf("MigrateArticleStyleOverload: %v", err)
@@ -65,7 +65,7 @@ func TestMigrateArticleStyleOverload_MovesWriter(t *testing.T) {
 func TestMigrateArticleStyleOverload_PreservesRealVisualStyle(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillProject(t, db, model.PlatformArticle, "温暖自然的生活摄影，柔光大地色系", "")
+	ch := createBackfillProject(t, db, model.PlatformWechat, "温暖自然的生活摄影，柔光大地色系", "")
 
 	if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {
 		t.Fatalf("MigrateArticleStyleOverload: %v", err)
@@ -104,7 +104,7 @@ func TestMigrateArticleStyleOverload_LeavesSeednoteUntouched(t *testing.T) {
 func TestMigrateArticleStyleOverload_DoesNotClobberExistingWritingStyle(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillProject(t, db, model.PlatformArticle, "casual-science", "cultural-depth")
+	ch := createBackfillProject(t, db, model.PlatformWechat, "casual-science", "cultural-depth")
 
 	if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {
 		t.Fatalf("MigrateArticleStyleOverload: %v", err)
@@ -124,7 +124,7 @@ func TestMigrateArticleStyleOverload_DoesNotClobberExistingWritingStyle(t *testi
 func TestMigrateArticleStyleOverload_Idempotent(t *testing.T) {
 	db := setupTestDB(t)
 	log := zerolog.Nop()
-	ch := createBackfillProject(t, db, model.PlatformArticle, "dan-koe", "")
+	ch := createBackfillProject(t, db, model.PlatformWechat, "dan-koe", "")
 
 	for i := 0; i < 2; i++ {
 		if err := MigrateArticleStyleOverload(context.Background(), db, &log); err != nil {

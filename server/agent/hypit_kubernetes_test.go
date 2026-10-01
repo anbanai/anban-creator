@@ -7,7 +7,7 @@ import (
 )
 
 func TestHypitKubernetesPlacementMatchesRuntimeArchitecture(t *testing.T) {
-	for _, kind := range []string{model.PlatformHypit, model.PlatformArticle, model.PlatformMontage} {
+	for _, kind := range []string{model.PlatformHypit, model.PlatformWechat, model.PlatformMontage} {
 		t.Run(kind, func(t *testing.T) {
 			task := testTask()
 			task.Type = kind

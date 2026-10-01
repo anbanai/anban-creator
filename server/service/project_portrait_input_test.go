@@ -19,7 +19,7 @@ func TestArticleProjectPortraitIsAnIndependentFrozenInput(t *testing.T) {
 			ctx := t.Context()
 			userID := uuid.NewString()
 			ensureTestUser(t, repo, userID)
-			projectID := createTestProject(t, repo, userID, model.PlatformArticle)
+			projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 			portrait := referenceAssetFixture("portrait", userID, DirectUploadPurposeProjectPortraitReference)
 			seedReferenceAsset(t, repo, portrait)
 			direct := referenceAssetFixture("product", userID, DirectUploadPurposeTaskReference)
@@ -44,7 +44,7 @@ func TestArticleProjectPortraitIsAnIndependentFrozenInput(t *testing.T) {
 				}
 				task = created[0]
 			case "plan":
-				task, err = tasks.CreateFromPlan(ctx, &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformArticle, ExecutionProfile: "effective", Prompt: "article", ReferenceImageAssetID: direct.ID, ArticleWithCover: &noCover})
+				task, err = tasks.CreateFromPlan(ctx, &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Prompt: "article", ReferenceImageAssetID: direct.ID, ArticleWithCover: &noCover})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
@@ -25,8 +27,17 @@ var (
 	ErrWechatCredentialsRequired         = errors.New("wechat credentials required")
 	ErrProjectProfileVersionConflict     = errors.New("project profile version conflict")
 	ErrProjectProfileAnalysisInProgress  = errors.New("project profile analysis is already in progress")
-	ErrProjectProfileUnsupportedPlatform = errors.New("project profile is only supported for article and seednote projects")
+	ErrProjectProfileResultAlreadyStored = errors.New("project profile result already submitted")
+	ErrProjectProfileUnsupportedPlatform = errors.New("project profile is only supported for WeChat and Seednote projects")
+	ErrInvalidProjectAgent               = errors.New("invalid project agent")
+	ErrInvalidProjectChannel             = errors.New("invalid project channel")
 )
+
+var supportedProjectChannels = map[string]struct{}{
+	model.ChannelArticle:       {},
+	model.ChannelSeednote:      {},
+	model.ChannelWechatPicture: {},
+}
 
 type projectDeleteConflictError struct {
 	msg string
@@ -59,7 +70,7 @@ func validateProjectAgentConfig(project *model.Project) error {
 }
 
 func validateProjectWechatCredentials(project *model.Project) error {
-	if project == nil || project.Platform != model.PlatformArticle {
+	if project == nil || project.Platform != model.PlatformWechat {
 		return nil
 	}
 	if strings.TrimSpace(project.Config.WechatAppID) == "" || strings.TrimSpace(project.Config.WechatSecret) == "" {
@@ -91,6 +102,7 @@ type ProjectService struct {
 	logger              *zerolog.Logger
 	templateSvc         *TemplateService
 	memory              ProjectMemoryLifecycle
+	profileMemory       ProjectProfileMemory
 	hypitCapabilities   *HypitCapabilityService
 	montageCapabilities *MontageCapabilityService
 	imageAnalyses       *ImageAnalysisService
@@ -98,6 +110,13 @@ type ProjectService struct {
 
 type ProjectMemoryLifecycle interface {
 	DeleteProject(context.Context, string) error
+}
+
+// ProjectProfileMemory is the narrow Server-owned writer used for the
+// database-to-memory profile projection.
+type ProjectProfileMemory interface {
+	EnsureProject(context.Context, string) error
+	WriteMarkdownFile(context.Context, string, string, string) error
 }
 
 // NewProjectService creates a new ProjectService.
@@ -112,6 +131,12 @@ func (s *ProjectService) SetTemplateService(svc *TemplateService) {
 
 func (s *ProjectService) SetProjectMemoryLifecycle(memory ProjectMemoryLifecycle) {
 	s.memory = memory
+}
+
+func (s *ProjectService) SetProjectProfileMemory(memory ProjectProfileMemory) {
+	if s != nil {
+		s.profileMemory = memory
+	}
 }
 
 func (s *ProjectService) SetMontageCapabilityService(capabilities *MontageCapabilityService) {
@@ -132,7 +157,7 @@ func (s *ProjectService) SetImageAnalysisService(analyses *ImageAnalysisService)
 // is injected at RESOLUTION time (resolver.ResolveStyle) so every consumer agrees
 // on the single source of truth. The project stores only what the user set.
 func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
-	if !validProjectPlatform(ch.Platform) {
+	if strings.TrimSpace(ch.Platform) != "" && !validProjectPlatform(ch.Platform) {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
 	}
 	if err := validateHypitProject(ch, s.hypitCapabilities); err != nil {
@@ -169,6 +194,9 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	ch.ID = uuid.New().String()
 	ch.UserID = userID
 	ch.Status = model.ProjectStatusActive
+	if ch.Profile.Data().SchemaVersion == 0 {
+		ch.Profile = datatypes.NewJSONType(model.NewProjectProfile())
+	}
 	if strings.TrimSpace(ch.VisualStyle) != "" {
 		ch.VisualStyleSource = model.ImageAnalysisSourceManual
 	}
@@ -179,11 +207,19 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 			return nil, fmt.Errorf("create project: %w", err)
 		}
 		ch.ImageAnalysis = job.View()
+		if err := s.repo.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: ch.ID, Status: model.ProfileInitializationNotStarted}); err != nil && !missingProfileStateTable(err) {
+			return nil, fmt.Errorf("create project profile state: %w", err)
+		}
+		s.reconcileProfileProjection(ctx, ch.ID, projectProfileFor(ch))
 		return ch, nil
 	}
 	if err := s.repo.Projects().Create(ctx, ch); err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
 	}
+	if err := s.repo.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: ch.ID, Status: model.ProfileInitializationNotStarted}); err != nil && !missingProfileStateTable(err) {
+		return nil, fmt.Errorf("create project profile state: %w", err)
+	}
+	s.reconcileProfileProjection(ctx, ch.ID, projectProfileFor(ch))
 
 	return ch, nil
 }
@@ -218,13 +254,91 @@ func projectProfileFor(project *model.Project) model.ProjectProfile {
 	if profile.SchemaVersion == 0 {
 		profile = model.NewProjectProfile()
 	}
+	if profile.InitializationStatus == "" {
+		profile.InitializationStatus = model.ProfileInitializationNotStarted
+	}
 	return profile
 }
 
+func profileDimension(profile model.ProjectProfile, name string) model.ProfileDimension {
+	switch name {
+	case "identity":
+		return profile.Dimensions.Identity
+	case "style":
+		return profile.Dimensions.Style
+	case "audience":
+		return profile.Dimensions.Audience
+	case "platforms":
+		return profile.Dimensions.Platforms
+	case "preferences":
+		return profile.Dimensions.Preferences
+	case "memory":
+		return profile.Dimensions.Memory
+	default:
+		return model.ProfileDimension{}
+	}
+}
+
+func (s *ProjectService) writeProfileProjection(ctx context.Context, projectID string, profile model.ProjectProfile) error {
+	if s.profileMemory == nil {
+		return nil
+	}
+	if err := s.profileMemory.EnsureProject(ctx, projectID); err != nil {
+		return fmt.Errorf("ensure project profile memory: %w", err)
+	}
+	for _, name := range model.ProfileDimensions() {
+		content, err := ProfileDimensionMarkdown(name, profileDimension(profile, name))
+		if err != nil {
+			return err
+		}
+		if err := s.profileMemory.WriteMarkdownFile(ctx, projectID, "profile/"+name+".md", content); err != nil {
+			return fmt.Errorf("write profile/%s.md: %w", name, err)
+		}
+	}
+	if err := s.profileMemory.WriteMarkdownFile(ctx, projectID, "AGENTS.md", ProfileAgentsMarkdown()); err != nil {
+		return fmt.Errorf("write AGENTS.md: %w", err)
+	}
+	return nil
+}
+
+// reconcileProfileProjection is deliberately best-effort. The database is the
+// profile source of truth; filesystem projection is recoverable and may be
+// retried by a later profile read or task bootstrap.
+func (s *ProjectService) reconcileProfileProjection(ctx context.Context, projectID string, profile model.ProjectProfile) {
+	if err := s.writeProfileProjection(ctx, projectID, profile); err != nil && s.logger != nil {
+		s.logger.Warn().Err(err).Str("project_id", projectID).Int64("profile_revision", profile.Version).Msg("profile memory projection is stale; will retry")
+	}
+}
+
+func persistProfileState(ctx context.Context, repo repository.Repository, projectID string, profile model.ProjectProfile) error {
+	state, err := repo.ProjectProfileStates().FindByProjectIDForUpdate(ctx, projectID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = repo.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: projectID, Status: profile.InitializationStatus, Revision: profile.Version, ActiveTaskID: profile.AnalysisTaskID, LastError: profile.LastError})
+		if missingProfileStateTable(err) {
+			return nil
+		}
+		return err
+	}
+	if err != nil {
+		if missingProfileStateTable(err) {
+			return nil
+		}
+		return err
+	}
+	state.Status, state.Revision, state.ActiveTaskID, state.LastError = profile.InitializationStatus, profile.Version, profile.AnalysisTaskID, profile.LastError
+	return repo.ProjectProfileStates().Save(ctx, state)
+}
+
+func missingProfileStateTable(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table") && strings.Contains(strings.ToLower(err.Error()), "project_profile_states")
+}
+
 func validateProjectProfilePlatform(project *model.Project) error {
-	if project == nil || (project.Platform != model.PlatformArticle && project.Platform != model.PlatformSeednote) {
+	if project == nil {
 		return ErrProjectProfileUnsupportedPlatform
 	}
+	// Projects are channel-neutral; the profile belongs to shared project
+	// context and is therefore valid for migrated and newly-created projects.
 	return nil
 }
 
@@ -241,10 +355,23 @@ func (s *ProjectService) GetProfile(ctx context.Context, userID, projectID strin
 	if err := validateProjectProfilePlatform(project); err != nil {
 		return model.ProjectProfile{}, err
 	}
-	return projectProfileFor(project), nil
+	profile := projectProfileFor(project)
+	s.reconcileProfileProjection(ctx, projectID, profile)
+	return profile, nil
 }
 
 func (s *ProjectService) updateProfile(ctx context.Context, userID, projectID string, expectedVersion int64, next model.ProjectProfile) (model.ProjectProfile, error) {
+	return s.updateProfileWithSource(ctx, userID, projectID, expectedVersion, next, "", "")
+}
+
+func (s *ProjectService) updateProfileWithSource(ctx context.Context, userID, projectID string, expectedVersion int64, next model.ProjectProfile, sourceTaskID, source string) (model.ProjectProfile, error) {
+	if source != "agent" {
+		for _, dimension := range []*model.ProfileDimension{&next.Dimensions.Identity, &next.Dimensions.Style, &next.Dimensions.Audience, &next.Dimensions.Platforms, &next.Dimensions.Preferences, &next.Dimensions.Memory} {
+			if !containsProfileSource(dimension.Sources, "[用户编辑]") {
+				dimension.Sources = append(dimension.Sources, "[用户编辑]")
+			}
+		}
+	}
 	if err := next.Validate(); err != nil {
 		return model.ProjectProfile{}, fmt.Errorf("invalid project profile: %w", err)
 	}
@@ -275,10 +402,159 @@ func (s *ProjectService) updateProfile(ctx context.Context, userID, projectID st
 		if err := tx.Projects().Update(ctx, project); err != nil {
 			return err
 		}
+		dimensions, err := json.Marshal(next.Dimensions)
+		if err != nil {
+			return fmt.Errorf("marshal profile dimensions: %w", err)
+		}
+		if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: projectID, Revision: next.Version, SixDimensions: dimensions, SourceTaskID: strings.TrimSpace(sourceTaskID)}); err != nil {
+			return fmt.Errorf("record profile revision: %w", err)
+		}
+		if err := persistProfileState(ctx, tx, projectID, next); err != nil {
+			return fmt.Errorf("persist profile state: %w", err)
+		}
 		result = next
 		return nil
 	})
+	if err == nil {
+		s.reconcileProfileProjection(ctx, projectID, result)
+	}
 	return result, err
+}
+
+// ApplyAgentProfileResult validates and atomically accepts one structured
+// profile result from the profile-analysis execution. The task and project
+// ownership checks happen server-side; callers cannot submit for another
+// execution or overwrite a newer revision.
+func (s *ProjectService) ApplyAgentProfileResult(ctx context.Context, userID, projectID, taskID string, expectedVersion int64, dimensions model.ProjectProfileDimensions, limits, missing []string) (model.ProjectProfile, error) {
+	if taskID == "" {
+		return model.ProjectProfile{}, fmt.Errorf("profile task id is required")
+	}
+	if expectedVersion < 0 {
+		return model.ProjectProfile{}, fmt.Errorf("profile revision must be non-negative")
+	}
+	var result model.ProjectProfile
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		project, err := tx.Projects().FindByIDForUpdate(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+		}
+		if project.UserID != userID {
+			return ErrProjectOwnedByUser
+		}
+		task, err := tx.Tasks().FindByIDForUpdate(ctx, taskID)
+		if err != nil || task.ProjectID != projectID || task.UserID != userID || task.Type != model.TaskTypeProfileAnalysis {
+			return fmt.Errorf("profile analysis task is not authorized")
+		}
+		if task.Status != model.TaskStatusPending && task.Status != model.TaskStatusRunning {
+			return fmt.Errorf("profile analysis task is not active")
+		}
+		if task.Result != nil && strings.TrimSpace(*task.Result) != "" {
+			return ErrProjectProfileResultAlreadyStored
+		}
+		current := projectProfileFor(project)
+		if expectedVersion != current.Version {
+			return ErrProjectProfileVersionConflict
+		}
+		next := current
+		next.Dimensions = dimensions
+		next.AnalysisLimits = append([]string(nil), limits...)
+		next.FollowUpQuestions = append([]string(nil), missing...)
+		next.Status = model.ProfileStatusConfirmed
+		next.InitializationStatus = model.ProfileInitializationReady
+		next.LastError = ""
+		next.AnalysisTaskID = taskID
+		next.Version = current.Version + 1
+		if err := next.Validate(); err != nil {
+			return fmt.Errorf("invalid agent profile result: %w", err)
+		}
+		project.Profile = datatypes.NewJSONType(next)
+		if err := tx.Projects().Update(ctx, project); err != nil {
+			return err
+		}
+		dimensionsJSON, err := json.Marshal(next.Dimensions)
+		if err != nil {
+			return fmt.Errorf("marshal profile dimensions: %w", err)
+		}
+		if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{
+			ID: uuid.NewString(), ProjectID: projectID, Revision: next.Version,
+			SixDimensions: dimensionsJSON, SourceTaskID: taskID,
+		}); err != nil {
+			return fmt.Errorf("record profile revision: %w", err)
+		}
+		if err := persistProfileState(ctx, tx, projectID, next); err != nil {
+			return fmt.Errorf("persist profile state: %w", err)
+		}
+		summary, _ := json.Marshal(map[string]any{"profile_revision": next.Version, "status": next.InitializationStatus})
+		summaryString := string(summary)
+		task.Result = &summaryString
+		if err := tx.Tasks().Update(ctx, task); err != nil {
+			return fmt.Errorf("persist profile task result: %w", err)
+		}
+		result = next
+		return nil
+	})
+	if err != nil {
+		return model.ProjectProfile{}, err
+	}
+	s.reconcileProfileProjection(ctx, projectID, result)
+	return result, nil
+}
+
+// MarkProfileTaskState updates only the lifecycle marker and error. It never
+// changes dimensions, so failed executions preserve the last ready profile.
+func (s *ProjectService) MarkProfileTaskState(ctx context.Context, projectID, taskID, state, message string) error {
+	return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		project, err := tx.Projects().FindByIDForUpdate(ctx, projectID)
+		if err != nil {
+			return err
+		}
+		profile := projectProfileFor(project)
+		if profile.AnalysisTaskID != taskID {
+			return nil
+		}
+		profile.InitializationStatus = state
+		profile.LastError = strings.TrimSpace(message)
+		project.Profile = datatypes.NewJSONType(profile)
+		if err := tx.Projects().Update(ctx, project); err != nil {
+			return err
+		}
+		return persistProfileState(ctx, tx, projectID, profile)
+	})
+}
+
+func (s *ProjectService) ProfileRevisions(ctx context.Context, userID, projectID string) ([]*model.ProjectProfileRevision, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+	}
+	if project.UserID != userID {
+		return nil, ErrProjectOwnedByUser
+	}
+	return s.repo.ProjectProfileRevisions().ListByProject(ctx, projectID)
+}
+
+func (s *ProjectService) RestoreProfileRevision(ctx context.Context, userID, projectID string, revision, expectedVersion int64) (model.ProjectProfile, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return model.ProjectProfile{}, fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+	}
+	if project.UserID != userID {
+		return model.ProjectProfile{}, ErrProjectOwnedByUser
+	}
+	row, err := s.repo.ProjectProfileRevisions().FindByProjectRevision(ctx, projectID, revision)
+	if err != nil {
+		return model.ProjectProfile{}, fmt.Errorf("find profile revision: %w", err)
+	}
+	var dimensions model.ProjectProfileDimensions
+	if err := json.Unmarshal(row.SixDimensions, &dimensions); err != nil {
+		return model.ProjectProfile{}, fmt.Errorf("decode profile revision: %w", err)
+	}
+	next := projectProfileFor(project)
+	next.Dimensions = dimensions
+	next.Status = model.ProfileStatusConfirmed
+	next.InitializationStatus = model.ProfileInitializationReady
+	next.LastError = ""
+	return s.updateProfileWithSource(ctx, userID, projectID, expectedVersion, next, "", "user_restore")
 }
 
 func (s *ProjectService) ConfirmProfile(ctx context.Context, userID, projectID string, expectedVersion int64, profile model.ProjectProfile) (model.ProjectProfile, error) {
@@ -290,6 +566,11 @@ func (s *ProjectService) ConfirmProfile(ctx context.Context, userID, projectID s
 	}
 	profile.AnalysisTaskID = current.AnalysisTaskID
 	profile.Status = model.ProfileStatusConfirmed
+	for _, dimension := range []*model.ProfileDimension{&profile.Dimensions.Identity, &profile.Dimensions.Style, &profile.Dimensions.Audience, &profile.Dimensions.Platforms, &profile.Dimensions.Preferences, &profile.Dimensions.Memory} {
+		if !containsProfileSource(dimension.Sources, "[用户编辑]") {
+			dimension.Sources = append(dimension.Sources, "[用户编辑]")
+		}
+	}
 	if profile.Version < 0 {
 		return model.ProjectProfile{}, fmt.Errorf("invalid project profile version")
 	}
@@ -350,6 +631,9 @@ func (s *ProjectService) UpdateProfileDimension(ctx context.Context, userID, pro
 	if len(value.MissingFields) == 0 {
 		value.MissingFields = append([]string(nil), previous.MissingFields...)
 	}
+	if !containsProfileSource(value.Sources, "[用户编辑]") {
+		value.Sources = append(value.Sources, "[用户编辑]")
+	}
 	if dimension == "memory" {
 		merged := map[string]any{}
 		for key, item := range previous.Content {
@@ -379,6 +663,15 @@ func (s *ProjectService) UpdateProfileDimension(ctx context.Context, userID, pro
 	return s.updateProfile(ctx, userID, projectID, expectedVersion, profile)
 }
 
+func containsProfileSource(values []string, want string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // List returns projects for the given user, filtered by the provided options.
 func (s *ProjectService) List(ctx context.Context, userID string, opts repository.ProjectListOptions) ([]*model.Project, error) {
 	projects, err := s.repo.Projects().ListByUserID(ctx, userID, opts)
@@ -401,6 +694,191 @@ func (s *ProjectService) BatchStats(ctx context.Context, projectIDs []string) (m
 		return nil, fmt.Errorf("batch project stats: %w", err)
 	}
 	return stats, nil
+}
+
+func (s *ProjectService) ownedProject(ctx context.Context, userID, projectID string) (*model.Project, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrProjectNotFound, err)
+	}
+	if project.UserID != userID {
+		return nil, ErrProjectOwnedByUser
+	}
+	return project, nil
+}
+
+// GetAgentConfig returns the settings for one Agent Pack after ownership
+// verification. The handler is responsible for redacting secrets at the API
+// boundary; internal callers receive the complete server-side value.
+func (s *ProjectService) GetAgentConfig(ctx context.Context, userID, projectID, agentID string) (*model.ProjectAgentConfig, error) {
+	if strings.TrimSpace(agentID) == "" {
+		return nil, fmt.Errorf("%w: agent_id is required", ErrInvalidProjectAgent)
+	}
+	pack, ok := agentpack.Default().ForAgent(agentID)
+	if !ok || pack.Kind != agentpack.KindManaged || !model.IsChannel(pack.Channel) {
+		return nil, fmt.Errorf("%w: unknown agent %q", ErrInvalidProjectAgent, agentID)
+	}
+	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
+		return nil, err
+	}
+	config, err := s.repo.ProjectAgentConfigs().Get(ctx, projectID, agentID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return config, err
+}
+
+// ListAgentConfigs returns all Agent settings for an owned project.
+func (s *ProjectService) ListAgentConfigs(ctx context.Context, userID, projectID string) ([]*model.ProjectAgentConfig, error) {
+	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
+		return nil, err
+	}
+	return s.repo.ProjectAgentConfigs().List(ctx, projectID)
+}
+
+func (s *ProjectService) UpsertAgentConfig(ctx context.Context, userID, projectID, agentID string, config map[string]any) (*model.ProjectAgentConfig, error) {
+	if strings.TrimSpace(agentID) == "" {
+		return nil, fmt.Errorf("%w: agent_id is required", ErrInvalidProjectAgent)
+	}
+	pack, ok := agentpack.Default().ForAgent(agentID)
+	if !ok || pack.Kind != agentpack.KindManaged || !model.IsChannel(pack.Channel) {
+		return nil, fmt.Errorf("%w: unknown agent %q", ErrInvalidProjectAgent, agentID)
+	}
+	if err := agentpack.ValidateProjectConfig(pack, config); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidProjectAgent, err)
+	}
+	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
+		return nil, err
+	}
+	if existing, err := s.repo.ProjectAgentConfigs().Get(ctx, projectID, agentID); err == nil {
+		config = mergeProjectConfig(existing.Config.Data(), config)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	row := &model.ProjectAgentConfig{ID: uuid.NewString(), ProjectID: projectID, AgentID: agentID}
+	row.Config = datatypes.NewJSONType(config)
+	if err := s.repo.ProjectAgentConfigs().Upsert(ctx, row); err != nil {
+		return nil, fmt.Errorf("upsert project agent config: %w", err)
+	}
+	return s.repo.ProjectAgentConfigs().Get(ctx, projectID, agentID)
+}
+
+func (s *ProjectService) DeleteAgentConfig(ctx context.Context, userID, projectID, agentID string) error {
+	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
+		return err
+	}
+	return s.repo.ProjectAgentConfigs().Delete(ctx, projectID, agentID)
+}
+
+func validProjectChannel(channel string) bool {
+	_, ok := supportedProjectChannels[strings.TrimSpace(channel)]
+	return ok
+}
+
+func isSensitiveProjectConfigKey(key string) bool {
+	lower := strings.ToLower(strings.TrimSpace(key))
+	return strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "password") || strings.Contains(lower, "private_key") || lower == "app_key"
+}
+
+func cloneProjectConfigMap(source map[string]any) map[string]any {
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		switch typed := value.(type) {
+		case map[string]any:
+			cloned[key] = cloneProjectConfigMap(typed)
+		case []any:
+			items := make([]any, len(typed))
+			for i, item := range typed {
+				if itemMap, ok := item.(map[string]any); ok {
+					items[i] = cloneProjectConfigMap(itemMap)
+				} else {
+					items[i] = item
+				}
+			}
+			cloned[key] = items
+		default:
+			cloned[key] = value
+		}
+	}
+	return cloned
+}
+
+// mergeProjectConfig preserves server-owned credentials omitted from a
+// redacted client response while allowing ordinary values to be replaced.
+func mergeProjectConfig(existing, incoming map[string]any) map[string]any {
+	merged := cloneProjectConfigMap(existing)
+	for key, value := range incoming {
+		if existingMap, ok := existing[key].(map[string]any); ok {
+			if incomingMap, ok := value.(map[string]any); ok {
+				merged[key] = mergeProjectConfig(existingMap, incomingMap)
+				continue
+			}
+		}
+		merged[key] = value
+	}
+	for key, value := range existing {
+		if isSensitiveProjectConfigKey(key) {
+			if _, ok := incoming[key]; !ok {
+				merged[key] = value
+			}
+		}
+	}
+	return merged
+}
+
+func (s *ProjectService) GetChannelConfig(ctx context.Context, userID, projectID, channel string) (*model.ProjectChannelConfig, error) {
+	if !validProjectChannel(channel) {
+		return nil, fmt.Errorf("%w: unsupported channel %q", ErrInvalidProjectChannel, channel)
+	}
+	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
+		return nil, err
+	}
+	config, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return config, err
+}
+
+func (s *ProjectService) ListChannelConfigs(ctx context.Context, userID, projectID string) ([]*model.ProjectChannelConfig, error) {
+	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
+		return nil, err
+	}
+	return s.repo.ProjectChannelConfigs().List(ctx, projectID)
+}
+
+func (s *ProjectService) UpsertChannelConfig(ctx context.Context, userID, projectID, channel string, config map[string]any) (*model.ProjectChannelConfig, error) {
+	channel = strings.TrimSpace(channel)
+	if !validProjectChannel(channel) {
+		return nil, fmt.Errorf("%w: unsupported channel %q", ErrInvalidProjectChannel, channel)
+	}
+	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
+		return nil, err
+	}
+	// Connector-specific validation is intentionally centralized here. Until a
+	// connector publishes a schema, the channel whitelist is the minimum valid
+	// contract and unknown keys remain opaque server-owned configuration.
+	if existing, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel); err == nil {
+		config = mergeProjectConfig(existing.Config.Data(), config)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	row := &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: channel}
+	row.Config = datatypes.NewJSONType(config)
+	if err := s.repo.ProjectChannelConfigs().Upsert(ctx, row); err != nil {
+		return nil, fmt.Errorf("upsert project channel config: %w", err)
+	}
+	return s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel)
+}
+
+func (s *ProjectService) DeleteChannelConfig(ctx context.Context, userID, projectID, channel string) error {
+	if !validProjectChannel(channel) {
+		return fmt.Errorf("%w: unsupported channel %q", ErrInvalidProjectChannel, channel)
+	}
+	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
+		return err
+	}
+	return s.repo.ProjectChannelConfigs().Delete(ctx, projectID, channel)
 }
 
 // Update updates mutable fields on a project owned by the user.

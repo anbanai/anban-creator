@@ -10,7 +10,7 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
 - **Plugin Assets** — Claude Code and Codex share one plugin source under `harness/`, with native manifests and host adapters for each harness.
 
-Managed execution uses separate `creator-agent-article`, `creator-agent-seednote`,
+Managed execution uses separate `creator-agent-wechat`, `creator-agent-seednote`,
 and `creator-agent-montage` images. They share the same plugin tree while keeping
 the Seednote workflow image independent from the Montage OpenMontage/Remotion/ffmpeg
 profile. 种草笔记 research flows through authenticated Anban Server MCP
@@ -30,7 +30,7 @@ uploads registered task artifacts back through the Server API.
 The shared scheduler configuration is:
 
 - `ANBAN_AGENT_EXECUTOR`: `docker` or `kubernetes`.
-- `ANBAN_AGENT_IMAGE_ARTICLE`: the minimal Article runtime image.
+- `ANBAN_AGENT_IMAGE_WECHAT`: the minimal Article runtime image.
 - `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow image; its 种草笔记 research uses authenticated Anban Server MCP tools.
 - `ANBAN_AGENT_IMAGE_MONTAGE`: the OpenMontage, Remotion, and ffmpeg runtime image.
 - `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`: a private value of at least 32 bytes used

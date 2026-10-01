@@ -11,8 +11,8 @@ const schemaPack: AgentPack = {
   display_name: 'Demo',
   description: 'Demo Pack',
   agent: { name: 'demo', max_turns: 20 },
-  bindings: { project_platforms: ['demo'], task_types: ['demo'] },
-  runtime: { profile: 'article', adapter: 'standard' },
+  bindings: { task_kinds: ['demo'] },
+  runtime: { profile: 'wechat', adapter: 'standard' },
   surfaces: ['task'],
   schemas: {
     task_input: {
@@ -67,7 +67,7 @@ describe('AgentPackSchemaFields', () => {
   })
 
   it('does not replace registered custom scenario fields', () => {
-    const customPack = { ...schemaPack, id: 'article', ui: { renderer: 'custom:article' } }
+    const customPack = { ...schemaPack, id: 'wechat-article', ui: { renderer: 'custom:wechat-article' } }
     const { container } = render(<AgentPackSchemaFields pack={customPack} surface="task" value={{}} onChange={() => {}} />)
     expect(container).toBeEmptyDOMElement()
   })

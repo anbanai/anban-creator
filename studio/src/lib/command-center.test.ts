@@ -131,8 +131,8 @@ describe('command center rules', () => {
   })
 
   it('standardizes task creation and return-intent URLs', () => {
-    expect(createTaskHref({ type: 'article', projectId: 'project-1', intent: 'schedule' })).toBe(
-      '/tasks?create=true&type=article&project_id=project-1&intent=schedule',
+    expect(createTaskHref({ type: 'wechat-article', projectId: 'project-1', intent: 'schedule' })).toBe(
+      '/tasks?create=true&type=wechat-article&project_id=project-1&intent=schedule',
     )
     expect(projectsReturnHref({ type: 'seednote', intent: 'new' })).toBe(
       '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
@@ -145,23 +145,23 @@ describe('command center rules', () => {
     })).toBe('/tasks?create=true&type=seednote&project_id=project-1&intent=new')
     expect(projectCreatedReturnHref({
       returnTo: '//evil.example/path',
-      type: 'article',
+      type: 'wechat-article',
       projectId: 'project-1',
-    })).toBe('/tasks?create=true&type=article&project_id=project-1')
+    })).toBe('/tasks?create=true&type=wechat-article&project_id=project-1')
     expect(projectCreatedReturnHref({
       returnTo: '/tasks-evil?x=1',
-      type: 'article',
+      type: 'wechat-article',
       projectId: 'project-1',
-    })).toBe('/tasks?create=true&type=article&project_id=project-1')
+    })).toBe('/tasks?create=true&type=wechat-article&project_id=project-1')
     expect(createTaskHref({ type: 'moments', projectId: 'moments-1', intent: 'new' })).toBe(
       '/tasks?create=true&type=moments&project_id=moments-1&intent=new',
     )
   })
 
   it('parses create intent params without leaking invalid values into forms', () => {
-    expect(parseCreationIntent(new URLSearchParams('create=true&type=article&project_id=project-1&intent=schedule'))).toEqual({
+    expect(parseCreationIntent(new URLSearchParams('create=true&type=wechat-article&project_id=project-1&intent=schedule'))).toEqual({
       shouldCreate: true,
-      type: 'article',
+      type: 'wechat-article',
       projectId: 'project-1',
       intent: 'schedule',
     })
@@ -184,7 +184,7 @@ describe('command center rules', () => {
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [],
       plans: [],
-      projects: [project({ platform: 'article', config: { wechat_app_id: 'wx-app' } })],
+      projects: [project({ platform: 'wechat', config: { wechat_app_id: 'wx-app' } })],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: null,
     })

@@ -27,7 +27,7 @@ func openFeedbackJobTestRepo(t *testing.T) (repository.Repository, *gorm.DB) {
 
 func TestProcessFeedbackJobReclaimsFailedJobForBoundedRetry(t *testing.T) {
 	repo, db := openFeedbackJobTestRepo(t)
-	job := &model.FeedbackJob{ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformArticle, AccountID: "wechat:wx-1", Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", AnalyticsRevision: 1, Fingerprint: "retry-fingerprint", Status: model.FeedbackJobQueued}
+	job := &model.FeedbackJob{ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat, AccountID: "wechat:wx-1", Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", AnalyticsRevision: 1, Fingerprint: "retry-fingerprint", Status: model.FeedbackJobQueued}
 	if _, err := repo.FeedbackLoop().CreateJob(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
@@ -75,8 +75,8 @@ func TestProcessFeedbackJobReclaimsFailedJobForBoundedRetry(t *testing.T) {
 func TestProcessFeedbackJobDefersWhenAccountLeaseIsHeld(t *testing.T) {
 	repo, _ := openFeedbackJobTestRepo(t)
 	firstID, secondID := uuid.NewString(), uuid.NewString()
-	first := &model.FeedbackJob{ID: firstID, UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformArticle, AccountID: "wechat:wx-1", Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", Fingerprint: "lease-first", Status: model.FeedbackJobQueued}
-	second := &model.FeedbackJob{ID: secondID, UserID: "user-1", ProjectID: "project-2", Platform: model.PlatformArticle, AccountID: "wechat:wx-1", Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", Fingerprint: "lease-second", Status: model.FeedbackJobQueued}
+	first := &model.FeedbackJob{ID: firstID, UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat, AccountID: "wechat:wx-1", Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", Fingerprint: "lease-first", Status: model.FeedbackJobQueued}
+	second := &model.FeedbackJob{ID: secondID, UserID: "user-1", ProjectID: "project-2", Platform: model.PlatformWechat, AccountID: "wechat:wx-1", Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", Fingerprint: "lease-second", Status: model.FeedbackJobQueued}
 	if _, err := repo.FeedbackLoop().CreateJob(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestProcessFeedbackJobDefersWhenAccountLeaseIsHeld(t *testing.T) {
 func TestProcessFeedbackJobSkipsWhenQueuedDataIsNoLongerValid(t *testing.T) {
 	repo, _ := openFeedbackJobTestRepo(t)
 	job := &model.FeedbackJob{
-		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat,
 		Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07",
 		AnalyticsRevision: 4, ContentSetDigest: "digest", Fingerprint: "fingerprint-empty", Status: model.FeedbackJobQueued,
 	}
@@ -129,11 +129,42 @@ func TestProcessFeedbackJobSkipsWhenQueuedDataIsNoLongerValid(t *testing.T) {
 	}
 }
 
+func TestProcessFeedbackJobDataTrackerCompletesWithoutInsight(t *testing.T) {
+	repo, db := openFeedbackJobTestRepo(t)
+	now := time.Date(2026, 9, 8, 4, 0, 0, 0, time.UTC)
+	contentID := "content-tracker"
+	if err := db.Create(&model.AnalyticsContent{ID: contentID, ProjectID: "project-1", Platform: model.PlatformWechat, Date: ptrTime(now.Add(-48 * time.Hour))}).Error; err != nil {
+		t.Fatal(err)
+	}
+	readUsers := int64(100)
+	if err := db.Create(&model.AnalyticsObservation{ID: "observation-tracker", ProjectID: "project-1", ContentID: contentID, MetricBasis: "cumulative", StatDate: "2026-09-07", Source: "manual", EffectiveAt: now, ReceivedAt: now, AnalyticsMetrics: model.AnalyticsMetrics{ReadUsers: &readUsers}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	job := &model.FeedbackJob{ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat, AccountID: "wechat:wx-1", Operation: "data_tracker", Cadence: FeedbackCadenceDaily, PeriodStart: "2026-09-07", PeriodEnd: "2026-09-07", AnalyticsRevision: 4, Fingerprint: "fingerprint-tracker", Status: model.FeedbackJobQueued}
+	if _, err := repo.FeedbackLoop().CreateJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProcessFeedbackJob(context.Background(), repo, job.ID); err != nil {
+		t.Fatalf("ProcessFeedbackJob() error = %v", err)
+	}
+	stored, err := repo.FeedbackLoop().FindJobByIDOrFingerprint(context.Background(), job.ID)
+	if err != nil || stored.Status != model.FeedbackJobSucceeded || stored.SampleCount != 1 {
+		t.Fatalf("job = %#v, err=%v, want succeeded tracker", stored, err)
+	}
+	var insightCount int64
+	if err := db.Model(&model.FeedbackInsight{}).Count(&insightCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if insightCount != 0 {
+		t.Fatalf("insight count = %d, want 0 for deterministic data tracker", insightCount)
+	}
+}
+
 func TestProcessFeedbackJobPersistsExplainableInsightFromSQLiteObservation(t *testing.T) {
 	repo, db := openFeedbackJobTestRepo(t)
 	now := time.Date(2026, 8, 31, 4, 0, 0, 0, time.UTC)
 	contentID := "content-1"
-	if err := db.Create(&model.AnalyticsContent{ID: contentID, ProjectID: "project-1", Platform: model.PlatformArticle, Date: ptrTime(now.Add(-8 * 24 * time.Hour))}).Error; err != nil {
+	if err := db.Create(&model.AnalyticsContent{ID: contentID, ProjectID: "project-1", Platform: model.PlatformWechat, Date: ptrTime(now.Add(-8 * 24 * time.Hour))}).Error; err != nil {
 		t.Fatal(err)
 	}
 	readUsers, shareUsers := int64(100), int64(10)
@@ -141,7 +172,7 @@ func TestProcessFeedbackJobPersistsExplainableInsightFromSQLiteObservation(t *te
 		t.Fatal(err)
 	}
 	job := &model.FeedbackJob{
-		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat,
 		Operation: "publish_analytics", Cadence: FeedbackCadenceWeekly, PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07",
 		AnalyticsRevision: 4, ContentSetDigest: "digest", Fingerprint: "fingerprint-valid", Status: model.FeedbackJobQueued,
 	}
@@ -173,7 +204,7 @@ func TestProcessFeedbackJobStrategyRecommendationsUseObservedEngagement(t *testi
 	now := time.Date(2026, 9, 8, 4, 0, 0, 0, time.UTC)
 	for i := 0; i < 10; i++ {
 		contentID := "content-" + uuid.NewString()
-		if err := db.Create(&model.AnalyticsContent{ID: contentID, ProjectID: "project-1", Platform: model.PlatformArticle, Date: ptrTime(now.Add(-8 * 24 * time.Hour))}).Error; err != nil {
+		if err := db.Create(&model.AnalyticsContent{ID: contentID, ProjectID: "project-1", Platform: model.PlatformWechat, Date: ptrTime(now.Add(-8 * 24 * time.Hour))}).Error; err != nil {
 			t.Fatal(err)
 		}
 		readUsers, shareUsers := int64(100), int64(10)
@@ -182,7 +213,7 @@ func TestProcessFeedbackJobStrategyRecommendationsUseObservedEngagement(t *testi
 		}
 	}
 	job := &model.FeedbackJob{
-		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformArticle,
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat,
 		Operation: "strategy_advisor", Cadence: FeedbackCadenceMonthly, PeriodStart: "2026-08-01", PeriodEnd: "2026-08-31",
 		AnalyticsRevision: 5, ContentSetDigest: "digest", Fingerprint: "fingerprint-strategy", Status: model.FeedbackJobQueued,
 	}

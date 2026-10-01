@@ -159,6 +159,31 @@ func TestFilesystemStoreReadsBoundedMarkdownInStableOrder(t *testing.T) {
 	}
 }
 
+func TestFilesystemStoreWritesProjectMarkdownAtomically(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewFilesystemStore(root, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := uuid.NewString()
+	if err := store.EnsureProject(context.Background(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteMarkdownFile(context.Background(), projectID, "profile/identity.md", "id\n"); err != nil {
+		t.Fatalf("WriteMarkdownFile() error = %v", err)
+	}
+	if err := store.WriteMarkdownFile(context.Background(), projectID, "../escape.md", "bad"); err == nil {
+		t.Fatal("WriteMarkdownFile() accepted an unsafe path")
+	}
+	view, err := store.ReadProject(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Files) != 1 || view.Files[0].Path != "profile/identity.md" || view.Files[0].Content != "id\n" {
+		t.Fatalf("written view = %#v", view)
+	}
+}
+
 func TestFilesystemStoreReturnsEmptyAndDeletesOnlyRequestedProject(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewFilesystemStore(root, testLimits())

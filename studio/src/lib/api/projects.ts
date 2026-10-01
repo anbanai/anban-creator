@@ -13,6 +13,8 @@ import type {
   ProfileAnalysisResponse,
   Task,
   FeedbackDashboard,
+  ProjectAgentConfig,
+  ProjectChannelConfig,
 } from '@/types'
 
 export const projectsApi = {
@@ -61,6 +63,30 @@ export const projectsApi = {
   delete: (id: string) =>
     unwrap<void>(http.delete(`/projects/${id}`)),
 
+  listAgentConfigs: (id: string) =>
+    unwrap<ProjectAgentConfig[]>(http.get(`/projects/${id}/agent-configs`)),
+
+  getAgentConfig: (id: string, agentID: string) =>
+    unwrap<ProjectAgentConfig>(http.get(`/projects/${id}/agent-configs/${encodeURIComponent(agentID)}`)),
+
+  upsertAgentConfig: (id: string, agentID: string, config: Record<string, unknown>) =>
+    unwrap<ProjectAgentConfig>(http.put(`/projects/${id}/agent-configs/${encodeURIComponent(agentID)}`, { config })),
+
+  deleteAgentConfig: (id: string, agentID: string) =>
+    unwrap<void>(http.delete(`/projects/${id}/agent-configs/${encodeURIComponent(agentID)}`)),
+
+  listChannelConfigs: (id: string) =>
+    unwrap<ProjectChannelConfig[]>(http.get(`/projects/${id}/channel-configs`)),
+
+  getChannelConfig: (id: string, channel: string) =>
+    unwrap<ProjectChannelConfig>(http.get(`/projects/${id}/channel-configs/${encodeURIComponent(channel)}`)),
+
+  upsertChannelConfig: (id: string, channel: string, config: Record<string, unknown>) =>
+    unwrap<ProjectChannelConfig>(http.put(`/projects/${id}/channel-configs/${encodeURIComponent(channel)}`, { config })),
+
+  deleteChannelConfig: (id: string, channel: string) =>
+    unwrap<void>(http.delete(`/projects/${id}/channel-configs/${encodeURIComponent(channel)}`)),
+
   platformConfigs: () =>
     unwrap<PlatformConfig[]>(http.get('/projects/platform-configs')),
 
@@ -73,9 +99,9 @@ export const projectsApi = {
   }, { timeout: 120000 })),
 
   getAccountProfile: (id: string) => unwrap<ProjectProfile>(http.get(`/projects/${id}/profile`)),
-  profileQuote: (id: string, data: { execution_profile?: string; answers?: Record<string, unknown>; samples?: string[] }) => unwrap<{ id: string; price_credits: number; list_price_credits: number; execution_profile: string; currency: string; expires_at: string; request_fingerprint: string }>(http.post(`/projects/${id}/profile/analysis/quote`, data)),
-  startProfileAnalysis: (id: string, data: { quote_id: string; quote_confirmed: boolean; execution_profile?: string; answers?: Record<string, unknown>; samples?: string[] }) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/analysis`, data)),
+  refreshProfile: (id: string, expectedRevision: number) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/refresh`, { expected_revision: expectedRevision })),
+  retryProfile: (id: string, expectedRevision: number) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/retry`, { expected_revision: expectedRevision })),
   profileAnalysis: (id: string) => unwrap<ProfileAnalysisResponse>(http.get(`/projects/${id}/profile/analysis`)),
   confirmAccountProfile: (id: string, profile: ProjectProfile) => unwrap<ProjectProfile>(http.put(`/projects/${id}/profile`, { version: profile.version, profile })),
-  updateProfileDimension: (id: string, dimension: string, version: number, value: ProfileDimension) => unwrap<ProjectProfile>(http.patch(`/projects/${id}/profile/${dimension}`, { version, value })),
+  updateProfileDimension: (id: string, dimension: string, version: number, value: ProfileDimension) => unwrap<ProjectProfile>(http.patch(`/projects/${id}/profile/dimensions/${dimension}`, { expected_revision: version, content: value.content })),
 }
