@@ -25,7 +25,18 @@ func NewAgentFeedbackService(repo repository.Repository, logger *zerolog.Logger)
 }
 
 // Create idempotently stores the latest feedback for one task/agent run.
+// Callers that have an execution identity should use CreateForExecution so
+// feedback remains attributable to the exact managed attempt.
 func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, scores, errors, optimizations, summary string) (*model.AgentFeedback, error) {
+	return s.create(ctx, taskID, "", agentName, scores, errors, optimizations, summary)
+}
+
+// CreateForExecution stores feedback with the authenticated execution ID.
+func (s *AgentFeedbackService) CreateForExecution(ctx context.Context, taskID, executionID, agentName, scores, errors, optimizations, summary string) (*model.AgentFeedback, error) {
+	return s.create(ctx, taskID, executionID, agentName, scores, errors, optimizations, summary)
+}
+
+func (s *AgentFeedbackService) create(ctx context.Context, taskID, executionID, agentName, scores, errors, optimizations, summary string) (*model.AgentFeedback, error) {
 	taskID = strings.TrimSpace(taskID)
 	agentName = strings.TrimSpace(agentName)
 	if taskID == "" {
@@ -34,6 +45,19 @@ func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, sc
 	task, err := s.repo.Tasks().FindByID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
+	}
+	if strings.TrimSpace(executionID) != "" {
+		execution, executionErr := s.repo.TaskExecutions().FindByID(ctx, strings.TrimSpace(executionID))
+		if executionErr != nil || execution.TaskID != taskID {
+			return nil, fmt.Errorf("feedback execution is not bound to task")
+		}
+		expectedAgent := strings.TrimSpace(execution.AgentID)
+		if expectedAgent == "" {
+			expectedAgent = strings.TrimSpace(task.AgentID)
+		}
+		if expectedAgent != "" && !feedbackAgentNameMatches(expectedAgent, agentName) {
+			return nil, fmt.Errorf("agent_name does not match the current task execution")
+		}
 	}
 	if task.TaskKind == model.TaskKindFeedbackAnalysis && agentName != model.AgentIDFeedback {
 		return nil, fmt.Errorf("feedback task requires agent_name=feedback")
@@ -48,6 +72,7 @@ func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, sc
 	feedback := &model.AgentFeedback{
 		ID:            uuid.New().String(),
 		TaskID:        taskID,
+		ExecutionID:   strings.TrimSpace(executionID),
 		AgentName:     agentName,
 		Scores:        scores,
 		Errors:        errors,
@@ -58,6 +83,15 @@ func (s *AgentFeedbackService) Create(ctx context.Context, taskID, agentName, sc
 		return nil, err
 	}
 	return feedback, nil
+}
+
+func feedbackAgentNameMatches(expected, supplied string) bool {
+	expected = strings.TrimSpace(expected)
+	supplied = strings.TrimSpace(supplied)
+	if expected == supplied {
+		return true
+	}
+	return expected == model.AgentIDChannelsVideo && (supplied == "montage" || supplied == "live-slicer")
 }
 
 // FindByTaskID returns all feedback entries for a task.

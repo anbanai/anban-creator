@@ -26,6 +26,36 @@ func TestAgentFeedbackCreateRequiresExistingTask(t *testing.T) {
 	}
 }
 
+func TestAgentFeedbackCreateForExecutionPersistsExecutionIdentity(t *testing.T) {
+	repo := setupAgentFeedbackRepo(t)
+	svc := NewAgentFeedbackService(repo, nil)
+	taskID := uuid.NewString()
+	seedFeedbackTask(t, repo, taskID)
+	executionID := uuid.NewString()
+	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: executionID, TaskID: taskID, Attempt: 1, AgentID: model.AgentIDArticle, Target: "test", Status: model.TaskExecutionRunning}); err != nil {
+		t.Fatal(err)
+	}
+	feedback, err := svc.CreateForExecution(context.Background(), taskID, executionID, model.AgentIDArticle, `{"quality":8}`, "", "", "run")
+	if err != nil {
+		t.Fatalf("CreateForExecution: %v", err)
+	}
+	if feedback.ExecutionID != executionID {
+		t.Fatalf("execution id = %q, want %s", feedback.ExecutionID, executionID)
+	}
+}
+
+func TestFeedbackAgentNameMatchesFrozenExecution(t *testing.T) {
+	if !feedbackAgentNameMatches(model.AgentIDArticle, model.AgentIDArticle) {
+		t.Fatal("exact agent identity should match")
+	}
+	if feedbackAgentNameMatches(model.AgentIDArticle, model.AgentIDSeednote) {
+		t.Fatal("cross-agent identity should be rejected")
+	}
+	if !feedbackAgentNameMatches(model.AgentIDChannelsVideo, "montage") || !feedbackAgentNameMatches(model.AgentIDChannelsVideo, "live-slicer") {
+		t.Fatal("channels-video aliases should match")
+	}
+}
+
 func TestAgentFeedbackCreateIsIdempotentPerTaskAndAgent(t *testing.T) {
 	repo := setupAgentFeedbackRepo(t)
 	svc := NewAgentFeedbackService(repo, nil)

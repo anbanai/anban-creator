@@ -1396,11 +1396,21 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 			err = taskSvc.HandleExecutionFromPayload(ctx, task.ID, task.UserID)
 			if err != nil {
 				_ = repo.FeedbackLoop().ReleaseFeedbackLease(context.Background(), service.FeedbackAccountLeaseScope(job.AccountID), job.ID)
+				if latest, findErr := repo.Tasks().FindByID(ctx, task.ID); findErr == nil && latest.Status == model.TaskStatusFailed {
+					if reconcileErr := service.MarkManagedFeedbackFailure(ctx, repo, job.ID, errors.New("feedback task reached terminal failure")); reconcileErr != nil {
+						return errors.Join(err, reconcileErr)
+					}
+				}
 				return err
 			}
 			latest, findErr := repo.Tasks().FindByID(ctx, task.ID)
 			if findErr == nil && model.IsTerminalTaskStatus(latest.Status) {
 				_ = repo.FeedbackLoop().ReleaseFeedbackLease(context.Background(), service.FeedbackAccountLeaseScope(job.AccountID), job.ID)
+				if latest.Status == model.TaskStatusFailed {
+					if reconcileErr := service.MarkManagedFeedbackFailure(ctx, repo, job.ID, errors.New("feedback task reached terminal failure")); reconcileErr != nil {
+						return reconcileErr
+					}
+				}
 			}
 			return nil
 		}, log)

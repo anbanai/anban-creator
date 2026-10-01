@@ -25,7 +25,7 @@ import (
 var reviewedMCPHandlerCapabilities = map[string]string{
 	"accountInfoHandler":                      "svcs.AgentProjectProfileSvc.Get",
 	"addTopicHandler":                         "svcs.TopicPoolSvc.Add",
-	"agentFeedbackSubmitHandler":              "svcs.AgentFeedbackSvc.Create",
+	"agentFeedbackSubmitHandler":              "svcs.AgentFeedbackSvc.CreateForExecution",
 	"analyzeImageHandler":                     "svcs.TaskImageOperationsSvc.Analyze",
 	"analyzeVideoHandler":                     "svcs.TaskVideoOperationsSvc.Analyze",
 	"buildLiveClipManifestHandler":            "svcs.LiveSliceSvc.BuildLiveClipManifest",

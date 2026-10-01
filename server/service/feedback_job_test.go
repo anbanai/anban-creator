@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,6 +24,39 @@ func openFeedbackJobTestRepo(t *testing.T) (repository.Repository, *gorm.DB) {
 		t.Fatal(err)
 	}
 	return repository.New(db), db
+}
+
+func TestMarkManagedFeedbackFailureReconcilesTerminalTaskFailure(t *testing.T) {
+	repo, _ := openFeedbackJobTestRepo(t)
+	job := &model.FeedbackJob{
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: "project-1", Platform: model.PlatformWechat,
+		AccountID: "wechat:wx-1", Operation: "content_postmortem", Cadence: FeedbackCadenceWeekly,
+		PeriodStart: "2026-09-01", PeriodEnd: "2026-09-07", Fingerprint: "managed-failure-fingerprint",
+		Status: model.FeedbackJobQueued,
+	}
+	if _, err := repo.FeedbackLoop().CreateJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	if err := MarkManagedFeedbackFailure(context.Background(), repo, job.ID, errors.New("runtime preparation failed")); err != nil {
+		t.Fatalf("MarkManagedFeedbackFailure() error = %v", err)
+	}
+	stored, err := repo.FeedbackLoop().FindJobByIDOrFingerprint(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != model.FeedbackJobFailed || stored.Attempts != 1 || stored.CompletedAt == nil {
+		t.Fatalf("stored = %#v, want failed attempt 1 with completion time", stored)
+	}
+	if err := MarkManagedFeedbackFailure(context.Background(), repo, job.ID, errors.New("late retry")); err != nil {
+		t.Fatalf("late MarkManagedFeedbackFailure() error = %v", err)
+	}
+	stored, err = repo.FeedbackLoop().FindJobByIDOrFingerprint(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Attempts != 1 || stored.LastError != "runtime preparation failed" {
+		t.Fatalf("late retry overwrote terminal failure: %#v", stored)
+	}
 }
 
 func TestProcessFeedbackJobReclaimsFailedJobForBoundedRetry(t *testing.T) {

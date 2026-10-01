@@ -156,7 +156,7 @@ func agentFeedbackSubmitHandler(ctx context.Context, req *mcp.CallToolRequest) (
 		return errorResult("agent feedback service not available"), nil
 	}
 
-	feedback, err := svcs.AgentFeedbackSvc.Create(ctx, taskID, agentName, scores, errors, optimizations, summary)
+	feedback, err := svcs.AgentFeedbackSvc.CreateForExecution(ctx, taskID, getExecutionID(ctx), agentName, scores, errors, optimizations, summary)
 	if err != nil {
 		return errorResult(fmt.Sprintf("submit feedback: %v", err)), nil
 	}

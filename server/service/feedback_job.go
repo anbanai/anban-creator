@@ -138,6 +138,28 @@ func markFeedbackFailure(job *model.FeedbackJob, err error) {
 	}
 }
 
+// MarkManagedFeedbackFailure reconciles a managed feedback Task that reached a
+// terminal failure before the normal feedback artifact finalizer could run.
+// It is intentionally a no-op for already terminal jobs so a late retry cannot
+// overwrite a successful or explicitly skipped result.
+func MarkManagedFeedbackFailure(ctx context.Context, repo repository.Repository, jobID string, reason error) error {
+	if repo == nil || strings.TrimSpace(jobID) == "" {
+		return errors.New("feedback job identity is required")
+	}
+	job, err := repo.FeedbackLoop().FindJobByIDOrFingerprint(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if job.Status != model.FeedbackJobQueued && job.Status != model.FeedbackJobRunning {
+		return nil
+	}
+	job.Attempts++
+	markFeedbackFailure(job, reason)
+	now := time.Now().UTC()
+	job.CompletedAt = &now
+	return repo.FeedbackLoop().UpdateJob(ctx, job)
+}
+
 func loadFeedbackMetricSummary(ctx context.Context, repo repository.Repository, job *model.FeedbackJob) (feedbackMetricSummary, map[string]any, error) {
 	if repo == nil || job == nil || repo.Analytics() == nil {
 		return feedbackMetricSummary{}, nil, errors.New("feedback analytics repository unavailable")
