@@ -321,8 +321,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("non-admin platform configs status = %d, want 200", resp.StatusCode)
 	}
 	configs := decodeBody(t, resp)["data"].([]any)
-	if len(configs) != 3 {
-		t.Fatalf("non-admin platform configs = %#v, want article, seednote, and montage", configs)
+	if len(configs) != 4 {
+		t.Fatalf("non-admin platform configs = %#v, want article, seednote, montage, and whiteboard-animation", configs)
 	}
 	for _, item := range configs {
 		platform := item.(map[string]any)["id"].(string)
@@ -335,8 +335,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("admin platform configs status = %d, want 200", resp.StatusCode)
 	}
-	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 6 {
-		t.Fatalf("admin platform configs = %#v, want all six configured platforms", configs)
+	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 7 {
+		t.Fatalf("admin platform configs = %#v, want all seven configured platforms", configs)
 	}
 }
 
