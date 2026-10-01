@@ -65,6 +65,9 @@ func feedbackContextHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	if job == nil {
 		return errorResult("feedback job not found"), nil
 	}
+	if job.TaskID != task.ID || job.ProjectID != task.ProjectID || job.UserID != task.UserID || task.TaskKind != model.TaskKindFeedbackAnalysis {
+		return errorResult("feedback job is not bound to the current task"), nil
+	}
 	identity, _ := getMCPExecutionIdentity(ctx)
 	currentExecution, err := repo.TaskExecutions().FindCurrentByTaskID(ctx, taskID)
 	if err != nil || currentExecution == nil || currentExecution.ID != identity.ExecutionID || job.ExecutionID != identity.ExecutionID {

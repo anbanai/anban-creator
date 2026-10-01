@@ -127,6 +127,65 @@ func TestFinalizeFeedbackExecutionRejectsArtifactRevisionMismatch(t *testing.T) 
 	}
 }
 
+func TestFinalizeFeedbackExecutionDoesNotActivateStrategyFromWarning(t *testing.T) {
+	fixture := newFeedbackFinalizerFixture(t)
+	db := fixture.svc.repo.Analytics().DB()
+	if err := db.AutoMigrate(&model.FeedbackJob{}, &model.FeedbackInsight{}, &model.FeedbackLease{}, &model.StrategySnapshot{}); err != nil {
+		t.Fatal(err)
+	}
+	job := &model.FeedbackJob{
+		ID: uuid.NewString(), UserID: fixture.task.UserID, ProjectID: fixture.task.ProjectID,
+		Platform: model.PlatformWechat, AccountID: "wechat:wx-feedback", Operation: "strategy_advisor", Cadence: model.FeedbackCadenceMonthly,
+		PeriodStart: "2026-09-01", PeriodEnd: "2026-09-30", AnalyticsRevision: 12, SampleCount: 10,
+		Trigger: "monthly", Fingerprint: uuid.NewString(), Status: model.FeedbackJobRunning, TaskID: fixture.task.ID, ExecutionID: fixture.execution.ID,
+	}
+	if err := db.Create(job).Error; err != nil {
+		t.Fatal(err)
+	}
+	fixture.task.SetAgentInput(map[string]any{"feedback_job_id": job.ID})
+	if err := fixture.repo.Tasks().Update(context.Background(), fixture.task); err != nil {
+		t.Fatal(err)
+	}
+	analysis := feedbackAnalysisArtifact{
+		SchemaVersion: feedbackArtifactSchemaVersion, Status: "warning", Source: "get_feedback_context",
+		DataAt: "2026-10-01T00:00:00Z", Missing: []string{"baseline.coverage"}, EvidencePaths: []string{feedbackEvidenceArtifactPath},
+		JobID: job.ID, ProjectID: job.ProjectID, Operation: job.Operation, AnalyticsRevision: job.AnalyticsRevision,
+		Summary: "Monthly evidence is incomplete.", Confidence: "low", Limitations: "Coverage is incomplete.",
+	}
+	evidence := feedbackEvidenceArtifact{
+		SchemaVersion: feedbackArtifactSchemaVersion, Status: "warning", Source: "get_feedback_context",
+		DataAt: "2026-10-01T00:00:00Z", Missing: []string{"baseline.coverage"}, EvidencePaths: []string{},
+		JobID: job.ID, AnalyticsRevision: job.AnalyticsRevision, Evidence: json.RawMessage(`{"sample_count":10}`),
+	}
+	for path, body := range map[string][]byte{feedbackAnalysisArtifactPath: feedbackMustJSON(t, analysis), feedbackEvidenceArtifactPath: feedbackMustJSON(t, evidence)} {
+		key := buildTaskMCPArtifactStoragePrefix(fixture.task, fixture.execution.ID) + path
+		fixture.store.files[key] = body
+		if err := fixture.repo.TaskFiles().Create(context.Background(), &model.TaskFile{ID: uuid.NewString(), TaskID: fixture.task.ID, ExecutionID: fixture.execution.ID, State: model.TaskFileStateDelivered, Role: "analysis", FilePath: path, FileName: path[stringsLastIndex(path, "/")+1:], MimeType: "application/json", FileSize: int64(len(body)), OSSKey: key, StorageProvider: fixture.store.Name()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.execution.Status = model.TaskExecutionSucceeded
+	if err := fixture.svc.FinalizeFeedbackExecution(context.Background(), fixture.task, fixture.execution, &agent.ExecutionResult{Success: true}); err != nil {
+		t.Fatalf("FinalizeFeedbackExecution: %v", err)
+	}
+	var strategies int64
+	if err := db.Model(&model.StrategySnapshot{}).Count(&strategies).Error; err != nil {
+		t.Fatal(err)
+	}
+	if strategies != 0 {
+		t.Fatalf("strategy snapshot count = %d, want 0 for warning evidence", strategies)
+	}
+}
+
+func feedbackMustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
 func newFeedbackFinalizerFixture(t *testing.T) *managedCompletionFixture {
 	t.Helper()
 	db := setupTaskTestDB(t)

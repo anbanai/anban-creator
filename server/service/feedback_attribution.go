@@ -48,15 +48,6 @@ func (s *FeedbackAttributionService) EnsureManagedTask(ctx context.Context, job 
 		return nil, ErrAttributionSchedulerUnavailable
 	}
 	expectedTaskID := strings.TrimSpace(job.TaskID)
-	if expectedTaskID != "" {
-		current, findErr := s.repo.Tasks().FindByID(ctx, expectedTaskID)
-		if findErr == nil && !model.IsTerminalTaskStatus(current.Status) {
-			return current, nil
-		}
-		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
-			return nil, findErr
-		}
-	}
 	leaseScope := FeedbackAccountLeaseScope(job.AccountID)
 	leaseHeld := false
 	leaseCommitted := false
@@ -74,6 +65,18 @@ func (s *FeedbackAttributionService) EnsureManagedTask(ctx context.Context, job 
 				_ = s.repo.FeedbackLoop().ReleaseFeedbackLease(context.Background(), leaseScope, job.ID)
 			}
 		}()
+	}
+	// Reusing a pending/running Task is still an execution attempt and retains
+	// the same account-level mutual exclusion as a newly created Task.
+	if expectedTaskID != "" {
+		current, findErr := s.repo.Tasks().FindByID(ctx, expectedTaskID)
+		if findErr == nil && !model.IsTerminalTaskStatus(current.Status) {
+			leaseCommitted = true
+			return current, nil
+		}
+		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return nil, findErr
+		}
 	}
 	if s.profiles == nil {
 		return nil, errors.New("feedback agent profile registry unavailable")

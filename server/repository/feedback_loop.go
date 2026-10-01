@@ -93,6 +93,16 @@ func (r *feedbackLoopRepository) AcquireFeedbackLease(ctx context.Context, scope
 			return result.Error
 		}
 		won = result.RowsAffected == 1
+		if !won {
+			var existing model.FeedbackLease
+			if err := tx.Where("scope = ?", scope).First(&existing).Error; err != nil {
+				return err
+			}
+			if existing.JobID == jobID {
+				won = tx.Model(&model.FeedbackLease{}).Where("scope = ? AND job_id = ?", scope, jobID).
+					Updates(map[string]any{"acquired_at": now, "expires_at": now.Add(ttl)}).RowsAffected == 1
+			}
+		}
 		return nil
 	})
 	return won, err
