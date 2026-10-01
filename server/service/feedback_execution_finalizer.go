@@ -163,7 +163,11 @@ func (s *TaskService) finalizeFeedbackExecution(ctx context.Context, task *model
 	if err := s.repo.FeedbackLoop().CreateInsight(ctx, insight); err != nil {
 		return s.failFeedbackFinalization(ctx, job, "feedback_insight_persist_failed")
 	}
-	if job.Operation == "strategy_advisor" {
+	// A warning artifact may support a human-readable insight, but it is not
+	// sufficient evidence for a formal strategy. Strategy activation remains a
+	// monthly, server-gated operation with the threshold enforced from the
+	// frozen job sample count.
+	if job.Operation == "strategy_advisor" && job.Cadence == model.FeedbackCadenceMonthly && job.SampleCount >= 10 && analysis.Status == "ready" {
 		if err := s.persistFeedbackStrategy(ctx, job, execution, analysis, string(combined)); err != nil {
 			return s.failFeedbackFinalization(ctx, job, "feedback_strategy_persist_failed")
 		}
