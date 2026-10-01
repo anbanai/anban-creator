@@ -5,7 +5,7 @@ import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
 import type { ProjectPlatform, OutputChannel } from './project'
 
-export type TaskType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'hypit'
+export type TaskType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection

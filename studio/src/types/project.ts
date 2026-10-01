@@ -4,10 +4,10 @@ import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { ImageAnalysis } from './image-analysis'
 
 /** @deprecated Projects are channel-neutral; keep this only for migrated API rows. */
-export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'hypit'
+export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
 // The open string branch keeps migrated/plugin-only rows readable while the
 // product picker exposes only the three supported channels above.
-export type OutputChannel = 'wechat-article' | 'seednote' | 'wechat-picture' | (string & {})
+export type OutputChannel = 'wechat-article' | 'seednote' | 'wechat-picture' | 'whiteboard-animation' | (string & {})
 export type ProjectStatus = 'active' | 'archived'
 export interface ProjectConfig {
   wechat_app_id?: string

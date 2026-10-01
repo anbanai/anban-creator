@@ -60,8 +60,9 @@ function planTypeForProject(platform: string | undefined, currentType?: PlanType
   }
   if (platform === 'seednote') return 'seednote'
   if (platform === 'montage') return 'montage'
+  if (platform === 'whiteboard-animation') return 'whiteboard-animation'
   if (platform === 'hypit') return 'hypit'
-  if (currentType === 'wechat-article' || currentType === 'wechat-picture' || currentType === 'seednote' || currentType === 'montage' || currentType === 'hypit') return currentType
+  if (currentType === 'wechat-article' || currentType === 'wechat-picture' || currentType === 'seednote' || currentType === 'montage' || currentType === 'whiteboard-animation' || currentType === 'hypit') return currentType
   // Projects are channel-neutral. A plan still needs a presentation default
   // before its independent Agent entries are selected.
   return 'seednote'
@@ -73,6 +74,8 @@ function planEntryForType(type: PlanType, executionProfile: AgentExecutionProfil
       return { agent_id: 'seednote', channel: 'seednote', task_kind: 'content_generation', execution_profile: executionProfile }
     case 'wechat-picture':
       return { agent_id: 'wechat-picture', channel: 'wechat-picture', task_kind: 'content_generation', execution_profile: executionProfile }
+    case 'whiteboard-animation':
+      return { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', task_kind: 'whiteboard-animation', execution_profile: executionProfile }
     case 'hypit':
       return undefined
     case 'wechat-article':
@@ -85,6 +88,7 @@ const PRODUCT_AGENT_OPTIONS = [
   { agent_id: 'wechat-article', channel: 'wechat-article', label: '公众号文章' },
   { agent_id: 'seednote', channel: 'seednote', label: '种草笔记' },
   { agent_id: 'wechat-picture', channel: 'wechat-picture', label: '公众号贴图' },
+  { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', label: '白板动画' },
 ] as const
 
 function planToFormValues(plan: Plan): PlanFormValues {
@@ -214,6 +218,15 @@ export default function PlansPage() {
 	const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
 	const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
 	const isMontagePlan = watchedType === 'montage' || watchedType === 'hypit'
+	const whiteboardSubtitles = watchedType === 'whiteboard-animation'
+		? promptAttachments.filter((attachment) => /\.srt$/i.test(attachment.fileName ?? ''))
+		: []
+	const hasWhiteboardSubtitle = whiteboardSubtitles.length === 1 && whiteboardSubtitles[0]?.type === 'text'
+	const whiteboardAttachmentPolicy = {
+		allowedTypes: ['text', 'image'] as const,
+		maxCount: 2,
+		maxBytes: { text: 25 * 1024 * 1024, image: 10 * 1024 * 1024 },
+	}
 	const usesImageSettings = watchedType !== 'hypit'
 	const {
 		items: imageCapabilityOptions,
@@ -581,7 +594,7 @@ export default function PlansPage() {
         .map((agentID) => {
           const option = PRODUCT_AGENT_OPTIONS.find((candidate) => candidate.agent_id === agentID)
           if (!option) return undefined
-          return { agent_id: option.agent_id, channel: option.channel, task_kind: 'content_generation', execution_profile: values.execution_profile as AgentExecutionProfileID }
+          return { agent_id: option.agent_id, channel: option.channel, task_kind: option.agent_id === 'whiteboard-animation' ? 'whiteboard-animation' : 'content_generation', execution_profile: values.execution_profile as AgentExecutionProfileID }
         })
         .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
     }
@@ -594,7 +607,7 @@ export default function PlansPage() {
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && (montageUploading || !montageReady))) {
+    if (imageCapabilityBlocker || !scheduleValid || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && (montageUploading || !montageReady))) {
       event?.preventDefault()
       return
     }
@@ -650,14 +663,14 @@ export default function PlansPage() {
       }}
       onSubmit={() => handlePlanSubmit()}
       attachmentController={attachmentController}
-      attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
+      attachmentPolicy={watchedType === 'whiteboard-animation' ? whiteboardAttachmentPolicy : GENERAL_AGENT_ATTACHMENT_POLICY}
       attachmentsEnabled={watchedType !== 'hypit'}
       ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
       submitMode="external"
       placeholder={watchedType === 'hypit' ? '描述每次复刻需要保留和替换的内容' : '描述每次计划的创作方向、内容要求和素材使用方式...'}
       submitLabel={editingPlan ? '更新计划' : '创建计划'}
       submitting={isSubmitting}
-      submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (isMontagePlan && !montageReady)}
+      submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && !montageReady)}
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -1113,6 +1126,7 @@ export default function PlansPage() {
                 || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
                 || attachmentController.uploading
                 || attachmentController.hasFailures
+                || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle)
                 || (isMontagePlan && (montageUploading || !montageReady))}
             >
               {editingPlan ? '更新' : '创建'}

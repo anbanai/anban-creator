@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import { useCallback } from 'react'
-import { BookOpen, MessageCircle, ShoppingBag, Signature } from 'lucide-react'
+import { BookOpen, MessageCircle, ShoppingBag, Signature, PenLine } from 'lucide-react'
 import { motion, useAnimation, useReducedMotion, type Variants } from 'motion/react'
 
 type PlatformIconComponent = ComponentType<{ className?: string }>
@@ -126,6 +126,7 @@ export const platformIcon: Record<string, PlatformIconComponent> = {
   viral_analysis: BookOpen,
   profile_analysis: BookOpen,
   montage: VideoGenerationIcon,
+  'whiteboard-animation': PenLine,
   hypit: VideoReplicationIcon,
 }
 
@@ -139,6 +140,7 @@ export const platformIconColor: Record<string, string> = {
   viral_analysis: 'text-[#7C3AED]',
   profile_analysis: 'text-[#64748B]',
   montage: 'text-[#9333EA]',
+  'whiteboard-animation': 'text-[#0F766E]',
   hypit: 'text-[#F97316]',
 }
 
@@ -151,6 +153,7 @@ export const platformBorderColor: Record<string, string> = {
   ecommerce: 'border-l-[#FF6A00]',
   viral_analysis: 'border-l-[#7C3AED]',
   montage: 'border-l-[#9333EA]',
+  'whiteboard-animation': 'border-l-[#0F766E]',
   hypit: 'border-l-[#F97316]',
 }
 
@@ -163,6 +166,7 @@ export const platformHoverBorderColor: Record<string, string> = {
   ecommerce: 'hover:border-l-[#FF6A00]/50',
   viral_analysis: 'hover:border-l-[#7C3AED]/50',
   montage: 'hover:border-l-[#9333EA]/50',
+  'whiteboard-animation': 'hover:border-l-[#0F766E]/50',
   hypit: 'hover:border-l-[#F97316]/50',
 }
 
@@ -174,12 +178,14 @@ export const platformBadgeVariant: Record<string, 'default' | 'secondary' | 'des
   ecommerce: 'default',
   viral_analysis: 'outline',
   montage: 'outline',
+  'whiteboard-animation': 'outline',
   hypit: 'outline',
 }
 
 // Explicit platform accents stay independent of the application's primary theme.
 export const platformBadgeClassName: Record<string, string> = {
   montage: 'border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300',
+  'whiteboard-animation': 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300',
   hypit: 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300',
 }
 
@@ -192,6 +198,7 @@ export const platformBgColor: Record<string, string> = {
   ecommerce: 'bg-[#FF6A00]/10',
   viral_analysis: 'bg-[#7C3AED]/10',
   montage: 'bg-[#9333EA]/10',
+  'whiteboard-animation': 'bg-[#0F766E]/10',
   hypit: 'bg-[#F97316]/10',
 }
 

@@ -5,6 +5,7 @@ const customRendererKeys = new Set([
   'moments',
   'ecommerce',
   'montage',
+  'whiteboard-animation',
   'hypit',
 ])
 

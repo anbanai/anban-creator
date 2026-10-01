@@ -74,6 +74,8 @@ func cloneTaskIdentity(src *model.Task) (agentID, channel, taskKind string) {
 			agentID = model.AgentIDSeednote
 		case model.PlatformHypit:
 			agentID = model.AgentIDHypit
+		case model.PlatformWhiteboardAnimation:
+			agentID = model.AgentIDWhiteboard
 		default:
 			agentID = legacyType
 		}

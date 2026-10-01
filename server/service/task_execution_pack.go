@@ -34,6 +34,8 @@ func taskExecutionIdentity(task *model.Task) (agentID, channel, taskKind string)
 			agentID = model.AgentIDChannelsVideo
 		case model.PlatformHypit:
 			agentID = model.AgentIDHypit
+		case model.PlatformWhiteboardAnimation:
+			agentID = model.AgentIDWhiteboard
 		}
 	}
 	if channel == "" {
@@ -97,6 +99,8 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 			}
 		case model.AgentIDFeedback:
 			execution.TaskKind = model.TaskKindFeedbackAnalysis
+		case model.AgentIDWhiteboard:
+			execution.TaskKind = model.PlatformWhiteboardAnimation
 		case model.AgentIDProfile:
 			execution.TaskKind = model.TaskKindProfileAnalysis
 		default:

@@ -15,13 +15,15 @@ export interface TaskFormDefaults extends CreateTaskFormValues {
   cover_use_portrait: boolean
 }
 
-function taskIdentity(type: TaskType): { agent_id: string; channel: 'wechat-article' | 'seednote' | 'wechat-picture'; task_kind: string } {
+function taskIdentity(type: TaskType): { agent_id: string; channel: 'wechat-article' | 'seednote' | 'wechat-picture' | 'whiteboard-animation'; task_kind: string } {
   switch (type) {
     case 'seednote':
     case 'viral_analysis':
       return { agent_id: 'seednote', channel: 'seednote', task_kind: type === 'viral_analysis' ? 'viral_analysis' : 'content_generation' }
     case 'wechat-picture':
       return { agent_id: 'wechat-picture', channel: 'wechat-picture', task_kind: 'content_generation' }
+    case 'whiteboard-animation':
+      return { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', task_kind: 'whiteboard-animation' }
     case 'wechat-article':
     default:
       return { agent_id: 'wechat-article', channel: 'wechat-article', task_kind: 'content_generation' }

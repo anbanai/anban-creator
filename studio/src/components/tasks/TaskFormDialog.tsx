@@ -51,17 +51,24 @@ const SEEDNOTE_ATTACHMENT_POLICY = {
   maxBytes: GENERAL_AGENT_ATTACHMENT_POLICY.maxBytes,
 } as const
 const SEEDNOTE_ATTACHMENT_BLOCKER = '种草笔记仅支持图片附件，请移除其他附件后继续。'
+const WHITEBOARD_ATTACHMENT_POLICY = {
+  allowedTypes: ['text', 'image'],
+  maxCount: 2,
+  maxBytes: { text: 25 * 1024 * 1024, image: 10 * 1024 * 1024 },
+} as const
 const BATCH_TASK_TYPES = new Set<TaskType>(['wechat-article', 'wechat-picture', 'seednote', 'moments'])
 
 const PRODUCT_AGENT_OPTIONS = [
   { agent_id: 'wechat-article', channel: 'wechat-article', label: '公众号文章' },
   { agent_id: 'seednote', channel: 'seednote', label: '种草笔记' },
   { agent_id: 'wechat-picture', channel: 'wechat-picture', label: '公众号贴图' },
+  { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', label: '白板动画' },
 ] as const
 
 function agentIDForTaskType(type: TaskType) {
   if (type === 'seednote' || type === 'viral_analysis') return 'seednote'
   if (type === 'wechat-picture') return 'wechat-picture'
+  if (type === 'whiteboard-animation') return 'whiteboard-animation'
   return 'wechat-article'
 }
 
@@ -152,6 +159,8 @@ export function TaskFormDialog({
   const watchedExecutionProfile = useWatch({ control: form.control, name: 'execution_profile' })
   const attachmentPolicy = watchedType === 'seednote'
     ? SEEDNOTE_ATTACHMENT_POLICY
+    : watchedType === 'whiteboard-animation'
+      ? WHITEBOARD_ATTACHMENT_POLICY
     : GENERAL_AGENT_ATTACHMENT_POLICY
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
@@ -201,6 +210,10 @@ export function TaskFormDialog({
   const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
+  const whiteboardSubtitles = watchedType === 'whiteboard-animation'
+    ? attachmentController.attachments.filter((attachment) => /\.srt$/i.test(attachment.fileName))
+    : []
+  const hasWhiteboardSubtitle = whiteboardSubtitles.length === 1 && whiteboardSubtitles[0]?.type === 'text'
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const availableProjects = useMemo(
     () => isViralAnalysisTask ? projects.filter((project) => project.platform === 'seednote') : projects,
@@ -370,7 +383,7 @@ export function TaskFormDialog({
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (creationBlocker || hasIncompatibleSeednoteAttachments || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && (montageUploading || !montageReady))) {
+    if (creationBlocker || hasIncompatibleSeednoteAttachments || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && (montageUploading || !montageReady))) {
       event?.preventDefault()
       return
     }
@@ -547,7 +560,7 @@ export function TaskFormDialog({
       placeholder={watchedType === 'hypit' ? '描述希望保留的镜头、节奏及需要替换的内容…' : '描述创作目标、内容要求和素材使用方式...'}
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
       submitting={isSubmitting}
-      submitDisabled={Boolean(creationBlocker) || (isMontageTask && !montageReady)}
+      submitDisabled={Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontageTask && !montageReady)}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           {projectControl}
@@ -568,6 +581,8 @@ export function TaskFormDialog({
             <DialogDescription>
               {mode === 'clone'
                 ? '编辑完整配置并创建一份新任务。'
+                : watchedType === 'whiteboard-animation'
+                  ? '上传 SRT 字幕，Agent 将按字幕生成白板动画。'
                 : isMontageTask
                   ? '配置视频目标、来源素材和成片方式。'
                   : '配置内容目标、图片选项和执行方式。'}
@@ -888,7 +903,7 @@ export function TaskFormDialog({
               type="submit"
               form="task-create-form"
               loading={isSubmitting}
-              disabled={isSubmitting || Boolean(creationBlocker) || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && (montageUploading || !montageReady))}
+              disabled={isSubmitting || Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && (montageUploading || !montageReady))}
             >
               {submitLabel}
             </Button>

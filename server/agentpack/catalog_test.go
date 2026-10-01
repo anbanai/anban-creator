@@ -950,8 +950,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 11 {
-		t.Fatalf("Pack count = %d, want 11", len(catalog.Packs))
+	if len(catalog.Packs) != 12 {
+		t.Fatalf("Pack count = %d, want 12", len(catalog.Packs))
 	}
 
 	wantRoutes := map[string]struct {
@@ -959,15 +959,16 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		profile string
 		adapter string
 	}{
-		"wechat-article": {packID: "wechat-article", profile: "wechat", adapter: AdapterStandard},
-		"wechat-picture": {packID: "wechat-picture", profile: "wechat", adapter: AdapterStandard},
-		"seednote":       {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"viral_analysis": {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"moments":        {packID: "moments", profile: "wechat", adapter: AdapterStandard},
-		"ecommerce":      {packID: "ecommerce", profile: "wechat", adapter: AdapterStandard},
-		"hypit":          {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
-		"montage":        {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
-		"live-slicer":    {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
+		"wechat-article":       {packID: "wechat-article", profile: "wechat", adapter: AdapterStandard},
+		"wechat-picture":       {packID: "wechat-picture", profile: "wechat", adapter: AdapterStandard},
+		"seednote":             {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
+		"viral_analysis":       {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
+		"moments":              {packID: "moments", profile: "wechat", adapter: AdapterStandard},
+		"ecommerce":            {packID: "ecommerce", profile: "wechat", adapter: AdapterStandard},
+		"hypit":                {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
+		"montage":              {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
+		"live-slicer":          {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
+		"whiteboard-animation": {packID: "whiteboard-animation", profile: "whiteboard-animation", adapter: AdapterStandard},
 	}
 	for taskType, want := range wantRoutes {
 		pack, ok := catalog.ForTaskType(taskType)
@@ -1013,7 +1014,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 
 func TestEmbeddedCatalogResolvesCurrentManagedRoutes(t *testing.T) {
 	catalog := Default()
-	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "live-slicer"} {
+	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "live-slicer", "whiteboard-animation"} {
 		if _, ok := catalog.ForTaskType(taskType); !ok {
 			t.Errorf("embedded Catalog has no route for %q", taskType)
 		}

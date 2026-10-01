@@ -23,11 +23,12 @@ var (
 )
 
 var supportedChannels = map[string]struct{}{
-	"wechat-article":   {},
-	"seednote":         {},
-	"wechat-picture":   {},
-	"profile-analysis": {},
-	"feedback":         {},
+	"wechat-article":       {},
+	"seednote":             {},
+	"wechat-picture":       {},
+	"profile-analysis":     {},
+	"feedback":             {},
+	"whiteboard-animation": {},
 }
 
 func isSupportedChannel(channel string) bool {

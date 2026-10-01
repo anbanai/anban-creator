@@ -58,6 +58,7 @@ const (
 	AgentIDHypit         = "hypit"
 	AgentIDFeedback      = "feedback"
 	AgentIDProfile       = "profile-analysis"
+	AgentIDWhiteboard    = "whiteboard-animation"
 )
 
 // Channel constants. Keep these values provider-neutral; labels belong to the
@@ -74,6 +75,7 @@ const (
 	ChannelProfile       = "profile-analysis"
 	ChannelMontage       = "montage"
 	ChannelFeedback      = "feedback"
+	ChannelWhiteboard    = "whiteboard-animation"
 )
 
 // Task kinds are workflow identities within one Agent/channel.
@@ -95,7 +97,7 @@ const (
 
 func IsChannel(value string) bool {
 	switch value {
-	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelFeedback, ChannelProfile:
+	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelFeedback, ChannelProfile, ChannelWhiteboard:
 		return true
 	default:
 		return false
@@ -104,7 +106,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDFeedback, AgentIDProfile:
+	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDFeedback, AgentIDProfile, AgentIDWhiteboard:
 		return true
 	default:
 		return false
@@ -121,6 +123,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelWechatPicture, true
 	case AgentIDFeedback:
 		return ChannelFeedback, true
+	case AgentIDWhiteboard:
+		return ChannelWhiteboard, true
 	default:
 		return "", false
 	}
@@ -135,6 +139,8 @@ func PlatformForChannel(channel string) string {
 		return PlatformWechat
 	case ChannelSeednote:
 		return PlatformSeednote
+	case ChannelWhiteboard:
+		return PlatformWhiteboardAnimation
 	default:
 		return ""
 	}
@@ -172,7 +178,7 @@ func DefaultImageRatioForChannel(channel string) string {
 func IsTaskKind(value string) bool {
 	switch value {
 	case TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis, TaskKindLiveSlicer,
-		TaskTypeLiveSlicer, TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformHypit,
+		TaskTypeLiveSlicer, TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit,
 		TaskTypeWechatArticle, TaskTypeWechatPicture:
 		return true
 	default:
@@ -205,14 +211,15 @@ const (
 
 // Platform constants.
 const (
-	PlatformWechat        = "wechat"
-	TaskTypeWechatArticle = "wechat-article"
-	TaskTypeWechatPicture = "wechat-picture"
-	PlatformSeednote      = "seednote"
-	PlatformMoments       = "moments"
-	PlatformEcommerce     = "ecommerce"
-	PlatformMontage       = "montage"
-	PlatformHypit         = "hypit"
+	PlatformWechat              = "wechat"
+	TaskTypeWechatArticle       = "wechat-article"
+	TaskTypeWechatPicture       = "wechat-picture"
+	PlatformSeednote            = "seednote"
+	PlatformMoments             = "moments"
+	PlatformEcommerce           = "ecommerce"
+	PlatformMontage             = "montage"
+	PlatformWhiteboardAnimation = "whiteboard-animation"
+	PlatformHypit               = "hypit"
 )
 
 // IsProjectPlatform reports whether value is an explicitly implemented
@@ -220,7 +227,7 @@ const (
 // identities, but must not create new business identities by themselves.
 func IsProjectPlatform(value string) bool {
 	switch value {
-	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformHypit:
+	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit:
 		return true
 	default:
 		return false

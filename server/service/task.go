@@ -474,6 +474,8 @@ func resolveTaskIdentity(project *model.Project, p CreateManualParams) (agentID,
 			agentID = model.AgentIDSeednote
 		case model.PlatformMontage:
 			agentID = model.AgentIDChannelsVideo
+		case model.PlatformWhiteboardAnimation:
+			agentID = model.AgentIDWhiteboard
 		case model.PlatformHypit:
 			agentID = model.AgentIDHypit
 		case model.PlatformMoments, model.PlatformEcommerce:
@@ -506,7 +508,7 @@ func resolveTaskIdentity(project *model.Project, p CreateManualParams) (agentID,
 			taskKind = model.TaskTypeProfileAnalysis
 		case model.TaskTypeLiveSlicer:
 			taskKind = model.TaskKindLiveSlicer
-		case model.PlatformSeednote, model.PlatformMontage:
+		case model.PlatformSeednote, model.PlatformMontage, model.PlatformWhiteboardAnimation:
 			taskKind = model.TaskKindContentGeneration
 		case model.PlatformHypit:
 			taskKind = model.PlatformHypit
@@ -728,6 +730,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 	}
 	isMontageTask := model.IsMontagePlatform(taskType)
+	if taskType == model.PlatformWhiteboardAnimation {
+		if err := validateWhiteboardAnimationInputs(p.InputAttachments); err != nil {
+			return nil, err
+		}
+		quantity = 1
+	}
 	effectiveImageRatio := strings.TrimSpace(p.ImageRatio)
 	if isMontageTask && effectiveImageRatio == model.ImageRatioAuto {
 		effectiveImageRatio = ""
@@ -1319,6 +1327,11 @@ func (s *TaskService) CreateFromPlan(ctx context.Context, plan *model.Plan) (*mo
 	if plan.CoverUsePortrait && (!model.SupportsPortraitCover(taskType) || project == nil || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" || ((taskType == model.TaskTypeWechatArticle || taskType == model.TaskTypeWechatPicture) && plan.ArticleWithCover != nil && !*plan.ArticleWithCover)) {
 		return nil, ErrCoverPortraitUnavailable
 	}
+	if taskType == model.PlatformWhiteboardAnimation {
+		if err := validateWhiteboardAnimationInputs(plan.InputAttachments.Data()); err != nil {
+			return nil, err
+		}
+	}
 	isMontageTask := model.IsMontagePlatform(taskType)
 	effectiveImageRatio := strings.TrimSpace(plan.ImageRatio)
 	if isMontageTask && effectiveImageRatio == model.ImageRatioAuto {
@@ -1533,6 +1546,8 @@ func legacyTaskTypeForIdentity(agentID, channel, taskKind string) string {
 		return model.PlatformSeednote
 	case model.AgentIDChannelsVideo:
 		return model.PlatformMontage
+	case model.AgentIDWhiteboard:
+		return model.PlatformWhiteboardAnimation
 	}
 	switch channel {
 	case model.ChannelArticle:
@@ -1543,6 +1558,8 @@ func legacyTaskTypeForIdentity(agentID, channel, taskKind string) string {
 		return model.PlatformSeednote
 	case model.ChannelChannelsVideo:
 		return model.PlatformMontage
+	case model.ChannelWhiteboard:
+		return model.PlatformWhiteboardAnimation
 	default:
 		return taskKind
 	}

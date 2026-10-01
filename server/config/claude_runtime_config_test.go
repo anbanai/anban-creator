@@ -43,6 +43,7 @@ claude:
     wechat: creator-agent-wechat:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    whiteboard-animation: creator-agent-whiteboard-animation:latest
 `
 
 func validClaudeConfigForTest() ClaudeConfig {
@@ -64,7 +65,7 @@ func validClaudeConfigForTest() ClaudeConfig {
 		},
 		Executor: "docker", ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
 		RuntimeImages: RuntimeImages{
-			model.PlatformWechat: "creator-agent-wechat:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest",
+			model.PlatformWechat: "creator-agent-wechat:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
 		},
 	}
 }

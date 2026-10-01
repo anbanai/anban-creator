@@ -54,6 +54,7 @@ const platformOptions: { value: ProjectPlatform; label: string }[] = [
   { value: 'moments', label: '朋友圈' },
   { value: 'ecommerce', label: '电商出图' },
   { value: 'montage', label: '视频生成' },
+  { value: 'whiteboard-animation', label: '白板动画' },
   { value: 'hypit', label: '视频复刻' },
 ]
 

@@ -30,6 +30,7 @@ claude:
     wechat: creator-agent-wechat:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    whiteboard-animation: creator-agent-whiteboard-animation:latest
 billing_runtime:
   config_dir: "${ANBAN_TEST_BILLING_DIR}"
   admin_api_key: "${ANBAN_TEST_BILLING_ADMIN_KEY}"
@@ -77,6 +78,7 @@ claude:
     wechat: creator-agent-wechat:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    whiteboard-animation: creator-agent-whiteboard-animation:latest
 `
 	if err := os.WriteFile(path, []byte(root), 0o600); err != nil {
 		t.Fatal(err)

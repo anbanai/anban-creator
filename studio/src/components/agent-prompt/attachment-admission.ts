@@ -62,6 +62,7 @@ const EXTENSION_RULES = new Map<string, AttachmentTypeRule>([
   ['json', { type: 'document', mimeTypes: ['application/json', 'text/json'] }],
   ['csv', { type: 'text', mimeTypes: ['text/csv', 'application/csv'] }],
   ['txt', { type: 'text', mimeTypes: ['text/plain'] }],
+  ['srt', { type: 'text', mimeTypes: ['application/x-subrip', 'text/plain', ''] }],
   ['md', { type: 'text', mimeTypes: ['text/markdown', 'text/plain'] }],
   ['markdown', { type: 'text', mimeTypes: ['text/markdown', 'text/plain'] }],
 ])

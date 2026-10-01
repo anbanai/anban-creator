@@ -647,7 +647,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-	requiredRuntimeProfiles := []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, "profile", "feedback"}
+	requiredRuntimeProfiles := []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, model.PlatformWhiteboardAnimation, "profile", "feedback"}
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -659,7 +659,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != model.PlatformWechat && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformHypit && profile != "profile" && profile != "feedback" {
+		if profile != model.PlatformWechat && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile" && profile != "feedback" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -1027,6 +1027,9 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(c.Claude.RuntimeImages["feedback"]) == "" {
 		c.Claude.RuntimeImages["feedback"] = "creator-agent-feedback:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation]) == "" {
+		c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation] = "creator-agent-whiteboard-animation:latest"
 	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080

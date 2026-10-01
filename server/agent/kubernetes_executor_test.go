@@ -1860,9 +1860,10 @@ func testJobConfig() kubernetesJobConfig {
 			},
 		},
 		RuntimeImages: srvconfig.RuntimeImages{
-			model.PlatformWechat:   "registry.example.com/creator-agent:v2",
-			model.PlatformSeednote: "registry.example.com/creator-agent-seednote:v2",
-			model.PlatformMontage:  "registry.example.com/creator-agent-montage:v2",
+			model.PlatformWechat:              "registry.example.com/creator-agent:v2",
+			model.PlatformSeednote:            "registry.example.com/creator-agent-seednote:v2",
+			model.PlatformMontage:             "registry.example.com/creator-agent-montage:v2",
+			model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation:v2",
 		},
 		ServerURL: "https://creator-server:8443",
 	}
