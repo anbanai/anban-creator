@@ -5,11 +5,7 @@ import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
 import type { ProjectPlatform, OutputChannel } from './project'
 
-<<<<<<< HEAD
-export type TaskType = 'seednote' | 'article' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
-=======
 export type TaskType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
->>>>>>> codex/tasks-infinite-scroll-review
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection

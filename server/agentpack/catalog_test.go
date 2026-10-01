@@ -950,13 +950,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-<<<<<<< HEAD
-	if len(catalog.Packs) != 10 {
-		t.Fatalf("Pack count = %d, want 10", len(catalog.Packs))
-=======
 	if len(catalog.Packs) != 12 {
 		t.Fatalf("Pack count = %d, want 12", len(catalog.Packs))
->>>>>>> codex/tasks-infinite-scroll-review
 	}
 
 	wantRoutes := map[string]struct {
@@ -964,18 +959,6 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		profile string
 		adapter string
 	}{
-<<<<<<< HEAD
-		"article":          {packID: "article", profile: "article", adapter: AdapterStandard},
-		"seednote":         {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"viral_analysis":   {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
-		"moments":          {packID: "moments", profile: "article", adapter: AdapterStandard},
-		"ecommerce":        {packID: "ecommerce", profile: "article", adapter: AdapterStandard},
-		"hypit":            {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
-		"montage":          {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
-		model.PlatformWhiteboardAnimation: {packID: "whiteboard-animation", profile: "whiteboard-animation", adapter: AdapterStandard},
-		"live-slicer":      {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
-		"profile_analysis": {packID: "profile-analysis", profile: "article", adapter: AdapterStandard},
-=======
 		"wechat-article":       {packID: "wechat-article", profile: "wechat", adapter: AdapterStandard},
 		"wechat-picture":       {packID: "wechat-picture", profile: "wechat", adapter: AdapterStandard},
 		"seednote":             {packID: "seednote", profile: "seednote", adapter: AdapterStandard},
@@ -986,7 +969,6 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		"montage":              {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
 		"live-slicer":          {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
 		"whiteboard-animation": {packID: "whiteboard-animation", profile: "whiteboard-animation", adapter: AdapterStandard},
->>>>>>> codex/tasks-infinite-scroll-review
 	}
 	for taskType, want := range wantRoutes {
 		pack, ok := catalog.ForTaskType(taskType)
@@ -1002,7 +984,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		t.Fatal("montage Pack missing")
 	} else {
 		wantRequiredArtifacts := []string{
-		"output/final.mp4",
+			"output/final.mp4",
 			"output/montage-project.json",
 			"output/cover.png",
 			"output/delivery-manifest.json",
@@ -1013,21 +995,6 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		wantDelivery := []string{"output/final.mp4", "output/delivery-manifest.json"}
 		if got := deliveryPaths(pack.DeliveryForTaskType("montage")); !slices.Equal(got, wantDelivery) {
 			t.Fatalf("montage delivery paths = %v, want %v", got, wantDelivery)
-		}
-	}
-	if pack, ok := catalog.Pack("whiteboard-animation"); !ok {
-		t.Fatal("whiteboard-animation Pack missing")
-	} else {
-		wantRequiredArtifacts := []string{
-			"output/final.mp4",
-			"output/storyboard.json",
-			"output/scenes/*.png",
-			"output/scenes/*.annotation.json",
-			"output/quality-report.json",
-			"output/delivery-manifest.json",
-		}
-		if got := requiredArtifactPaths(pack); !slices.Equal(got, wantRequiredArtifacts) {
-			t.Fatalf("whiteboard-animation required artifacts = %v, want %v", got, wantRequiredArtifacts)
 		}
 	}
 	if _, ok := catalog.Pack("designer"); ok {
@@ -1047,11 +1014,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 
 func TestEmbeddedCatalogResolvesCurrentManagedRoutes(t *testing.T) {
 	catalog := Default()
-<<<<<<< HEAD
-	for _, taskType := range []string{"article", "seednote", "viral_analysis", "moments", "ecommerce", "montage", model.PlatformWhiteboardAnimation, "hypit", "live-slicer"} {
-=======
 	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "live-slicer", "whiteboard-animation"} {
->>>>>>> codex/tasks-infinite-scroll-review
 		if _, ok := catalog.ForTaskType(taskType); !ok {
 			t.Errorf("embedded Catalog has no route for %q", taskType)
 		}

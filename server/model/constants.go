@@ -211,13 +211,9 @@ const (
 
 // Platform constants.
 const (
-<<<<<<< HEAD
-	PlatformArticle             = "article"
-=======
 	PlatformWechat              = "wechat"
 	TaskTypeWechatArticle       = "wechat-article"
 	TaskTypeWechatPicture       = "wechat-picture"
->>>>>>> codex/tasks-infinite-scroll-review
 	PlatformSeednote            = "seednote"
 	PlatformMoments             = "moments"
 	PlatformEcommerce           = "ecommerce"
@@ -231,11 +227,7 @@ const (
 // identities, but must not create new business identities by themselves.
 func IsProjectPlatform(value string) bool {
 	switch value {
-<<<<<<< HEAD
-	case PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit:
-=======
 	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit:
->>>>>>> codex/tasks-infinite-scroll-review
 		return true
 	default:
 		return false

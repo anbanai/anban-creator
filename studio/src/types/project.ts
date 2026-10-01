@@ -3,15 +3,11 @@ import type { MontagePreferences } from './montage'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { ImageAnalysis } from './image-analysis'
 
-<<<<<<< HEAD
-export type ProjectPlatform = 'article' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
-=======
 /** @deprecated Projects are channel-neutral; keep this only for migrated API rows. */
 export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
 // The open string branch keeps migrated/plugin-only rows readable while the
 // product picker exposes only the three supported channels above.
 export type OutputChannel = 'wechat-article' | 'seednote' | 'wechat-picture' | 'whiteboard-animation' | (string & {})
->>>>>>> codex/tasks-infinite-scroll-review
 export type ProjectStatus = 'active' | 'archived'
 export interface ProjectConfig {
   wechat_app_id?: string

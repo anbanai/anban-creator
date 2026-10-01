@@ -261,11 +261,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
 	projectIDs := make(map[string]string)
-<<<<<<< HEAD
-	for _, platform := range []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformWhiteboardAnimation, model.PlatformHypit} {
-=======
 	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformWhiteboardAnimation, model.PlatformHypit} {
->>>>>>> codex/tasks-infinite-scroll-review
 		projectID := uuid.NewString()
 		if err := repo.Projects().Create(t.Context(), &model.Project{
 			ID: projectID, UserID: userID, Platform: platform,
@@ -341,8 +337,6 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	}
 	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 7 {
 		t.Fatalf("admin platform configs = %#v, want all seven configured platforms", configs)
-<<<<<<< HEAD
-=======
 	}
 }
 
@@ -394,7 +388,6 @@ func TestProjectHandlerCreateAutomaticallyQueuesFreeProfileAnalysis(t *testing.T
 	tasks, err = repo.Tasks().FindByUserID(t.Context(), userID, projectID, "", 0, 10)
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("repeated initialization created duplicate tasks: count=%d err=%v", len(tasks), err)
->>>>>>> codex/tasks-infinite-scroll-review
 	}
 }
 

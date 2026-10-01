@@ -65,11 +65,7 @@ func validClaudeConfigForTest() ClaudeConfig {
 		},
 		Executor: "docker", ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
 		RuntimeImages: RuntimeImages{
-<<<<<<< HEAD
-			model.PlatformArticle: "creator-agent-article:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
-=======
 			model.PlatformWechat: "creator-agent-wechat:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
->>>>>>> codex/tasks-infinite-scroll-review
 		},
 	}
 }

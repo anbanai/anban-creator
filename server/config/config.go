@@ -647,11 +647,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-<<<<<<< HEAD
-	requiredRuntimeProfiles := []string{model.PlatformArticle, model.PlatformSeednote, model.PlatformMontage, model.PlatformWhiteboardAnimation}
-=======
 	requiredRuntimeProfiles := []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, model.PlatformWhiteboardAnimation, "profile", "feedback"}
->>>>>>> codex/tasks-infinite-scroll-review
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -663,11 +659,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-<<<<<<< HEAD
-		if profile != model.PlatformArticle && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit {
-=======
 		if profile != model.PlatformWechat && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile" && profile != "feedback" {
->>>>>>> codex/tasks-infinite-scroll-review
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}

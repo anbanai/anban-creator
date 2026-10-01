@@ -10,13 +10,8 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
 - **Plugin Assets** — Claude Code and Codex share one plugin source under `harness/`, with native manifests and host adapters for each harness.
 
-<<<<<<< HEAD
-Managed execution uses separate `creator-agent-article`, `creator-agent-seednote`,
-`creator-agent-montage`, and `creator-agent-whiteboard-animation` images. They share the same plugin tree while keeping
-=======
 Managed execution uses separate `creator-agent-wechat`, `creator-agent-seednote`,
 and `creator-agent-montage` images. They share the same plugin tree while keeping
->>>>>>> codex/tasks-infinite-scroll-review
 the Seednote workflow image independent from the Montage OpenMontage/Remotion/ffmpeg
 profile. 种草笔记 research flows through authenticated Anban Server MCP
 tools backed by the separately deployed `sidecar-seednote`.
@@ -38,11 +33,10 @@ The shared scheduler configuration is:
 - `ANBAN_AGENT_IMAGE_WECHAT`: the minimal Article runtime image.
 - `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow image; its 种草笔记 research uses authenticated Anban Server MCP tools.
 - `ANBAN_AGENT_IMAGE_MONTAGE`: the OpenMontage, Remotion, and ffmpeg runtime image.
-- `ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION`: the pinned SRT whiteboard-animation runtime image with preinstalled Python rendering dependencies.
 - `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`: a private value of at least 32 bytes used
   to mint short-lived workload tokens.
 
-The Server never builds missing runtime images. `make docker-up` builds the four
+The Server never builds missing runtime images. `make docker-up` builds the three
 local runtime images before starting Compose; direct `docker compose up` users
 must build or pull them first. Production deployments should publish and select
 immutable image digests so a persisted execution can always resume with the
@@ -63,7 +57,7 @@ cp .env.example .env
 # Fill every required value in .env before starting Compose.
 
 # Start infra and services with Docker Compose
-# (builds all four managed runtime images before startup)
+# (builds all three managed runtime images before startup)
 make docker-up
 
 # Or run server and web separately during development

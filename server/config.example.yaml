@@ -354,11 +354,8 @@ claude:
     wechat: "${ANBAN_AGENT_IMAGE_WECHAT}"
     seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"
     montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"
-<<<<<<< HEAD
-=======
     profile: "${ANBAN_AGENT_IMAGE_PROFILE}"
     feedback: "${ANBAN_AGENT_IMAGE_FEEDBACK}"
->>>>>>> codex/tasks-infinite-scroll-review
     whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
     hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
   # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。

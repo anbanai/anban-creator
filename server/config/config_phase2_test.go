@@ -41,30 +41,6 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		t.Setenv(match[1], "")
 	}
 	for name, value := range map[string]string{
-<<<<<<< HEAD
-		"ANBAN_DATABASE_DSN":                     "root:test@tcp(localhost:3306)/anban_creator?parseTime=true",
-		"ANBAN_BILLING_ADMIN_API_KEY":            "test-billing-admin-key",
-		"ANBAN_AGENT_EXECUTOR":                   "docker",
-		"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":     "0123456789abcdef0123456789abcdef",
-		"ANBAN_AGENT_IMAGE_ARTICLE":              "creator-agent-article:latest",
-		"ANBAN_AGENT_IMAGE_SEEDNOTE":             "creator-agent-seednote:latest",
-		"ANBAN_AGENT_IMAGE_MONTAGE":              "creator-agent-montage:latest",
-		"ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION": "creator-agent-whiteboard-animation:latest",
-		"ANBAN_JWT_SECRET_KEY":                   "0123456789abcdef0123456789abcdef",
-		"ANBAN_OSS_ENDPOINT":                     "oss-cn-test.aliyuncs.com",
-		"ANBAN_OSS_ACCESS_KEY_ID":                "test-access-key-id",
-		"ANBAN_OSS_ACCESS_KEY_SECRET":            "test-access-key-secret",
-		"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":      "https://deepseek.example.com/anthropic",
-		"ANBAN_DEEPSEEK_API_KEY":                 "test-deepseek-api-key",
-		"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":      "https://api.moonshot.cn/anthropic",
-		"ANBAN_MOONSHOT_API_KEY":                 "test-moonshot-agent-api-key",
-		"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":         "https://open.bigmodel.cn/api/anthropic",
-		"ANBAN_ZHIPU_API_KEY":                    "test-zhipu-api-key",
-		"MOONSHOT_API_KEY":                       "test-moonshot-api-key",
-		"VOLCENGINE_ARK_API_KEY":                 "test-volcengine-api-key",
-		"WANGCAI_OPENAI_BASE_URL":                "https://images.example.com/v1",
-		"WANGCAI_OPENAI_API_KEY":                 "test-openai-api-key",
-=======
 		"ANBAN_DATABASE_DSN":                 "root:test@tcp(localhost:3306)/anban_creator?parseTime=true",
 		"ANBAN_BILLING_ADMIN_API_KEY":        "test-billing-admin-key",
 		"ANBAN_AGENT_EXECUTOR":               "docker",
@@ -86,7 +62,6 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		"VOLCENGINE_ARK_API_KEY":             "test-volcengine-api-key",
 		"WANGCAI_OPENAI_BASE_URL":            "https://images.example.com/v1",
 		"WANGCAI_OPENAI_API_KEY":             "test-openai-api-key",
->>>>>>> codex/tasks-infinite-scroll-review
 	} {
 		t.Setenv(name, value)
 	}

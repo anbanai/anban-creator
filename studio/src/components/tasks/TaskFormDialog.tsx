@@ -56,9 +56,6 @@ const WHITEBOARD_ATTACHMENT_POLICY = {
   maxCount: 2,
   maxBytes: { text: 25 * 1024 * 1024, image: 10 * 1024 * 1024 },
 } as const
-<<<<<<< HEAD
-const BATCH_TASK_TYPES = new Set<TaskType>(['article', 'seednote', 'moments'])
-=======
 const BATCH_TASK_TYPES = new Set<TaskType>(['wechat-article', 'wechat-picture', 'seednote', 'moments'])
 
 const PRODUCT_AGENT_OPTIONS = [
@@ -74,7 +71,6 @@ function agentIDForTaskType(type: TaskType) {
   if (type === 'whiteboard-animation') return 'whiteboard-animation'
   return 'wechat-article'
 }
->>>>>>> codex/tasks-infinite-scroll-review
 
 function maxTaskQuantity(type: TaskType) {
   return BATCH_TASK_TYPES.has(type) ? 5 : 1
@@ -165,11 +161,7 @@ export function TaskFormDialog({
     ? SEEDNOTE_ATTACHMENT_POLICY
     : watchedType === 'whiteboard-animation'
       ? WHITEBOARD_ATTACHMENT_POLICY
-<<<<<<< HEAD
-      : GENERAL_AGENT_ATTACHMENT_POLICY
-=======
     : GENERAL_AGENT_ATTACHMENT_POLICY
->>>>>>> codex/tasks-infinite-scroll-review
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: attachmentPolicy,

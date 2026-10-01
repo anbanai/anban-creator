@@ -410,20 +410,12 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	case model.PlatformMoments:
 		return nil, fmt.Errorf("plans are not supported for moments projects: %w", ErrUnsupportedPlanPlatform)
 	}
-<<<<<<< HEAD
-	if project.Platform == model.PlatformWhiteboardAnimation {
-=======
 	if effectivePlatform == model.PlatformWhiteboardAnimation {
->>>>>>> codex/tasks-infinite-scroll-review
 		if err := validateWhiteboardAnimationInputs(p.InputAttachments); err != nil {
 			return nil, err
 		}
 	}
-<<<<<<< HEAD
-	if p.HypitInput != nil && !model.IsHypitPlatform(project.Platform) {
-=======
 	if legacySingleEntry && p.HypitInput != nil && !model.IsHypitPlatform(effectivePlatform) {
->>>>>>> codex/tasks-infinite-scroll-review
 		return nil, ErrHypitInput
 	}
 	if legacySingleEntry && model.IsHypitPlatform(effectivePlatform) {

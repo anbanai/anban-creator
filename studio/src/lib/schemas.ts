@@ -120,11 +120,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
-<<<<<<< HEAD
-  type: z.enum(["seednote", "article", "moments", "viral_analysis", "profile_analysis", "ecommerce", "montage", "whiteboard-animation", "hypit"]),
-=======
   type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral_analysis", "profile_analysis", "ecommerce", "montage", "whiteboard-animation", "hypit"]),
->>>>>>> codex/tasks-infinite-scroll-review
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),
@@ -213,15 +209,6 @@ export const createTaskSchema = z.object({
 
   if (data.type === "whiteboard-animation") {
     const subtitles = (data.input_attachments ?? []).filter((attachment) => /\.srt$/i.test(attachment.file_name ?? ""))
-<<<<<<< HEAD
-    if (subtitles.length !== 1 || subtitles[0]?.type !== 'text') {
-      ctx.addIssue({ code: "custom", message: "请上传且仅上传一个 .srt 字幕文件", path: ["input_attachments"] })
-    }
-    if ((data.input_attachments ?? []).some((attachment) => attachment.type !== 'text' && attachment.type !== 'image')) {
-      ctx.addIssue({ code: "custom", message: "白板动画仅支持 SRT 字幕和图片风格参考", path: ["input_attachments"] })
-    }
-    if ((data.input_attachments ?? []).filter((attachment) => attachment.type === 'image').length > 1) {
-=======
     if (subtitles.length !== 1 || (subtitles[0]?.type !== 'text' && subtitles[0]?.type !== 'document')) {
       ctx.addIssue({ code: "custom", message: "请上传且仅上传一个 .srt 字幕文件", path: ["input_attachments"] })
     }
@@ -229,7 +216,6 @@ export const createTaskSchema = z.object({
       ctx.addIssue({ code: "custom", message: "白板动画仅支持 SRT 字幕和图片风格参考", path: ["input_attachments"] })
     }
     if ((data.input_attachments ?? []).filter((attachment) => attachment.type === 'image').length > 1 || (data.input_attachments ?? []).some((attachment) => (attachment.type === 'text' || attachment.type === 'document') && !/\.srt$/i.test(attachment.file_name ?? ""))) {
->>>>>>> codex/tasks-infinite-scroll-review
       ctx.addIssue({ code: "custom", message: "最多上传一张风格参考图", path: ["input_attachments"] })
     }
   }
@@ -240,11 +226,7 @@ export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 export const planSchema = z.object({
   project_id: z.string().optional(),
   execution_profile: executionProfileSchema,
-<<<<<<< HEAD
-  type: z.enum(["seednote", "article", "montage", "whiteboard-animation", "hypit"]),
-=======
   type: z.enum(["seednote", "wechat-article", "wechat-picture", "montage", "whiteboard-animation", "hypit"]),
->>>>>>> codex/tasks-infinite-scroll-review
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_capability_key: z.string().max(50).optional(),
@@ -281,15 +263,6 @@ export const planSchema = z.object({
 
   if (data.type === "whiteboard-animation") {
     const subtitles = (data.input_attachments ?? []).filter((attachment) => /\.srt$/i.test(attachment.file_name ?? ""))
-<<<<<<< HEAD
-    if (subtitles.length !== 1 || subtitles[0]?.type !== 'text') {
-      ctx.addIssue({ code: "custom", message: "请上传且仅上传一个 .srt 字幕文件", path: ["input_attachments"] })
-    }
-    if ((data.input_attachments ?? []).some((attachment) => attachment.type !== 'text' && attachment.type !== 'image')) {
-      ctx.addIssue({ code: "custom", message: "白板动画仅支持 SRT 字幕和图片风格参考", path: ["input_attachments"] })
-    }
-    if ((data.input_attachments ?? []).filter((attachment) => attachment.type === 'image').length > 1 || (data.input_attachments ?? []).some((attachment) => attachment.type === 'text' && !/\.srt$/i.test(attachment.file_name ?? ""))) {
-=======
     if (subtitles.length !== 1 || (subtitles[0]?.type !== 'text' && subtitles[0]?.type !== 'document')) {
       ctx.addIssue({ code: "custom", message: "请上传且仅上传一个 .srt 字幕文件", path: ["input_attachments"] })
     }
@@ -297,7 +270,6 @@ export const planSchema = z.object({
       ctx.addIssue({ code: "custom", message: "白板动画仅支持 SRT 字幕和图片风格参考", path: ["input_attachments"] })
     }
     if ((data.input_attachments ?? []).filter((attachment) => attachment.type === 'image').length > 1 || (data.input_attachments ?? []).some((attachment) => (attachment.type === 'text' || attachment.type === 'document') && !/\.srt$/i.test(attachment.file_name ?? ""))) {
->>>>>>> codex/tasks-infinite-scroll-review
       ctx.addIssue({ code: "custom", message: "最多上传一张风格参考图", path: ["input_attachments"] })
     }
   }
@@ -306,11 +278,7 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-<<<<<<< HEAD
-  platform: z.enum(["seednote", "article", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit"]),
-=======
   platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit"]).or(z.literal('')),
->>>>>>> codex/tasks-infinite-scroll-review
   agent_config: z.record(z.string(), z.unknown()).default({}),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),

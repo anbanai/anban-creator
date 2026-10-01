@@ -53,10 +53,6 @@ import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFi
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
-<<<<<<< HEAD
-function isPlanType(value: string | undefined): value is PlanType {
-  return value === 'seednote' || value === 'article' || value === 'montage' || value === 'whiteboard-animation' || value === 'hypit'
-=======
 function planTypeForProject(platform: string | undefined, currentType?: PlanType): PlanType | undefined {
   if (platform === 'wechat') {
     if (currentType === 'wechat-article' || currentType === 'wechat-picture') return currentType
@@ -70,7 +66,6 @@ function planTypeForProject(platform: string | undefined, currentType?: PlanType
   // Projects are channel-neutral. A plan still needs a presentation default
   // before its independent Agent entries are selected.
   return 'seednote'
->>>>>>> codex/tasks-infinite-scroll-review
 }
 
 function planEntryForType(type: PlanType, executionProfile: AgentExecutionProfileID) {
@@ -612,11 +607,7 @@ export default function PlansPage() {
   }
 
   function handlePlanSubmit(event?: BaseSyntheticEvent) {
-<<<<<<< HEAD
-		if (imageCapabilityBlocker || !scheduleValid || attachmentController.uploading || attachmentController.hasFailures || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && (montageUploading || !montageReady))) {
-=======
     if (imageCapabilityBlocker || !scheduleValid || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && (montageUploading || !montageReady))) {
->>>>>>> codex/tasks-infinite-scroll-review
       event?.preventDefault()
       return
     }
@@ -672,22 +663,14 @@ export default function PlansPage() {
       }}
       onSubmit={() => handlePlanSubmit()}
       attachmentController={attachmentController}
-<<<<<<< HEAD
-		attachmentPolicy={watchedType === 'whiteboard-animation' ? whiteboardAttachmentPolicy : GENERAL_AGENT_ATTACHMENT_POLICY}
-=======
       attachmentPolicy={watchedType === 'whiteboard-animation' ? whiteboardAttachmentPolicy : GENERAL_AGENT_ATTACHMENT_POLICY}
->>>>>>> codex/tasks-infinite-scroll-review
       attachmentsEnabled={watchedType !== 'hypit'}
       ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
       submitMode="external"
       placeholder={watchedType === 'hypit' ? '描述每次复刻需要保留和替换的内容' : '描述每次计划的创作方向、内容要求和素材使用方式...'}
       submitLabel={editingPlan ? '更新计划' : '创建计划'}
       submitting={isSubmitting}
-<<<<<<< HEAD
-		submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && !montageReady)}
-=======
       submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && !montageReady)}
->>>>>>> codex/tasks-infinite-scroll-review
       attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -1143,13 +1126,8 @@ export default function PlansPage() {
                 || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
                 || attachmentController.uploading
                 || attachmentController.hasFailures
-<<<<<<< HEAD
-				|| (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle)
-				|| (isMontagePlan && (montageUploading || !montageReady))}
-=======
                 || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle)
                 || (isMontagePlan && (montageUploading || !montageReady))}
->>>>>>> codex/tasks-infinite-scroll-review
             >
               {editingPlan ? '更新' : '创建'}
             </Button>

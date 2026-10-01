@@ -4,11 +4,7 @@ import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID } from './agent-profile'
 
-<<<<<<< HEAD
-export type PlanType = 'seednote' | 'article' | 'montage' | 'whiteboard-animation' | 'hypit'
-=======
 export type PlanType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'montage' | 'whiteboard-animation' | 'hypit'
->>>>>>> codex/tasks-infinite-scroll-review
 export type PlanStatus = 'active' | 'paused' | 'completed'
 
 export type PlanEntryStatus = 'active' | 'paused' | 'failed'

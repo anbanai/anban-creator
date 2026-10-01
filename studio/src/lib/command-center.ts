@@ -68,11 +68,7 @@ export interface NextBestAction {
 const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 const LOW_CREDIT_THRESHOLD = 200
 const CRITICAL_CREDIT_THRESHOLD = 50
-<<<<<<< HEAD
-const taskTypes = new Set<TaskType>(['seednote', 'article', 'moments', 'viral_analysis', 'ecommerce', 'montage', 'whiteboard-animation', 'hypit'])
-=======
 const taskTypes = new Set<TaskType>(['seednote', 'wechat-article', 'moments', 'viral_analysis', 'ecommerce', 'montage', 'whiteboard-animation', 'hypit'])
->>>>>>> codex/tasks-infinite-scroll-review
 const creationIntents = new Set(['new', 'retry', 'schedule'])
 
 function readinessStatus(ready?: boolean | null, legacyKnown?: boolean): ReadinessStatus {

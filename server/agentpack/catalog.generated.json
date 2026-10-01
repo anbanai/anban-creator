@@ -1324,12 +1324,6 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-<<<<<<< HEAD
-      "digest": "0dcc8378c007199414eef22f5b8ea4cbf3ef485181e46ea437729a7c52b06dcf"
-    },
-    {
-      "id": "whiteboard-animation",
-=======
       "digest": "d9dc62e952730271ed0a072246f34c3255e54228e42eabcc6e5992eaf7a61d45"
     },
     {
@@ -1691,7 +1685,6 @@
     {
       "id": "whiteboard-animation",
       "channel": "whiteboard-animation",
->>>>>>> codex/tasks-infinite-scroll-review
       "version": "2.0.2",
       "kind": "managed",
       "display_name": "白板动画",
@@ -1704,14 +1697,7 @@
         "max_turns": 120
       },
       "bindings": {
-<<<<<<< HEAD
-        "project_platforms": [
-          "whiteboard-animation"
-        ],
-        "task_types": [
-=======
         "task_kinds": [
->>>>>>> codex/tasks-infinite-scroll-review
           "whiteboard-animation"
         ]
       },
@@ -1836,11 +1822,7 @@
       "ui": {
         "renderer": "custom:whiteboard-animation"
       },
-<<<<<<< HEAD
-      "digest": "b0a204cdc45a547a2e43c1bd27b79157fb94e95087b6f56277eb0fdf579f6c26"
-=======
       "digest": "fb696ae564e003425c4571eefe808edf8dbb67f771ccbc0c1bf0bd4d8769cf63"
->>>>>>> codex/tasks-infinite-scroll-review
     }
   ]
 }

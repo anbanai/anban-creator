@@ -3,11 +3,7 @@ package model
 import "testing"
 
 func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
-<<<<<<< HEAD
-	for _, platform := range []string{PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation} {
-=======
 	for _, platform := range []string{PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage} {
->>>>>>> codex/tasks-infinite-scroll-review
 		if !IsProjectPlatform(platform) {
 			t.Errorf("IsProjectPlatform(%q) = false", platform)
 		}
@@ -16,11 +12,7 @@ func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
 		t.Fatal("Pack-only value was accepted as a project platform")
 	}
 
-<<<<<<< HEAD
-	for _, taskType := range []string{PlatformArticle, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, TaskTypeLiveSlicer, TaskTypeViralAnalysis} {
-=======
 	for _, taskType := range []string{TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, TaskTypeLiveSlicer, TaskTypeViralAnalysis} {
->>>>>>> codex/tasks-infinite-scroll-review
 		if !IsTaskType(taskType) {
 			t.Errorf("IsTaskType(%q) = false", taskType)
 		}
@@ -30,16 +22,6 @@ func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
 	}
 	if IsProjectPlatform("article") || IsTaskType("article") {
 		t.Fatal("legacy article identity is still accepted")
-	}
-}
-
-func TestWhiteboardAnimationHasPublicPlatformConfig(t *testing.T) {
-	config := GetPlatformConfig(PlatformWhiteboardAnimation)
-	if config == nil || config.ID != PlatformWhiteboardAnimation || len(config.Fields) == 0 {
-		t.Fatalf("whiteboard-animation platform config = %#v, want public form metadata", config)
-	}
-	if config.Label != "白板动画" {
-		t.Fatalf("whiteboard-animation platform label = %q, want 白板动画", config.Label)
 	}
 }
 

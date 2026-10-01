@@ -354,13 +354,9 @@ claude:
     wechat: "${WECHAT_RUNTIME_IMAGE:-creator-agent-wechat:latest}"
     seednote: "${SEEDNOTE_RUNTIME_IMAGE:-creator-agent-seednote:latest}"
     montage: "${MONTAGE_RUNTIME_IMAGE:-creator-agent-montage:latest}"
-<<<<<<< HEAD
-    whiteboard-animation: "${WHITEBOARD_ANIMATION_RUNTIME_IMAGE:-creator-agent-whiteboard-animation:latest}"
-=======
     profile: "${PROFILE_RUNTIME_IMAGE:-creator-agent-profile:latest}"
     whiteboard-animation: "${WHITEBOARD_ANIMATION_RUNTIME_IMAGE:-creator-agent-whiteboard-animation:latest}"
     feedback: "${FEEDBACK_RUNTIME_IMAGE:-creator-agent-feedback:latest}"
->>>>>>> codex/tasks-infinite-scroll-review
   execution_token_secret: "runtime-smoke-execution-token-secret-32-bytes-minimum"
   agent_server_url: "http://server:8080"
   plugin_dir: "/anbanai"

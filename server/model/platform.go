@@ -144,11 +144,7 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-<<<<<<< HEAD
-	order := []string{PlatformSeednote, PlatformMoments, PlatformArticle, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit}
-=======
 	order := []string{PlatformSeednote, PlatformMoments, PlatformWechat, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit}
->>>>>>> codex/tasks-infinite-scroll-review
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {
