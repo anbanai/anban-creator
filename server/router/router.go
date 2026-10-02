@@ -47,6 +47,7 @@ type Services struct {
 	WechatAnalyticsHandler       *handler.WechatAnalyticsHandler
 	WechatAnalyticsImportHandler *handler.WechatAnalyticsImportHandler
 	WechatPublicationHandler     *handler.WechatPublicationHandler
+	ChannelsAnalyticsHandler     *handler.ChannelsAnalyticsHandler
 	AgentHandler                 *handler.AgentHandler
 	AgentProfileHandler          *handler.AgentProfileHandler
 	AgentPackHandler             *handler.AgentPackHandler
@@ -362,6 +363,10 @@ func NewRouter(svc *Services) *fiber.App {
 		}
 		if svc.WechatAnalyticsHandler != nil {
 			apiV1.Get("/tasks/:id/wechat-analytics", svc.WechatAnalyticsHandler.GetTaskAnalytics)
+		}
+		if svc.ChannelsAnalyticsHandler != nil {
+			apiV1.Get("/tasks/:id/channels-analytics", svc.ChannelsAnalyticsHandler.GetTaskAnalytics)
+			apiV1.Post("/tasks/:id/channels-analytics/bind", svc.ChannelsAnalyticsHandler.BindTask)
 		}
 		apiV1.Delete("/tasks/:id", svc.TaskHandler.Delete)
 		apiV1.Post("/tasks/:id/cancel", svc.TaskHandler.Cancel)

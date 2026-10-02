@@ -69,6 +69,16 @@ func TestNew_SeednoteTrackingRepositories(t *testing.T) {
 	}
 }
 
+func TestNew_ChannelsTrackingRepositories(t *testing.T) {
+	repo := New(setupTestDB(t))
+	if repo.ChannelsTrackings() == nil {
+		t.Fatal("ChannelsTrackings() should not be nil")
+	}
+	if repo.ChannelsMetricSnapshots() == nil {
+		t.Fatal("ChannelsMetricSnapshots() should not be nil")
+	}
+}
+
 func TestSeednoteTrackingRepository_CRUD(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)

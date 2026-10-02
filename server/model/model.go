@@ -42,6 +42,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&WechatAnalyticsImportBatch{},
 		&WechatAnalyticsImportRow{},
 		&WechatAnalyticsSnapshot{},
+		&ChannelsVideoTracking{},
+		&ChannelsMetricSnapshot{},
 		&Template{},
 		&ImageAnalysisJob{},
 		&ViralAnalysis{},

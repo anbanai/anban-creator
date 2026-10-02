@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge'
 import { SignedImage } from '@/components/ui/SignedImage'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
+import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
 import { TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
@@ -716,6 +717,10 @@ export default function TaskDetailPage() {
 
           {task.type === 'seednote' && task.status === 'completed' && (
             <SeednoteAnalyticsPanel taskId={task.id} />
+          )}
+
+          {task.type === 'montage' && task.status === 'completed' && (
+            <ChannelsAnalyticsPanel taskId={task.id} />
           )}
         </div>
 

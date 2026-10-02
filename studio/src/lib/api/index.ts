@@ -9,6 +9,7 @@ import { usageApi } from './usage'
 import { feedbackApi } from './feedback'
 import { seednoteAnalyticsApi } from './seednote-analytics'
 import { wechatAnalyticsApi } from './wechat-analytics'
+import { channelsAnalyticsApi } from './channels-analytics'
 import { templatesApi } from './templates'
 import { postersApi } from './posters'
 import { viralAnalysesApi } from './viral-analyses'
@@ -40,6 +41,7 @@ export const api = {
   feedback: feedbackApi,
   seednoteAnalytics: seednoteAnalyticsApi,
   wechatAnalytics: wechatAnalyticsApi,
+  channelsAnalytics: channelsAnalyticsApi,
   templates: templatesApi,
   posters: postersApi,
   viralAnalyses: viralAnalysesApi,

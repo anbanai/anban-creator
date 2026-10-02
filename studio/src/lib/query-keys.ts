@@ -24,6 +24,7 @@ export const queryKeys = {
     files: (id: string) => ['task-files', id] as const,
     feedback: (id: string) => ['task-feedback', id] as const,
     seednoteAnalytics: (id: string) => ['task', id, 'seednote-analytics'] as const,
+    channelsAnalytics: (id: string) => ['task', id, 'channels-analytics'] as const,
   },
   seednoteImport: {
     batches: (projectId: string) => ['seednote-import-batches', projectId] as const,
