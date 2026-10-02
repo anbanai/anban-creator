@@ -50,7 +50,8 @@ make server-run               # Build and run server with config
 make server-dev               # Run server via go run (development)
 make server-test              # Run server tests (go -C server test -v ./...)
 
-make docker-agent-image       # Build minimal Article Agent image
+make docker-wechat-article-agent-image # Build minimal WeChat article Agent image
+make docker-wechat-picture-agent-image # Build WeChat picture Agent image
 make docker-seednote-agent-image # Build independent Seednote workflow image
 make docker-montage-agent-image  # Build Montage image (OpenMontage + Remotion + ffmpeg)
 make docker-server-image      # Build server Docker image (Go binary)

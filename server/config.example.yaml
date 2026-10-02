@@ -345,12 +345,12 @@ claude:
   runtime_images:
     wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}"
     wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"
-    seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"
-    montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"
+    seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"
+    montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"
     moments: "${ANBAN_AGENT_IMAGE_MOMENTS:-creator-agent-moments:latest}"
     ecommerce: "${ANBAN_AGENT_IMAGE_ECOMMERCE:-creator-agent-ecommerce:latest}"
-    profile: "${ANBAN_AGENT_IMAGE_PROFILE}"
-    feedback: "${ANBAN_AGENT_IMAGE_FEEDBACK}"
+    profile: "${ANBAN_AGENT_IMAGE_PROFILE:-creator-agent-profile:latest}"
+    feedback: "${ANBAN_AGENT_IMAGE_FEEDBACK:-creator-agent-feedback:latest}"
     whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
     hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
   # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。

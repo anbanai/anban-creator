@@ -23,7 +23,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(root, "CLAUDE.md"),
 		filepath.Join(root, "harness", "README.md"),
-		filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat"),
+		filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-article"),
 		filepath.Join(root, "deploy/docker/Dockerfile.server"),
 		filepath.Join(root, "studio", "src", "pages", "PluginsPage.tsx"),
 		filepath.Join(root, "studio", "public", "claude", "index.html"),

@@ -90,7 +90,7 @@ spec:
             - name: ANBAN_AGENT_NAMESPACE
               value: ${namespace}
             - name: ANBAN_AGENT_IMAGE_WECHAT_ARTICLE
-              value: ${wechat_agent_image_repo}
+              value: ${wechat_article_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_WECHAT_PICTURE
               value: ${wechat_picture_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_SEEDNOTE

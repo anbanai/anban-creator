@@ -161,7 +161,7 @@ func TestRuntimeSmokeGeneratedServerConfigUsesProfileEnvs(t *testing.T) {
 
 func TestArticleDockerfileVerifiesManagedBootstrapContract(t *testing.T) {
 	repoRoot := runtimeSmokeRepoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "Dockerfile.agent-wechat"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "Dockerfile.agent-wechat-article"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,7 +674,7 @@ func TestRuntimeSmokeMakeTargetDelegatesBuildsToDockerOnlyScript(t *testing.T) {
 			t.Errorf("Makefile contains unsupported runtime smoke indirection %q", forbidden)
 		}
 	}
-	for _, dockerfile := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, dockerfile := range []string{"Dockerfile.agent-wechat-article", "Dockerfile.agent-wechat-picture", "Dockerfile.agent-moments", "Dockerfile.agent-ecommerce", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		if !strings.Contains(script, "docker build") || !strings.Contains(script, dockerfile) {
 			t.Errorf("runtime smoke script does not own Docker build for %s", dockerfile)
 		}

@@ -166,7 +166,7 @@ func TestHumanizerIsDeferredUntilAgentsNeedIt(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"Dockerfile.agent-wechat-article", "Dockerfile.agent-wechat-picture", "Dockerfile.agent-moments", "Dockerfile.agent-ecommerce", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		dockerfile := readRepoFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, want := range []string{
 			"COPY harness/ /anbanai/",

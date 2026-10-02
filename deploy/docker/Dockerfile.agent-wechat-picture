@@ -1,3 +1,7 @@
+# WeChat picture runtime for managed profile `wechat-picture`.
+# Content runtimes share one system dependency profile: Node + the managed
+# bootstrap bundle + the canonical plugin tree. Each profile keeps its own
+# image identity and Dockerfile so packs never inherit another pack's runtime.
 FROM node:bookworm-slim AS builder
 
 WORKDIR /app/anban-agent

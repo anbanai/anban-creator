@@ -208,7 +208,7 @@ func TestDockerRuntimeSpecEmitsExplicitHTTPBootstrapTrustOnlyForHTTP(t *testing.
 
 func TestAgentImagesPrecreateWorkloadSecretDirectory(t *testing.T) {
 	const contract = "install -d -m 0700 -o 1000 -g 1000 /run/secrets/anban"
-	for _, name := range []string{"wechat", "seednote", "montage"} {
+	for _, name := range []string{"wechat-article", "wechat-picture", "moments", "ecommerce", "seednote", "montage"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join("..", "..", "deploy", "docker", "Dockerfile.agent-"+name)
 			raw, err := os.ReadFile(path)

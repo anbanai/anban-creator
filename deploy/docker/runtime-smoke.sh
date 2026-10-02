@@ -492,13 +492,16 @@ runtime_smoke_main() {
   MONTAGE_RUNTIME_IMAGE=creator-agent-montage:latest
   MOMENTS_RUNTIME_IMAGE=creator-agent-moments:latest
   ECOMMERCE_RUNTIME_IMAGE=creator-agent-ecommerce:latest
-  ARTICLE_DOCKERFILE=Dockerfile.agent-wechat
+  WECHAT_ARTICLE_DOCKERFILE=Dockerfile.agent-wechat-article
+  WECHAT_PICTURE_DOCKERFILE=Dockerfile.agent-wechat-picture
   SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote
   MONTAGE_DOCKERFILE=Dockerfile.agent-montage
-  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$WECHAT_ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$WECHAT_PICTURE_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$MOMENTS_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$ECOMMERCE_RUNTIME_IMAGE" "$REPO_ROOT"
+  MOMENTS_DOCKERFILE=Dockerfile.agent-moments
+  ECOMMERCE_DOCKERFILE=Dockerfile.agent-ecommerce
+  docker build -f "$REPO_ROOT/deploy/docker/$WECHAT_ARTICLE_DOCKERFILE" -t "$WECHAT_ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$WECHAT_PICTURE_DOCKERFILE" -t "$WECHAT_PICTURE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$MOMENTS_DOCKERFILE" -t "$MOMENTS_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$ECOMMERCE_DOCKERFILE" -t "$ECOMMERCE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
 

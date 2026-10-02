@@ -339,7 +339,7 @@ func makeVariableAssignments(text, variable string) []string {
 
 func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 	root := repositoryRoot(t)
-	articlePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat")
+	articlePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-article")
 	seednotePath := filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote")
 	article := readTextFile(t, articlePath)
 	seednote := readTextFile(t, seednotePath)
@@ -376,7 +376,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 
 func TestDockerRuntimeProfiles(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"deploy/docker/Dockerfile.agent-wechat", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage"} {
+	for _, name := range []string{"deploy/docker/Dockerfile.agent-wechat-article", "deploy/docker/Dockerfile.agent-wechat-picture", "deploy/docker/Dockerfile.agent-moments", "deploy/docker/Dockerfile.agent-ecommerce", "deploy/docker/Dockerfile.agent-seednote", "deploy/docker/Dockerfile.agent-montage"} {
 		path := filepath.Join(root, name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
@@ -533,7 +533,7 @@ func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
 }
 
 func TestArticleAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
-	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-wechat")
+	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-wechat-article")
 	body := readTextFile(t, path)
 	from := strings.Index(body, "FROM node:bookworm-slim")
 	if from < 0 {
@@ -576,7 +576,7 @@ func TestDockerRuntimeAgentImageAndKubernetesJobAgreeOnNumericIdentity(t *testin
 		t.Fatalf("Job identity = %d:%d, want numeric 1000:1000", kubernetesAgentUID, kubernetesAgentGID)
 	}
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage", "Dockerfile.agent-hypit"} {
+	for _, name := range []string{"Dockerfile.agent-wechat-article", "Dockerfile.agent-wechat-picture", "Dockerfile.agent-moments", "Dockerfile.agent-ecommerce", "Dockerfile.agent-seednote", "Dockerfile.agent-montage", "Dockerfile.agent-hypit"} {
 		path := filepath.Join(root, "deploy", "docker", name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
@@ -621,7 +621,7 @@ func TestDockerRuntimeAgentSourceUsesFixedOneShotIdentity(t *testing.T) {
 
 func TestDockerRuntimeAgentLoadsImmutablePluginDirectly(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"Dockerfile.agent-wechat-article", "Dockerfile.agent-wechat-picture", "Dockerfile.agent-moments", "Dockerfile.agent-ecommerce", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		path := filepath.Join(root, "deploy", "docker", name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
@@ -649,7 +649,7 @@ func TestDockerRuntimeAgentLoadsImmutablePluginDirectly(t *testing.T) {
 }
 
 func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {
-	body := readTextFile(t, filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-wechat"))
+	body := readTextFile(t, filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-wechat-article"))
 	for _, want := range []string{
 		`find /anbanai -type l -print -quit`,
 		`chown -R root:root /anbanai`,
@@ -658,12 +658,12 @@ func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {
 		`CMD ["job"]`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("deploy/docker/Dockerfile.agent-wechat missing immutable one-shot contract %q", want)
+			t.Fatalf("deploy/docker/Dockerfile.agent-wechat-article missing immutable one-shot contract %q", want)
 		}
 	}
 	for _, forbidden := range []string{`CMD ["sleep", "infinity"]`, `USER root\nWORKDIR /workspace`} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("deploy/docker/Dockerfile.agent-wechat retains reusable runtime contract %q", forbidden)
+			t.Fatalf("deploy/docker/Dockerfile.agent-wechat-article retains reusable runtime contract %q", forbidden)
 		}
 	}
 }
@@ -688,7 +688,7 @@ func TestDockerignoreExcludesLargeNonRuntimeTrees(t *testing.T) {
 
 func TestAgentDockerfilesAreCentralized(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, name := range []string{"Dockerfile.agent-wechat", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
+	for _, name := range []string{"Dockerfile.agent-wechat-article", "Dockerfile.agent-wechat-picture", "Dockerfile.agent-moments", "Dockerfile.agent-ecommerce", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		if _, err := os.Stat(filepath.Join(root, "deploy", "docker", name)); err != nil {
 			t.Fatalf("deploy/docker/%s must exist: %v", name, err)
 		}
@@ -732,7 +732,19 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		contains []string
 	}{
 		{
-			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat"),
+			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-article"),
+			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+		},
+		{
+			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-picture"),
+			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+		},
+		{
+			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-moments"),
+			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+		},
+		{
+			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-ecommerce"),
 			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
 		},
 		{
@@ -791,12 +803,15 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	root := repositoryRoot(t)
 	got := trackedDockerfiles(t, root)
 	want := []string{
+		"deploy/docker/Dockerfile.agent-ecommerce",
 		"deploy/docker/Dockerfile.agent-feedback",
 		"deploy/docker/Dockerfile.agent-hypit",
+		"deploy/docker/Dockerfile.agent-moments",
 		"deploy/docker/Dockerfile.agent-montage",
 		"deploy/docker/Dockerfile.agent-profile",
 		"deploy/docker/Dockerfile.agent-seednote",
-		"deploy/docker/Dockerfile.agent-wechat",
+		"deploy/docker/Dockerfile.agent-wechat-article",
+		"deploy/docker/Dockerfile.agent-wechat-picture",
 		"deploy/docker/Dockerfile.agent-whiteboard-animation",
 		"deploy/docker/Dockerfile.server",
 		"deploy/docker/Dockerfile.sidecar-ilink",
@@ -960,7 +975,10 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-ecommerce-agent-image:",
 		"docker-wechat-article-agent-image:",
 		"docker-wechat-picture-agent-image:",
-		"docker build -f deploy/docker/Dockerfile.agent-wechat -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",
 		"--build-arg OPENMONTAGE_REPO=\"$(OPENMONTAGE_SOURCE_REPO)\"",
@@ -1070,8 +1088,8 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		for _, want := range []string{
 			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
 			"wechat-article: \"${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}\"",
-			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE}\"",
-			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE}\"",
+			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}\"",
+			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}\"",
 			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}\"",
 			"pids_limit: 512",
 		} {

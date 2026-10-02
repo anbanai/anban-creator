@@ -181,10 +181,11 @@ docker-logs:
 
 # Build the minimal Article Agent image.
 docker-wechat-article-agent-image:
-	@docker build -f deploy/docker/Dockerfile.agent-wechat -t $(WECHAT_ARTICLE_AGENT_IMAGE) .
+	@docker build -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .
 
+# Build the WeChat picture Agent image.
 docker-wechat-picture-agent-image:
-	@docker build -f deploy/docker/Dockerfile.agent-wechat -t $(WECHAT_PICTURE_AGENT_IMAGE) .
+	@docker build -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .
 
 # Build the independent Seednote workflow image.
 docker-seednote-agent-image:
@@ -201,11 +202,13 @@ docker-montage-agent-image:
 		-t $(MONTAGE_AGENT_IMAGE) . && \
 		echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
 
+# Build the Moments Agent image.
 docker-moments-agent-image:
-	@docker build -f deploy/docker/Dockerfile.agent-wechat -t $(MOMENTS_AGENT_IMAGE) .
+	@docker build -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .
 
+# Build the Ecommerce Agent image.
 docker-ecommerce-agent-image:
-	@docker build -f deploy/docker/Dockerfile.agent-wechat -t $(ECOMMERCE_AGENT_IMAGE) .
+	@docker build -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .
 
 # Build the minimal dedicated Profile Agent runtime.
 docker-profile-agent-image:

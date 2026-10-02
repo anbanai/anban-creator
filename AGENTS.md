@@ -85,7 +85,8 @@ The Studio build runs `tsc -b && vite build`.
 ```bash
 make docker-up
 make docker-down
-make docker-agent-image
+make docker-wechat-article-agent-image
+make docker-wechat-picture-agent-image
 make docker-seednote-agent-image
 make docker-montage-agent-image
 make docker-hypit-agent-image
@@ -95,18 +96,18 @@ make docker-server-image
 
 All repository-owned Docker build definitions live under `deploy/docker/`; keep
 the repository root as the build context. Agent profiles use independent
-`Dockerfile.agent-wechat`, `Dockerfile.agent-seednote`, and
-`Dockerfile.agent-montage` files rather than stages inherited from one business
-image.
+`Dockerfile.agent-<profile>` files rather than stages inherited from one
+business image.
 
 The managed runtime uses an independently tagged image for every Agent Pack:
 `creator-agent-wechat-article`, `creator-agent-wechat-picture`,
 `creator-agent-seednote`, `creator-agent-montage`, and specialist workflow images.
-Dockerfiles may be reused when system dependencies match, but runtime profiles and
-image identities remain isolated. `creator-agent-hypit` is reserved for video
-replication from unmodified official Hypit source. Seednote
-Seednote research flows through authenticated Anban Server MCP tools backed by
-the separately deployed `sidecar-seednote`. Keep the canonical
+Name every runtime variable after its profile, so `ANBAN_AGENT_IMAGE_<PROFILE>`
+and the Kubernetes `${<profile>_agent_image_repo}` substitution stay in a
+one-to-one mapping with `claude.runtime_images.<profile>`.
+`creator-agent-hypit` is reserved for video replication from unmodified official
+Hypit source. Seednote research flows through authenticated Anban Server MCP
+tools backed by the separately deployed `sidecar-seednote`. Keep the canonical
 plugin tree intact in every image; image selection controls system dependencies,
 not which Skills are distributed.
 
