@@ -12,9 +12,9 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.284",
-    "@anthropic-ai/sdk": "0.129.0",
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.288",
+    "@anthropic-ai/sdk": "0.131.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1",
     "zod": "4.6.5"
