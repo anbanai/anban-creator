@@ -41,8 +41,6 @@ type Repository interface {
 	WechatMetricSnapshots() WechatMetricSnapshotRepository
 	WechatAnalyticsImports() WechatAnalyticsImportRepository
 	WechatCapabilities() WechatCapabilityRepository
-	ChannelsTrackings() ChannelsTrackingRepository
-	ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository
 	Templates() TemplateRepository
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
@@ -427,22 +425,6 @@ type WechatCapabilityRepository interface {
 	Upsert(ctx context.Context, capability *model.WechatAccountCapability) error
 }
 
-type ChannelsTrackingRepository interface {
-	Create(ctx context.Context, tracking *model.ChannelsVideoTracking) error
-	FindByTaskID(ctx context.Context, taskID string) (*model.ChannelsVideoTracking, error)
-	FindByID(ctx context.Context, id string) (*model.ChannelsVideoTracking, error)
-	FindDue(ctx context.Context, now time.Time, limit int) ([]*model.ChannelsVideoTracking, error)
-	TryClaimCapture(ctx context.Context, id, token string, now, until time.Time) (bool, error)
-	ReleaseCaptureClaim(ctx context.Context, id, token string) error
-	Update(ctx context.Context, tracking *model.ChannelsVideoTracking) error
-}
-
-type ChannelsMetricSnapshotRepository interface {
-	UpsertByTrackingAndDate(ctx context.Context, snapshot *model.ChannelsMetricSnapshot) error
-	FindByTaskID(ctx context.Context, taskID string) ([]*model.ChannelsMetricSnapshot, error)
-	DeleteByTrackingID(ctx context.Context, trackingID string) error
-}
-
 // TopicPoolRepository provides access to the topic_pool table.
 type TopicPoolRepository interface {
 	Create(ctx context.Context, topic *model.TopicPool) error
@@ -536,8 +518,6 @@ type repository struct {
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
 	wechatAnalyticsImports  WechatAnalyticsImportRepository
 	wechatCapabilities      WechatCapabilityRepository
-	channelsTrackings       ChannelsTrackingRepository
-	channelsMetricSnapshots ChannelsMetricSnapshotRepository
 	templates               TemplateRepository
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
@@ -579,8 +559,6 @@ func New(db *gorm.DB) Repository {
 	wechatMetricSnapshots := newWechatMetricSnapshotRepository(db)
 	wechatAnalyticsImports := newWechatAnalyticsImportRepository(db)
 	wechatCapabilities := newWechatCapabilityRepository(db)
-	channelsTrackings := newChannelsTrackingRepository(db)
-	channelsMetricSnapshots := newChannelsMetricSnapshotRepository(db)
 	templates := newTemplateRepository(db)
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
@@ -624,8 +602,6 @@ func New(db *gorm.DB) Repository {
 		wechatMetricSnapshots:   wechatMetricSnapshots,
 		wechatAnalyticsImports:  wechatAnalyticsImports,
 		wechatCapabilities:      wechatCapabilities,
-		channelsTrackings:       channelsTrackings,
-		channelsMetricSnapshots: channelsMetricSnapshots,
 		templates:               templates,
 		viralAnalyses:           viralAnalyses,
 		posterTasks:             posterTasks,
@@ -684,16 +660,12 @@ func (r *repository) WechatAnalyticsImports() WechatAnalyticsImportRepository {
 	return r.wechatAnalyticsImports
 }
 func (r *repository) WechatCapabilities() WechatCapabilityRepository { return r.wechatCapabilities }
-func (r *repository) ChannelsTrackings() ChannelsTrackingRepository  { return r.channelsTrackings }
-func (r *repository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
-	return r.channelsMetricSnapshots
-}
-func (r *repository) Templates() TemplateRepository              { return r.templates }
-func (r *repository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
-func (r *repository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
-func (r *repository) AgentFeedbacks() AgentFeedbackRepository    { return r.agentFeedbacks }
-func (r *repository) FeedbackLoop() FeedbackLoopRepository       { return r.feedbackLoop }
-func (r *repository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
+func (r *repository) Templates() TemplateRepository                  { return r.templates }
+func (r *repository) ViralAnalyses() ViralAnalysisRepository         { return r.viralAnalyses }
+func (r *repository) PosterTasks() PosterTaskRepository              { return r.posterTasks }
+func (r *repository) AgentFeedbacks() AgentFeedbackRepository        { return r.agentFeedbacks }
+func (r *repository) FeedbackLoop() FeedbackLoopRepository           { return r.feedbackLoop }
+func (r *repository) ContentMetadata() ContentMetadataRepository     { return r.contentMetadata }
 
 func (r *repository) TopicPools() TopicPoolRepository         { return r.topicPools }
 func (r *repository) TrendSnapshots() TrendSnapshotRepository { return r.trendSnapshots }
@@ -759,8 +731,6 @@ type txRepository struct {
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
 	wechatAnalyticsImports  WechatAnalyticsImportRepository
 	wechatCapabilities      WechatCapabilityRepository
-	channelsTrackings       ChannelsTrackingRepository
-	channelsMetricSnapshots ChannelsMetricSnapshotRepository
 	templates               TemplateRepository
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
@@ -806,8 +776,6 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		wechatMetricSnapshots:   newWechatMetricSnapshotRepository(tx),
 		wechatAnalyticsImports:  newWechatAnalyticsImportRepository(tx),
 		wechatCapabilities:      newWechatCapabilityRepository(tx),
-		channelsTrackings:       newChannelsTrackingRepository(tx),
-		channelsMetricSnapshots: newChannelsMetricSnapshotRepository(tx),
 		templates:               newTemplateRepository(tx),
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
@@ -870,16 +838,12 @@ func (r *txRepository) WechatAnalyticsImports() WechatAnalyticsImportRepository 
 	return r.wechatAnalyticsImports
 }
 func (r *txRepository) WechatCapabilities() WechatCapabilityRepository { return r.wechatCapabilities }
-func (r *txRepository) ChannelsTrackings() ChannelsTrackingRepository  { return r.channelsTrackings }
-func (r *txRepository) ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository {
-	return r.channelsMetricSnapshots
-}
-func (r *txRepository) Templates() TemplateRepository              { return r.templates }
-func (r *txRepository) ViralAnalyses() ViralAnalysisRepository     { return r.viralAnalyses }
-func (r *txRepository) PosterTasks() PosterTaskRepository          { return r.posterTasks }
-func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository    { return r.agentFeedbacks }
-func (r *txRepository) FeedbackLoop() FeedbackLoopRepository       { return r.feedbackLoop }
-func (r *txRepository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
+func (r *txRepository) Templates() TemplateRepository                  { return r.templates }
+func (r *txRepository) ViralAnalyses() ViralAnalysisRepository         { return r.viralAnalyses }
+func (r *txRepository) PosterTasks() PosterTaskRepository              { return r.posterTasks }
+func (r *txRepository) AgentFeedbacks() AgentFeedbackRepository        { return r.agentFeedbacks }
+func (r *txRepository) FeedbackLoop() FeedbackLoopRepository           { return r.feedbackLoop }
+func (r *txRepository) ContentMetadata() ContentMetadataRepository     { return r.contentMetadata }
 
 func (r *txRepository) TopicPools() TopicPoolRepository         { return r.topicPools }
 func (r *txRepository) TrendSnapshots() TrendSnapshotRepository { return r.trendSnapshots }

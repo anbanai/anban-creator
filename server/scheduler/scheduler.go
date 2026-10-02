@@ -19,7 +19,6 @@ const (
 	TypePlanTrigger                = "plan:trigger"
 	TypeSeednoteCaptureMetrics     = "seednote:capture_metrics"
 	TypeWechatCaptureMetrics       = "wechat:capture_metrics"
-	TypeChannelsCaptureMetrics     = "channels:capture_metrics"
 	TypeWechatPublicationPoll      = "wechat:publication_poll"
 	TypeWechatPublicationReconcile = "wechat:publication_reconcile"
 	TypeImageAnalyze               = "image:analyze"
@@ -233,7 +232,6 @@ type PlanTriggerHandler func(ctx context.Context, planID string) error
 // SeednoteTrackingHandler is the function signature for SeedNote tracking jobs.
 type SeednoteTrackingHandler func(ctx context.Context, trackingID string) error
 type WechatTrackingHandler func(ctx context.Context, trackingID string) error
-type ChannelsTrackingHandler func(ctx context.Context, trackingID string) error
 type WechatPublicationPollHandler func(ctx context.Context, publicationID string) error
 type WechatPublicationReconcileHandler func(ctx context.Context, projectID string) error
 
@@ -248,7 +246,6 @@ func NewTaskProcessor(
 	planHandler PlanTriggerHandler,
 	seednoteCaptureHandler SeednoteTrackingHandler,
 	wechatCaptureHandler WechatTrackingHandler,
-	channelsCaptureHandler ChannelsTrackingHandler,
 	redisAddr, redisPassword string,
 	redisDB int,
 	concurrency int,
@@ -311,18 +308,6 @@ func NewTaskProcessor(
 		return wechatCaptureHandler(ctx, trackingID)
 	})
 
-	mux.HandleFunc(TypeChannelsCaptureMetrics, func(ctx context.Context, t *asynq.Task) error {
-		trackingID, err := parseSeednoteTrackingPayload(t.Payload())
-		if err != nil {
-			logger.Error().Err(err).Msg("failed to unmarshal WeChat Channels capture payload")
-			return err
-		}
-		logger.Info().Str("tracking_id", trackingID).Msg("processing WeChat Channels capture metrics task")
-		if channelsCaptureHandler == nil {
-			return fmt.Errorf("WeChat Channels capture handler unavailable")
-		}
-		return channelsCaptureHandler(ctx, trackingID)
-	})
 	if len(publicationHandlers) > 0 {
 		handlers := publicationHandlers[0]
 		mux.HandleFunc(TypeWechatPublicationPoll, func(ctx context.Context, t *asynq.Task) error {

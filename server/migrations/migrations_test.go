@@ -602,3 +602,27 @@ func TestAgentProfileEnvsQuoteExpiryIsNarrow(t *testing.T) {
 		}
 	}
 }
+
+func TestChannelsVideoAnalyticsRemovalMigration(t *testing.T) {
+	raw, err := os.ReadFile("20261002_drop_channels_video_analytics.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"DROP TABLE IF EXISTS `channels_metric_snapshots`",
+		"DROP TABLE IF EXISTS `channels_video_trackings`",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("channels-video removal migration missing %q", required)
+		}
+	}
+	if strings.Index(sql, "DROP TABLE IF EXISTS `channels_metric_snapshots`") > strings.Index(sql, "DROP TABLE IF EXISTS `channels_video_trackings`") {
+		t.Fatal("channels-video removal migration must drop the snapshot table before its tracking table")
+	}
+	for _, forbidden := range []string{"CREATE TABLE", "INSERT INTO", "UPDATE `", "DELETE FROM"} {
+		if strings.Contains(strings.ToUpper(sql), strings.ToUpper(forbidden)) {
+			t.Fatalf("channels-video removal migration contains %q", forbidden)
+		}
+	}
+}

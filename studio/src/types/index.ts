@@ -114,14 +114,6 @@ export type {
   WechatAnalyticsOverview,
 } from './wechat-analytics-import'
 
-export type {
-  ChannelsAnalytics,
-  ChannelsMetricInfo,
-  ChannelsMetricSeriesItem,
-  ChannelsTrackingInfo,
-  ChannelsTrackingStatus,
-} from './channels-analytics'
-
 // Timeline
 export type { TimelineItemType, TimelineItem, TimelineResponse } from './timeline'
 
