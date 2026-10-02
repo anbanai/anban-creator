@@ -974,7 +974,7 @@ function requiredMCPTools(taskType: string): string[] {
 	if (taskType === "profile_analysis") return ["get_project_profile", "submit_profile_result"];
   if (taskType === "seednote") return ["analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback"];
   if (taskType === "viral_analysis") return ["get_project_profile", "list_project_titles", "submit_agent_feedback"];
-  if (taskType === "montage") return ["analyze_image", "generate_image", "get_project_profile", "submit_agent_feedback"];
+  if (taskType === "montage") return ["analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"];
   return [];
 }
 

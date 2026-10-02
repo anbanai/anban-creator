@@ -509,6 +509,11 @@ func main() {
 		projectSvc.SetImageAnalysisService(imageAnalysisSvc)
 		templateSvc.SetImageAnalysisService(imageAnalysisSvc)
 	}
+	var videoUnderstandingClient service.LLMClient
+	if cfg.VideoUnderstanding.BaseURL != "" && cfg.VideoUnderstanding.Key != "" && cfg.VideoUnderstanding.Model != "" {
+		videoUnderstandingClient = service.NewOpenAILLMClient(cfg.VideoUnderstanding.BaseURL, cfg.VideoUnderstanding.Key, cfg.VideoUnderstanding.Model, cfg.VideoUnderstanding.Timeout)
+		log.Info().Str("endpoint", cfg.VideoUnderstanding.BaseURL).Str("model", cfg.VideoUnderstanding.Model).Msg("video understanding LLM client initialized")
+	}
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
 		aiEntrySvc = service.NewAIEntryService(repo, taskSvc, serverInternalLLMClient, fixedBilling.Cost, service.AIEntryModelConfig{
@@ -745,6 +750,10 @@ func main() {
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
 			}, log),
+			TaskVideoOperationsSvc: service.NewTaskVideoOperationsService(repo, store, videoUnderstandingClient, fixedBilling.Cost, service.TaskVideoOperationsConfig{
+				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
+				UnderstandingModel:    cfg.VideoUnderstanding.Model,
+			}, log),
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)
@@ -753,6 +762,7 @@ func main() {
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
 			Bool("image_understanding", imageUnderstandingClient != nil).
+			Bool("video_understanding", videoUnderstandingClient != nil).
 			Bool("content_render_tools", contentRenderSvc != nil).
 			Bool("publishing_tools", publishingSvc != nil).
 			Msg("MCP handler initialized with tools (official SDK)")
