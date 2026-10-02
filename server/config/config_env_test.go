@@ -112,16 +112,3 @@ claude:
 		t.Errorf("jwt.secret_key = %q, want \"real-secret\" (env must not override without ${...})", cfg.JWT.SecretKey)
 	}
 }
-
-func TestTingWuConfigDoesNotRequireCredentialsWhenUnused(t *testing.T) {
-	cfg := &Config{
-		Database: DatabaseConfig{DSN: "root:pass@tcp(localhost:3306)/test"},
-		JWT:      JWTConfig{SecretKey: "secret", AccessExpiry: "24h", RefreshExpiry: "168h"},
-		Claude:   validClaudeConfigForTest(),
-	}
-	cfg.applyDefaults()
-
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("validate without TingWu config: %v", err)
-	}
-}

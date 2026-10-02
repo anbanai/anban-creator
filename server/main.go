@@ -505,11 +505,6 @@ func main() {
 		projectSvc.SetImageAnalysisService(imageAnalysisSvc)
 		templateSvc.SetImageAnalysisService(imageAnalysisSvc)
 	}
-	var videoUnderstandingClient service.LLMClient
-	if cfg.VideoUnderstanding.BaseURL != "" && cfg.VideoUnderstanding.Key != "" && cfg.VideoUnderstanding.Model != "" {
-		videoUnderstandingClient = service.NewOpenAILLMClient(cfg.VideoUnderstanding.BaseURL, cfg.VideoUnderstanding.Key, cfg.VideoUnderstanding.Model, cfg.VideoUnderstanding.Timeout)
-		log.Info().Str("endpoint", cfg.VideoUnderstanding.BaseURL).Str("model", cfg.VideoUnderstanding.Model).Msg("video understanding LLM client initialized")
-	}
 	var aiEntrySvc *service.AIEntryService
 	if repo != nil && taskSvc != nil {
 		aiEntrySvc = service.NewAIEntryService(repo, taskSvc, serverInternalLLMClient, fixedBilling.Cost, service.AIEntryModelConfig{
@@ -707,7 +702,6 @@ func main() {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
 		var contentRenderSvc *service.ContentRenderService
-		var liveSliceSvc *service.LiveSliceService
 
 		if store != nil {
 			imageSvc = service.NewImageService(defaultImageAPI, store, repo, log)
@@ -719,20 +713,6 @@ func main() {
 		if repo != nil {
 			contentRenderSvc = service.NewContentRenderService(repo, log)
 		}
-		if cfg.TingWu.Complete() || store != nil {
-			var err error
-			liveSliceSvc, err = service.NewLiveSliceServiceWithSecret(cfg.TingWu, store, log, cfg.Claude.ExecutionTokenSecret)
-			if err != nil {
-				log.Warn().Err(err).Msg("live-slice service unavailable")
-			} else {
-				log.Info().
-					Bool("llm_configured", false).
-					Bool("tingwu_configured", cfg.TingWu.Complete()).
-					Bool("storage_configured", store != nil).
-					Msg("live-slice service initialized")
-			}
-		}
-
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
 			TaskSvc:                taskSvc,
@@ -743,10 +723,7 @@ func main() {
 			ContentRenderSvc:       contentRenderSvc,
 			PublishingSvc:          publishingSvc,
 			WechatPublicationSvc:   wechatPublicationSvc,
-			LiveSliceSvc:           liveSliceSvc,
 			SeednoteCapabilitySvc:  service.NewSeednoteCapabilityService(seednoteClient, seednoteMonitor),
-			FileUploadSvc:          service.NewFileUploadService(store),
-			MediaPipelineSvc:       service.NewMediaPipelineService(store, cfg.TingWu.Complete()),
 			TopicPoolSvc:           topicPoolSvc,
 			TrendSvc:               trendSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
@@ -760,10 +737,6 @@ func main() {
 				UnderstandingProvider: cfg.ImageUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.ImageUnderstanding.Model,
 			}, log),
-			TaskVideoOperationsSvc: service.NewTaskVideoOperationsService(repo, store, videoUnderstandingClient, fixedBilling.Cost, service.TaskVideoOperationsConfig{
-				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
-				UnderstandingModel:    cfg.VideoUnderstanding.Model,
-			}, log),
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)
@@ -772,9 +745,7 @@ func main() {
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
 			Bool("image_understanding", imageUnderstandingClient != nil).
-			Bool("video_understanding", videoUnderstandingClient != nil).
 			Bool("content_render_tools", contentRenderSvc != nil).
-			Bool("live_slice_tools", liveSliceSvc != nil).
 			Bool("publishing_tools", publishingSvc != nil).
 			Msg("MCP handler initialized with tools (official SDK)")
 	} else {

@@ -165,7 +165,6 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 	root := repoRoot(t)
 	expected := map[string][]string{
 		"ecommerce":      {"ecommerce-product-analysis", "ecommerce-copywriting", "ecommerce-visual-design", "ecommerce-platform-specs"},
-		"live-slicer":    {"live-slice", "capcut-draft"},
 		"moments":        {"moments"},
 		"hypit":          {},
 		"montage":        {"montage"},

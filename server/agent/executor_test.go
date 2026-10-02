@@ -329,7 +329,6 @@ func TestTaskTypeToAgent(t *testing.T) {
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
-		{model.TaskTypeLiveSlicer, "live-slicer"},
 		{model.TaskTypeViralAnalysis, "seednote"},
 		{"unknown", "seednote"},
 	}
@@ -390,7 +389,6 @@ func TestDefaultMaxTurnsUsesManagedRuntimeBudget(t *testing.T) {
 		{model.PlatformMoments, 25},
 		{model.PlatformEcommerce, 90},
 		{model.PlatformMontage, 40},
-		{model.TaskTypeLiveSlicer, 40},
 	}
 	for _, tt := range tests {
 		t.Run(tt.taskType, func(t *testing.T) {

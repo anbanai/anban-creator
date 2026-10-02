@@ -82,8 +82,6 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		{path: "harness/agents/ecommerce.toml", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
 		{path: "harness/agents/montage.md", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
 		{path: "harness/agents/montage.toml", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
-		{path: "harness/agents/live-slicer.md", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
-		{path: "harness/agents/live-slicer.toml", outputs: []string{"output/summary.md", "output/clip-manifest.json", "output/clip-plan.json"}},
 	}
 	for _, workflow := range workflowOutputs {
 		relativePath := workflow.path
@@ -147,7 +145,6 @@ func TestNativeAgentPairsDeclareSameExplicitOutputPaths(t *testing.T) {
 	for _, agentName := range []string{
 		"wechat-article",
 		"ecommerce",
-		"live-slicer",
 		"moments",
 		"montage",
 		"seednote",

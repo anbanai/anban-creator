@@ -18,7 +18,6 @@ type BootstrapCommit = {
 export async function prepareWorkspace(workspace: string, taskType: string, runtimeAdapter: BootstrapResponse["runtime_adapter"]): Promise<void> {
   await ensureRealDirectory(workspace, "workspace root", false);
   await ensureRealDirectory(join(workspace, "output"), "output", true);
-  if (taskType === "live-slicer") await ensureRealDirectory(join(workspace, "output", "exports", ".parts"), "live-slicer parts", true);
   if (runtimeAdapter === "openmontage") await prepareMontageWorkspace(workspace);
 }
 

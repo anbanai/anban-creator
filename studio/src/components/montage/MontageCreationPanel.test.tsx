@@ -27,7 +27,7 @@ const capabilities: MontagePipelineCapability[] = [
   },
   {
     key: 'clip-factory', display_name: '长视频拆条', description: '从直播、播客或访谈中提炼短视频',
-    best_for: ['直播切片', '播客拆条'], source_hint: '需要一段长视频或音频作为拆条来源',
+    best_for: ['长视频拆条', '播客拆条'], source_hint: '需要一段长视频或音频作为拆条来源',
     output_hint: '多条可独立发布的短视频', source_requirement: 'video_or_audio', output_mode: 'multiple',
     recommended_duration_seconds: 45,
   },

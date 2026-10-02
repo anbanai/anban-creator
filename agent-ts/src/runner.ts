@@ -964,7 +964,6 @@ function requiredSkills(taskType: string): string[] {
   if (taskType === "viral_analysis") return ["anban:seednote-research", "anban:seednote-viral-analysis"];
   if (taskType === "wechat-article") return ["anban:humanizer", "anban:portrait-cover-design"];
   if (taskType === "ecommerce") return ["anban:humanizer"];
-  if (taskType === "live-slicer") return ["anban:live-slice", "anban:capcut-draft"];
   if (taskType === "montage") return ["anban:montage", "anban:portrait-cover-design"];
   if (taskType === "hypit") return ["anban:portrait-cover-design"];
   return [];
@@ -975,7 +974,7 @@ function requiredMCPTools(taskType: string): string[] {
 	if (taskType === "profile_analysis") return ["get_project_profile", "submit_profile_result"];
   if (taskType === "seednote") return ["analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback"];
   if (taskType === "viral_analysis") return ["get_project_profile", "list_project_titles", "submit_agent_feedback"];
-  if (taskType === "montage") return ["analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"];
+  if (taskType === "montage") return ["analyze_image", "generate_image", "get_project_profile", "submit_agent_feedback"];
   return [];
 }
 

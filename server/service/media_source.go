@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -207,4 +208,26 @@ func mediaSourceFilename(rawURL string) string {
 		return "media"
 	}
 	return name
+}
+
+func audioContentType(ext string) string {
+	switch ext {
+	case ".mp3":
+		return "audio/mpeg"
+	case ".m4a", ".mp4":
+		return "audio/mp4"
+	case ".wav":
+		return "audio/wav"
+	case ".aac":
+		return "audio/aac"
+	case ".flac":
+		return "audio/flac"
+	case ".ogg":
+		return "audio/ogg"
+	default:
+		if t := mime.TypeByExtension(ext); t != "" {
+			return t
+		}
+		return "application/octet-stream"
+	}
 }

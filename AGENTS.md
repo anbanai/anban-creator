@@ -195,7 +195,6 @@ Current major agents:
 
 - `article`: end-to-end WeChat article creation.
 - `seednote`: Seednote-style note creation, clone/rewrite, visual generation, and archival.
-- `live-slicer`: live video transcription, segmentation, ffmpeg export, and optional CapCut draft generation.
 
 Development rules:
 
@@ -203,8 +202,6 @@ Development rules:
 - Use `make agent-pack-new`, then `make agent-pack-generate` and `make agent-pack-check`. Managed scaffolds start with plugin-only surfaces; add `project`, `task`, or `plan` only after the typed Go/Studio business fields, Schema validation, billing operation/SKUs, and service/UI surface are implemented.
 - Runtime profiles express dependency images; runtime adapters express exceptional workspace layouts. Keep ordinary workflow sequencing in Agents/Skills, not adapters or MCP handlers.
 - Agents must use MCP tools directly, not ad hoc HTTP clients.
-- Local media work in live-slicer uses `ffmpeg` and `ffprobe`.
-- Do not reintroduce legacy Python helper scripts for live slicing.
 - Keep generated task artifacts explicit and file-backed, especially JSON returned by MCP tools.
 - Skills must stay host-neutral. Put unavoidable host syntax in the native manifest, MCP, Hook, Agent, or install adapter rather than duplicating a Skill tree.
 - Before adding or modifying a Skill, read [`docs/ANBAN-SKILL-SPEC.md`](docs/ANBAN-SKILL-SPEC.md); it is the canonical Anban contract for Claude-compatible frontmatter, progressive disclosure, file-backed outputs, failure handling, and Skill/Server boundaries.
@@ -218,8 +215,7 @@ Use table-driven Go tests for behavior with multiple cases. Prefer `httptest` fo
 Useful targeted commands:
 
 ```bash
-cd server && go test ./mcp -run TestLiveSliceSkillFiles -count=1
-cd server && go test ./service -run TestBuildLive -count=1
+cd server && go test ./mcp -run TestEveryMCPHandlerHasReviewedCapabilityBoundary -count=1
 cd studio && bun run test -- src/lib/vite-config.test.ts
 ```
 

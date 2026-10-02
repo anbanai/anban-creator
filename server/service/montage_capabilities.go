@@ -145,7 +145,7 @@ var montagePipelineCapabilities = map[string]MontagePipelineCapability{
 	},
 	"clip-factory": {
 		Key: "clip-factory", DisplayName: "长视频拆条", Description: "从直播、播客或访谈中提炼短视频",
-		BestFor:    []string{"直播切片", "播客拆条", "访谈精选"},
+		BestFor:    []string{"长视频拆条", "播客拆条", "访谈精选"},
 		SourceHint: "需要一段长视频或音频作为拆条来源", OutputHint: "多条可独立发布的短视频",
 		SourceRequirement: MontageSourceRequirementVideoOrAudio, OutputMode: MontageOutputModeMultiple, RecommendedDurationSeconds: 45,
 	},

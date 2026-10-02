@@ -162,19 +162,3 @@ func TestSkillBoundariesStayHostNeutral(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func TestLiveSlicerPresignedUploadBoundary(t *testing.T) {
-	root := filepath.Join(repoRoot(t), "harness")
-	skill := readRepoFile(t, filepath.Join(root, "skills", "live-slice", "SKILL.md"))
-	if strings.Contains(skill, "curl") {
-		t.Fatal("live-slice Skill must delegate presigned upload to its Agent/runtime adapter")
-	}
-	for _, rel := range []string{"packs/live-slicer/agent.claude.md", "packs/live-slicer/agent.codex.toml"} {
-		body := readRepoFile(t, filepath.Join(root, rel))
-		for _, term := range []string{"prepare_file_upload", "curl", "audio_upload_failed"} {
-			if !strings.Contains(body, term) {
-				t.Fatalf("%s missing runtime upload contract %q", rel, term)
-			}
-		}
-	}
-}

@@ -179,13 +179,11 @@ func TestActiveRuntimeFeedbackScoresAreSerialized(t *testing.T) {
 	paths := []string{
 		"harness/agents/moments.md",
 		"harness/agents/seednote.md",
-		"harness/agents/live-slicer.md",
 		"harness/agents/ecommerce.md",
 		"harness/agents/wechat-article.md",
 		"harness/agents/montage.md",
 		"harness/agents/moments.toml",
 		"harness/agents/seednote.toml",
-		"harness/agents/live-slicer.toml",
 		"harness/agents/ecommerce.toml",
 		"harness/agents/wechat-article.toml",
 		"harness/agents/montage.toml",

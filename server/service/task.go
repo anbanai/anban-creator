@@ -485,8 +485,6 @@ func resolveTaskIdentity(project *model.Project, p CreateManualParams) (agentID,
 			agentID = model.AgentIDSeednote
 		case model.TaskTypeProfileAnalysis:
 			agentID = model.AgentIDProfile
-		case model.TaskTypeLiveSlicer:
-			agentID = "live-slicer"
 		}
 	}
 	if channel == "" {
@@ -506,8 +504,6 @@ func resolveTaskIdentity(project *model.Project, p CreateManualParams) (agentID,
 			taskKind = model.TaskTypeViralAnalysis
 		case model.TaskTypeProfileAnalysis:
 			taskKind = model.TaskTypeProfileAnalysis
-		case model.TaskTypeLiveSlicer:
-			taskKind = model.TaskKindLiveSlicer
 		case model.PlatformSeednote, model.PlatformMontage, model.PlatformWhiteboardAnimation:
 			taskKind = model.TaskKindContentGeneration
 		case model.PlatformHypit:

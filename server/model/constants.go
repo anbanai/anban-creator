@@ -70,7 +70,6 @@ const (
 	ChannelHypit         = "hypit"
 	ChannelMoments       = "moments"
 	ChannelEcommerce     = "ecommerce"
-	ChannelLiveSlicer    = "live-slicer"
 	ChannelProfile       = "profile-analysis"
 	ChannelMontage       = "montage"
 	ChannelFeedback      = "feedback"
@@ -82,14 +81,12 @@ const (
 	TaskKindContentGeneration = "content_generation"
 	TaskKindViralAnalysis     = "viral_analysis"
 	TaskKindProfileAnalysis   = "profile_analysis"
-	TaskKindLiveSlicer        = "live_slicer"
 	TaskKindFeedbackAnalysis  = "feedback_analysis"
 )
 
 // Managed task types that are not project platforms (legacy aliases retained
 // for historical rows and migration readers).
 const (
-	TaskTypeLiveSlicer      = "live-slicer"
 	TaskTypeViralAnalysis   = "viral_analysis"
 	TaskTypeProfileAnalysis = "profile_analysis"
 )
@@ -178,8 +175,8 @@ func DefaultImageRatioForChannel(channel string) string {
 
 func IsTaskKind(value string) bool {
 	switch value {
-	case TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis, TaskKindLiveSlicer,
-		TaskTypeLiveSlicer, TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit,
+	case TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis,
+		TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit,
 		TaskTypeWechatArticle, TaskTypeWechatPicture:
 		return true
 	default:
@@ -247,7 +244,7 @@ func IsAdminOnlyProjectPlatform(value string) bool {
 
 // IsTaskType reports whether value is an explicitly implemented task type.
 func IsTaskType(value string) bool {
-	return value == TaskTypeWechatArticle || value == TaskTypeWechatPicture || IsProjectPlatform(value) || value == TaskTypeLiveSlicer || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis
+	return value == TaskTypeWechatArticle || value == TaskTypeWechatPicture || IsProjectPlatform(value) || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis
 }
 
 func IsMontagePlatform(platform string) bool {
@@ -390,7 +387,6 @@ func NormalizeTier(s string) Tier {
 // Provider-cost operation identities for understanding tools.
 const (
 	OperationImageUnderstanding = "image_understanding"
-	OperationVideoUnderstanding = "video_understanding"
 )
 
 // Viral analysis status constants.

@@ -202,7 +202,6 @@ describe("validateManagedInit", () => {
     const taskTypes = [
       { taskType: "wechat-article", tool: "get_project_profile", skills: ["anban:humanizer", "anban:portrait-cover-design"] },
       { taskType: "ecommerce", tool: "get_project_profile", skills: ["anban:humanizer"] },
-      { taskType: "live-slicer", tool: "analyze_video", skills: ["anban:live-slice", "anban:capcut-draft"] },
       { taskType: "moments", tool: "get_project_profile", skills: [] },
     ];
     for (const fixture of taskTypes) {
@@ -220,7 +219,6 @@ describe("validateManagedInit", () => {
   test("requires the complete Montage cover runtime surface", () => {
     const requiredTools = [
       "analyze_image",
-      "analyze_video",
       "generate_image",
       "get_project_profile",
       "submit_agent_feedback",

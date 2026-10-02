@@ -586,6 +586,40 @@ func (s *TaskImageOperationsService) recordAnalysisCost(ctx context.Context, tas
 	})
 }
 
+type understandingCostRequest struct {
+	TaskID, Provider, Model, ProviderRequestID, MediaKind string
+	Usage                                                 *srvconfig.TokenUsage
+}
+
+func recordUnderstandingCost(ctx context.Context, costs UnderstandingCostRecorder, logger *zerolog.Logger, req understandingCostRequest) {
+	if costs == nil || req.Provider == "" || req.Model == "" {
+		return
+	}
+	var err error
+	if req.Usage == nil || (req.Usage.InputTokens <= 0 && req.Usage.CachedInputTokens <= 0 && req.Usage.CacheReadInputTokens <= 0 && req.Usage.CacheCreationInputTokens <= 0 && req.Usage.OutputTokens <= 0) {
+		_, err = costs.RecordMediaUnreconciled(ctx, RecordMediaUnreconciledRequest{
+			TaskID: req.TaskID, Provider: req.Provider, Model: req.Model,
+			ProviderRequestID: req.ProviderRequestID, MediaKind: req.MediaKind,
+			ReasonCode: model.BillingExecutionCostReasonMissingProviderUsage,
+		})
+	} else {
+		cacheRead := req.Usage.CacheReadInputTokens
+		if cacheRead == 0 {
+			cacheRead = req.Usage.CachedInputTokens
+		}
+		_, err = costs.RecordProviderTokenUsage(ctx, RecordProviderTokenCostRequest{
+			TaskID: req.TaskID, Provider: req.Provider, Model: req.Model,
+			ProviderRequestID: req.ProviderRequestID, CatalogID: costs.CatalogID(), IdempotencyKey: req.ProviderRequestID,
+			Usage:   TokenUsage{Input: req.Usage.InputTokens, CacheRead: cacheRead, CacheCreation: req.Usage.CacheCreationInputTokens, Output: req.Usage.OutputTokens},
+			UsageAt: time.Now().UTC(),
+			Source:  string(model.BillingProviderCostSourceProviderResponse),
+		})
+	}
+	if err != nil && logger != nil {
+		logger.Error().Err(err).Str("task_id", req.TaskID).Str("provider_request_id", req.ProviderRequestID).Msg("record understanding provider cost; operation result remains valid")
+	}
+}
+
 func downloadTaskAnalysisImage(ctx context.Context, imageURL string, maxSize int64) ([]byte, error) {
 	client := &http.Client{
 		Timeout:       15 * time.Second,

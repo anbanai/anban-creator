@@ -17,7 +17,6 @@ import (
 func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 	agents := []string{
 		"ecommerce",
-		"live-slicer",
 		"moments",
 		"montage",
 		"seednote",
@@ -41,7 +40,7 @@ func TestClaudeAgentsOwnFinalFeedback(t *testing.T) {
 
 func TestClaudeAgentFeedbackCallsMatchMCPSchema(t *testing.T) {
 	agents := []string{
-		"ecommerce", "live-slicer", "moments", "montage",
+		"ecommerce", "moments", "montage",
 		"wechat-article", "wechat-picture", "seednote",
 	}
 	allowedArgs := map[string]bool{
@@ -346,11 +345,6 @@ func TestClaudeAgentFeedbackFollowsDeliveryReport(t *testing.T) {
 			name:         "wechat-article",
 			anchor:       "**产出**：`output/draft.json`",
 			summaryTerms: []string{"所选模板", "交付包状态", "内容审核通过率"},
-		},
-		{
-			name:         "live-slicer",
-			anchor:       "若流程中断，报告要包含：",
-			summaryTerms: []string{"成功/失败切片数", "输出目录", "可恢复 warning"},
 		},
 	}
 
@@ -700,7 +694,6 @@ func TestCodexDynamicLifecycleBoundary(t *testing.T) {
 	deliveryAnchors := map[string]string{
 		"wechat-article": "完成后交付摘要",
 		"ecommerce":      "交付校验",
-		"live-slicer":    "完成后交付摘要",
 		"moments":        "交付校验",
 		"seednote":       "交付校验",
 	}

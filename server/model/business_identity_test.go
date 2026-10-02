@@ -12,7 +12,7 @@ func TestBusinessIdentitySetsRejectUndeclaredValues(t *testing.T) {
 		t.Fatal("Pack-only value was accepted as a project platform")
 	}
 
-	for _, taskType := range []string{TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, TaskTypeLiveSlicer, TaskTypeViralAnalysis} {
+	for _, taskType := range []string{TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, TaskTypeViralAnalysis} {
 		if !IsTaskType(taskType) {
 			t.Errorf("IsTaskType(%q) = false", taskType)
 		}

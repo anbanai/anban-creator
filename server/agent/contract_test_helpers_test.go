@@ -32,10 +32,8 @@ func managedRequiredMCPTools(taskType string) []string {
 		return []string{"analyze_image", "claim_topic", "finalize_task_title", "generate_image", "get_project_profile", "list_project_titles", "submit_agent_feedback"}
 	case model.TaskTypeViralAnalysis:
 		return []string{"get_project_profile", "list_project_titles", "submit_agent_feedback"}
-	case model.TaskTypeLiveSlicer:
-		return []string{"analyze_video", "build_live_clip_manifest", "build_live_clip_plan", "build_live_subject_clip_plan", "create_live_analysis_task", "get_media_pipeline_status", "prepare_file_upload", "query_live_analysis_task", "submit_agent_feedback"}
 	case model.PlatformMontage:
-		return []string{"analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"}
+		return []string{"analyze_image", "generate_image", "get_project_profile", "submit_agent_feedback"}
 	default:
 		return nil
 	}

@@ -85,7 +85,6 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		{taskType: model.PlatformEcommerce, profile: "ecommerce", image: "creator-agent-ecommerce:latest"},
 		{taskType: model.PlatformSeednote, profile: "seednote", image: "creator-agent-seednote:latest"},
 		{taskType: model.PlatformMontage, profile: "montage", image: "creator-agent-montage:latest"},
-		{taskType: model.TaskTypeLiveSlicer, profile: "montage", image: "creator-agent-montage:latest"},
 		{taskType: model.TaskTypeViralAnalysis, profile: "seednote", image: "creator-agent-seednote:latest"},
 	} {
 		if got := images.ForTask(test.taskType); got.Profile != test.profile || got.Image != test.image {

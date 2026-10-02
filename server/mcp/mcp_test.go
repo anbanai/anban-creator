@@ -289,8 +289,6 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 		{name: "history rejects null target", toolName: "recompute_content_tags", arguments: `{"task_id":"task-1","execution_id":null}`},
 		{name: "history rejects numeric target", toolName: "recompute_agent_feedback", arguments: `{"task_id":"task-1","execution_id":123}`},
 		{name: "optional project selector rejects null", toolName: "set_task_progress_plan", arguments: `{"task_id":"task-1","project_id":null}`},
-		{name: "prepare upload must bind project", toolName: "prepare_file_upload", arguments: `{"project_id":"project-2","task_id":"task-1"}`},
-		{name: "prepare upload must name task", toolName: "prepare_file_upload", arguments: `{"project_id":"project-1"}`},
 		{name: "user-wide task enumeration is denied", toolName: "list_tasks", arguments: `{"project_id":"project-1"}`},
 		{name: "user-wide project enumeration is denied", toolName: "list_projects", arguments: `{}`},
 		{name: "managed draft publication is denied", toolName: "create_draft", arguments: `{"project_id":"project-1","task_id":"task-1","articles":[{"title":"Title","content":"<p>Body</p>"}]}`},
@@ -522,7 +520,7 @@ func TestMCPHandlerToolsList(t *testing.T) {
 			}
 		}
 	}
-	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "create_draft", "get_media_pipeline_status", "upload_live_audio", "create_live_analysis_task", "build_live_clip_plan", "build_live_subject_clip_plan", "build_live_clip_manifest", "prepare_file_upload"} {
+	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "create_draft"} {
 		if !toolNames[expected] {
 			t.Errorf("expected tool %q not found in tools/list response", expected)
 		}
@@ -732,7 +730,7 @@ func TestMCPLoggingMiddlewareRedactsSignedURLQueries(t *testing.T) {
 	})
 	handler := mcpLoggingMiddleware(inner, &log)
 
-	reqBody := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_live_analysis_task","arguments":{"audio_url":"https://signed.example.com/audio.mp3?Signature=secret&Expires=123","download_url":"https://signed.example.com/dl?token=secret","nested":{"image_url":"https://img.example.com/a.png?x=secret"}}},"id":1}`
+	reqBody := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"analyze_image","arguments":{"image_url":"https://img.example.com/a.png?Signature=secret&Expires=123","source_url":"https://signed.example.com/dl?token=secret","nested":{"preview_url":"https://img.example.com/b.png?x=secret"}}},"id":1}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(reqBody))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -742,9 +740,9 @@ func TestMCPLoggingMiddlewareRedactsSignedURLQueries(t *testing.T) {
 		t.Fatalf("signed URL query leaked in log output: %s", output)
 	}
 	for _, want := range []string{
-		`\"audio_url\":\"https://signed.example.com/audio.mp3?REDACTED\"`,
-		`\"download_url\":\"https://signed.example.com/dl?REDACTED\"`,
 		`\"image_url\":\"https://img.example.com/a.png?REDACTED\"`,
+		`\"source_url\":\"https://signed.example.com/dl?REDACTED\"`,
+		`\"preview_url\":\"https://img.example.com/b.png?REDACTED\"`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("redacted log missing %q: %s", want, output)
@@ -762,7 +760,7 @@ func TestMCPLoggingMiddlewareRedactsMalformedURLQueries(t *testing.T) {
 
 	// The malformed percent escape makes url.Parse fail; credentials must still
 	// not be copied into the request log.
-	reqBody := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_live_analysis_task","arguments":{"audio_url":"https://signed.example.com/audio.mp3?bad=%zz&Signature=secret#fragment"}},"id":1}`
+	reqBody := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"analyze_image","arguments":{"image_url":"https://img.example.com/a.png?bad=%zz&Signature=secret#fragment"}},"id":1}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(reqBody))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -771,7 +769,7 @@ func TestMCPLoggingMiddlewareRedactsMalformedURLQueries(t *testing.T) {
 	if strings.Contains(output, "Signature=secret") || strings.Contains(output, "%zz") {
 		t.Fatalf("malformed signed URL query leaked in log output: %s", output)
 	}
-	if !strings.Contains(output, `\"audio_url\":\"https://signed.example.com/audio.mp3?REDACTED#fragment\"`) {
+	if !strings.Contains(output, `\"image_url\":\"https://img.example.com/a.png?REDACTED#fragment\"`) {
 		t.Fatalf("malformed URL log missing redaction: %s", output)
 	}
 }

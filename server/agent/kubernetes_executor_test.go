@@ -308,7 +308,7 @@ func TestWorkspaceInitScript(t *testing.T) {
 		}
 	}
 	if liveSlicer := kubernetesWorkspaceInitScript(agentpack.AdapterStandard); strings.Contains(liveSlicer, "runtime=/workspace/openmontage") {
-		t.Fatal("standard live-slicer adapter received OpenMontage workspace initialization")
+		t.Fatal("standard adapter received OpenMontage workspace initialization")
 	}
 }
 

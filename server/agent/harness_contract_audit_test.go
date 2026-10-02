@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,8 +50,6 @@ func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 		"harness/packs/wechat-article/agent.claude.md":  {"readiness.status", "blocked", "output/draft.json"},
 		"harness/packs/wechat-article/agent.codex.toml": {"readiness.status", "blocked", "output/draft.json"},
 		"harness/packs/moments/agent.codex.toml":        {"不得询问", "结构化失败"},
-		"harness/packs/live-slicer/agent.claude.md":     {"runtime provides", "ffmpeg", "ffprobe"},
-		"harness/packs/live-slicer/agent.codex.toml":    {"runtime provides", "ffmpeg", "ffprobe"},
 		"harness/packs/seednote/agent.claude.md":        {"viral_analysis", "quality_status=failed", "generate_image"},
 		"harness/packs/seednote/agent.codex.toml":       {"viral_analysis", "quality_status=failed", "generate_image"},
 		"harness/packs/montage/agent.codex.toml":        {"checkpoint", "decision", "output/failure-diagnosis.md", "output/failure-state.json", "recoverable_failure", "invalid_video_aspect_ratio"},
@@ -73,35 +69,5 @@ func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 	moments := readArticleContractFile(t, filepath.Join(root, "harness/packs/moments/agent.codex.toml"))
 	if strings.Contains(moments, "无法判断时向用户列出候选") {
 		t.Fatal("Moments Codex agent must not ask the user to choose a project")
-	}
-}
-
-func TestCapCutTemplatesAreRealAndReferenced(t *testing.T) {
-	root := articleContractRepoRoot(t)
-	body := readArticleContractFile(t, filepath.Join(root, "harness/skills/capcut-draft/SKILL.md"))
-	if strings.Contains(body, "aux_sound_project.json") {
-		t.Fatal("CapCut skill references a missing aux_sound_project.json template")
-	}
-	for _, name := range []string{"draft_info.json", "draft_meta_info.json", "aux_sound_channel.json"} {
-		if !strings.Contains(body, name) {
-			t.Fatalf("CapCut skill does not reference %s", name)
-		}
-	}
-	entries, err := os.ReadDir(filepath.Join(root, "harness/skills/capcut-draft/templates"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(root, "harness/skills/capcut-draft/templates", entry.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var value any
-		if err := json.Unmarshal(data, &value); err != nil {
-			t.Fatalf("template %s is not valid JSON: %v", entry.Name(), err)
-		}
 	}
 }

@@ -50,7 +50,7 @@ func TestPluginAssetsDoNotControlManagedWorkspaceDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, taskType := range []string{"wechat", "seednote", "moments", "ecommerce", "montage", "live-slicer"} {
+	for _, taskType := range []string{"wechat", "seednote", "moments", "ecommerce", "montage"} {
 		if containsString(managedRequiredMCPTools(taskType), "prepare_workspace") {
 			t.Errorf("managed runtime policy for %s names forbidden prepare_workspace tool", taskType)
 		}
@@ -144,7 +144,6 @@ func TestParentPluginContractsDoNotRequireLegacyWorkspaceInstructions(t *testing
 		{path: "server/agent/article_skill_contract_test.go", forbidden: []string{"$DIR/03-article.md", "$DIR/01-research.md", "$DIR/02-outline.md", "$DIR/seo-result.md"}},
 		{path: "server/agent/claude_plugin_best_practices_test.go", forbidden: []string{"$DIR/draft.json"}},
 		{path: "server/mcp/seednote_hook_test.go", forbidden: []string{"$DIR/failure-state.json", "$DIR/content.md", "$DIR/viral-template.json", "$DIR/template-meta.json", "成果目录（`$DIR`）"}},
-		{path: "server/mcp/live_slice_skill_test.go", forbidden: []string{"$DIR/metadata.json", "$DIR/audio.mp3", "$DIR/cover.jpg", "mkdir -p " + `"$(dirname "$OUT")"`}},
 	}
 
 	root := repoRoot(t)

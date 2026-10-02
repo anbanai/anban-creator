@@ -950,8 +950,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 11 {
-		t.Fatalf("Pack count = %d, want 11", len(catalog.Packs))
+	if len(catalog.Packs) != 10 {
+		t.Fatalf("Pack count = %d, want 10", len(catalog.Packs))
 	}
 
 	wantRoutes := map[string]struct {
@@ -967,7 +967,6 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		"ecommerce":            {packID: "ecommerce", profile: "ecommerce", adapter: AdapterStandard},
 		"hypit":                {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
 		"montage":              {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
-		"live-slicer":          {packID: "live-slicer", profile: "montage", adapter: AdapterStandard},
 		"whiteboard-animation": {packID: "whiteboard-animation", profile: "whiteboard-animation", adapter: AdapterStandard},
 	}
 	for taskType, want := range wantRoutes {
@@ -1014,7 +1013,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 
 func TestEmbeddedCatalogResolvesCurrentManagedRoutes(t *testing.T) {
 	catalog := Default()
-	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "live-slicer", "whiteboard-animation"} {
+	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "whiteboard-animation"} {
 		if _, ok := catalog.ForTaskType(taskType); !ok {
 			t.Errorf("embedded Catalog has no route for %q", taskType)
 		}

@@ -107,7 +107,7 @@ export const mockMontageCapabilities: MontageCapabilityListResponse = {
       key: 'clip-factory',
       display_name: '长视频拆条',
       description: '从直播、播客或访谈中提炼短视频',
-      best_for: ['直播切片', '播客拆条', '访谈精选'],
+      best_for: ['长视频拆条', '播客拆条', '访谈精选'],
       source_hint: '需要一段长视频或音频作为拆条来源',
       output_hint: '多条可独立发布的短视频',
       source_requirement: 'video_or_audio',
@@ -275,7 +275,6 @@ export const mockAgentPackCatalog: AgentPackCatalog = {
   packs: [
     managedPack('wechat-article', '微信公众号文章', { projectPlatforms: ['wechat'], taskTypes: ['wechat-article'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
     managedPack('ecommerce', '电商素材', { projectPlatforms: ['ecommerce'], taskTypes: ['ecommerce'] }),
-    managedPack('live-slicer', '直播切片', { taskTypes: ['live-slicer'], surfaces: ['plugin'] }),
     managedPack('moments', '朋友圈素材包', { projectPlatforms: ['moments'], taskTypes: ['moments'] }),
     managedPack('montage', '视频生成', { projectPlatforms: ['montage'], taskTypes: ['montage'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
     managedPack('seednote', '种草笔记', { projectPlatforms: ['seednote'], taskTypes: ['seednote', 'viral_analysis'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
@@ -409,7 +408,7 @@ export const handlers = [
         task_id: 'task-1',
         artifacts: {},
         retake_actions: ['keep', 'fix_in_post', 'edit', 're_roll', 'rewrite'],
-        next_actions: ['continue_editing', 'generate_cover', 'export_capcut_draft'],
+        next_actions: ['continue_editing', 'generate_cover'],
       },
     })
   }),

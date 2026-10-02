@@ -215,8 +215,6 @@ func TaskTypeToAgent(taskType string) string {
 		return "moments"
 	case model.PlatformEcommerce:
 		return "ecommerce"
-	case model.TaskTypeLiveSlicer:
-		return "live-slicer"
 	}
 	agentName, _ := taskTypeToAgentRoute(taskType)
 	return agentName

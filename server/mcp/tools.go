@@ -15,10 +15,6 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
-type TaskVideoAnalyzer interface {
-	Analyze(context.Context, service.AnalyzeTaskVideoRequest) (*service.AnalyzeTaskVideoResult, error)
-}
-
 type TaskImageGenerator interface {
 	Generate(context.Context, service.GenerateTaskImageRequest) (*service.TaskImageAsset, error)
 }
@@ -49,10 +45,7 @@ type Services struct {
 	ContentRenderSvc       *service.ContentRenderService
 	PublishingSvc          *service.PublishingService
 	WechatPublicationSvc   *service.WechatPublicationService
-	LiveSliceSvc           *service.LiveSliceService
 	SeednoteCapabilitySvc  *service.SeednoteCapabilityService
-	FileUploadSvc          *service.FileUploadService
-	MediaPipelineSvc       *service.MediaPipelineService
 	TopicPoolSvc           *service.TopicPoolService
 	TrendSvc               *service.TrendService
 	AgentFeedbackSvc       *service.AgentFeedbackService
@@ -63,7 +56,6 @@ type Services struct {
 	ResourceCatalogSvc     *service.ResourceCatalogService
 	TaskImageSvc           TaskImageGenerator
 	TaskImageOperationsSvc TaskImageOperations
-	TaskVideoOperationsSvc TaskVideoAnalyzer
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -72,15 +64,11 @@ func RegisterTools(server *mcp.Server) {
 	registerTaskTools(server)
 	registerPlanTools(server)
 	registerImageTools(server)
-	registerVideoUnderstandingTools(server)
 	registerContentRenderTools(server)
 	registerPublishingTools(server)
 	registerSeednoteFormatTools(server)
 	registerResourceTools(server)
 	registerSeednoteTools(server)
-	registerMediaPipelineTools(server)
-	registerFileUploadTools(server)
-	registerLiveSliceTools(server)
 	registerTopicPoolTools(server)
 	registerTrendTools(server)
 	registerProgressTools(server)

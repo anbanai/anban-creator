@@ -345,12 +345,11 @@ type executionToolScope struct {
 var executionToolScopes = map[string]executionToolScope{
 	// User-wide enumeration and scheduling are never part of one task's
 	// execution authority.
-	"list_projects":     {Denied: true},
-	"list_tasks":        {Denied: true},
-	"list_plans":        {Denied: true},
-	"create_plan":       {Denied: true},
-	"add_topic":         {Denied: true},
-	"upload_live_audio": {Denied: true},
+	"list_projects": {Denied: true},
+	"list_tasks":    {Denied: true},
+	"list_plans":    {Denied: true},
+	"create_plan":   {Denied: true},
+	"add_topic":     {Denied: true},
 
 	// Project-scoped reads and publication listings are restricted to the
 	// project frozen into the execution token.
@@ -386,26 +385,18 @@ var executionToolScopes = map[string]executionToolScope{
 	"compress_image":                 {RequireTaskID: true},
 	"download_image":                 {RequireProjectID: true, RequireTaskID: true},
 	"analyze_image":                  {RequireProjectID: true, RequireTaskID: true},
-	"analyze_video":                  {RequireProjectID: true, RequireTaskID: true},
 
 	// These tools are deterministic, read-only, or operate on the external
-	// live/Seednote capability already selected for the current execution. The
+	// Seednote capability already selected for the current execution. The
 	// central authorizer still runs before dispatch, so stale executions cannot
 	// use them.
-	"score_article":                {},
-	"export_seednote":              {},
-	"list_resources":               {},
-	"get_resource":                 {},
-	"search_seednote_feeds":        {},
-	"get_seednote_feed_detail":     {},
-	"get_seednote_user_profile":    {},
-	"get_media_pipeline_status":    {},
-	"prepare_file_upload":          {RequireProjectID: true, RequireTaskID: true},
-	"create_live_analysis_task":    {},
-	"query_live_analysis_task":     {},
-	"build_live_clip_plan":         {},
-	"build_live_subject_clip_plan": {},
-	"build_live_clip_manifest":     {},
+	"score_article":             {},
+	"export_seednote":           {},
+	"list_resources":            {},
+	"get_resource":              {},
+	"search_seednote_feeds":     {},
+	"get_seednote_feed_detail":  {},
+	"get_seednote_user_profile": {},
 }
 
 func validateExecutionToolScope(toolName string, arguments map[string]any, projectID, taskID, executionID string) error {
