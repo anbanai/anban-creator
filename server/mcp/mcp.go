@@ -385,7 +385,6 @@ var executionToolScopes = map[string]executionToolScope{
 	"compress_image":                 {RequireTaskID: true},
 	"download_image":                 {RequireProjectID: true, RequireTaskID: true},
 	"analyze_image":                  {RequireProjectID: true, RequireTaskID: true},
-	"analyze_video":                  {RequireProjectID: true, RequireTaskID: true},
 
 	// These tools are deterministic, read-only, or operate on the external
 	// Seednote capability already selected for the current execution. The

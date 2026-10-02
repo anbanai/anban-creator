@@ -27,7 +27,6 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"addTopicHandler":                         "svcs.TopicPoolSvc.Add",
 	"agentFeedbackSubmitHandler":              "svcs.AgentFeedbackSvc.CreateForExecution",
 	"analyzeImageHandler":                     "svcs.TaskImageOperationsSvc.Analyze",
-	"analyzeVideoHandler":                     "svcs.TaskVideoOperationsSvc.Analyze",
 	"claimTopicHandler":                       "svcs.TopicPoolSvc.ClaimTopic",
 	"compressImageHandler":                    "svcs.TaskImageOperationsSvc.Compress",
 	"contentMetadataRecomputeFeedbackHandler": "svcs.ContentMetadataSvc.RecomputeFeedback",

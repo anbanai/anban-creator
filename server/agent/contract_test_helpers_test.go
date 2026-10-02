@@ -33,7 +33,7 @@ func managedRequiredMCPTools(taskType string) []string {
 	case model.TaskTypeViralAnalysis:
 		return []string{"get_project_profile", "list_project_titles", "submit_agent_feedback"}
 	case model.PlatformMontage:
-		return []string{"analyze_image", "analyze_video", "generate_image", "get_project_profile", "submit_agent_feedback"}
+		return []string{"analyze_image", "generate_image", "get_project_profile", "submit_agent_feedback"}
 	default:
 		return nil
 	}
