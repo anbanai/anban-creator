@@ -166,9 +166,9 @@ func (availableRuntimeDispatcher) Scope() string { return "docker" }
 
 func (availableRuntimeDispatcher) ResolveRuntime(taskType string) config.RuntimeImageSelection {
 	return config.RuntimeImages{
-		model.PlatformWechat:   "creator-agent-wechat:test",
-		model.PlatformSeednote: "creator-agent-seednote:test",
-		model.PlatformMontage:  "creator-agent-montage:test",
+		model.TaskTypeWechatArticle: "creator-agent-wechat-article:test",
+		model.PlatformSeednote:      "creator-agent-seednote:test",
+		model.PlatformMontage:       "creator-agent-montage:test",
 	}.ForTask(taskType)
 }
 
