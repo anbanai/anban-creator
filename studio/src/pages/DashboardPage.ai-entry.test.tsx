@@ -365,8 +365,8 @@ describe('DashboardPage AI entry', () => {
     fireEvent.click(submit)
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
-      agent_id: 'channels-video',
-      channel: 'channels-video',
+      agent_id: 'montage',
+      channel: 'montage',
       task_kind: 'content_generation',
       project_id: 'project-5',
       text: '做一条新品发布短片',

@@ -40,10 +40,14 @@ claude:
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
-    wechat: creator-agent-wechat:latest
+    wechat-article: creator-agent-wechat-article:latest
+    wechat-picture: creator-agent-wechat-picture:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    moments: creator-agent-moments:latest
+    ecommerce: creator-agent-ecommerce:latest
     whiteboard-animation: creator-agent-whiteboard-animation:latest
+    hypit: creator-agent-hypit:latest
 `
 
 func validClaudeConfigForTest() ClaudeConfig {
@@ -65,7 +69,7 @@ func validClaudeConfigForTest() ClaudeConfig {
 		},
 		Executor: "docker", ExecutionTokenSecret: "0123456789abcdef0123456789abcdef",
 		RuntimeImages: RuntimeImages{
-			model.PlatformWechat: "creator-agent-wechat:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
+			"wechat-article": "creator-agent-wechat-article:latest", "wechat-picture": "creator-agent-wechat-picture:latest", model.PlatformSeednote: "creator-agent-seednote:latest", model.PlatformMontage: "creator-agent-montage:latest", model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest", "moments": "creator-agent-moments:latest", "ecommerce": "creator-agent-ecommerce:latest", model.PlatformHypit: "creator-agent-hypit:latest", "profile": "creator-agent-profile:latest", "feedback": "creator-agent-feedback:latest",
 		},
 	}
 }

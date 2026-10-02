@@ -73,9 +73,13 @@ claude:
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
-    wechat: creator-agent-wechat:latest
+    wechat-article: creator-agent-wechat-article:latest
+    wechat-picture: creator-agent-wechat-picture:latest
     seednote: creator-agent-seednote:latest
     montage: creator-agent-montage:latest
+    moments: creator-agent-moments:latest
+    ecommerce: creator-agent-ecommerce:latest
+    hypit: creator-agent-hypit:latest
     whiteboard-animation: creator-agent-whiteboard-animation:latest
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {

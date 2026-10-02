@@ -44,7 +44,7 @@ func TestBuildDockerRuntimeSpec(t *testing.T) {
 		ImageConfig: imageConfig,
 	}
 	execution := &model.TaskExecution{
-		ID: "execution-123", TaskID: "task-456", RuntimeImage: "registry.example/creator-agent-wechat@sha256:persisted",
+		ID: "execution-123", TaskID: "task-456", RuntimeImage: "registry.example/creator-agent-wechat-article@sha256:persisted",
 	}
 	task := &model.Task{ID: "task-456", ProjectID: "project-789", UserID: "user-012"}
 

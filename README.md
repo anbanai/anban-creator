@@ -10,10 +10,11 @@ Anban is a Studio-first content creation platform for WeChat articles and Seedno
 - **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
 - **Plugin Assets** — Claude Code and Codex share one plugin source under `harness/`, with native manifests and host adapters for each harness.
 
-Managed execution uses separate `creator-agent-wechat`, `creator-agent-seednote`,
-and `creator-agent-montage` images. They share the same plugin tree while keeping
-the Seednote workflow image independent from the Montage OpenMontage/Remotion/ffmpeg
-profile. 种草笔记 research flows through authenticated Anban Server MCP
+Managed execution uses a separate image identity for every Agent Pack, including
+`creator-agent-wechat-article`, `creator-agent-wechat-picture`,
+`creator-agent-seednote`, and `creator-agent-montage`. Images share the same
+plugin tree and may reuse a Dockerfile when their system dependencies match.
+种草笔记 research flows through authenticated Anban Server MCP
 tools backed by the separately deployed `sidecar-seednote`.
 Their independent build definitions, together with the Server, Studio, and
 sidecar iLink definitions, live in `deploy/docker/` and use the repository root as the
@@ -30,14 +31,15 @@ uploads registered task artifacts back through the Server API.
 The shared scheduler configuration is:
 
 - `ANBAN_AGENT_EXECUTOR`: `docker` or `kubernetes`.
-- `ANBAN_AGENT_IMAGE_WECHAT`: the minimal Article runtime image.
+- `ANBAN_AGENT_IMAGE_WECHAT_ARTICLE`: the WeChat article Agent image.
+- `ANBAN_AGENT_IMAGE_WECHAT_PICTURE`: the WeChat picture Agent image.
 - `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow image; its 种草笔记 research uses authenticated Anban Server MCP tools.
 - `ANBAN_AGENT_IMAGE_MONTAGE`: the OpenMontage, Remotion, and ffmpeg runtime image.
 - `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`: a private value of at least 32 bytes used
   to mint short-lived workload tokens.
 
-The Server never builds missing runtime images. `make docker-up` builds the three
-local runtime images before starting Compose; direct `docker compose up` users
+The Server never builds missing runtime images. `make docker-up` builds the
+configured local Agent images before starting Compose; direct `docker compose` users
 must build or pull them first. Production deployments should publish and select
 immutable image digests so a persisted execution can always resume with the
 same runtime identity.

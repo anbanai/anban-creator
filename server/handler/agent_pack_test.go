@@ -39,14 +39,14 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || len(envelope.Data.Packs) != 12 {
+	if envelope.Code != 0 || len(envelope.Data.Packs) != 11 {
 		t.Fatalf("catalog response = %#v", envelope)
 	}
 	if envelope.Data.Packs[0].ID != "ecommerce" {
 		t.Fatalf("first Pack = %q, want deterministic ecommerce", envelope.Data.Packs[0].ID)
 	}
 	for _, pack := range envelope.Data.Packs {
-		if pack.ID == "hypit" || pack.ID == "channels-video" {
+		if pack.ID == "hypit" {
 			if pack.Kind != "plugin" || !slices.Equal(pack.Surfaces, []string{"plugin"}) || pack.Channel != "" {
 				t.Fatalf("plugin-only Pack exposed as a channel Agent: %#v", pack)
 			}

@@ -473,7 +473,7 @@ func resolveTaskIdentity(project *model.Project, p CreateManualParams) (agentID,
 		case model.PlatformSeednote:
 			agentID = model.AgentIDSeednote
 		case model.PlatformMontage:
-			agentID = model.AgentIDChannelsVideo
+			agentID = model.AgentIDMontage
 		case model.PlatformWhiteboardAnimation:
 			agentID = model.AgentIDWhiteboard
 		case model.PlatformHypit:
@@ -695,7 +695,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			taskType = model.TaskTypeWechatArticle
 		case model.AgentIDSeednote:
 			taskType = model.PlatformSeednote
-		case model.AgentIDChannelsVideo:
+		case model.AgentIDMontage:
 			taskType = model.PlatformMontage
 		}
 	}
@@ -1544,7 +1544,7 @@ func legacyTaskTypeForIdentity(agentID, channel, taskKind string) string {
 		return model.TaskTypeWechatPicture
 	case model.AgentIDSeednote:
 		return model.PlatformSeednote
-	case model.AgentIDChannelsVideo:
+	case model.AgentIDMontage:
 		return model.PlatformMontage
 	case model.AgentIDWhiteboard:
 		return model.PlatformWhiteboardAnimation
@@ -1556,7 +1556,7 @@ func legacyTaskTypeForIdentity(agentID, channel, taskKind string) string {
 		return model.TaskTypeWechatPicture
 	case model.ChannelSeednote:
 		return model.PlatformSeednote
-	case model.ChannelChannelsVideo:
+	case model.ChannelMontage:
 		return model.PlatformMontage
 	case model.ChannelWhiteboard:
 		return model.PlatformWhiteboardAnimation

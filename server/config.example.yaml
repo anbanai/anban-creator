@@ -349,11 +349,14 @@ claude:
   executor: "${ANBAN_AGENT_EXECUTOR}"
   # 失败运行时保留多久供排查（秒），之后由 reconciler 清理。
   runtime_diagnostic_retention_seconds: 600
-  # 所有托管执行器共享同一组 canonical runtime 镜像。
+  # 每个 Agent 使用独立的 canonical runtime 镜像。
   runtime_images:
-    wechat: "${ANBAN_AGENT_IMAGE_WECHAT}"
+    wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}"
+    wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"
     seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"
     montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"
+    moments: "${ANBAN_AGENT_IMAGE_MOMENTS:-creator-agent-moments:latest}"
+    ecommerce: "${ANBAN_AGENT_IMAGE_ECOMMERCE:-creator-agent-ecommerce:latest}"
     profile: "${ANBAN_AGENT_IMAGE_PROFILE}"
     feedback: "${ANBAN_AGENT_IMAGE_FEEDBACK}"
     whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"

@@ -91,7 +91,7 @@ func feedbackAgentNameMatches(expected, supplied string) bool {
 	if expected == supplied {
 		return true
 	}
-	return expected == model.AgentIDChannelsVideo && (supplied == "montage" || supplied == "live-slicer")
+	return expected == model.AgentIDMontage && supplied == model.AgentIDMontage
 }
 
 // FindByTaskID returns all feedback entries for a task.

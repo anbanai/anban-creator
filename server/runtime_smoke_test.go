@@ -299,9 +299,9 @@ query_execution() {
   count=$((count + 1))
   printf '%s' "$count" >"$TEST_STATE_FILE"
   if [[ "$count" == 1 ]]; then
-    printf '%s\n' 'execution-1|1||article|creator-agent-wechat:latest|docker|workload-1|instance-1|running'
+    printf '%s\n' 'execution-1|1||wechat-article|creator-agent-wechat-article:latest|docker|workload-1|instance-1|running'
   else
-    printf '%s\n' 'execution-2|2|execution-1|article|creator-agent-wechat:latest|docker|workload-2|instance-2|running'
+    printf '%s\n' 'execution-2|2|execution-1|wechat-article|creator-agent-wechat-article:latest|docker|workload-2|instance-2|running'
   fi
 }
 row=$(poll_execution_identity "$TEST_TASK_ID" 2 "$TEST_TASK_ID" "$TEST_PROJECT_ID")
@@ -621,7 +621,7 @@ func TestRuntimeSmokeScriptCoversManagedDockerLifecycle(t *testing.T) {
 
 	required := []string{
 		"set -euo pipefail",
-		"docker compose", "up -d", "creator-agent-wechat:latest",
+		"docker compose", "up -d", "creator-agent-wechat-article:latest",
 		"creator-agent-seednote:latest", "creator-agent-montage:latest", "Dockerfile.agent-montage",
 		"/api/v1/auth/register", "/api/admin/billing/topups", "/api/v1/projects", "/api/v1/tasks",
 		"/resume", "runtime_workload", "runtime_image", "/workspace/output/runtime-smoke.txt",

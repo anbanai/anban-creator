@@ -647,7 +647,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-	requiredRuntimeProfiles := []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMontage, model.PlatformWhiteboardAnimation, "profile", "feedback"}
+	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile", "feedback"}
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -659,7 +659,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != model.PlatformWechat && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile" && profile != "feedback" {
+		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile" && profile != "feedback" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -710,10 +710,13 @@ type RuntimeImageSelection struct {
 type RuntimeImages map[string]string
 
 func canonicalRuntimeProfile(taskType string) string {
+	if taskType == model.TaskTypeWechatArticle {
+		return "wechat-article"
+	}
 	if pack, ok := agentpack.Default().ForTaskType(strings.TrimSpace(taskType)); ok {
 		return pack.Runtime.Profile
 	}
-	return model.PlatformWechat
+	return "wechat-article"
 }
 
 func (c RuntimeImages) ForTask(taskType string) RuntimeImageSelection {
@@ -1021,6 +1024,18 @@ func expandEnvVars(data []byte) []byte {
 func (c *Config) applyDefaults() {
 	if c.Claude.RuntimeImages == nil {
 		c.Claude.RuntimeImages = RuntimeImages{}
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["wechat-article"]) == "" {
+		c.Claude.RuntimeImages["wechat-article"] = "creator-agent-wechat-article:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["wechat-picture"]) == "" {
+		c.Claude.RuntimeImages["wechat-picture"] = "creator-agent-wechat-picture:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["moments"]) == "" {
+		c.Claude.RuntimeImages["moments"] = "creator-agent-moments:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["ecommerce"]) == "" {
+		c.Claude.RuntimeImages["ecommerce"] = "creator-agent-ecommerce:latest"
 	}
 	if strings.TrimSpace(c.Claude.RuntimeImages["profile"]) == "" {
 		c.Claude.RuntimeImages["profile"] = "creator-agent-profile:latest"

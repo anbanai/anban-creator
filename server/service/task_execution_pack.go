@@ -31,7 +31,7 @@ func taskExecutionIdentity(task *model.Task) (agentID, channel, taskKind string)
 		case model.PlatformSeednote:
 			agentID = model.AgentIDSeednote
 		case model.PlatformMontage:
-			agentID = model.AgentIDChannelsVideo
+			agentID = model.AgentIDMontage
 		case model.PlatformHypit:
 			agentID = model.AgentIDHypit
 		case model.PlatformWhiteboardAnimation:
@@ -69,11 +69,11 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 			pack, ok = candidate, true
 			agentID = pack.Agent.Name
 		} else if agentID == model.PlatformMontage {
-			pack, ok = agentpack.Default().ForAgent(model.AgentIDChannelsVideo)
-			agentID = model.AgentIDChannelsVideo
+			pack, ok = agentpack.Default().ForAgent(model.AgentIDMontage)
+			agentID = model.AgentIDMontage
 		}
 	}
-	legacyPlugin := ok && pack.Kind == agentpack.KindPlugin && (agentID == model.AgentIDHypit || agentID == model.AgentIDChannelsVideo)
+	legacyPlugin := ok && pack.Kind == agentpack.KindPlugin && (agentID == model.AgentIDHypit || agentID == model.AgentIDMontage)
 	if !ok || pack.Kind != agentpack.KindManaged && !legacyPlugin {
 		return fmt.Errorf("managed Agent %q has no Agent Pack", agentID)
 	}

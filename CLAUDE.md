@@ -112,7 +112,7 @@ make docker-logs              # Follow container logs
 
 ### Agent (`agent-ts/`)
 
-TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes. The server dispatches managed tasks to one of three dependency profiles: `creator-agent-wechat`, `creator-agent-seednote`, or `creator-agent-montage`. All profiles contain the same canonical plugin; only their system runtimes differ.
+TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes. The server dispatches each Agent Pack to its own runtime profile and image identity. Images may share a Dockerfile when dependencies match, while tags and configuration keys remain isolated per Agent.
 
 - `src/main.ts` — Managed `job` lifecycle and terminal finalization
 - `src/runner.ts` — Claude Agent SDK query and stream handling

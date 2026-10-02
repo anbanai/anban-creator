@@ -201,7 +201,9 @@ func migrateLegacyIdentity(value string) (agentID, channel, taskKind string, ok 
 		return model.AgentIDWechatPicture, model.ChannelWechatPicture, model.TaskKindContentGeneration, true
 	case model.TaskTypeViralAnalysis, "viral-analysis":
 		return model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindViralAnalysis, true
-	case "montage", "channels-video", "hypit", "live-slicer", "moments", "ecommerce":
+	case "channels-video":
+		return model.AgentIDMontage, model.ChannelMontage, model.TaskKindContentGeneration, true
+	case "montage", "hypit", "live-slicer", "moments", "ecommerce":
 		return "", "", "", false
 	default:
 		value = strings.TrimSpace(value)

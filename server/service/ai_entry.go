@@ -142,7 +142,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		case model.PlatformSeednote:
 			req.AgentID, req.Channel, req.TaskKind = model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindContentGeneration
 		case model.PlatformMontage:
-			req.AgentID, req.Channel, req.TaskKind = model.AgentIDChannelsVideo, model.ChannelChannelsVideo, model.TaskKindContentGeneration
+			req.AgentID, req.Channel, req.TaskKind = model.AgentIDMontage, model.ChannelMontage, model.TaskKindContentGeneration
 		case model.PlatformHypit:
 			req.AgentID, req.Channel, req.TaskKind = model.AgentIDHypit, model.ChannelHypit, model.PlatformHypit
 		case model.PlatformMoments, model.PlatformEcommerce:
@@ -202,7 +202,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if prompt == "" {
 		return aiEntryNeedsConfiguration("请先描述你想创建的内容。", "/"), nil
 	}
-	if usesImageSettings && imageRatio == "" && req.Channel != model.ChannelChannelsVideo {
+	if usesImageSettings && imageRatio == "" && req.Channel != model.ChannelMontage {
 		imageRatio = normalizeAIEntryImageRatio(intent.ImageRatio)
 	}
 
@@ -241,7 +241,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		}
 	case model.ChannelSeednote:
 		// Seednote uses InputAttachments as its only new per-run reference source.
-	case model.ChannelChannelsVideo:
+	case model.ChannelMontage:
 		params.MontageInput = aiEntryMontageInput(project, prompt)
 	case model.ChannelEcommerce:
 		photos := imageAttachmentURLs(req.Attachments)

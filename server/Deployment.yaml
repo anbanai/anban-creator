@@ -89,12 +89,18 @@ spec:
               value: /var/run/secrets/anban-internal-ca/ca.crt
             - name: ANBAN_AGENT_NAMESPACE
               value: ${namespace}
-            - name: ANBAN_AGENT_IMAGE_WECHAT
+            - name: ANBAN_AGENT_IMAGE_WECHAT_ARTICLE
               value: ${wechat_agent_image_repo}
+            - name: ANBAN_AGENT_IMAGE_WECHAT_PICTURE
+              value: ${wechat_picture_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_SEEDNOTE
               value: ${seednote_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_MONTAGE
               value: ${montage_agent_image_repo}
+            - name: ANBAN_AGENT_IMAGE_MOMENTS
+              value: ${moments_agent_image_repo}
+            - name: ANBAN_AGENT_IMAGE_ECOMMERCE
+              value: ${ecommerce_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_PROFILE
               value: ${profile_agent_image_repo}
             - name: ANBAN_AGENT_IMAGE_FEEDBACK

@@ -19,7 +19,7 @@
       },
       "bindings": {},
       "runtime": {
-        "profile": "wechat",
+        "profile": "ecommerce",
         "adapter": "standard",
         "max_turns": 90
       },
@@ -143,116 +143,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "19b60dd524f1a5c709e78c5f8f676820593c776522b26318bddb885fff6a9254"
-    },
-    {
-      "id": "channels-video",
-      "version": "2.0.4",
-      "kind": "plugin",
-      "display_name": "视频生成",
-      "description": "从素材和业务输入生成最终视频与交付清单。",
-      "agent": {
-        "name": "channels-video",
-        "skills": [
-          "montage",
-          "portrait-cover-design"
-        ],
-        "max_turns": 180
-      },
-      "bindings": {},
-      "runtime": {
-        "profile": "montage",
-        "adapter": "openmontage",
-        "max_turns": 40
-      },
-      "surfaces": [
-        "plugin"
-      ],
-      "features": [
-        "video-generation",
-        "source-assets"
-      ],
-      "billing_operations": {
-        "content_generation": "task.montage"
-      },
-      "artifacts": [
-        {
-          "role": "final_video",
-          "path": "output/final.mp4",
-          "mime_type": "video/mp4",
-          "required": true
-        },
-        {
-          "role": "project_manifest",
-          "path": "output/montage-project.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "cover",
-          "path": "output/cover.png",
-          "mime_type": "image/png",
-          "required": true
-        },
-        {
-          "role": "delivery_manifest",
-          "path": "output/delivery-manifest.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "cover_plan",
-          "path": "output/cover-plan.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_prompt",
-          "path": "output/cover-prompt.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "cover_review",
-          "path": "output/cover-quality.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "failure_diagnosis",
-          "path": "output/failure-diagnosis.md",
-          "mime_type": "text/markdown",
-          "required": false
-        },
-        {
-          "role": "failure_state",
-          "path": "output/failure-state.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "progress_state",
-          "path": "output/progress-state.json",
-          "mime_type": "application/json",
-          "required": false
-        }
-      ],
-      "delivery": [
-        {
-          "role": "final_video",
-          "path": "output/final.mp4",
-          "mime_type": "video/mp4"
-        },
-        {
-          "role": "delivery_manifest",
-          "path": "output/delivery-manifest.json",
-          "mime_type": "application/json"
-        }
-      ],
-      "ui": {
-        "renderer": "custom:montage"
-      },
-      "digest": "415d095b799ed6adf924e48e453e301b5c6622fb7703cbc0fcf872c61c016e37"
+      "digest": "f0313533514d17ada223f5dd124893fba118d39f7a4fe11b7a4cd56f6218612c"
     },
     {
       "id": "feedback",
@@ -711,7 +602,7 @@
       },
       "bindings": {},
       "runtime": {
-        "profile": "wechat",
+        "profile": "moments",
         "adapter": "standard",
         "max_turns": 25
       },
@@ -785,7 +676,7 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "4bffa7bcd6068fdcdf259accf67057569c1a31797be86103117a8cae736dfb30"
+      "digest": "dd8766713c857e8eedff29cd7323b5cd0946cbd5d36dc21362702ee76f529310"
     },
     {
       "id": "montage",
@@ -1357,7 +1248,7 @@
         ]
       },
       "runtime": {
-        "profile": "wechat",
+        "profile": "wechat-article",
         "adapter": "standard",
         "max_turns": 60
       },
@@ -1545,7 +1436,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "ac931181fb3353e245ecefa65d0a21f6623467db9421cb4ec55da05946db1ab8"
+      "digest": "8278be9fc5ebd163542dd691a7ce78886c312488d8daa5c9ee84af5065d3b026"
     },
     {
       "id": "wechat-picture",
@@ -1569,7 +1460,7 @@
         ]
       },
       "runtime": {
-        "profile": "wechat",
+        "profile": "wechat-picture",
         "adapter": "standard",
         "max_turns": 60
       },
@@ -1680,7 +1571,7 @@
       "ui": {
         "renderer": "custom:wechat-picture"
       },
-      "digest": "b9ab49c6703af868365fd77d79e89c06743376d3ebb84867b870ad80b186d6a6"
+      "digest": "258cb0020f774838933ead30639b30e2cc5b19a2b2bcb71d15917a9831694470"
     },
     {
       "id": "whiteboard-animation",

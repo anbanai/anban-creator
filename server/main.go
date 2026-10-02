@@ -321,7 +321,7 @@ func main() {
 			log.Fatal().Err(err).Msg("failed to create Docker workload verifier")
 		}
 		log.Info().
-			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformWechat).Image).
+			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.TaskTypeWechatArticle).Image).
 			Int64("cpu_cores", cfg.Claude.Docker.CPUCores).
 			Int64("memory_mb", cfg.Claude.Docker.MemoryMB).
 			Int("timeout_sec", cfg.Claude.Docker.TimeoutSec).
@@ -345,7 +345,7 @@ func main() {
 		}
 		log.Info().
 			Str("namespace", cfg.Claude.Kubernetes.Namespace).
-			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.PlatformWechat).Image).
+			Str("article_image", cfg.Claude.RuntimeImages.ForTask(model.TaskTypeWechatArticle).Image).
 			Msg("Kubernetes Job runtime client created")
 	default:
 		log.Fatal().Str("executor", cfg.Claude.Executor).Msg("unsupported Claude executor")

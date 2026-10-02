@@ -214,7 +214,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"ANBAN_AGENT_EXECUTOR":              "kubernetes",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL":     "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443",
 		"ANBAN_AGENT_NAMESPACE":             "${namespace}",
-		"ANBAN_AGENT_IMAGE_WECHAT":         "${wechat_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":  "${wechat_agent_image_repo}",
+		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":  "${wechat_picture_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE":        "${seednote_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_MONTAGE":         "${montage_agent_image_repo}",
 		"ANBAN_AGENT_SERVICE_ACCOUNT":       "creator-agent-runner",
@@ -298,7 +299,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	} {
 		for _, want := range []string{
 			`executor: "${ANBAN_AGENT_EXECUTOR}"`,
-			`wechat: "${ANBAN_AGENT_IMAGE_WECHAT}"`,
+			`wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}"`,
+			`wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"`,
 			`seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"`,
 			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,

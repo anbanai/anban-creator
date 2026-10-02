@@ -99,10 +99,12 @@ the repository root as the build context. Agent profiles use independent
 `Dockerfile.agent-montage` files rather than stages inherited from one business
 image.
 
-The managed runtime uses four independent images: `creator-agent-wechat` for the
-minimal Article runtime, `creator-agent-seednote` for the independent Seednote
-workflow, `creator-agent-montage` for OpenMontage/Remotion/ffmpeg, and
-`creator-agent-hypit` for video replication from unmodified official Hypit source. Seednote
+The managed runtime uses an independently tagged image for every Agent Pack:
+`creator-agent-wechat-article`, `creator-agent-wechat-picture`,
+`creator-agent-seednote`, `creator-agent-montage`, and specialist workflow images.
+Dockerfiles may be reused when system dependencies match, but runtime profiles and
+image identities remain isolated. `creator-agent-hypit` is reserved for video
+replication from unmodified official Hypit source. Seednote
 Seednote research flows through authenticated Anban Server MCP tools backed by
 the separately deployed `sidecar-seednote`. Keep the canonical
 plugin tree intact in every image; image selection controls system dependencies,
@@ -116,9 +118,10 @@ runtime-provided `/workspace/openmontage` project root. Video replication keeps
 its official distribution read-only under `/opt/hypit` and its independent
 project at `/workspace/project`; its profile and credentials are Server-configured.
 
-Configure dispatch with `ANBAN_AGENT_EXECUTOR`,
-`ANBAN_AGENT_IMAGE_WECHAT`, `ANBAN_AGENT_IMAGE_SEEDNOTE`,
-`ANBAN_AGENT_IMAGE_MONTAGE`, `ANBAN_AGENT_IMAGE_HYPIT`, and `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`. The
+Configure dispatch with `ANBAN_AGENT_EXECUTOR`, one image variable per runtime
+profile such as `ANBAN_AGENT_IMAGE_WECHAT_ARTICLE` and
+`ANBAN_AGENT_IMAGE_WECHAT_PICTURE`, plus `ANBAN_AGENT_IMAGE_HYPIT` and
+`ANBAN_AGENT_EXECUTION_TOKEN_SECRET`. The
 Server never builds a missing runtime image; build or publish all selected
 images before dispatch and prefer immutable digests outside local development.
 The Compose Docker executor requires the Docker daemon socket mounted at

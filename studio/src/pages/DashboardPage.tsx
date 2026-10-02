@@ -121,7 +121,7 @@ export default function DashboardPage() {
   const aiEntryIdentity = selectedPlatform === 'seednote'
     ? { agent_id: 'seednote', channel: 'seednote', task_kind: 'content_generation' }
     : selectedPlatform === 'montage'
-      ? { agent_id: 'channels-video', channel: 'channels-video', task_kind: 'content_generation' }
+		? { agent_id: 'montage', channel: 'montage', task_kind: 'content_generation' }
       : selectedPlatform === 'hypit'
         ? { agent_id: 'hypit', channel: 'hypit', task_kind: 'hypit' }
         : selectedPlatform === 'moments'

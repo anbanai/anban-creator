@@ -66,8 +66,8 @@ describe('tasksApi', () => {
     const post = vi.spyOn(clientHttp, 'post').mockResolvedValue({ data: { data: { id: 'task-clone', status: 'pending' } } } as any)
     const request: CreateTaskRequest = {
       type: 'montage',
-      agent_id: 'channels-video',
-      channel: 'channels-video',
+      agent_id: 'montage',
+      channel: 'montage',
       task_kind: 'content_generation',
       execution_profile: 'balanced',
       project_id: 'project-1',

@@ -39,7 +39,7 @@ const validResponse = (): BootstrapResponse => {
     agent_pack_id: "wechat-article",
     agent_pack_version: "1.0.0",
     agent_pack_digest: "a".repeat(64),
-    runtime_profile: "wechat",
+    runtime_profile: "wechat-article",
     runtime_adapter: "standard",
     project_id: "project-1",
     prompt: "Write an article",
@@ -137,7 +137,7 @@ describe("validateBootstrapResponse", () => {
     ["agent_pack_id", "montage", "wechat-article"],
     ["agent_pack_version", "2.0.0", "1.0.0"],
     ["agent_pack_digest", "b".repeat(64), "a".repeat(64)],
-    ["runtime_profile", "montage", "wechat"],
+    ["runtime_profile", "montage", "wechat-article"],
     ["runtime_adapter", "openmontage", "standard"],
     ["agent_flag", "anban:montage", "anban:wechat-article"],
   ] as const)("identifies %s drift between the frozen execution and runtime Catalog", (field, frozen, runtime) => {
@@ -146,7 +146,7 @@ describe("validateBootstrapResponse", () => {
     const catalog: AgentPackCatalog = { packs: [{
       id: "wechat-article", version: "1.0.0", digest: "a".repeat(64),
       agent: { name: "wechat-article" }, bindings: { task_types: ["wechat-article"] },
-      runtime: { profile: "wechat", adapter: "standard" },
+      runtime: { profile: "wechat-article", adapter: "standard" },
       artifacts: [{ role: "final", path: "output/final.md", required: true }],
     }] };
 

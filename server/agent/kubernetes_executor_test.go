@@ -112,7 +112,7 @@ func TestBuildKubernetesJobIsOneShotAndHardened(t *testing.T) {
 	if c.Name != "creator-agent" {
 		t.Fatalf("container name = %q, want creator-agent", c.Name)
 	}
-	if c.Image != "registry.example.com/creator-agent:v2" {
+	if c.Image != "registry.example.com/creator-agent-wechat-article:v2" {
 		t.Fatalf("image = %q, want configured image", c.Image)
 	}
 	if c.TerminationMessagePolicy != corev1.TerminationMessageFallbackToLogsOnError {
@@ -1860,10 +1860,16 @@ func testJobConfig() kubernetesJobConfig {
 			},
 		},
 		RuntimeImages: srvconfig.RuntimeImages{
-			model.PlatformWechat:              "registry.example.com/creator-agent:v2",
+			"wechat-article":                  "registry.example.com/creator-agent-wechat-article:v2",
+			"wechat-picture":                  "registry.example.com/creator-agent-wechat-picture:v2",
 			model.PlatformSeednote:            "registry.example.com/creator-agent-seednote:v2",
 			model.PlatformMontage:             "registry.example.com/creator-agent-montage:v2",
+			"moments":                         "registry.example.com/creator-agent-moments:v2",
+			"ecommerce":                       "registry.example.com/creator-agent-ecommerce:v2",
 			model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation:v2",
+			model.PlatformHypit:               "registry.example.com/creator-agent-hypit:v2",
+			"profile":                         "registry.example.com/creator-agent-profile:v2",
+			"feedback":                        "registry.example.com/creator-agent-feedback:v2",
 		},
 		ServerURL: "https://creator-server:8443",
 	}
@@ -1872,7 +1878,7 @@ func testJobConfig() kubernetesJobConfig {
 func testExecution() *model.TaskExecution {
 	return &model.TaskExecution{
 		ID: "execution-1", TaskID: "task-1", Attempt: 1, RuntimeScope: "anban", RuntimeWorkload: kubernetesJobName("execution-1"),
-		RuntimeAdapter: agentpack.AdapterStandard, RuntimeProfile: "wechat", RuntimeImage: testJobConfig().RuntimeImages.ForTask(model.PlatformWechat).Image,
+		RuntimeAdapter: agentpack.AdapterStandard, RuntimeProfile: "wechat-article", RuntimeImage: testJobConfig().RuntimeImages.ForTask(model.TaskTypeWechatArticle).Image,
 	}
 }
 
@@ -1885,7 +1891,7 @@ func persistedKubernetesTestExecution(job *batchv1.Job) *model.TaskExecution {
 }
 
 func testTask() *model.Task {
-	return &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Prompt: "never put this prompt in a Job"}
+	return &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Prompt: "never put this prompt in a Job"}
 }
 
 func testDispatcher(client kubeclient.Interface) *kubernetesJobDispatcher {

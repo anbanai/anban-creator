@@ -351,9 +351,12 @@ claude:
         deepseek-flash: "deepseek-flash"
   executor: docker
   runtime_images:
-    wechat: "${WECHAT_RUNTIME_IMAGE:-creator-agent-wechat:latest}"
+    wechat-article: "${WECHAT_ARTICLE_RUNTIME_IMAGE:-creator-agent-wechat-article:latest}"
+    wechat-picture: "${WECHAT_PICTURE_RUNTIME_IMAGE:-creator-agent-wechat-picture:latest}"
     seednote: "${SEEDNOTE_RUNTIME_IMAGE:-creator-agent-seednote:latest}"
     montage: "${MONTAGE_RUNTIME_IMAGE:-creator-agent-montage:latest}"
+    moments: "${MOMENTS_RUNTIME_IMAGE:-creator-agent-moments:latest}"
+    ecommerce: "${ECOMMERCE_RUNTIME_IMAGE:-creator-agent-ecommerce:latest}"
     profile: "${PROFILE_RUNTIME_IMAGE:-creator-agent-profile:latest}"
     whiteboard-animation: "${WHITEBOARD_ANIMATION_RUNTIME_IMAGE:-creator-agent-whiteboard-animation:latest}"
     feedback: "${FEEDBACK_RUNTIME_IMAGE:-creator-agent-feedback:latest}"
@@ -368,7 +371,8 @@ claude:
     max_file_bytes: 65536
     max_preview_bytes: 262144
   max_turns:
-    wechat: 10
+    wechat-article: 10
+    wechat-picture: 10
     seednote: 10
     montage: 10
     whiteboard-animation: 10
@@ -482,13 +486,19 @@ runtime_smoke_main() {
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-  WECHAT_RUNTIME_IMAGE=creator-agent-wechat:latest
+  WECHAT_ARTICLE_RUNTIME_IMAGE=creator-agent-wechat-article:latest
+  WECHAT_PICTURE_RUNTIME_IMAGE=creator-agent-wechat-picture:latest
   SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote:latest
   MONTAGE_RUNTIME_IMAGE=creator-agent-montage:latest
+  MOMENTS_RUNTIME_IMAGE=creator-agent-moments:latest
+  ECOMMERCE_RUNTIME_IMAGE=creator-agent-ecommerce:latest
   ARTICLE_DOCKERFILE=Dockerfile.agent-wechat
   SEEDNOTE_DOCKERFILE=Dockerfile.agent-seednote
   MONTAGE_DOCKERFILE=Dockerfile.agent-montage
-  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$WECHAT_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$WECHAT_ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$WECHAT_PICTURE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$MOMENTS_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$ARTICLE_DOCKERFILE" -t "$ECOMMERCE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
   docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
 

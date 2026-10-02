@@ -54,7 +54,7 @@ const (
 	AgentIDArticle       = "wechat-article"
 	AgentIDSeednote      = "seednote"
 	AgentIDWechatPicture = "wechat-picture"
-	AgentIDChannelsVideo = "channels-video"
+	AgentIDMontage       = "montage"
 	AgentIDHypit         = "hypit"
 	AgentIDFeedback      = "feedback"
 	AgentIDProfile       = "profile-analysis"
@@ -67,7 +67,6 @@ const (
 	ChannelArticle       = "wechat-article"
 	ChannelSeednote      = "seednote"
 	ChannelWechatPicture = "wechat-picture"
-	ChannelChannelsVideo = "channels-video"
 	ChannelHypit         = "hypit"
 	ChannelMoments       = "moments"
 	ChannelEcommerce     = "ecommerce"
@@ -121,6 +120,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelSeednote, true
 	case AgentIDWechatPicture:
 		return ChannelWechatPicture, true
+	case AgentIDMontage:
+		return ChannelMontage, true
 	case AgentIDFeedback:
 		return ChannelFeedback, true
 	case AgentIDWhiteboard:

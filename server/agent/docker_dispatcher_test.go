@@ -102,7 +102,7 @@ func TestDockerDispatcherPreparesThenActivatesContainer(t *testing.T) {
 
 func TestDockerDispatcherFencesTagRaceBeforeCopyingWorkloadToken(t *testing.T) {
 	const (
-		mutableTag   = "registry.example.com/creator-agent-wechat:latest"
+		mutableTag   = "registry.example.com/creator-agent-wechat-article:latest"
 		racedImageID = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	)
 	engine := newFakeDockerEngine()
@@ -112,7 +112,7 @@ func TestDockerDispatcherFencesTagRaceBeforeCopyingWorkloadToken(t *testing.T) {
 		dockerDispatcherTestImageID: dockerDispatcherTestImageID,
 	}
 	runtimeImages := dockerDispatcherTestImages()
-	runtimeImages[model.PlatformWechat] = mutableTag
+	runtimeImages["wechat-article"] = mutableTag
 	dispatcher, err := NewDockerDispatcher(
 		runtimeImages, dockerDispatcherTestConfig(), "http://server:8080",
 		dockerDispatcherTestTokens(t), engine, &testProjectMemoryStore{}, time.Now,
@@ -683,18 +683,23 @@ func dockerDispatcherTestConfig() srvconfig.DockerConfig {
 
 func dockerDispatcherTestImages() srvconfig.RuntimeImages {
 	return srvconfig.RuntimeImages{
-		model.PlatformWechat:   "registry.example.com/creator-agent-wechat@sha256:article",
-		model.PlatformSeednote: "registry.example.com/creator-agent-seednote@sha256:seednote",
-		model.PlatformMontage:  "registry.example.com/creator-agent-montage@sha256:montage",
-		"profile":              "registry.example.com/creator-agent-profile@sha256:profile",
-		"feedback":             "registry.example.com/creator-agent-feedback@sha256:feedback",
+		"wechat-article":                  "registry.example.com/creator-agent-wechat-article@sha256:article",
+		"wechat-picture":                  "registry.example.com/creator-agent-wechat-picture@sha256:picture",
+		model.PlatformSeednote:            "registry.example.com/creator-agent-seednote@sha256:seednote",
+		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:montage",
+		"moments":                         "registry.example.com/creator-agent-moments@sha256:moments",
+		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:ecommerce",
+		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:whiteboard",
+		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:hypit",
+		"profile":                         "registry.example.com/creator-agent-profile@sha256:profile",
+		"feedback":                        "registry.example.com/creator-agent-feedback@sha256:feedback",
 	}
 }
 
 func dockerDispatcherTestExecution() *model.TaskExecution {
 	return &model.TaskExecution{
 		ID: "docker-execution-1", TaskID: "docker-task-1", Attempt: 1,
-		RuntimeProfile: model.PlatformWechat, RuntimeImage: dockerDispatcherTestImages()[model.PlatformWechat],
+		RuntimeProfile: "wechat-article", RuntimeImage: dockerDispatcherTestImages()["wechat-article"],
 	}
 }
 
@@ -762,7 +767,7 @@ func newFakeDockerEngine() *fakeDockerEngine {
 	image := dockerDispatcherTestImage()
 	return &fakeDockerEngine{
 		images: map[string]imageTypes.InspectResponse{
-			dockerDispatcherTestImages()[model.PlatformWechat]:         image,
+			dockerDispatcherTestImages()["wechat-article"]:             image,
 			"registry.example.com/creator-agent-montage@sha256:parent": image,
 		},
 		volumes: map[string]volume.Volume{}, containers: map[string]containertypes.InspectResponse{},

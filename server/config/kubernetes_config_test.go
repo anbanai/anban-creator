@@ -18,9 +18,16 @@ func baseKubernetesConfigForTest() Config {
 	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
 	claude.ExecutionTokenSecret = "0123456789abcdef0123456789abcdef"
 	claude.RuntimeImages = RuntimeImages{
-		model.PlatformWechat:   "registry.example.com/creator-agent-wechat@sha256:" + strings.Repeat("a", 64),
-		model.PlatformSeednote: "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
-		model.PlatformMontage:  "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
+		"wechat-article":                  "registry.example.com/creator-agent-wechat-article@sha256:" + strings.Repeat("a", 64),
+		"wechat-picture":                  "registry.example.com/creator-agent-wechat-picture@sha256:" + strings.Repeat("e", 64),
+		model.PlatformSeednote:            "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
+		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
+		"moments":                         "registry.example.com/creator-agent-moments@sha256:" + strings.Repeat("h", 64),
+		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("i", 64),
+		"profile":                         "registry.example.com/creator-agent-profile@sha256:" + strings.Repeat("j", 64),
+		"feedback":                        "registry.example.com/creator-agent-feedback@sha256:" + strings.Repeat("k", 64),
+		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:" + strings.Repeat("l", 64),
+		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:" + strings.Repeat("m", 64),
 	}
 	claude.Kubernetes = KubernetesConfig{
 		Namespace:          "anbanai-prod",
@@ -57,18 +64,25 @@ func TestValidateAcceptsKubernetesExecutor(t *testing.T) {
 
 func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 	images := RuntimeImages{
-		model.PlatformWechat:   "creator-agent-wechat:latest",
-		model.PlatformSeednote: "creator-agent-seednote:latest",
-		model.PlatformMontage:  "creator-agent-montage:latest",
+		"wechat-article":                  "creator-agent-wechat-article:latest",
+		"wechat-picture":                  "creator-agent-wechat-picture:latest",
+		"moments":                         "creator-agent-moments:latest",
+		"ecommerce":                       "creator-agent-ecommerce:latest",
+		model.PlatformSeednote:            "creator-agent-seednote:latest",
+		model.PlatformMontage:             "creator-agent-montage:latest",
+		model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
+		"profile":                         "creator-agent-profile:latest",
+		"feedback":                        "creator-agent-feedback:latest",
+		model.PlatformHypit:               "creator-agent-hypit:latest",
 	}
 	for _, test := range []struct {
 		taskType string
 		profile  string
 		image    string
 	}{
-		{taskType: model.TaskTypeWechatArticle, profile: "wechat", image: "creator-agent-wechat:latest"},
-		{taskType: model.PlatformMoments, profile: "wechat", image: "creator-agent-wechat:latest"},
-		{taskType: model.PlatformEcommerce, profile: "wechat", image: "creator-agent-wechat:latest"},
+		{taskType: model.TaskTypeWechatArticle, profile: "wechat-article", image: "creator-agent-wechat-article:latest"},
+		{taskType: model.PlatformMoments, profile: "moments", image: "creator-agent-moments:latest"},
+		{taskType: model.PlatformEcommerce, profile: "ecommerce", image: "creator-agent-ecommerce:latest"},
 		{taskType: model.PlatformSeednote, profile: "seednote", image: "creator-agent-seednote:latest"},
 		{taskType: model.PlatformMontage, profile: "montage", image: "creator-agent-montage:latest"},
 		{taskType: model.TaskTypeLiveSlicer, profile: "montage", image: "creator-agent-montage:latest"},
@@ -89,21 +103,21 @@ func TestValidateRuntimeImagesRequiresExactCanonicalProfiles(t *testing.T) {
 		{
 			name:     "missing article image",
 			profiles: map[string]string{model.PlatformMontage: "registry/montage:v1"},
-			want:     "claude.runtime_images.wechat is required",
+			want:     "claude.runtime_images.wechat-article is required",
 		},
 		{
 			name:     "missing montage image",
-			profiles: map[string]string{model.PlatformWechat: "registry/wechat:v1", model.PlatformSeednote: "registry/seednote:v1"},
+			profiles: map[string]string{"wechat-article": "registry/wechat-article:v1", model.PlatformSeednote: "registry/seednote:v1"},
 			want:     "claude.runtime_images.montage is required",
 		},
 		{
 			name:     "empty mapped image",
-			profiles: map[string]string{model.PlatformWechat: "registry/wechat:v1", model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "  "},
+			profiles: map[string]string{"wechat-article": "registry/wechat-article:v1", model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "  "},
 			want:     "claude.runtime_images.montage must not be empty",
 		},
 		{
 			name:     "unsupported task key",
-			profiles: map[string]string{model.PlatformWechat: "registry/wechat:v1", model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "registry/montage:v1", "unknown": "registry/unknown:v1"},
+			profiles: map[string]string{"wechat-article": "registry/wechat-article:v1", model.PlatformSeednote: "registry/seednote:v1", model.PlatformMontage: "registry/montage:v1", "unknown": "registry/unknown:v1"},
 			want:     `claude.runtime_images contains unsupported profile "unknown"`,
 		},
 	} {
@@ -119,6 +133,7 @@ func TestValidateRuntimeImagesRequiresExactCanonicalProfiles(t *testing.T) {
 
 func TestValidateRequiresHypitRuntimeImageWhenEnabled(t *testing.T) {
 	claude := validClaudeConfigForTest()
+	delete(claude.RuntimeImages, model.PlatformHypit)
 	cfg := Config{
 		Database: DatabaseConfig{DSN: "dsn"},
 		JWT:      JWTConfig{SecretKey: "secret"},
@@ -239,7 +254,7 @@ storage:
 claude:
   executor: "kubernetes"
   runtime_images:
-    wechat: "registry.example.com/creator-agent-wechat@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    wechat-article: "registry.example.com/creator-agent-wechat-article@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     seednote: "registry.example.com/creator-agent-seednote@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     montage: "registry.example.com/creator-agent-montage@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     whiteboard-animation: "registry.example.com/creator-agent-whiteboard-animation@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"

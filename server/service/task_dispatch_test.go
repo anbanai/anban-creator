@@ -77,7 +77,7 @@ type lateCommitAfterErrorDispatcher struct {
 func (*lateCommitAfterErrorDispatcher) Scope() string { return "docker" }
 
 func (*lateCommitAfterErrorDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
-	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat-article", Image: "registry/content@sha256:test"}
 }
 
 func (*lateCommitAfterErrorDispatcher) Prepare(context.Context, *model.TaskExecution, *model.Task) (*model.RuntimeIdentity, error) {
@@ -126,7 +126,7 @@ type staleWinnerDispatcher struct {
 func (*staleWinnerDispatcher) Scope() string { return "docker" }
 
 func (*staleWinnerDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
-	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat-article", Image: "registry/content@sha256:test"}
 }
 
 func (d *staleWinnerDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
@@ -161,7 +161,7 @@ func (d *staleWinnerDispatcher) Delete(_ context.Context, execution *model.TaskE
 func (*lateCreatingDispatcher) Scope() string { return "docker" }
 
 func (*lateCreatingDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
-	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat-article", Image: "registry/content@sha256:test"}
 }
 
 func (d *lateCreatingDispatcher) Prepare(_ context.Context, execution *model.TaskExecution, _ *model.Task) (*model.RuntimeIdentity, error) {
@@ -199,7 +199,7 @@ func (d *lateCreatingDispatcher) Delete(_ context.Context, execution *model.Task
 }
 
 func (*activationOrderingDispatcher) ResolveRuntime(string) serverconfig.RuntimeImageSelection {
-	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat-article", Image: "registry/content@sha256:test"}
 }
 
 func (*activationOrderingDispatcher) Scope() string { return "docker" }
@@ -256,7 +256,7 @@ func (d *dispatchTestDispatcher) ResolveRuntime(string) serverconfig.RuntimeImag
 	if d.runtimeSelection.Profile != "" || d.runtimeSelection.Image != "" {
 		return d.runtimeSelection
 	}
-	return serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
+	return serverconfig.RuntimeImageSelection{Profile: "wechat-article", Image: "registry/content@sha256:test"}
 }
 
 func (d *dispatchTestDispatcher) Scope() string { return "docker" }
@@ -726,7 +726,13 @@ func TestDispatchCancellationAfterResourcePreparationCompensatesWithoutActivatio
 	go func() {
 		dispatchDone <- svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID)
 	}()
-	<-dispatcher.prepared
+	select {
+	case <-dispatcher.prepared:
+	case err := <-dispatchDone:
+		t.Fatalf("dispatch exited before preparation: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch did not reach resource preparation")
+	}
 	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); !errors.Is(err, ErrRuntimePreparationInFlight) {
 		t.Fatalf("cancel prepared execution error = %v, want ErrRuntimePreparationInFlight", err)
 	}
@@ -1001,7 +1007,7 @@ func TestCreateCurrentExecutionRejectsEmptyRuntimeScope(t *testing.T) {
 
 func TestCreateCurrentExecutionRejectsIncompleteRuntimeSelection(t *testing.T) {
 	svc, _, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "wechat"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "wechat-article"}
 	if _, _, err := svc.createCurrentExecution(context.Background(), task); err == nil || !strings.Contains(err.Error(), "returned incomplete identity") {
 		t.Fatalf("create error = %v, want incomplete runtime selection", err)
 	}
@@ -1047,7 +1053,7 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 	}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed, Result: result,
-		RuntimeProfile: model.PlatformWechat, RuntimeImage: "registry/content@sha256:parent",
+		RuntimeProfile: model.TaskTypeWechatArticle, RuntimeImage: "registry/content@sha256:parent",
 	}
 	if err := applyAgentPackIdentity(parent, task.Type); err != nil {
 		t.Fatal(err)
@@ -1078,7 +1084,7 @@ func TestDispatchResumedTaskCreatesExecutionLineageWithClaudeSession(t *testing.
 func TestDispatchAutocompactThrashingStartsFreshClaudeSessionAndRuntime(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{
-		Profile: "wechat", Image: "registry/content@sha256:current",
+		Profile: "wechat-article", Image: "registry/content@sha256:current",
 	}
 	ctx := context.Background()
 	result, err := json.Marshal(&agent.ExecutionResult{
@@ -1112,17 +1118,17 @@ func TestDispatchAutocompactThrashingStartsFreshClaudeSessionAndRuntime(t *testi
 	if current.ResumeSessionID != "" {
 		t.Fatalf("resume session = %q, want a fresh Claude session after autocompact thrashing", current.ResumeSessionID)
 	}
-	if current.RuntimeProfile != model.PlatformWechat || current.RuntimeImage != "registry/content@sha256:current" {
+	if current.RuntimeProfile != model.TaskTypeWechatArticle || current.RuntimeImage != "registry/content@sha256:current" {
 		t.Fatalf("resumed runtime = %q %q, want current deployed runtime", current.RuntimeProfile, current.RuntimeImage)
 	}
 }
 
 func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:new"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "wechat-article", Image: "registry/content@sha256:new"}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
-		RuntimeProfile: model.PlatformWechat, RuntimeImage: "registry/content@sha256:original",
+		RuntimeProfile: model.TaskTypeWechatArticle, RuntimeImage: "registry/content@sha256:original",
 	}
 	if err := applyAgentPackIdentity(parent, task.Type); err != nil {
 		t.Fatal(err)
@@ -1146,10 +1152,10 @@ func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 
 func TestResumeExecutionWithoutFrozenAgentPackUsesCurrentRuntimeImage(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformWechat, Image: "registry/content@sha256:current"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.TaskTypeWechatArticle, Image: "registry/content@sha256:current"}
 	parent := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
-		RuntimeProfile: model.PlatformWechat, RuntimeImage: "registry/content@sha256:legacy",
+		RuntimeProfile: model.TaskTypeWechatArticle, RuntimeImage: "registry/content@sha256:legacy",
 	}
 	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
 		t.Fatal(err)
@@ -1170,7 +1176,7 @@ func TestResumeExecutionWithoutFrozenAgentPackUsesCurrentRuntimeImage(t *testing
 
 func TestResumeExecutionWithIncompleteFrozenAgentPackStartsFreshSession(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
-	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.PlatformWechat, Image: "registry/content@sha256:current"}
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: model.TaskTypeWechatArticle, Image: "registry/content@sha256:current"}
 	result, err := json.Marshal(&agent.ExecutionResult{Success: false, Error: "max turns", SessionID: "legacy-session", RemoteArtifacts: true})
 	if err != nil {
 		t.Fatal(err)

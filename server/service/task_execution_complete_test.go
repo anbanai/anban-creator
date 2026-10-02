@@ -1801,7 +1801,7 @@ func (r *failingCleanupIdentityExecutions) SetCleanupRuntimeIdentity(context.Con
 }
 
 func (*cancelOrderingDispatcher) ResolveRuntime(string) srvconfig.RuntimeImageSelection {
-	return srvconfig.RuntimeImageSelection{Profile: "wechat", Image: "registry/content@sha256:test"}
+	return srvconfig.RuntimeImageSelection{Profile: "wechat-article", Image: "registry/content@sha256:test"}
 }
 
 func (d *cancelOrderingDispatcher) Scope() string {

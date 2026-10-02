@@ -55,11 +55,12 @@ func TestCreatorAgentImageNamingContract(t *testing.T) {
 }
 
 func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.T) {
-	validMakefile := "AGENT_IMAGE := creator-agent-wechat:latest\n"
+	validMakefile := "WECHAT_ARTICLE_AGENT_IMAGE ?= creator-agent-wechat-article:latest\nWECHAT_PICTURE_AGENT_IMAGE ?= creator-agent-wechat-picture:latest\n"
 	validCompose := `services:
 	  server:
 	    environment:
-	      ANBAN_AGENT_IMAGE_WECHAT: "creator-agent-wechat:latest"
+	      ANBAN_AGENT_IMAGE_WECHAT_ARTICLE: "creator-agent-wechat-article:latest"
+	      ANBAN_AGENT_IMAGE_WECHAT_PICTURE: "creator-agent-wechat-picture:latest"
 `
 
 	for _, tc := range []struct {
@@ -69,12 +70,12 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 	}{
 		{
 			name:     "Make variable name decoy",
-			makefile: "LEGACY_AGENT_IMAGE := creator-agent-wechat:latest\n",
+			makefile: "LEGACY_AGENT_IMAGE := creator-agent-wechat-article:latest\n",
 			compose:  validCompose,
 		},
 		{
 			name:     "commented Make assignment",
-			makefile: "# AGENT_IMAGE := creator-agent-wechat:latest\n",
+			makefile: "# AGENT_IMAGE := creator-agent-wechat-article:latest\n",
 			compose:  validCompose,
 		},
 		{
@@ -97,14 +98,14 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 			makefile: validMakefile,
 			compose: `services:
 	  server:
-	    image: creator-agent-wechat:latest
+	    image: creator-agent-wechat-article:latest
 `,
 		},
 		{
 			name:     "persistent Agent service remains",
 			makefile: validMakefile,
 			compose: validCompose + `  agent:
-	    image: creator-agent-wechat:latest
+	    image: creator-agent-wechat-article:latest
 `,
 		},
 		{
@@ -117,7 +118,7 @@ func TestValidateCreatorAgentImageNamingRejectsDecoysAndLegacyValues(t *testing.
 		{
 			name:     "duplicate Compose environment overrides expected value",
 			makefile: validMakefile,
-			compose:  validCompose + "      ANBAN_AGENT_IMAGE_WECHAT: \"wrong-agent:latest\"\n",
+			compose:  validCompose + "      ANBAN_AGENT_IMAGE_WECHAT_ARTICLE: \"wrong-agent:latest\"\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -132,9 +133,10 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 	if containsRetiredAgentIdentity(makefile) {
 		return fmt.Errorf("Makefile must not retain anban-creator-agent or anban-agent identities")
 	}
-	makeValues := makeVariableAssignments(makefile, "AGENT_IMAGE")
-	if len(makeValues) != 1 || makeValues[0] != "creator-agent-wechat:latest" {
-		return fmt.Errorf("Makefile must define AGENT_IMAGE exactly once with value creator-agent-wechat:latest")
+	articleValues := makeVariableAssignments(makefile, "WECHAT_ARTICLE_AGENT_IMAGE")
+	pictureValues := makeVariableAssignments(makefile, "WECHAT_PICTURE_AGENT_IMAGE")
+	if len(articleValues) != 1 || articleValues[0] != "creator-agent-wechat-article:latest" || len(pictureValues) != 1 || pictureValues[0] != "creator-agent-wechat-picture:latest" {
+		return fmt.Errorf("Makefile must define independent WeChat article and picture image variables")
 	}
 
 	if containsRetiredAgentIdentity(compose) {
@@ -143,9 +145,10 @@ func validateCreatorAgentImageNaming(makefile, compose string) error {
 	if strings.Contains("\n"+compose, "\n  agent:\n") {
 		return fmt.Errorf("docker-compose.yml must not define a persistent agent service")
 	}
-	values := composeEnvironmentAssignments(compose, "server", "ANBAN_AGENT_IMAGE_WECHAT")
-	if len(values) != 1 || values[0] != `"creator-agent-wechat:latest"` {
-		return fmt.Errorf("docker-compose.yml must configure the Server Article runtime image exactly once")
+	articleValues = composeEnvironmentAssignments(compose, "server", "ANBAN_AGENT_IMAGE_WECHAT_ARTICLE")
+	pictureValues = composeEnvironmentAssignments(compose, "server", "ANBAN_AGENT_IMAGE_WECHAT_PICTURE")
+	if len(articleValues) != 1 || articleValues[0] != `"creator-agent-wechat-article:latest"` || len(pictureValues) != 1 || pictureValues[0] != `"creator-agent-wechat-picture:latest"` {
+		return fmt.Errorf("docker-compose.yml must configure independent WeChat runtime images exactly once")
 	}
 	return nil
 }
@@ -952,8 +955,12 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-sidecar-ilink-image:",
 		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-agent-image docker-seednote-agent-image docker-montage-agent-image docker-profile-agent-image docker-feedback-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
-		"docker build -f deploy/docker/Dockerfile.agent-wechat -t $(AGENT_IMAGE) .",
+		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-agent-image docker-feedback-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
+		"docker-moments-agent-image:",
+		"docker-ecommerce-agent-image:",
+		"docker-wechat-article-agent-image:",
+		"docker-wechat-picture-agent-image:",
+		"docker build -f deploy/docker/Dockerfile.agent-wechat -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
 		"docker build -f deploy/docker/Dockerfile.agent-montage",
 		"--build-arg OPENMONTAGE_REPO=\"$(OPENMONTAGE_SOURCE_REPO)\"",
@@ -961,8 +968,8 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
-		"docker-image: docker-agent-image",
-		"make docker-agent-image",
+		"docker-image:",
+		"docker-wechat-article-agent-image",
 		"make docker-server-image",
 		"make docker-sidecar-ilink-image",
 		"make docker-sidecar-seednote-image",
@@ -1025,9 +1032,12 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		"ANBAN_AGENT_EXECUTOR: \"docker\"",
 		"ANBAN_CLAUDE_AGENT_SERVER_URL: \"http://server:8080\"",
 		"ANBAN_AGENT_EXECUTION_TOKEN_SECRET:",
-		"ANBAN_AGENT_IMAGE_WECHAT: \"creator-agent-wechat:latest\"",
+		"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE: \"creator-agent-wechat-article:latest\"",
+		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE: \"creator-agent-wechat-picture:latest\"",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE: \"creator-agent-seednote:latest\"",
 		"ANBAN_AGENT_IMAGE_MONTAGE: \"creator-agent-montage:latest\"",
+		"ANBAN_AGENT_IMAGE_MOMENTS: \"creator-agent-moments:latest\"",
+		"ANBAN_AGENT_IMAGE_ECOMMERCE: \"creator-agent-ecommerce:latest\"",
 		"ANBAN_AGENT_DOCKER_NETWORK: \"creator-runtime-network\"",
 		"- /var/run/docker.sock:/var/run/docker.sock",
 		"group_add:\n      - \"${DOCKER_GID:-0}\"",
@@ -1059,7 +1069,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
 			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
-			"wechat: \"${ANBAN_AGENT_IMAGE_WECHAT}\"",
+			"wechat-article: \"${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}\"",
 			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE}\"",
 			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE}\"",
 			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}\"",
@@ -1078,7 +1088,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"docker-up: docker-agent-image docker-seednote-agent-image docker-montage-agent-image",
+		"docker-up: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
 		"DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)",
 		"DOCKER_GID=\"$(DOCKER_SOCKET_GID)\" docker compose up -d",
 	} {
@@ -1112,7 +1122,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 		}
 		for name, want := range map[string]string{
 			"ANBAN_AGENT_EXECUTOR":               "docker",
-			"ANBAN_AGENT_IMAGE_WECHAT":           "creator-agent-wechat:latest",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":   "creator-agent-wechat-article:latest",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
 			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
 			"ANBAN_AGENT_IMAGE_PROFILE":          "${ANBAN_AGENT_IMAGE_PROFILE:-creator-agent-profile:latest}",
@@ -1174,9 +1184,12 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_BILLING_ADMIN_API_KEY",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",
 			"ANBAN_AGENT_EXECUTOR",
-			"ANBAN_AGENT_IMAGE_WECHAT",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE",
+			"ANBAN_AGENT_IMAGE_WECHAT_PICTURE",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE",
 			"ANBAN_AGENT_IMAGE_MONTAGE",
+			"ANBAN_AGENT_IMAGE_MOMENTS",
+			"ANBAN_AGENT_IMAGE_ECOMMERCE",
 			"ANBAN_JWT_SECRET_KEY",
 			"ANBAN_OSS_ENDPOINT",
 			"ANBAN_OSS_ACCESS_KEY_ID",
@@ -1227,7 +1240,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 			"ANBAN_AGENT_EXECUTOR":               "docker",
 			"ANBAN_CLAUDE_AGENT_SERVER_URL":      "http://server:8080",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET": "0123456789abcdef0123456789abcdef",
-			"ANBAN_AGENT_IMAGE_WECHAT":           "creator-agent-wechat:latest",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":   "creator-agent-wechat-article:latest",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE":         "creator-agent-seednote:latest",
 			"ANBAN_AGENT_IMAGE_MONTAGE":          "creator-agent-montage:latest",
 			"ANBAN_AGENT_IMAGE_PROFILE":          "creator-agent-profile:latest",
@@ -1293,7 +1306,7 @@ func TestDockerRuntimeContract(t *testing.T) {
 
 		for _, want := range []string{
 			"ANBAN_AGENT_EXECUTOR",
-			"ANBAN_AGENT_IMAGE_WECHAT",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE",
 			"ANBAN_AGENT_IMAGE_SEEDNOTE",
 			"ANBAN_AGENT_IMAGE_MONTAGE",
 			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET",

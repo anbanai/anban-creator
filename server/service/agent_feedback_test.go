@@ -51,8 +51,8 @@ func TestFeedbackAgentNameMatchesFrozenExecution(t *testing.T) {
 	if feedbackAgentNameMatches(model.AgentIDArticle, model.AgentIDSeednote) {
 		t.Fatal("cross-agent identity should be rejected")
 	}
-	if !feedbackAgentNameMatches(model.AgentIDChannelsVideo, "montage") || !feedbackAgentNameMatches(model.AgentIDChannelsVideo, "live-slicer") {
-		t.Fatal("channels-video aliases should match")
+	if !feedbackAgentNameMatches(model.AgentIDMontage, model.AgentIDMontage) {
+		t.Fatal("montage feedback identity should match")
 	}
 }
 
