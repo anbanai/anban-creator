@@ -520,7 +520,7 @@ func TestMCPHandlerToolsList(t *testing.T) {
 			}
 		}
 	}
-	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "create_draft"} {
+	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "create_draft", "analyze_video"} {
 		if !toolNames[expected] {
 			t.Errorf("expected tool %q not found in tools/list response", expected)
 		}

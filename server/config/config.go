@@ -22,31 +22,32 @@ import (
 
 // Config holds all server configuration.
 type Config struct {
-	Server             ServerConfig                   `yaml:"server"`
-	Logging            LoggingConfig                  `yaml:"logging"`
-	Database           DatabaseConfig                 `yaml:"database"`
-	Redis              RedisConfig                    `yaml:"redis"`
-	JWT                JWTConfig                      `yaml:"jwt"`
-	WeChat             WeChatConfig                   `yaml:"wechat"`
-	Storage            StorageConfig                  `yaml:"storage"`
-	MCP                MCPConfig                      `yaml:"mcp"`
-	Hypit              HypitConfig                    `yaml:"hypit"`
-	Montage            MontageConfig                  `yaml:"montage"`
-	ServerInternal     ModelRuntimeConfig             `yaml:"-"`
-	ModelProviders     map[string]ModelProviderConfig `yaml:"model_providers"`
-	ModelRoutes        ModelRoutesConfig              `yaml:"model_routes"`
-	BillingRuntime     BillingRuntimeConfig           `yaml:"billing_runtime" json:"billing_runtime"`
-	BillingBundle      *serverbilling.Bundle          `yaml:"-" json:"-"`
-	ImageUnderstanding UnderstandingRuntimeConfig     `yaml:"-"`
-	Claude             ClaudeConfig                   `yaml:"claude"`
-	CORS               CORSConfig                     `yaml:"cors"`
-	Asynq              AsynqConfig                    `yaml:"asynq"`
-	Email              EmailConfig                    `yaml:"email"`
-	Invitation         InvitationConfig               `yaml:"invitation"`
-	Seednote           SeednoteConfig                 `yaml:"seednote"`
-	Worldtree          WorldtreeConfig                `yaml:"worldtree"`
-	Ilink              IlinkConfig                    `yaml:"ilink"`
-	Trends             TrendsConfig                   `yaml:"trends"`
+	Server             ServerConfig                    `yaml:"server"`
+	Logging            LoggingConfig                   `yaml:"logging"`
+	Database           DatabaseConfig                  `yaml:"database"`
+	Redis              RedisConfig                     `yaml:"redis"`
+	JWT                JWTConfig                       `yaml:"jwt"`
+	WeChat             WeChatConfig                    `yaml:"wechat"`
+	Storage            StorageConfig                   `yaml:"storage"`
+	MCP                MCPConfig                       `yaml:"mcp"`
+	Hypit              HypitConfig                     `yaml:"hypit"`
+	Montage            MontageConfig                   `yaml:"montage"`
+	ServerInternal     ModelRuntimeConfig              `yaml:"-"`
+	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
+	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
+	BillingRuntime     BillingRuntimeConfig            `yaml:"billing_runtime" json:"billing_runtime"`
+	BillingBundle      *serverbilling.Bundle           `yaml:"-" json:"-"`
+	ImageUnderstanding UnderstandingRuntimeConfig      `yaml:"-"`
+	VideoUnderstanding VideoUnderstandingRuntimeConfig `yaml:"-"`
+	Claude             ClaudeConfig                    `yaml:"claude"`
+	CORS               CORSConfig                      `yaml:"cors"`
+	Asynq              AsynqConfig                     `yaml:"asynq"`
+	Email              EmailConfig                     `yaml:"email"`
+	Invitation         InvitationConfig                `yaml:"invitation"`
+	Seednote           SeednoteConfig                  `yaml:"seednote"`
+	Worldtree          WorldtreeConfig                 `yaml:"worldtree"`
+	Ilink              IlinkConfig                     `yaml:"ilink"`
+	Trends             TrendsConfig                    `yaml:"trends"`
 }
 
 type TrendsConfig struct {
@@ -299,6 +300,12 @@ type UnderstandingRouteConfig struct {
 	RequireUsage bool `yaml:"require_usage"`
 }
 
+type VideoUnderstandingRouteConfig struct {
+	UnderstandingRouteConfig `yaml:",inline"`
+	RequireNativeVideo       bool   `yaml:"require_native_video"`
+	MaxRecommendedResolution string `yaml:"max_recommended_resolution"`
+}
+
 type ImageGenerationRouteConfig struct {
 	Provider           string                  `yaml:"provider" json:"-"`
 	Model              string                  `yaml:"model" json:"-"`
@@ -361,9 +368,10 @@ type ImageGenerationFeatures struct {
 }
 
 type ModelRoutesConfig struct {
-	ServerInternal     RouteConfig                 `yaml:"server_internal"`
-	ImageUnderstanding UnderstandingRouteConfig    `yaml:"image_understanding"`
-	ImageGeneration    ImageGenerationRoutesConfig `yaml:"image_generation"`
+	ServerInternal     RouteConfig                   `yaml:"server_internal"`
+	ImageUnderstanding UnderstandingRouteConfig      `yaml:"image_understanding"`
+	VideoUnderstanding VideoUnderstandingRouteConfig `yaml:"video_understanding"`
+	ImageGeneration    ImageGenerationRoutesConfig   `yaml:"image_generation"`
 }
 
 type UnderstandingRuntimeConfig struct {
@@ -374,6 +382,12 @@ type UnderstandingRuntimeConfig struct {
 	ProviderKey  string
 	Timeout      time.Duration
 	RequireUsage bool
+}
+
+type VideoUnderstandingRuntimeConfig struct {
+	UnderstandingRuntimeConfig
+	RequireNativeVideo       bool
+	MaxRecommendedResolution string
 }
 
 // BillingRuntimeConfig points the server at the strict fixed-SKU billing
@@ -885,7 +899,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		return fmt.Errorf("parse config keys: %w", err)
 	}
 	deprecated := map[string]string{
-		"vision":    "model_routes.image_understanding",
+		"vision":    "model_routes.image_understanding and model_routes.video_understanding",
 		"writing":   "model_routes.server_internal",
 		"image_api": "model_routes.image_generation",
 	}
@@ -930,6 +944,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		knownModelRoutes := map[string]bool{
 			"server_internal":     true,
 			"image_understanding": true,
+			"video_understanding": true,
 			"image_generation":    true,
 		}
 		for key := range modelRoutes {
@@ -1186,6 +1201,10 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) deriveModelRouteRuntimeConfig() error {
+	if (c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "") &&
+		!c.ModelRoutes.VideoUnderstanding.RequireNativeVideo {
+		return fmt.Errorf("model_routes.video_understanding.require_native_video must be true")
+	}
 	provider := func(routeName, providerKey string) (ModelProviderConfig, error) {
 		if strings.TrimSpace(providerKey) == "" {
 			return ModelProviderConfig{}, fmt.Errorf("%s.provider is required", routeName)
@@ -1222,6 +1241,21 @@ func (c *Config) deriveModelRouteRuntimeConfig() error {
 			BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.ImageUnderstanding.Model,
 			Provider: providerKind(c.ModelRoutes.ImageUnderstanding.Provider), ProviderKey: c.ModelRoutes.ImageUnderstanding.Provider,
 			Timeout: c.ModelRoutes.ImageUnderstanding.Timeout, RequireUsage: c.ModelRoutes.ImageUnderstanding.RequireUsage,
+		}
+	}
+	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
+		p, err := provider("model_routes.video_understanding", c.ModelRoutes.VideoUnderstanding.Provider)
+		if err != nil {
+			return err
+		}
+		c.VideoUnderstanding = VideoUnderstandingRuntimeConfig{
+			UnderstandingRuntimeConfig: UnderstandingRuntimeConfig{
+				BaseURL: p.BaseURL, Key: p.APIKey, Model: c.ModelRoutes.VideoUnderstanding.Model,
+				Provider: providerKind(c.ModelRoutes.VideoUnderstanding.Provider), ProviderKey: c.ModelRoutes.VideoUnderstanding.Provider,
+				Timeout: c.ModelRoutes.VideoUnderstanding.Timeout, RequireUsage: c.ModelRoutes.VideoUnderstanding.RequireUsage,
+			},
+			RequireNativeVideo:       c.ModelRoutes.VideoUnderstanding.RequireNativeVideo,
+			MaxRecommendedResolution: c.ModelRoutes.VideoUnderstanding.MaxRecommendedResolution,
 		}
 	}
 	for key, route := range c.ModelRoutes.ImageGeneration.Capabilities {
@@ -1590,6 +1624,12 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Montage.Validate(); err != nil {
 		errs = append(errs, err.Error())
+	}
+
+	if c.ModelRoutes.VideoUnderstanding.Model != "" || c.ModelRoutes.VideoUnderstanding.Provider != "" {
+		if !c.ModelRoutes.VideoUnderstanding.RequireNativeVideo {
+			errs = append(errs, "model_routes.video_understanding.require_native_video must be true")
+		}
 	}
 
 	imageGeneration := c.ModelRoutes.ImageGeneration

@@ -387,6 +387,7 @@ func NormalizeTier(s string) Tier {
 // Provider-cost operation identities for understanding tools.
 const (
 	OperationImageUnderstanding = "image_understanding"
+	OperationVideoUnderstanding = "video_understanding"
 )
 
 // Viral analysis status constants.

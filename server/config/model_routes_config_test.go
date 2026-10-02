@@ -97,7 +97,7 @@ claude:
 	}
 }
 
-func TestSemanticModelConfigRejectsRemovedVideoUnderstandingRoute(t *testing.T) {
+func TestSemanticModelConfigRejectsNonNativeVideoUnderstandingRoute(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := fakePluginDir(t, dir)
 	cfgPath := filepath.Join(dir, "config.yaml")
@@ -111,6 +111,7 @@ model_routes:
   video_understanding:
     provider: moonshot
     model: kimi-k2.7-code-highspeed
+    require_native_video: false
 claude:
   plugin_dir: "` + pluginDir + `"
 `)
@@ -120,10 +121,10 @@ claude:
 
 	_, err := NewConfig(cfgPath)
 	if err == nil {
-		t.Fatal("NewConfig() succeeded, want unknown model_routes key error")
+		t.Fatal("NewConfig() succeeded, want native-video requirement error")
 	}
-	if !strings.Contains(err.Error(), "unknown model_routes config key video_understanding") {
-		t.Fatalf("error = %v, want removed video_understanding hint", err)
+	if !strings.Contains(err.Error(), "model_routes.video_understanding.require_native_video must be true") {
+		t.Fatalf("error = %v, want native-video requirement hint", err)
 	}
 }
 

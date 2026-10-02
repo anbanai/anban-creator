@@ -219,6 +219,7 @@ describe("validateManagedInit", () => {
   test("requires the complete Montage cover runtime surface", () => {
     const requiredTools = [
       "analyze_image",
+      "analyze_video",
       "generate_image",
       "get_project_profile",
       "submit_agent_feedback",
