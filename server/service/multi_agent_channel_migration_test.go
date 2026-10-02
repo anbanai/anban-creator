@@ -56,6 +56,85 @@ func TestMigrateMultiAgentChannelIdentityBackfillsSupportedRowsAndEntries(t *tes
 	}
 }
 
+func TestMigrateMultiAgentChannelIdentityBackfillsEveryHistoricalTaskType(t *testing.T) {
+	db := openMultiAgentMigrationDB(t)
+	types := []struct {
+		legacyType string
+		agentID    string
+		channel    string
+		taskKind   string
+	}{
+		{model.TaskTypeWechatArticle, model.AgentIDArticle, model.ChannelArticle, model.TaskKindContentGeneration},
+		{model.PlatformSeednote, model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindContentGeneration},
+		{model.TaskTypeWechatPicture, model.AgentIDWechatPicture, model.ChannelWechatPicture, model.TaskKindContentGeneration},
+		{model.TaskTypeViralAnalysis, model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindViralAnalysis},
+		{model.TaskTypeProfileAnalysis, model.AgentIDProfileAnalysis, model.ChannelProfileAnalysis, model.TaskKindProfileAnalysis},
+		{model.PlatformMontage, model.AgentIDMontage, model.ChannelMontage, model.TaskKindContentGeneration},
+		{model.PlatformHypit, model.AgentIDHypit, model.ChannelHypit, model.PlatformHypit},
+		{model.PlatformMoments, model.PlatformMoments, model.ChannelMoments, model.PlatformMoments},
+		{model.PlatformEcommerce, model.PlatformEcommerce, model.ChannelEcommerce, model.PlatformEcommerce},
+		{model.PlatformWhiteboardAnimation, model.AgentIDWhiteboard, model.ChannelWhiteboard, model.TaskKindContentGeneration},
+		{"channels-video", model.AgentIDMontage, model.ChannelMontage, model.TaskKindContentGeneration},
+	}
+	for _, tt := range types {
+		if err := db.Create(&model.Task{ID: uuid.NewString(), UserID: "user-1", Type: tt.legacyType, Status: model.TaskStatusPending}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A partially migrated row must be completed as well; checking only agent_id
+	// leaves this exact row failing the startup readiness check.
+	if err := db.Create(&model.Task{ID: uuid.NewString(), UserID: "user-1", Type: model.PlatformMontage, AgentID: model.AgentIDMontage, Status: model.TaskStatusPending}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MigrateMultiAgentChannelIdentity(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var tasks []model.Task
+	if err := db.Order("created_at").Find(&tasks).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != len(types)+1 {
+		t.Fatalf("tasks = %d, want %d", len(tasks), len(types)+1)
+	}
+	for i, tt := range types {
+		if got := tasks[i]; got.AgentID != tt.agentID || got.Channel != tt.channel || got.TaskKind != tt.taskKind {
+			t.Errorf("task %q identity = %q/%q/%q, want %q/%q/%q", got.Type, got.AgentID, got.Channel, got.TaskKind, tt.agentID, tt.channel, tt.taskKind)
+		}
+	}
+	partial := tasks[len(tasks)-1]
+	if partial.AgentID != model.AgentIDMontage || partial.Channel != model.ChannelMontage || partial.TaskKind != model.TaskKindContentGeneration {
+		t.Errorf("partial task identity = %q/%q/%q", partial.AgentID, partial.Channel, partial.TaskKind)
+	}
+}
+
+func TestMigrateMultiAgentChannelIdentityCompletesPartialExecutionIdentity(t *testing.T) {
+	db := openMultiAgentMigrationDB(t)
+	taskID := uuid.NewString()
+	if err := db.Create(&model.Task{ID: taskID, UserID: "user-1", Type: model.PlatformMontage, Status: model.TaskStatusRunning}).Error; err != nil {
+		t.Fatal(err)
+	}
+	executionID := uuid.NewString()
+	if err := db.Create(&model.TaskExecution{
+		ID: executionID, TaskID: taskID, Attempt: 1, AgentID: model.AgentIDMontage,
+		ExecutionProfile: "effective", Provider: "claude", ProfileEnvs: map[string]string{},
+		ProfileFingerprint: "fingerprint", Target: "kubernetes", Status: model.TaskExecutionRunning,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MigrateMultiAgentChannelIdentity(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var execution model.TaskExecution
+	if err := db.First(&execution, "id = ?", executionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if execution.AgentID != model.AgentIDMontage || execution.Channel != model.ChannelMontage || execution.TaskKind != model.TaskKindContentGeneration {
+		t.Fatalf("execution identity = %q/%q/%q", execution.AgentID, execution.Channel, execution.TaskKind)
+	}
+}
+
 func TestAssertMultiAgentChannelReadinessAllowsHistoricalPluginIdentities(t *testing.T) {
 	db := openMultiAgentMigrationDB(t)
 	if err := db.Create(&model.Task{ID: uuid.NewString(), UserID: "user-1", Type: "montage", AgentID: "montage", Channel: "montage", TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusPending}).Error; err != nil {
@@ -70,5 +149,22 @@ func TestAssertMultiAgentChannelReadinessAllowsHistoricalPluginIdentities(t *tes
 	err := AssertMultiAgentChannelReadiness(context.Background(), db)
 	if err == nil || !strings.Contains(err.Error(), "outside supported product identities") {
 		t.Fatalf("mismatched identity error = %v", err)
+	}
+}
+
+func TestAssertMultiAgentChannelReadinessIgnoresTerminalRowsWithoutIdentity(t *testing.T) {
+	db := openMultiAgentMigrationDB(t)
+	if err := db.Create(&model.Task{ID: uuid.NewString(), UserID: "user-1", Type: "removed-workflow", Status: model.TaskStatusCompleted}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.TaskExecution{
+		ID: uuid.NewString(), TaskID: uuid.NewString(), Attempt: 1,
+		ExecutionProfile: "effective", Provider: "claude", ProfileEnvs: map[string]string{},
+		ProfileFingerprint: "fingerprint", Target: "kubernetes", Status: model.TaskExecutionSucceeded,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := AssertMultiAgentChannelReadiness(context.Background(), db); err != nil {
+		t.Fatalf("terminal historical rows should not block readiness: %v", err)
 	}
 }

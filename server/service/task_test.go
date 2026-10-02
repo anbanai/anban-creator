@@ -168,7 +168,7 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	}
 	params := CreateManualParams{
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
-		AgentID: model.AgentIDProfile, Channel: model.ChannelProfile, TaskKind: model.TaskKindProfileAnalysis,
+		AgentID: model.AgentIDProfileAnalysis, Channel: model.ChannelProfileAnalysis, TaskKind: model.TaskKindProfileAnalysis,
 		RequestedTaskType: model.TaskTypeProfileAnalysis, Prompt: "https://example.com/profile",
 		AgentInput: input, Quantity: 1, ProfileAnalysisExpectedVersion: &expectedRevision,
 	}

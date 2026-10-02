@@ -24,7 +24,7 @@ func baseKubernetesConfigForTest() Config {
 		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
 		"moments":                         "registry.example.com/creator-agent-moments@sha256:" + strings.Repeat("h", 64),
 		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("i", 64),
-		"profile":                         "registry.example.com/creator-agent-profile@sha256:" + strings.Repeat("j", 64),
+		"profile-analysis":                "registry.example.com/creator-agent-profile-analysis@sha256:" + strings.Repeat("j", 64),
 		"feedback":                        "registry.example.com/creator-agent-feedback@sha256:" + strings.Repeat("k", 64),
 		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:" + strings.Repeat("l", 64),
 		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:" + strings.Repeat("m", 64),
@@ -71,7 +71,7 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		model.PlatformSeednote:            "creator-agent-seednote:latest",
 		model.PlatformMontage:             "creator-agent-montage:latest",
 		model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
-		"profile":                         "creator-agent-profile:latest",
+		"profile-analysis":                "creator-agent-profile-analysis:latest",
 		"feedback":                        "creator-agent-feedback:latest",
 		model.PlatformHypit:               "creator-agent-hypit:latest",
 	}

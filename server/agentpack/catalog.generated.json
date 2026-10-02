@@ -601,7 +601,7 @@
     {
       "id": "profile-analysis",
       "channel": "profile-analysis",
-      "version": "2.1.1",
+      "version": "2.1.2",
       "kind": "managed",
       "display_name": "账号画像分析",
       "description": "基于用户提供的公开资料和问答生成并提交六维项目账号画像。",
@@ -618,7 +618,7 @@
         ]
       },
       "runtime": {
-        "profile": "profile",
+        "profile": "profile-analysis",
         "adapter": "standard",
         "max_turns": 40
       },
@@ -802,7 +802,7 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "b699f1437160de8cdff129320fea5276c2bdf9f75a88250aeb3c699d4ef38045"
+      "digest": "d05b296c8d1002c21be6ab8da0525ae4e151aff68750cd0df70584af362fcd87"
     },
     {
       "id": "seednote",

@@ -615,7 +615,7 @@ func (h *ProjectHandler) ensureProfileInitialization(ctx context.Context, userID
 	expectedVersion := profile.Version
 	tasks, err := h.tasks.CreateManual(ctx, service.CreateManualParams{
 		UserID: userID, ProjectID: project.ID, ExecutionProfile: "effective",
-		AgentID: model.AgentIDProfile, Channel: model.ChannelProfile, TaskKind: model.TaskKindProfileAnalysis,
+		AgentID: model.AgentIDProfileAnalysis, Channel: model.ChannelProfileAnalysis, TaskKind: model.TaskKindProfileAnalysis,
 		Prompt:     project.ProfileURL,
 		AgentInput: profileAgentInput(project, map[string]any{}, nil),
 		Quantity:   1, ProfileAnalysisExpectedVersion: &expectedVersion,

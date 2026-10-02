@@ -605,7 +605,7 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, path+".envs: "+err.Error())
 		}
 	}
-	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile", "feedback"}
+	requiredRuntimeProfiles := []string{"wechat-article", "wechat-picture", model.PlatformSeednote, model.PlatformMontage, "moments", "ecommerce", model.PlatformWhiteboardAnimation, "profile-analysis", "feedback"}
 	for _, profile := range requiredRuntimeProfiles {
 		image, ok := c.RuntimeImages[profile]
 		if !ok {
@@ -617,7 +617,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile" && profile != "feedback" {
+		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile-analysis" && profile != "feedback" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -993,8 +993,8 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Claude.RuntimeImages["ecommerce"]) == "" {
 		c.Claude.RuntimeImages["ecommerce"] = "creator-agent-ecommerce:latest"
 	}
-	if strings.TrimSpace(c.Claude.RuntimeImages["profile"]) == "" {
-		c.Claude.RuntimeImages["profile"] = "creator-agent-profile:latest"
+	if strings.TrimSpace(c.Claude.RuntimeImages["profile-analysis"]) == "" {
+		c.Claude.RuntimeImages["profile-analysis"] = "creator-agent-profile-analysis:latest"
 	}
 	if strings.TrimSpace(c.Claude.RuntimeImages["feedback"]) == "" {
 		c.Claude.RuntimeImages["feedback"] = "creator-agent-feedback:latest"

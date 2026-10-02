@@ -484,7 +484,7 @@ func resolveTaskIdentity(project *model.Project, p CreateManualParams) (agentID,
 		case model.TaskTypeViralAnalysis:
 			agentID = model.AgentIDSeednote
 		case model.TaskTypeProfileAnalysis:
-			agentID = model.AgentIDProfile
+			agentID = model.AgentIDProfileAnalysis
 		}
 	}
 	if channel == "" {

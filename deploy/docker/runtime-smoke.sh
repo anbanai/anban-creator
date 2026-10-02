@@ -357,7 +357,7 @@ claude:
     montage: "${MONTAGE_RUNTIME_IMAGE:-creator-agent-montage:latest}"
     moments: "${MOMENTS_RUNTIME_IMAGE:-creator-agent-moments:latest}"
     ecommerce: "${ECOMMERCE_RUNTIME_IMAGE:-creator-agent-ecommerce:latest}"
-    profile: "${PROFILE_RUNTIME_IMAGE:-creator-agent-profile:latest}"
+    profile-analysis: "${PROFILE_ANALYSIS_RUNTIME_IMAGE:-creator-agent-profile-analysis:latest}"
     whiteboard-animation: "${WHITEBOARD_ANIMATION_RUNTIME_IMAGE:-creator-agent-whiteboard-animation:latest}"
     feedback: "${FEEDBACK_RUNTIME_IMAGE:-creator-agent-feedback:latest}"
   execution_token_secret: "runtime-smoke-execution-token-secret-32-bytes-minimum"

@@ -11,7 +11,7 @@ SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
 MOMENTS_AGENT_IMAGE ?= creator-agent-moments:latest
 ECOMMERCE_AGENT_IMAGE ?= creator-agent-ecommerce:latest
-PROFILE_AGENT_IMAGE ?= creator-agent-profile:latest
+PROFILE_ANALYSIS_AGENT_IMAGE ?= creator-agent-profile-analysis:latest
 FEEDBACK_AGENT_IMAGE ?= creator-agent-feedback:latest
 WHITEBOARD_ANIMATION_AGENT_IMAGE ?= creator-agent-whiteboard-animation:latest
 HYPIT_AGENT_IMAGE ?= creator-agent-hypit:latest
@@ -36,7 +36,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-agent-image docker-feedback-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
+        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images
 
 .PHONY: docker-runtime-smoke docker-hypit-smoke
 
@@ -168,7 +168,7 @@ web-build:
 
 # Build all one-shot task runtimes, then start the Compose services. Runtime
 # containers are launched on demand by the server and are not Compose services.
-docker-up: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-agent-image docker-feedback-agent-image docker-whiteboard-animation-agent-image
+docker-up: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-agent-image docker-whiteboard-animation-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
@@ -210,11 +210,11 @@ docker-moments-agent-image:
 docker-ecommerce-agent-image:
 	@docker build -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .
 
-# Build the minimal dedicated Profile Agent runtime.
-docker-profile-agent-image:
-	@echo "Building $(PROFILE_AGENT_IMAGE)..." && \
-	docker build -f deploy/docker/Dockerfile.agent-profile -t $(PROFILE_AGENT_IMAGE) . && \
-	echo "Image build complete: $(PROFILE_AGENT_IMAGE)"
+# Build the minimal dedicated Profile Analysis Agent runtime.
+docker-profile-analysis-agent-image:
+	@echo "Building $(PROFILE_ANALYSIS_AGENT_IMAGE)..." && \
+	docker build -f deploy/docker/Dockerfile.agent-profile-analysis -t $(PROFILE_ANALYSIS_AGENT_IMAGE) . && \
+	echo "Image build complete: $(PROFILE_ANALYSIS_AGENT_IMAGE)"
 
 # Build the minimal Feedback Agent runtime without media or publishing tools.
 docker-feedback-agent-image:
@@ -272,7 +272,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-agent-image docker-feedback-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
+docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
 
 # Backward-compatible alias (builds agent image)
 docker-image: docker-wechat-article-agent-image

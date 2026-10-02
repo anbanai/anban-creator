@@ -1868,7 +1868,7 @@ func testJobConfig() kubernetesJobConfig {
 			"ecommerce":                       "registry.example.com/creator-agent-ecommerce:v2",
 			model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation:v2",
 			model.PlatformHypit:               "registry.example.com/creator-agent-hypit:v2",
-			"profile":                         "registry.example.com/creator-agent-profile:v2",
+			"profile-analysis":                "registry.example.com/creator-agent-profile-analysis:v2",
 			"feedback":                        "registry.example.com/creator-agent-feedback:v2",
 		},
 		ServerURL: "https://creator-server:8443",

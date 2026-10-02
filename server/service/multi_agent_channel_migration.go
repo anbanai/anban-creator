@@ -27,22 +27,21 @@ func MigrateMultiAgentChannelIdentity(ctx context.Context, db *gorm.DB) error {
 		_ = tx.Rollback()
 		return err
 	}
-	updates := []struct {
-		types   []string
-		agent   string
-		channel string
-		kind    string
-	}{
-		{[]string{"article", "wechat", "wechat-article"}, model.AgentIDArticle, model.ChannelArticle, model.TaskKindContentGeneration},
-		{[]string{"seednote"}, model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindContentGeneration},
-		{[]string{"wechat-picture"}, model.AgentIDWechatPicture, model.ChannelWechatPicture, model.TaskKindContentGeneration},
-		{[]string{model.TaskTypeViralAnalysis, "viral-analysis"}, model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindViralAnalysis},
+	var tasks []model.Task
+	if err := tx.Where("agent_id IS NULL OR agent_id = '' OR channel IS NULL OR channel = '' OR task_kind IS NULL OR task_kind = ''").Find(&tasks).Error; err != nil {
+		return rollback(fmt.Errorf("load legacy tasks: %w", err))
 	}
-	for _, update := range updates {
-		if err := tx.Model(&model.Task{}).
-			Where("(agent_id IS NULL OR agent_id = '') AND type IN ?", update.types).
-			Updates(map[string]any{"agent_id": update.agent, "channel": update.channel, "task_kind": update.kind}).Error; err != nil {
-			return rollback(fmt.Errorf("backfill task identity: %w", err))
+	for _, task := range tasks {
+		agentID, channel, taskKind, ok := migrateLegacyTaskIdentity(task)
+		if !ok {
+			// Leave unknown historical rows untouched. Readiness will still fail for
+			// active rows, but terminal rows do not need an invented Agent identity.
+			continue
+		}
+		if err := tx.Model(&model.Task{}).Where("id = ?", task.ID).Updates(map[string]any{
+			"agent_id": agentID, "channel": channel, "task_kind": taskKind,
+		}).Error; err != nil {
+			return rollback(fmt.Errorf("backfill task %s identity: %w", task.ID, err))
 		}
 	}
 	// Convert every historical plan into one independent entry. The entry is
@@ -125,7 +124,7 @@ func MigrateMultiAgentChannelIdentity(ctx context.Context, db *gorm.DB) error {
 	if strings.Contains(strings.ToLower(tx.Dialector.Name()), "sqlite") {
 		// SQLite does not support MySQL JOIN UPDATE; use a portable per-row pass.
 		var executions []model.TaskExecution
-		if queryErr := tx.Where("agent_id IS NULL OR agent_id = ''").Find(&executions).Error; queryErr != nil {
+		if queryErr := tx.Where("agent_id IS NULL OR agent_id = '' OR channel IS NULL OR channel = '' OR task_kind IS NULL OR task_kind = ''").Find(&executions).Error; queryErr != nil {
 			return rollback(queryErr)
 		}
 		for _, execution := range executions {
@@ -137,7 +136,7 @@ func MigrateMultiAgentChannelIdentity(ctx context.Context, db *gorm.DB) error {
 				return rollback(queryErr)
 			}
 		}
-	} else if err := tx.Exec(`UPDATE task_executions e JOIN tasks t ON t.id = e.task_id SET e.agent_id = t.agent_id, e.channel = t.channel, e.task_kind = t.task_kind WHERE e.agent_id IS NULL OR e.agent_id = ''`).Error; err != nil {
+	} else if err := tx.Exec(`UPDATE task_executions e JOIN tasks t ON t.id = e.task_id SET e.agent_id = t.agent_id, e.channel = t.channel, e.task_kind = t.task_kind WHERE e.agent_id IS NULL OR e.agent_id = '' OR e.channel IS NULL OR e.channel = '' OR e.task_kind IS NULL OR e.task_kind = ''`).Error; err != nil {
 		return rollback(fmt.Errorf("backfill execution identity: %w", err))
 	}
 	if err := tx.Commit().Error; err != nil {
@@ -154,7 +153,7 @@ func AssertMultiAgentChannelReadiness(ctx context.Context, db *gorm.DB) error {
 	}
 	var count int64
 	if err := db.WithContext(ctx).Model(&model.Task{}).
-		Where("agent_id IS NULL OR agent_id = '' OR channel IS NULL OR channel = '' OR task_kind IS NULL OR task_kind = ''").
+		Where("status IN ? AND (agent_id IS NULL OR agent_id = '' OR channel IS NULL OR channel = '' OR task_kind IS NULL OR task_kind = '')", []string{model.TaskStatusPending, model.TaskStatusRunning}).
 		Count(&count).Error; err != nil {
 		return err
 	}
@@ -172,7 +171,9 @@ func AssertMultiAgentChannelReadiness(ctx context.Context, db *gorm.DB) error {
 		return fmt.Errorf("multi-agent identity migration found %d tasks outside supported product identities", count)
 	}
 	if err := db.WithContext(ctx).Model(&model.TaskExecution{}).
-		Where("agent_id IS NULL OR agent_id = '' OR channel IS NULL OR channel = '' OR task_kind IS NULL OR task_kind = ''").
+		Where("status IN ? AND (agent_id IS NULL OR agent_id = '' OR channel IS NULL OR channel = '' OR task_kind IS NULL OR task_kind = '')", []string{
+			model.TaskExecutionCreated, model.TaskExecutionDispatching, model.TaskExecutionStarting, model.TaskExecutionRunning,
+		}).
 		Count(&count).Error; err != nil {
 		return err
 	}
@@ -203,8 +204,20 @@ func migrateLegacyIdentity(value string) (agentID, channel, taskKind string, ok 
 		return model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindViralAnalysis, true
 	case "channels-video":
 		return model.AgentIDMontage, model.ChannelMontage, model.TaskKindContentGeneration, true
-	case "montage", "hypit", "moments", "ecommerce":
-		return "", "", "", false
+	case model.TaskTypeProfileAnalysis, "profile-analysis":
+		return model.AgentIDProfileAnalysis, model.ChannelProfileAnalysis, model.TaskKindProfileAnalysis, true
+	case model.PlatformMontage:
+		return model.AgentIDMontage, model.ChannelMontage, model.TaskKindContentGeneration, true
+	case model.PlatformHypit:
+		return model.AgentIDHypit, model.ChannelHypit, model.PlatformHypit, true
+	case model.PlatformMoments:
+		return model.PlatformMoments, model.ChannelMoments, model.PlatformMoments, true
+	case model.PlatformEcommerce:
+		return model.PlatformEcommerce, model.ChannelEcommerce, model.PlatformEcommerce, true
+	case model.PlatformWhiteboardAnimation:
+		return model.AgentIDWhiteboard, model.ChannelWhiteboard, model.TaskKindContentGeneration, true
+	case "feedback":
+		return model.AgentIDFeedback, model.ChannelFeedback, model.TaskKindFeedbackAnalysis, true
 	default:
 		value = strings.TrimSpace(value)
 		if value == "" {
@@ -212,4 +225,42 @@ func migrateLegacyIdentity(value string) (agentID, channel, taskKind string, ok 
 		}
 		return "", "", "", false
 	}
+}
+
+func migrateLegacyTaskIdentity(task model.Task) (agentID, channel, taskKind string, ok bool) {
+	if agentID, channel, taskKind, ok = migrateLegacyIdentity(task.Type); ok {
+		return agentID, channel, taskKind, true
+	}
+	// A partially migrated row may have lost its legacy type's exact spelling,
+	// but still has the stable Agent ID. Recover the remaining fields from the
+	// Agent Pack contract instead of guessing from project metadata.
+	agentID = strings.TrimSpace(task.AgentID)
+	if agentID == "" {
+		return "", "", "", false
+	}
+	if channel, ok = model.AgentChannel(agentID); ok {
+		if taskKind = strings.TrimSpace(task.TaskKind); taskKind == "" {
+			taskKind = model.TaskKindContentGeneration
+		}
+		return agentID, channel, taskKind, true
+	}
+	pack, found := agentpack.Default().ForAgent(agentID)
+	if !found {
+		return "", "", "", false
+	}
+	channel = strings.TrimSpace(pack.Channel)
+	if channel == "" && pack.Kind == agentpack.KindPlugin {
+		channel = agentID
+	}
+	if channel == "" {
+		return "", "", "", false
+	}
+	taskKind = strings.TrimSpace(task.TaskKind)
+	if taskKind == "" {
+		taskKind = strings.TrimSpace(task.Type)
+	}
+	if taskKind == "" {
+		return "", "", "", false
+	}
+	return agentID, channel, taskKind, true
 }

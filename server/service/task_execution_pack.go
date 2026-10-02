@@ -46,7 +46,7 @@ func taskExecutionIdentity(task *model.Task) (agentID, channel, taskKind string)
 		switch agentID {
 		case model.AgentIDArticle, model.AgentIDWechatPicture, model.AgentIDSeednote:
 			taskKind = model.TaskKindContentGeneration
-		case model.AgentIDProfile:
+		case model.AgentIDProfileAnalysis:
 			taskKind = model.TaskKindProfileAnalysis
 		default:
 			taskKind = model.TaskKindContentGeneration
@@ -101,7 +101,7 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 			execution.TaskKind = model.TaskKindFeedbackAnalysis
 		case model.AgentIDWhiteboard:
 			execution.TaskKind = model.PlatformWhiteboardAnimation
-		case model.AgentIDProfile:
+		case model.AgentIDProfileAnalysis:
 			execution.TaskKind = model.TaskKindProfileAnalysis
 		default:
 			execution.TaskKind = model.TaskKindContentGeneration

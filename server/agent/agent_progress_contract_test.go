@@ -40,7 +40,7 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 				wantVersion = "1.1.0"
 			}
 			if pack.ID == "profile-analysis" {
-				wantVersion = "2.1.1"
+				wantVersion = "2.1.2"
 			}
 			if pack.ID == "feedback" {
 				wantVersion = "1.0.1"
