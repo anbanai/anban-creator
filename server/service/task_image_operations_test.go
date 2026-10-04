@@ -38,7 +38,7 @@ type fakeTaskImageOperationsImage struct {
 	compressData []byte
 }
 
-func (f *fakeTaskImageOperationsImage) UploadImage(_ context.Context, _, _, filePath string) (*UploadImageResult, error) {
+func (f *fakeTaskImageOperationsImage) UploadImage(_ context.Context, _, _, _, filePath string) (*UploadImageResult, error) {
 	f.uploadPath = filePath
 	if f.readUpload {
 		data, err := os.ReadFile(filePath)

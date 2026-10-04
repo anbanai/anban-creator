@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
 	appconfig "github.com/anbanai/anban-creator/server/app/config"
@@ -62,12 +63,11 @@ type UploadImageResult struct {
 // ImageService handles image generation, upload, and compression
 // for server-side MCP tool use. It wraps the server/app/image package.
 type ImageService struct {
-	imageCfg           *srvconfig.ImageAPIConfig
-	storage            storage.Provider
-	repo               repository.Repository
-	capabilityResolver *ImageCapabilityResolver
-	logger             *zerolog.Logger
-	providerCostSvc    *ProviderCostService
+	imageCfg        *srvconfig.ImageAPIConfig
+	storage         storage.Provider
+	repo            repository.Repository
+	logger          *zerolog.Logger
+	providerCostSvc *ProviderCostService
 }
 
 // NewImageService creates a new ImageService.
@@ -83,10 +83,6 @@ func NewImageService(
 		repo:     repo,
 		logger:   logger,
 	}
-}
-
-func (s *ImageService) SetImageCapabilityResolver(resolver *ImageCapabilityResolver) {
-	s.capabilityResolver = resolver
 }
 
 func (s *ImageService) SetProviderCostService(svc *ProviderCostService) {
@@ -248,45 +244,6 @@ func (b *boundedImageBuffer) Write(p []byte) (int, error) {
 		return 0, storage.ErrObjectExceedsMaxSize
 	}
 	return b.Buffer.Write(p)
-}
-
-// buildProcessor creates a new image.Processor for the given project and image type.
-// imageCapabilityKey routes through the server-owned capability catalog.
-func (s *ImageService) buildProcessor(ctx context.Context, ch *model.Project, imageType, imageCapabilityKey string) (*image.Processor, error) {
-	effectiveCfg := s.imageCfg
-	if s.capabilityResolver != nil && strings.TrimSpace(imageCapabilityKey) != "" {
-		resolved, source, err := s.capabilityResolver.ResolveImageConfigForTaskKey(ctx, ch.UserID, imageCapabilityKey)
-		if err != nil {
-			return nil, err
-		}
-		if resolved != nil {
-			s.logger.Info().
-				Str("user_id", ch.UserID).
-				Str("image_type", imageType).
-				Str("image_capability_key", imageCapabilityKey).
-				Str("source", source).
-				Msg("using task-selected image config")
-			effectiveCfg = resolved
-		}
-	}
-
-	// BuildAppConfig only needs the image-API/sizing slots here; the style
-	// dimensions are irrelevant for provider resolution but the signature requires
-	// a resolved set, so pass the project-only resolution (no task).
-	appCfg, err := agent.BuildAppConfig(ch, ResolveStyle(ch, nil), effectiveCfg, "", false)
-	if err != nil {
-		return nil, fmt.Errorf("build app config: %w", err)
-	}
-
-	var apiCfg *appconfig.ImageAPI
-	if effectiveCfg != nil {
-		apiCfg = effectiveCfg.API
-	}
-	if apiCfg == nil {
-		return nil, fmt.Errorf("no image API config available for type %q", imageType)
-	}
-
-	return image.NewProcessor(appCfg, apiCfg, s.logger), nil
 }
 
 // buildProcessorForResolved builds the generation processor from an immutable
@@ -515,27 +472,68 @@ func populateImageResultDimensions(result *ImageResult) error {
 	return nil
 }
 
-// UploadImage uploads a local image. For the WeChat platform, uploads
-// to WeChat CDN. For other platforms (seednote), uploads to the configured storage provider.
+// UploadImage routes a local image through the task's channel. WeChat channel
+// credentials remain server-owned and are loaded only for this upload.
 func (s *ImageService) UploadImage(
 	ctx context.Context,
-	userID, projectID, filePath string,
+	userID, projectID, taskID, filePath string,
 ) (*UploadImageResult, error) {
+	task, err := s.repo.Tasks().FindByID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("find upload task: %w", err)
+	}
+	if task == nil || userID == "" || task.UserID != userID {
+		return nil, ErrTaskImageOperationOwnership
+	}
+	if task.ProjectID != projectID {
+		return nil, ErrTaskImageOperationProjectMismatch
+	}
+	if task.Channel == "" {
+		return nil, errors.New("image upload requires a task channel")
+	}
 	ch, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("find project: %w", err)
 	}
+	if ch == nil || ch.UserID != userID {
+		return nil, ErrTaskImageOperationProjectOwnership
+	}
 
-	// Non-WeChat platforms: upload to storage provider (local/OSS).
-	if ch.Platform != model.PlatformWechat {
+	// Projects can contain tasks for multiple channels; the legacy project
+	// platform must not select the upload destination or credentials.
+	if task.Channel != model.ChannelArticle && task.Channel != model.ChannelWechatPicture {
 		return s.uploadToStorage(ctx, filePath)
 	}
 
-	// WeChat platforms: upload to WeChat CDN.
-	processor, err := s.buildProcessor(ctx, ch, "content", "")
-	if err != nil {
-		return nil, err
+	channelConfig, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, task.Channel)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("load upload channel credentials: %w", err)
 	}
+	wechatCfg := appconfig.WechatConfig{}
+	if channelConfig != nil {
+		wechatCfg.AppID = strings.TrimSpace(mapStringValue(channelConfig.Config.Data(), "wechat_app_id"))
+		wechatCfg.Secret = strings.TrimSpace(mapStringValue(channelConfig.Config.Data(), "wechat_secret"))
+	}
+	if wechatCfg.AppID == "" || wechatCfg.Secret == "" {
+		return nil, &image.ProcessorError{
+			Message:  "wechat credentials not configured for task channel, cannot upload image",
+			HintText: "请先在项目对应的公众号渠道配置中填写 WeChat App ID 和 Secret",
+		}
+	}
+	// Uploading existing bytes needs only channel credentials and compression
+	// settings, never a configured image-generation provider or capability.
+	appCfg := &appconfig.Config{Wechat: wechatCfg}
+	uploadCfg := &appconfig.ImageAPI{
+		Compress:  true,
+		MaxWidth:  appconfig.DefaultImageMaxWidth,
+		MaxSizeMB: appconfig.DefaultImageMaxSizeMB,
+	}
+	if s.imageCfg != nil && s.imageCfg.API != nil {
+		uploadCfg.Compress = s.imageCfg.API.Compress
+		uploadCfg.MaxWidth = s.imageCfg.API.MaxWidth
+		uploadCfg.MaxSizeMB = s.imageCfg.API.MaxSizeMB
+	}
+	processor := image.NewProcessor(appCfg, uploadCfg, s.logger)
 
 	result, err := processor.UploadLocalImage(filePath)
 	if err != nil {

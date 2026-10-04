@@ -95,7 +95,7 @@ type TaskImageOperationsConfig struct {
 }
 
 type taskImageOperationsImage interface {
-	UploadImage(context.Context, string, string, string) (*UploadImageResult, error)
+	UploadImage(context.Context, string, string, string, string) (*UploadImageResult, error)
 	CompressImage(string, int) (string, bool, error)
 }
 
@@ -146,7 +146,7 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	if cleanup != nil {
 		defer cleanup()
 	}
-	result, err := s.images.UploadImage(ctx, req.UserID, req.ProjectID, filePath)
+	result, err := s.images.UploadImage(ctx, req.UserID, req.ProjectID, req.TaskID, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("upload image: %w", err)
 	}

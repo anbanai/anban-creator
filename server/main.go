@@ -725,7 +725,6 @@ func main() {
 
 		if store != nil {
 			imageSvc = service.NewImageService(defaultImageAPI, store, repo, log)
-			imageSvc.SetImageCapabilityResolver(imageCapabilityResolver)
 		}
 		if imageSvc != nil {
 			imageSvc.SetProviderCostService(fixedBilling.Cost)
