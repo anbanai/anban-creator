@@ -12,6 +12,10 @@ vi.mock('@/lib/content-analytics', async importOriginal => ({ ...await importOri
 // jsdom has no layout; keep the real trend component and chart at a fixed viewport.
 vi.mock('recharts', async importOriginal => ({ ...await importOriginal<typeof import('recharts')>(), ResponsiveContainer: ({ children }: { children: React.ReactElement<{ width?: number; height?: number }> }) => cloneElement(children, { width: 800, height: 320 }) }))
 
+// Hydration chains project, overview and list requests while mounting the real
+// chart. This test checks data semantics, not a one-second rendering deadline.
+const hydrationWait = { timeout: 5000 }
+
 const article: AnalyticsContent = { id: 'article-1', title: '已归档公众号文章', content_type: 'wechat-article', date: '2026-08-01', last_stat_date: '2026-09-30', metrics: { read_users: 1286, share_users: 0, read_to_follow_users: null, delivered_users: 9800 } }
 const picture: AnalyticsContent = { id: 'picture-1', title: '尚无统计的贴图', content_type: 'wechat-picture', date: '2026-08-02', metrics: { read_users: null, share_users: null, read_to_follow_users: null, delivered_users: null } }
 const overview: AnalyticsOverview = {
@@ -40,7 +44,7 @@ beforeEach(() => {
 describe('persisted WeChat analytics display', () => {
   it('preserves nonzero, zero and missing values in four summary metrics, trend details and list columns', async () => {
     render(<ContentAnalyticsPage />)
-    await screen.findByRole('button', { name: article.title })
+    await screen.findByRole('button', { name: article.title }, hydrationWait)
     const summary = within(screen.getByLabelText('关键指标'))
     expect(summary.getByRole('button', { name: '阅读人数1,286' })).toBeInTheDocument()
     expect(summary.getByRole('button', { name: '分享人数0' })).toBeInTheDocument()
@@ -62,7 +66,7 @@ describe('persisted WeChat analytics display', () => {
 
   it('uses canonical content types for labels and filters', async () => {
     render(<ContentAnalyticsPage />)
-    await screen.findByRole('button', { name: article.title })
+    await screen.findByRole('button', { name: article.title }, hydrationWait)
     const row = screen.getByRole('button', { name: article.title }).closest('tr')!
     expect(within(row).getByText('公众号文章')).toBeInTheDocument()
     const filter = screen.getByRole('combobox', { name: '内容类型' })
@@ -75,7 +79,7 @@ describe('persisted WeChat analytics display', () => {
 
   it('never substitutes publication or creation dates for the data-as-of date', async () => {
     render(<ContentAnalyticsPage />)
-    await screen.findByRole('button', { name: picture.title })
+    await screen.findByRole('button', { name: picture.title }, hydrationWait)
     const cells = (title: string) => within(screen.getByRole('button', { name: title }).closest('tr')!).getAllByRole('cell')
     expect(cells(article.title)[6]).toHaveTextContent('2026-09-30')
     expect(cells(picture.title)[6]).toHaveTextContent('—')
@@ -85,7 +89,7 @@ describe('persisted WeChat analytics display', () => {
   it('uses Chinese metric metadata for unavailable metrics and formatted observations', async () => {
     window.history.replaceState(null, '', '/content-analytics?account=wechat&content=article-1&from=2026-09-01&to=2026-09-30')
     render(<ContentAnalyticsPage />)
-    await screen.findByRole('heading', { name: article.title })
+    await screen.findByRole('heading', { name: article.title }, hydrationWait)
     expect(screen.getByText('平均阅读时长：缺少阅读人数权重；送达完成率：缺少送达人数权重')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查看观测记录' }))
     expect(await screen.findByText(/阅读人数：1,286 · 分享人数：0 · 阅读后关注：— · 送达人数：9,800 · 平均阅读时长：12.5 秒 · 送达完成率：75.00%/)).toBeInTheDocument()
