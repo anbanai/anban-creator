@@ -297,7 +297,9 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
   if (data.artifact_transport?.mode !== "direct" && data.artifact_transport?.mode !== "stream") throw new Error("bootstrap artifact transport is invalid");
   if (!cleanString(data.prompt) || Buffer.byteLength(data.prompt) > MAX_BOOTSTRAP_PROMPT_BYTES) throw new Error("bootstrap prompt is invalid");
   if (!Number.isInteger(data.max_turns) || data.max_turns < 1 || data.max_turns > MAX_BOOTSTRAP_TURNS) throw new Error("bootstrap max turns is invalid");
-  if (!/^anban:[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_flag)) throw new Error("bootstrap agent flag is invalid");
+  if (!/^anban:[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_flag)) {
+    throw new Error(`bootstrap agent flag is invalid (received ${JSON.stringify(data.agent_flag)})`);
+  }
   if (data.agent_memory_directory !== ".claude/agent-memory") throw new Error("bootstrap Agent memory directory is invalid");
   validateExecutionProfile(data.execution_profile);
   if (data.resume_session_id && (!cleanString(data.resume_session_id) || data.resume_session_id.length > 128 || /[\s\x00-\x1f]/.test(data.resume_session_id))) throw new Error("bootstrap resume session ID is invalid");

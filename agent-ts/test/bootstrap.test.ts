@@ -164,6 +164,17 @@ describe("validateBootstrapResponse", () => {
     expect(message).not.toContain(response.execution_profile.envs.ANTHROPIC_AUTH_TOKEN!);
   });
 
+  test("accepts the Hypit Agent flag emitted by the server", () => {
+    const response = validResponse();
+    response.task_type = "hypit";
+    response.task_kind = "hypit";
+    response.agent_pack_id = "hypit";
+    response.agent_pack_version = "1.0.0";
+    response.runtime_profile = "hypit";
+    response.agent_flag = "anban:hypit";
+    expect(validateBootstrapResponse("execution-1", response).agent_flag).toBe("anban:hypit");
+  });
+
   test("rejects malformed Agent Pack artifact contracts", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
     const basePack = {

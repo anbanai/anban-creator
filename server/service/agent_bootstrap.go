@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -518,6 +519,24 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err := serveragent.ValidateModelUsageAliases(aliases); err != nil {
 		return nil, fmt.Errorf("%w: invalid Claude model usage aliases: %w", ErrAgentBootstrapUnavailable, err)
 	}
+	packID := strings.TrimSpace(execution.AgentPackID)
+	if packID == "" {
+		packID = strings.TrimSpace(execution.AgentID)
+	}
+	pack, ok := agentpack.Default().ForAgent(packID)
+	if !ok && strings.TrimSpace(execution.AgentID) == "" {
+		packID = strings.TrimSpace(task.AgentID)
+		if packID == "" {
+			packID = serveragent.TaskTypeToAgent(task.Type)
+		}
+		pack, ok = agentpack.Default().ForAgent(packID)
+	}
+	if !ok || strings.TrimSpace(pack.Agent.Name) == "" {
+		return nil, fmt.Errorf("%w: Agent Pack %q has no valid agent name", ErrAgentBootstrapConflict, packID)
+	}
+	if !regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`).MatchString(pack.Agent.Name) {
+		return nil, fmt.Errorf("%w: Agent Pack %q has invalid agent name", ErrAgentBootstrapConflict, packID)
+	}
 	return &AgentBootstrapResponse{
 		ExecutionToken: token, ExecutionID: execution.ID, TaskID: task.ID, TaskType: bootstrapTaskType,
 		AgentID: execution.AgentID, Channel: execution.Channel, TaskKind: execution.TaskKind,
@@ -529,7 +548,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			DisplayName: executionProfile.DisplayName, ProfileFingerprint: task.AgentProfileFingerprint,
 			Envs: model.CloneClaudeProfileEnvs(runtimeEnv), ModelUsageAliases: aliases,
 		},
-		MaxTurns: serveragent.DefaultMaxTurns(execution.AgentPackID, s.cfg.MaxTurns), AgentFlag: "anban:" + execution.AgentID,
+		MaxTurns: serveragent.DefaultMaxTurns(execution.AgentPackID, s.cfg.MaxTurns), AgentFlag: "anban:" + pack.Agent.Name,
 		AgentMemoryDirectory: ".claude/agent-memory", ResumeSessionID: execution.ResumeSessionID, ResumeContextPath: resumeContextPath,
 		Env: s.montageEnv(task), Files: files, ArtifactTransport: ArtifactTransport{Mode: s.artifactTransportMode()},
 		recoveryImages: recoveryImages,
