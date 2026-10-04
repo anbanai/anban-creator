@@ -12,6 +12,7 @@ import (
 	"github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -51,6 +52,15 @@ func (r planCASRepositoryOverride) Plans() repository.PlanRepository {
 	return r.plans
 }
 
+func (r planCASRepositoryOverride) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	return r.Repository.WithTx(ctx, func(tx repository.Repository) error {
+		if _, ok := r.plans.(rejectingPlanCASRepository); ok {
+			return fn(planCASRepositoryOverride{Repository: tx, plans: rejectingPlanCASRepository{PlanRepository: tx.Plans()}})
+		}
+		return fn(tx)
+	})
+}
+
 type stubDraftClient struct {
 	listDraftsErr    error
 	listPublishedErr error
@@ -84,7 +94,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Plan{}, &model.Task{}, &model.User{},
 		&model.LoginSession{}, &model.TaskFile{}, &model.Project{},
-		&model.Asset{}, &model.PlanEntry{},
+		&model.Asset{}, &model.PlanEntry{}, &model.ProjectChannelConfig{},
 	); err != nil {
 		t.Fatalf("failed to migrate: %v", err)
 	}
@@ -159,14 +169,14 @@ func TestPlanServiceRequiresExecutionProfileOnCreateAndUpdate(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 
-	if _, err := svc.Create(ctx, CreatePlanParams{
+	if _, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"},
 		UserID: userID, ProjectID: projectID, CronExpr: "0 9 * * *", Prompt: "topic",
 	}); err == nil || !strings.Contains(err.Error(), "execution_profile is required") {
 		t.Fatalf("Create error = %v, want execution_profile is required", err)
 	}
 
 	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		ExecutionProfile: "effective", CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
 	}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
@@ -197,7 +207,7 @@ func TestPlanServiceValidatesProfileTierAndPersistsSelection(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
-	plan, err := svc.Create(ctx, CreatePlanParams{
+	plan, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"},
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "balanced",
 		CronExpr: "0 9 * * *", Prompt: "topic",
 	})
@@ -219,6 +229,13 @@ func TestPlanServiceValidatesProfileTierAndPersistsSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
+	if len(updated.Entries) != 1 || updated.Entries[0].ExecutionProfile != "effective" {
+		t.Fatalf("updated entries did not inherit profile: %#v", updated.Entries)
+	}
+	entries, err := repo.PlanEntries().ListByPlanID(ctx, plan.ID)
+	if err != nil || len(entries) != 1 || entries[0].ExecutionProfile != "effective" {
+		t.Fatalf("persisted entries = %#v, %v", entries, err)
+	}
 	stored, err := repo.Plans().FindByID(ctx, plan.ID)
 	if err != nil || updated.ExecutionProfile != "effective" || stored.ExecutionProfile != "effective" {
 		t.Fatalf("updated=%#v stored=%#v err=%v", updated, stored, err)
@@ -233,13 +250,14 @@ func createTestWechatProject(t *testing.T, repo repository.Repository, userID st
 		Platform: model.PlatformWechat,
 		Name:     "Test WeChat Project",
 		Status:   model.ProjectStatusActive,
-		Config: model.ProjectConfig{
-			WechatAppID:  "app-id",
-			WechatSecret: "secret",
-		},
 	}
 	if err := repo.Projects().Create(context.Background(), ch); err != nil {
 		t.Fatalf("create test wechat project: %v", err)
+	}
+	config := &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: ch.ID, Channel: model.ChannelArticle}
+	config.Config = datatypes.NewJSONType(map[string]any{"wechat_app_id": "app-id", "wechat_secret": "secret"})
+	if err := repo.ProjectChannelConfigs().Upsert(context.Background(), config); err != nil {
+		t.Fatalf("create test wechat channel config: %v", err)
 	}
 	return ch.ID
 }
@@ -303,7 +321,7 @@ func TestPlanService_Create(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+			plan, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 				UserID:    "user-1",
 				ProjectID: tt.projectID,
 				CronExpr:  tt.cronExpr,
@@ -340,158 +358,13 @@ func TestPlanService_Create(t *testing.T) {
 	}
 }
 
-func TestPlanServiceCreateMontagePlanStoresInput(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	userID := "user-om-plan"
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-
-	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
-		UserID:             userID,
-		ProjectID:          projectID,
-		CronExpr:           "0 10 * * *",
-		ImageRatio:         "16:9",
-		ImageCapabilityKey: "standard",
-		MontageInput: &model.MontageInput{
-			Brief:       "每日生成新品短片",
-			PipelineKey: "default",
-			Preferences: model.MontagePreferences{
-				DurationSeconds: 30,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create montage plan: %v", err)
-	}
-	if plan.Type != model.PlatformMontage {
-		t.Fatalf("plan type = %q, want montage", plan.Type)
-	}
-	if plan.ImageRatio != "16:9" || plan.ImageCapabilityKey != "standard" {
-		t.Fatalf("Montage plan image settings = ratio %q, capability %q; want 16:9 and standard", plan.ImageRatio, plan.ImageCapabilityKey)
-	}
-	got := plan.MontageInput.Data()
-	if got.Brief != "每日生成新品短片" || got.PipelineKey != "default" {
-		t.Fatalf("montage input = %#v", got)
-	}
-	if got.Preferences.DurationSeconds != 30 {
-		t.Fatalf("preferences = %#v", got.Preferences)
-	}
-}
-
-func TestPlanServiceUpdateMontagePlanStoresInput(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	userID := "user-om-plan-update"
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-
-	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
-		UserID:    userID,
-		ProjectID: projectID,
-		CronExpr:  "0 10 * * *",
-		MontageInput: &model.MontageInput{
-			Brief:       "旧短片",
-			PipelineKey: "default",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create montage plan: %v", err)
-	}
-	plan.ImageRatio = "16:9"
-	plan.ImageCapabilityKey = "retired-capability"
-	if err := repo.Plans().UpdateEditable(ctx, plan, false); err != nil {
-		t.Fatalf("seed legacy Montage image settings: %v", err)
-	}
-	nextRatio := "1:1"
-	nextCapability := "professional"
-
-	updated, err := svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "effective",
-		ID:                 plan.ID,
-		ImageRatio:         &nextRatio,
-		ImageCapabilityKey: &nextCapability,
-		MontageInput: &model.MontageInput{
-			Brief:       "更新后的短片",
-			PipelineKey: "social-short",
-			Preferences: model.MontagePreferences{
-				DurationSeconds: 20,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Update montage plan: %v", err)
-	}
-	if updated.ImageRatio != "1:1" || updated.ImageCapabilityKey != "professional" {
-		t.Fatalf("updated Montage plan image settings = ratio %q, capability %q; want 1:1 and professional", updated.ImageRatio, updated.ImageCapabilityKey)
-	}
-	persisted, err := repo.Plans().FindByID(ctx, plan.ID)
-	if err != nil {
-		t.Fatalf("FindByID: %v", err)
-	}
-	if persisted.ImageRatio != "1:1" || persisted.ImageCapabilityKey != "professional" {
-		t.Fatalf("persisted Montage plan image settings = ratio %q, capability %q; want 1:1 and professional", persisted.ImageRatio, persisted.ImageCapabilityKey)
-	}
-	got := updated.MontageInput.Data()
-	if got.Brief != "更新后的短片" || got.PipelineKey != "social-short" {
-		t.Fatalf("montage input = %#v", got)
-	}
-	if got.Preferences.DurationSeconds != 20 {
-		t.Fatalf("preferences = %#v", got.Preferences)
-	}
-
-	updated, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "effective", ID: plan.ID, Prompt: "只改提示"})
-	if err != nil {
-		t.Fatalf("Update without montage input: %v", err)
-	}
-	got = updated.MontageInput.Data()
-	if got.Brief != "更新后的短片" || got.PipelineKey != "social-short" {
-		t.Fatalf("montage input changed when omitted: %#v", got)
-	}
-}
-
-func TestPlanServiceRejectsMontageInputForOtherPlatforms(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	userID := "user-om-plan-reject"
-	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
-
-	_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
-		UserID:    userID,
-		ProjectID: projectID,
-		CronExpr:  "0 10 * * *",
-		MontageInput: &model.MontageInput{
-			Brief: "错误平台",
-		},
-	})
-	if err == nil || !errors.Is(err, ErrMontageInput) || !strings.Contains(err.Error(), "montage_input 只能用于视频生成计划") {
-		t.Fatalf("Create error = %v, want 视频生成输入无效", err)
-	}
-
-	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
-		UserID:    userID,
-		ProjectID: projectID,
-		CronExpr:  "0 10 * * *",
-		Prompt:    "正常文章计划",
-	})
-	if err != nil {
-		t.Fatalf("Create article plan: %v", err)
-	}
-	_, err = svc.Update(ctx, UpdatePlanParams{ExecutionProfile: "effective",
-		ID: plan.ID,
-		MontageInput: &model.MontageInput{
-			Brief: "错误平台更新",
-		},
-	})
-	if err == nil || !errors.Is(err, ErrMontageInput) || !strings.Contains(err.Error(), "montage_input 只能用于视频生成计划") {
-		t.Fatalf("Update error = %v, want 视频生成输入无效", err)
-	}
-}
-
 func TestPlanService_Create_SkipReferenceImage(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 
 	skipRef := true
-	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	plan, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:             "user-1",
 		ProjectID:          chID,
 		CronExpr:           "0 9 * * *",
@@ -511,7 +384,7 @@ func TestPlanService_ImageRatioPersistsAndUpdates(t *testing.T) {
 	ctx := context.Background()
 	projectID := createTestProject(t, repo, "user-1", model.PlatformWechat)
 
-	plan, err := svc.Create(ctx, CreatePlanParams{
+	plan, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"},
 		ExecutionProfile: "effective",
 		UserID:           "user-1",
 		ProjectID:        projectID,
@@ -546,105 +419,13 @@ func TestPlanService_ImageRatioPersistsAndUpdates(t *testing.T) {
 	}
 }
 
-func TestPlanService_Create_ArticleImageToggles(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	chID := createTestProject(t, repo, "user-1", model.PlatformWechat)
-
-	cover, content := false, false
-	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
-		UserID:                   "user-1",
-		ProjectID:                chID,
-		CronExpr:                 "0 9 * * *",
-		Prompt:                   "topic hint",
-		ArticleWithCover:         &cover,
-		ArticleWithContentImages: &content,
-	})
-	if err != nil {
-		t.Fatalf("create plan: %v", err)
-	}
-	if plan.ArticleWithCover == nil || *plan.ArticleWithCover {
-		t.Error("expected article_with_cover to be false when explicitly set")
-	}
-	if plan.ArticleWithContentImages == nil || *plan.ArticleWithContentImages {
-		t.Error("expected article_with_content_images to be false when explicitly set")
-	}
-
-	// Default (nil flags) → both true (legacy "always generate" behavior).
-	planDefault, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
-		UserID:    "user-1",
-		ProjectID: chID,
-		CronExpr:  "0 10 * * *",
-		Prompt:    "topic hint 2",
-	})
-	if err != nil {
-		t.Fatalf("create default plan: %v", err)
-	}
-	if ptr := planDefault.ArticleWithCover; ptr == nil || !*ptr {
-		t.Error("expected article_with_cover to default true when omitted")
-	}
-	if ptr := planDefault.ArticleWithContentImages; ptr == nil || !*ptr {
-		t.Error("expected article_with_content_images to default true when omitted")
-	}
-}
-
-func TestPlanServiceCreateRequiresAndPersistsArticleCoverPortrait(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := t.Context()
-	projectID := createTestProject(t, repo, "user-1", model.PlatformWechat)
-	project, err := repo.Projects().FindByID(ctx, projectID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	project.PortraitReferenceImageAssetID = "portrait-asset"
-	if err := repo.Projects().Update(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	plan, err := svc.Create(ctx, CreatePlanParams{
-		UserID: "user-1", ProjectID: projectID, ExecutionProfile: "effective",
-		CronExpr: "0 9 * * *", CoverUsePortrait: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !plan.CoverUsePortrait {
-		t.Fatal("plan did not persist required portrait setting")
-	}
-
-	taskSvc, taskRepo := setupTaskServiceWithEnqueuer(t)
-	userID := uuid.NewString()
-	ensureTestUser(t, taskRepo, userID)
-	spawnProjectID := createTestProject(t, taskRepo, userID, model.PlatformWechat)
-	portrait := referenceAssetFixture("portrait", userID, DirectUploadPurposeProjectPortraitReference)
-	seedReferenceAsset(t, taskRepo, portrait)
-	spawnProject, err := taskRepo.Projects().FindByID(ctx, spawnProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	spawnProject.PortraitReferenceImageAssetID = portrait.ID
-	if err := taskRepo.Projects().Update(ctx, spawnProject); err != nil {
-		t.Fatal(err)
-	}
-	taskSvc.SetReferenceAssetService(NewReferenceAssetService(taskRepo, nil, nil))
-	spawned, err := taskSvc.CreateFromPlan(ctx, &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: spawnProjectID, Type: model.TaskTypeWechatArticle,
-		ExecutionProfile: "effective", CoverUsePortrait: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !spawned.CoverUsePortrait {
-		t.Fatal("spawned task did not inherit required portrait setting")
-	}
-}
-
 func TestPlanService_GetByID(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
 	// Create a test project and plan.
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	created, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -670,7 +451,7 @@ func TestPlanService_GetByID(t *testing.T) {
 	}
 }
 
-func TestPlanService_CreateRejectsUnsupportedPlanPlatforms(t *testing.T) {
+func TestPlanService_CreateAllowsIndependentProjectPlatforms(t *testing.T) {
 	svc, repo := setupTestPlanService(t)
 	ctx := context.Background()
 
@@ -684,14 +465,14 @@ func TestPlanService_CreateRejectsUnsupportedPlanPlatforms(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			projectID := createTestProject(t, repo, "user-unsupported-plan-"+tt.name, tt.platform)
 
-			_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+			_, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 				UserID:    "user-unsupported-plan-" + tt.name,
 				ProjectID: projectID,
 				CronExpr:  "0 9 * * *",
 				Prompt:    "scheduled content",
 			})
-			if !errors.Is(err, ErrUnsupportedPlanPlatform) {
-				t.Fatalf("Create error = %v, want ErrUnsupportedPlanPlatform", err)
+			if err != nil {
+				t.Fatalf("Create across project platforms: %v", err)
 			}
 		})
 	}
@@ -708,7 +489,7 @@ func TestPlanService_List(t *testing.T) {
 
 	// Create multiple plans for user-1.
 	for i := 0; i < 5; i++ {
-		_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+		_, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 			UserID:    "user-1",
 			ProjectID: chID,
 			CronExpr:  "0 9 * * *",
@@ -720,7 +501,7 @@ func TestPlanService_List(t *testing.T) {
 	}
 
 	// Create plans for another user.
-	_, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	_, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:    "user-2",
 		ProjectID: chID2,
 		CronExpr:  "0 10 * * *",
@@ -766,7 +547,7 @@ func TestPlanService_Update(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	created, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -824,7 +605,7 @@ func TestPlanService_Update_SkipReferenceImage(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	created, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -883,7 +664,7 @@ func TestPlanService_Update_ReferenceImageAssetID(t *testing.T) {
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	initialRef := "asset-initial"
 	seedReferenceAsset(t, repo, referenceAssetFixture(initialRef, "user-1", DirectUploadPurposeTaskReference))
-	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	created, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:                "user-1",
 		ProjectID:             chID,
 		CronExpr:              "0 9 * * *",
@@ -945,7 +726,7 @@ func TestPlanServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWriting(t
 	ctx := context.Background()
 	projectID := createTestProject(t, base, "user-1", model.PlatformSeednote)
 	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID, Type: model.PlatformSeednote,
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID,
 		Prompt: "before", CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
 		ReferenceImageAssetID: "asset-a",
 	}
@@ -992,7 +773,7 @@ func TestPlanServiceUpdatesDoNotOverwriteSchedulerNextRun(t *testing.T) {
 			oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 			schedulerNext := oldNext.Add(time.Hour)
 			plan := &model.Plan{
-				ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID, Type: model.PlatformSeednote,
+				ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID,
 				Prompt: "before", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
 				ReferenceImageAssetID: "asset-a", NextRunAt: &oldNext,
 			}
@@ -1039,7 +820,7 @@ func TestPlanServiceExplicitCronChangeUpdatesSchedule(t *testing.T) {
 	projectID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID, Type: model.PlatformSeednote,
+		ID: uuid.NewString(), UserID: "user-1", ProjectID: projectID,
 		Prompt: "before", CronExpr: "0 * * * *", Status: model.PlanStatusActive, NextRunAt: &oldNext,
 	}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
@@ -1082,7 +863,7 @@ func TestPlanServicePauseResumeDoNotOverwriteConcurrentEditableFields(t *testing
 			ctx := context.Background()
 			next := time.Now().Add(time.Hour).Truncate(time.Second)
 			plan := &model.Plan{
-				ID: uuid.NewString(), UserID: "user-1", Type: model.TaskTypeWechatArticle,
+				ID: uuid.NewString(), UserID: "user-1",
 				Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
 				Status: tt.initial, NextRunAt: &next,
 			}
@@ -1132,7 +913,7 @@ func TestPlanService_Pause_Resume(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	created, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -1187,7 +968,7 @@ func TestPlanServicePauseCancelsPendingBacklogAndReversesAdmission(t *testing.T)
 		t.Fatal(err)
 	}
 	svc.SetBillingWalletService(fixture.wallet)
-	created, err := billingTaskSvc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID, Prompt: "pause backlog", Quantity: 2})
+	created, err := billingTaskSvc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID, Prompt: "pause backlog", Quantity: 2})
 	if err != nil || len(created) != 2 {
 		t.Fatalf("CreateManual = %d, %v", len(created), err)
 	}
@@ -1235,7 +1016,7 @@ func TestFindPendingByProjectExcludesPausedPlanTasks(t *testing.T) {
 		}
 	}
 	for _, planID := range []*string{nil, &activeID, &pausedID} {
-		task := &model.Task{ID: uuid.NewString(), UserID: "user-dispatch", ProjectID: projectID, PlanID: planID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending}
+		task := &model.Task{ID: uuid.NewString(), UserID: "user-dispatch", ProjectID: projectID, PlanID: planID, Status: model.TaskStatusPending}
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			t.Fatal(err)
 		}
@@ -1259,7 +1040,7 @@ func TestPlanService_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	chID := createTestProject(t, repo, "user-1", model.PlatformSeednote)
-	created, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	created, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:    "user-1",
 		ProjectID: chID,
 		CronExpr:  "0 9 * * *",
@@ -1364,7 +1145,7 @@ func createSeednotePlanWithInputAttachments(t *testing.T, svc *PlanService, repo
 		t.Fatalf("create user: %v", err)
 	}
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	plan, err := svc.Create(ctx, CreatePlanParams{ExecutionProfile: "effective",
+	plan, err := svc.Create(ctx, CreatePlanParams{AgentIDs: []string{"wechat-article"}, ExecutionProfile: "effective",
 		UserID:           userID,
 		ProjectID:        projectID,
 		CronExpr:         "0 9 * * *",
@@ -1398,68 +1179,6 @@ func TestCreatePlanClonesInputAttachments(t *testing.T) {
 	got := stored.InputAttachments.Data()
 	if len(got) != 1 || got[0].Instruction != "保留产品包装细节" {
 		t.Fatalf("stored attachments = %#v, want independent original snapshot", got)
-	}
-}
-
-func TestCreatePlanRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
-
-	_, err := svc.Create(ctx, CreatePlanParams{
-		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,
-		CronExpr: "0 9 * * *", AgentInput: map[string]any{"tone": "concise"},
-	})
-	if !errors.Is(err, ErrInvalidAgentInput) {
-		t.Fatalf("Create error = %v, want ErrInvalidAgentInput", err)
-	}
-}
-
-func TestCreatePlanPersistsEmptyAgentInputSnapshot(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	ctx := context.Background()
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
-
-	plan, err := svc.Create(ctx, CreatePlanParams{
-		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,
-		CronExpr: "0 9 * * *", AgentInput: map[string]any{},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if plan.AgentInput.Data() == nil {
-		t.Fatal("plan agent_input was not persisted")
-	}
-}
-
-func TestUpdatePlanRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	plan := createSeednotePlanWithInputAttachments(t, svc, repo, nil)
-	input := map[string]any{"tone": "concise"}
-
-	_, err := svc.Update(context.Background(), UpdatePlanParams{
-		ExecutionProfile: "effective", ID: plan.ID, AgentInput: &input,
-	})
-	if !errors.Is(err, ErrInvalidAgentInput) {
-		t.Fatalf("Update error = %v, want ErrInvalidAgentInput", err)
-	}
-}
-
-func TestUpdatePlanClearsAgentInputWithExplicitEmptyObject(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	plan := createSeednotePlanWithInputAttachments(t, svc, repo, nil)
-	empty := map[string]any{}
-
-	updated, err := svc.Update(context.Background(), UpdatePlanParams{
-		ExecutionProfile: "effective", ID: plan.ID, AgentInput: &empty,
-	})
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if updated.AgentInput.Data() == nil {
-		t.Fatal("explicit empty agent_input was not applied")
 	}
 }
 
@@ -1523,5 +1242,75 @@ func TestUpdatePlanInputAttachmentsNonEmptyReplaces(t *testing.T) {
 	got := stored.InputAttachments.Data()
 	if len(got) != 1 || got[0].URL != "https://cdn.example.com/replacement.png" || got[0].Instruction != "替换说明" {
 		t.Fatalf("stored attachments = %#v, want replacement snapshot", got)
+	}
+}
+
+func TestPlanServiceSelectionAndProfileUpdatesAreAtomic(t *testing.T) {
+	for _, useCAS := range []bool{false, true} {
+		t.Run(fmt.Sprintf("CAS=%v", useCAS), func(t *testing.T) {
+			db := setupTestDB(t)
+			repo := repository.New(db)
+			svc := newTestPlanService(t, repo)
+			projectID := createTestProject(t, repo, "owner", model.PlatformWechat)
+			plan, err := svc.Create(t.Context(), CreatePlanParams{UserID: "owner", ProjectID: projectID, ExecutionProfile: "effective", CronExpr: "0 9 * * *", Prompt: "before", AgentIDs: []string{model.AgentIDArticle}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalEntryID := plan.Entries[0].ID
+			selection := []string{model.AgentIDArticle, model.AgentIDSeednote}
+			callback := "test:reject_second_entry"
+			if err := db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+				if entry, ok := tx.Statement.Dest.(*model.PlanEntry); ok && entry.AgentID == model.AgentIDSeednote {
+					tx.AddError(errors.New("injected entry failure"))
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			params := UpdatePlanParams{ID: plan.ID, ExecutionProfile: "effective", Prompt: "after", AgentIDs: &selection}
+			update := func() (*model.Plan, error) {
+				if useCAS {
+					return svc.UpdateIfReferenceImageAssetID(t.Context(), params, "")
+				}
+				return svc.Update(t.Context(), params)
+			}
+			if _, err := update(); err == nil || !strings.Contains(err.Error(), "injected entry failure") {
+				t.Fatalf("update error = %v", err)
+			}
+			stored, err := svc.GetByID(t.Context(), plan.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Prompt != "before" || len(stored.Entries) != 1 || stored.Entries[0].ID != originalEntryID {
+				t.Fatalf("partial update persisted: %#v", stored)
+			}
+			if err := db.Callback().Create().Remove(callback); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := update()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.Prompt != "after" || len(updated.Entries) != 2 {
+				t.Fatalf("incomplete update result: %#v", updated)
+			}
+			listed, _, err := svc.List(t.Context(), "owner", 0, 10, projectID)
+			if err != nil || len(listed) != 1 || len(listed[0].Entries) != 2 {
+				t.Fatalf("incomplete list result: %#v, %v", listed, err)
+			}
+		})
+	}
+}
+
+func TestPlanServiceRejectsInvalidAgentSelections(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	projectID := createTestProject(t, repo, "owner", model.PlatformWechat)
+	for _, ids := range [][]string{nil, {}, {""}, {"unknown"}, {model.AgentIDArticle, model.AgentIDArticle}, {model.AgentIDProfileAnalysis}} {
+		if _, err := svc.Create(t.Context(), CreatePlanParams{UserID: "owner", ProjectID: projectID, ExecutionProfile: "effective", CronExpr: "0 9 * * *", AgentIDs: ids}); err == nil {
+			t.Fatalf("accepted invalid selection %#v", ids)
+		}
+	}
+	plans, err := repo.Plans().FindByUserID(t.Context(), "owner", projectID, 0, 10)
+	if err != nil || len(plans) != 0 {
+		t.Fatalf("invalid selection persisted: %#v, %v", plans, err)
 	}
 }

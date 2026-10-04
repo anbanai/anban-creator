@@ -16,9 +16,10 @@ describe('montage UX contracts', () => {
     expect(dialogSource).not.toContain('MontageExecutionTarget')
   })
 
-  it('plans page supports montage input', () => {
+  it('plans keep output selection independent from task-specific inputs', () => {
     const source = readFileSync('src/pages/PlansPage.tsx', 'utf8')
-    expect(source).toContain('montage_input')
-    expect(source).toContain('MontageCreationPanel')
+    expect(source).toContain('agent_ids')
+    expect(source).not.toContain('montage_input')
+    expect(source).not.toContain('MontageCreationPanel')
   })
 })

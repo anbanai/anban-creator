@@ -130,7 +130,7 @@ func TestAIEntryHandlerMapsAgentProfileErrors(t *testing.T) {
 
 func TestAIEntryHandlerSubmitPassesExplicitParametersAndReturnsCreatedTasks(t *testing.T) {
 	logger := zerolog.New(io.Discard)
-	task := &model.Task{ID: uuid.NewString(), Type: model.TaskTypeWechatArticle, Prompt: "写文章"}
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), Type: model.TaskTypeWechatArticle, Prompt: "写文章"}
 	submitter := &fakeAIEntrySubmitter{
 		res: service.AIEntrySubmitResult{
 			Status:  service.AIEntryStatusCreated,
@@ -244,7 +244,7 @@ func TestAIEntryHandlerSubmitValidatesAndDefaultsQuantity(t *testing.T) {
 
 func TestAIEntryHandlerSubmitFinalizesUploadSession(t *testing.T) {
 	logger := zerolog.New(io.Discard)
-	task := &model.Task{ID: uuid.NewString(), Type: model.TaskTypeWechatArticle, Prompt: "写文章"}
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), Type: model.TaskTypeWechatArticle, Prompt: "写文章"}
 	submitter := &fakeAIEntrySubmitter{
 		res: service.AIEntrySubmitResult{
 			Status:  service.AIEntryStatusCreated,

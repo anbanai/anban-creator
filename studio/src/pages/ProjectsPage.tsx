@@ -43,8 +43,6 @@ import { ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/la
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { MontageProjectDefaultsPanel } from '@/components/montage/MontageProjectDefaultsPanel'
-import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
-import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -72,7 +70,6 @@ const statusTabs: { label: string; value: string }[] = [
 
 const CHANNEL_FORM_DEFAULTS: ProjectFormValues = {
   platform: 'wechat',
-  agent_config: {},
   name: '',
   profile_url: '',
   avatar_url: '',
@@ -125,11 +122,10 @@ function projectPlatformFromIntent(type: string | undefined, isAdmin: boolean): 
 function projectToForm(ch: Project): ProjectFormValues {
   return {
     platform: ch.platform ?? CHANNEL_FORM_DEFAULTS.platform,
-    agent_config: ch.agent_config ?? {},
     name: ch.name || '',
     profile_url: ch.profile_url || '',
     avatar_url: ch.avatar_url || '',
-    wechat_app_id: ch.config?.wechat_app_id || '',
+    wechat_app_id: '',
     wechat_secret: '',
     keywords: ch.keywords || '',
     instructions: ch.instructions || ch.positioning || '',
@@ -157,10 +153,15 @@ function projectToForm(ch: Project): ProjectFormValues {
   }
 }
 
+async function saveWechatAccountConfig(projectID: string, config: Record<string, unknown>) {
+  for (const channel of ['wechat-article', 'wechat-picture']) {
+    await api.projects.upsertChannelConfig(projectID, channel, config)
+  }
+}
+
 export default function ProjectsPage() {
   const { user } = useAuth()
   const isAdmin = user?.is_admin === true
-  const agentPacksQuery = useAgentPacks()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -170,6 +171,9 @@ export default function ProjectsPage() {
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const formSessionRef = useRef(0)
+  const createdProjectReturnHrefRef = useRef<string | null>(null)
+  useEffect(() => () => { formSessionRef.current += 1 }, [])
   const [fetchingProfile, setFetchingProfile] = useState(false)
   const [profileFetchHint, setProfileFetchHint] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
@@ -190,11 +194,6 @@ export default function ProjectsPage() {
   })
 
   const selectedPlatform = useWatch({ control: form.control, name: 'platform' })
-  const watchedAgentConfig = useWatch({ control: form.control, name: 'agent_config' }) ?? {}
-  const selectedAgentPack = useMemo(
-		() => agentPacksQuery.data?.packs.find((pack) => pack.channel === selectedPlatform),
-    [agentPacksQuery.data, selectedPlatform],
-  )
   const isWechat = selectedPlatform === 'wechat'
   const isSeednote = selectedPlatform === 'seednote'
   const isMoments = selectedPlatform === 'moments'
@@ -348,6 +347,21 @@ export default function ProjectsPage() {
     refetchInterval: isImageAnalysisActive(editingAnalysis) ? 2000 : false,
   })
 
+  const channelConfigsQuery = useQuery({
+    queryKey: ['project-channel-configs', editingProject?.id],
+    queryFn: () => api.projects.getChannelConfig(editingProject!.id, 'wechat-article'),
+    enabled: modalOpen && Boolean(editingProject) && isWechat,
+    retry: false,
+    staleTime: 0,
+  })
+
+  useEffect(() => {
+    const config = channelConfigsQuery.data
+    if (!modalOpen || !editingProject || config?.project_id !== editingProject.id || form.getFieldState('wechat_app_id').isDirty) return
+    const appID = config.config.wechat_app_id
+    form.setValue('wechat_app_id', typeof appID === 'string' ? appID : '', { shouldDirty: false })
+  }, [channelConfigsQuery.data, editingProject, form, modalOpen])
+
   useEffect(() => {
     const refreshed = editingProjectQuery.data?.project
     if (!refreshed) return
@@ -367,27 +381,34 @@ export default function ProjectsPage() {
   }, [modalOpen, searchParams, visibleProjects])
 
   const createMutation = useMutation({
-    mutationFn: (data: CreateProjectRequest) => api.projects.create(data),
-    onSuccess: (created) => {
-      toast.success(created.project.image_analysis ? '项目已创建，正在后台识别视觉风格' : '项目创建成功')
+    mutationFn: async ({ data, channelConfig, sessionID, returnContext }: { data: CreateProjectRequest; channelConfig?: Record<string, unknown>; sessionID: number; returnContext: Omit<Parameters<typeof projectCreatedReturnHref>[0], 'projectId'> | null }) => {
+      const created = await api.projects.create(data)
+      if (sessionID === formSessionRef.current) {
+        createdProjectReturnHrefRef.current = returnContext ? projectCreatedReturnHref({ ...returnContext, projectId: created.project.id }) : null
+      }
+      if (channelConfig && created.project.id) {
+        try {
+          await saveWechatAccountConfig(created.project.id, channelConfig)
+        } catch (error) {
+          // The project already exists. Preserve the form and retry through
+          // update so a failed credential write cannot create another project.
+          if (sessionID === formSessionRef.current) setEditingProject(created.project)
+          void queryClient.invalidateQueries({ queryKey: ['projects'] })
+          throw error
+        }
+      }
+      return created
+    },
+    onSuccess: (created, { sessionID }) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
-      const createdProject = created.project
-      if (returnTo && createdProject?.id) {
-        closeProfile()
-        resetModal()
-        navigate(projectCreatedReturnHref({
-          returnTo,
-          type: createIntent.type,
-          projectId: createdProject.id,
-          intent: createIntent.intent,
-        }))
-        return
-      }
-      resetModal()
+      queryClient.invalidateQueries({ queryKey: ['project-channel-configs'] })
+      if (sessionID !== formSessionRef.current) return
+      toast.success(created.project.image_analysis ? '项目已创建，正在后台识别视觉风格' : '项目创建成功')
+      finishProjectSave()
     },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '创建项目失败，请重试'))
+    onError: (err, { sessionID }) => {
+      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建项目失败，请重试'))
     },
   })
 
@@ -471,16 +492,23 @@ export default function ProjectsPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<CreateProjectRequest> }) =>
-      api.projects.update(id, data),
-    onSuccess: () => {
-      toast.success('项目更新成功')
+    mutationFn: async ({ id, data, channelConfig }: { id: string; data: Partial<CreateProjectRequest>; channelConfig?: Record<string, unknown>; sessionID: number }) => {
+      const updated = await api.projects.update(id, data)
+      if (channelConfig) {
+        await saveWechatAccountConfig(id, channelConfig)
+      }
+      return updated
+    },
+    onSuccess: (_, { sessionID }) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
-      resetModal()
+      queryClient.invalidateQueries({ queryKey: ['project-channel-configs'] })
+      if (sessionID !== formSessionRef.current) return
+      toast.success('项目更新成功')
+      finishProjectSave()
     },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '更新项目失败，请重试'))
+    onError: (err, { sessionID }) => {
+      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '更新项目失败，请重试'))
     },
   })
 
@@ -509,6 +537,8 @@ export default function ProjectsPage() {
   })
 
   function openCreate() {
+    formSessionRef.current += 1
+    createdProjectReturnHrefRef.current = null
     setEditingProject(null)
     setProfileFetchHint(null)
     const platform = projectPlatformFromIntent(createIntent.type, isAdmin)
@@ -530,6 +560,8 @@ export default function ProjectsPage() {
   }, [createIntent.shouldCreate, modalOpen])
 
   function openEdit(project: Project) {
+    formSessionRef.current += 1
+    createdProjectReturnHrefRef.current = null
     setEditingProject(project)
     setProfileFetchHint(null)
     setEditingAnalysis(project.image_analysis ?? null)
@@ -541,6 +573,13 @@ export default function ProjectsPage() {
     setModalOpen(true)
   }
 
+  function finishProjectSave() {
+    const returnHref = createdProjectReturnHrefRef.current
+    if (returnHref) closeProfile()
+    resetModal()
+    if (returnHref) navigate(returnHref)
+  }
+
   function closeModal() {
     if (form.formState.isDirty) {
       setShowDirtyDialog(true)
@@ -550,6 +589,8 @@ export default function ProjectsPage() {
   }
 
   function resetModal() {
+    formSessionRef.current += 1
+    createdProjectReturnHrefRef.current = null
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingProject(null)
@@ -569,6 +610,7 @@ export default function ProjectsPage() {
   }
 
   async function onSubmit(values: ProjectFormValues) {
+    if (!values.platform) return
     const submittedImageCapability = imageCapabilityOptions.find(
       (option) => option.key === (values.ecommerce_image_capability_key || defaultImageCapability),
     )
@@ -585,7 +627,6 @@ export default function ProjectsPage() {
     }
     const payload: CreateProjectRequest = {
       platform: values.platform,
-      agent_config: values.agent_config,
       name: values.name?.trim() || undefined,
       profile_url: values.profile_url?.trim() || undefined,
       avatar_url: values.avatar_url?.trim() || undefined,
@@ -597,9 +638,13 @@ export default function ProjectsPage() {
         ? values.author?.trim() || undefined
         : undefined,
       image_ratio: values.image_ratio,
-      wechat_app_id: values.wechat_app_id?.trim() || undefined,
-      wechat_secret: values.wechat_secret?.trim() || undefined,
     }
+    const channelConfig = values.platform === 'wechat'
+      ? {
+          ...(values.wechat_app_id?.trim() ? { wechat_app_id: values.wechat_app_id.trim() } : {}),
+          ...(values.wechat_secret?.trim() ? { wechat_secret: values.wechat_secret.trim() } : {}),
+        }
+      : undefined
     if (values.platform !== 'montage' && (!editingProject || form.formState.dirtyFields.visual_style)) {
       payload.visual_style = values.visual_style?.trim() ?? ''
     }
@@ -635,14 +680,14 @@ export default function ProjectsPage() {
         ...(form.formState.dirtyFields.reference_image ? { reference_image: referenceImage } : {}),
         ...(form.formState.dirtyFields.portrait_reference_image ? { portrait_reference_image: portraitReferenceImage } : {}),
       }
-      await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: updatePayload })).catch(() => {})
+      await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: updatePayload, channelConfig, sessionID: formSessionRef.current })).catch(() => {})
     } else {
       const createPayload = {
         ...payload,
         ...(referenceImage ? { reference_image: referenceImage } : {}),
         ...(portraitReferenceImage ? { portrait_reference_image: portraitReferenceImage } : {}),
       }
-      await submit(async () => createMutation.mutateAsync(createPayload)).catch(() => {})
+      await submit(async () => createMutation.mutateAsync({ data: createPayload, channelConfig, sessionID: formSessionRef.current, returnContext: returnTo ? { returnTo, type: createIntent.type, intent: createIntent.intent } : null })).catch(() => {})
     }
   }
 
@@ -752,7 +797,7 @@ export default function ProjectsPage() {
                 <FormItem className="flex items-center gap-3 space-y-0">
                   <div className="flex w-20 shrink-0 items-center justify-end gap-1">
                     <FormLabel className="w-auto">平台</FormLabel>
-                    <FieldHint>决定这个项目的创作流程、可选能力与交付物，创建后不可修改。</FieldHint>
+                    <FieldHint>用于账号配置、项目默认值和创作画像上下文，创建后不可修改。</FieldHint>
                   </div>
                   <FormControl>
                     <Select
@@ -760,7 +805,6 @@ export default function ProjectsPage() {
                       onValueChange={(value) => {
                         setMontageDefaultsReady(false)
                         field.onChange(value)
-                        form.setValue('agent_config', {}, { shouldDirty: true })
                         form.setValue(
                           'image_ratio',
                           (value ? platformConfigMap[value]?.default_image_ratio : 'auto') as ProjectFormValues['image_ratio'],
@@ -796,18 +840,6 @@ export default function ProjectsPage() {
                   <FormMessage />
                 </FormItem>
               )} />
-
-              <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm">
-                <p className="font-medium">项目公共上下文</p>
-                <p className="mt-1 text-xs text-muted-foreground">项目保存定位、关键词、视觉风格和素材等共享信息。创建任务或计划时再选择 Agent；每个 Agent 固定一个输出渠道。</p>
-              </div>
-
-              <AgentPackSchemaFields
-                pack={selectedAgentPack}
-                surface="project"
-                value={watchedAgentConfig}
-                onChange={(value) => form.setValue('agent_config', value, { shouldDirty: true, shouldValidate: true })}
-              />
 
               {hasProfileField && <FormField control={form.control} name="profile_url" render={({ field }) => (
                 <FormItem>
@@ -871,7 +903,7 @@ export default function ProjectsPage() {
                 <FormItem>
                   <div className="flex items-center gap-1">
                     <FormLabel className="w-auto">项目定位</FormLabel>
-                    <FieldHint>写入任务工作区的 CLAUDE.md，Agent 每次创作都会按它对齐定位。</FieldHint>
+                    <FieldHint>每次创作都会参考这些要求，保持账号定位与表达风格一致。</FieldHint>
                   </div>
                   <FormControl>
                     <Textarea
@@ -899,9 +931,9 @@ export default function ProjectsPage() {
                     <>
                       <FormField control={form.control} name="wechat_app_id" render={({ field }) => (
                         <FormItem>
-                          <FormLabel>微信 AppID</FormLabel>
+                          <FormLabel htmlFor="project-wechat-app-id">微信 AppID</FormLabel>
                           <FormControl>
-                            <Input className="flex-1 min-w-0" placeholder="wx..." {...field} />
+                            <Input id="project-wechat-app-id" className="flex-1 min-w-0" placeholder="wx..." {...field} />
                           </FormControl>
                           <FormDescription>在公众号后台「设置与开发 → 基本配置」获取，用于向微信创建草稿和正式发布。</FormDescription>
                           <FormMessage />
@@ -910,9 +942,10 @@ export default function ProjectsPage() {
 
                       <FormField control={form.control} name="wechat_secret" render={({ field }) => (
                         <FormItem>
-                          <FormLabel>微信 AppSecret</FormLabel>
+                          <FormLabel htmlFor="project-wechat-secret">微信 AppSecret</FormLabel>
                           <FormControl>
                             <Input
+                              id="project-wechat-secret"
                               type="password"
                               placeholder={editingProject ? '留空则保持原有密钥不变' : '创建后不可查看'}
                               {...field}

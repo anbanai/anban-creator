@@ -125,7 +125,7 @@ func feedbackSampleThreshold(operation string) int64 {
 
 type FeedbackEligibilityInput struct {
 	ProjectID, Platform, AccountID, Operation, Cadence                           string
-	TargetContentID                                                               string
+	TargetContentID                                                              string
 	PeriodStart, PeriodEnd, ContentSetDigest                                     string
 	AnalyticsRevision, StrategyRevision                                          int64
 	HasNewRevision, HasMatureContent, HasValidObservations, MeetsSampleThreshold bool

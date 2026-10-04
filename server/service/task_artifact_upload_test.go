@@ -1707,7 +1707,7 @@ func TestGeneratedCoverWechatMetadataSurvivesManifestAndReachesDraftAdd(t *testi
 	withCover, withContentImages := true, false
 	task := &model.Task{
 		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
-		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
+		Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusRunning,
 		ArticleWithCover: &withCover, ArticleWithContentImages: &withContentImages,
 		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}

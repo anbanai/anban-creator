@@ -13,12 +13,9 @@ import (
 // tasks. Project/account style config is snapshotted from the project when the
 // task is created; plans no longer override visual/writer/author/theme.
 type Plan struct {
-	ID        string `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID    string `gorm:"type:char(36);index;not null" json:"user_id"`
-	ProjectID string `gorm:"type:char(36);index" json:"project_id"`
-	// Type is retained only as a migration bridge. Plan identity now lives in
-	// Entries and this field is never serialized by the new API contract.
-	Type             string `gorm:"type:varchar(20);not null" json:"-"`
+	ID               string `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID           string `gorm:"type:char(36);index;not null" json:"user_id"`
+	ProjectID        string `gorm:"type:char(36);index" json:"project_id"`
 	ExecutionProfile string `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
 	Title            string `gorm:"type:varchar(200)" json:"title"`
 	Description      string `gorm:"type:text" json:"description"`
@@ -28,34 +25,13 @@ type Plan struct {
 	// ImageCapabilityKey / ImageRatio / ReferenceImageAssetID are per-plan image defaults copied to each
 	// spawned task (task-level values, when set, win). They are scheduling-adjacent
 	// "what to produce" params, not style/author/theme dimensions.
-	ImageCapabilityKey    string     `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
-	ImageRatio            string     `gorm:"type:varchar(10);default:''" json:"image_ratio"`
-	ReferenceImageAssetID string     `gorm:"type:char(36);index" json:"-"`
-	ReferenceImage        *AssetView `gorm:"-" json:"reference_image,omitempty"`
-	SkipReferenceImage    bool       `gorm:"default:false" json:"skip_reference_image,omitempty"`
-	Watermark             bool       `gorm:"default:false" json:"watermark,omitempty"`
-	// HasContentImage / HasTailImage are plan-level seednote image composition
-	// flags copied to Task on CreateFromPlan. Cover is always on; content defaults
-	// to on, tail defaults to off — matches the seednote form default.
-	HasContentImage bool `gorm:"default:true;not null" json:"has_content_image"`
-	HasTailImage    bool `gorm:"default:false;not null" json:"has_tail_image"`
-	// ArticleWithCover / ArticleWithContentImages are plan-level 公众号 article image
-	// toggles copied to Task on CreateFromPlan. Nullable *bool, DB default true (nil =
-	// generate). See model.Task.ArticleWithCover for why *bool is required.
-	ArticleWithCover         *bool                                 `gorm:"default:true;not null" json:"article_with_cover"`
-	ArticleWithContentImages *bool                                 `gorm:"default:true;not null" json:"article_with_content_images"`
-	CoverUsePortrait         bool                                  `gorm:"default:false;not null" json:"cover_use_portrait"`
-	InputAttachments         datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
-	HypitInput               datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
-	MontageInput             datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
-	AgentInput               datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
-
-	// Legacy style/author/theme columns. New code no longer writes or reads these;
-	// task runtime config is frozen from the owning project into Task.ProjectSnapshot.
-	VisualStyle string `gorm:"type:varchar(1024);default:''" json:"visual_style,omitempty"` // 图片视觉 (free text)
-	Writer      string `gorm:"type:varchar(100);default:''" json:"writer,omitempty"`        // 写作者 YAML resource key
-	Author      string `gorm:"type:varchar(200);default:''" json:"author,omitempty"`        // 作者署名 (publish author — never a writer persona name)
-	Theme       string `gorm:"type:varchar(50);default:''" json:"theme,omitempty"`          // 排版主题 key
+	ImageCapabilityKey    string                                `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
+	ImageRatio            string                                `gorm:"type:varchar(10);default:''" json:"image_ratio"`
+	ReferenceImageAssetID string                                `gorm:"type:char(36);index" json:"-"`
+	ReferenceImage        *AssetView                            `gorm:"-" json:"reference_image,omitempty"`
+	SkipReferenceImage    bool                                  `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark             bool                                  `gorm:"default:false" json:"watermark,omitempty"`
+	InputAttachments      datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
 
 	NextRunAt *time.Time   `gorm:"index" json:"next_run_at"`
 	CreatedAt time.Time    `json:"created_at"`

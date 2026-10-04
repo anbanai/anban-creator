@@ -39,14 +39,6 @@ func (f projectMemoryDeleteFake) DeleteProject(context.Context, string) error {
 	return f.err
 }
 
-func TestProjectRequestMapsAgentConfig(t *testing.T) {
-	req := projectRequest{Platform: "article", Name: "Article", AgentConfig: map[string]any{}, AgentConfigSet: true}
-	project := req.toProject()
-	if !project.AgentConfigSet || project.AgentConfig.Data() == nil {
-		t.Fatalf("AgentConfig = %#v set=%v", project.AgentConfig.Data(), project.AgentConfigSet)
-	}
-}
-
 func TestProjectConfigResponseRedactsSecrets(t *testing.T) {
 	redacted := redactedProjectConfig(map[string]any{
 		"app_id":     "public",
@@ -74,8 +66,8 @@ func TestProjectHandlerRejectsInvalidAgentConfigWithStableBadRequest(t *testing.
 		},
 	})
 	body := decodeBody(t, resp)
-	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body["msg"].(string), "invalid_agent_config") {
-		t.Fatalf("create status/body = %d/%#v, want 400 invalid_agent_config", resp.StatusCode, body)
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body["msg"].(string), "agent_config is no longer supported") {
+		t.Fatalf("create status/body = %d/%#v, want 400 agent_config is no longer supported", resp.StatusCode, body)
 	}
 
 	project := &model.Project{
@@ -89,8 +81,8 @@ func TestProjectHandlerRejectsInvalidAgentConfigWithStableBadRequest(t *testing.
 		"agent_config": map[string]any{"unexpected": true},
 	})
 	body = decodeBody(t, resp)
-	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body["msg"].(string), "invalid_agent_config") {
-		t.Fatalf("update status/body = %d/%#v, want 400 invalid_agent_config", resp.StatusCode, body)
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(body["msg"].(string), "agent_config is no longer supported") {
+		t.Fatalf("update status/body = %d/%#v, want 400 agent_config is no longer supported", resp.StatusCode, body)
 	}
 }
 
@@ -758,7 +750,6 @@ func TestProjectUpdateReferenceNullClearsAndOmissionPreserves(t *testing.T) {
 	if err := repo.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "brand",
 		ReferenceImageAssetID: asset.ID, Status: model.ProjectStatusActive,
-		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +781,6 @@ func TestProjectUpdateReferenceSelectionReplacesAndFinalizes(t *testing.T) {
 	if err := repo.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "brand",
 		ReferenceImageAssetID: "old-asset", Status: model.ProjectStatusActive,
-		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1010,7 +1000,6 @@ func TestProjectUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testi
 	if err := base.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "before",
 		ReferenceImageAssetID: "asset-a", Status: model.ProjectStatusActive,
-		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1072,7 +1061,6 @@ func TestProjectUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *
 	if err := base.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "before",
 		ReferenceImageAssetID: assetIDs[0], Status: model.ProjectStatusActive,
-		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1122,7 +1110,6 @@ func TestProjectUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	if err := base.Projects().Create(t.Context(), &model.Project{
 		ID: projectID, UserID: userID, Platform: model.PlatformWechat,
 		Name: "before", Status: model.ProjectStatusActive,
-		Config: model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1163,7 +1150,6 @@ func TestProjectHandler_UpdateFinalizesAvatarUploadSession(t *testing.T) {
 		Platform: model.PlatformWechat,
 		Name:     "公众号项目",
 		Status:   model.ProjectStatusActive,
-		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	}); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
@@ -1216,7 +1202,6 @@ func TestProjectHandler_DeleteWithAssociatedTasksReturnsConflict(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformSeednote,
 		Status:    model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -1254,7 +1239,6 @@ func TestProjectHandler_DeleteWithAssociatedPlansReturnsConflict(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformSeednote,
 		Title:     "Daily ideas",
 		Status:    model.PlanStatusActive,
 	}); err != nil {
@@ -1411,5 +1395,35 @@ func TestProjectHandlerMemoryPreviewBoundsSerializedResponse(t *testing.T) {
 	encoded, err := json.Marshal(envelope.Data)
 	if err != nil || !strings.Contains(string(encoded), `"partial":true`) || !strings.Contains(string(encoded), `"truncated":true`) {
 		t.Fatalf("bounded response must disclose truncation: data=%s err=%v", encoded, err)
+	}
+}
+
+func TestProjectWechatCredentialUpdatePreservesOmittedSecret(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "Account", Status: model.ProjectStatusActive}
+	if err := repo.Projects().Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	svc := service.NewProjectService(repo, &logger)
+	if _, err := svc.UpsertChannelConfig(t.Context(), userID, project.ID, model.ChannelArticle, map[string]any{"wechat_app_id": "old-app", "wechat_secret": "saved-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID, userID, map[string]any{"wechat_app_id": "new-app"})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+	}
+	config, err := repo.ProjectChannelConfigs().Get(t.Context(), project.ID, model.ChannelArticle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Config.Data()["wechat_app_id"] != "new-app" || config.Config.Data()["wechat_secret"] != "saved-secret" {
+		t.Fatalf("credential update discarded omitted fields")
+	}
+	if strings.Contains(string(body), "saved-secret") || strings.Contains(string(body), "agent_config") {
+		t.Fatalf("project response exposed private configuration: %s", body)
 	}
 }

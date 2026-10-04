@@ -3,10 +3,12 @@ package platform
 import (
 	"context"
 	"errors"
+	"strings"
 
 	appconfig "github.com/anbanai/anban-creator/server/app/config"
 	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/rs/zerolog"
 )
 
@@ -19,21 +21,35 @@ type WechatArticleDetailAPI interface {
 type WechatOfficialAnalyticsProvider struct {
 	logger     *zerolog.Logger
 	apiFactory func(*model.Project) (WechatArticleDetailAPI, error)
+	repo       repository.Repository
 }
 
-func NewWechatOfficialAnalyticsProvider(logger *zerolog.Logger) *WechatOfficialAnalyticsProvider {
+func NewWechatOfficialAnalyticsProvider(logger *zerolog.Logger, repos ...repository.Repository) *WechatOfficialAnalyticsProvider {
 	provider := &WechatOfficialAnalyticsProvider{logger: logger}
+	if len(repos) > 0 {
+		provider.repo = repos[0]
+	}
 	provider.apiFactory = provider.officialAPI
 	return provider
 }
 
 func (p *WechatOfficialAnalyticsProvider) officialAPI(project *model.Project) (WechatArticleDetailAPI, error) {
-	if project == nil || project.GetWechatAppID() == "" || project.GetWechatSecret() == "" {
+	if project == nil {
+		return nil, ErrWechatCredentialsMissing
+	}
+	if p.repo != nil {
+		if config, err := p.repo.ProjectChannelConfigs().Get(context.Background(), project.ID, model.ChannelArticle); err == nil && config != nil {
+			project.RuntimeChannelConfig = config.Config.Data()
+		}
+	}
+	appID, _ := project.RuntimeChannelConfig["wechat_app_id"].(string)
+	secret, _ := project.RuntimeChannelConfig["wechat_secret"].(string)
+	if strings.TrimSpace(appID) == "" || strings.TrimSpace(secret) == "" {
 		return nil, ErrWechatCredentialsMissing
 	}
 	cfg := &appconfig.Config{}
-	cfg.Wechat.AppID = project.GetWechatAppID()
-	cfg.Wechat.Secret = project.GetWechatSecret()
+	cfg.Wechat.AppID = strings.TrimSpace(appID)
+	cfg.Wechat.Secret = strings.TrimSpace(secret)
 	return appwechat.NewService(cfg, p.logger).OfficialAPI(), nil
 }
 

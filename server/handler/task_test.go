@@ -357,8 +357,8 @@ func TestTaskAndPlanCreateRejectLegacyExecutionProfileIDs(t *testing.T) {
 			path string
 			body string
 		}{
-			{name: "task", path: "/tasks", body: `{"project_id":"` + projectID + `","prompt":"write","execution_profile":"` + profileID + `"}`},
-			{name: "plan", path: "/plans", body: `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","execution_profile":"` + profileID + `"}`},
+			{name: "task", path: "/tasks", body: `{"project_id":"` + projectID + `","prompt":"write","agent_id":"wechat-article","channel":"wechat-article","task_kind":"content_generation","execution_profile":"` + profileID + `"}`},
+			{name: "plan", path: "/plans", body: `{"project_id":"` + projectID + `","cron_expr":"0 9 * * *","agent_ids":["wechat-article"],"execution_profile":"` + profileID + `"}`},
 		} {
 			t.Run(request.name+"/"+profileID, func(t *testing.T) {
 				resp := postJSON(t, app, request.path, request.body)
@@ -393,7 +393,7 @@ func TestCreateTaskRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","execution_profile":"effective","agent_input":{"tone":"concise"}}`)
+	resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","agent_id":"wechat-article","channel":"wechat-article","task_kind":"content_generation","execution_profile":"effective","agent_input":{"tone":"concise"}}`)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(string(body), "invalid_agent_input") {
@@ -443,7 +443,7 @@ func TestCreateViralAnalysisTaskUsesStandardManagedLifecycle(t *testing.T) {
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-	body := `{"project_id":"` + project.ID + `","type":"viral_analysis","prompt":"https://www.xiaohongshu.com/explore/note-1","execution_profile":"effective","quantity":1}`
+	body := `{"project_id":"` + project.ID + `","type":"viral_analysis","prompt":"https://www.xiaohongshu.com/explore/note-1","agent_id":"seednote","channel":"seednote","task_kind":"viral_analysis","execution_profile":"effective","quantity":1}`
 	resp := postJSON(t, app, "/tasks", body)
 	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {
@@ -491,14 +491,14 @@ func TestCreateViralAnalysisTaskUsesStandardManagedLifecycle(t *testing.T) {
 	}
 }
 
-func TestCreateViralAnalysisTaskValidatesRequestedTypeAgainstProjectPlatform(t *testing.T) {
+func TestCreateTaskRejectsMismatchedRequestedTypeAndIdentity(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		platform string
 		taskType string
 	}{
-		{name: "viral analysis requires seednote", platform: model.PlatformWechat, taskType: model.TaskTypeViralAnalysis},
-		{name: "ordinary type must match project", platform: model.PlatformSeednote, taskType: model.TaskTypeWechatArticle},
+		{name: "article type mismatches viral identity", platform: model.PlatformWechat, taskType: model.TaskTypeWechatArticle},
+		{name: "seednote project does not override explicit identity", platform: model.PlatformSeednote, taskType: model.TaskTypeWechatArticle},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			db := setupTaskHandlerTestDB(t)
@@ -516,7 +516,7 @@ func TestCreateViralAnalysisTaskValidatesRequestedTypeAgainstProjectPlatform(t *
 			h := NewTaskHandler(taskSvc, &logger)
 			app := fiber.New()
 			app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
-			resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","type":"`+tt.taskType+`","prompt":"source","execution_profile":"effective","quantity":1}`)
+			resp := postJSON(t, app, "/tasks", `{"project_id":"`+projectID+`","type":"`+tt.taskType+`","prompt":"source","agent_id":"seednote","channel":"seednote","task_kind":"viral_analysis","execution_profile":"effective","quantity":1}`)
 			defer resp.Body.Close()
 			if resp.StatusCode != fiber.StatusBadRequest {
 				body, _ := io.ReadAll(resp.Body)
@@ -573,7 +573,7 @@ func TestDownloadAndPreviewRemainAvailableForCompletedTask(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
 		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 	}); err != nil {
@@ -660,7 +660,7 @@ func TestGetFilesPreservesDeliveryURLs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
 		ID: taskID, UserID: userID, ProjectID: uuid.New().String(),
 		Type: model.PlatformSeednote, Status: model.TaskStatusRunning,
 	}); err != nil {
@@ -732,7 +732,7 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "visiblefiles"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
 	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusFailed)
@@ -784,7 +784,7 @@ func TestProcessTaskFileCanBePreviewedButNotDownloaded(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "previewonly"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
 	seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusCompleted)
@@ -893,7 +893,7 @@ func TestTaskFileDownloadSurfacesStorageStreamFailure(t *testing.T) {
 	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed", InviteCode: "streamfail"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, ProjectID: uuid.NewString(), Type: model.PlatformSeednote, Status: model.TaskStatusRunning}); err != nil {
 		t.Fatal(err)
 	}
 	executionID := seedHandlerFrozenExecution(t, repo, taskID, model.PlatformSeednote, model.TaskStatusCompleted)
@@ -989,7 +989,7 @@ func TestTaskCreatePromptLengthLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body := `{"execution_profile":"effective","project_id":"` + projectID + `","prompt":"` + tt.prompt + `"}`
+			body := `{"agent_id":"seednote","channel":"seednote","task_kind":"content_generation","execution_profile":"effective","project_id":"` + projectID + `","prompt":"` + tt.prompt + `"}`
 			req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 
@@ -1057,27 +1057,27 @@ func TestCreateTask_ImageCapabilityKeyTierForbidden(t *testing.T) {
 	}{
 		{
 			name:       "free tier + free preset accepted",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"volcengine-standard"}`,
+			body:       `{"agent_id":"seednote","channel":"seednote","task_kind":"content_generation","execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"volcengine-standard"}`,
 			wantStatus: fiber.StatusOK,
 		},
 		{
 			name:       "free tier + empty key accepted",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `"}`,
+			body:       `{"agent_id":"seednote","channel":"seednote","task_kind":"content_generation","execution_profile":"effective","project_id":"` + projectID + `"}`,
 			wantStatus: fiber.StatusOK,
 		},
 		{
 			name:       "free tier + pro preset rejected",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"gemini-pro"}`,
+			body:       `{"agent_id":"seednote","channel":"seednote","task_kind":"content_generation","execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"gemini-pro"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
 			name:       "free tier + custom rejected",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"custom"}`,
+			body:       `{"agent_id":"seednote","channel":"seednote","task_kind":"content_generation","execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"custom"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
 			name:       "free tier + unknown key rejected",
-			body:       `{"execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"made-up"}`,
+			body:       `{"agent_id":"seednote","channel":"seednote","task_kind":"content_generation","execution_profile":"effective","project_id":"` + projectID + `","image_capability_key":"made-up"}`,
 			wantStatus: fiber.StatusForbidden,
 		},
 	}
@@ -1140,7 +1140,7 @@ func TestCreateTask_ArticleImageTogglesPersist(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"execution_profile":"effective","project_id":"` + projectID + `","prompt":"文章开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
+	body := `{"agent_id":"wechat-article","channel":"wechat-article","task_kind":"content_generation","execution_profile":"effective","project_id":"` + projectID + `","prompt":"文章开关持久化测试","article_with_cover":false,"article_with_content_images":false}`
 	req := httptest.NewRequest("POST", "/tasks", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -1208,7 +1208,7 @@ func TestCreateTaskMontageReturnsSingleTaskWhenQuantityIsClamped(t *testing.T) {
 	})
 
 	resp := postJSON(t, app, "/tasks", `{
-		"execution_profile":"effective","project_id": "`+projectID+`",
+		"agent_id":"montage","channel":"montage","task_kind":"montage","execution_profile":"effective","project_id": "`+projectID+`",
 		"quantity": 3,
 		"montage_input": {
 			"brief": "做一条新品发布短片",
@@ -1263,7 +1263,7 @@ func TestCreateTaskEcommerceKeepsArrayResponseWhenRequestQuantityExceedsOne(t *t
 	})
 
 	resp := postJSON(t, app, "/tasks", `{
-		"execution_profile":"effective","project_id": "`+projectID+`",
+		"agent_id":"ecommerce","channel":"ecommerce","task_kind":"ecommerce","execution_profile":"effective","project_id": "`+projectID+`",
 		"quantity": 3,
 		"selected_modules": {"main_images": 1}
 	}`)
@@ -1315,7 +1315,7 @@ func TestCreateTaskEcommerceFreezesUploadedProductPhotoAsInputAttachment(t *test
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
 	resp := postJSON(t, app, "/tasks", `{
-		"execution_profile":"effective","project_id":"`+projectID+`",
+		"agent_id":"ecommerce","channel":"ecommerce","task_kind":"ecommerce","execution_profile":"effective","project_id":"`+projectID+`",
 		"selected_modules":{"main_images":1},
 		"product_photos":["/api/v1/files/`+pendingKey+`"]
 	}`)
@@ -1366,7 +1366,7 @@ func TestCreateTaskEcommerceValidatesAndFreezesInheritedProjectCapability(t *tes
 	app := fiber.New()
 	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-	resp := postJSON(t, app, "/tasks", `{"execution_profile":"effective","project_id":"`+project.ID+`","image_ratio":"3:4"}`)
+	resp := postJSON(t, app, "/tasks", `{"agent_id":"ecommerce","channel":"ecommerce","task_kind":"ecommerce","execution_profile":"effective","project_id":"`+project.ID+`","image_ratio":"3:4"}`)
 	defer resp.Body.Close()
 	if resp.StatusCode != fiber.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -1406,7 +1406,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 	taskID := uuid.New().String()
-	source := &model.Task{
+	source := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ID:               taskID,
 		UserID:           userID,
 		ProjectID:        projectID,
@@ -1457,7 +1457,7 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 		Data struct {
 			ID                   string                                      `json:"id"`
 			ProjectID            string                                      `json:"project_id"`
-			Type                 string                                      `json:"type"`
+			Channel              string                                      `json:"channel"`
 			Status               string                                      `json:"status"`
 			Prompt               string                                      `json:"prompt"`
 			ExecutionProfile     string                                      `json:"execution_profile"`
@@ -1477,8 +1477,8 @@ func TestCloneTask_AllowsCompletedTask(t *testing.T) {
 	if env.Data.ExecutionProfile != "balanced" || env.Data.AgentProfileSnapshot.ProfileID != "balanced" {
 		t.Fatalf("exact clone profile = %q snapshot=%#v, want balanced", env.Data.ExecutionProfile, env.Data.AgentProfileSnapshot)
 	}
-	if env.Data.ProjectID != projectID || env.Data.Type != model.TaskTypeWechatArticle || env.Data.Prompt != "edited exact clone prompt" {
-		t.Fatalf("exact clone destination/config = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Type, env.Data.Prompt)
+	if env.Data.ProjectID != projectID || env.Data.Channel != model.TaskTypeWechatArticle || env.Data.Prompt != "edited exact clone prompt" {
+		t.Fatalf("exact clone destination/config = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Channel, env.Data.Prompt)
 	}
 	attachments := env.Data.InputAttachments.Data()
 	if len(attachments) != 1 || attachments[0].Text != "edited exact attachment" {
@@ -1498,7 +1498,7 @@ func TestCloneMontageTaskIgnoresLegacyUnavailableImageSettings(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformMontage, Name: "Montage", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	source := &model.Task{
+	source := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage,
 		ExecutionProfile: "effective", Status: model.TaskStatusFailed,
 		ImageRatio: "16:9", ImageCapabilityKey: "standard",
@@ -1579,7 +1579,7 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 			t.Fatalf("create project: %v", err)
 		}
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.PlatformSeednote, ExecutionProfile: "effective", Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted, Prompt: "source prompt"}
 	source.SetProjectSnapshot(model.SnapshotProject(sourceProject))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source task: %v", err)
@@ -1625,15 +1625,15 @@ func TestCloneTask_FullEditableOverrides(t *testing.T) {
 	var env struct {
 		Data struct {
 			ProjectID string `json:"project_id"`
-			Type      string `json:"type"`
+			Channel   string `json:"channel"`
 			Prompt    string `json:"prompt"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if env.Data.ProjectID != destinationProject.ID || env.Data.Type != model.TaskTypeWechatArticle || env.Data.Prompt != "edited full clone prompt" {
-		t.Fatalf("response task = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Type, env.Data.Prompt)
+	if env.Data.ProjectID != destinationProject.ID || env.Data.Channel != model.TaskTypeWechatArticle || env.Data.Prompt != "edited full clone prompt" {
+		t.Fatalf("response task = project %q type %q prompt %q", env.Data.ProjectID, env.Data.Channel, env.Data.Prompt)
 	}
 
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, destinationProject.ID, "", 0, 10)
@@ -1698,7 +1698,7 @@ func TestCloneTask_FullEditableRejectsProjectStyleReferenceAsArticlePortrait(t *
 			t.Fatalf("create project: %v", err)
 		}
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, ExecutionProfile: "effective", Status: model.TaskStatusCompleted, Prompt: "source prompt"}
+	source := &model.Task{AgentID: handlerFixtureAgentID(sourceProject.Platform), Channel: handlerFixtureAgentID(sourceProject.Platform), TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: handlerFixtureAgentID(sourceProject.Platform), ExecutionProfile: "effective", Status: model.TaskStatusCompleted, Prompt: "source prompt"}
 	source.SetProjectSnapshot(model.SnapshotProject(sourceProject))
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
@@ -1901,11 +1901,11 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 			t.Fatalf("create project: %v", err)
 		}
 	}
-	source := &model.Task{
+	source := &model.Task{AgentID: handlerFixtureAgentID(sourceProject.Platform), Channel: handlerFixtureAgentID(sourceProject.Platform), TaskKind: model.TaskKindContentGeneration,
 		ID:                    uuid.NewString(),
 		UserID:                userID,
 		ProjectID:             sourceProject.ID,
-		Type:                  sourceProject.Platform,
+		Type:                  handlerFixtureAgentID(sourceProject.Platform),
 		ExecutionProfile:      "effective",
 		Status:                model.TaskStatusCompleted,
 		Prompt:                "AI entry source",
@@ -1915,7 +1915,7 @@ func TestCloneTask_FullEditableReusesOnlyExactDirectAIEntryReference(t *testing.
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
 	}
-	snapshotOnlySource := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
+	snapshotOnlySource := &model.Task{AgentID: handlerFixtureAgentID(sourceProject.Platform), Channel: handlerFixtureAgentID(sourceProject.Platform), TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: handlerFixtureAgentID(sourceProject.Platform), ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
 	snapshotOnlySource.SetProjectSnapshot(model.ProjectSnapshot{ReferenceImageAssetID: unrelated.ID})
 	if err := repo.Tasks().Create(ctx, snapshotOnlySource); err != nil {
 		t.Fatalf("create snapshot-only source: %v", err)
@@ -2070,7 +2070,7 @@ func TestCloneTask_FullEditableTypeSpecificFields(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
+			source := &model.Task{AgentID: handlerFixtureAgentID(tt.platform), Channel: handlerFixtureAgentID(tt.platform), TaskKind: handlerFixtureTaskKind(tt.platform), ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: handlerFixtureAgentID(tt.platform), ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
 			if err := repo.Tasks().Create(t.Context(), source); err != nil {
 				t.Fatal(err)
 			}
@@ -2156,7 +2156,7 @@ func setupCloneSourceReuseFixtureWithStore(t *testing.T, destinationPlatform str
 			t.Fatal(err)
 		}
 	}
-	rootTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: rootProject.ID, Type: rootProject.Platform, ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
+	rootTask := &model.Task{AgentID: handlerFixtureAgentID(rootProject.Platform), Channel: handlerFixtureAgentID(rootProject.Platform), TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), UserID: userID, ProjectID: rootProject.ID, Type: handlerFixtureAgentID(rootProject.Platform), ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
 	sourceAsset := &model.Asset{
 		ID: uuid.NewString(), UserID: userID, Purpose: service.DirectUploadPurposeAIEntryAttachment,
 		StorageKey: "assets/users/" + userID + "/clone/source.png", FileName: "source.png",
@@ -2165,11 +2165,11 @@ func setupCloneSourceReuseFixtureWithStore(t *testing.T, destinationPlatform str
 	if err := repo.Assets().Create(ctx, sourceAsset); err != nil {
 		t.Fatal(err)
 	}
-	source := &model.Task{
+	source := &model.Task{AgentID: handlerFixtureAgentID(destinationPlatform), Channel: handlerFixtureAgentID(destinationPlatform), TaskKind: handlerFixtureTaskKind(destinationPlatform),
 		ID:                   uuid.NewString(),
 		UserID:               userID,
 		ProjectID:            sourceProject.ID,
-		Type:                 sourceProject.Platform,
+		Type:                 handlerFixtureAgentID(destinationPlatform),
 		ExecutionProfile:     "effective",
 		Status:               model.TaskStatusCompleted,
 		InputSourceTaskID:    rootTask.ID,
@@ -2627,7 +2627,7 @@ func TestCloneTask_FullEditableRejectsInvalidInputBeforePersistence(t *testing.T
 			if err := repo.Projects().Create(t.Context(), sourceProject); err != nil {
 				t.Fatal(err)
 			}
-			source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: sourceProject.Platform, ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
+			source := &model.Task{AgentID: handlerFixtureAgentID(sourceProject.Platform), Channel: handlerFixtureAgentID(sourceProject.Platform), TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: handlerFixtureAgentID(sourceProject.Platform), ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
 			if err := repo.Tasks().Create(t.Context(), source); err != nil {
 				t.Fatal(err)
 			}
@@ -2679,7 +2679,7 @@ func TestCloneTask_FullEditableRejectsInsufficientBalanceWithoutCreatingTask(t *
 			t.Fatal(err)
 		}
 	}
-	source := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
+	source := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), UserID: userID, ProjectID: sourceProject.ID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Status: model.TaskStatusCompleted}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
@@ -2757,11 +2757,11 @@ func TestResumeTask_ReusesCurrentTaskAndAcceptsPromptFilesAndLabels(t *testing.T
 		t.Fatalf("create project: %v", err)
 	}
 	taskID := uuid.New().String()
-	task := &model.Task{
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ID:        taskID,
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformWechat,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusFailed,
 		Prompt:    "failed task",
 	}
@@ -2849,7 +2849,7 @@ func TestResumeTask_AcceptsJSONPromptOnly(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 	taskID := uuid.NewString()
-	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusFailed}
+	task := &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusFailed}
 	freezeHandlerTaskProfile(t, task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -2898,7 +2898,7 @@ func TestResumeTask_RejectsCompletedTaskAndPreservesDeliveryState(t *testing.T) 
 	}
 	completedAt := time.Now().Add(-time.Minute)
 	result := `{"success":true}`
-	task := &model.Task{
+	task := &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
 		Status: model.TaskStatusCompleted, Result: &result, CompletedAt: &completedAt,
 	}
@@ -2952,7 +2952,7 @@ func TestResumeTask_MapsDeletedFrozenProviderError(t *testing.T) {
 		t.Fatal(err)
 	}
 	taskID := uuid.NewString()
-	task := &model.Task{
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed,
 		ExecutionProfile: frozen.ID, AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint, ImageCapabilityKey: "standard",
 	}
@@ -2995,7 +2995,7 @@ func TestResumeTask_Returns503WhenFileStorageUnavailable(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 	taskID := uuid.NewString()
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	logger := zerolog.New(io.Discard)
@@ -3053,11 +3053,11 @@ func TestResumeTask_RejectsEmptyInput(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 	taskID := uuid.New().String()
-	if err := repo.Tasks().Create(ctx, &model.Task{
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ID:        taskID,
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformWechat,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusCompleted,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -3107,7 +3107,7 @@ func TestTaskResponsesIncludeTotalBillingAndChargeDetails(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
 		Status: model.TaskStatusCompleted, Prompt: "详情固定价格展示",
 		BillingQuoteID: "quote-v1", BillingCatalogID: "retail-v1", BillingSKUID: "task.wechat_article.standard.v1",
@@ -3284,7 +3284,7 @@ func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
 		t.Fatalf("create task attachment asset: %v", err)
 	}
 	resp := postJSON(t, app, "/tasks", `{
-		"execution_profile":"effective","project_id":"`+projectID+`",
+		"agent_id":"seednote","channel":"seednote","task_kind":"content_generation","execution_profile":"effective","project_id":"`+projectID+`",
 		"prompt":"生成新品种草图文",
 		"input_attachments":[{
 			"asset_id":"`+asset.ID+`",
@@ -3317,7 +3317,7 @@ func TestCreateTaskAcceptsSeednoteInputAttachments(t *testing.T) {
 func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
 	app, repo, ctx, userID, projectID := setupSeednoteTaskCreateHandler(t)
 	resp := postJSON(t, app, "/tasks", `{
-		"execution_profile":"effective","project_id":"`+projectID+`",
+		"agent_id":"seednote","channel":"seednote","task_kind":"content_generation","execution_profile":"effective","project_id":"`+projectID+`",
 		"prompt":"生成新品种草图文",
 		"input_attachments":[{
 			"type":"video",
@@ -3337,5 +3337,26 @@ func TestCreateTaskRejectsNonImageSeednoteAttachment(t *testing.T) {
 	}
 	if len(tasks) != 0 {
 		t.Fatalf("tasks = %#v, want none", tasks)
+	}
+}
+
+// Test fixtures select an explicit execution identity independently from project ownership.
+func handlerFixtureAgentID(platform string) string {
+	switch platform {
+	case model.PlatformWechat, model.TaskTypeWechatArticle:
+		return model.AgentIDArticle
+	case model.TaskTypeWechatPicture:
+		return model.AgentIDWechatPicture
+	default:
+		return platform
+	}
+}
+
+func handlerFixtureTaskKind(channel string) string {
+	switch channel {
+	case model.PlatformMontage, model.PlatformEcommerce, model.PlatformHypit, model.PlatformMoments:
+		return channel
+	default:
+		return model.TaskKindContentGeneration
 	}
 }

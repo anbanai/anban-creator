@@ -44,7 +44,6 @@ function project(overrides: Partial<Project> = {}): Project {
 
     image_ratio: '',
     max_concurrent_tasks: 1,
-    config: {},
     status: 'active',
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:00:00.000Z',
@@ -55,7 +54,7 @@ function project(overrides: Partial<Project> = {}): Project {
 function plan(overrides: Partial<Plan>): Plan {
   return {
     id: 'plan-1',
-    type: 'seednote',
+    agent_ids: ['seednote'],
     title: '每日选题',
     description: '',
     cron_expr: '0 9 * * *',
@@ -184,7 +183,7 @@ describe('command center rules', () => {
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [],
       plans: [],
-      projects: [project({ platform: 'wechat', config: { wechat_app_id: 'wx-app' } })],
+      projects: [project({ platform: 'wechat',  })],
       billingWallet: { paid: 1000, promotional: 0, debt: 0, balance: 1000 },
       apiKeysReady: null,
     })

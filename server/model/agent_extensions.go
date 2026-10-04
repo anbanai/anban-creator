@@ -2,17 +2,8 @@ package model
 
 import "gorm.io/datatypes"
 
-func (p *Project) SetAgentConfig(config map[string]any) {
-	p.AgentConfig = datatypes.NewJSONType(config)
-	p.AgentConfigSet = true
-}
-
 func (t *Task) SetAgentInput(input map[string]any) {
 	t.AgentInput = datatypes.NewJSONType(input)
-}
-
-func (p *Plan) SetAgentInput(input map[string]any) {
-	p.AgentInput = datatypes.NewJSONType(input)
 }
 
 func cloneAgentExtensionMap(source map[string]any) map[string]any {

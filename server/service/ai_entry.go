@@ -131,31 +131,13 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	if project.Status != model.ProjectStatusActive {
 		return aiEntryNeedsConfiguration("当前项目已归档，请切换到活跃项目。", "/projects"), nil
 	}
-	// The Studio composer used to submit a transport-only "studio" channel
-	// (or no identity at all). Resolve that UI form to the project's canonical
-	// Agent/channel/task-kind identity before validating the request. The
-	// resulting task always persists the canonical values.
-	if (req.AgentID == "" && req.Channel == "" && req.TaskKind == "") || req.Channel == "studio" {
-		switch project.Platform {
-		case model.PlatformWechat:
-			req.AgentID, req.Channel, req.TaskKind = model.AgentIDArticle, model.ChannelArticle, model.TaskKindContentGeneration
-		case model.PlatformSeednote:
-			req.AgentID, req.Channel, req.TaskKind = model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindContentGeneration
-		case model.PlatformMontage:
-			req.AgentID, req.Channel, req.TaskKind = model.AgentIDMontage, model.ChannelMontage, model.TaskKindContentGeneration
-		case model.PlatformHypit:
-			req.AgentID, req.Channel, req.TaskKind = model.AgentIDHypit, model.ChannelHypit, model.PlatformHypit
-		case model.PlatformMoments, model.PlatformEcommerce:
-			req.AgentID, req.Channel, req.TaskKind = project.Platform, project.Platform, project.Platform
-		}
-	}
 	if req.AgentID == "" || req.Channel == "" || req.TaskKind == "" {
 		return aiEntryNeedsConfiguration("请选择 Agent、输出渠道和任务类型。", "/tasks"), nil
 	}
-	usesImageSettings := len(model.SupportedImageRatiosForChannel(req.Channel)) > 0
-	if !usesImageSettings {
-		usesImageSettings = len(model.SupportedImageRatios(project.Platform)) > 0
+	if _, _, _, _, err := resolveTaskIdentity(nil, CreateManualParams{AgentID: req.AgentID, Channel: req.Channel, TaskKind: req.TaskKind}); err != nil {
+		return aiEntryError("创建任务失败：" + cleanErr(err.Error())), nil
 	}
+	usesImageSettings := len(model.SupportedImageRatiosForChannel(req.Channel)) > 0
 	quantity := req.Quantity
 	if quantity == 0 {
 		quantity = 1
@@ -166,9 +148,6 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	imageRatio := strings.TrimSpace(req.ImageRatio)
 	if usesImageSettings && imageRatio != "" {
 		validRatio := model.IsBusinessImageRatioAllowedForChannel(req.Channel, imageRatio)
-		if model.PlatformForChannel(req.Channel) == "" {
-			validRatio = model.IsBusinessImageRatioAllowed(project.Platform, imageRatio)
-		}
 		if !validRatio {
 			return aiEntryError(fmt.Sprintf("创建任务失败：%s for channel %s: %s", model.ValidImageRatioHint, req.Channel, imageRatio)), nil
 		}

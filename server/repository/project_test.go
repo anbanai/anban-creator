@@ -23,8 +23,8 @@ func TestProjectStatsIncludeUnusedTopics(t *testing.T) {
 	}
 
 	for _, task := range []*model.Task{
-		{ID: "task-stats-1", UserID: "user-1", ProjectID: projects[0].ID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted},
-		{ID: "task-stats-2", UserID: "user-1", ProjectID: projects[0].ID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending},
+		{ID: "task-stats-1", UserID: "user-1", ProjectID: projects[0].ID, Status: model.TaskStatusCompleted},
+		{ID: "task-stats-2", UserID: "user-1", ProjectID: projects[0].ID, Status: model.TaskStatusPending},
 	} {
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			t.Fatalf("create task %s: %v", task.ID, err)

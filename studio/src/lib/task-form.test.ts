@@ -24,7 +24,6 @@ function project(overrides: Partial<Project> = {}): Project {
 
     image_ratio: '3:4',
     max_concurrent_tasks: 1,
-    config: {},
     status: 'active',
     created_at: '2026-07-22T00:00:00Z',
     updated_at: '2026-07-22T00:00:00Z',

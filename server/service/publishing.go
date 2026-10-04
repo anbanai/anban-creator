@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -90,10 +91,21 @@ func (s *PublishingService) getProject(ctx context.Context, userID, projectID st
 	if ch.UserID != userID {
 		return nil, fmt.Errorf("project not owned by user")
 	}
-	if ch.GetWechatAppID() == "" || ch.GetWechatSecret() == "" {
+	config, configErr := s.repo.ProjectChannelConfigs().Get(ctx, ch.ID, model.ChannelArticle)
+	if configErr == nil && config != nil {
+		ch.RuntimeChannelConfig = config.Config.Data()
+	} else {
+		return nil, fmt.Errorf("project missing WeChat credentials")
+	}
+	if strings.TrimSpace(mapStringValue(ch.RuntimeChannelConfig, "wechat_app_id")) == "" || strings.TrimSpace(mapStringValue(ch.RuntimeChannelConfig, "wechat_secret")) == "" {
 		return nil, fmt.Errorf("project missing WeChat credentials")
 	}
 	return ch, nil
+}
+
+func mapStringValue(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
 }
 
 // ListDrafts returns a paginated list of WeChat drafts for the given project.

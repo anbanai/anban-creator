@@ -75,7 +75,7 @@ func bulkTestApp(t *testing.T, userID string) (app *fiber.App, repo repository.R
 func seedBulkTask(t *testing.T, repo repository.Repository, userID, projectID, status string) string {
 	t.Helper()
 	id := uuid.New().String()
-	task := &model.Task{
+	task := &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
 		ID:               id,
 		UserID:           userID,
 		ProjectID:        projectID,

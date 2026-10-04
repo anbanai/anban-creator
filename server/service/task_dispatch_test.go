@@ -1708,7 +1708,7 @@ func TestPendingDispatchFailureRetriesAtomicBillingReversal(t *testing.T) {
 	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
 
 	logger := zerolog.New(io.Discard)
-	tasks, err := creationSvc.CreateManual(ctx, CreateManualParams{
+	tasks, err := creationSvc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID,
 		Prompt: "dispatch failure billing reversal", Quantity: 1,
 	})
@@ -1749,7 +1749,7 @@ func TestPendingFailureAmbiguousCommitVerifiesTerminalBillingBeforePostCommit(t 
 	ctx := context.Background()
 	creationSvc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
-	tasks, err := creationSvc.CreateManual(ctx, CreateManualParams{
+	tasks, err := creationSvc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID,
 		Prompt: "ambiguous terminal commit", Quantity: 1,
 	})

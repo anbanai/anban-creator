@@ -54,7 +54,7 @@ func TestTaskFixedBillingBatchAdmissionChargesEachTaskOnce(t *testing.T) {
 	svc, f, enqueuer := newFixedTaskBillingFixture(t, 1_500, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "batch", Quantity: 2,
 	})
 	if err != nil {
@@ -89,7 +89,7 @@ func TestTaskFixedBillingEnqueueCancellationStillFinalizesAndReverses(t *testing
 	svc.enqueuer = cancelingFailTaskEnqueuer{cancel: cancel, err: errors.New("redis unavailable")}
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "enqueue failure", Quantity: 1,
 	})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestTaskFixedBillingRejectsDebtAndInsufficientBalanceBeforeEnqueue(t *testi
 			ctx := context.Background()
 			svc, f, enqueuer := newFixedTaskBillingFixture(t, tt.paid, tt.debt)
 			projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
-			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+			tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 				UserID: billingWalletUserID, ProjectID: projectID, Prompt: tt.name, Quantity: 1,
 			})
 			if !errors.Is(err, tt.want) || tasks != nil {
@@ -145,7 +145,7 @@ func TestTaskFixedBillingBatchAdmissionIsAtomicWhenTotalBalanceIsInsufficient(t 
 	svc, f, enqueuer := newFixedTaskBillingFixture(t, 700, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "atomic batch", Quantity: 2,
 	})
 	if !errors.Is(err, ErrBillingInsufficientForTask) || tasks != nil {
@@ -168,8 +168,8 @@ func TestTaskFixedBillingScheduledRunsResolveCurrentCatalog(t *testing.T) {
 	svc, f, _ := newFixedTaskBillingFixture(t, 2_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
 	plan := &model.Plan{ExecutionProfile: "effective",
-		ID: "plan-current-catalog", UserID: billingWalletUserID, ProjectID: projectID,
-		Type: model.TaskTypeWechatArticle, Status: model.PlanStatusActive, Prompt: "scheduled",
+		ID: "plan-current-catalog", UserID: billingWalletUserID, ProjectID: projectID, Status: model.PlanStatusActive, Prompt: "scheduled",
+		AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 	}
 
 	first, err := svc.CreateFromPlan(ctx, plan)
@@ -202,7 +202,7 @@ func TestTaskFixedBillingResumeKeepsOriginalCharge(t *testing.T) {
 	ctx := context.Background()
 	svc, f, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformWechat)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "first", Quantity: 1,
 	})
 	if err != nil {

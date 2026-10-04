@@ -42,13 +42,14 @@ agent:
   skills: [demo-skill]
   max_turns: 60
 channel: wechat-article
+plan_task_kind: demo-task
 bindings:
   task_kinds: [demo-task]
 runtime:
   profile: wechat
   adapter: standard
   max_turns: 40
-surfaces: [project, task, plan]
+surfaces: [task, plan]
 billing_operations:
   demo-task: task.demo
 artifacts:
@@ -86,6 +87,22 @@ delivery:
 	}
 	if operation, ok := catalog.BillingOperation("demo-task"); !ok || operation != "task.demo" {
 		t.Fatalf("BillingOperation = %q, %v", operation, ok)
+	}
+}
+
+func TestLoadCatalogRequiresPlanTaskKindForPlanSurface(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "plan_task_kind: demo-task\n", "", 1)
+	root := writePackFixture(t, manifest)
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "plan_task_kind") {
+		t.Fatalf("LoadCatalog error = %v, want plan_task_kind validation", err)
+	}
+}
+
+func TestLoadCatalogRejectsPlanTaskKindOutsideBindings(t *testing.T) {
+	manifest := strings.Replace(validFixtureManifest, "plan_task_kind: demo-task", "plan_task_kind: other-task", 1)
+	root := writePackFixture(t, manifest)
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "plan_task_kind") {
+		t.Fatalf("LoadCatalog error = %v, want plan_task_kind binding validation", err)
 	}
 }
 
@@ -244,6 +261,7 @@ func TestLoadCatalogRejectsInvalidPackContracts(t *testing.T) {
 		{name: "unknown adapter", manifest: strings.ReplaceAll(validFixtureManifest, "adapter: standard", "adapter: remote"), want: "unsupported runtime adapter"},
 		{name: "missing skill", manifest: strings.ReplaceAll(validFixtureManifest, "demo-skill", "missing-skill"), want: "missing Skill"},
 		{name: "plugin task binding", manifest: strings.Replace(validFixtureManifest, "kind: managed", "kind: plugin", 1), want: "plugin Pack must not bind task types"},
+		{name: "project surface", manifest: strings.Replace(validFixtureManifest, "surfaces: [task, plan]", "surfaces: [project, task, plan]", 1), want: "unsupported surface \"project\""},
 		{name: "product surface without billing", manifest: strings.Replace(validFixtureManifest, "billing_operations:\n  demo-task: task.demo\n", "", 1), want: "product surfaces require billing operation"},
 		{name: "artifact path with backslash", manifest: strings.Replace(validFixtureManifest, "path: output/final.md", `path: output\final.md`, 1), want: "invalid artifact contract"},
 		{name: "non canonical artifact path", manifest: strings.Replace(validFixtureManifest, "path: output/final.md", "path: output//final.md", 1), want: "invalid artifact contract"},
@@ -336,6 +354,7 @@ func TestLoadCatalogRejectsInvalidOrMissingDeliveryContracts(t *testing.T) {
 
 func TestLoadCatalogDoesNotAllowProfileDataDeliveryForOtherTaskKinds(t *testing.T) {
 	manifest := strings.Replace(validFixtureManifest, "task_kinds: [demo-task]", "task_kinds: [article]", 1)
+	manifest = strings.Replace(manifest, "plan_task_kind: demo-task", "plan_task_kind: article", 1)
 	manifest = strings.Replace(manifest, "demo-task: task.demo", "article: task.article", 1)
 	manifest = strings.Replace(manifest, "artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n    required: true\ndelivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n", "artifacts: []\ndelivery: []\ndata_delivery:\n  - role: profile_result\n    type: database\n    required: true\n", 1)
 	root := writePackFixture(t, manifest)
@@ -551,6 +570,7 @@ func TestLoadCatalogRejectsDuplicateAgentNames(t *testing.T) {
 	manifest := strings.Replace(validFixtureManifest, "id: demo-pack", "id: other-pack", 1)
 	manifest = strings.Replace(manifest, "channel: wechat-article", "channel: seednote", 1)
 	manifest = strings.Replace(manifest, "task_kinds: [demo-task]", "task_kinds: [other-task]", 1)
+	manifest = strings.Replace(manifest, "plan_task_kind: demo-task", "plan_task_kind: other-task", 1)
 	manifest = strings.Replace(manifest, "demo-task: task.demo", "other-task: task.other", 1)
 	for name, content := range map[string]string{
 		"agent-pack.yaml":  manifest,
@@ -1374,13 +1394,14 @@ agent:
   skills: [demo-skill]
   max_turns: 60
 channel: wechat-article
+plan_task_kind: demo-task
 bindings:
   task_kinds: [demo-task]
 runtime:
   profile: wechat
   adapter: standard
   max_turns: 40
-surfaces: [project, task, plan]
+surfaces: [task, plan]
 billing_operations:
   demo-task: task.demo
 artifacts:

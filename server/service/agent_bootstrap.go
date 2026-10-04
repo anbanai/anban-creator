@@ -323,9 +323,6 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			}
 		} else if gc == nil {
 			strategyChannel := strings.TrimSpace(task.Channel)
-			if strategyChannel == "" {
-				strategyChannel = strings.TrimSpace(project.Platform)
-			}
 			strategy, err = s.repo.FeedbackLoop().FindActiveStrategy(ctx, task.ProjectID, strategyChannel)
 			if err != nil {
 				return nil, fmt.Errorf("load feedback strategy: %w", err)
@@ -337,9 +334,6 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		// same execution keeps consuming that frozen snapshot even after it is
 		// retired by a newer monthly activation.
 		strategyChannel := strings.TrimSpace(task.Channel)
-		if strategyChannel == "" {
-			strategyChannel = strings.TrimSpace(project.Platform)
-		}
 		strategyTaskKind := strings.TrimSpace(task.TaskKind)
 		if strategyTaskKind == "" {
 			strategyTaskKind = strings.TrimSpace(task.Type)
@@ -476,7 +470,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	if err != nil {
 		return nil, err
 	}
-	bootstrapTaskType := legacyTaskTypeForIdentity(task.AgentID, task.Channel, task.TaskKind)
+	bootstrapTaskType := taskTypeForIdentity(task.AgentID, task.Channel, task.TaskKind)
 	if bootstrapTaskType == "" {
 		bootstrapTaskType = task.Type
 	}

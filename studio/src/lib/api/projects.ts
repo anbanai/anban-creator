@@ -13,7 +13,6 @@ import type {
   ProfileAnalysisResponse,
   Task,
   FeedbackDashboard,
-  ProjectAgentConfig,
   ProjectChannelConfig,
 } from '@/types'
 
@@ -62,18 +61,6 @@ export const projectsApi = {
 
   delete: (id: string) =>
     unwrap<void>(http.delete(`/projects/${id}`)),
-
-  listAgentConfigs: (id: string) =>
-    unwrap<ProjectAgentConfig[]>(http.get(`/projects/${id}/agent-configs`)),
-
-  getAgentConfig: (id: string, agentID: string) =>
-    unwrap<ProjectAgentConfig>(http.get(`/projects/${id}/agent-configs/${encodeURIComponent(agentID)}`)),
-
-  upsertAgentConfig: (id: string, agentID: string, config: Record<string, unknown>) =>
-    unwrap<ProjectAgentConfig>(http.put(`/projects/${id}/agent-configs/${encodeURIComponent(agentID)}`, { config })),
-
-  deleteAgentConfig: (id: string, agentID: string) =>
-    unwrap<void>(http.delete(`/projects/${id}/agent-configs/${encodeURIComponent(agentID)}`)),
 
   listChannelConfigs: (id: string) =>
     unwrap<ProjectChannelConfig[]>(http.get(`/projects/${id}/channel-configs`)),

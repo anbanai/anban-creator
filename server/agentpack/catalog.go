@@ -199,6 +199,16 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		if len(manifest.Bindings.TaskKinds) == 0 {
 			return fmt.Errorf("managed Pack requires at least one task kind")
 		}
+		if hasSurface(manifest.Surfaces, "plan") {
+			if strings.TrimSpace(manifest.PlanTaskKind) == "" {
+				return fmt.Errorf("managed Pack with plan surface requires plan_task_kind")
+			}
+			if !containsString(manifest.Bindings.TaskKinds, manifest.PlanTaskKind) {
+				return fmt.Errorf("plan_task_kind %q must be declared in bindings.task_kinds", manifest.PlanTaskKind)
+			}
+		} else if strings.TrimSpace(manifest.PlanTaskKind) != "" {
+			return fmt.Errorf("plan_task_kind requires plan surface")
+		}
 		if strings.TrimSpace(manifest.Runtime.Profile) == "" {
 			return fmt.Errorf("managed Pack requires runtime.profile")
 		}
@@ -236,13 +246,13 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			return fmt.Errorf("billing operation for task kind %q must not be empty", taskKind)
 		}
 	}
-	allowedSurfaces := map[string]bool{"plugin": true, "project": true, "task": true, "plan": true}
+	allowedSurfaces := map[string]bool{"plugin": true, "task": true, "plan": true}
 	hasProductSurface := false
 	for _, surface := range manifest.Surfaces {
 		if !allowedSurfaces[surface] {
 			return fmt.Errorf("unsupported surface %q", surface)
 		}
-		if surface == "project" || surface == "task" || surface == "plan" {
+		if surface == "task" || surface == "plan" {
 			hasProductSurface = true
 		}
 	}
@@ -257,7 +267,6 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		ref       string
 		extension bool
 	}{
-		{manifest.SchemaFiles.ProjectConfig, true},
 		{manifest.SchemaFiles.TaskInput, true},
 		{manifest.SchemaFiles.UI, false},
 		{manifest.SchemaFiles.Output, false},
@@ -333,6 +342,24 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		}
 	}
 	return nil
+}
+
+func hasSurface(surfaces []string, wanted string) bool {
+	for _, surface := range surfaces {
+		if surface == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Manifest) hasRequiredDataDelivery(role string) bool {
@@ -497,7 +524,7 @@ func securePackFile(packDir, relative string) (string, error) {
 func digestManifest(pluginRoot string, manifest Manifest, manifestData []byte) (string, error) {
 	hash := sha256.New()
 	_, _ = hash.Write(manifestData)
-	paths := []string{manifest.Agent.ClaudeSource, manifest.Agent.CodexSource, manifest.Agent.DSHSource, manifest.SchemaFiles.ProjectConfig, manifest.SchemaFiles.TaskInput, manifest.SchemaFiles.UI, manifest.SchemaFiles.Output}
+	paths := []string{manifest.Agent.ClaudeSource, manifest.Agent.CodexSource, manifest.Agent.DSHSource, manifest.SchemaFiles.TaskInput, manifest.SchemaFiles.UI, manifest.SchemaFiles.Output}
 	for _, relative := range paths {
 		if relative == "" {
 			continue
@@ -554,7 +581,6 @@ func resolveSchemas(manifest *Manifest) error {
 		ref    string
 		assign func(*SchemaDocuments, json.RawMessage)
 	}{
-		{manifest.SchemaFiles.ProjectConfig, func(s *SchemaDocuments, raw json.RawMessage) { s.ProjectConfig = raw }},
 		{manifest.SchemaFiles.TaskInput, func(s *SchemaDocuments, raw json.RawMessage) { s.TaskInput = raw }},
 		{manifest.SchemaFiles.UI, func(s *SchemaDocuments, raw json.RawMessage) { s.UI = raw }},
 		{manifest.SchemaFiles.Output, func(s *SchemaDocuments, raw json.RawMessage) { s.Output = raw }},

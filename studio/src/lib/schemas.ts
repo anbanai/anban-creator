@@ -224,9 +224,9 @@ export const createTaskSchema = z.object({
 export type CreateTaskFormValues = z.infer<typeof createTaskSchema>
 
 export const planSchema = z.object({
-  project_id: z.string().optional(),
+  project_id: z.string().min(1, "请选择项目"),
+  agent_ids: z.array(z.string().min(1)).min(1, "至少选择一种输出类型"),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "wechat-article", "wechat-picture", "montage", "whiteboard-animation", "hypit"]),
   cron_expr: z.string().min(1, "请设置排期"),
   prompt: promptSchema.optional(),
   image_capability_key: z.string().max(50).optional(),
@@ -236,50 +236,12 @@ export const planSchema = z.object({
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),
-  agent_input: z.record(z.string(), z.unknown()).default({}),
   watermark: z.boolean().optional(),
-  // Seednote image composition (see createTaskSchema). Defaults match the server.
-  has_content_image: z.boolean().default(true),
-  has_tail_image: z.boolean().default(false),
-  // Article image toggles (see createTaskSchema). Both default true; spawned
-  // article tasks inherit them; non-article plans ignore them server-side.
-  article_with_cover: z.boolean().default(true),
-  article_with_content_images: z.boolean().default(true),
-  cover_use_portrait: z.boolean().default(false),
-  hypit_input: hypitInputSchema,
-  montage_input: montageInputSchema,
-}).superRefine((data, ctx) => {
-  if (data.type === "hypit" && !(data.hypit_input?.brief?.trim() || data.prompt?.trim())) ctx.addIssue({ code: "custom", message: "请填写视频复刻要求", path: ["prompt"] })
-  if (data.type === "montage") {
-    const brief = data.montage_input?.brief?.trim() || ""
-    if (!brief) {
-      ctx.addIssue({
-        code: "custom",
-        message: "请填写视频生成需求",
-        path: ["montage_input", "brief"],
-      })
-    }
-  }
-
-  if (data.type === "whiteboard-animation") {
-    const subtitles = (data.input_attachments ?? []).filter((attachment) => /\.srt$/i.test(attachment.file_name ?? ""))
-    if (subtitles.length !== 1 || (subtitles[0]?.type !== 'text' && subtitles[0]?.type !== 'document')) {
-      ctx.addIssue({ code: "custom", message: "请上传且仅上传一个 .srt 字幕文件", path: ["input_attachments"] })
-    }
-    if ((data.input_attachments ?? []).some((attachment) => attachment.type !== 'text' && attachment.type !== 'document' && attachment.type !== 'image')) {
-      ctx.addIssue({ code: "custom", message: "白板动画仅支持 SRT 字幕和图片风格参考", path: ["input_attachments"] })
-    }
-    if ((data.input_attachments ?? []).filter((attachment) => attachment.type === 'image').length > 1 || (data.input_attachments ?? []).some((attachment) => (attachment.type === 'text' || attachment.type === 'document') && !/\.srt$/i.test(attachment.file_name ?? ""))) {
-      ctx.addIssue({ code: "custom", message: "最多上传一张风格参考图", path: ["input_attachments"] })
-    }
-  }
-
-})
+}).strict()
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
   platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit"]).or(z.literal('')),
-  agent_config: z.record(z.string(), z.unknown()).default({}),
   name: z.string().max(100, "名称不能超过 100 个字符").optional(),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),

@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { registeredAgentPackForm } from '@/lib/agent-pack-renderers'
 import type { AgentPack, AgentPackJSONSchema } from '@/types'
 
-type ExtensionSurface = 'project' | 'task' | 'plan'
+type ExtensionSurface = 'task' | 'plan'
 
 interface AgentPackSchemaFieldsProps {
   pack?: AgentPack
@@ -18,8 +18,8 @@ interface AgentPackSchemaFieldsProps {
   onChange: (value: Record<string, unknown>) => void
 }
 
-function schemaForSurface(pack: AgentPack, surface: ExtensionSurface) {
-  return surface === 'project' ? pack.schemas?.project_config : pack.schemas?.task_input
+function schemaForSurface(pack: AgentPack, _surface: ExtensionSurface) {
+  return pack.schemas?.task_input
 }
 
 export function AgentPackSchemaFields({ pack, surface, value = {}, onChange }: AgentPackSchemaFieldsProps) {

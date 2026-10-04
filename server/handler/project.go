@@ -194,12 +194,6 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	if errors.Is(err, service.ErrInvalidAgentConfig) {
-		return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
-	}
-	if errors.Is(err, service.ErrWechatCredentialsRequired) {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
 	return Error(c, fiber.StatusInternalServerError, "failed to update project")
 }
@@ -250,8 +244,6 @@ type projectRequest struct {
 	EcommerceDefaults             *model.EcommerceProjectDefaults  `json:"ecommerce_defaults,omitempty"`
 	MontageDefaults               *model.MontageDefaults           `json:"montage_defaults,omitempty"`
 	HypitDefaults                 *model.HypitDefaults             `json:"hypit_defaults,omitempty"`
-	AgentConfig                   map[string]any                   `json:"agent_config,omitempty"`
-	AgentConfigSet                bool                             `json:"-"`
 	// Config fields for platform-specific credentials.
 	WechatAppID             string  `json:"wechat_app_id"`
 	WechatSecret            string  `json:"wechat_secret"`
@@ -261,7 +253,6 @@ type projectRequest struct {
 type projectConfigResponse struct {
 	ID        string         `json:"id"`
 	ProjectID string         `json:"project_id"`
-	AgentID   string         `json:"agent_id,omitempty"`
 	Channel   string         `json:"channel,omitempty"`
 	Config    map[string]any `json:"config"`
 }
@@ -304,10 +295,6 @@ func redactedProjectConfig(value map[string]any) map[string]any {
 	return redacted
 }
 
-func projectAgentConfigResponse(config *model.ProjectAgentConfig) projectConfigResponse {
-	return projectConfigResponse{ID: config.ID, ProjectID: config.ProjectID, AgentID: config.AgentID, Config: redactedProjectConfig(config.Config.Data())}
-}
-
 func projectChannelConfigResponse(config *model.ProjectChannelConfig) projectConfigResponse {
 	return projectConfigResponse{ID: config.ID, ProjectID: config.ProjectID, Channel: config.Channel, Config: redactedProjectConfig(config.Config.Data())}
 }
@@ -319,7 +306,7 @@ func (h *ProjectHandler) respondProjectConfigError(c fiber.Ctx, err error) error
 	if errors.Is(err, service.ErrProjectOwnedByUser) {
 		return Forbidden(c, "you do not have access to this project")
 	}
-	if errors.Is(err, service.ErrInvalidProjectAgent) || errors.Is(err, service.ErrInvalidProjectChannel) {
+	if errors.Is(err, service.ErrInvalidProjectChannel) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	h.logger.Error().Err(err).Msg("project config operation failed")
@@ -362,7 +349,6 @@ func (req *projectRequest) toProject() *model.Project {
 		MaxConcurrentTasks:            req.MaxConcurrentTasks,
 		Instructions:                  instructions,
 		InstructionsSet:               instructionsSet,
-		Config:                        model.ProjectConfig{WechatAppID: req.WechatAppID, WechatSecret: req.WechatSecret},
 	}
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
@@ -376,10 +362,31 @@ func (req *projectRequest) toProject() *model.Project {
 		p.SetMontageDefaults(*req.MontageDefaults)
 		p.MontageDefaultsSet = true
 	}
-	if req.AgentConfigSet {
-		p.SetAgentConfig(req.AgentConfig)
-	}
 	return p
+}
+
+func (req *projectRequest) wechatChannelConfig() map[string]any {
+	config := map[string]any{}
+	if appID := strings.TrimSpace(req.WechatAppID); appID != "" {
+		config["wechat_app_id"] = appID
+	}
+	if secret := strings.TrimSpace(req.WechatSecret); secret != "" {
+		config["wechat_secret"] = secret
+	}
+	return config
+}
+
+func rejectProjectAgentConfig(body []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return err
+	}
+	for field := range fields {
+		if strings.EqualFold(strings.TrimSpace(field), "agent_config") {
+			return errors.New("agent_config is no longer supported; configure outputs on a plan")
+		}
+	}
+	return nil
 }
 
 // List handles GET /projects.
@@ -482,6 +489,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	if err := rejectProjectAgentConfig(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -495,7 +505,6 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 	req.VisualStyleSet = hasJSONField(c.Body(), "visual_style")
 	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
-	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 
 	if req.Platform != "" && model.IsAdminOnlyProjectPlatform(req.Platform) && !projectUserIsAdmin(c) {
 		return Forbidden(c, "project platform is currently available to administrators only")
@@ -506,6 +515,11 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if pc != nil {
 		for _, field := range pc.Fields {
 			if !field.Required {
+				continue
+			}
+			// Account credentials are owned by ProjectChannelConfig and are
+			// submitted through that endpoint after the project exists.
+			if field.Key == "wechat_app_id" || field.Key == "wechat_secret" {
 				continue
 			}
 			val := req.getFieldValue(field.Key)
@@ -557,14 +571,13 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if errors.Is(err, service.ErrInvalidAgentConfig) {
-			return Error(c, fiber.StatusBadRequest, "invalid_agent_config: "+err.Error())
-		}
-		if errors.Is(err, service.ErrWechatCredentialsRequired) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())
+	}
+	if ch.Platform == model.PlatformWechat && (strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != "") {
+		if _, configErr := h.service.UpsertChannelConfig(c.Context(), userID, ch.ID, model.ChannelArticle, req.wechatChannelConfig()); configErr != nil {
+			return h.respondProjectConfigError(c, configErr)
+		}
 	}
 
 	h.service.SanitizeProjectForResponse(created)
@@ -680,64 +693,6 @@ func (h *ProjectHandler) Get(c fiber.Ctx) error {
 		"project": projectAPIResponse(ch),
 		"stats":   stats,
 	})
-}
-
-func (h *ProjectHandler) ListAgentConfigs(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	configs, err := h.service.ListAgentConfigs(c.Context(), userID, c.Params("id"))
-	if err != nil {
-		return h.respondProjectConfigError(c, err)
-	}
-	result := make([]projectConfigResponse, 0, len(configs))
-	for _, config := range configs {
-		result = append(result, projectAgentConfigResponse(config))
-	}
-	return Success(c, result)
-}
-
-func (h *ProjectHandler) GetAgentConfig(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	config, err := h.service.GetAgentConfig(c.Context(), userID, c.Params("id"), c.Params("agent_id"))
-	if err != nil {
-		return h.respondProjectConfigError(c, err)
-	}
-	if config == nil {
-		return Error(c, fiber.StatusNotFound, "agent config not found")
-	}
-	return Success(c, projectAgentConfigResponse(config))
-}
-
-func (h *ProjectHandler) UpsertAgentConfig(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	var req projectConfigRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid agent config body")
-	}
-	config, err := h.service.UpsertAgentConfig(c.Context(), userID, c.Params("id"), c.Params("agent_id"), req.Config)
-	if err != nil {
-		return h.respondProjectConfigError(c, err)
-	}
-	return Success(c, projectAgentConfigResponse(config))
-}
-
-func (h *ProjectHandler) DeleteAgentConfig(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	if err := h.service.DeleteAgentConfig(c.Context(), userID, c.Params("id"), c.Params("agent_id")); err != nil {
-		return h.respondProjectConfigError(c, err)
-	}
-	return Success(c, fiber.Map{"deleted": true})
 }
 
 func (h *ProjectHandler) ListChannelConfigs(c fiber.Ctx) error {
@@ -1080,7 +1035,7 @@ func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
 	if strings.TrimSpace(analysisInput.ExecutionProfile) == "" {
 		analysisInput.ExecutionProfile = "effective"
 	}
-	tasks, err := h.tasks.CreateManual(c.Context(), service.CreateManualParams{UserID: userID, ProjectID: project.ID, ExecutionProfile: analysisInput.ExecutionProfile, RequestedTaskType: model.TaskTypeProfileAnalysis, Prompt: project.ProfileURL, AgentInput: input, Quantity: 1, ProfileAnalysisExpectedVersion: &expectedVersion})
+	tasks, err := h.tasks.CreateManual(c.Context(), service.CreateManualParams{UserID: userID, ProjectID: project.ID, ExecutionProfile: analysisInput.ExecutionProfile, AgentID: model.AgentIDProfileAnalysis, Channel: model.ChannelProfileAnalysis, TaskKind: model.TaskKindProfileAnalysis, Prompt: project.ProfileURL, AgentInput: input, Quantity: 1, ProfileAnalysisExpectedVersion: &expectedVersion})
 	if err != nil {
 		return h.respondTaskError(c, err)
 	}
@@ -1215,6 +1170,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	if err := rejectProjectAgentConfig(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -1228,7 +1186,6 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 	req.VisualStyleSet = hasJSONField(c.Body(), "visual_style")
 	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
-	req.AgentConfigSet = hasJSONField(c.Body(), "agent_config")
 	if !projectPlatformIsVisibleToUser(c, req.Platform) {
 		return Forbidden(c, "project platform is currently available to administrators only")
 	}
@@ -1317,6 +1274,11 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	}
 	if err != nil {
 		return h.respondProjectUpdateError(c, projectID, err)
+	}
+	if updated.Platform == model.PlatformWechat && (strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != "") {
+		if _, configErr := h.service.UpsertChannelConfig(c.Context(), userID, projectID, model.ChannelArticle, req.wechatChannelConfig()); configErr != nil {
+			return h.respondProjectConfigError(c, configErr)
+		}
 	}
 
 	h.service.SanitizeProjectForResponse(updated)

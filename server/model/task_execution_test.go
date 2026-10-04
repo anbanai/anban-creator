@@ -36,8 +36,8 @@ func TestTaskExecutionMigrationAndCurrentAttempt(t *testing.T) {
 	if !db.Migrator().HasColumn(&Task{}, "Lifecycle") {
 		t.Fatal("lifecycle missing")
 	}
-	if !db.Migrator().HasColumn(&Project{}, "AgentConfig") || !db.Migrator().HasColumn(&Plan{}, "AgentInput") || !db.Migrator().HasColumn(&Task{}, "AgentInput") {
-		t.Fatal("Agent Pack extension JSON columns missing")
+	if !db.Migrator().HasColumn(&Task{}, "AgentInput") {
+		t.Fatal("task Agent Pack extension JSON column missing")
 	}
 	if !db.Migrator().HasColumn(&TaskExecution{}, "DispatchClaimToken") ||
 		!db.Migrator().HasColumn(&TaskExecution{}, "DispatchClaimedAt") {

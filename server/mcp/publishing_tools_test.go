@@ -85,7 +85,7 @@ func newPublishingToolFixture(t *testing.T) *publishingToolFixture {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, CurrentExecutionID: &f.executionID}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted, CurrentExecutionID: &f.executionID}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
@@ -327,7 +327,7 @@ func TestCreateDraftHandlerRejectsOwnershipAndProjectMismatchBeforeWechat(t *tes
 		t.Fatal(err)
 	}
 	foreignProjectTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: foreignProjectTaskID, UserID: f.userID, ProjectID: foreignProjectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: foreignProjectTaskID, UserID: f.userID, ProjectID: foreignProjectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	tests := []struct {

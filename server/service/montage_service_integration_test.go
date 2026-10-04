@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	serverconfig "github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -44,7 +43,7 @@ func TestTaskServiceNormalizesMontageInputFromProjectDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{
+	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ExecutionProfile: "effective",
 		UserID:           userID,
 		ProjectID:        projectID,
@@ -76,7 +75,7 @@ func TestTaskServiceRejectsRetiredMontagePipeline(t *testing.T) {
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	_, err := svc.CreateManual(t.Context(), CreateManualParams{
+	_, err := svc.CreateManual(t.Context(), CreateManualParams{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ExecutionProfile: "effective",
 		UserID:           userID,
 		ProjectID:        projectID,
@@ -101,8 +100,8 @@ func TestTaskServiceValidatesMontageTaskFileSources(t *testing.T) {
 	foreignUserID := uuid.NewString()
 	foreignProjectID := createTestProject(t, repo, foreignUserID, model.PlatformMontage)
 
-	ownerTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
-	foreignTask := &model.Task{ID: uuid.NewString(), UserID: foreignUserID, ProjectID: foreignProjectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
+	ownerTask := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage, ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
+	foreignTask := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage, ID: uuid.NewString(), UserID: foreignUserID, ProjectID: foreignProjectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
 	for _, task := range []*model.Task{ownerTask, foreignTask} {
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			t.Fatalf("create source task: %v", err)
@@ -134,7 +133,7 @@ func TestTaskServiceValidatesMontageTaskFileSources(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.CreateManual(ctx, CreateManualParams{
+			_, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 				ExecutionProfile: "effective",
 				UserID:           userID,
 				ProjectID:        projectID,
@@ -157,68 +156,6 @@ func TestTaskServiceValidatesMontageTaskFileSources(t *testing.T) {
 	}
 }
 
-func TestPlanServiceValidatesMontageTaskFileSources(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	svc.SetMontageCapabilityService(NewMontageCapabilityService(montageIntegrationConfig()))
-	svc.SetReferenceAssetService(NewReferenceAssetService(repo, &signFakeStore{}, time.Now))
-	ctx := t.Context()
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	sourceTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
-	if err := repo.Tasks().Create(ctx, sourceTask); err != nil {
-		t.Fatalf("create source task: %v", err)
-	}
-	video := &model.TaskFile{
-		ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateDelivered,
-		Role: model.FileRoleVideo, FilePath: "output/source.mp4", FileName: "source.mp4", MimeType: "video/mp4",
-		FileSize: 1024, ContentHash: strings.Repeat("a", 64), OSSKey: "tasks/source/source.mp4", StorageProvider: "fake",
-	}
-	image := &model.TaskFile{ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleImage, FilePath: "output/source.png", FileName: "source.png", MimeType: "image/png"}
-	unmaterializable := []*model.TaskFile{
-		{ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleVideo, FilePath: "output/missing.mp4", FileName: "missing.mp4", MimeType: "video/mp4", StorageProvider: "fake"},
-		{ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleVideo, FilePath: "output/empty.mp4", FileName: "empty.mp4", MimeType: "video/mp4", OSSKey: "tasks/source/empty.mp4", StorageProvider: "fake"},
-		{ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleVideo, FilePath: "output/provider.mp4", FileName: "provider.mp4", MimeType: "video/mp4", FileSize: 1, OSSKey: "tasks/source/provider.mp4", StorageProvider: "other"},
-		{ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleVideo, FilePath: "output/oversized.mp4", FileName: "oversized.mp4", MimeType: "video/mp4", FileSize: 64<<20 + 1, OSSKey: "tasks/source/oversized.mp4", StorageProvider: "fake"},
-		{ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleVideo, FilePath: "output/hash.mp4", FileName: "hash.mp4", MimeType: "video/mp4", FileSize: 1, ContentHash: "NOT-A-SHA256", OSSKey: "tasks/source/hash.mp4", StorageProvider: "fake"},
-	}
-	files := []*model.TaskFile{video, image}
-	files = append(files, unmaterializable...)
-	for _, file := range files {
-		if err := repo.TaskFiles().Create(ctx, file); err != nil {
-			t.Fatalf("create source file: %v", err)
-		}
-	}
-
-	create := func(fileID string) error {
-		_, err := svc.Create(ctx, CreatePlanParams{
-			ExecutionProfile: "effective",
-			UserID:           userID,
-			ProjectID:        projectID,
-			CronExpr:         "0 10 * * *",
-			MontageInput: &model.MontageInput{
-				Brief:        "计划素材校验",
-				PipelineKey:  "talking-head",
-				SourceAssets: []model.MontageAsset{{Type: "video", TaskFileID: fileID}},
-			},
-		})
-		return err
-	}
-	if err := create(video.ID); err != nil {
-		t.Fatalf("Create valid plan: %v", err)
-	}
-	if err := create(image.ID); err == nil || !errors.Is(err, ErrMontageInput) {
-		t.Fatalf("Create MIME-mismatched plan error = %v, want ErrMontageInput", err)
-	}
-	if err := create(uuid.NewString()); err == nil || !errors.Is(err, ErrMontageInput) {
-		t.Fatalf("Create missing-file plan error = %v, want ErrMontageInput", err)
-	}
-	for _, file := range unmaterializable {
-		if err := create(file.ID); err == nil || !errors.Is(err, ErrMontageInput) {
-			t.Fatalf("Create unmaterializable plan file %s error = %v, want ErrMontageInput", file.FileName, err)
-		}
-	}
-}
-
 func TestTaskServiceReservesBootstrapBudgetBeyondMontageTaskFileSources(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
@@ -227,7 +164,7 @@ func TestTaskServiceReservesBootstrapBudgetBeyondMontageTaskFileSources(t *testi
 	ctx := t.Context()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	sourceTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
+	sourceTask := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage, ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
 	if err := repo.Tasks().Create(ctx, sourceTask); err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +182,7 @@ func TestTaskServiceReservesBootstrapBudgetBeyondMontageTaskFileSources(t *testi
 		assets = append(assets, model.MontageAsset{Type: "video", TaskFileID: file.ID})
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,
 		MontageInput: &model.MontageInput{Brief: "too much bootstrap media", PipelineKey: "cinematic", SourceAssets: assets},
 	})
@@ -265,7 +202,7 @@ func TestTaskServiceRejectsMontageInlineBootstrapBudgetAtSourceLimit(t *testing.
 	ctx := t.Context()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	sourceTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
+	sourceTask := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage, ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
 	if err := repo.Tasks().Create(ctx, sourceTask); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +222,7 @@ func TestTaskServiceRejectsMontageInlineBootstrapBudgetAtSourceLimit(t *testing.
 		assets = append(assets, model.MontageAsset{Type: "video", TaskFileID: file.ID})
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ExecutionProfile: "effective", UserID: userID, ProjectID: projectID,
 		MontageInput: &model.MontageInput{
 			Brief: "inline metadata must fit the remaining bootstrap budget", PipelineKey: "cinematic",
@@ -312,11 +249,11 @@ func TestTaskServiceExactCloneAcceptsIntermediateMontageSourceFromRootLineage(t 
 	intermediateProjectID := createTestProject(t, repo, userID, model.PlatformMontage)
 	destinationProjectID := createTestProject(t, repo, userID, model.PlatformMontage)
 
-	root := &model.Task{
+	root := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ID: uuid.NewString(), UserID: userID, ProjectID: rootProjectID,
 		Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
 	}
-	intermediate := &model.Task{
+	intermediate := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ID: uuid.NewString(), UserID: userID, ProjectID: intermediateProjectID,
 		Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
 		InputSourceTaskID: root.ID, InputSourceProjectID: root.ProjectID,
@@ -336,7 +273,7 @@ func TestTaskServiceExactCloneAcceptsIntermediateMontageSourceFromRootLineage(t 
 		t.Fatal(err)
 	}
 
-	source := &model.Task{
+	source := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ID: uuid.NewString(), UserID: userID, ProjectID: destinationProjectID,
 		Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
 		ExecutionProfile: "effective",
@@ -365,107 +302,6 @@ func TestTaskServiceExactCloneAcceptsIntermediateMontageSourceFromRootLineage(t 
 	}
 }
 
-func TestTaskServiceNormalizesMontagePlanWhenCreatingScheduledTask(t *testing.T) {
-	svc, repo := setupTaskServiceWithEnqueuer(t)
-	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
-	svc.SetMontageConfig(montageIntegrationConfig())
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.PlatformMontage, Status: model.PlanStatusActive,
-		ExecutionProfile: "effective", ImageCapabilityKey: "standard",
-	}
-	plan.SetMontageInput(model.MontageInput{Brief: "自动生成发布视频"})
-
-	task, err := svc.CreateFromPlan(t.Context(), plan)
-	if err != nil {
-		t.Fatalf("CreateFromPlan: %v", err)
-	}
-	got := task.MontageInput.Data()
-	if got.PipelineKey != "cinematic" || got.Preferences.DurationSeconds != 30 {
-		t.Fatalf("scheduled task montage input = %#v", got)
-	}
-}
-
-func TestTaskServiceCreateFromPlanRejectsUnavailableMontageTaskFile(t *testing.T) {
-	svc, repo := setupTaskServiceWithEnqueuer(t)
-	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
-	svc.SetMontageConfig(montageIntegrationConfig())
-	ctx := t.Context()
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	sourceTask := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
-	}
-	if err := repo.Tasks().Create(ctx, sourceTask); err != nil {
-		t.Fatal(err)
-	}
-	sourceFile := &model.TaskFile{
-		ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateSuperseded,
-		Role: model.FileRoleVideo, FilePath: "output/source.mp4", FileName: "source.mp4", MimeType: "video/mp4",
-	}
-	if err := repo.TaskFiles().Create(ctx, sourceFile); err != nil {
-		t.Fatal(err)
-	}
-	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.PlatformMontage, Status: model.PlanStatusActive,
-		ExecutionProfile: "effective", ImageCapabilityKey: "standard",
-	}
-	plan.SetMontageInput(model.MontageInput{
-		Brief: "reuse scheduled source", PipelineKey: "talking-head",
-		SourceAssets: []model.MontageAsset{{Type: "video", TaskFileID: sourceFile.ID}},
-	})
-
-	task, err := svc.CreateFromPlan(ctx, plan)
-	if err == nil || !errors.Is(err, ErrMontageInput) {
-		t.Fatalf("CreateFromPlan error = %v, want ErrMontageInput", err)
-	}
-	if task != nil {
-		t.Fatalf("CreateFromPlan task = %#v, want nil", task)
-	}
-}
-
-func TestTaskServiceCreateFromPlanRejectsUnmaterializableMontageTaskFile(t *testing.T) {
-	svc, repo := setupTaskServiceWithEnqueuer(t)
-	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
-	svc.SetMontageConfig(montageIntegrationConfig())
-	svc.store = &signFakeStore{}
-	ctx := t.Context()
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	sourceTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformMontage, Status: model.TaskStatusCompleted}
-	if err := repo.Tasks().Create(ctx, sourceTask); err != nil {
-		t.Fatal(err)
-	}
-	sourceFile := &model.TaskFile{
-		ID: uuid.NewString(), TaskID: sourceTask.ID, State: model.TaskFileStateDelivered,
-		Role: model.FileRoleVideo, FilePath: "output/source.mp4", FileName: "source.mp4", MimeType: "video/mp4", StorageProvider: "fake",
-	}
-	if err := repo.TaskFiles().Create(ctx, sourceFile); err != nil {
-		t.Fatal(err)
-	}
-	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.PlatformMontage, Status: model.PlanStatusActive,
-		ExecutionProfile: "effective", ImageCapabilityKey: "standard",
-	}
-	plan.SetMontageInput(model.MontageInput{
-		Brief: "reuse scheduled source", PipelineKey: "talking-head",
-		SourceAssets: []model.MontageAsset{{Type: "video", TaskFileID: sourceFile.ID}},
-	})
-
-	task, err := svc.CreateFromPlan(ctx, plan)
-	if err == nil || !errors.Is(err, ErrMontageInput) {
-		t.Fatalf("CreateFromPlan error = %v, want ErrMontageInput", err)
-	}
-	if task != nil {
-		t.Fatalf("CreateFromPlan task = %#v, want nil", task)
-	}
-}
-
 func TestTaskServiceExactCloneRejectsUnmaterializableMontageSource(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{})
@@ -474,7 +310,7 @@ func TestTaskServiceExactCloneRejectsUnmaterializableMontageSource(t *testing.T)
 	ctx := t.Context()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	source := &model.Task{
+	source := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
 		ExecutionProfile: "effective",
@@ -513,7 +349,7 @@ func TestTaskServiceExactClonePreservesRetiredMontagePipeline(t *testing.T) {
 	svc.SetMontageConfig(montageIntegrationConfig())
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	source := &model.Task{
+	source := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		Type: model.PlatformMontage, Status: model.TaskStatusCompleted,
 		ExecutionProfile: "effective",
@@ -542,99 +378,6 @@ func TestTaskServiceExactClonePreservesRetiredMontagePipeline(t *testing.T) {
 	}
 	if gotInput.Brief != editedPrompt {
 		t.Fatalf("cloned brief = %q, want %q", gotInput.Brief, editedPrompt)
-	}
-}
-
-func TestPlanServiceNormalizesMontageInputAndValidatesUpdates(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	svc.SetMontageCapabilityService(NewMontageCapabilityService(montageIntegrationConfig()))
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-	project, err := repo.Projects().FindByID(t.Context(), projectID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	project.SetMontageDefaults(model.MontageDefaults{DefaultPipeline: "screen-demo"})
-	if err := repo.Projects().Update(t.Context(), project); err != nil {
-		t.Fatal(err)
-	}
-
-	plan, err := svc.Create(t.Context(), CreatePlanParams{
-		ExecutionProfile: "effective",
-		UserID:           userID,
-		ProjectID:        projectID,
-		CronExpr:         "0 10 * * *",
-		MontageInput:     &model.MontageInput{Brief: "  每天生成产品演示  "},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	got := plan.MontageInput.Data()
-	if got.Brief != "每天生成产品演示" || got.PipelineKey != "screen-demo" || got.Preferences.DurationSeconds != 60 {
-		t.Fatalf("normalized plan input = %#v", got)
-	}
-
-	_, err = svc.Update(t.Context(), UpdatePlanParams{
-		ExecutionProfile: "effective",
-		ID:               plan.ID,
-		MontageInput: &model.MontageInput{
-			Brief:       "切换到停用流程",
-			PipelineKey: "retired-pipeline",
-		},
-	})
-	if err == nil || !errors.Is(err, ErrMontageInput) {
-		t.Fatalf("Update error = %v, want ErrMontageInput", err)
-	}
-}
-
-func TestPlanServiceRevalidatesPersistedMontageInputOnPartialUpdate(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-
-	plan, err := svc.Create(t.Context(), CreatePlanParams{
-		ExecutionProfile: "effective",
-		UserID:           userID,
-		ProjectID:        projectID,
-		CronExpr:         "0 10 * * *",
-		MontageInput: &model.MontageInput{
-			Brief:       "历史自动视频",
-			PipelineKey: "retired-pipeline",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Create legacy plan: %v", err)
-	}
-	svc.SetMontageCapabilityService(NewMontageCapabilityService(montageIntegrationConfig()))
-
-	_, err = svc.Update(t.Context(), UpdatePlanParams{
-		ExecutionProfile: "effective",
-		ID:               plan.ID,
-		Prompt:           "只修改计划提示",
-	})
-	if err == nil || !errors.Is(err, ErrMontageInput) {
-		t.Fatalf("Update error = %v, want ErrMontageInput for persisted retired pipeline", err)
-	}
-}
-
-func TestPlanServiceRequiresSourcesForSelectedMontagePipeline(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	svc.SetMontageCapabilityService(NewMontageCapabilityService(montageIntegrationConfig()))
-	userID := uuid.NewString()
-	projectID := createTestProject(t, repo, userID, model.PlatformMontage)
-
-	_, err := svc.Create(t.Context(), CreatePlanParams{
-		ExecutionProfile: "effective",
-		UserID:           userID,
-		ProjectID:        projectID,
-		CronExpr:         "0 10 * * *",
-		MontageInput: &model.MontageInput{
-			Brief:       "定期精剪口播",
-			PipelineKey: "talking-head",
-		},
-	})
-	if err == nil || !errors.Is(err, ErrMontageInput) {
-		t.Fatalf("Create error = %v, want ErrMontageInput", err)
 	}
 }
 

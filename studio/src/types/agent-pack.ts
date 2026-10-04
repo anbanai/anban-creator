@@ -1,4 +1,4 @@
-export type AgentPackSurface = 'plugin' | 'project' | 'task' | 'plan'
+export type AgentPackSurface = 'plugin' | 'task' | 'plan'
 
 export interface AgentPackJSONSchema {
   type?: 'object' | 'array' | 'string' | 'boolean' | 'number' | 'integer'
@@ -23,7 +23,8 @@ export interface AgentPackDeliverySpec {
 
 export interface AgentPack {
   id: string
-	channel?: 'wechat-article' | 'seednote' | 'wechat-picture'
+	channel?: string
+	plan_task_kind?: string
   version: string
   kind: 'plugin' | 'managed'
   display_name: string
@@ -47,7 +48,6 @@ export interface AgentPack {
   delivery?: AgentPackDeliverySpec[]
   delivery_by_task_type?: Record<string, AgentPackDeliverySpec[]>
   schemas?: {
-    project_config?: AgentPackJSONSchema
     task_input?: AgentPackJSONSchema
     ui?: AgentPackJSONSchema
     output?: AgentPackJSONSchema

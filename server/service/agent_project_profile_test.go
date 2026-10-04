@@ -39,7 +39,6 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformSeednote,
 		Name: "current", Instructions: "current instructions", VisualStyle: "current style",
 	}
-	project.SetAgentConfig(map[string]any{"audience": "current"})
 	if err := repo.Projects().Create(context.Background(), project); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +51,6 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 		ProjectName: "snapshot", Platform: model.PlatformSeednote,
 		Instructions: "snapshot instructions", VisualStyle: "snapshot style",
 		ReferenceImageAssetID: "asset-id", ImageRatio: "3:4",
-		AgentConfig: map[string]any{"audience": "snapshot"},
 	})
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
@@ -73,12 +71,12 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	if got := (*profile)["visual_style_source"]; got != "snapshot" {
 		t.Fatalf("visual_style_source = %v, want snapshot", got)
 	}
-	if got := (*profile)["agent_config"].(map[string]any)["audience"]; got != "snapshot" {
-		t.Fatalf("agent_config.audience = %v, want frozen snapshot", got)
-	}
 	resolved := (*profile)["resolved_profile"].(map[string]any)
-	if got := resolved["agent_config"].(map[string]any)["audience"]; got != "snapshot" {
-		t.Fatalf("resolved_profile.agent_config.audience = %v, want frozen snapshot", got)
+	if _, exists := (*profile)["agent_config"]; exists {
+		t.Fatal("profile must not expose project-level Agent configuration")
+	}
+	if _, exists := resolved["agent_config"]; exists {
+		t.Fatal("resolved profile must not expose project-level Agent configuration")
 	}
 	if got := resolved["project_style_reference_path"]; got != ".anban-creator/project-style-reference.png" {
 		t.Fatalf("project_style_reference_path = %v", got)
@@ -128,16 +126,21 @@ func TestAgentProjectProfileIncludesMatchingFeedbackStrategy(t *testing.T) {
 	if err := repo.Projects().Create(context.Background(), project); err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: project.ID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&model.StrategySnapshot{ID: uuid.NewString(), ProjectID: project.ID, Platform: model.PlatformWechat, Revision: 1, SourceRevision: 3, Digest: "digest", Status: "active", ApplicableTasks: `["wechat-article"]`, Recommendations: `["keep"]`, Evidence: `{"sample_count":10}`, Confidence: "medium", Limitations: "advisory"}).Error; err != nil {
+	if err := db.Create(&model.StrategySnapshot{ID: uuid.NewString(), ProjectID: project.ID, Platform: model.PlatformWechat, Revision: 1, SourceRevision: 3, Digest: "digest", Status: "active", ApplicableTasks: `["content_generation"]`, Recommendations: `["keep"]`, Evidence: `{"sample_count":10}`, Confidence: "medium", Limitations: "advisory"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	profile, err := svc.Get(context.Background(), AgentProjectProfileRequest{UserID: userID, ProjectID: project.ID, TaskID: task.ID})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, key := range []string{"available_themes", "available_writers", "available_article_templates"} {
+		if reflect.ValueOf((*profile)[key]).Len() == 0 {
+			t.Fatalf("article task must retain %s", key)
+		}
 	}
 	feedback, ok := (*profile)["feedback_strategy"].(map[string]any)
 	if !ok || feedback["available"] != true || feedback["strategy_revision"] != int64(1) {

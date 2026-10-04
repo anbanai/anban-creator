@@ -16,74 +16,48 @@ func TestHypitPortraitCoverFollowsVideoRatio(t *testing.T) {
 	for _, tc := range []struct{ name, input, defaults, want string }{
 		{"horizontal", "16:9", "", "16:9"}, {"source", "source", "16:9", "auto"}, {"project default", "", "16:9", "16:9"}, {"unspecified", "", "", "auto"},
 	} {
-		for _, entry := range []string{"manual", "plan"} {
-			t.Run(tc.name+"/"+entry, func(t *testing.T) {
-				tasks, repo := setupTaskServiceWithEnqueuer(t)
-				tasks.SetHypitConfig(hypitTestConfig())
-				tasks.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "image@sha256:pinned"}})
-				user := "hypit-cover-owner"
-				id := createTestProject(t, repo, user, model.PlatformHypit)
-				portrait := referenceAssetFixture("portrait", user, DirectUploadPurposeProjectPortraitReference)
-				seedReferenceAsset(t, repo, portrait)
-				project, _ := repo.Projects().FindByID(t.Context(), id)
-				project.PortraitReferenceImageAssetID = portrait.ID
-				project.ImageRatio = "9:16"
-				project.SetHypitDefaults(model.HypitDefaults{Preferences: model.HypitPreferences{AspectRatio: tc.defaults}})
-				if err := repo.Projects().Update(t.Context(), project); err != nil {
-					t.Fatal(err)
-				}
-				tasks.SetReferenceAssetService(NewReferenceAssetService(repo, nil, nil))
-				input := model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}, Preferences: model.HypitPreferences{AspectRatio: tc.input}}
-				var task *model.Task
-				if entry == "manual" {
-					created, err := tasks.CreateManual(t.Context(), CreateManualParams{UserID: user, ProjectID: id, ExecutionProfile: "effective", CoverUsePortrait: true, ImageRatio: "9:16", HypitInput: &input})
-					if err != nil {
-						t.Fatal(err)
-					}
-					task = created[0]
-				} else {
-					plans := newTestPlanService(t, repo)
-					plans.SetHypitCapabilityService(NewHypitCapabilityService(hypitTestConfig()))
-					plan, err := plans.Create(t.Context(), CreatePlanParams{UserID: user, ProjectID: id, ExecutionProfile: "effective", CronExpr: "0 9 * * *", CoverUsePortrait: true, ImageRatio: "9:16", HypitInput: &input})
-					if err != nil {
-						t.Fatal(err)
-					}
-					if plan.ImageRatio != tc.want {
-						t.Fatalf("plan cover ratio=%q want %q", plan.ImageRatio, tc.want)
-					}
-					task, err = tasks.CreateFromPlan(t.Context(), plan)
-					if err != nil {
-						t.Fatal(err)
-					}
-					changed := plan.HypitInput.Data()
-					changed.Preferences.AspectRatio = "1:1"
-					conflict := "9:16"
-					updated, err := plans.Update(t.Context(), UpdatePlanParams{ID: plan.ID, ExecutionProfile: "effective", HypitInput: &changed, ImageRatio: &conflict})
-					if err != nil || updated.ImageRatio != "1:1" {
-						t.Fatalf("updated cover ratio=%+v error=%v", updated, err)
-					}
-				}
-				if task.ImageRatio != tc.want {
-					t.Fatalf("task cover ratio=%q want %q", task.ImageRatio, tc.want)
-				}
-				task.Status = model.TaskStatusCompleted
-				if err := repo.Tasks().Update(t.Context(), task); err != nil {
-					t.Fatal(err)
-				}
-				project.SetHypitDefaults(model.HypitDefaults{Preferences: model.HypitPreferences{AspectRatio: "1:1"}})
-				if err := repo.Projects().Update(t.Context(), project); err != nil {
-					t.Fatal(err)
-				}
-				clones, err := tasks.Clone(t.Context(), task.ID, CloneTaskParams{ExecutionProfile: "effective"})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if clones[0].ImageRatio != tc.want {
-					t.Fatalf("clone cover ratio=%q want frozen %q", clones[0].ImageRatio, tc.want)
-				}
-				assertHypitImageCoverGeneration(t, task.ImageRatio)
-			})
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			tasks, repo := setupTaskServiceWithEnqueuer(t)
+			tasks.SetHypitConfig(hypitTestConfig())
+			tasks.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "image@sha256:pinned"}})
+			user := "hypit-cover-owner"
+			id := createTestProject(t, repo, user, model.PlatformHypit)
+			portrait := referenceAssetFixture("portrait", user, DirectUploadPurposeProjectPortraitReference)
+			seedReferenceAsset(t, repo, portrait)
+			project, _ := repo.Projects().FindByID(t.Context(), id)
+			project.PortraitReferenceImageAssetID = portrait.ID
+			project.ImageRatio = "9:16"
+			project.SetHypitDefaults(model.HypitDefaults{Preferences: model.HypitPreferences{AspectRatio: tc.defaults}})
+			if err := repo.Projects().Update(t.Context(), project); err != nil {
+				t.Fatal(err)
+			}
+			tasks.SetReferenceAssetService(NewReferenceAssetService(repo, nil, nil))
+			input := model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}, Preferences: model.HypitPreferences{AspectRatio: tc.input}}
+			created, err := tasks.CreateManual(t.Context(), CreateManualParams{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, UserID: user, ProjectID: id, ExecutionProfile: "effective", CoverUsePortrait: true, ImageRatio: "9:16", HypitInput: &input})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task := created[0]
+			if task.ImageRatio != tc.want {
+				t.Fatalf("task cover ratio=%q want %q", task.ImageRatio, tc.want)
+			}
+			task.Status = model.TaskStatusCompleted
+			if err := repo.Tasks().Update(t.Context(), task); err != nil {
+				t.Fatal(err)
+			}
+			project.SetHypitDefaults(model.HypitDefaults{Preferences: model.HypitPreferences{AspectRatio: "1:1"}})
+			if err := repo.Projects().Update(t.Context(), project); err != nil {
+				t.Fatal(err)
+			}
+			clones, err := tasks.Clone(t.Context(), task.ID, CloneTaskParams{ExecutionProfile: "effective"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if clones[0].ImageRatio != tc.want {
+				t.Fatalf("clone cover ratio=%q want frozen %q", clones[0].ImageRatio, tc.want)
+			}
+			assertHypitImageCoverGeneration(t, task.ImageRatio)
+		})
 	}
 }
 
@@ -125,7 +99,7 @@ func assertHypitImageCoverGeneration(t *testing.T, frozenRatio string) {
 func TestHypitProfileExposesFrozenCoverInputsWithoutImageResolver(t *testing.T) {
 	tasks, repo := setupTaskServiceWithEnqueuer(t)
 	id := createTestProject(t, repo, "profile-owner", model.PlatformHypit)
-	task := &model.Task{ID: "hypit-profile-task", UserID: "profile-owner", ProjectID: id, Type: model.PlatformHypit, ImageRatio: "16:9", CoverUsePortrait: true, ImageCapabilityKey: "frozen-image-model", ReferenceImageAssetID: "task-reference"}
+	task := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, ID: "hypit-profile-task", UserID: "profile-owner", ProjectID: id, Type: model.PlatformHypit, ImageRatio: "16:9", CoverUsePortrait: true, ImageCapabilityKey: "frozen-image-model", ReferenceImageAssetID: "task-reference"}
 	task.SetProjectSnapshot(model.ProjectSnapshot{Platform: model.PlatformHypit, ProjectName: "frozen name", VisualStyle: "frozen style", ReferenceImageAssetID: "style-reference", PortraitReferenceImageAssetID: "frozen-portrait", HypitDefaults: model.HypitDefaults{Preferences: model.HypitPreferences{AspectRatio: "16:9"}}})
 	if err := repo.Tasks().Create(t.Context(), task); err != nil {
 		t.Fatal(err)

@@ -40,8 +40,8 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Article(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.TaskTypeWechatArticle,
-		Status:    model.PlanStatusActive,
+		AgentID:   model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		Status: model.PlanStatusActive,
 		// Prompt and Title intentionally empty → must claim from pool.
 	}
 
@@ -115,8 +115,8 @@ func TestCreateFromPlan_ClaimsTopicFromPool_Seednote(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.PlatformSeednote,
-		Status:    model.PlanStatusActive,
+		AgentID:   model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
+		Status: model.PlanStatusActive,
 	}
 
 	task, err := svc.CreateFromPlan(ctx, plan)
@@ -151,9 +151,9 @@ func TestCreateFromPlan_DoesNotClaimWhenPromptSet(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.TaskTypeWechatArticle,
-		Prompt:    explicit,
-		Status:    model.PlanStatusActive,
+		AgentID:   model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		Prompt: explicit,
+		Status: model.PlanStatusActive,
 	}
 
 	task, err := svc.CreateFromPlan(ctx, plan)
@@ -192,9 +192,9 @@ func TestCreateFromPlan_TitleAlsoBlocksClaim(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.TaskTypeWechatArticle,
-		Title:     titleTopic,
-		Status:    model.PlanStatusActive,
+		AgentID:   model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		Title:  titleTopic,
+		Status: model.PlanStatusActive,
 	}
 
 	task, err := svc.CreateFromPlan(ctx, plan)
@@ -223,8 +223,8 @@ func TestCreateFromPlan_EmptyPoolFallsBack(t *testing.T) {
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		ProjectID: projectID,
-		Type:      model.TaskTypeWechatArticle,
-		Status:    model.PlanStatusActive,
+		AgentID:   model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		Status: model.PlanStatusActive,
 	}
 
 	task, err := svc.CreateFromPlan(ctx, plan)
@@ -253,7 +253,7 @@ func TestCreateManual_ClaimsTopicFromPool_Article(t *testing.T) {
 		t.Fatalf("seed topic: %v", err)
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  1,
@@ -296,7 +296,7 @@ func TestCreateManual_DoesNotClaimWhenPromptSet(t *testing.T) {
 	}
 
 	const explicit = "用户显式指定的主题"
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Prompt:    explicit,
@@ -333,7 +333,7 @@ func TestCreateManual_DoesNotClaimForEcommerce(t *testing.T) {
 		t.Fatalf("seed topic: %v", err)
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: "ecommerce", Channel: model.ChannelEcommerce, TaskKind: model.PlatformEcommerce, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  1,
@@ -375,7 +375,7 @@ func TestCreateManual_ClaimsOnePerTask(t *testing.T) {
 		t.Fatalf("seed topics: %v", err)
 	}
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
 		Quantity:  3,

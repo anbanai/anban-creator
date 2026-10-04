@@ -53,19 +53,7 @@ func taskAPIResponse(task *model.Task, store storage.Provider) map[string]any {
 		return nil
 	}
 	resp := modelAPIMap(task)
-	taskType := publicTaskType(task.AgentID, task.Channel, task.TaskKind, task.Type)
-	if taskType == "" {
-		// Historical rows may have lost the identity columns while retaining
-		// the task type. Never return an empty public discriminator.
-		switch task.Type {
-		case model.PlatformWechat:
-			taskType = model.TaskTypeWechatArticle
-		case model.TaskTypeWechatArticle, model.TaskTypeWechatPicture, model.PlatformSeednote,
-			model.TaskTypeViralAnalysis, model.PlatformMontage, model.PlatformHypit:
-			taskType = task.Type
-		}
-	}
-	resp["type"] = taskType
+	resp["type"] = task.Type
 	resp["billing_total_credits"] = task.BillingPriceCredits
 	if model.IsHypitPlatform(task.Type) {
 		resp["input_source_task_id"] = task.InputSourceTaskID
@@ -160,33 +148,29 @@ func planAPIResponse(plan *model.Plan, store storage.Provider) map[string]any {
 		return nil
 	}
 	resp := modelAPIMap(plan)
-	agentID, channel, taskKind := plan.AgentID, plan.Channel, plan.TaskKind
-	if len(plan.Entries) > 0 && plan.Entries[0] != nil {
-		agentID, channel, taskKind = plan.Entries[0].AgentID, plan.Entries[0].Channel, plan.Entries[0].TaskKind
+	agentIDs := make([]string, 0, len(plan.Entries))
+	for _, entry := range plan.Entries {
+		if entry != nil && strings.TrimSpace(entry.AgentID) != "" {
+			agentIDs = append(agentIDs, entry.AgentID)
+		}
 	}
-	resp["type"] = publicTaskType(agentID, channel, taskKind, plan.Type)
-	rewriteMontageAPIField(resp, plan.Type, plan.MontageInput.Data())
+	resp["agent_ids"] = agentIDs
+	if plan.Entries == nil {
+		resp["entries"] = []*model.PlanEntry{}
+	} else {
+		resp["entries"] = plan.Entries
+	}
+	delete(resp, "type")
+	delete(resp, "agent_input")
+	delete(resp, "has_content_image")
+	delete(resp, "has_tail_image")
+	delete(resp, "article_with_cover")
+	delete(resp, "article_with_content_images")
+	delete(resp, "cover_use_portrait")
+	delete(resp, "hypit_input")
+	delete(resp, "montage_input")
 	enrichOwnedObjectKeys(resp, store)
 	return resp
-}
-
-func publicTaskType(agentID, channel, taskKind, legacyType string) string {
-	switch strings.TrimSpace(channel) {
-	case model.ChannelWechatPicture:
-		return model.TaskTypeWechatPicture
-	case model.ChannelArticle:
-		return model.TaskTypeWechatArticle
-	}
-	if strings.TrimSpace(legacyType) == "article" {
-		return model.TaskTypeWechatArticle
-	}
-	if strings.TrimSpace(legacyType) != "" {
-		return legacyType
-	}
-	if strings.TrimSpace(agentID) != "" {
-		return agentID
-	}
-	return taskKind
 }
 
 func enrichOwnedObjectKeys(resp map[string]any, store storage.Provider) {

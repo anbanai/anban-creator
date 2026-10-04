@@ -187,7 +187,7 @@ export function PersonaBlock({
             ))}
           </SelectContent>
         </Select>
-        <p className="text-[0.8rem] text-muted-foreground">决定 Agent 的行文语气、结构习惯和用词偏好，会随每次创作注入提示。</p>
+        <p className="text-[0.8rem] text-muted-foreground">决定内容的行文语气、结构习惯和用词偏好，会随每次创作注入提示。</p>
       </section>
     </div>
   )

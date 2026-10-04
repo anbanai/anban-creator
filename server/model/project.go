@@ -6,12 +6,6 @@ import (
 	"gorm.io/datatypes"
 )
 
-// ProjectConfig holds platform-specific configuration stored as JSON.
-type ProjectConfig struct {
-	WechatAppID  string `json:"wechat_app_id,omitempty"`
-	WechatSecret string `json:"wechat_secret,omitempty"`
-}
-
 // EcommerceProjectDefaults holds the reusable e-commerce defaults for a project
 // (platform="ecommerce"): deliverable modules + quantities, target platform,
 // brand brief, and default image model key. Product photos stay per-task
@@ -39,9 +33,8 @@ func (p *Project) SetEcommerceDefaults(ec EcommerceProjectDefaults) {
 type Project struct {
 	ID     string `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID string `gorm:"type:char(36);index;not null" json:"user_id"`
-	// Platform is retained only as an internal migration bridge. New API
-	// contracts are channel-neutral and never serialize or validate it.
-	Platform   string `gorm:"type:varchar(20);not null" json:"-"`
+	// Platform identifies the account context; it never selects task identity.
+	Platform   string `gorm:"type:varchar(20);not null" json:"platform"`
 	Name       string `gorm:"type:varchar(100);not null" json:"name"`
 	AvatarURL  string `gorm:"type:varchar(500)" json:"avatar_url"`
 	ProfileURL string `gorm:"type:varchar(500)" json:"-"` // legacy platform homepage link
@@ -79,34 +72,24 @@ type Project struct {
 	MaxConcurrentTasks            int        `gorm:"type:int;default:10" json:"max_concurrent_tasks"` // 最大并发任务数
 	// Timezone controls project-local periodic feedback windows. Empty values
 	// fall back to the platform default (Asia/Shanghai).
-	Timezone       string        `gorm:"type:varchar(64);default:'Asia/Shanghai'" json:"timezone"`
-	FeedbackPaused bool          `gorm:"not null;default:false" json:"feedback_paused"`
-	Config         ProjectConfig `gorm:"type:json;serializer:json" json:"-"` // legacy credentials; channel configs are canonical
+	Timezone       string `gorm:"type:varchar(64);default:'Asia/Shanghai'" json:"timezone"`
+	FeedbackPaused bool   `gorm:"not null;default:false" json:"feedback_paused"`
 	// EcommerceDefaults carries the reusable e-commerce defaults for platform=
 	// "ecommerce" projects. Zero value for non-ecommerce projects.
 	EcommerceDefaults    datatypes.JSONType[EcommerceProjectDefaults] `gorm:"type:json" json:"ecommerce_defaults"`
 	EcommerceDefaultsSet bool                                         `gorm:"-" json:"-"`
 	MontageDefaults      datatypes.JSONType[MontageDefaults]          `gorm:"type:json" json:"montage_defaults"`
-	AgentConfig          datatypes.JSONType[map[string]any]           `gorm:"type:json" json:"agent_config"`
 	Profile              datatypes.JSONType[ProjectProfile]           `gorm:"type:json" json:"profile"`
-	AgentConfigSet       bool                                         `gorm:"-" json:"-"`
-	HypitDefaults        datatypes.JSONType[HypitDefaults]            `gorm:"type:json" json:"hypit_defaults"`
-	HypitDefaultsSet     bool                                         `gorm:"-" json:"-"`
-	MontageDefaultsSet   bool                                         `gorm:"-" json:"-"`
-	Status               string                                       `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
-	DeletingAt           *time.Time                                   `gorm:"index" json:"-"`
-	CreatedAt            time.Time                                    `json:"created_at"`
-	UpdatedAt            time.Time                                    `json:"updated_at"`
+	// RuntimeChannelConfig is populated by Server-owned connector flows for the
+	// current request. It is never persisted or exposed in project responses.
+	RuntimeChannelConfig map[string]any                    `gorm:"-" json:"-"`
+	HypitDefaults        datatypes.JSONType[HypitDefaults] `gorm:"type:json" json:"hypit_defaults"`
+	HypitDefaultsSet     bool                              `gorm:"-" json:"-"`
+	MontageDefaultsSet   bool                              `gorm:"-" json:"-"`
+	Status               string                            `gorm:"type:varchar(20);default:active" json:"status"` // active, archived
+	DeletingAt           *time.Time                        `gorm:"index" json:"-"`
+	CreatedAt            time.Time                         `json:"created_at"`
+	UpdatedAt            time.Time                         `json:"updated_at"`
 }
 
 func (Project) TableName() string { return "projects" }
-
-// GetWechatAppID returns the WeChat App ID from config.
-func (p *Project) GetWechatAppID() string {
-	return p.Config.WechatAppID
-}
-
-// GetWechatSecret returns the WeChat Secret from config.
-func (p *Project) GetWechatSecret() string {
-	return p.Config.WechatSecret
-}

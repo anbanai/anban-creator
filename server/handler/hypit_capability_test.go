@@ -46,7 +46,7 @@ func TestHypitSourceCapabilitiesHTTPAuthorizesOwner(t *testing.T) {
 	logger := zerolog.Nop()
 	tasks := newHandlerTaskService(t, repo, nil, nil, &logger, "", nil, nil)
 	tasks.SetHypitConfig(cfg)
-	source := &model.Task{ID: "source", UserID: "owner", Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(`{"profile":{"format":"hypit.runtime-local@1","endpoints":{"local":{"use":"@hypit/provider-media-local"}}},"limits":{"max_duration_seconds":180,"timeout_minutes":7}}`)}
+	source := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.TaskKindContentGeneration, ID: "source", UserID: "owner", Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(`{"profile":{"format":"hypit.runtime-local@1","endpoints":{"local":{"use":"@hypit/provider-media-local"}}},"limits":{"max_duration_seconds":180,"timeout_minutes":7}}`)}
 	if err := repo.Tasks().Create(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}

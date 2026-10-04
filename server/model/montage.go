@@ -40,10 +40,6 @@ func (t *Task) SetMontageInput(input MontageInput) {
 	t.MontageInput = datatypes.NewJSONType(input)
 }
 
-func (p *Plan) SetMontageInput(input MontageInput) {
-	p.MontageInput = datatypes.NewJSONType(input)
-}
-
 func (p *Project) SetMontageDefaults(defaults MontageDefaults) {
 	p.MontageDefaults = datatypes.NewJSONType(defaults)
 }

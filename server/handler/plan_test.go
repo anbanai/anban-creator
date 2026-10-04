@@ -44,6 +44,17 @@ func (r planHandlerRepositoryOverride) Plans() repository.PlanRepository {
 	return r.plans
 }
 
+// Simulate the competing commit before opening the request transaction.
+func (r planHandlerRepositoryOverride) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	if hooked, ok := r.plans.(*hookedPlanRepository); ok {
+		hooked.casCalls++
+		if hooked.beforeCAS != nil {
+			hooked.beforeCAS(hooked.casCalls)
+		}
+	}
+	return r.Repository.WithTx(ctx, fn)
+}
+
 func newPlanHandlerUpdateTestApp(t *testing.T, repo repository.Repository, store *projectReferenceStore) *fiber.App {
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
 	planSvc := newHandlerPlanService(t, repo, &logger)
@@ -115,11 +126,11 @@ func TestCreatePlanRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	app := fiber.New()
 	app.Post("/plans", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 
-	resp := postJSON(t, app, "/plans", `{"project_id":"`+projectID+`","execution_profile":"effective","cron_expr":"0 9 * * *","agent_input":{"tone":"concise"}}`)
+	resp := postJSON(t, app, "/plans", `{"project_id":"`+projectID+`","agent_ids":["wechat-article"],"execution_profile":"effective","cron_expr":"0 9 * * *","agent_input":{"tone":"concise"}}`)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(string(body), "invalid_agent_input") {
-		t.Fatalf("status/body = %d/%s, want 400 invalid_agent_input", resp.StatusCode, body)
+	if resp.StatusCode != fiber.StatusBadRequest || !strings.Contains(string(body), "no longer supported") {
+		t.Fatalf("status/body = %d/%s, want removed-field rejection", resp.StatusCode, body)
 	}
 }
 
@@ -150,14 +161,14 @@ func TestPlanHandlerScheduleRecommendation(t *testing.T) {
 	}
 }
 
-// TestCreatePlan_ArticleImageTogglesPersist verifies the plan handler→service→
+// TestCreatePlanSharedImageSettingsPersist verifies the plan handler→service→
 // model→DB round-trip persists an explicit `false` for both article image
 // toggles. Same regression guard as TestCreateTask_ArticleImageTogglesPersist
 // (*bool / gorm:"default:true" mitigation + handler wiring omission): the
 // plan-level toggles propagate to spawned tasks via CreateFromPlan, so a plan
 // created with cover/content off must persist those choices. The value is
 // re-read from the repo to assert the persisted state.
-func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
+func TestCreatePlanSharedImageSettingsPersist(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -197,7 +208,7 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"计划开关持久化测试","image_ratio":"16:9","article_with_cover":false,"article_with_content_images":false}`
+	body := `{"execution_profile":"effective","project_id":"` + projectID + `","agent_ids":["wechat-article"],"cron_expr":"0 9 * * *","prompt":"共享图片设置持久化测试","image_ratio":"16:9"}`
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -220,20 +231,16 @@ func TestCreatePlan_ArticleImageTogglesPersist(t *testing.T) {
 	if got.ImageRatio != "16:9" {
 		t.Fatalf("image_ratio = %q, want 16:9", got.ImageRatio)
 	}
-	for label, ptr := range map[string]*bool{
-		"ArticleWithCover":         got.ArticleWithCover,
-		"ArticleWithContentImages": got.ArticleWithContentImages,
-	} {
-		switch {
-		case ptr == nil:
-			t.Errorf("%s = nil, want non-nil false", label)
-		case *ptr:
-			t.Errorf("%s = true, want false", label)
-		}
+	got.Entries, err = repo.PlanEntries().ListByPlanID(ctx, got.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Entries) != 1 || got.Entries[0].AgentID != "wechat-article" {
+		t.Fatalf("entries = %#v, want one article entry", got.Entries)
 	}
 }
 
-func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
+func TestCreatePlanRejectsMontageInputWithoutFinalizingUploads(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -286,7 +293,7 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
 		"execution_profile":"effective","project_id": "`+projectID+`",
-		"cron_expr": "0 9 * * *",
+		"cron_expr": "0 9 * * *", "agent_ids": ["montage"],
 		"montage_input": {
 			"brief": "每天剪一条发布会短片",
 			"source_assets": [{"type": "video", "url": "`+stagingURL+`"}]
@@ -297,21 +304,31 @@ func TestCreatePlanMontageFinalizesSourceAssetUploads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	if resp.StatusCode != fiber.StatusOK {
+	if resp.StatusCode != fiber.StatusBadRequest {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, want 200 body=%s", resp.StatusCode, body)
+		t.Fatalf("status = %d, want removed-field rejection body=%s", resp.StatusCode, body)
 	}
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read response: %v", err)
 	}
-	if strings.Contains(string(responseBody), "uploads/pending/") || !strings.Contains(string(responseBody), "assets/users/") {
-		t.Fatalf("plan persisted non-final montage URL: %s", responseBody)
+	if !strings.Contains(string(responseBody), "montage_input is no longer supported") {
+		t.Fatalf("unexpected rejection: %s", responseBody)
 	}
-	assertFinalizedAsset(t, repo, uploadID, "assets/users/"+userID+"/"+uploadID+"/clip.mp4")
+	session, err := repo.UploadSessions().FindByID(ctx, uploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Status != model.UploadSessionPending || session.AssetID != "" {
+		t.Fatalf("upload session changed: %#v", session)
+	}
+	plans, err := repo.Plans().FindByUserID(ctx, userID, projectID, 0, 10)
+	if err != nil || len(plans) != 0 {
+		t.Fatalf("rejected request persisted plan: %#v, %v", plans, err)
+	}
 }
 
-func TestCreateMontagePlanPersistsImageSettings(t *testing.T) {
+func TestCreatePlanOnMontageProjectPersistsSharedImageSettings(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := t.Context()
@@ -334,7 +351,7 @@ func TestCreateMontagePlanPersistsImageSettings(t *testing.T) {
 	app.Post("/plans", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
 	app.Put("/plans/:id", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Update(c) })
 
-	resp := postJSON(t, app, "/plans", `{"execution_profile":"effective","project_id":"`+projectID+`","cron_expr":"0 9 * * *","image_ratio":"16:9","image_capability_key":"standard","montage_input":{"brief":"每天剪一条短片"}}`)
+	resp := postJSON(t, app, "/plans", `{"execution_profile":"effective","project_id":"`+projectID+`","cron_expr":"0 9 * * *","image_ratio":"16:9","image_capability_key":"standard","agent_ids":["wechat-article"]}`)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -351,7 +368,7 @@ func TestCreateMontagePlanPersistsImageSettings(t *testing.T) {
 		"execution_profile":    "effective",
 		"image_ratio":          "1:1",
 		"image_capability_key": "standard",
-		"montage_input":        map[string]any{"brief": "更新后的短片"},
+		"agent_ids":            []string{"wechat-article"},
 	})
 	defer updated.Body.Close()
 	updatedBody, _ := io.ReadAll(updated.Body)
@@ -418,7 +435,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	})
 
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(`{
-		"execution_profile":"effective","project_id": "`+projectID+`",
+		"agent_ids":["wechat-article"],"execution_profile":"effective","project_id": "`+projectID+`",
 		"cron_expr": "0 9 * * *",
 		"montage_input": {
 			"brief": "错误平台",
@@ -443,7 +460,7 @@ func TestCreatePlanRejectsMontageAssetOnOtherPlatformWithoutFinalizing(t *testin
 	}
 }
 
-func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
+func TestCreatePlanAllowsArticleOutputOnMomentsProject(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -478,19 +495,16 @@ func TestCreatePlan_MomentsProjectReturnsBadRequest(t *testing.T) {
 		return h.Create(c)
 	})
 
-	body := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"每日朋友圈"}`
+	body := `{"agent_ids":["wechat-article"],"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"每日朋友圈"}`
 	req := httptest.NewRequest("POST", "/plans", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	if resp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	raw, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(raw), "plans are not supported for moments projects") {
-		t.Fatalf("response = %s, want unsupported moments message", raw)
+	if resp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d: %s", resp.StatusCode, raw)
 	}
 }
 
@@ -554,7 +568,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 	}
 	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
 		t.Run("create "+tt.name, func(t *testing.T) {
-			body := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + tt.attachments + `}`
+			body := `{"agent_ids":["wechat-article"],"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + tt.attachments + `}`
 			req := httptest.NewRequest(http.MethodPost, "/plans", strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
@@ -571,7 +585,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		`{"asset_id":"` + attachmentAssets[2].ID + `"},` +
 		`{"asset_id":"` + attachmentAssets[3].ID + `"},` +
 		`{"asset_id":"` + attachmentAssets[4].ID + `"}]`
-	createBody := `{"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + attachmentJSON + `}`
+	createBody := `{"agent_ids":["wechat-article"],"execution_profile":"effective","project_id":"` + projectID + `","cron_expr":"0 9 * * *","prompt":"test","input_attachments":` + attachmentJSON + `}`
 	createReq := httptest.NewRequest("POST", "/plans", strings.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createResp, err := app.Test(createReq)
@@ -596,7 +610,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("created attachments = %#v, want all five normalized types", got)
 	}
 
-	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"execution_profile":"effective","prompt":"updated"}`))
+	omitReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"agent_ids":["wechat-article"],"execution_profile":"effective","prompt":"updated"}`))
 	omitReq.Header.Set("Content-Type", "application/json")
 	omitResp, err := app.Test(omitReq)
 	if err != nil {
@@ -615,7 +629,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 
 	for _, tt := range handlerAttachmentRouteRejectionCases("foreign-upload", foreignKey) {
 		t.Run("update "+tt.name, func(t *testing.T) {
-			body := `{"execution_profile":"effective","input_attachments":` + tt.attachments + `}`
+			body := `{"agent_ids":["wechat-article"],"execution_profile":"effective","input_attachments":` + tt.attachments + `}`
 			req := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
@@ -630,7 +644,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		})
 	}
 
-	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"execution_profile":"effective","input_attachments":[]}`))
+	clearReq := httptest.NewRequest("PUT", "/plans/"+planID, strings.NewReader(`{"agent_ids":["wechat-article"],"execution_profile":"effective","input_attachments":[]}`))
 	clearReq.Header.Set("Content-Type", "application/json")
 	clearResp, err := app.Test(clearReq)
 	if err != nil {
@@ -647,7 +661,7 @@ func TestPlanHandlerInputAttachmentSemantics(t *testing.T) {
 		t.Fatalf("attachments after explicit empty update = %#v, want empty", got)
 	}
 
-	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"execution_profile":"effective","input_attachments":`+attachmentJSON+`}`))
+	replaceReq := httptest.NewRequest(http.MethodPut, "/plans/"+planID, strings.NewReader(`{"agent_ids":["wechat-article"],"execution_profile":"effective","input_attachments":`+attachmentJSON+`}`))
 	replaceReq.Header.Set("Content-Type", "application/json")
 	replaceResp, err := app.Test(replaceReq)
 	if err != nil || replaceResp.StatusCode != fiber.StatusOK {
@@ -679,7 +693,7 @@ func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.
 		}
 	}
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Type: model.TaskTypeWechatArticle, Prompt: "before",
+		ID: planID, UserID: userID, Prompt: "before",
 		CronExpr: "0 9 * * *", ReferenceImageAssetID: "asset-a", Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)
@@ -702,7 +716,7 @@ func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
 	app := newPlanHandlerUpdateTestApp(t, repo, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "effective", "prompt": "after"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"agent_ids": []string{"wechat-article"}, "execution_profile": "effective", "prompt": "after"})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
@@ -742,7 +756,7 @@ func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *tes
 		}
 	}
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Type: model.TaskTypeWechatArticle, Prompt: "before",
+		ID: planID, UserID: userID, Prompt: "before",
 		CronExpr: "0 9 * * *", ReferenceImageAssetID: assetIDs[0], Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)
@@ -762,7 +776,7 @@ func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *tes
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
 	app := newPlanHandlerUpdateTestApp(t, repo, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "effective", "prompt": "must-not-write"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"agent_ids": []string{"wechat-article"}, "execution_profile": "effective", "prompt": "must-not-write"})
 	if resp.StatusCode != fiber.StatusConflict {
 		t.Fatalf("status=%d want 409 body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
@@ -793,7 +807,7 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	planID := uuid.NewString()
 	seedPlanHandlerUser(t, base, userID)
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Type: model.TaskTypeWechatArticle, Prompt: "before",
+		ID: planID, UserID: userID, Prompt: "before",
 		CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)
@@ -804,7 +818,7 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	store := &projectReferenceStore{fakeStorageProvider: uploadSessionStatStore(base.UploadSessions())}
 	app := newPlanHandlerUpdateTestApp(t, base, store)
 
-	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"execution_profile": "effective", "prompt": "after"})
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/plans/"+planID, userID, map[string]any{"agent_ids": []string{"wechat-article"}, "execution_profile": "effective", "prompt": "after"})
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("status=%d body=%v", resp.StatusCode, decodeBody(t, resp))
 	}
@@ -817,5 +831,65 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	}
 	if len(store.signedKeys) != 0 {
 		t.Fatalf("empty reference signed keys=%#v", store.signedKeys)
+	}
+}
+
+func TestPlanHandlerRejectsRemovedFieldsBeforeMutation(t *testing.T) {
+	for _, field := range []string{"type", "agent_input", "entries", "agent_id", "channel", "task_kind", "image_defaults", "has_content_image", "has_tail_image", "article_with_cover", "article_with_content_images", "cover_use_portrait", "montage_input", "hypit_input"} {
+		for _, method := range []string{http.MethodPost, http.MethodPut} {
+			t.Run(method+"/"+field, func(t *testing.T) {
+				logger := zerolog.New(io.Discard)
+				h := NewPlanHandler(nil, &logger)
+				app := fiber.New()
+				app.Use(func(c fiber.Ctx) error { c.Locals("user_id", "owner"); return c.Next() })
+				app.Post("/plans", h.Create)
+				app.Put("/plans/:id", h.Update)
+				path := "/plans"
+				if method == http.MethodPut {
+					path += "/existing"
+				}
+				req := httptest.NewRequest(method, path, strings.NewReader(`{"project_id":"project","execution_profile":"effective","agent_ids":["wechat-article"],"cron_expr":"0 9 * * *","`+field+`":null}`))
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
+				if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), field+" is no longer supported") {
+					t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+				}
+			})
+		}
+	}
+}
+
+func TestPlanHandlerRequiresAgentSelection(t *testing.T) {
+	for _, selection := range []string{"", `,"agent_ids":null`, `,"agent_ids":[]`} {
+		for _, method := range []string{http.MethodPost, http.MethodPut} {
+			t.Run(method+selection, func(t *testing.T) {
+				logger := zerolog.New(io.Discard)
+				h := NewPlanHandler(nil, &logger)
+				app := fiber.New()
+				app.Use(func(c fiber.Ctx) error { c.Locals("user_id", "owner"); return c.Next() })
+				app.Post("/plans", h.Create)
+				app.Put("/plans/:id", h.Update)
+				path := "/plans"
+				if method == http.MethodPut {
+					path += "/existing"
+				}
+				req := httptest.NewRequest(method, path, strings.NewReader(`{"project_id":"project","execution_profile":"effective","cron_expr":"0 9 * * *"`+selection+`}`))
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				body, _ := io.ReadAll(resp.Body)
+				if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "agent_id is required") {
+					t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+				}
+			})
+		}
 	}
 }

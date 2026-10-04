@@ -300,8 +300,7 @@ func planOwnsStorageKey(plan *model.Plan, store storage.Provider, key string) bo
 	if plan == nil {
 		return false
 	}
-	return attachmentsOwnStorageKey(plan.InputAttachments.Data(), store, key) ||
-		hypitOwnsStorageKey(plan.HypitInput.Data(), store, key, plan.UserID) || montageOwnsStorageKey(plan.MontageInput.Data(), store, key)
+	return attachmentsOwnStorageKey(plan.InputAttachments.Data(), store, key)
 }
 
 func attachmentsOwnStorageKey(attachments []model.EntryAttachment, store storage.Provider, key string) bool {

@@ -1,139 +1,144 @@
-import { PortraitCoverControl } from '@/components/tasks/PortraitCoverControl'
-import { HypitCreationPanel } from '@/components/hypit/HypitCreationPanel'
-import { buildHypitInputForSubmit, initialHypitInput } from '@/lib/hypit-form'
-import { useState, useEffect, useMemo, useRef, useCallback, type BaseSyntheticEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type BaseSyntheticEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useForm, useWatch } from 'react-hook-form'
+import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, FileText, Stamp, Loader2, Images } from 'lucide-react'
-import { Skeleton } from '@/components/ui/skeleton'
-import QueryErrorState from '@/components/QueryErrorState'
+import {
+  BookOpen,
+  FileImage,
+  FileText,
+  Inbox,
+  Layers3,
+  Pause,
+  Play,
+  Plus,
+  Sparkles,
+  Trash2,
+} from 'lucide-react'
+
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { AgentExecutionProfileID, PlatformConfig, Project, Plan, PlanType, CreatePlanRequest, UpdatePlanRequest } from '@/types'
-import type { Resolver } from 'react-hook-form'
-import { ProjectSelector } from '@/components/ProjectSelector'
-import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
-import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
-import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
-import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
-import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
-import { SearchInput } from '@/components/ui/SearchInput'
+import type { AgentExecutionProfileID, AgentPack, Plan, CreatePlanRequest, UpdatePlanRequest } from '@/types'
+import { planSchema, type PlanFormValues, normalizeImageRatio } from '@/lib/schemas'
+import { useAgentPacks } from '@/hooks/useAgentPacks'
+import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
+import { useImageCapabilities } from '@/hooks/useImageCapabilities'
+import { parseCreationIntent } from '@/lib/command-center'
+import { cheapestAvailableExecutionProfileForTasks } from '@/lib/pricing'
+import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
+import type { InputAttachment } from '@/types/input-attachment'
+import type { ReferenceImageValue } from '@/types/asset'
+import { planStatusLabel, cronToHuman, formatDateTimeCN, getBadgeVariant } from '@/lib/labels'
+import { cn } from '@/lib/utils'
+
+import PageHeader from '@/components/layout/PageHeader'
+import EmptyState from '@/components/EmptyState'
+import QueryErrorState from '@/components/QueryErrorState'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import SchedulePicker from '@/components/SchedulePicker'
+import { Input } from '@/components/ui/input'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { planStatusLabel, contentTypeDisplayName, formatDateTimeCN, cronToHuman, getBadgeVariant } from '@/lib/labels'
-import { platformBadgeVariant, platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
-import { PlatformAvatar } from '@/components/PlatformAvatar'
-import { normalizeImageRatio, planSchema, type PlanFormValues } from '@/lib/schemas'
-import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
+import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
+import { ReferenceMaterialInput } from '@/components/ReferenceMaterialInput'
+import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
+import SchedulePicker from '@/components/SchedulePicker'
+import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
+import { ImageAspectRatioField } from '@/components/tasks/ImageAspectRatioField'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
-import { useImageCapabilities } from '@/hooks/useImageCapabilities'
-import PageHeader from '@/components/layout/PageHeader'
-import { SimplePagination } from '@/components/SimplePagination'
-import EmptyState from '@/components/EmptyState'
-import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
-import { cn } from '@/lib/utils'
-import { parseCreationIntent } from '@/lib/command-center'
-import { taskCostFor } from '@/lib/pricing'
-import { cheapestAvailableExecutionProfile } from '@/lib/pricing'
-import { queryKeys } from '@/lib/query-keys'
-import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
-import type { PromptAttachment } from '@/types/input-attachment'
-import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
-import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
-import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
-import { useAgentPacks } from '@/hooks/useAgentPacks'
-import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 
-function planTypeForProject(platform: string | undefined, currentType?: PlanType): PlanType | undefined {
-  if (platform === 'wechat') {
-    if (currentType === 'wechat-article' || currentType === 'wechat-picture') return currentType
-    return 'wechat-article'
-  }
-  if (platform === 'seednote') return 'seednote'
-  if (platform === 'montage') return 'montage'
-  if (platform === 'whiteboard-animation') return 'whiteboard-animation'
-  if (platform === 'hypit') return 'hypit'
-  if (currentType === 'wechat-article' || currentType === 'wechat-picture' || currentType === 'seednote' || currentType === 'montage' || currentType === 'whiteboard-animation' || currentType === 'hypit') return currentType
-  // Projects are channel-neutral. A plan still needs a presentation default
-  // before its independent Agent entries are selected.
-  return 'seednote'
+const DEFAULT_CRON = '0 9 * * 1,3,5'
+
+type OutputPack = AgentPack & { channel: string; plan_task_kind: string }
+
+const outputLabels: Record<string, string> = {
+  'wechat-article': '公众号文章',
+  seednote: '种草笔记',
+  'wechat-picture': '公众号贴图',
 }
 
-function planEntryForType(type: PlanType, executionProfile: AgentExecutionProfileID) {
-  switch (type) {
-    case 'seednote':
-      return { agent_id: 'seednote', channel: 'seednote', task_kind: 'content_generation', execution_profile: executionProfile }
-    case 'wechat-picture':
-      return { agent_id: 'wechat-picture', channel: 'wechat-picture', task_kind: 'content_generation', execution_profile: executionProfile }
-    case 'whiteboard-animation':
-      return { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', task_kind: 'whiteboard-animation', execution_profile: executionProfile }
-    case 'hypit':
-      return undefined
-    case 'wechat-article':
-    default:
-      return { agent_id: 'wechat-article', channel: 'wechat-article', task_kind: 'content_generation', execution_profile: executionProfile }
-  }
+const outputIcons: Record<string, typeof FileText> = {
+  'wechat-article': FileText,
+  seednote: BookOpen,
+  'wechat-picture': FileImage,
 }
 
-const PRODUCT_AGENT_OPTIONS = [
-  { agent_id: 'wechat-article', channel: 'wechat-article', label: '公众号文章' },
-  { agent_id: 'seednote', channel: 'seednote', label: '种草笔记' },
-  { agent_id: 'wechat-picture', channel: 'wechat-picture', label: '公众号贴图' },
-  { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', label: '白板动画' },
-] as const
-
-function planToFormValues(plan: Plan): PlanFormValues {
-  return {
-    project_id: plan.project_id || '',
-    execution_profile: plan.execution_profile,
-    type: plan.type,
-    cron_expr: plan.cron_expr,
-    prompt: plan.type === 'hypit' ? plan.hypit_input?.brief || plan.prompt || '' : plan.prompt || '',
-    image_capability_key: plan.image_capability_key || '',
-    image_ratio: normalizeImageRatio(plan.image_ratio),
-    skip_reference_image: plan.skip_reference_image || false,
-    input_attachments: plan.input_attachments ?? [],
-    agent_input: plan.agent_input ?? {},
-    watermark: plan.watermark || false,
-    has_content_image: plan.has_content_image ?? true,
-    has_tail_image: plan.has_tail_image ?? false,
-    article_with_cover: plan.article_with_cover ?? true,
-    article_with_content_images: plan.article_with_content_images ?? true,
-    cover_use_portrait: !!plan.cover_use_portrait && (plan.type !== 'wechat-article' || plan.article_with_cover !== false),
-    hypit_input: plan.type === 'hypit' ? initialHypitInput(plan.prompt || '', plan.hypit_input) : undefined,
-    montage_input: plan.type === 'montage' ? initialMontageInput(plan.prompt || '', plan.montage_input) : undefined,
-  }
+const outputTones: Record<string, string> = {
+  'wechat-article': 'aria-pressed:border-sky-500 aria-pressed:bg-sky-50 aria-pressed:text-sky-700 dark:aria-pressed:bg-sky-950/40 dark:aria-pressed:text-sky-300',
+  seednote: 'aria-pressed:border-rose-500 aria-pressed:bg-rose-50 aria-pressed:text-rose-700 dark:aria-pressed:bg-rose-950/40 dark:aria-pressed:text-rose-300',
+  'wechat-picture': 'aria-pressed:border-amber-500 aria-pressed:bg-amber-50 aria-pressed:text-amber-700 dark:aria-pressed:bg-amber-950/40 dark:aria-pressed:text-amber-300',
 }
 
-function cronTime(cron: string) {
-  const [minute, hour] = cron.trim().split(/\s+/)
-  if (hour === undefined || minute === undefined) return undefined
-  return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
+function canUseForPlan(pack: AgentPack): pack is OutputPack {
+  return pack.kind === 'managed'
+    && pack.surfaces.includes('plan')
+    && typeof pack.channel === 'string'
+    && pack.channel.trim() !== ''
+    && typeof pack.plan_task_kind === 'string'
+    && pack.plan_task_kind.trim() !== ''
+    && (pack.bindings.task_kinds ?? []).includes(pack.plan_task_kind)
 }
 
-function cronWithTime(cron: string, value: string) {
+function outputLabel(pack: OutputPack) {
+  return outputLabels[pack.id] ?? pack.display_name.replace(/^微信公众号/, '公众号')
+}
+
+function outputIcon(pack: OutputPack) {
+  return outputIcons[pack.id] ?? Layers3
+}
+
+function cronWithTime(cron: string, time: string) {
   const parts = cron.trim().split(/\s+/)
-  const [hour, minute] = value.split(':')
+  const [hour, minute] = time.split(':')
   if (parts.length !== 5 || hour === undefined || minute === undefined) return cron
   parts[0] = String(Number(minute))
   parts[1] = String(Number(hour))
   return parts.join(' ')
 }
 
+function formValuesForPlan(plan: Plan): PlanFormValues {
+  return {
+    project_id: plan.project_id,
+    agent_ids: plan.agent_ids ?? plan.entries?.map((entry) => entry.agent_id) ?? [],
+    execution_profile: plan.execution_profile,
+    cron_expr: plan.cron_expr,
+    prompt: plan.prompt || '',
+    image_capability_key: plan.image_capability_key || '',
+    image_ratio: normalizeImageRatio(plan.image_ratio),
+    skip_reference_image: plan.skip_reference_image ?? false,
+    reference_image: plan.reference_image ?? null,
+    input_attachments: plan.input_attachments ?? [],
+    watermark: plan.watermark ?? false,
+  }
+}
+
+function defaultValues(projectID = ''): PlanFormValues {
+  return {
+    project_id: projectID,
+    agent_ids: [],
+    execution_profile: '',
+    cron_expr: DEFAULT_CRON,
+    prompt: '',
+    image_capability_key: '',
+    image_ratio: 'auto',
+    skip_reference_image: false,
+    reference_image: null,
+    input_attachments: [],
+    watermark: false,
+  }
+}
+
 export default function PlansPage() {
-  const agentPacksQuery = useAgentPacks()
-  const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const createIntent = parseCreationIntent(searchParams)
+  const queryClient = useQueryClient()
+  const { submit } = useSubmitLock()
   const [projectFilter, setProjectFilter] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
   const [page, setPage] = useState(1)
@@ -141,1030 +146,292 @@ export default function PlansPage() {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
-  const [promptAttachments, setPromptAttachments] = useState<PromptAttachment[]>([])
-  const [attachmentSubmitError, setAttachmentSubmitError] = useState('')
-  const [montageUploading, setMontageUploading] = useState(false)
-  const [montageReady, setMontageReady] = useState(false)
-  const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
-  const [selectedPlanAgents, setSelectedPlanAgents] = useState<string[]>(['seednote'])
   const [scheduleValid, setScheduleValid] = useState(true)
-  const { submit } = useSubmitLock()
-  const highlightedPlanId = searchParams.get('highlight') || ''
-  const planRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const attachmentsTouchedRef = useRef(false)
-  const attachmentHydratingRef = useRef(false)
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
+  const [attachmentFailed, setAttachmentFailed] = useState(false)
+  const [referenceUploading, setReferenceUploading] = useState(false)
+  const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
   const recommendationRequestRef = useRef(0)
   const scheduleManuallyChangedRef = useRef(false)
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
-    defaultValues: {
-      project_id: '',
-      execution_profile: '',
-      type: 'seednote',
-      cron_expr: '0 9 * * 1,3,5',
-      prompt: '',
-      image_capability_key: '',
-      image_ratio: 'auto',
-      input_attachments: [],
-      agent_input: {},
-      has_content_image: true,
-      has_tail_image: false,
-      article_with_cover: true,
-      article_with_content_images: true,
-      cover_use_portrait: false,
-      hypit_input: undefined,
-      montage_input: undefined,
-    },
+    defaultValues: defaultValues(),
   })
-  const attachmentController = usePromptAttachments({
-    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
-    policy: GENERAL_AGENT_ATTACHMENT_POLICY,
-    attachments: promptAttachments,
-    onAttachmentsChange: (next) => {
-      setPromptAttachments(next)
-      setAttachmentSubmitError('')
-      if (attachmentHydratingRef.current) return
-      attachmentsTouchedRef.current = true
-      const pendingAttachments = next.filter((attachment) => attachment.status !== 'uploaded').map((attachment) => ({
-        type: attachment.type,
-        file_name: attachment.fileName,
-        content_type: attachment.contentType,
-        size: attachment.size,
-        instruction: attachment.instruction,
-        role: attachment.role,
-      }))
-      form.setValue('input_attachments', [
-        ...attachmentController.toInputAttachments(),
-        ...pendingAttachments,
-      ], {
-        shouldDirty: true,
-        shouldValidate: true,
-      })
-    },
-  })
-
-  // Auto-focus title field when dialog opens
-  useEffect(() => {
-    if (modalOpen) {
-      setTimeout(() => form.setFocus('cron_expr'), 100)
-    }
-  }, [modalOpen, form])
-
-	const watchedType = useWatch({ control: form.control, name: 'type' })
-	const watchedProjectId = useWatch({ control: form.control, name: 'project_id' })
-	const watchedExecutionProfile = useWatch({ control: form.control, name: 'execution_profile' })
-	const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' })
-	const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' })
-	const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
-	const isMontagePlan = watchedType === 'montage' || watchedType === 'hypit'
-	const whiteboardSubtitles = watchedType === 'whiteboard-animation'
-		? promptAttachments.filter((attachment) => /\.srt$/i.test(attachment.fileName ?? ''))
-		: []
-	const hasWhiteboardSubtitle = whiteboardSubtitles.length === 1 && whiteboardSubtitles[0]?.type === 'text'
-	const whiteboardAttachmentPolicy = {
-		allowedTypes: ['text', 'image'] as const,
-		maxCount: 2,
-		maxBytes: { text: 25 * 1024 * 1024, image: 10 * 1024 * 1024 },
-	}
-	const usesImageSettings = watchedType !== 'hypit'
-	const {
-		items: imageCapabilityOptions,
-		defaultCapability: defaultImageCapability,
-		isLoading: imageCapabilitiesLoading,
-		isError: imageCapabilitiesError,
-	} = useImageCapabilities(modalOpen && usesImageSettings)
-	const effectiveImageCapabilityKey = watchedImageCapabilityKey || defaultImageCapability
-	const selectedImageCapability = imageCapabilityOptions.find((option) => option.key === effectiveImageCapabilityKey)
-	const imageCapabilityUnavailable = usesImageSettings
-		&& !imageCapabilitiesLoading
-		&& !imageCapabilitiesError
-		&& (
-			!selectedImageCapability
-			|| selectedImageCapability.enabled !== true
-			|| selectedImageCapability.price_available !== true
-		)
-	const imageCapabilityBlocker = !usesImageSettings
-		? null
-		: imageCapabilitiesError
-			? '图像能力暂时无法加载，请稍后重试。'
-			: imageCapabilitiesLoading
-				? '正在加载图像能力，请稍候。'
-				: imageCapabilityUnavailable
-					? '当前图像能力不可用，请重新选择。'
-					: null
-	const selectedAgentPack = useMemo(
-		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_kinds?.includes(watchedType)),
-		[agentPacksQuery.data, watchedType],
-	)
-
-  const handleScheduleValidityChange = useCallback((valid: boolean) => {
-    setScheduleValid(valid)
-    if (valid) form.clearErrors('cron_expr')
-    else form.setError('cron_expr', { type: 'validate' })
-  }, [form])
-
-  // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
 
-  useEffect(() => { setPage(1) }, [projectFilter])
+  const watchedProjectID = useWatch({ control: form.control, name: 'project_id' })
+  const watchedAgentIDs = useWatch({ control: form.control, name: 'agent_ids' }) ?? []
+  const watchedExecutionProfile = useWatch({ control: form.control, name: 'execution_profile' })
+  const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' }) ?? ''
+  const watchedSkipReference = useWatch({ control: form.control, name: 'skip_reference_image' }) ?? false
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['plans', projectFilter, page],
-    queryFn: () => api.plans.list({
-      limit: 50,
-      offset: (page - 1) * 50,
-      project_id: projectFilter || undefined,
-    }),
-  })
-
-  const plans = data?.items ?? []
-  const totalPlans = data?.total ?? 0
-  const totalPages = Math.ceil(totalPlans / 50)
-  const filteredPlans = useMemo(() => {
-    if (!searchFilter.trim()) return plans
-    const q = searchFilter.trim().toLowerCase()
-    return plans.filter((p) => (p.prompt || '').toLowerCase().includes(q))
-  }, [plans, searchFilter])
-
-  useEffect(() => {
-    if (!highlightedPlanId || isLoading) return
-    planRefs.current[highlightedPlanId]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [highlightedPlanId, isLoading, filteredPlans.length])
-
-  // Fetch projects for name/avatar display
-  const { data: allProjects } = useQuery({
-    queryKey: ['projects-for-plans'],
-    queryFn: () => api.projects.list(),
-    staleTime: 60_000,
-  })
-  const { data: platformConfigs = [] } = useQuery({
-    queryKey: ['platform-configs'],
-    queryFn: () => api.projects.platformConfigs(),
-    staleTime: Infinity,
-  })
-  const platformConfigMap = useMemo(() => new Map<string, PlatformConfig>(
-    platformConfigs.map((config) => [config.id, config]),
-  ), [platformConfigs])
-
-  const projectMap = useMemo(() => {
-    const map: Record<string, Project> = {}
-    if (allProjects) {
-      for (const ch of allProjects) {
-        map[ch.id] = ch
-      }
-    }
-    return map
-  }, [allProjects])
-  const planContextProjects = useMemo(
-    () => allProjects ?? [],
-    [allProjects],
-  )
-  const selectedProject = projectMap[watchedProjectId ?? ''] ?? undefined
-  const businessImageRatios = platformConfigMap.get(selectedProject?.platform ?? watchedType)?.supported_image_ratios ?? []
-
-  const { data: billingCatalog, refetch: refetchBillingCatalog } = useQuery({
-    queryKey: queryKeys.billing.catalog,
-    queryFn: () => api.billing.catalog(),
-    staleTime: 60_000,
-  })
-
-  useEffect(() => {
-    const transition = billingCatalog?.task_time_pricing?.next_transition_at
-    if (!modalOpen || !transition) return
-    const delay = new Date(transition).getTime() - Date.now() + 250
-    if (delay <= 0) {
-      void refetchBillingCatalog()
-      return
-    }
-    const timer = window.setTimeout(() => { void refetchBillingCatalog() }, delay)
-    return () => window.clearTimeout(timer)
-  }, [billingCatalog?.task_time_pricing?.next_transition_at, modalOpen, refetchBillingCatalog])
-  const { data: billingWallet } = useQuery({
-    queryKey: queryKeys.billing.wallet,
-    queryFn: () => api.billing.wallet(),
-    staleTime: 30_000,
-  })
+  const packsQuery = useAgentPacks()
+  const outputPacks = useMemo(() => (packsQuery.data?.packs ?? []).filter(canUseForPlan), [packsQuery.data?.packs])
   const executionProfilesQuery = useAgentExecutionProfiles()
-  const selectedExecutionProfileAvailable = executionProfilesQuery.data
-    ?.find((profile) => profile.id === watchedExecutionProfile)
-    ?.available === true
-  const defaultExecutionProfile = cheapestAvailableExecutionProfile(
-    executionProfilesQuery.data,
-    billingCatalog,
-    watchedType,
+  const { items: imageCapabilities, defaultCapability: defaultImageCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(modalOpen)
+  const effectiveImageCapability = watchedImageCapabilityKey || defaultImageCapability || ''
+
+  const { data: projects = [], isLoading: projectsLoading } = useQuery({
+    queryKey: ['projects-for-plans'],
+    queryFn: () => api.projects.list({ status: 'active' }),
+    staleTime: 60_000,
+  })
+  const projectMap = useMemo(() => Object.fromEntries(projects.map((project) => [project.id, project])), [projects])
+  const selectedProject = projectMap[watchedProjectID]
+
+  const { data: planData, isLoading, isError, refetch } = useQuery({
+    queryKey: ['plans', projectFilter, page],
+    queryFn: () => api.plans.list({ limit: 50, offset: (page - 1) * 50, project_id: projectFilter || undefined }),
+  })
+  const plans = useMemo(() => {
+    const items = planData?.items ?? []
+    const query = searchFilter.trim().toLowerCase()
+    return query ? items.filter((plan) => `${plan.prompt} ${plan.title}`.toLowerCase().includes(query)) : items
+  }, [planData?.items, searchFilter])
+  const totalPages = Math.max(1, Math.ceil((planData?.total ?? 0) / 50))
+
+  const executionProfileOptions = executionProfilesQuery.data ?? []
+  const recommendedProfile = useMemo(
+    () => cheapestAvailableExecutionProfileForTasks(executionProfileOptions, undefined, watchedAgentIDs),
+    [executionProfileOptions, watchedAgentIDs],
   )
+  const defaultExecutionProfile = recommendedProfile
+    ?? executionProfileOptions.find((profile) => profile.available)?.id
 
   useEffect(() => {
-    if (!modalOpen || form.getValues('execution_profile') || !defaultExecutionProfile) return
+    if (!modalOpen || watchedExecutionProfile || !defaultExecutionProfile) return
     form.setValue('execution_profile', defaultExecutionProfile, { shouldValidate: true })
-  }, [defaultExecutionProfile, form, modalOpen])
+  }, [defaultExecutionProfile, form, modalOpen, watchedExecutionProfile])
 
   const createMutation = useMutation({
-    mutationFn: (data: CreatePlanRequest) => api.plans.create(data),
+    mutationFn: (payload: CreatePlanRequest) => api.plans.create(payload),
     onSuccess: () => {
       toast.success('计划创建成功')
-      queryClient.invalidateQueries({ queryKey: ['plans'] })
+      void queryClient.invalidateQueries({ queryKey: ['plans'] })
       resetModal()
     },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '创建计划失败'))
-    },
+    onError: (error) => toast.error(getApiErrorMessage(error, '创建计划失败')),
   })
-
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpdatePlanRequest }) => api.plans.update(id, data),
+    mutationFn: ({ id, payload }: { id: string; payload: UpdatePlanRequest }) => api.plans.update(id, payload),
     onSuccess: () => {
       toast.success('计划更新成功')
-      queryClient.invalidateQueries({ queryKey: ['plans'] })
+      void queryClient.invalidateQueries({ queryKey: ['plans'] })
       resetModal()
     },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '更新计划失败'))
-    },
+    onError: (error) => toast.error(getApiErrorMessage(error, '更新计划失败')),
   })
-
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.plans.delete(id),
     onSuccess: () => {
       toast.success('计划已删除')
-      queryClient.invalidateQueries({ queryKey: ['plans'] })
+      void queryClient.invalidateQueries({ queryKey: ['plans'] })
       setDeleteTarget(null)
     },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '删除计划失败'))
-    },
+    onError: (error) => toast.error(getApiErrorMessage(error, '删除计划失败')),
   })
-
   const pauseMutation = useMutation({
     mutationFn: (id: string) => api.plans.pause(id),
-    onSuccess: () => {
-      toast.success('计划已暂停')
-      queryClient.invalidateQueries({ queryKey: ['plans'] })
-    },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '暂停计划失败'))
-    },
+    onSuccess: () => { toast.success('计划已暂停'); void queryClient.invalidateQueries({ queryKey: ['plans'] }) },
+    onError: (error) => toast.error(getApiErrorMessage(error, '暂停计划失败')),
   })
-
   const resumeMutation = useMutation({
     mutationFn: (id: string) => api.plans.resume(id),
-    onSuccess: () => {
-      toast.success('计划已恢复')
-      queryClient.invalidateQueries({ queryKey: ['plans'] })
-    },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, '恢复计划失败'))
-    },
+    onSuccess: () => { toast.success('计划已恢复'); void queryClient.invalidateQueries({ queryKey: ['plans'] }) },
+    onError: (error) => toast.error(getApiErrorMessage(error, '恢复计划失败')),
   })
 
-  const openCreate = useCallback(() => {
-    const requestedType: PlanType = createIntent.type === 'wechat-article' || createIntent.type === 'wechat-picture' || createIntent.type === 'montage' || createIntent.type === 'hypit'
-      ? createIntent.type
-      : 'seednote'
-    const intentProject = createIntent.projectId ? projectMap[createIntent.projectId] : undefined
-    const intentProjectType = planTypeForProject(intentProject?.platform, requestedType)
-    const selectedIntentProject = intentProject && intentProjectType
-      ? intentProject
-      : undefined
-    const initialType = intentProjectType ?? requestedType
-    setSelectedPlanAgents([planEntryForType(initialType, 'effective')?.agent_id ?? 'seednote'])
+  const resetModal = useCallback(() => {
+    recommendationRequestRef.current += 1
+    setModalOpen(false)
     setEditingPlan(null)
-    scheduleManuallyChangedRef.current = false
+    setShowDirtyDialog(false)
+    setScheduleValid(true)
     setRecommendationUnavailable(false)
-    setMontageUploading(false)
-    setMontageReady(false)
-    setAttachmentSubmitError('')
-    attachmentsTouchedRef.current = false
-    attachmentHydratingRef.current = true
-    attachmentController.clear()
-    attachmentHydratingRef.current = false
-    form.reset({
-      project_id: selectedIntentProject?.id ?? '',
-      execution_profile: '',
-      type: initialType,
-      cron_expr: '0 9 * * 1,3,5',
-      prompt: '',
-      image_capability_key: '',
-      image_ratio: normalizeImageRatio(selectedIntentProject?.image_ratio),
-      input_attachments: [],
-      agent_input: {},
-      has_content_image: true,
-      has_tail_image: false,
-      article_with_cover: true,
-      article_with_content_images: true,
-      cover_use_portrait: false,
-      hypit_input: initialType === 'hypit' ? initialHypitInput('', undefined, selectedIntentProject?.hypit_defaults) : undefined,
-      montage_input: initialType === 'montage'
-        ? initialMontageInput('', undefined, selectedIntentProject?.montage_defaults)
-        : undefined,
-    })
+    setAttachmentUploading(false)
+    setAttachmentFailed(false)
+    setReferenceUploading(false)
+    form.reset(defaultValues())
+  }, [form])
+
+  const openCreate = useCallback(() => {
+    const projectID = createIntent.projectId && projectMap[createIntent.projectId] ? createIntent.projectId : ''
+    setEditingPlan(null)
+    setRecommendationUnavailable(false)
+    scheduleManuallyChangedRef.current = false
+    form.reset(defaultValues(projectID))
     setModalOpen(true)
     const requestID = ++recommendationRequestRef.current
-    void refetchBillingCatalog()
     void api.plans.scheduleRecommendation().then((recommendation) => {
       if (requestID !== recommendationRequestRef.current || scheduleManuallyChangedRef.current) return
-      form.setValue('cron_expr', cronWithTime(form.getValues('cron_expr'), recommendation.time), { shouldValidate: true })
+      form.setValue('cron_expr', cronWithTime(form.getValues('cron_expr'), recommendation.time), { shouldDirty: false, shouldValidate: true })
       setRecommendationUnavailable(!recommendation.load_balanced)
-    }).catch(async () => {
-      if (requestID !== recommendationRequestRef.current || scheduleManuallyChangedRef.current) return
-      const fallbackCatalog = billingCatalog ?? await queryClient.fetchQuery({ queryKey: queryKeys.billing.catalog, queryFn: () => api.billing.catalog() }).catch(() => undefined)
-      const fallback = fallbackCatalog?.task_time_pricing?.off_peak_windows[0]?.start
-      if (fallback) form.setValue('cron_expr', cronWithTime(form.getValues('cron_expr'), fallback), { shouldValidate: true })
-      setRecommendationUnavailable(true)
-    })
-  }, [billingCatalog, createIntent.projectId, createIntent.type, form, projectMap, queryClient, refetchBillingCatalog])
+    }).catch(() => setRecommendationUnavailable(true))
+  }, [createIntent.projectId, form, projectMap])
 
   useEffect(() => {
-    if (!createIntent.shouldCreate) return
-    if (createIntent.projectId && !allProjects) return
+    if (!createIntent.shouldCreate || (createIntent.projectId && projects.length === 0)) return
     openCreate()
     setSearchParams({}, { replace: true })
-  }, [allProjects, createIntent.projectId, createIntent.shouldCreate, openCreate, setSearchParams])
+  }, [createIntent.projectId, createIntent.shouldCreate, openCreate, projects.length, setSearchParams])
 
   function openEdit(plan: Plan) {
-    recommendationRequestRef.current++
+    recommendationRequestRef.current += 1
     setEditingPlan(plan)
-    const existingAgents = (plan.entries ?? []).map((entry) => entry.agent_id).filter((agentID) => PRODUCT_AGENT_OPTIONS.some((option) => option.agent_id === agentID))
-    setSelectedPlanAgents(existingAgents.length > 0 ? existingAgents : [planEntryForType(plan.type, plan.execution_profile)?.agent_id ?? 'seednote'])
     setRecommendationUnavailable(false)
-    setAttachmentSubmitError('')
-    setMontageUploading(false)
-    setMontageReady(false)
-    form.reset(planToFormValues(plan))
-    attachmentsTouchedRef.current = false
-    attachmentHydratingRef.current = true
-    attachmentController.reset(plan.input_attachments ?? [])
-    attachmentHydratingRef.current = false
+    form.reset(formValuesForPlan(plan))
     setModalOpen(true)
   }
 
   function closeModal() {
-    if (form.formState.isDirty) {
-      setShowDirtyDialog(true)
-      return
-    }
+    if (form.formState.isDirty) { setShowDirtyDialog(true); return }
     resetModal()
   }
 
-  function resetModal() {
-    setModalOpen(false)
-    setShowDirtyDialog(false)
-    setEditingPlan(null)
-    setSelectedPlanAgents(['seednote'])
-    setMontageUploading(false)
-    setMontageReady(false)
-    setAttachmentSubmitError('')
-    attachmentsTouchedRef.current = false
-    attachmentHydratingRef.current = true
-    attachmentController.clear()
-    attachmentHydratingRef.current = false
-    form.reset({
-      project_id: '',
-      execution_profile: '',
-      type: 'seednote',
-      cron_expr: '0 9 * * 1,3,5',
-      prompt: '',
-      image_capability_key: '',
-		image_ratio: 'auto',
-      input_attachments: [],
-      has_content_image: true,
-      has_tail_image: false,
-      article_with_cover: true,
-      article_with_content_images: true,
-      cover_use_portrait: false,
-      hypit_input: undefined,
-      montage_input: undefined,
-    })
+  function changeProject(id: string | null) {
+    form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
+    // Output selection is independent from the project context.
+    if (id) form.setValue('image_ratio', normalizeImageRatio(projectMap[id]?.image_ratio), { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
-    const submittedProfileAvailable = executionProfilesQuery.data
-      ?.find((profile) => profile.id === values.execution_profile)
-      ?.available === true
-    if (!submittedProfileAvailable) return
-	const submittedImageCapability = imageCapabilityOptions.find(
-		(option) => option.key === (values.image_capability_key || defaultImageCapability),
-	)
-	if (values.type !== 'hypit' && (
-		!submittedImageCapability
-		|| submittedImageCapability.enabled !== true
-		|| submittedImageCapability.price_available !== true
-	)) {
-		toast.error('该图像能力已停用，请重新选择')
-		return
-	}
-    // For edit (PUT), image_capability_key is a *string on the backend: nil = leave
-    // unchanged, "" = clear to system default. Always send it so explicit
-    // "system default" selection actually clears the previously saved value.
-    // For create (POST), "" is also valid (means system default).
-    let inputAttachments = editingPlan && !attachmentsTouchedRef.current
-      ? undefined
-      : values.input_attachments
-    if (inputAttachments !== undefined) {
-      const prepared = prepareReusableInputAttachments(inputAttachments, { allowExternalURLs: true })
-      if (prepared.error) {
-        setAttachmentSubmitError(prepared.error)
-        return
-      }
-      inputAttachments = prepared.attachments ?? []
-    }
-    setAttachmentSubmitError('')
-
-    const payload: CreatePlanRequest = {
-      type: values.type,
+    if (values.agent_ids.length === 0) { form.setError('agent_ids', { type: 'validate', message: '至少选择一种输出类型' }); return }
+    if (referenceUploading || attachmentUploading || attachmentFailed || !scheduleValid) return
+    const prepared = prepareReusableInputAttachments(values.input_attachments ?? [], { allowExternalURLs: true })
+    if (prepared.error) { toast.error(prepared.error); return }
+    const shared = {
+      agent_ids: values.agent_ids,
       execution_profile: values.execution_profile as AgentExecutionProfileID,
       cron_expr: values.cron_expr.trim(),
       prompt: values.prompt?.trim() || undefined,
-      project_id: values.project_id || undefined,
-	  image_capability_key: values.image_capability_key,
-	  image_ratio: values.image_ratio,
-      ...(inputAttachments === undefined ? {} : { input_attachments: inputAttachments }),
-      agent_input: values.agent_input,
-      watermark: values.watermark || undefined,
-      has_content_image: values.type === 'seednote' ? values.has_content_image : undefined,
-      has_tail_image: values.type === 'seednote' ? values.has_tail_image : undefined,
-      // Article image toggles (公众号文章): both default true; non-article omits.
-      article_with_cover: values.type === 'wechat-article' ? values.article_with_cover : undefined,
-      article_with_content_images: values.type === 'wechat-article' ? values.article_with_content_images : undefined,
-      cover_use_portrait: values.cover_use_portrait && (values.type !== 'wechat-article' || values.article_with_cover),
-      hypit_input: values.type === 'hypit' ? buildHypitInputForSubmit(values.prompt || '', values.hypit_input, selectedProject?.hypit_defaults) : undefined,
-      montage_input: values.type === 'montage' ? buildMontageInputForSubmit(values.prompt, values.montage_input) : undefined,
-      entries: selectedPlanAgents
-        .map((agentID) => {
-          const option = PRODUCT_AGENT_OPTIONS.find((candidate) => candidate.agent_id === agentID)
-          if (!option) return undefined
-          return { agent_id: option.agent_id, channel: option.channel, task_kind: option.agent_id === 'whiteboard-animation' ? 'whiteboard-animation' : 'content_generation', execution_profile: values.execution_profile as AgentExecutionProfileID }
-        })
-        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      image_capability_key: values.image_capability_key || undefined,
+      image_ratio: values.image_ratio,
+      skip_reference_image: values.skip_reference_image,
+      reference_image: values.skip_reference_image ? null : values.reference_image,
+      input_attachments: prepared.attachments ?? [],
+      watermark: values.watermark,
     }
-
-    if (editingPlan) {
-      await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, data: payload })).catch(() => {})
-    } else {
-      await submit(async () => createMutation.mutateAsync(payload)).catch(() => {})
-    }
+    if (editingPlan) await submit(async () => updateMutation.mutateAsync({ id: editingPlan.id, payload: shared })).catch(() => {})
+    else await submit(async () => createMutation.mutateAsync({ project_id: values.project_id, ...shared })).catch(() => {})
   }
 
-  function handlePlanSubmit(event?: BaseSyntheticEvent) {
-    if (imageCapabilityBlocker || !scheduleValid || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || (isMontagePlan && (montageUploading || !montageReady))) {
-      event?.preventDefault()
-      return
-    }
-    return form.handleSubmit(onSubmit)(event)
+  const handleScheduleChange = useCallback((value: string) => {
+    scheduleManuallyChangedRef.current = true
+    form.setValue('cron_expr', value, { shouldDirty: true, shouldValidate: true })
+  }, [form])
+  const handleScheduleInteraction = useCallback(() => {
+    scheduleManuallyChangedRef.current = true
+  }, [])
+  const handleScheduleValidity = useCallback((valid: boolean) => {
+    setScheduleValid(valid)
+    if (valid) form.clearErrors('cron_expr')
+  }, [form])
+
+  function handleSubmit(event?: BaseSyntheticEvent) {
+    event?.preventDefault()
+    void form.handleSubmit(onSubmit)(event)
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
-  const projectControl = editingPlan ? (
-    <ProjectContextControl mode="readonly" project={selectedProject ?? null} compact />
-  ) : (
-    <ProjectContextControl
-      mode="select"
-      projects={planContextProjects}
-      value={watchedProjectId || null}
-      allowNoProject={false}
-      placeholder="选择项目"
-      disabled={isSubmitting}
-      onValueChange={(id, project) => {
-        const preserveHypitInput = form.getValues('type') === 'hypit' && project?.platform === 'hypit'
-        if (!preserveHypitInput) {
-          setMontageUploading(false)
-          setMontageReady(false)
-        }
-        form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
-        if (!id) return
-        const nextType = planTypeForProject(project?.platform, form.getValues('type'))
-        if (!nextType) return
-        const fullProject = projectMap[id]
-        form.setValue('cover_use_portrait', form.getValues('type') === nextType && form.getValues('cover_use_portrait') && Boolean(fullProject?.portrait_reference_image), { shouldDirty: true })
-        form.setValue('type', nextType, { shouldDirty: true })
-        form.setValue('image_ratio', normalizeImageRatio(fullProject?.image_ratio), { shouldDirty: true })
-        form.setValue('agent_input', {}, { shouldDirty: true })
-        form.setValue('hypit_input', nextType === 'hypit' ? initialHypitInput(form.getValues('prompt') || '', preserveHypitInput ? { ...form.getValues('hypit_input'), preferences: fullProject?.hypit_defaults?.preferences } : undefined, fullProject?.hypit_defaults) : undefined, { shouldDirty: false })
-        form.setValue('montage_input', nextType === 'montage' ? initialMontageInput(form.getValues('prompt') || '', undefined, fullProject?.montage_defaults) : undefined, { shouldDirty: false })
-      }}
-      ariaLabel={selectedProject ? `项目：${selectedProject.name}` : '项目：未选择'}
-      compact
-    />
-  )
-  const promptComposer = (
-    <>
-      <AgentPromptInput
-      value={{ prompt: form.watch('prompt') ?? '', attachments: watchedType === 'hypit' ? [] : promptAttachments }}
-      onChange={(value) => {
-        form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })
-        if (watchedType === 'hypit') {
-          form.setValue('hypit_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
-        }
-        if (watchedType === 'montage') {
-          form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
-        }
-        if (value.attachments !== promptAttachments) setPromptAttachments(value.attachments)
-      }}
-      onSubmit={() => handlePlanSubmit()}
-      attachmentController={attachmentController}
-      attachmentPolicy={watchedType === 'whiteboard-animation' ? whiteboardAttachmentPolicy : GENERAL_AGENT_ATTACHMENT_POLICY}
-      attachmentsEnabled={watchedType !== 'hypit'}
-      ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
-      submitMode="external"
-      placeholder={watchedType === 'hypit' ? '描述每次复刻需要保留和替换的内容' : '描述每次计划的创作方向、内容要求和素材使用方式...'}
-      submitLabel={editingPlan ? '更新计划' : '创建计划'}
-      submitting={isSubmitting}
-      submitDisabled={!watchedProjectId || Boolean(imageCapabilityBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontagePlan && !montageReady)}
-      attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
-      leadingTools={(
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
-          {projectControl}
-          <TaskComposerParameters
-            execution={{
-              profiles: executionProfilesQuery.data ?? [],
-              value: watchedExecutionProfile,
-              onChange: (value) => form.setValue('execution_profile', value, { shouldDirty: true, shouldValidate: true }),
-              loading: executionProfilesQuery.isLoading,
-              disabled: executionProfilesQuery.isError,
-              catalog: billingCatalog,
-              taskType: watchedType,
-              priceUnit: 'run',
-            }}
-            image={usesImageSettings ? {
-              ratios: businessImageRatios,
-              ratio: watchedImageRatio || 'auto',
-              onRatioChange: (value) => form.setValue('image_ratio', value, { shouldDirty: true, shouldValidate: true }),
-              capabilities: imageCapabilityOptions,
-              capabilityKey: effectiveImageCapabilityKey,
-              onCapabilityChange: (value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true }),
-              loading: imageCapabilitiesLoading,
-              disabled: imageCapabilitiesError,
-            } : undefined}
-            disabled={isSubmitting}
-          />
-        </div>
-      )}
-      />
-      {attachmentSubmitError ? (
-        <p role="alert" className="text-sm text-destructive">{attachmentSubmitError}</p>
-      ) : null}
-    </>
-  )
+  const selectedPackSet = useMemo(() => new Set(watchedAgentIDs), [watchedAgentIDs])
+  const selectedImageCapability = imageCapabilities.find((item) => item.key === effectiveImageCapability)
+  const imageUnavailable = !imageCapabilitiesLoading && !imageCapabilitiesError && selectedImageCapability !== undefined
+    && (selectedImageCapability.enabled !== true || selectedImageCapability.price_available !== true)
 
   return (
     <div className="space-y-6">
-      <PageHeader title="计划" description="管理你的内容计划，定时自动创作发布。">
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" />
-          新建计划
-        </Button>
+      <PageHeader title="计划" description="一次排期可同时生成多种输出，每种输出独立执行。">
+        <Button onClick={openCreate}><Plus className="h-4 w-4" />新建计划</Button>
       </PageHeader>
 
-      {/* Project filter + Search */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="w-full sm:w-48">
-          <ProjectSelector
-            value={projectFilter}
-            onChange={(id) => setProjectFilter(id)}
-            excludePlatforms={['moments', 'ecommerce']}
-          />
-        </div>
-        <div className="w-full sm:w-48 sm:ml-auto">
-          <SearchInput
-            value={searchFilter}
-            onChange={setSearchFilter}
-            placeholder="搜索本页计划..."
-          />
-        </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <ProjectContextControl
+          mode="select"
+          projects={projects}
+          value={projectFilter || null}
+          allowNoProject
+          noProjectLabel="全部项目"
+          loading={projectsLoading}
+          onValueChange={(id) => { setProjectFilter(id ?? ''); setPage(1) }}
+          ariaLabel="筛选项目"
+          compact
+        />
+        <Input value={searchFilter} onChange={(event) => setSearchFilter(event.target.value)} placeholder="搜索计划" className="w-full sm:w-64" />
       </div>
 
-      {!isLoading && !isError && (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <p role="status">共 {totalPlans} 个计划 · 本页显示 {filteredPlans.length} 个</p>
-          {(projectFilter || searchFilter) && <Button variant="ghost" size="sm" onClick={() => { setProjectFilter(''); setSearchFilter('') }}>清空筛选</Button>}
-        </div>
-      )}
-
-      {isError ? (
-        <QueryErrorState onRetry={() => refetch()} />
-      ) : isLoading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="rounded-lg border border-border bg-card p-4 border-l-4 border-l-muted">
-              <div className="flex items-start gap-3">
-                <Skeleton className="h-8 w-8 rounded-full" />
-                <div className="min-w-0 flex-1 space-y-2">
-                  <Skeleton className="h-4 w-2/3" />
-                  <Skeleton className="h-3 w-1/4" />
-                  <div className="flex gap-2">
-                    <Skeleton className="h-5 w-14 rounded-full" />
-                    <Skeleton className="h-3 w-32" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : filteredPlans.length === 0 ? (
-        <EmptyState
-          icon={FileText}
-          title={searchFilter.trim() || projectFilter ? "未找到匹配的计划" : "还没有计划"}
-          description={searchFilter.trim() || projectFilter ? "试试其他关键词、清空筛选，或翻页查看其他计划。搜索仅匹配当前页。" : "创建你的第一个内容计划，让 AI 定时帮你创作。"}
-          action={!searchFilter.trim() && !projectFilter ? { label: '新建计划', onClick: openCreate } : undefined}
-        />
+      {isError ? <QueryErrorState onRetry={() => void refetch()} /> : isLoading ? (
+        <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">正在加载计划...</div>
+      ) : plans.length === 0 ? (
+        <EmptyState icon={Inbox} title="还没有计划" description="创建计划后，系统会按排期自动生成任务。" action={{ label: '新建计划', onClick: openCreate }} />
       ) : (
-        <>
         <div className="space-y-3">
-          {filteredPlans.map((plan) => {
+          {plans.map((plan) => {
             const project = projectMap[plan.project_id]
-            const borderColor = platformBorderColor[plan.type] || ''
-            const hoverBorderColor = platformHoverBorderColor[plan.type] || ''
-            const platformBadge = platformBadgeVariant[plan.type] || ('neutral' as const)
-
+            const outputIDs = plan.agent_ids ?? plan.entries?.map((entry) => entry.agent_id) ?? []
             return (
-              <div
-                key={plan.id}
-                ref={(node) => {
-                  planRefs.current[plan.id] = node
-                }}
-                data-testid={`plan-card-${plan.id}`}
-                data-plan-id={plan.id}
-                data-highlighted={highlightedPlanId === plan.id ? 'true' : undefined}
-                className={cn(
-                  'group rounded-lg border border-border bg-card p-4 border-l-4 transition-all duration-200 hover:shadow-md',
-                  borderColor,
-                  hoverBorderColor,
-                  highlightedPlanId === plan.id && 'ring-2 ring-primary/30 bg-primary/5',
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={plan.type} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="truncate text-sm font-medium text-foreground">
-                        {plan.prompt || contentTypeDisplayName(plan.type) + '计划'}
-                      </span>
-                      <Badge variant={getBadgeVariant(plan.status, 'plan')} className="shrink-0">
-                        {planStatusLabel[plan.status] || plan.status}
-                      </Badge>
+              <div key={plan.id} className="rounded-lg border border-border bg-card p-4" data-plan-id={plan.id}>
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="truncate text-sm font-semibold">{plan.prompt || '定时创作计划'}</h2>
+                      <Badge variant={getBadgeVariant(plan.status, 'plan')}>{planStatusLabel[plan.status] ?? plan.status}</Badge>
                     </div>
-                    {project?.name && (
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
-                    )}
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      {plan.entries && plan.entries.length > 0 && (
-                        <Badge variant="outline" className="text-[10px]">{plan.entries.length} 个 Agent</Badge>
-                      )}
-                      <Badge variant={platformBadge} className={cn("text-[10px]", platformBadgeClassName[plan.type])}>
-                        {contentTypeDisplayName(plan.type)}
-                      </Badge>
-                      <span>{cronToHuman(plan.cron_expr)}</span>
-                      <span>下次：{formatDateTimeCN(plan.next_run_at)}</span>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>{project?.name || '未命名项目'}</span><span aria-hidden="true">·</span><span>{cronToHuman(plan.cron_expr)}</span>
+                      {plan.next_run_at ? <><span aria-hidden="true">·</span><span>下次 {formatDateTimeCN(plan.next_run_at)}</span></> : null}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5" aria-label="输出类型">
+                      {outputIDs.map((agentID) => {
+                        const pack = outputPacks.find((item) => item.id === agentID)
+                        return <Badge key={agentID} variant="outline" className="font-normal">{pack ? outputLabel(pack) : outputLabels[agentID] ?? agentID}</Badge>
+                      })}
                     </div>
                   </div>
-                </div>
-                <div className="mt-2 flex justify-end gap-1.5 border-t border-border pt-2">
-                  {plan.status === 'active' && (
-                    <Button variant="ghost" size="xs" loading={pauseMutation.isPending} onClick={() => { void submit(async () => pauseMutation.mutateAsync(plan.id)).catch(() => {}) }}>
-                      暂停
-                    </Button>
-                  )}
-                  {plan.status === 'paused' && (
-                    <Button variant="ghost" size="xs" loading={resumeMutation.isPending} onClick={() => { void submit(async () => resumeMutation.mutateAsync(plan.id)).catch(() => {}) }}>
-                      恢复
-                    </Button>
-                  )}
-                  <Button variant="ghost" size="xs" onClick={() => openEdit(plan)}>
-                    编辑
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="xs"
-                    onClick={() => setDeleteTarget(plan.id)}
-                  >
-                    删除
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button type="button" size="icon-sm" variant="ghost" aria-label="编辑" onClick={() => openEdit(plan)}><Sparkles className="h-4 w-4" /></Button>
+                    {plan.status === 'active' ? <Button type="button" size="icon-sm" variant="ghost" aria-label="暂停" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="h-4 w-4" /></Button> : <Button type="button" size="icon-sm" variant="ghost" aria-label="恢复" onClick={() => void resumeMutation.mutateAsync(plan.id)}><Play className="h-4 w-4" /></Button>}
+                    <Button type="button" size="icon-sm" variant="ghost" aria-label="删除" onClick={() => setDeleteTarget(plan.id)}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
                 </div>
               </div>
             )
           })}
-        </div>
-
-        </>
-      )}
-
-      {!isLoading && !isError && totalPages > 1 && (
-        <div className="mt-4 flex justify-center">
-          <SimplePagination
-            page={page}
-            totalPages={totalPages}
-            onPageChange={setPage}
-          />
+          {totalPages > 1 ? <div className="flex items-center justify-between pt-2 text-sm text-muted-foreground"><span>第 {page} / {totalPages} 页</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</Button><Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>下一页</Button></div></div> : null}
         </div>
       )}
 
-      {/* Create/Edit Dialog */}
-      <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle>
-          </DialogHeader>
+      <Dialog open={modalOpen} onOpenChange={(open) => { if (!open) closeModal() }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle></DialogHeader>
           <Form {...form}>
-            <form id="plan-form" onSubmit={handlePlanSubmit} className="max-h-[60vh] space-y-4 overflow-y-auto">
-              <SeednoteTemplateGallery
-                platform={selectedProject?.platform}
-                onApply={(templatePrompt) => {
-                  form.setValue('prompt', templatePrompt, { shouldDirty: true, shouldValidate: true })
-                }}
-              />
+            <form id="plan-form" onSubmit={handleSubmit} className="max-h-[78vh] space-y-5 overflow-y-auto px-1">
+              <section className="space-y-2">
+                <div className="flex items-baseline justify-between gap-3"><div><h3 className="text-sm font-semibold">输出类型</h3><p className="mt-1 text-xs text-muted-foreground">可多选，下一次触发会为每种输出分别创建任务。</p></div>{watchedAgentIDs.length > 0 ? <span className="text-xs text-muted-foreground">已选 {watchedAgentIDs.length} 项</span> : null}</div>
+                <FormField control={form.control} name="agent_ids" render={({ field }) => <FormItem><FormControl><ToggleGroup multiple value={field.value} onValueChange={field.onChange} variant="outline" spacing={2} className="grid w-full grid-cols-1 sm:grid-cols-3" aria-label="输出类型">
+                  {packsQuery.isLoading ? <div className="col-span-full rounded-md border border-dashed p-4 text-sm text-muted-foreground">正在加载可用输出...</div> : null}
+                  {outputPacks.map((pack) => { const Icon = outputIcon(pack); const selected = selectedPackSet.has(pack.id); return <ToggleGroupItem key={pack.id} value={pack.id} aria-label={outputLabel(pack)} aria-pressed={selected} className={cn('h-auto min-h-20 justify-start gap-2 px-3 py-3 text-left', outputTones[pack.id])}><Icon className="h-5 w-5 shrink-0" /><span className="min-w-0"><span className="block truncate font-medium">{outputLabel(pack)}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{pack.description}</span></span></ToggleGroupItem> })}
+                </ToggleGroup></FormControl><FormMessage />{packsQuery.isError || outputPacks.length === 0 ? <p className="text-sm text-destructive">暂时没有可用于计划的输出类型。</p> : null}</FormItem>} />
+              </section>
 
-              <FormField control={form.control} name="cron_expr" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>排期设置</FormLabel>
-                  <FormControl>
-                    <SchedulePicker
-                      value={field.value}
-                      onChange={field.onChange}
-                      onInteraction={() => { scheduleManuallyChangedRef.current = true }}
-                      onValidityChange={handleScheduleValidityChange}
-                      footer={(
-                        <TaskTimePricingNotice
-                          catalog={billingCatalog}
-                          taskType={watchedType}
-                          executionProfile={(watchedExecutionProfile || undefined) as AgentExecutionProfileID | undefined}
-                          selectedTime={cronTime(field.value)}
-                          recommendationUnavailable={!editingPlan && recommendationUnavailable}
-                        />
-                      )}
-                    />
-                  </FormControl>
-                  <FormDescription>到点自动创建任务并按项目默认配置执行；这里的修改只影响下一次执行。</FormDescription>
-                </FormItem>
-              )} />
+              <section className="space-y-2"><h3 className="text-sm font-semibold">项目</h3><FormField control={form.control} name="project_id" render={({ field }) => <FormItem><FormControl>{editingPlan ? <ProjectContextControl mode="readonly" project={selectedProject ?? projectMap[field.value] ?? null} compact /> : <ProjectContextControl mode="select" projects={projects} value={field.value || null} onValueChange={changeProject} loading={projectsLoading} disabled={isSubmitting} allowNoProject={false} placeholder="选择项目" ariaLabel="项目" />}</FormControl><FormMessage /></FormItem>} /></section>
 
-              <div className="space-y-2 rounded-lg border border-border p-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">执行 Agent</p>
-                  <p className="text-xs text-muted-foreground">每个选中的 Agent 在每次触发时独立创建一个任务；渠道由 Agent 固定。</p>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {PRODUCT_AGENT_OPTIONS.map((option) => {
-                    const checked = selectedPlanAgents.includes(option.agent_id)
-                    return (
-                      <label key={option.agent_id} className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${checked ? 'border-primary bg-primary/5' : 'border-border'}`}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => setSelectedPlanAgents((current) => checked ? current.filter((agentID) => agentID !== option.agent_id) : [...current, option.agent_id])}
-                          disabled={isSubmitting}
-                          aria-label={option.label}
-                        />
-                        <span className="min-w-0">
-                          <span className="block font-medium">{option.label}</span>
-                          <span className="block text-xs text-muted-foreground">{option.channel}</span>
-                        </span>
-                      </label>
-                    )
-                  })}
-                </div>
-                {selectedPlanAgents.length === 0 ? <p className="text-xs font-medium text-destructive">至少选择一个 Agent。</p> : null}
-              </div>
+              <section className="space-y-2"><h3 className="text-sm font-semibold">创作提示</h3><FormField control={form.control} name="prompt" render={({ field }) => <FormItem><FormControl><Textarea aria-label="创作提示" {...field} value={field.value ?? ''} rows={4} placeholder="描述每次创作的方向、要求和素材使用方式" /></FormControl><FormDescription>项目中的定位、关键词、视觉风格和作者设置会自动作为公共上下文。</FormDescription><FormMessage /></FormItem>} /></section>
 
-              {!isMontagePlan ? promptComposer : null}
+              <section className="space-y-2"><h3 className="text-sm font-semibold">排期</h3><FormField control={form.control} name="cron_expr" render={({ field }) => <FormItem><FormControl><SchedulePicker value={field.value} onChange={handleScheduleChange} onInteraction={handleScheduleInteraction} onValidityChange={handleScheduleValidity} /></FormControl>{recommendationUnavailable ? <p className="text-xs text-muted-foreground">智能排期暂不可用，已保留默认时间。</p> : null}<FormMessage /></FormItem>} /></section>
 
-              {watchedType === 'hypit' ? <HypitCreationPanel form={form} onReadyChange={setMontageReady} onUploadingChange={setMontageUploading} briefField={promptComposer} /> : isMontagePlan && (
-                <MontageCreationPanel
-                  form={form}
-                  fieldRoot="montage_input"
-                  onUploadingChange={setMontageUploading}
-                  onReadyChange={setMontageReady}
-                  briefField={promptComposer}
-                />
-              )}
+              <section className="space-y-2"><h3 className="text-sm font-semibold">执行配置</h3><FormField control={form.control} name="execution_profile" render={({ field }) => <FormItem><FormControl><ToggleGroup value={field.value ? [field.value] : []} onValueChange={(value) => { if (value[0]) field.onChange(value[0]) }} variant="outline" className="grid w-full grid-cols-1 sm:grid-cols-3" aria-label="执行配置">{executionProfileOptions.map((profile) => <ToggleGroupItem key={profile.id} value={profile.id} disabled={!profile.available} className="h-auto min-h-16 flex-col items-start gap-1 px-3 py-2 text-left"><span className="font-medium">{profile.display_name}</span><span className="text-xs text-muted-foreground">{profile.available ? profile.description : '当前不可用'}</span></ToggleGroupItem>)}</ToggleGroup></FormControl><FormMessage /></FormItem>} /></section>
 
-              {!isMontagePlan && <FormField control={form.control} name="watermark" render={({ field }) => (
-                <FormItem>
-                  <button
-                    type="button"
-                    onClick={() => field.onChange(!field.value)}
-                    className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                      field.value
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-foreground/20'
-                    }`}
-                  >
-                    <Stamp className={`mt-0.5 h-5 w-5 shrink-0 ${field.value ? 'text-primary' : 'text-muted-foreground'}`} />
-                    <div className="min-w-0">
-                      <p className={`text-sm font-medium ${field.value ? 'text-foreground' : 'text-muted-foreground'}`}>
-                        水印
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">仅在所选图像能力支持水印时生效</p>
-                    </div>
-                  </button>
-                  <FormMessage />
-                </FormItem>
-              )} />}
+              <section className="space-y-2"><h3 className="text-sm font-semibold">共享图片设置</h3><div className="rounded-md border border-border/70 p-3"><div className="space-y-3"><div><p className="mb-2 text-xs font-medium text-muted-foreground">图片能力</p><ImageCapabilitySelector options={imageCapabilities} value={effectiveImageCapability} onChange={(value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true })} disabled={imageCapabilitiesLoading || imageCapabilitiesError} /></div><div><p className="mb-2 text-xs font-medium text-muted-foreground">图片比例</p><ImageAspectRatioField value={form.watch('image_ratio') || 'auto'} ratios={['9:16', '3:4', '1:1', '4:3', '16:9']} onChange={(value) => form.setValue('image_ratio', value, { shouldDirty: true })} /></div></div><details className="mt-3 border-t border-border/70 pt-3"><summary className="cursor-pointer text-sm font-medium">高级设置</summary><div className="mt-3 space-y-4"><FormField control={form.control} name="skip_reference_image" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>跳过参考图</FormLabel><FormDescription>本次计划不使用参考图。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />{!watchedSkipReference ? <FormField control={form.control} name="reference_image" render={({ field }) => <FormItem><FormLabel>参考图</FormLabel><FormControl><ReferenceAssetUpload value={(field.value as ReferenceImageValue | null) ?? null} onChange={field.onChange} purpose="task_reference" onUploadingChange={setReferenceUploading} disabled={isSubmitting} /></FormControl><FormMessage /></FormItem>} /> : null}<FormField control={form.control} name="watermark" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>水印</FormLabel><FormDescription>在支持的图片能力中启用水印。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} /><FormField control={form.control} name="input_attachments" render={({ field }) => <FormItem><FormLabel>附件</FormLabel><FormControl><ReferenceMaterialInput value={(field.value ?? []) as InputAttachment[]} onChange={field.onChange} allowedTypes={['image', 'audio', 'video', 'document', 'text']} maxCount={16} compact onUploadingChange={setAttachmentUploading} onFailuresChange={setAttachmentFailed} hint="可添加图片、文档或其他公共素材。" /></FormControl><FormMessage /></FormItem>} /></div></details></div>{imageUnavailable ? <p role="alert" className="text-sm text-destructive">当前图像能力不可用，请重新选择。</p> : null}</section>
 
-              {/* Image composition (seednote only) */}
-              {watchedType === 'seednote' && (
-                <FormField control={form.control} name="has_content_image" render={({ field }) => {
-                  const hasTail = form.watch('has_tail_image')
-                  const total = 1 + (field.value ? 1 : 0) + (hasTail ? 1 : 0)
-                  return (
-                    <FormItem>
-                      <div className="rounded-lg border border-border p-3">
-                        <div className="flex items-start gap-3">
-                          <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-foreground">图片构成</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              封面始终生成；勾选要额外生成的图。
-                            </p>
-                          </div>
-                        </div>
-                        <div className="mt-3 divide-y divide-border">
-                          <div className="flex items-center justify-between py-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-foreground">封面图</span>
-                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">必选</span>
-                            </div>
-                            <Switch checked disabled />
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">内容图</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">承载 2-4 个信息点（image_01.png）</p>
-                            </div>
-                            <Switch checked={!!field.value} onCheckedChange={field.onChange} />
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">尾图</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">行动召唤 / 关注引导（tail.png）</p>
-                            </div>
-                            <Switch checked={!!hasTail} onCheckedChange={(v) => form.setValue('has_tail_image', v, { shouldDirty: true })} />
-                          </div>
-                        </div>
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          当前将生成 {total} 张图片
-                        </p>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )
-                }} />
-              )}
-
-              {/* Image composition (公众号 article): cover + content images each
-                  independently toggleable — unlike seednote, the article cover is
-                  NOT mandatory (both default on → legacy behavior). */}
-              {watchedType === 'wechat-article' && (
-                <FormField control={form.control} name="article_with_cover" render={({ field }) => {
-                  const withContent = form.watch('article_with_content_images')
-                  const summary = field.value && withContent
-                    ? '将生成封面 + 正文配图（默认）'
-                    : field.value
-                      ? '仅生成封面图，不生成正文配图'
-                      : withContent
-                        ? '仅生成正文配图；发布草稿不设封面'
-                        : '纯文字文章，不生成任何图片；发布草稿不设封面'
-                  return (
-                    <FormItem>
-                      <div className="rounded-lg border border-border p-3">
-                        <div className="flex items-start gap-3">
-                          <Images className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-foreground">图片构成</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              独立选择是否生成封面与正文配图。两者都关 = 纯文字文章。
-                            </p>
-                          </div>
-                        </div>
-                        <div className="mt-3 divide-y divide-border">
-                          <div className="flex items-center justify-between py-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">封面图</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">按任务比例生成，保护微信中心分享卡安全区</p>
-                            </div>
-                            <Switch aria-label="生成封面图" checked={!!field.value} onCheckedChange={(checked) => {
-                              field.onChange(checked)
-                              if (!checked) form.setValue('cover_use_portrait', false, { shouldDirty: true })
-                            }} />
-                          </div>
-                          <div className="flex items-center justify-between py-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">正文配图</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">按排版节奏插入的章节插图</p>
-                            </div>
-                            <Switch aria-label="生成正文配图" checked={!!withContent} onCheckedChange={(v) => form.setValue('article_with_content_images', v, { shouldDirty: true })} />
-                          </div>
-                        </div>
-                        <p className="mt-2 text-xs text-muted-foreground">{summary}</p>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )
-                }} />
-              )}
-
-              <PortraitCoverControl
-                type={watchedType}
-                project={selectedProject}
-                checked={!!form.watch('cover_use_portrait')}
-                coverEnabled={watchedType !== 'wechat-article' || !!form.watch('article_with_cover')}
-                onCheckedChange={(checked) => form.setValue('cover_use_portrait', checked, { shouldDirty: true })}
-              />
-
-              <AgentPackSchemaFields
-                pack={selectedAgentPack}
-                surface="plan"
-                value={watchedAgentInput}
-                onChange={(value) => form.setValue('agent_input', value, { shouldDirty: true, shouldValidate: true })}
-              />
-              {/* Each scheduled run resolves the active immutable task SKU at admission. */}
-              {(() => {
-                const perRun = taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined)
-                const balance = billingWallet?.balance ?? 0
-                const remaining = perRun === undefined ? undefined : balance - perRun
-                return (
-                  <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
-                    <p className="text-muted-foreground">
-                      当前每次执行固定价：<span className="font-medium text-foreground">
-                        {perRun === undefined ? '暂不可用' : `${perRun.toLocaleString()} 积分`}
-                      </span>
-                    </p>
-                    <p className="text-xs text-muted-foreground">每次触发时按当时生效的 SKU 计价；Claude Code token 不向用户计费。</p>
-                    <p className="text-xs text-muted-foreground">任务内成功交付的图片、视频等增值操作使用各自固定 SKU。</p>
-                    {remaining !== undefined && (
-                      <p className="text-muted-foreground">
-                        余额：{balance.toLocaleString()} →{' '}
-                        <span className={`font-medium ${remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>
-                          {remaining.toLocaleString()}
-                        </span>
-                      </p>
-                    )}
-                    {((billingWallet?.debt ?? 0) > 0 || (remaining !== undefined && remaining < 0)) && (
-                      <p className="text-sm font-medium text-red-500">当前钱包无法准入新一次执行，请先充值。</p>
-                    )}
-                    {imageCapabilityBlocker ? (
-                      <p role="alert" className="text-sm font-medium text-red-500">{imageCapabilityBlocker}</p>
-                    ) : null}
-                  </div>
-                )
-              })()}
+              <DialogFooter><Button type="button" variant="outline" onClick={closeModal}>取消</Button><Button type="submit" loading={isSubmitting} disabled={isSubmitting || watchedAgentIDs.length === 0 || !watchedProjectID || !watchedExecutionProfile || !scheduleValid || referenceUploading || attachmentUploading || attachmentFailed || imageUnavailable}>{editingPlan ? '保存' : '创建'}</Button></DialogFooter>
             </form>
           </Form>
-          <DialogFooter>
-            <Button variant="secondary" onClick={closeModal}>取消</Button>
-            <Button
-              type="submit"
-              form="plan-form"
-              loading={isSubmitting}
-              disabled={
-                !watchedProjectId
-                || selectedPlanAgents.length === 0
-                || !watchedExecutionProfile
-                || executionProfilesQuery.isError
-                || !selectedExecutionProfileAvailable
-                || Boolean(imageCapabilityBlocker)
-                || taskCostFor(billingCatalog, watchedType as string, watchedExecutionProfile || undefined) === undefined
-                || attachmentController.uploading
-                || attachmentController.hasFailures
-                || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle)
-                || (isMontagePlan && (montageUploading || !montageReady))}
-            >
-              {editingPlan ? '更新' : '创建'}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation */}
-      <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确定删除此计划？</AlertDialogTitle>
-            <AlertDialogDescription>此操作不可撤销。删除后计划将无法恢复。</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) void submit(async () => deleteMutation.mutateAsync(deleteTarget)).catch(() => {}) }}>
-              {deleteMutation.isPending && <Loader2 className="size-3.5 animate-spin" />}
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Dirty form confirmation */}
-      <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>放弃编辑？</AlertDialogTitle>
-            <AlertDialogDescription>你有未保存的更改，确定要关闭吗？</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>继续编辑</AlertDialogCancel>
-            <AlertDialogAction onClick={resetModal}>放弃</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>放弃未保存的修改？</AlertDialogTitle><AlertDialogDescription>关闭后当前表单内容会丢失。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>继续编辑</AlertDialogCancel><AlertDialogAction onClick={resetModal}>放弃修改</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>删除这个计划？</AlertDialogTitle><AlertDialogDescription>删除后不会再触发新的任务。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) void deleteMutation.mutateAsync(deleteTarget) }}>删除</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     </div>
   )
 }

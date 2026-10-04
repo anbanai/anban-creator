@@ -184,10 +184,10 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 	if err := repo.Users().Create(ctx, &model.User{ID: f.userID, Email: f.userID + "@publication.test", Password: "x", InviteCode: f.userID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformWechat, Name: "WeChat", Status: model.ProjectStatusActive, Config: model.ProjectConfig{WechatAppID: "app", WechatSecret: "secret"}}); err != nil {
+	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformWechat, Name: "WeChat", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &f.executionID}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusRunning, CurrentExecutionID: &f.executionID}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
@@ -2823,7 +2823,7 @@ func TestWechatPublicationRecoverDueDispatchesDatabaseBackedWork(t *testing.T) {
 	}
 
 	manualTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: manualTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: manualTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	manual := &model.WechatPublication{
@@ -3250,7 +3250,7 @@ func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testin
 	f := newPublicationFixture(t)
 	first := f.seedDrafted(t)
 	secondTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	created := f.now.Add(-time.Hour)
@@ -3780,7 +3780,7 @@ func TestConcurrentSelectionHasOneAtomicArticleBindingWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	created := f.now.Add(-time.Hour)
@@ -3864,5 +3864,34 @@ func TestPublicationSchedulesUseTheContractedDurableCadence(t *testing.T) {
 		if got == nil || !got.Equal(now.Add(tc.after)) {
 			t.Fatalf("age %s = %v, want +%s", tc.age, got, tc.after)
 		}
+	}
+}
+
+func TestWechatPublicationLoadsOnlyTaskChannelCredentials(t *testing.T) {
+	f := newPublicationFixture(t)
+	ctx := context.Background()
+	if err := f.db.Model(&model.Project{}).Where("id = ?", f.projectID).Update("platform", model.PlatformSeednote).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Model(&model.Task{}).Where("id = ?", f.taskID).Updates(map[string]any{"type": model.TaskTypeWechatPicture, "agent_id": model.AgentIDWechatPicture, "channel": model.ChannelWechatPicture}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		row := &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: f.projectID, Channel: channel}
+		row.Config = datatypes.NewJSONType(map[string]any{"wechat_app_id": channel})
+		if err := f.repo.ProjectChannelConfigs().Upsert(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, project, err := f.svc.ownedTaskProject(ctx, f.userID, f.taskID)
+	if err != nil || project.RuntimeChannelConfig["wechat_app_id"] != model.ChannelWechatPicture {
+		t.Fatalf("task channel config: %#v, %v", project, err)
+	}
+	if err := f.repo.ProjectChannelConfigs().Delete(ctx, f.projectID, model.ChannelWechatPicture); err != nil {
+		t.Fatal(err)
+	}
+	_, project, err = f.svc.ownedTaskProject(ctx, f.userID, f.taskID)
+	if err != nil || len(project.RuntimeChannelConfig) != 0 {
+		t.Fatalf("must not reuse article credentials: %#v, %v", project, err)
 	}
 }

@@ -121,7 +121,6 @@ export const mockPlans: PaginatedResponse<Plan> = {
   items: [
     {
       id: 'plan-1',
-      type: 'wechat-article',
       title: '测试计划',
       description: '',
       cron_expr: '0 9 * * 1',
@@ -130,6 +129,7 @@ export const mockPlans: PaginatedResponse<Plan> = {
       next_run_at: '2025-01-20T09:00:00Z',
       project_id: 'ch-1',
       execution_profile: 'effective',
+      agent_ids: ['wechat-article'],
       created_at: '2025-01-10T00:00:00Z',
       updated_at: '2025-01-10T00:00:00Z',
     },
@@ -173,7 +173,6 @@ export const mockProjects: Project[] = [
 
     image_ratio: '16:9',
     max_concurrent_tasks: 2,
-    config: { wechat_app_id: 'wx123' },
     status: 'active',
     created_at: '2025-01-01T00:00:00Z',
     updated_at: '2025-01-01T00:00:00Z',
@@ -255,7 +254,7 @@ export const mockApiKeys: APIKey[] = [
 const managedPack = (id: string, displayName: string, options: {
   projectPlatforms?: string[]
   taskTypes: string[]
-  surfaces?: Array<'plugin' | 'project' | 'task' | 'plan'>
+  surfaces?: Array<'plugin' | 'task' | 'plan'>
 }): AgentPackCatalog['packs'][number] => ({
   id,
   version: '1.0.0',
@@ -263,21 +262,23 @@ const managedPack = (id: string, displayName: string, options: {
   display_name: displayName,
   description: `${displayName} workflow`,
   agent: { name: id, max_turns: 20 },
-  channel: options.projectPlatforms?.[0] as AgentPackCatalog['packs'][number]['channel'],
-  bindings: { task_kinds: options.taskTypes },
+  channel: id,
+  bindings: { task_kinds: options.surfaces?.includes('plan') ? ['content_generation', ...options.taskTypes.filter((kind) => kind === 'viral_analysis')] : options.taskTypes },
   runtime: { profile: id === 'montage' ? 'montage' : 'wechat', adapter: id === 'montage' ? 'openmontage' : 'standard' },
-  surfaces: options.surfaces ?? ['plugin', 'project', 'task'],
+  surfaces: options.surfaces ?? ['plugin', 'task'],
+  plan_task_kind: options.surfaces?.includes('plan') ? 'content_generation' : undefined,
   ui: { renderer: `custom:${id}` },
   digest: 'a'.repeat(64),
 })
 
 export const mockAgentPackCatalog: AgentPackCatalog = {
   packs: [
-    managedPack('wechat-article', '微信公众号文章', { projectPlatforms: ['wechat'], taskTypes: ['wechat-article'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
+    managedPack('wechat-article', '微信公众号文章', { projectPlatforms: ['wechat'], taskTypes: ['wechat-article'], surfaces: ['plugin', 'task', 'plan'] }),
+    managedPack('wechat-picture', '公众号贴图', { taskTypes: ['wechat-picture'], surfaces: ['plugin', 'task', 'plan'] }),
     managedPack('ecommerce', '电商素材', { projectPlatforms: ['ecommerce'], taskTypes: ['ecommerce'] }),
     managedPack('moments', '朋友圈素材包', { projectPlatforms: ['moments'], taskTypes: ['moments'] }),
-    managedPack('montage', '视频生成', { projectPlatforms: ['montage'], taskTypes: ['montage'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
-    managedPack('seednote', '种草笔记', { projectPlatforms: ['seednote'], taskTypes: ['seednote', 'viral_analysis'], surfaces: ['plugin', 'project', 'task', 'plan'] }),
+    managedPack('montage', '视频生成', { projectPlatforms: ['montage'], taskTypes: ['montage'] }),
+    managedPack('seednote', '种草笔记', { projectPlatforms: ['seednote'], taskTypes: ['seednote', 'viral_analysis'], surfaces: ['plugin', 'task', 'plan'] }),
   ],
 }
 

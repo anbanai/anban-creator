@@ -11,7 +11,7 @@ func TestHypitDoesNotSignUnownedPersistedURL(t *testing.T) {
 	repo := repository.New(setupTaskHandlerTestDB(t))
 	store := &resolveDownloadStore{}
 	key := "tasks/another-user/private.mp4"
-	task := &model.Task{ID: "review-task", UserID: "review-user", ProjectID: "review-project", Type: model.PlatformHypit}
+	task := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.TaskKindContentGeneration, ID: "review-task", UserID: "review-user", ProjectID: "review-project", Type: model.PlatformHypit}
 	task.SetHypitInput(model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video", URL: "/api/v1/files/" + key}})
 	if err := repo.Tasks().Create(t.Context(), task); err != nil {
 		t.Fatal(err)

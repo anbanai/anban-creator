@@ -189,9 +189,9 @@ func TestFeedbackWindowOpenUsesCadenceSpecificLocalWindows(t *testing.T) {
 }
 
 func TestFeedbackAccountIDUsesPlatformIdentityAndProjectFallback(t *testing.T) {
-	wechatA := &model.Project{ID: "project-a", Platform: model.PlatformWechat, Config: model.ProjectConfig{WechatAppID: "wx-a"}}
-	wechatB := &model.Project{ID: "project-b", Platform: model.PlatformWechat, Config: model.ProjectConfig{WechatAppID: "wx-a"}}
-	if gotA, gotB := feedbackAccountID(wechatA), feedbackAccountID(wechatB); gotA != gotB || gotA != "wechat:wx-a" {
+	wechatA := &model.Project{ID: "project-a", Platform: model.PlatformWechat}
+	wechatB := &model.Project{ID: "project-b", Platform: model.PlatformWechat}
+	if gotA, gotB := feedbackAccountID(wechatA), feedbackAccountID(wechatB); gotA == gotB || gotA == "" || gotB == "" {
 		t.Fatalf("wechat account identity = %q, %q", gotA, gotB)
 	}
 	seednote := &model.Project{ID: "project-c", Platform: model.PlatformSeednote, ProfileURL: "https://example.test/u/c"}

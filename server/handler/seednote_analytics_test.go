@@ -72,7 +72,7 @@ func TestSeednoteAnalyticsHandler_BindRejectsInvalidPublicationIdentity(t *testi
 			if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "Seednote", Status: model.ProjectStatusActive}); err != nil {
 				t.Fatal(err)
 			}
-			if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
+			if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -108,7 +108,7 @@ func TestSeednoteAnalyticsHandler_GetTaskAnalytics(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformSeednote, Name: "SeedNote", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	tracking := &model.SeednotePostTracking{
@@ -205,7 +205,7 @@ func TestSeednoteAnalyticsHandler_RejectsNonOwner(t *testing.T) {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformSeednote, Name: "SeedNote", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: ownerID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
+	if err := repo.Tasks().Create(ctx, &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: ownerID, ProjectID: projectID, Type: model.PlatformSeednote, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 

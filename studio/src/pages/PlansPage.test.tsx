@@ -1,1265 +1,172 @@
-import { act, screen, waitFor, fireEvent, within } from '@testing-library/react'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PlansPage from './PlansPage'
 import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
+import { mockAgentPackCatalog, mockPlans, mockProjects } from '@/test/mocks/handlers'
 import type { ReferenceMaterialInputProps } from '@/components/ReferenceMaterialInput'
-import type { InputAttachment, Plan, Project } from '@/types'
 
-const { errorMock } = vi.hoisted(() => ({ errorMock: vi.fn() }))
-
-vi.mock('sonner', () => ({ toast: { error: errorMock, success: vi.fn() } }))
-
-const referenceMaterialInputHarness = vi.hoisted(() => ({
-  props: undefined as ReferenceMaterialInputProps | undefined,
-}))
-
+const harness = vi.hoisted(() => ({ error: vi.fn(), materials: undefined as ReferenceMaterialInputProps | undefined }))
+vi.mock('sonner', () => ({ toast: { error: harness.error, success: vi.fn() } }))
 vi.mock('@/components/ReferenceMaterialInput', () => ({
-  ReferenceMaterialInput: (props: ReferenceMaterialInputProps) => {
-    referenceMaterialInputHarness.props = props
-    return <div />
-  },
+  ReferenceMaterialInput: (props: ReferenceMaterialInputProps) => { harness.materials = props; return <div /> },
 }))
-
-const uploadToOSSMock = vi.hoisted(() => vi.fn())
-const resolveDownloadUrlMock = vi.hoisted(() => vi.fn())
-
-vi.mock('@/lib/direct-upload', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload')
-  return { ...actual, uploadToOSS: uploadToOSSMock }
-})
-
-vi.mock('@/lib/api/uploads', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/api/uploads')>('@/lib/api/uploads')
-  return {
-    ...actual,
-    uploadsApi: { ...actual.uploadsApi, resolveDownloadUrl: resolveDownloadUrlMock },
-  }
-})
-
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
-  const { mockPlans, mockProjects, mockPlatformConfigs } =
-    await vi.importActual<typeof import('@/test/mocks/handlers')>('@/test/mocks/handlers')
-  return {
-    ...actual,
-    api: {
-      ...actual.api,
-      plans: {
-        ...actual.api.plans,
-        scheduleRecommendation: vi.fn().mockResolvedValue({ time: '12:07', timezone: 'Asia/Shanghai', granularity_minutes: 15, load_balanced: true }),
-        list: vi.fn().mockResolvedValue(mockPlans),
-        create: vi.fn(),
-        update: vi.fn(),
-        pause: vi.fn(),
-        resume: vi.fn(),
-        delete: vi.fn(),
-      },
-      projects: {
-        ...actual.api.projects,
-        list: vi.fn().mockResolvedValue(mockProjects),
-        platformConfigs: vi.fn().mockResolvedValue(mockPlatformConfigs),
-      },
-      billing: {
-        ...actual.api.billing,
-        catalog: vi.fn().mockResolvedValue({
-          catalog_id: 'retail-test-v1',
-          currency: 'credits',
-          task_time_pricing: { timezone: 'Asia/Shanghai', peak_windows: [{ start: '09:00', end: '12:00' }, { start: '14:00', end: '18:00' }], off_peak_windows: [{ start: '00:00', end: '09:00' }, { start: '12:00', end: '14:00' }, { start: '18:00', end: '24:00' }], off_peak_rate_percent: 80, current_period: 'peak', server_time: '2026-07-31T10:00:00+08:00', next_transition_at: '2026-07-31T12:00:00+08:00' },
-          skus: [
-            { id: 'task.wechat_article.effective', operation: 'task.wechat_article', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4800, peak_price_credits: 4800, off_peak_price_credits: 3840, delivery: 'article_artifacts_verified' },
-            { id: 'task.wechat_article.balanced', operation: 'task.wechat_article', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 6000, delivery: 'article_artifacts_verified' },
-            { id: 'task.wechat_article.quality', operation: 'task.wechat_article', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 18000, delivery: 'article_artifacts_verified' },
-            { id: 'task.seednote.effective', operation: 'task.seednote', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, peak_price_credits: 4000, off_peak_price_credits: 3200, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.seednote.balanced', operation: 'task.seednote', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 5000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.seednote.quality', operation: 'task.seednote', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 15000, delivery: 'seednote_artifacts_verified' },
-            { id: 'task.hypit.effective', operation: 'task.hypit', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'hypit_artifacts_verified' },
-            { id: 'task.montage.effective', operation: 'task.montage', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 1600, delivery: 'montage_artifacts_verified' },
-            { id: 'task.montage.balanced', operation: 'task.montage', execution_profile: 'balanced', charge_policy: 'task_admission', price_credits: 2000, delivery: 'montage_artifacts_verified' },
-            { id: 'task.montage.quality', operation: 'task.montage', execution_profile: 'quality', charge_policy: 'task_admission', price_credits: 6000, delivery: 'montage_artifacts_verified' },
-          ],
-        }),
-        wallet: vi.fn().mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 }),
-      },
-      agentProfiles: {
-        ...actual.api.agentProfiles,
-        list: vi.fn().mockResolvedValue([
-          { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '适合日常创作', min_tier: 'free', available: true },
-          { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
-          { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: true },
-        ]),
-      },
-      agentPacks: {
-        ...actual.api.agentPacks,
-        list: vi.fn().mockResolvedValue({ packs: [] }),
-      },
-      imageCapabilities: {
-        ...actual.api.imageCapabilities,
-        list: vi.fn().mockResolvedValue({
-          tier: 'pro',
-          default_capability: 'standard',
-          items: [{ key: 'standard', display_name: '标准图像', price_available: true, enabled: true }],
-        }),
-      },
-      hypitCapabilities: { list: vi.fn().mockResolvedValue({ enabled: true, configured: true, missing_configuration: [], limits: { max_duration_seconds: 180, max_assets: 20, max_asset_bytes: 1000000, max_input_bytes: 2000000 } }) },
-      montageCapabilities: {
-        ...actual.api.montageCapabilities,
-        list: vi.fn().mockResolvedValue({
-          enabled: true,
-          default_pipeline: 'cinematic',
-          max_duration_seconds: 600,
-          max_assets: 20,
-          items: [
-            {
-              key: 'cinematic', display_name: '电影感制作', description: '品牌片、预告片与情绪叙事',
-              best_for: ['品牌发布', '概念预告'], source_hint: '可使用视频、图片，也可仅根据创意说明生成',
-              output_hint: '一条完整成片', source_requirement: 'optional', output_mode: 'single',
-              recommended_duration_seconds: 30,
-            },
-            {
-              key: 'screen-demo', display_name: '屏幕演示', description: '产品教程、软件操作与终端流程',
-              best_for: ['产品演示', '终端操作'], source_hint: '可上传屏幕录制，或在说明中给出可复现的操作步骤',
-              output_hint: '一条清晰的演示视频', source_requirement: 'optional', output_mode: 'single',
-              recommended_duration_seconds: 60,
-            },
-          ],
-        }),
-      },
-      templates: {
-        ...actual.api.templates,
-        list: vi.fn().mockResolvedValue({
-          items: [{
-            id: 'template-1', type: 'seednote', name: '知识卡片', category: '知识科普',
-            thumbnail: null, prompt: '模板视觉 Prompt', prompt_source: 'manual', readiness_status: 'ready',
-            activate_when_ready: true, visibility: 'public', sort_order: 0,
-            is_active: true, created_at: '2026-08-02T00:00:00Z', updated_at: '2026-08-02T00:00:00Z',
-          }],
-          total: 1,
-        }),
-      },
-    },
-  }
+  return { ...actual, api: { ...actual.api,
+    projects: { ...actual.api.projects, list: vi.fn() },
+    plans: { ...actual.api.plans, list: vi.fn(), create: vi.fn(), update: vi.fn(), pause: vi.fn(), resume: vi.fn(), delete: vi.fn(), scheduleRecommendation: vi.fn() },
+    agentPacks: { ...actual.api.agentPacks, list: vi.fn() },
+    agentProfiles: { ...actual.api.agentProfiles, list: vi.fn() },
+    imageCapabilities: { ...actual.api.imageCapabilities, list: vi.fn() },
+  } }
 })
-
-async function openPlanParameters(dialog: HTMLElement) {
-  const trigger = await within(dialog).findByRole('button', { name: /^创作参数：/ })
-  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger)
-  return waitFor(() => {
-    const popover = document.querySelector<HTMLElement>('[data-slot="popover-content"][data-open]')
-    expect(popover).toBeInTheDocument()
-    return popover!
-  })
+async function openCreate() {
+  fireEvent.click((await screen.findAllByRole('button', { name: '新建计划' }))[0])
+  return screen.findByRole('dialog', { name: '新建计划' })
 }
-
-describe('PlansPage — mutation failure feedback (no silent failure)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
-      uploadId: `upload-${file.name}`,
-      key: `uploads/pending/user/${file.name}`,
-      publicUrl: `https://cdn.example/${file.name}?signed=secret`,
-      contentType: file.type,
-      size: file.size,
-    }))
-    window.history.pushState({}, '', '/')
-    vi.mocked(api.plans.list).mockResolvedValue({
-      items: [{
-        id: 'plan-1',
-        type: 'wechat-article',
-        title: '测试计划',
-        description: '',
-        cron_expr: '0 9 * * 1',
-        prompt: '',
-        status: 'active',
-        next_run_at: '2025-01-20T09:00:00Z',
-        project_id: 'ch-1',
-        execution_profile: 'quality',
-        created_at: '2025-01-10T00:00:00Z',
-        updated_at: '2025-01-10T00:00:00Z',
-      }],
-      total: 1,
-    })
-    vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'ch-1',
-      user_id: '1',
-      platform: 'wechat',
-      name: '测试项目',
-      avatar_url: '',
-      profile_url: 'https://mp.weixin.qq.com/test',
-      instructions: '测试定位',
-      keywords: '测试',
-      visual_style: '',
-      writer: '',
-      theme: '',
-      author: '作者',
-      portrait_reference_image: {
-        asset_id: '22222222-2222-4222-8222-222222222222',
-        file_name: 'portrait.png',
-        content_type: 'image/png',
-        size: 8,
-        download_url: 'https://cdn.example/portrait.png',
-        download_expires_at: '2026-09-13T12:00:00Z',
-      },
-
-      image_ratio: '16:9',
-      max_concurrent_tasks: 2,
-      config: { wechat_app_id: 'wx123' },
-      status: 'active',
-      created_at: '2025-01-01T00:00:00Z',
-      updated_at: '2025-01-01T00:00:00Z',
-    }])
-    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 0, promotional: 0, debt: 0, balance: 0 })
-    vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
-  })
-
-  it('keeps the plan composer usable when the optional Agent Pack catalog is partial', async () => {
-    vi.mocked(api.agentPacks.list).mockResolvedValueOnce({} as Awaited<ReturnType<typeof api.agentPacks.list>>)
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
-
+async function selectProject(dialog: HTMLElement, name: string) {
+  fireEvent.click(within(dialog).getByRole('combobox', { name: /^项目/ }))
+  fireEvent.click(await screen.findByRole('option', { name: new RegExp(name) }))
+}
+beforeEach(() => {
+  vi.clearAllMocks()
+  window.history.pushState({}, '', '/plans')
+  harness.materials = undefined
+  vi.mocked(api.projects.list).mockResolvedValue([mockProjects[0], { ...mockProjects[0], id: 'second-project', name: '第二账号', platform: 'seednote' }])
+  vi.mocked(api.plans.list).mockResolvedValue({ items: [], total: 0 })
+  vi.mocked(api.plans.create).mockResolvedValue(mockPlans.items[0])
+  vi.mocked(api.plans.update).mockResolvedValue(mockPlans.items[0])
+  vi.mocked(api.plans.scheduleRecommendation).mockResolvedValue({ time: '12:07', timezone: 'Asia/Shanghai', granularity_minutes: 15, load_balanced: true })
+  vi.mocked(api.agentPacks.list).mockResolvedValue(mockAgentPackCatalog)
+  vi.mocked(api.agentProfiles.list).mockResolvedValue([{ id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '日常创作', min_tier: 'free', available: true }])
+  vi.mocked(api.imageCapabilities.list).mockResolvedValue({ tier: 'pro', default_capability: 'standard', items: [{ key: 'standard', display_name: '标准图像', price_available: true, enabled: true }] })
+})
+describe('PlansPage multi-output plans', () => {
+  it('starts empty and required, and orders the minimal form with advanced settings collapsed', async () => {
     render(<PlansPage />)
-
-    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
+    const dialog = await openCreate()
+    for (const label of ['公众号文章', '种草笔记', '公众号贴图']) expect(await within(dialog).findByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+    expect(Array.from(dialog.querySelectorAll('h3')).map((node) => node.textContent)).toEqual(['输出类型', '项目', '创作提示', '排期', '执行配置', '共享图片设置'])
+    expect(dialog.querySelector('details')).not.toHaveAttribute('open')
+    expect(dialog).not.toHaveTextContent(/Agent 参数|任务类型|Schema|视频类型|主参考视频链接/)
   })
-
-  it('automatically supplies the plan project portrait as optional input', async () => {
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(within(dialog).queryByLabelText('参考图文件')).not.toBeInTheDocument()
-    fireEvent.submit(document.getElementById('plan-form')!)
-
-    expect(within(dialog).getByText('勾选后使用项目人物与标题设计封面')).toBeInTheDocument()
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalled())
-    expect(vi.mocked(api.plans.create).mock.calls[0][0]).toHaveProperty('cover_use_portrait', false)
-  })
-
-  it.each(['wechat', 'seednote'] as const)('submits the %s portrait requirement for recurring plans', async (platform) => {
-    const projects = await api.projects.list()
-    vi.mocked(api.projects.list).mockResolvedValue([{ ...projects[0], platform }])
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
+  it('requires explicit output selection even when opened from a typed project link', async () => {
+    window.history.pushState({}, '', `/plans?create=true&type=wechat-article&project_id=${mockProjects[0].id}`)
     render(<PlansPage />)
     const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
-    fireEvent.click(portraitSwitch)
-    fireEvent.submit(document.getElementById('plan-form')!)
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalled())
-    expect(vi.mocked(api.plans.create).mock.calls[0][0]).toMatchObject({ cover_use_portrait: true })
+    expect(await within(dialog).findByRole('button', { name: '公众号文章' })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
   })
-
-  it('disables a plan portrait when the project has no configured image', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'ch-1', user_id: '1', platform: 'wechat', name: '测试项目', avatar_url: '', profile_url: '', instructions: '测试定位', keywords: '测试', visual_style: '', writer: '', theme: '', author: '作者', image_ratio: '16:9', max_concurrent_tasks: 2, config: { wechat_app_id: 'wx123' }, status: 'active', created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z', portrait_reference_image: null,
-    } as Project])
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
+  it('loads new eligible packs dynamically and excludes incomplete or non-plan packs', async () => {
+    const base = mockAgentPackCatalog.packs[0]
+    vi.mocked(api.agentPacks.list).mockResolvedValue({ packs: [
+      ...mockAgentPackCatalog.packs,
+      { ...base, id: 'new-output', display_name: '新增输出', channel: 'new-channel' },
+      { ...base, id: 'plugin-only', display_name: '插件输出', kind: 'plugin' },
+      { ...base, id: 'no-channel', display_name: '缺少渠道', channel: '' },
+      { ...base, id: 'bad-kind', display_name: '错误任务', plan_task_kind: 'not-bound' },
+      { ...base, id: 'no-plan', display_name: '仅任务', surfaces: ['task'] },
+    ] })
     render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(within(dialog).getByText('项目尚未设置人物参考图')).toBeInTheDocument()
+    const dialog = await openCreate()
+    expect(await within(dialog).findByRole('button', { name: '新增输出' })).toBeInTheDocument()
+    for (const name of ['插件输出', '缺少渠道', '错误任务', '仅任务', '视频生成']) expect(within(dialog).queryByRole('button', { name })).not.toBeInTheDocument()
   })
-
-  it('creates a plan with the selected server-backed execution profile and exact price', async () => {
-    vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
+  it('preserves multiple outputs across project platforms and submits only shared fields', async () => {
     render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作参数：.*性价比/ }))
-    expect(await screen.findByRole('button', { name: /^性价比，/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(dialog).getByText('4,800 积分')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^平衡型，/ }))
+    const dialog = await openCreate()
+    fireEvent.click(await within(dialog).findByRole('button', { name: '公众号文章' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '公众号贴图' }))
+    await selectProject(dialog, mockProjects[0].name)
+    await selectProject(dialog, '第二账号')
+    expect(within(dialog).getByRole('button', { name: '公众号文章' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByRole('button', { name: '公众号贴图' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.change(within(dialog).getByPlaceholderText('描述每次创作的方向、要求和素材使用方式'), { target: { value: '  每周介绍新品  ' } })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
-      project_id: 'ch-1',
-      type: 'wechat-article',
-      execution_profile: 'balanced',
-    })))
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(JSON.stringify(vi.mocked(api.plans.create).mock.calls[0][0]))).toEqual({
+      project_id: 'second-project', agent_ids: ['wechat-article', 'wechat-picture'], execution_profile: 'effective',
+      cron_expr: '7 12 * * 1,3,5', prompt: '每周介绍新品', image_ratio: mockProjects[0].image_ratio,
+      skip_reference_image: false, reference_image: null, input_attachments: [], watermark: false,
+    })
   })
-
-  it('applies the backend off-peak recommendation only to a new plan', async () => {
+  it('disables submission after deselecting every output', async () => {
     render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const createDialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(createDialog).findByText(/12:07 自动执行/)).toBeInTheDocument()
-    expect(within(createDialog).getByText('当前选择为低峰时段 · 预计 3200 积分/次')).toBeInTheDocument()
-    expect(within(createDialog).getByText('高峰 4000 积分 · 低峰 3200 积分 · 低峰可节省 800 积分')).toBeInTheDocument()
-    expect(api.plans.scheduleRecommendation).toHaveBeenCalledTimes(1)
+    const dialog = await openCreate()
+    const output = await within(dialog).findByRole('button', { name: '种草笔记' })
+    fireEvent.click(output)
+    await selectProject(dialog, mockProjects[0].name)
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(output)
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+    expect(api.plans.create).not.toHaveBeenCalled()
   })
-
-  it('does not request or overwrite a recommendation when editing', async () => {
+  it('shows output labels and restores the saved selection when editing', async () => {
+    const plan = { ...mockPlans.items[0], prompt: '多种输出', agent_ids: ['seednote', 'wechat-picture'] }
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    const editDialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(within(editDialog).getByText(/09:00 自动执行/)).toBeInTheDocument()
+    expect(await screen.findByText('种草笔记')).toBeInTheDocument()
+    expect(await screen.findByText('公众号贴图')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
+    expect(within(dialog).getByRole('button', { name: '种草笔记' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByRole('button', { name: '公众号贴图' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(within(dialog).getByRole('button', { name: '公众号文章' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ agent_ids: ['seednote', 'wechat-picture', 'wechat-article'] })))
     expect(api.plans.scheduleRecommendation).not.toHaveBeenCalled()
   })
-
-  it('uses a catalog-derived off-peak fallback when recommendation is unavailable', async () => {
-    vi.mocked(api.plans.scheduleRecommendation).mockRejectedValueOnce(new Error('unavailable'))
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByText(/00:00 自动执行/)).toBeInTheDocument()
-    expect(within(dialog).getByText('智能分布暂不可用，已使用当前配置中的低峰时间。')).toBeInTheDocument()
-  })
-
-  it('retains the stored execution profile when editing a plan', async () => {
+  it.each([false, true])('shows the saved reference and submits its selection after removal=%s', async (remove) => {
+    const reference = { asset_id: '44444444-4444-4444-8444-444444444444', file_name: 'cover.png', content_type: 'image/png', size: 9, download_url: 'https://signed.example/cover.png', download_expires_at: '2026-10-04T10:00:00Z' }
+    const plan = { ...mockPlans.items[0], agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作参数：.*极致效果/ }))
-    expect(await screen.findByRole('button', { name: /^极致效果，/ })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
-
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith('plan-1', expect.objectContaining({
-      execution_profile: 'quality',
-    })))
+    fireEvent.click(within(dialog).getByText('高级设置'))
+    expect(within(dialog).getByRole('img', { name: '参考图' })).toHaveAttribute('src', reference.download_url)
+    if (remove) fireEvent.click(within(dialog).getByRole('button', { name: '移除参考图' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ reference_image: remove ? null : { asset_id: reference.asset_id } })))
   })
 
-  it('blocks plan updates when the stored execution profile is no longer available', async () => {
-    vi.mocked(api.agentProfiles.list).mockResolvedValueOnce([
-      { id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '适合日常创作', min_tier: 'free', available: true },
-      { id: 'balanced', display_name: '平衡型', provider: 'volcengine_ark', model_name: 'doubao-seed-evolving', description: '质量与速度平衡', min_tier: 'pro', available: true },
-      { id: 'quality', display_name: '极致效果', provider: 'moonshot', model_name: 'kimi-k3[1m]', description: '复杂高质量创作', min_tier: 'enterprise', available: false, unavailable_reason: 'requires_enterprise' },
-    ])
+  it('keeps manual schedule changes when the recommendation resolves later', async () => {
+    let resolveRecommendation!: (value: Awaited<ReturnType<typeof api.plans.scheduleRecommendation>>) => void
+    vi.mocked(api.plans.scheduleRecommendation).mockReturnValue(new Promise((resolve) => { resolveRecommendation = resolve }))
     render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-
-    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(await within(dialog).findByRole('button', { name: '更新' })).toBeDisabled()
-    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
-    expect(api.plans.update).not.toHaveBeenCalled()
-  })
-
-  it('keeps schedule above the create composer and orders its project, execution, and image controls', async () => {
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
-    expect(composer).toBeInTheDocument()
-    const parametersControl = await within(composer!).findByRole('button', { name: /^创作参数：/ })
-
-    const projectControl = await within(composer as HTMLElement).findByRole('combobox', { name: '项目：未选择' })
-    expect(projectControl.compareDocumentPosition(parametersControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(composer as HTMLElement).queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
-    expect(within(composer as HTMLElement).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
-
-    const scheduleLabel = within(dialog).getByText('排期设置', { selector: 'label' })
-    expect(composer).not.toContainElement(scheduleLabel)
-    expect(scheduleLabel.compareDocumentPosition(composer as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(dialog).queryByText('内容类型', { selector: 'label' })).not.toBeInTheDocument()
-    expect(within(composer as HTMLElement).queryByText(/(?:任务|图片)数量/)).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
-    expect(document.querySelectorAll('form form')).toHaveLength(0)
-  })
-
-  it('explains what the schedule field actually does', async () => {
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-
-    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(within(dialog).getByText('到点自动创建任务并按项目默认配置执行；这里的修改只影响下一次执行。')).toBeInTheDocument()
-  })
-
-  it('renders the edited plan project as a compact readonly identity inside the composer', async () => {
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-
-    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
-    const projectControl = composer?.querySelector<HTMLElement>('[data-slot="project-context-control"]')
-    expect(projectControl).toHaveAttribute('data-mode', 'readonly')
-    expect(projectControl).toHaveAttribute('data-compact', 'true')
-    expect(projectControl).toHaveTextContent('测试项目')
-    expect(within(dialog).queryByText('内容类型', { selector: 'label' })).not.toBeInTheDocument()
-  })
-
-  it('在计划创建和编辑时用模板覆盖非空 Prompt', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'seednote-project', user_id: '1', platform: 'seednote', name: '种草项目', avatar_url: '',
-      profile_url: '', instructions: '', keywords: '', visual_style: '', writer: '', theme: '', author: '',
- image_ratio: '3:4', max_concurrent_tasks: 2, config: {}, status: 'active',
-      created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z',
-    }])
-    vi.mocked(api.plans.list).mockResolvedValueOnce({
-      items: [{
-        id: 'seednote-plan', title: '种草计划', description: '', type: 'seednote', cron_expr: '0 9 * * 1', prompt: '已有计划 Prompt',
-        status: 'active', next_run_at: '2026-08-03T09:00:00Z', project_id: 'seednote-project',
-        execution_profile: 'effective', created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z',
-      }],
-      total: 1,
-    })
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '新建计划' }))
-    const createDialog = await screen.findByRole('dialog', { name: '新建计划' })
-    fireEvent.click(within(createDialog).getByRole('combobox', { name: '项目：未选择' }))
-    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
-    const createPrompt = within(createDialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...')
-    fireEvent.change(createPrompt, { target: { value: '已有创建 Prompt' } })
-    fireEvent.click(await within(createDialog).findByRole('button', { name: /知识卡片/ }))
-    expect(createPrompt).toHaveValue('模板视觉 Prompt')
-    fireEvent.click(within(createDialog).getByRole('button', { name: '取消' }))
-    fireEvent.click(await screen.findByRole('button', { name: '放弃' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建计划' })).not.toBeInTheDocument())
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    const editDialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    const editPrompt = within(editDialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...')
-    expect(editPrompt).toHaveValue('已有计划 Prompt')
-    fireEvent.click(await within(editDialog).findByRole('button', { name: /知识卡片/ }))
-    expect(editPrompt).toHaveValue('模板视觉 Prompt')
-  })
-
-  it('blocks submission when a weekly schedule has no selected day', async () => {
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
-    render(<PlansPage />)
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-
-    for (const day of ['周一', '周三', '周五']) {
-      fireEvent.click(within(dialog).getByRole('button', { name: day }))
-    }
-    expect(within(dialog).getByText('请至少选择一天')).toBeInTheDocument()
+    const dialog = await openCreate()
+    fireEvent.click(await within(dialog).findByRole('button', { name: '种草笔记' }))
+    await selectProject(dialog, mockProjects[0].name)
+    fireEvent.click(within(dialog).getByRole('button', { name: '每天' }))
+    await act(async () => resolveRecommendation({ time: '22:22', timezone: 'Asia/Shanghai', granularity_minutes: 15, load_balanced: true }))
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-
-    expect(api.plans.create).not.toHaveBeenCalled()
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({ cron_expr: '0 9 * * *' })))
   })
-
-  it('shows an error toast when pausing a plan fails (was previously silent)', async () => {
-    // pause is wired through useSubmitLock().submit(mutateAsync) with no catch —
-    // before this fix, a rejection surfaced nothing to the user. Now the server's
-    // reason (response.data.msg) is surfaced via getApiErrorMessage.
-    vi.mocked(api.plans.pause).mockRejectedValueOnce({
-      response: { data: { msg: '排期冲突，请检查现有计划' } },
-    })
-
+  it('blocks unresolved uploads and reports save failures', async () => {
+    vi.mocked(api.plans.create).mockRejectedValue(new Error('network failed'))
     render(<PlansPage />)
-
-    // mockPlans[0] is an active plan → the 暂停 button renders.
-    const pauseBtn = await screen.findByRole('button', { name: '暂停' }, { timeout: 5000 })
-    fireEvent.click(pauseBtn)
-
-    await waitFor(() => {
-      expect(errorMock).toHaveBeenCalledWith('排期冲突，请检查现有计划')
-    })
-  })
-
-  it('highlights a plan addressed by the timeline highlight parameter', async () => {
-    window.history.pushState({}, '', '/plans?highlight=plan-1')
-
-    render(<PlansPage />)
-
-    const highlightedPlan = await screen.findByTestId('plan-card-plan-1')
-    expect(highlightedPlan).toHaveAttribute('data-highlighted', 'true')
-  })
-
-  it('opens create dialog from URL intent with the project context preselected', async () => {
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
-
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
+    const dialog = await openCreate()
+    fireEvent.click(await within(dialog).findByRole('button', { name: '种草笔记' }))
+    await selectProject(dialog, mockProjects[0].name)
+    act(() => harness.materials?.onUploadingChange?.(true))
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+    act(() => { harness.materials?.onUploadingChange?.(false); harness.materials?.onFailuresChange?.(true) })
+    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+    act(() => harness.materials?.onFailuresChange?.(false))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(harness.error).toHaveBeenCalled())
     expect(dialog).toBeInTheDocument()
-    expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
   })
-
-  it('rejects a stale project from the URL intent', async () => {
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=missing-project&intent=schedule')
+  it('does not invent outputs when the catalog is empty', async () => {
+    vi.mocked(api.agentPacks.list).mockResolvedValue({ packs: [] })
     render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
-    await within(dialog).findByRole('button', { name: /^创作参数：.*性价比/ })
-    const createButton = within(dialog).getByRole('button', { name: '创建' })
-    expect(createButton).toBeDisabled()
-    fireEvent.click(createButton)
-    expect(api.plans.create).not.toHaveBeenCalled()
-  })
-
-  it('rejects an unsupported project platform from the URL intent', async () => {
-    const momentsProject = {
-      id: 'moments-project', user_id: '1', platform: 'moments', name: '朋友圈项目', avatar_url: '',
-      profile_url: '', instructions: '', keywords: '', visual_style: '', writer: '', theme: '', author: '',
-      image_ratio: '1:1', max_concurrent_tasks: 2, config: {}, status: 'active',
-      created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z',
-    } as Project
-    vi.mocked(api.projects.list).mockResolvedValueOnce([momentsProject])
-    window.history.pushState({}, '', `/plans?create=true&type=wechat-article&project_id=${momentsProject.id}&intent=schedule`)
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
-    const createButton = within(dialog).getByRole('button', { name: '创建' })
-    expect(createButton).toBeDisabled()
-    fireEvent.click(createButton)
-    expect(api.plans.create).not.toHaveBeenCalled()
-  })
-
-  it('shows and blocks an image capability query failure for an article plan', async () => {
-    vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('capability unavailable'))
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByText('图像能力暂时无法加载，请稍后重试。')).toBeInTheDocument()
-    const failedParameters = await openPlanParameters(dialog)
-    for (const button of within(within(failedParameters).getByRole('group', { name: '图片比例' })).getAllByRole('button')) {
-      expect(button).toBeDisabled()
-    }
-    const createButton = within(dialog).getByRole('button', { name: '创建' })
-    expect(createButton).toBeDisabled()
-    fireEvent.click(createButton)
-    expect(api.plans.create).not.toHaveBeenCalled()
-  })
-
-  it('uses the cheapest available profile price for article plan runs', async () => {
-    vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
-    window.history.pushState({}, '', '/plans?create=true&type=wechat-article&project_id=ch-1&intent=schedule')
-
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const price = await within(dialog).findByText('4,800 积分')
-    expect(price.parentElement).toHaveTextContent('当前每次执行固定价：4,800 积分')
-    expect(within(dialog).getByText(/余额：7,000 →/)).toBeInTheDocument()
-    expect(within(dialog).getByText('2,200')).toBeInTheDocument()
-    expect(within(dialog).queryByText(/运行预留/)).not.toBeInTheDocument()
-    expect(within(dialog).queryByText(/积分不足/)).not.toBeInTheDocument()
-  })
-})
-
-describe('PlansPage image capability contract', () => {
-  it('rejects a retired image capability before submission', () => {
-    const source = readFileSync(resolve(import.meta.dirname, 'PlansPage.tsx'), 'utf8')
-    expect(source).toContain('该图像能力已停用，请重新选择')
-    expect(source).toContain('submittedImageCapability.price_available !== true')
-    expect(source).toContain('submittedImageCapability.enabled !== true')
-  })
-
-  it('describes watermark support without exposing an image provider', () => {
-    const source = readFileSync(resolve(import.meta.dirname, 'PlansPage.tsx'), 'utf8')
-    expect(source).toContain('仅在所选图像能力支持水印时生效')
-    expect(source).not.toContain('火山引擎')
-  })
-
-  it('persists image ratio through the business platform contract', () => {
-    const source = readFileSync(resolve(import.meta.dirname, 'PlansPage.tsx'), 'utf8')
-    expect(source).toContain('image_ratio: normalizeImageRatio(plan.image_ratio)')
-    expect(source).toContain('image_ratio: values.image_ratio')
-    expect(source).toContain('supported_image_ratios')
-    expect(source).toContain('<TaskComposerParameters')
-    expect(source).toContain('normalizeImageRatio(fullProject?.image_ratio)')
-    expect(source).not.toContain('generation_features')
-    expect(source).not.toContain('generationFeatures')
-    expect(source).not.toContain('sizePresets')
-    expect(source).not.toContain('imageRatioUnsupported')
-  })
-})
-
-
-describe('PlansPage Seednote reference snapshots', () => {
-  const savedReferenceAttachment: InputAttachment = {
-    type: 'image',
-    asset_id: '22222222-2222-4222-8222-222222222222',
-    file_name: 'plan-reference.png',
-    content_type: 'image/png',
-    size: 9,
-  }
-  const savedAttachment: InputAttachment = {
-    type: 'image',
-    url: '/saved-product.png',
-    file_name: 'saved-product.png',
-    content_type: 'image/png',
-    upload_id: 'upload-saved',
-    key: 'uploads/saved-product.png',
-    instruction: '保留包装、Logo 和瓶身比例',
-  }
-  const seednoteProject = {
-    id: 'seednote-project-1',
-    user_id: '1',
-    platform: 'seednote',
-    name: '种草项目',
-    avatar_url: '',
-    profile_url: '',
-    instructions: '面向敏感肌用户',
-    keywords: '护肤',
-    visual_style: '',
-    writer: '',
-    theme: '',
-    author: '',
-
-    image_ratio: '3:4',
-    max_concurrent_tasks: 2,
-    config: {},
-    status: 'active',
-    created_at: '2025-01-01T00:00:00Z',
-    updated_at: '2025-01-01T00:00:00Z',
-  } as Project
-  const seednotePlan = {
-    id: 'seednote-plan-1',
-    type: 'seednote',
-    title: '每日种草计划',
-    description: '',
-    cron_expr: '0 9 * * 1,3,5',
-    prompt: '围绕敏感肌保湿创作',
-    status: 'active',
-    next_run_at: '2025-01-20T09:00:00Z',
-    project_id: seednoteProject.id,
-    execution_profile: 'effective',
-    input_attachments: [savedReferenceAttachment, savedAttachment],
-    created_at: '2025-01-10T00:00:00Z',
-    updated_at: '2025-01-10T00:00:00Z',
-  } as Plan
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    window.history.pushState({}, '', '/')
-    uploadToOSSMock.mockImplementation(async ({ file }: { file: File }) => ({
-      uploadId: `upload-${file.name}`,
-      key: `uploads/pending/user/${file.name}`,
-      publicUrl: `https://cdn.example/${file.name}?signed=secret`,
-      contentType: file.type,
-      size: file.size,
-    }))
-    vi.mocked(api.projects.list).mockResolvedValue([seednoteProject])
-    vi.mocked(api.plans.list).mockResolvedValue({ items: [seednotePlan], total: 1 })
-    vi.mocked(api.plans.create).mockResolvedValue(seednotePlan)
-    vi.mocked(api.plans.update).mockResolvedValue(seednotePlan)
-    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
-    resolveDownloadUrlMock.mockResolvedValue({
-      url: 'https://cdn.example.com/signed-plan-attachment.png',
-      expires_at: '2026-07-17T12:00:00Z',
-    })
-  })
-
-  it('creates a Seednote plan with the current reference snapshot', async () => {
-    window.history.pushState({}, '', `/plans?create=true&type=seednote&project_id=${seednoteProject.id}&intent=schedule`)
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(within(dialog).queryByRole('button', { name: '创建计划' })).not.toBeInTheDocument()
-    expect(within(dialog).getAllByRole('button', { name: '创建' })).toHaveLength(1)
-    const file = new File(['saved'], 'saved-product.png', { type: 'image/png' })
-    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
-    await screen.findByRole('button', { name: '预览 saved-product.png' })
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
-
-    await waitFor(() => {
-      expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'seednote',
-        input_attachments: [{
-          type: 'image',
-          upload_id: 'upload-saved-product.png',
-          key: 'uploads/pending/user/saved-product.png',
-          file_name: 'saved-product.png',
-          content_type: 'image/png',
-          size: file.size,
-        }],
-      }))
-    })
-  })
-
-  it('omits untouched ordered plan materials from the update payload', async () => {
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    expect(await screen.findByRole('button', { name: '预览 plan-reference.png' })).toBeInTheDocument()
-    const updateButton = screen.getByRole('button', { name: '更新' })
-    await waitFor(() => expect(updateButton).toBeEnabled())
-    fireEvent.click(updateButton)
-
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
-    const payload = vi.mocked(api.plans.update).mock.calls[0][1]
-    expect(payload).not.toHaveProperty('input_attachments')
-    expect(payload).not.toHaveProperty('reference_image')
-    expect(payload).not.toHaveProperty('reference_image_url')
-  })
-
-  it('removes an ordered plan image only when it is explicitly deleted', async () => {
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    fireEvent.click(await screen.findByRole('button', { name: '删除 plan-reference.png' }))
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
-    const payload = vi.mocked(api.plans.update).mock.calls[0][1]
-    expect(payload.input_attachments).toEqual([expect.objectContaining({
-      type: 'image',
-      upload_id: 'upload-saved',
-      key: 'uploads/saved-product.png',
-      file_name: 'saved-product.png',
-    })])
-    expect(payload).not.toHaveProperty('reference_image')
-    expect(payload).not.toHaveProperty('reference_image_url')
-  })
-
-  it('replaces an ordered plan image with an uploaded attachment', async () => {
-    uploadToOSSMock.mockResolvedValueOnce({
-      uploadSessionId: '55555555-5555-4555-8555-555555555555',
-      uploadId: 'upload-plan-reference',
-      key: 'uploads/pending/plan-reference.png',
-      publicUrl: 'https://staging.example/plan-reference.png',
-      previewUrl: 'https://staging.example/plan-reference.png',
-      contentType: 'image/png',
-      size: 9,
-    })
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    fireEvent.click(await screen.findByRole('button', { name: '删除 plan-reference.png' }))
-    fireEvent.change(screen.getByLabelText('选择附件文件'), {
-      target: { files: [new File(['replacement'], 'plan-replacement.png', { type: 'image/png' })] },
-    })
-    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalled())
-    const payload = vi.mocked(api.plans.update).mock.calls[0][1]
-    expect(payload.input_attachments).toEqual([
-      expect.objectContaining({ upload_id: 'upload-saved', key: 'uploads/saved-product.png' }),
-      expect.objectContaining({
-        type: 'image',
-        upload_id: 'upload-plan-reference',
-        key: 'uploads/pending/plan-reference.png',
-        file_name: 'plan-replacement.png',
-      }),
-    ])
-    expect(payload).not.toHaveProperty('reference_image')
-    expect(payload).not.toHaveProperty('reference_image_url')
-  })
-
-  it('keeps a replacement attachment open when plan update fails', async () => {
-    uploadToOSSMock.mockResolvedValueOnce({
-      uploadSessionId: '66666666-6666-4666-8666-666666666666',
-      uploadId: 'upload-expired-plan-reference',
-      key: 'uploads/pending/expired-plan-reference.png',
-      publicUrl: 'https://staging.example/expired-plan-reference.png',
-      previewUrl: 'https://staging.example/expired-plan-reference.png',
-      contentType: 'image/png',
-      size: 9,
-    })
-    vi.mocked(api.plans.update).mockRejectedValueOnce({
-      response: { data: { msg: '参考图上传会话已过期，请重新上传' } },
-    })
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    fireEvent.click(await screen.findByRole('button', { name: '删除 plan-reference.png' }))
-    fireEvent.change(screen.getByLabelText('选择附件文件'), {
-      target: { files: [new File(['replacement'], 'expired.png', { type: 'image/png' })] },
-    })
-    const preview = await screen.findByRole('button', { name: '预览 expired.png' })
-    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-
-    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('参考图上传会话已过期，请重新上传'))
-    expect(screen.getByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
-    expect(preview).toBeInTheDocument()
-    const payload = vi.mocked(api.plans.update).mock.calls[0][1]
-    expect(payload.input_attachments).toEqual([
-      expect.objectContaining({ upload_id: 'upload-saved', key: 'uploads/saved-product.png' }),
-      expect.objectContaining({
-        type: 'image',
-        upload_id: 'upload-expired-plan-reference',
-        key: 'uploads/pending/expired-plan-reference.png',
-        file_name: 'expired.png',
-      }),
-    ])
-    expect(payload).not.toHaveProperty('reference_image')
-    expect(payload).not.toHaveProperty('reference_image_url')
-  })
-
-  it('hydrates edit snapshots without marking ordered materials as changed', async () => {
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    expect(await screen.findByRole('dialog', { name: '编辑计划' })).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '预览 saved-product.png' })).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(1))
-    expect(vi.mocked(api.plans.update).mock.calls[0][1]).not.toHaveProperty('input_attachments')
-  })
-
-  it('guards native form submit until plan reference uploads finish', async () => {
-    window.history.pushState({}, '', `/plans?create=true&type=seednote&project_id=${seednoteProject.id}&intent=schedule`)
-    let resolveUpload!: (value: unknown) => void
-    uploadToOSSMock.mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve }))
-    render(<PlansPage />)
-
-    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('选择附件文件'), {
-      target: { files: [new File(['pending'], 'pending.png', { type: 'image/png' })] },
-    })
-
-    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
-    const form = document.getElementById('plan-form')
-    expect(form).toBeInstanceOf(HTMLFormElement)
-    fireEvent.submit(form!)
-    await act(async () => { await Promise.resolve() })
-    expect(api.plans.create).not.toHaveBeenCalled()
-
-    await act(async () => {
-      resolveUpload({ uploadId: 'pending', key: 'uploads/pending/pending.png', publicUrl: '', contentType: 'image/png', size: 7 })
-      await Promise.resolve()
-    })
-
-    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
-    fireEvent.submit(form!)
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
-      input_attachments: [expect.objectContaining({
-        upload_id: 'pending',
-        key: 'uploads/pending/pending.png',
-      })],
-    })))
-  })
-
-  it('does not dirty hydrated attachments but marks instruction edits dirty', async () => {
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByRole('button', { name: '预览 saved-product.png' })
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
-    expect(screen.queryByRole('alertdialog', { name: '放弃编辑？' })).not.toBeInTheDocument()
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByRole('button', { name: '预览 saved-product.png' })
-    fireEvent.click(screen.getByRole('button', { name: '编辑 saved-product.png 的附件说明' }))
-    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
-      target: { value: '改用新版包装说明' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(await screen.findByRole('alertdialog', { name: '放弃编辑？' })).toBeInTheDocument()
-  })
-
-  it('keeps legacy owner keys for preview but normalizes touched snapshots before update', async () => {
-    const legacyPlan = {
-      ...seednotePlan,
-      input_attachments: [
-        {
-          type: 'image',
-          url: '/api/v1/files/plans/seednote-plan-1/input/legacy.png',
-          key: 'plans/seednote-plan-1/input/legacy.png',
-          file_name: 'legacy.png',
-          content_type: 'image/png',
-          size: 20,
-          instruction: '保留原图',
-        },
-        {
-          type: 'document',
-          key: 'plans/seednote-plan-1/input/key-only.pdf',
-          file_name: 'key-only.pdf',
-          content_type: 'application/pdf',
-          size: 30,
-        },
-      ],
-    } as Plan
-    vi.mocked(api.plans.list).mockResolvedValue({ items: [legacyPlan], total: 1 })
-    vi.mocked(api.plans.update).mockResolvedValue(legacyPlan)
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    fireEvent.click(within(dialog).getByRole('button', { name: '预览 legacy.png' }))
-    await waitFor(() => expect(resolveDownloadUrlMock).toHaveBeenCalledWith({
-      key: 'plans/seednote-plan-1/input/legacy.png',
-      owner_type: 'plan',
-      owner_id: 'seednote-plan-1',
-    }))
-    fireEvent.click(screen.getByRole('button', { name: '关闭附件预览' }))
-
-    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(1))
-    expect(vi.mocked(api.plans.update).mock.calls[0][1]).not.toHaveProperty('input_attachments')
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    const editedDialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    fireEvent.click(within(editedDialog).getByRole('button', { name: '编辑 legacy.png 的附件说明' }))
-    fireEvent.change(await screen.findByRole('textbox', { name: '附件说明' }), {
-      target: { value: '使用新版说明' },
-    })
-    fireEvent.click(within(editedDialog).getByRole('button', { name: '更新' }))
-    expect(await within(editedDialog).findByText('附件 key-only.pdf 缺少可复用的内部文件地址，请删除后重新上传')).toBeInTheDocument()
-    expect(api.plans.update).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(within(editedDialog).getByRole('button', { name: '删除 key-only.pdf' }))
-    fireEvent.click(within(editedDialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(api.plans.update).mock.calls[1][1]).toEqual(expect.objectContaining({
-      input_attachments: [{
-        type: 'image',
-        url: '/api/v1/files/plans/seednote-plan-1/input/legacy.png',
-        file_name: 'legacy.png',
-        content_type: 'image/png',
-        size: 20,
-        instruction: '使用新版说明',
-      }],
-    }))
-  })
-})
-
-describe('PlansPage Montage input', () => {
-  const montageProject = {
-    id: 'project-montage',
-    user_id: '1',
-    platform: 'montage',
-    name: '视频生成项目',
-    avatar_url: '',
-    profile_url: '',
-    instructions: '新品短视频',
-    keywords: '',
-    visual_style: '',
-    writer: '',
-    theme: '',
-    author: '',
-
-    reference_image_url: '',
-    image_ratio: '16:9',
-    montage_defaults: {
-      default_pipeline: 'cinematic',
-      preferences: {
-        duration_seconds: 45,
-        style: 'project style',
-        music_prompt: 'project music',
-        subtitle_mode: 'burned_in',
-        voiceover_mode: 'narrated',
-      },
-      asset_guidance: '优先使用实拍素材',
-      delivery_targets: ['final_video'],
-    },
-    max_concurrent_tasks: 2,
-    config: {},
-    status: 'active',
-    created_at: '2025-01-01T00:00:00Z',
-    updated_at: '2025-01-01T00:00:00Z',
-  } as Project
-  const savedMontagePlan = {
-    id: 'montage-plan-1',
-    type: 'montage',
-    title: '视频生成周计划',
-    description: '',
-    cron_expr: '0 9 * * 1',
-    prompt: '',
-    status: 'active',
-    next_run_at: '2025-01-20T09:00:00Z',
-    project_id: montageProject.id,
-    execution_profile: 'effective',
-    image_ratio: '16:9',
-    image_capability_key: 'standard',
-    montage_input: {
-      brief: '保存的 brief',
-      pipeline_key: 'screen-demo',
-      source_assets: [],
-      preferences: { duration_seconds: 12 },
-      delivery_targets: [],
-    },
-    created_at: '2025-01-10T00:00:00Z',
-    updated_at: '2025-01-10T00:00:00Z',
-  } as Plan
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    window.history.pushState({}, '', '/')
-    referenceMaterialInputHarness.props = undefined
-    vi.mocked(api.projects.list).mockResolvedValue([montageProject])
-    vi.mocked(api.plans.list).mockResolvedValue({ items: [], total: 0 })
-    vi.mocked(api.plans.create).mockResolvedValue(savedMontagePlan)
-    vi.mocked(api.plans.update).mockResolvedValue(savedMontagePlan)
-    vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 10000, promotional: 0, debt: 0, balance: 10000 })
-    vi.mocked(api.montageCapabilities.list).mockResolvedValue({
-      enabled: true,
-      default_pipeline: 'cinematic',
-      max_duration_seconds: 600,
-      max_assets: 20,
-      items: [
-        {
-          key: 'cinematic', display_name: '电影感制作', description: '品牌片、预告片与情绪叙事',
-          best_for: ['品牌发布', '概念预告'], source_hint: '可使用视频、图片，也可仅根据创意说明生成',
-          output_hint: '一条完整成片', source_requirement: 'optional', output_mode: 'single',
-          recommended_duration_seconds: 30,
-        },
-        {
-          key: 'screen-demo', display_name: '屏幕演示', description: '产品教程、软件操作与终端流程',
-          best_for: ['产品演示', '终端操作'], source_hint: '可上传屏幕录制，或在说明中给出可复现的操作步骤',
-          output_hint: '一条清晰的演示视频', source_requirement: 'optional', output_mode: 'single',
-          recommended_duration_seconds: 60,
-        },
-      ],
-    })
-  })
-
-  it('edits saved video replication input without replacing it with project defaults', async () => {
-    const project = { ...montageProject, platform: 'hypit', hypit_defaults: { preferences: { duration_seconds: 80 } } } as Project
-    const plan = { ...savedMontagePlan, type: 'hypit', hypit_input: { brief: '已有复刻要求', reference: { type: 'video_url', url: 'https://example.com/saved.mp4' }, preferences: { duration_seconds: 12, aspect_ratio: '1:1' } } } as Plan
-    vi.mocked(api.projects.list).mockResolvedValue([project])
-    vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    await screen.findByLabelText('复刻要求')
-    expect(screen.getByLabelText('目标时长（可选）')).toHaveValue(12)
-    expect(screen.getByLabelText('主参考视频链接')).toHaveValue('https://example.com/saved.mp4')
-    fireEvent.change(screen.getByLabelText('复刻要求'), { target: { value: '修改后复刻要求' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ hypit_input: expect.objectContaining({ brief: '修改后复刻要求', preferences: { duration_seconds: 12, aspect_ratio: '1:1' } }) })))
-  })
-
-  it.each(['wechat', 'seednote', 'montage', 'hypit'] as const)('saves a disabled %s portrait cover and restores it when editing again', async (platform) => {
-    const project: Project = {
-      ...montageProject,
-      platform,
-      portrait_reference_image: { asset_id: '22222222-2222-4222-8222-222222222222', download_url: '/portrait.png', file_name: 'portrait.png', content_type: 'image/png', size: 8, download_expires_at: '' },
-    }
-    let savedPlan: Plan = {
-      ...savedMontagePlan,
-      type: platform === 'wechat' ? 'wechat-article' : platform,
-      prompt: '使用项目人物介绍新品',
-      cover_use_portrait: true,
-      montage_input: platform === 'montage' ? savedMontagePlan.montage_input : undefined,
-      hypit_input: platform === 'hypit' ? { brief: '使用项目人物介绍新品', reference: { type: 'video_url', url: 'https://example.com/saved.mp4' }, preferences: { aspect_ratio: '16:9' } } : undefined,
-    }
-    vi.mocked(api.projects.list).mockResolvedValue([project])
-    vi.mocked(api.plans.list).mockImplementation(async () => ({ items: [savedPlan], total: 1 }))
-    vi.mocked(api.plans.update).mockImplementationOnce(async (_id, request) => {
-      savedPlan = { ...savedPlan, cover_use_portrait: request.cover_use_portrait ?? savedPlan.cover_use_portrait }
-      return savedPlan
-    })
-
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
-    expect(portraitSwitch).toBeChecked()
-    fireEvent.click(portraitSwitch)
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: '更新' })).toBeEnabled())
-    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(savedPlan.id, expect.objectContaining({ cover_use_portrait: false })))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑计划' })).not.toBeInTheDocument())
-    await waitFor(() => expect(api.plans.list).toHaveBeenCalledTimes(2))
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    const reopenedDialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(await within(reopenedDialog).findByRole('switch', { name: '人物封面' })).not.toBeChecked()
-  })
-
-  it.each([0, 12])('saves a follow-source plan when its previous duration is %s', async (duration) => {
-    const project = { ...montageProject, platform: 'hypit', hypit_defaults: { preferences: { duration_seconds: 80 } } } as Project
-    const plan = { ...savedMontagePlan, type: 'hypit', hypit_input: { brief: '复刻要求', reference: { type: 'video_url', url: 'https://example.com/saved.mp4' }, preferences: { duration_seconds: duration } } } as Plan
-    vi.mocked(api.projects.list).mockResolvedValue([project])
-    vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
-    render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    const input = await screen.findByLabelText('目标时长（可选）')
-    expect(input).toHaveValue(duration || null)
-    if (duration) fireEvent.change(input, { target: { value: '' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: '更新' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ hypit_input: expect.objectContaining({ preferences: { duration_seconds: 0 } }) })))
-  })
-
-  it('shows the replication brand instead of the raw platform key in the plan dialog', async () => {
-    const project = { ...montageProject, platform: 'hypit', name: 'Hypit' } as Project
-    vi.mocked(api.projects.list).mockResolvedValue([project])
-    window.history.pushState({}, '', `/plans?create=true&type=hypit&project_id=${project.id}&intent=schedule`)
-    render(<PlansPage />)
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    const selector = await within(dialog).findByRole('combobox', { name: /^项目：/ })
-    await waitFor(() => expect(selector).toHaveTextContent('Hypit'))
-    expect(selector).not.toHaveTextContent('视频复刻')
-    expect(selector.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
-    expect(selector).not.toHaveTextContent('Hypit项目')
-    expect(dialog).not.toHaveTextContent('montage')
-    expect(dialog).not.toHaveTextContent('hypit')
-  })
-
-  it('blocks plan creation while supplemental media has unresolved upload failures', async () => {
-    const project = { ...montageProject, platform: 'hypit' } as Project
-    const second = { ...project, id: 'second-hypit-plan-project', name: '第二复刻计划项目' } as Project
-    vi.mocked(api.projects.list).mockResolvedValue([project, second])
-    window.history.pushState({}, '', `/plans?create=true&type=hypit&project_id=${project.id}&intent=schedule`)
-    render(<PlansPage />)
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    await within(dialog).findByLabelText('主参考视频链接')
-    fireEvent.change(within(dialog).getByLabelText('复刻要求'), { target: { value: '使用产品素材' } })
-    fireEvent.change(within(dialog).getByLabelText('主参考视频链接'), { target: { value: 'https://example.com/story.mp4' } })
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
-    act(() => referenceMaterialInputHarness.props?.onUploadingChange?.(true))
-    fireEvent.click(within(dialog).getByRole('combobox', { name: /^项目：/ }))
-    fireEvent.click(await screen.findByRole('option', { name: /第二复刻计划项目/ }))
-    expect(within(dialog).getByLabelText('主参考视频链接')).toHaveValue('https://example.com/story.mp4')
-    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
-    act(() => {
-      referenceMaterialInputHarness.props?.onUploadingChange?.(false)
-      referenceMaterialInputHarness.props?.onFailuresChange?.(true)
-    })
-    expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
-    act(() => referenceMaterialInputHarness.props?.onFailuresChange?.(false))
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
-    expect(api.plans.create).not.toHaveBeenCalled()
-  })
-
-  it.each([false, true])('creates a video replication plan with portrait selection %s and independent references', async (usePortrait) => {
-    const project = { ...montageProject, portrait_reference_image: { asset_id: '22222222-2222-4222-8222-222222222222', download_url: '/portrait.png', file_name: 'portrait.png', content_type: 'image/png', size: 8, download_expires_at: '' }, platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '9:16', language: '中文' } } } as Project
-    vi.mocked(api.projects.list).mockResolvedValue([project])
-    window.history.pushState({}, '', `/plans?create=true&type=hypit&project_id=${project.id}&intent=schedule`)
-    render(<PlansPage />)
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    await within(dialog).findByLabelText('主参考视频链接')
-    fireEvent.change(within(dialog).getByLabelText('复刻要求'), { target: { value: '每周复刻品牌故事' } })
-    fireEvent.change(within(dialog).getByLabelText('主参考视频链接'), { target: { value: 'https://example.com/story.mp4' } })
-    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
-    if (usePortrait) fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'hypit', cover_use_portrait: usePortrait, hypit_input: expect.objectContaining({ brief: '每周复刻品牌故事', reference: { type: 'video_url', url: 'https://example.com/story.mp4' }, preferences: { aspect_ratio: '9:16', language: '中文' } }) })))
-  })
-
-  it('uses the preselected project platform when the URL type conflicts', async () => {
-    window.history.pushState({}, '', `/plans?create=true&type=wechat-article&project_id=${montageProject.id}&intent=schedule`)
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByRole('radio', { name: /电影感制作/ })).toBeChecked()
-    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
-    const montageParameters = await openPlanParameters(dialog)
-	  expect(within(montageParameters).getByText('视频比例')).toBeInTheDocument()
-	  expect(within(montageParameters).getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
-
-    fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
-      target: { value: '按项目平台创建' },
-    })
-    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
-      project_id: montageProject.id,
-      type: 'montage',
-      montage_input: expect.objectContaining({
-        brief: '按项目平台创建',
-        pipeline_key: 'cinematic',
-      }),
-    })))
-  })
-
-  it.each([false, true])('creates a Montage plan with portrait selection %s', async (usePortrait) => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ ...montageProject, portrait_reference_image: { asset_id: '22222222-2222-4222-8222-222222222222', download_url: '/portrait.png', file_name: 'portrait.png', content_type: 'image/png', size: 8, download_expires_at: '' } }])
-    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByRole('radio', { name: /电影感制作/ })).toBeChecked()
-    fireEvent.change(within(dialog).getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
-      target: { value: '无需图片能力的 Montage' },
-    })
-    if (usePortrait) fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
-      project_id: montageProject.id,
-      type: 'montage',
-    })))
-    const createCalls = vi.mocked(api.plans.create).mock.calls
-    const payload = createCalls[createCalls.length - 1]?.[0]
-    expect(payload).toMatchObject({ image_ratio: '16:9', cover_use_portrait: usePortrait })
-  })
-
-  it('inherits project defaults and creates a plan with complete Montage input', async () => {
-    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
-    render(<PlansPage />)
-
-    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
-    expect(await screen.findByRole('radio', { name: /电影感制作/ })).toBeChecked()
-    expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(45)
-    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
-
-    fireEvent.change(screen.getByPlaceholderText('描述每次计划的创作方向、内容要求和素材使用方式...'), {
-      target: { value: '每周新品发布短片' },
-    })
-    act(() => {
-      referenceMaterialInputHarness.props?.onChange([{
-        type: 'video',
-        url: '/source.mp4',
-        file_name: 'source.mp4',
-        content_type: 'video/mp4',
-        size: 42,
-      }])
-    })
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
-
-    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'montage',
-      project_id: montageProject.id,
-      montage_input: expect.objectContaining({
-        brief: '每周新品发布短片',
-        pipeline_key: 'cinematic',
-        source_assets: [expect.objectContaining({ type: 'video_url', url: '/source.mp4' })],
-        preferences: {
-          duration_seconds: 45,
-          style: 'project style',
-          music_prompt: 'project music',
-          subtitle_mode: 'burned_in',
-          voiceover_mode: 'narrated',
-        },
-        delivery_targets: ['final_video'],
-      }),
-    })))
-  })
-
-  it('keeps saved Montage input ahead of current project defaults when editing', async () => {
-    vi.mocked(api.plans.list).mockResolvedValue({ items: [savedMontagePlan], total: 1 })
-    render(<PlansPage />)
-
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
-    const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
-    expect(await screen.findByRole('radio', { name: /屏幕演示/ })).toBeChecked()
-    expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(12)
-    const montageParameters = await openPlanParameters(dialog)
-    expect(within(montageParameters).getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(await within(dialog).findByRole('button', { name: /^创作参数：/ }))
-    expect(screen.queryByText('final_video')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-
-    await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(
-      savedMontagePlan.id,
-      expect.objectContaining({
-        image_ratio: '16:9',
-        image_capability_key: 'standard',
-        montage_input: expect.objectContaining({
-          pipeline_key: 'screen-demo',
-          preferences: expect.objectContaining({ duration_seconds: 12 }),
-          delivery_targets: [],
-        }),
-      }),
-    ))
-  })
-
-  it('blocks Montage plan save while source assets are uploading', async () => {
-    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
-    render(<PlansPage />)
-
-    expect(await screen.findByRole('dialog', { name: '新建计划' })).toBeInTheDocument()
-    await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
-
-    act(() => {
-      referenceMaterialInputHarness.props?.onUploadingChange?.(true)
-    })
-
-    expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
-  })
-
-  it('blocks Montage plan save when the capability catalog fails to load', async () => {
-    vi.mocked(api.montageCapabilities.list).mockRejectedValueOnce(new Error('catalog unavailable'))
-    window.history.pushState({}, '', `/plans?create=true&type=montage&project_id=${montageProject.id}&intent=schedule`)
-
-    render(<PlansPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建计划' })
-    expect(await within(dialog).findByText('视频类型加载失败，暂时无法创建视频')).toBeInTheDocument()
+    const dialog = await openCreate()
+    expect(await within(dialog).findByText('暂时没有可用于计划的输出类型。')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '公众号文章' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
   })
 })

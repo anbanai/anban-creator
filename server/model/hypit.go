@@ -31,7 +31,6 @@ type HypitDefaults struct {
 }
 
 func (t *Task) SetHypitInput(v HypitInput)          { t.HypitInput = datatypes.NewJSONType(v) }
-func (p *Plan) SetHypitInput(v HypitInput)          { p.HypitInput = datatypes.NewJSONType(v) }
 func (p *Project) SetHypitDefaults(v HypitDefaults) { p.HypitDefaults = datatypes.NewJSONType(v) }
 func IsHypitPlatform(v string) bool                 { return v == PlatformHypit }
 

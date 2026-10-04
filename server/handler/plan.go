@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -123,6 +125,7 @@ func validAttachmentURL(url string) bool {
 
 type createPlanRequest struct {
 	ProjectID          string                           `json:"project_id"`
+	AgentIDs           []string                         `json:"agent_ids"`
 	ExecutionProfile   string                           `json:"execution_profile"`
 	CronExpr           string                           `json:"cron_expr"`
 	Prompt             string                           `json:"prompt"`
@@ -131,153 +134,50 @@ type createPlanRequest struct {
 	SkipReferenceImage *bool                            `json:"skip_reference_image"`
 	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
 	Watermark          *bool                            `json:"watermark"`
-	// HasContentImage / HasTailImage: seednote image composition (cover always
-	// generated). nil → fall back to plan model defaults (content on, tail off).
-	HasContentImage *bool `json:"has_content_image,omitempty"`
-	HasTailImage    *bool `json:"has_tail_image,omitempty"`
-	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
-	// (cover NOT mandatory). nil → fall back to plan model defaults (both on).
-	ArticleWithCover         *bool                    `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                    `json:"article_with_content_images,omitempty"`
-	CoverUsePortrait         bool                     `json:"cover_use_portrait,omitempty"`
-	MontageInput             *model.MontageInput      `json:"montage_input,omitempty"`
-	HypitInput               *model.HypitInput        `json:"hypit_input,omitempty"`
-	InputAttachments         []model.EntryAttachment  `json:"input_attachments,omitempty"`
-	AgentInput               map[string]any           `json:"agent_input,omitempty"`
-	Entries                  []createPlanEntryRequest `json:"entries,omitempty"`
+	InputAttachments   []model.EntryAttachment          `json:"input_attachments,omitempty"`
 }
 
 type updatePlanRequest struct {
-	ExecutionProfile         string                           `json:"execution_profile"`
-	CronExpr                 string                           `json:"cron_expr"`
-	Prompt                   string                           `json:"prompt"`
-	ImageCapabilityKey       *string                          `json:"image_capability_key"`
-	ImageRatio               *string                          `json:"image_ratio"`
-	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
-	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
-	ReferenceImageSet        bool                             `json:"-"`
-	Watermark                *bool                            `json:"watermark"`
-	HasContentImage          *bool                            `json:"has_content_image,omitempty"`
-	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
-	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
-	CoverUsePortrait         *bool                            `json:"cover_use_portrait,omitempty"`
-	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
-	HypitInput               *model.HypitInput                `json:"hypit_input,omitempty"`
-	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
-	AgentInput               *map[string]any                  `json:"agent_input,omitempty"`
+	AgentIDs           *[]string                        `json:"agent_ids"`
+	ExecutionProfile   string                           `json:"execution_profile"`
+	CronExpr           string                           `json:"cron_expr"`
+	Prompt             string                           `json:"prompt"`
+	ImageCapabilityKey *string                          `json:"image_capability_key"`
+	ImageRatio         *string                          `json:"image_ratio"`
+	SkipReferenceImage *bool                            `json:"skip_reference_image"`
+	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
+	ReferenceImageSet  bool                             `json:"-"`
+	Watermark          *bool                            `json:"watermark"`
+	InputAttachments   *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
 }
 
-type createPlanEntryRequest struct {
-	AgentID          string         `json:"agent_id"`
-	Channel          string         `json:"channel"`
-	TaskKind         string         `json:"task_kind"`
-	ExecutionProfile string         `json:"execution_profile"`
-	AgentInput       map[string]any `json:"agent_input"`
-	ImageDefaults    map[string]any `json:"image_defaults"`
-}
-
-type updatePlanEntryRequest struct {
-	AgentID          *string         `json:"agent_id"`
-	Channel          *string         `json:"channel"`
-	TaskKind         *string         `json:"task_kind"`
-	ExecutionProfile *string         `json:"execution_profile"`
-	AgentInput       *map[string]any `json:"agent_input"`
-	ImageDefaults    *map[string]any `json:"image_defaults"`
-	Status           *string         `json:"status"`
-}
-
-func (h *PlanHandler) CreateEntry(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+func rejectPlanRemovedFields(body []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return fmt.Errorf("invalid plan request: %w", err)
 	}
-	var req createPlanEntryRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	removed := map[string]struct{}{
+		"type": {}, "agent_input": {}, "entries": {}, "agent_id": {},
+		"channel": {}, "task_kind": {}, "image_defaults": {},
+		"has_content_image": {}, "has_tail_image": {},
+		"article_with_cover": {}, "article_with_content_images": {},
+		"cover_use_portrait": {}, "montage_input": {}, "hypit_input": {},
 	}
-	entry, err := h.service.CreateEntry(c.Context(), service.CreatePlanEntryParams{
-		UserID: userID, PlanID: c.Params("id"), AgentID: req.AgentID, Channel: req.Channel,
-		TaskKind: req.TaskKind, ExecutionProfile: req.ExecutionProfile,
-		AgentInput: req.AgentInput, ImageDefaults: req.ImageDefaults,
-	})
-	if err != nil {
-		if errors.Is(err, service.ErrDuplicatePlanAgent) {
-			return Error(c, fiber.StatusConflict, err.Error())
+	for key := range raw {
+		if _, ok := removed[strings.ToLower(strings.TrimSpace(key))]; ok {
+			return fmt.Errorf("%s is no longer supported; use agent_ids and shared plan fields", key)
 		}
-		if strings.Contains(err.Error(), "not owned") {
-			return Forbidden(c, err.Error())
-		}
-		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	return Success(c, entry)
-}
-
-func (h *PlanHandler) ListEntries(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	entries, err := h.service.ListEntries(c.Context(), userID, c.Params("id"))
-	if err != nil {
-		if strings.Contains(err.Error(), "not owned") {
-			return Forbidden(c, err.Error())
-		}
-		return Error(c, fiber.StatusNotFound, "plan not found")
-	}
-	return Success(c, entries)
-}
-
-func (h *PlanHandler) UpdateEntry(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	var req updatePlanEntryRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-	entry, err := h.service.UpdateEntry(c.Context(), service.UpdatePlanEntryParams{
-		UserID: userID, PlanID: c.Params("id"), EntryID: c.Params("entry_id"), AgentID: req.AgentID, Channel: req.Channel,
-		TaskKind: req.TaskKind, ExecutionProfile: req.ExecutionProfile,
-		AgentInput: req.AgentInput, ImageDefaults: req.ImageDefaults, Status: req.Status,
-	})
-	if err != nil {
-		if errors.Is(err, service.ErrPlanEntryNotFound) {
-			return Error(c, fiber.StatusNotFound, err.Error())
-		}
-		if errors.Is(err, service.ErrDuplicatePlanAgent) {
-			return Error(c, fiber.StatusConflict, err.Error())
-		}
-		if strings.Contains(err.Error(), "not owned") {
-			return Forbidden(c, err.Error())
-		}
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-	return Success(c, entry)
-}
-
-func (h *PlanHandler) DeleteEntry(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	if err := h.service.DeleteEntry(c.Context(), userID, c.Params("id"), c.Params("entry_id")); err != nil {
-		if errors.Is(err, service.ErrPlanEntryNotFound) {
-			return Error(c, fiber.StatusNotFound, err.Error())
-		}
-		if strings.Contains(err.Error(), "not owned") {
-			return Forbidden(c, err.Error())
-		}
-		return Error(c, fiber.StatusInternalServerError, "failed to delete plan entry")
-	}
-	return Success(c, fiber.Map{"deleted": true})
+	return nil
 }
 
 // Create handles POST /api/v1/plans.
 func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
+	}
+	if err := rejectPlanRemovedFields(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	var req createPlanRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -286,24 +186,11 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
 	}
-	if strings.TrimSpace(req.ExecutionProfile) == "" && len(req.Entries) == 0 {
+	if strings.TrimSpace(req.ExecutionProfile) == "" {
 		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
 	}
-	if h.repo != nil {
-		if project, projectErr := h.repo.Projects().FindByID(c.Context(), req.ProjectID); projectErr == nil {
-			if project.Platform == model.PlatformMoments {
-				return Error(c, fiber.StatusBadRequest, "plans are not supported for moments projects")
-			}
-			if req.MontageInput != nil && !model.IsMontagePlatform(project.Platform) {
-				return Error(c, fiber.StatusBadRequest, "montage_input is only valid for video generation plans")
-			}
-		}
-	}
-	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
-		return Error(c, fiber.StatusBadRequest, "视频生成任务需要填写需求")
-	}
-	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
+	if len(req.AgentIDs) == 0 {
+		return Error(c, fiber.StatusBadRequest, "at least one agent_id is required")
 	}
 
 	userID := GetUserID(c)
@@ -348,48 +235,19 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return respondInputAttachmentError(c, h.logger, err)
 	}
 	req.InputAttachments = validatedAttachments
-	if h.repo != nil {
-		if req.HypitInput != nil {
-			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeHypitAsset, hypitAssetURLs(req.HypitInput))
-			if err != nil {
-				return respondUploadSessionFinalizeError(c, h.logger, err)
-			}
-			rewriteHypitAssetURLs(req.HypitInput, rewrites)
-		}
-		if isMontageProjectForUser(c.Context(), h.repo, userID, req.ProjectID) {
-			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
-			if err != nil {
-				return respondUploadSessionFinalizeError(c, h.logger, err)
-			}
-			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
-		}
-	}
-
-	entries := make([]service.CreatePlanEntryParams, 0, len(req.Entries))
-	for _, entry := range req.Entries {
-		entries = append(entries, service.CreatePlanEntryParams{AgentID: entry.AgentID, Channel: entry.Channel, TaskKind: entry.TaskKind, ExecutionProfile: entry.ExecutionProfile, AgentInput: entry.AgentInput, ImageDefaults: entry.ImageDefaults})
-	}
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
-		UserID:                   userID,
-		ProjectID:                req.ProjectID,
-		ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
-		CronExpr:                 req.CronExpr,
-		Prompt:                   req.Prompt,
-		ImageCapabilityKey:       req.ImageCapabilityKey,
-		ImageRatio:               req.ImageRatio,
-		SkipReferenceImage:       req.SkipReferenceImage,
-		ReferenceImageAssetID:    referenceAssetID,
-		Watermark:                req.Watermark,
-		HasContentImage:          req.HasContentImage,
-		HasTailImage:             req.HasTailImage,
-		ArticleWithCover:         req.ArticleWithCover,
-		ArticleWithContentImages: req.ArticleWithContentImages,
-		CoverUsePortrait:         req.CoverUsePortrait,
-		MontageInput:             req.MontageInput,
-		HypitInput:               req.HypitInput,
-		InputAttachments:         req.InputAttachments,
-		AgentInput:               req.AgentInput,
-		Entries:                  entries,
+		UserID:                userID,
+		ProjectID:             req.ProjectID,
+		ExecutionProfile:      strings.TrimSpace(req.ExecutionProfile),
+		CronExpr:              req.CronExpr,
+		Prompt:                req.Prompt,
+		ImageCapabilityKey:    req.ImageCapabilityKey,
+		ImageRatio:            req.ImageRatio,
+		SkipReferenceImage:    req.SkipReferenceImage,
+		ReferenceImageAssetID: referenceAssetID,
+		Watermark:             req.Watermark,
+		InputAttachments:      req.InputAttachments,
+		AgentIDs:              req.AgentIDs,
 	})
 	if err != nil {
 		if handled, response := respondAgentProfileError(c, err); handled {
@@ -399,22 +257,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
-		if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if errors.Is(err, service.ErrUnsupportedPlanPlatform) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if errors.Is(err, service.ErrCoverPortraitUnavailable) {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if errors.Is(err, service.ErrInvalidAgentInput) {
-			return Error(c, fiber.StatusBadRequest, "invalid_agent_input: "+err.Error())
-		}
-		if errors.Is(err, service.ErrUnsupportedPlanPlatform) || strings.Contains(err.Error(), "montage_input") || strings.Contains(err.Error(), "image_ratio") || strings.Contains(err.Error(), "Agent ") {
-			return Error(c, fiber.StatusBadRequest, err.Error())
-		}
-		if strings.Contains(err.Error(), "plans are not supported for moments projects") {
+		if errors.Is(err, service.ErrUnsupportedPlanPlatform) || strings.Contains(err.Error(), "image_ratio") || strings.Contains(err.Error(), "Agent ") || strings.Contains(err.Error(), "agent_id") {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -455,11 +298,6 @@ func (h *PlanHandler) List(c fiber.Ctx) error {
 	if err := h.presentPlanReferences(c.Context(), userID, plans); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
-	for _, plan := range plans {
-		if entries, entryErr := h.service.ListEntries(c.Context(), userID, plan.ID); entryErr == nil {
-			plan.Entries = entries
-		}
-	}
 
 	return Success(c, fiber.Map{
 		"items": planAPIResponses(plans, h.store),
@@ -490,9 +328,6 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 	if err := h.presentPlanReference(c.Context(), userID, plan); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
-	if entries, entryErr := h.service.ListEntries(c.Context(), userID, plan.ID); entryErr == nil {
-		plan.Entries = entries
-	}
 
 	return Success(c, planAPIResponse(plan, h.store))
 }
@@ -512,6 +347,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if err := rejectRemovedRequestFields(c.Body()); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	if err := rejectPlanRemovedFields(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	var req updatePlanRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
@@ -519,13 +357,10 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if strings.TrimSpace(req.ExecutionProfile) == "" {
 		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
 	}
+	if req.AgentIDs == nil || len(*req.AgentIDs) == 0 {
+		return Error(c, fiber.StatusBadRequest, "at least one agent_id is required")
+	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
-	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
-	if req.MontageInput != nil && strings.TrimSpace(req.MontageInput.Brief) == "" {
-		return Error(c, fiber.StatusBadRequest, "视频生成任务需要填写需求")
-	}
 	// Verify ownership before update.
 	existing, err := h.service.GetByID(c.Context(), id)
 	if err != nil {
@@ -581,42 +416,18 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		}
 		req.InputAttachments = &validatedAttachments
 	}
-	if h.repo != nil {
-		if model.IsHypitPlatform(existing.Type) {
-			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeHypitAsset, hypitAssetURLs(req.HypitInput))
-			if err != nil {
-				return respondUploadSessionFinalizeError(c, h.logger, err)
-			}
-			rewriteHypitAssetURLs(req.HypitInput, rewrites)
-		}
-		if model.IsMontagePlatform(existing.Type) {
-			rewrites, err := finalizeUploadSessionURLs(c.Context(), h.store, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
-			if err != nil {
-				return respondUploadSessionFinalizeError(c, h.logger, err)
-			}
-			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
-		}
-	}
-
 	updateParams := service.UpdatePlanParams{
-		ID:                       id,
-		ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
-		CronExpr:                 req.CronExpr,
-		Prompt:                   req.Prompt,
-		ImageCapabilityKey:       req.ImageCapabilityKey,
-		ImageRatio:               req.ImageRatio,
-		SkipReferenceImage:       req.SkipReferenceImage,
-		ReferenceImageAssetID:    referenceAssetID,
-		Watermark:                req.Watermark,
-		HasContentImage:          req.HasContentImage,
-		HasTailImage:             req.HasTailImage,
-		ArticleWithCover:         req.ArticleWithCover,
-		ArticleWithContentImages: req.ArticleWithContentImages,
-		CoverUsePortrait:         req.CoverUsePortrait,
-		MontageInput:             req.MontageInput,
-		HypitInput:               req.HypitInput,
-		InputAttachments:         req.InputAttachments,
-		AgentInput:               req.AgentInput,
+		ID:                    id,
+		ExecutionProfile:      strings.TrimSpace(req.ExecutionProfile),
+		CronExpr:              req.CronExpr,
+		Prompt:                req.Prompt,
+		ImageCapabilityKey:    req.ImageCapabilityKey,
+		ImageRatio:            req.ImageRatio,
+		SkipReferenceImage:    req.SkipReferenceImage,
+		ReferenceImageAssetID: referenceAssetID,
+		Watermark:             req.Watermark,
+		InputAttachments:      req.InputAttachments,
+		AgentIDs:              req.AgentIDs,
 	}
 	var plan *model.Plan
 	if req.ReferenceImageSet {
@@ -649,9 +460,6 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrCoverPortraitUnavailable) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
-		if errors.Is(err, service.ErrInvalidAgentInput) {
-			return Error(c, fiber.StatusBadRequest, "invalid_agent_input: "+err.Error())
-		}
 		if handled, response := respondAgentProfileError(c, err); handled {
 			return response
 		}
@@ -661,10 +469,10 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		if errors.Is(err, service.ErrPlanUpdateConflict) {
 			return Error(c, fiber.StatusConflict, "plan changed concurrently; please retry")
 		}
-		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
-		if errors.Is(err, service.ErrMontageInput) || errors.Is(err, service.ErrHypitInput) {
+		if errors.Is(err, service.ErrDuplicatePlanAgent) || strings.Contains(err.Error(), "agent_id") {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
+		h.logger.Error().Err(err).Str("plan_id", id).Msg("update plan failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
 	}
 	plan.ReferenceImage = referenceView

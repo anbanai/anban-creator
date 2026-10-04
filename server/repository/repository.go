@@ -25,7 +25,6 @@ type Repository interface {
 	Projects() ProjectRepository
 	ProjectProfileRevisions() ProjectProfileRevisionRepository
 	ProjectProfileStates() ProjectProfileStateRepository
-	ProjectAgentConfigs() ProjectAgentConfigRepository
 	ProjectChannelConfigs() ProjectChannelConfigRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
@@ -520,7 +519,6 @@ type repository struct {
 	projects                ProjectRepository
 	projectProfileRevisions ProjectProfileRevisionRepository
 	projectProfileStates    ProjectProfileStateRepository
-	projectAgentConfigs     ProjectAgentConfigRepository
 	projectChannelConfigs   ProjectChannelConfigRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
@@ -563,7 +561,6 @@ func New(db *gorm.DB) Repository {
 	assets := newAssetRepository(db)
 	imageAnalyses := newImageAnalysisRepository(db)
 	projects := newProjectRepository(db)
-	projectAgentConfigs := newProjectAgentConfigRepository(db)
 	projectChannelConfigs := newProjectChannelConfigRepository(db)
 	apiKeys := newAPIKeyRepository(db)
 	feedbacks := newFeedbackRepository(db)
@@ -608,7 +605,6 @@ func New(db *gorm.DB) Repository {
 		projects:                projects,
 		projectProfileRevisions: newProjectProfileRevisionRepository(db),
 		projectProfileStates:    newProjectProfileStateRepository(db),
-		projectAgentConfigs:     projectAgentConfigs,
 		projectChannelConfigs:   projectChannelConfigs,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
@@ -658,7 +654,6 @@ func (r *repository) ProjectProfileRevisions() ProjectProfileRevisionRepository 
 func (r *repository) ProjectProfileStates() ProjectProfileStateRepository {
 	return r.projectProfileStates
 }
-func (r *repository) ProjectAgentConfigs() ProjectAgentConfigRepository { return r.projectAgentConfigs }
 func (r *repository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs
 }
@@ -743,7 +738,6 @@ type txRepository struct {
 	projects                ProjectRepository
 	projectProfileRevisions ProjectProfileRevisionRepository
 	projectProfileStates    ProjectProfileStateRepository
-	projectAgentConfigs     ProjectAgentConfigRepository
 	projectChannelConfigs   ProjectChannelConfigRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
@@ -790,7 +784,6 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		projects:                newProjectRepository(tx),
 		projectProfileRevisions: newProjectProfileRevisionRepository(tx),
 		projectProfileStates:    newProjectProfileStateRepository(tx),
-		projectAgentConfigs:     newProjectAgentConfigRepository(tx),
 		projectChannelConfigs:   newProjectChannelConfigRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
 		feedbacks:               newFeedbackRepository(tx),
@@ -839,9 +832,6 @@ func (r *txRepository) ProjectProfileRevisions() ProjectProfileRevisionRepositor
 
 func (r *txRepository) ProjectProfileStates() ProjectProfileStateRepository {
 	return r.projectProfileStates
-}
-func (r *txRepository) ProjectAgentConfigs() ProjectAgentConfigRepository {
-	return r.projectAgentConfigs
 }
 func (r *txRepository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs

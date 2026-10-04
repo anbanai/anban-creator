@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectsPage from './ProjectsPage'
 import { api } from '@/lib/api'
@@ -39,7 +39,6 @@ const projectWithReference: Project = {
   },
   image_ratio: '16:9',
   max_concurrent_tasks: 2,
-  config: { wechat_app_id: 'wx123' },
   status: 'active',
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
@@ -74,6 +73,8 @@ vi.mock('@/lib/api', async () => {
         stats: vi.fn().mockResolvedValue({ 'ch-1': mockProjectDetail.stats }),
         platformConfigs: vi.fn().mockResolvedValue(mockPlatformConfigs),
         create: vi.fn(),
+        getChannelConfig: vi.fn().mockResolvedValue({ id: "channel-1", project_id: "ch-1", channel: "wechat-article", config: { wechat_app_id: "wx-test" } }),
+        upsertChannelConfig: vi.fn().mockResolvedValue({}),
         get: vi.fn(),
         update: vi.fn(),
       },
@@ -116,6 +117,8 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.platformConfigs).mockResolvedValue(mockPlatformConfigs)
     vi.mocked(api.projects.create).mockReset()
     vi.mocked(api.projects.get).mockReset()
+    vi.mocked(api.projects.getChannelConfig).mockReset().mockResolvedValue({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', config: { wechat_app_id: 'wx-test' } })
+    vi.mocked(api.projects.upsertChannelConfig).mockReset().mockResolvedValue({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', config: {} })
     vi.mocked(api.projects.update).mockReset()
 		vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
     vi.mocked(api.montageCapabilities.list).mockReset().mockResolvedValue({
@@ -222,9 +225,135 @@ describe('ProjectsPage', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建项目' })
     expect(within(dialog).getByText('写清受众、领域和语气；定位会作为长期约束注入每一次创作，任务里可再补充单次要求。')).toBeInTheDocument()
     expect(within(dialog).getByText('在公众号后台「设置与开发 → 基本配置」获取，用于向微信创建草稿和正式发布。')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '决定这个项目的创作流程、可选能力与交付物，创建后不可修改。' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '用于账号配置、项目默认值和创作画像上下文，创建后不可修改。' })).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '只用于项目列表和发布信息展示，不影响生成内容。留空则使用平台默认图标。' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '写入任务工作区的 CLAUDE.md，Agent 每次创作都会按它对齐定位。' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '每次创作都会参考这些要求，保持账号定位与表达风格一致。' })).toBeInTheDocument()
+  })
+
+  it('keeps account platform and saves credentials through channel configuration only', async () => {
+    vi.mocked(api.projects.update).mockResolvedValue(projectWithReference)
+    render(<ProjectsPage />)
+    await clickProjectAction('测试项目', '编辑项目')
+    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    await waitFor(() => expect(within(dialog).getByLabelText('微信 AppID')).toHaveValue('wx-test'))
+    expect(api.projects.getChannelConfig).toHaveBeenCalledWith('ch-1', 'wechat-article')
+    expect(dialog).not.toHaveTextContent(/Agent|执行配置|Agent 参数/)
+    fireEvent.change(within(dialog).getByLabelText('微信 AppSecret'), { target: { value: 'new-secret' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.projects.upsertChannelConfig).toHaveBeenCalledWith('ch-1', 'wechat-article', { wechat_app_id: 'wx-test', wechat_secret: 'new-secret' }))
+    await waitFor(() => expect(api.projects.upsertChannelConfig).toHaveBeenCalledWith('ch-1', 'wechat-picture', { wechat_app_id: 'wx-test', wechat_secret: 'new-secret' }))
+    const payload = vi.mocked(api.projects.update).mock.calls[0][1]
+    expect(payload.platform).toBe('wechat')
+    expect(payload).not.toHaveProperty('wechat_secret')
+    expect(payload).not.toHaveProperty('wechat_app_id')
+    expect(payload).not.toHaveProperty('config')
+    expect(api.agentPacks.list).not.toHaveBeenCalled()
+  })
+
+  it('keeps an edited AppID when account configuration finishes loading', async () => {
+    let resolveConfig!: (value: Awaited<ReturnType<typeof api.projects.getChannelConfig>>) => void
+    vi.mocked(api.projects.getChannelConfig).mockReturnValueOnce(new Promise((resolve) => { resolveConfig = resolve }))
+    vi.mocked(api.projects.update).mockResolvedValue(projectWithReference)
+    render(<ProjectsPage />)
+    await clickProjectAction('测试项目', '编辑项目')
+    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    fireEvent.change(within(dialog).getByLabelText('微信 AppID'), { target: { value: 'wx-replacement' } })
+    fireEvent.change(within(dialog).getByLabelText('微信 AppSecret'), { target: { value: 'replacement-secret' } })
+    await act(async () => resolveConfig({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', config: { wechat_app_id: 'wx-old' } }))
+    expect(within(dialog).getByLabelText('微信 AppID')).toHaveValue('wx-replacement')
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.projects.upsertChannelConfig).toHaveBeenCalledWith('ch-1', 'wechat-article', { wechat_app_id: 'wx-replacement', wechat_secret: 'replacement-secret' }))
+  })
+
+  it.each(['wechat-article', 'wechat-picture'])('retries credentials after %s fails without creating a duplicate', async (failedChannel) => {
+    const createdProject = { ...projectWithReference, id: 'new-project' }
+    vi.mocked(api.projects.create).mockResolvedValue({ project: createdProject })
+    vi.mocked(api.projects.update).mockResolvedValue(createdProject)
+    let failed = false
+    vi.mocked(api.projects.upsertChannelConfig).mockImplementation(async (id, channel, config) => {
+      if (!failed && channel === failedChannel) { failed = true; throw new Error('账号凭据保存失败') }
+      return { id: 'saved-config', project_id: id, channel, config }
+    })
+    window.history.pushState({}, '', '/projects?create=true&type=wechat-article')
+    render(<ProjectsPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    fireEvent.change(within(dialog).getByLabelText('微信 AppID'), { target: { value: 'wx-new' } })
+    fireEvent.change(within(dialog).getByLabelText('微信 AppSecret'), { target: { value: 'new-secret' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(errorMock).toHaveBeenCalled())
+    const editDialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    expect(within(editDialog).getByLabelText('微信 AppID')).toHaveValue('wx-new')
+    expect(within(editDialog).getByLabelText('微信 AppSecret')).toHaveValue('new-secret')
+    fireEvent.click(within(editDialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目' })).not.toBeInTheDocument())
+    expect(api.projects.upsertChannelConfig).toHaveBeenCalledTimes(failedChannel === 'wechat-article' ? 3 : 4)
+    expect(api.projects.create).toHaveBeenCalledTimes(1)
+    expect(api.projects.update).toHaveBeenCalledWith('new-project', expect.objectContaining({ platform: 'wechat' }))
+    expect(api.projects.upsertChannelConfig).toHaveBeenLastCalledWith('new-project', 'wechat-picture', { wechat_app_id: 'wx-new', wechat_secret: 'new-secret' })
+  })
+
+  it.each(['create failure', 'create success', 'update success'])('ignores a stale %s after another editor opens', async (outcome) => {
+    const secondProject = { ...projectWithReference, id: 'second-project', name: '第二项目' }
+    vi.mocked(api.projects.list).mockResolvedValue([projectWithReference, secondProject])
+    vi.mocked(api.projects.create).mockResolvedValue({ project: { ...projectWithReference, id: 'created-project' } })
+    vi.mocked(api.projects.update).mockResolvedValue(secondProject)
+    let resolveWrite!: (value: Awaited<ReturnType<typeof api.projects.upsertChannelConfig>>) => void
+    let rejectWrite!: (reason: Error) => void
+    vi.mocked(api.projects.upsertChannelConfig).mockImplementationOnce(() => new Promise((resolve, reject) => { resolveWrite = resolve; rejectWrite = reject }))
+    render(<ProjectsPage />)
+    if (outcome.startsWith('create')) fireEvent.click(await screen.findByRole('button', { name: '新建项目' }))
+    else await clickProjectAction('测试项目', '编辑项目')
+    const originalDialog = await screen.findByRole('dialog', { name: outcome.startsWith('create') ? '新建项目' : '编辑项目' })
+    fireEvent.change(within(originalDialog).getByLabelText('微信 AppID'), { target: { value: 'wx-original' } })
+    fireEvent.click(within(originalDialog).getByRole('button', { name: outcome.startsWith('create') ? '创建' : '更新' }))
+    await waitFor(() => expect(api.projects.upsertChannelConfig).toHaveBeenCalledTimes(1))
+    fireEvent.click(within(originalDialog).getByRole('button', { name: '取消' }))
+    const confirmation = await screen.findByRole('alertdialog')
+    fireEvent.click(within(confirmation).getByRole('button', { name: '放弃' }))
+    await clickProjectAction('第二项目', '编辑项目')
+    const currentDialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    fireEvent.change(within(currentDialog).getByLabelText('微信 AppID'), { target: { value: 'wx-second' } })
+    await act(async () => {
+      if (outcome === 'create failure') rejectWrite(new Error('late credential failure'))
+      else resolveWrite({ id: 'config', project_id: 'old-project', channel: 'wechat-article', config: {} })
+    })
+    expect(currentDialog).toBeInTheDocument()
+    expect(within(currentDialog).getByLabelText('微信 AppID')).toHaveValue('wx-second')
+    fireEvent.click(within(currentDialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.projects.update).toHaveBeenLastCalledWith('second-project', expect.objectContaining({ platform: 'wechat' })))
+  })
+
+  it('returns to task creation with the created project after a credential retry', async () => {
+    const createdProject = { ...projectWithReference, id: 'created-project' }
+    vi.mocked(api.projects.create).mockResolvedValue({ project: createdProject })
+    vi.mocked(api.projects.update).mockResolvedValue(createdProject)
+    vi.mocked(api.projects.upsertChannelConfig).mockRejectedValueOnce(new Error('retry credentials'))
+    window.history.pushState({}, '', '/projects?create=true&type=wechat-article&return_to=/tasks&intent=new')
+    render(<ProjectsPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    fireEvent.change(within(dialog).getByLabelText('微信 AppID'), { target: { value: 'wx-created' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    const editDialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    fireEvent.click(within(editDialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(window.location.pathname).toBe('/tasks'))
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('project_id')).toBe('created-project')
+    expect(params.get('type')).toBe('wechat-article')
+    expect(params.get('create')).toBe('true')
+    expect(api.projects.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces a channel credential save failure and keeps the editor open', async () => {
+    vi.mocked(api.projects.update).mockResolvedValue(projectWithReference)
+    vi.mocked(api.projects.upsertChannelConfig).mockRejectedValueOnce({ response: { data: { msg: '账号凭据保存失败' } } })
+    render(<ProjectsPage />)
+    await clickProjectAction('测试项目', '编辑项目')
+    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    await waitFor(() => expect(within(dialog).getByLabelText('微信 AppID')).toHaveValue('wx-test'))
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('账号凭据保存失败'))
+    expect(dialog).toBeInTheDocument()
+    expect(successMock).not.toHaveBeenCalled()
   })
 
   it('explains the ecommerce project defaults', async () => {
@@ -551,7 +680,6 @@ describe('ProjectsPage', () => {
       image_ratio: '9:16',
       montage_defaults: {},
       max_concurrent_tasks: 1,
-      config: {},
       status: 'active',
       created_at: '2026-07-17T00:00:00Z',
       updated_at: '2026-07-17T00:00:00Z',
@@ -614,7 +742,6 @@ describe('ProjectsPage', () => {
         delivery_targets: ['final_video', 'subtitles'],
       },
       max_concurrent_tasks: 1,
-      config: {},
       status: 'active',
       created_at: '2026-07-17T00:00:00Z',
       updated_at: '2026-07-17T00:00:00Z',

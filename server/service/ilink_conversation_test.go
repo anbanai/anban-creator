@@ -59,7 +59,7 @@ func TestIlinkConversationNaturalLanguageCreateUsesAIEntryService(t *testing.T) 
 		BodyText:   "帮我写一篇夏日防晒指南",
 	})
 
-	if entry.req.UserID != "user-1" || entry.req.ProjectID != "project-1" || entry.req.Channel != "ilink" {
+	if entry.req.UserID != "user-1" || entry.req.ProjectID != "project-1" || entry.req.Channel != model.ChannelArticle || entry.req.AgentID != model.AgentIDArticle || entry.req.TaskKind != model.TaskKindContentGeneration {
 		t.Fatalf("entry req = %#v", entry.req)
 	}
 	if entry.req.Text != "帮我写一篇夏日防晒指南" {

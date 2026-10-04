@@ -10,13 +10,13 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestProjectConfigDoesNotExposeLegacyWechatPublishMode(t *testing.T) {
-	configType := reflect.TypeOf(ProjectConfig{})
+func TestChannelConfigDoesNotExposeLegacyWechatPublishMode(t *testing.T) {
+	configType := reflect.TypeOf(ProjectChannelConfig{})
 	if _, exists := configType.FieldByName("WechatPublishMode"); exists {
-		t.Fatal("ProjectConfig still exposes the legacy WechatPublishMode field")
+		t.Fatal("ProjectChannelConfig still exposes the legacy WechatPublishMode field")
 	}
 
-	raw, err := json.Marshal(ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"})
+	raw, err := json.Marshal(ProjectChannelConfig{Channel: ChannelArticle})
 	if err != nil {
 		t.Fatal(err)
 	}

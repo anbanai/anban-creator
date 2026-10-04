@@ -136,6 +136,9 @@ func main() {
 		if err := service.MigrateMultiAgentChannelIdentity(context.Background(), mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate multi-Agent channel identity")
 		}
+		if err := service.MigrateProjectAgentConfigRemoval(context.Background(), mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("failed to remove project Agent configuration")
+		}
 		if err := service.MigrateWechatIdentity(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate WeChat identities")
 		}
@@ -526,7 +529,7 @@ func main() {
 
 	if repo != nil {
 		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), asynqClient, log)
-		wechatTrackingSvc = service.NewWechatTrackingService(repo, platform.NewWechatOfficialAnalyticsProvider(log), asynqClient, log)
+		wechatTrackingSvc = service.NewWechatTrackingService(repo, platform.NewWechatOfficialAnalyticsProvider(log, repo), asynqClient, log)
 		channelsTrackingSvc = service.NewChannelsTrackingService(repo, worldtreeClient, asynqClient, log)
 		log.Info().Msg("SeedNote tracking service initialized")
 		log.Info().Msg("WeChat article tracking service initialized")

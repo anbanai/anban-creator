@@ -73,7 +73,17 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		}
 	}
 
-	if model.IsHypitPlatform(project.Platform) {
+	outputType := project.Platform
+	if task != nil {
+		outputType = task.Type
+	}
+	resourcePlatform := outputType
+	if task != nil {
+		if platform := model.PlatformForChannel(task.Channel); platform != "" {
+			resourcePlatform = platform
+		}
+	}
+	if model.IsHypitPlatform(outputType) {
 		in := model.HypitInput{}
 		if task != nil {
 			in = task.HypitInput.Data()
@@ -83,7 +93,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			"id": project.ID, "name": project.Name, "platform": project.Platform,
 			"instructions": project.Instructions, "visual_style": project.VisualStyle,
 			"image_ratio":           hypitPortraitCoverRatio(project.HypitDefaults.Data().Preferences),
-			"allowed_image_ratios":  model.SupportedImageRatios(project.Platform),
+			"allowed_image_ratios":  model.SupportedImageRatios(resourcePlatform),
 			"uses_project_snapshot": usesProjectSnapshot,
 		}
 		if task != nil {
@@ -121,10 +131,6 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	if err != nil {
 		return nil, fmt.Errorf("resolve image capability: %w", err)
 	}
-	agentConfig := project.AgentConfig.Data()
-	if agentConfig == nil {
-		agentConfig = map[string]any{}
-	}
 	profile := AgentProjectProfile{
 		"name": project.Name, "positioning": project.Instructions,
 		"instructions": project.Instructions, "keywords": project.Keywords,
@@ -132,7 +138,6 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"writer": style.Writer, "author": style.Author, "theme": style.Theme,
 		"visual_style_source": style.VisualStyleSource, "writer_source": style.WriterSource,
 		"author_source": style.AuthorSource, "theme_source": style.ThemeSource,
-		"agent_config": agentConfig,
 	}
 	projectProfile := project.Profile.Data()
 	if projectProfile.SchemaVersion == 0 {
@@ -153,8 +158,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"creative_constraints": style.VisualStyle, "visual_style_label": "图片视觉",
 		"image_ratio": effectiveImageRatio, "uses_project_snapshot": usesProjectSnapshot,
 		"image_capability_key": imageCapability.Key,
-		"allowed_image_ratios": model.SupportedImageRatios(project.Platform),
-		"agent_config":         agentConfig,
+		"allowed_image_ratios": model.SupportedImageRatios(resourcePlatform),
 		"sources": map[string]any{
 			"visual_style": style.VisualStyleSource,
 			"instructions": agentProfileSource(usesProjectSnapshot),
@@ -178,7 +182,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		resolvedProfile["project_portrait_reference_path"] = serveragent.ProjectPortraitReferenceImagePath
 	}
 	profile["resolved_profile"] = resolvedProfile
-	if project.Platform == model.PlatformWechat || project.Platform == model.PlatformSeednote {
+	if outputType == model.TaskTypeWechatArticle || outputType == model.PlatformWechat || outputType == model.PlatformSeednote {
 		feedbackStrategy, err := s.feedbackStrategyProfile(ctx, project, task)
 		if err != nil {
 			return nil, fmt.Errorf("load feedback strategy: %w", err)
@@ -186,7 +190,7 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		profile["feedback_strategy"] = feedbackStrategy
 	}
 
-	switch project.Platform {
+	switch outputType {
 	case model.PlatformSeednote:
 		imageConfig := map[string]any{}
 		if hasTaskReference {
@@ -236,9 +240,9 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 	}
 
 	if s.resources != nil {
-		profile["available_themes"] = s.resources.ListByPlatform(resources.CategoryTheme, project.Platform)
-		profile["available_writers"] = s.resources.ListByPlatform(resources.CategoryWriter, project.Platform)
-		profile["available_article_templates"] = s.resources.ListByPlatform(resources.CategoryArticleTemplate, project.Platform)
+		profile["available_themes"] = s.resources.ListByPlatform(resources.CategoryTheme, resourcePlatform)
+		profile["available_writers"] = s.resources.ListByPlatform(resources.CategoryWriter, resourcePlatform)
+		profile["available_article_templates"] = s.resources.ListByPlatform(resources.CategoryArticleTemplate, resourcePlatform)
 		if style.Theme != "" {
 			if entry := s.resources.Get(resources.CategoryTheme, style.Theme); entry != nil {
 				profile["theme_description"] = entry.Description
@@ -259,19 +263,14 @@ func (s *AgentProjectProfileService) feedbackStrategyProfile(ctx context.Context
 		return payload, nil
 	}
 	channel, taskKind := feedbackIdentity(project, task)
+	if channel == "" || taskKind == "" {
+		return payload, nil
+	}
 	snapshot, err := s.repo.FeedbackLoop().FindActiveStrategy(ctx, project.ID, channel)
 	if err != nil {
 		return nil, err
 	}
-	// A pre-migration row may still be keyed by the old project platform. The
-	// repository resolves canonical and legacy aliases, but retain a direct
-	// fallback for custom repository implementations.
-	if snapshot == nil && channel != strings.TrimSpace(project.Platform) {
-		snapshot, err = s.repo.FeedbackLoop().FindActiveStrategy(ctx, project.ID, project.Platform)
-	}
-	if err != nil {
-		return nil, err
-	}
+
 	if !feedbackStrategyUsable(snapshot, taskKind, channel, time.Now().UTC()) {
 		return payload, nil
 	}
@@ -291,41 +290,11 @@ func (s *AgentProjectProfileService) feedbackStrategyProfile(ctx context.Context
 	return payload, nil
 }
 
-func feedbackIdentity(project *model.Project, task *model.Task) (string, string) {
-	channel := ""
-	taskKind := ""
-	if task != nil {
-		channel = strings.TrimSpace(task.Channel)
-		taskKind = strings.TrimSpace(task.TaskKind)
+func feedbackIdentity(_ *model.Project, task *model.Task) (string, string) {
+	if task == nil {
+		return "", ""
 	}
-	if channel == "" && project != nil {
-		switch strings.TrimSpace(project.Platform) {
-		case model.PlatformWechat, model.TaskTypeWechatArticle:
-			channel = model.ChannelArticle
-		case model.PlatformSeednote:
-			channel = model.ChannelSeednote
-		case model.TaskTypeWechatPicture:
-			channel = model.ChannelWechatPicture
-		default:
-			channel = strings.TrimSpace(project.Platform)
-		}
-	}
-	if taskKind == "" && task != nil {
-		taskKind = strings.TrimSpace(task.Type)
-	}
-	if taskKind == "" {
-		switch channel {
-		case model.ChannelArticle:
-			taskKind = model.TaskTypeWechatArticle
-		case model.ChannelWechatPicture:
-			taskKind = model.TaskTypeWechatPicture
-		case model.ChannelSeednote:
-			taskKind = model.TaskKindContentGeneration
-		default:
-			taskKind = channel
-		}
-	}
-	return channel, taskKind
+	return strings.TrimSpace(task.Channel), strings.TrimSpace(task.TaskKind)
 }
 
 func (s *AgentProjectProfileService) montageProfile(project *model.Project, task *model.Task) map[string]any {

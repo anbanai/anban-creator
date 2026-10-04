@@ -21,9 +21,9 @@ func TestHypitPluginDeliveryContract(t *testing.T) {
 			if pack.Kind != agentpack.KindPlugin || pack.Runtime.Profile != "hypit" || pack.Runtime.Adapter != agentpack.AdapterStandard {
 				t.Fatalf("wrong execution route: %#v", pack)
 			}
-			project, ok := c.ForProjectPlatform("hypit")
-			if !ok || project.ID != pack.ID {
-				t.Fatal("project and task must resolve to the same Pack")
+			resolved, ok := c.ForTaskType("hypit")
+			if !ok || resolved.ID != pack.ID {
+				t.Fatal("task type must resolve to the same Pack")
 			}
 			if operation, ok := c.BillingOperation("hypit"); !ok || operation != "task.hypit" {
 				t.Fatalf("billing operation %q", operation)

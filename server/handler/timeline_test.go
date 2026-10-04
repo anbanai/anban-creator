@@ -172,7 +172,6 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	plan1 := &model.Plan{
 		ID:          "plan-1",
 		UserID:      userID,
-		Type:        model.ScopeSeednote,
 		Title:       "Scheduled Plan",
 		Description: "A scheduled plan",
 		CronExpr:    "0 9 * * 1-5",
@@ -186,7 +185,6 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	plan2 := &model.Plan{
 		ID:        "plan-2",
 		UserID:    userID,
-		Type:      model.ScopeWechat,
 		Title:     "Far Future Plan",
 		CronExpr:  "0 9 * * 1-5",
 		Status:    model.PlanStatusActive,
@@ -197,7 +195,6 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	plan3 := &model.Plan{
 		ID:        "plan-3",
 		UserID:    userID,
-		Type:      model.ScopeSeednote,
 		Title:     "Paused Plan",
 		CronExpr:  "0 9 * * 1-5",
 		Status:    model.PlanStatusPaused,
@@ -314,12 +311,12 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 					title = p.Prompt
 				}
 				if title == "" {
-					title = p.Type + " plan"
+					title = "计划"
 				}
 				userItems = append(userItems, TimelineItem{
 					ID:          p.ID,
 					Type:        "plan",
-					ContentType: p.Type,
+					ContentType: "plan",
 					Title:       title,
 					Status:      p.Status,
 					ScheduledAt: p.NextRunAt,

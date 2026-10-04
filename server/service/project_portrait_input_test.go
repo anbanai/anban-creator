@@ -38,20 +38,20 @@ func TestArticleProjectPortraitIsAnIndependentFrozenInput(t *testing.T) {
 			noCover := false
 			switch entry {
 			case "manual":
-				created, createErr := tasks.CreateManual(ctx, CreateManualParams{UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Prompt: "article", ReferenceImageAssetID: direct.ID, ArticleWithCover: &noCover})
+				created, createErr := tasks.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Prompt: "article", ReferenceImageAssetID: direct.ID, ArticleWithCover: &noCover})
 				if createErr != nil {
 					t.Fatal(createErr)
 				}
 				task = created[0]
 			case "plan":
-				task, err = tasks.CreateFromPlan(ctx, &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, ExecutionProfile: "effective", Prompt: "article", ReferenceImageAssetID: direct.ID, ArticleWithCover: &noCover})
+				task, err = tasks.CreateFromPlan(ctx, &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", Prompt: "article", ReferenceImageAssetID: direct.ID})
 				if err != nil {
 					t.Fatal(err)
 				}
 			case "ai_entry":
 				entrySvc := NewAIEntryService(repo, tasks, &fakeAIEntryLLM{}, nil, AIEntryModelConfig{}, nil)
 				entrySvc.SetReferenceAssetService(NewReferenceAssetService(repo, store, time.Now))
-				result, submitErr := entrySvc.Submit(ctx, AIEntrySubmitRequest{UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "article"})
+				result, submitErr := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "article"})
 				if submitErr != nil {
 					t.Fatal(submitErr)
 				}

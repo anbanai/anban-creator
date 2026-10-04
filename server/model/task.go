@@ -172,7 +172,6 @@ type ProjectSnapshot struct {
 	EcommerceDefaults             EcommerceProjectDefaults `json:"ecommerce_defaults,omitempty"`
 	HypitDefaults                 HypitDefaults            `json:"hypit_defaults,omitempty"`
 	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
-	AgentConfig                   map[string]any           `json:"agent_config,omitempty"`
 	ChannelConfig                 map[string]any           `json:"channel_config,omitempty"`
 	Profile                       ProjectProfile           `json:"profile,omitempty"`
 }
@@ -328,7 +327,7 @@ func (s ProjectSnapshot) HasData() bool {
 		strings.TrimSpace(s.Writer) != "" ||
 		strings.TrimSpace(s.Theme) != "" ||
 		strings.TrimSpace(s.Author) != "" ||
-		s.Profile.SchemaVersion != 0 || len(s.AgentConfig) > 0 || len(s.ChannelConfig) > 0
+		s.Profile.SchemaVersion != 0 || len(s.ChannelConfig) > 0
 }
 
 func (t *Task) SetImageCapabilitySnapshot(snapshot ImageCapabilitySnapshot) {
@@ -358,7 +357,6 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		EcommerceDefaults:             p.EcommerceDefaults.Data(),
 		MontageDefaults:               p.MontageDefaults.Data(),
 		HypitDefaults:                 p.HypitDefaults.Data(),
-		AgentConfig:                   cloneAgentExtensionMap(p.AgentConfig.Data()),
 		Profile:                       p.Profile.Data(),
 	}
 }
@@ -387,7 +385,6 @@ func ProjectFromSnapshot(base *Project, snap ProjectSnapshot) *Project {
 	p.SetEcommerceDefaults(snap.EcommerceDefaults)
 	p.SetMontageDefaults(snap.MontageDefaults)
 	p.SetHypitDefaults(snap.HypitDefaults)
-	p.SetAgentConfig(cloneAgentExtensionMap(snap.AgentConfig))
 	p.Profile = datatypes.NewJSONType(snap.Profile)
 	return &p
 }

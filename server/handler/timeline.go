@@ -157,7 +157,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 					title = p.Prompt
 				}
 				if title == "" {
-					title = p.Type + " plan"
+					title = "计划"
 				}
 				var projectName, platform string
 				if ch, ok := projectMap[p.ProjectID]; ok {
@@ -167,7 +167,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 				items = append(items, TimelineItem{
 					ID:          p.ID,
 					Type:        "plan",
-					ContentType: p.Type,
+					ContentType: "plan",
 					Title:       title,
 					Status:      p.Status,
 					ProjectID:   p.ProjectID,

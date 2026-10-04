@@ -12,7 +12,6 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
-	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -23,13 +22,10 @@ var (
 	ErrProjectDeleteConflict             = errors.New("project delete conflict")
 	ErrProjectUpdateConflict             = errors.New("project update conflict")
 	ErrProjectMontageDefaults            = errors.New("视频生成项目默认设置无效")
-	ErrInvalidAgentConfig                = errors.New("invalid agent config")
-	ErrWechatCredentialsRequired         = errors.New("wechat credentials required")
 	ErrProjectProfileVersionConflict     = errors.New("project profile version conflict")
 	ErrProjectProfileAnalysisInProgress  = errors.New("project profile analysis is already in progress")
 	ErrProjectProfileResultAlreadyStored = errors.New("project profile result already submitted")
 	ErrProjectProfileUnsupportedPlatform = errors.New("project profile is only supported for WeChat and Seednote projects")
-	ErrInvalidProjectAgent               = errors.New("invalid project agent")
 	ErrInvalidProjectChannel             = errors.New("invalid project channel")
 )
 
@@ -53,30 +49,6 @@ func (e projectDeleteConflictError) Is(target error) bool {
 
 func validProjectPlatform(platform string) bool {
 	return model.IsProjectPlatform(platform)
-}
-
-func validateProjectAgentConfig(project *model.Project) error {
-	if project == nil || !project.AgentConfigSet {
-		return nil
-	}
-	pack, ok := agentpack.Default().ForProjectPlatform(project.Platform)
-	if !ok {
-		return fmt.Errorf("%w: no Agent Pack is bound to project platform %q", ErrInvalidAgentConfig, project.Platform)
-	}
-	if err := agentpack.ValidateProjectConfig(pack, project.AgentConfig.Data()); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidAgentConfig, err)
-	}
-	return nil
-}
-
-func validateProjectWechatCredentials(project *model.Project) error {
-	if project == nil || project.Platform != model.PlatformWechat {
-		return nil
-	}
-	if strings.TrimSpace(project.Config.WechatAppID) == "" || strings.TrimSpace(project.Config.WechatSecret) == "" {
-		return fmt.Errorf("%w: wechat_app_id and wechat_secret are required for article projects", ErrWechatCredentialsRequired)
-	}
-	return nil
 }
 
 func validateProjectMontageDefaults(project *model.Project, capabilities *MontageCapabilityService) error {
@@ -164,12 +136,6 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 		return nil, err
 	}
 	if err := validateProjectMontageDefaults(ch, s.montageCapabilities); err != nil {
-		return nil, err
-	}
-	if err := validateProjectAgentConfig(ch); err != nil {
-		return nil, err
-	}
-	if err := validateProjectWechatCredentials(ch); err != nil {
 		return nil, err
 	}
 	if ch.Instructions == "" && ch.Positioning != "" {
@@ -707,90 +673,27 @@ func (s *ProjectService) ownedProject(ctx context.Context, userID, projectID str
 	return project, nil
 }
 
-// GetAgentConfig returns the settings for one Agent Pack after ownership
-// verification. The handler is responsible for redacting secrets at the API
-// boundary; internal callers receive the complete server-side value.
-func (s *ProjectService) GetAgentConfig(ctx context.Context, userID, projectID, agentID string) (*model.ProjectAgentConfig, error) {
-	if strings.TrimSpace(agentID) == "" {
-		return nil, fmt.Errorf("%w: agent_id is required", ErrInvalidProjectAgent)
-	}
-	pack, ok := agentpack.Default().ForAgent(agentID)
-	if !ok || pack.Kind != agentpack.KindManaged || !model.IsChannel(pack.Channel) {
-		return nil, fmt.Errorf("%w: unknown agent %q", ErrInvalidProjectAgent, agentID)
-	}
-	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
-		return nil, err
-	}
-	config, err := s.repo.ProjectAgentConfigs().Get(ctx, projectID, agentID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	return config, err
-}
-
-// ListAgentConfigs returns all Agent settings for an owned project.
-func (s *ProjectService) ListAgentConfigs(ctx context.Context, userID, projectID string) ([]*model.ProjectAgentConfig, error) {
-	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
-		return nil, err
-	}
-	return s.repo.ProjectAgentConfigs().List(ctx, projectID)
-}
-
-func (s *ProjectService) UpsertAgentConfig(ctx context.Context, userID, projectID, agentID string, config map[string]any) (*model.ProjectAgentConfig, error) {
-	if strings.TrimSpace(agentID) == "" {
-		return nil, fmt.Errorf("%w: agent_id is required", ErrInvalidProjectAgent)
-	}
-	pack, ok := agentpack.Default().ForAgent(agentID)
-	if !ok || pack.Kind != agentpack.KindManaged || !model.IsChannel(pack.Channel) {
-		return nil, fmt.Errorf("%w: unknown agent %q", ErrInvalidProjectAgent, agentID)
-	}
-	if err := agentpack.ValidateProjectConfig(pack, config); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidProjectAgent, err)
-	}
-	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
-		return nil, err
-	}
-	if existing, err := s.repo.ProjectAgentConfigs().Get(ctx, projectID, agentID); err == nil {
-		config = mergeProjectConfig(existing.Config.Data(), config)
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	row := &model.ProjectAgentConfig{ID: uuid.NewString(), ProjectID: projectID, AgentID: agentID}
-	row.Config = datatypes.NewJSONType(config)
-	if err := s.repo.ProjectAgentConfigs().Upsert(ctx, row); err != nil {
-		return nil, fmt.Errorf("upsert project agent config: %w", err)
-	}
-	return s.repo.ProjectAgentConfigs().Get(ctx, projectID, agentID)
-}
-
-func (s *ProjectService) DeleteAgentConfig(ctx context.Context, userID, projectID, agentID string) error {
-	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
-		return err
-	}
-	return s.repo.ProjectAgentConfigs().Delete(ctx, projectID, agentID)
-}
-
 func validProjectChannel(channel string) bool {
 	_, ok := supportedProjectChannels[strings.TrimSpace(channel)]
 	return ok
 }
 
-func isSensitiveProjectConfigKey(key string) bool {
+func isSensitiveChannelConfigKey(key string) bool {
 	lower := strings.ToLower(strings.TrimSpace(key))
 	return strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "password") || strings.Contains(lower, "private_key") || lower == "app_key"
 }
 
-func cloneProjectConfigMap(source map[string]any) map[string]any {
+func cloneChannelConfigMap(source map[string]any) map[string]any {
 	cloned := make(map[string]any, len(source))
 	for key, value := range source {
 		switch typed := value.(type) {
 		case map[string]any:
-			cloned[key] = cloneProjectConfigMap(typed)
+			cloned[key] = cloneChannelConfigMap(typed)
 		case []any:
 			items := make([]any, len(typed))
 			for i, item := range typed {
 				if itemMap, ok := item.(map[string]any); ok {
-					items[i] = cloneProjectConfigMap(itemMap)
+					items[i] = cloneChannelConfigMap(itemMap)
 				} else {
 					items[i] = item
 				}
@@ -803,21 +706,21 @@ func cloneProjectConfigMap(source map[string]any) map[string]any {
 	return cloned
 }
 
-// mergeProjectConfig preserves server-owned credentials omitted from a
+// mergeChannelConfig preserves server-owned credentials omitted from a
 // redacted client response while allowing ordinary values to be replaced.
-func mergeProjectConfig(existing, incoming map[string]any) map[string]any {
-	merged := cloneProjectConfigMap(existing)
+func mergeChannelConfig(existing, incoming map[string]any) map[string]any {
+	merged := cloneChannelConfigMap(existing)
 	for key, value := range incoming {
 		if existingMap, ok := existing[key].(map[string]any); ok {
 			if incomingMap, ok := value.(map[string]any); ok {
-				merged[key] = mergeProjectConfig(existingMap, incomingMap)
+				merged[key] = mergeChannelConfig(existingMap, incomingMap)
 				continue
 			}
 		}
 		merged[key] = value
 	}
 	for key, value := range existing {
-		if isSensitiveProjectConfigKey(key) {
+		if isSensitiveChannelConfigKey(key) {
 			if _, ok := incoming[key]; !ok {
 				merged[key] = value
 			}
@@ -859,7 +762,7 @@ func (s *ProjectService) UpsertChannelConfig(ctx context.Context, userID, projec
 	// connector publishes a schema, the channel whitelist is the minimum valid
 	// contract and unknown keys remain opaque server-owned configuration.
 	if existing, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel); err == nil {
-		config = mergeProjectConfig(existing.Config.Data(), config)
+		config = mergeChannelConfig(existing.Config.Data(), config)
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
@@ -960,22 +863,6 @@ func (s *ProjectService) update(ctx context.Context, userID, projectID string, c
 }
 
 func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
-	effectivePlatform := existing.Platform
-	if ch.Platform != "" {
-		effectivePlatform = ch.Platform
-	}
-	if ch.AgentConfigSet || (ch.Platform != "" && ch.Platform != existing.Platform) {
-		candidate := *existing
-		candidate.Platform = effectivePlatform
-		candidate.AgentConfigSet = true
-		if ch.AgentConfigSet {
-			candidate.AgentConfig = ch.AgentConfig
-		}
-		if err := validateProjectAgentConfig(&candidate); err != nil {
-			return err
-		}
-	}
-
 	// Apply updatable fields from ch to existing (only non-empty values).
 	platformChanged := ch.Platform != "" && ch.Platform != existing.Platform
 	if ch.Name != "" {
@@ -1062,20 +949,6 @@ func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
 		if err := validateProjectMontageDefaults(&candidate, s.montageCapabilities); err != nil {
 			return err
 		}
-	}
-	if ch.AgentConfigSet {
-		existing.AgentConfig = ch.AgentConfig
-	}
-	// Credentials are partial-update fields so ordinary project edits do not
-	// erase an existing account configuration.
-	if ch.Config.WechatAppID != "" {
-		existing.Config.WechatAppID = ch.Config.WechatAppID
-	}
-	if ch.Config.WechatSecret != "" {
-		existing.Config.WechatSecret = ch.Config.WechatSecret
-	}
-	if err := validateProjectWechatCredentials(existing); err != nil {
-		return err
 	}
 	return nil
 }
@@ -1184,7 +1057,11 @@ func (s *ProjectService) Delete(ctx context.Context, userID, projectID string) e
 
 // SanitizeProject clears sensitive fields from a project before returning it in API responses.
 func SanitizeProject(ch *model.Project) {
-	ch.Config.WechatSecret = ""
+	// Channel credentials are loaded through dedicated channel-config routes and
+	// are never embedded in the project response.
+	if ch != nil {
+		ch.RuntimeChannelConfig = nil
+	}
 }
 
 // SanitizeProjectForResponse clears project secrets before API responses.

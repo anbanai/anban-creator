@@ -221,8 +221,7 @@ func (s *WechatPublicationService) ownedTaskProject(ctx context.Context, userID,
 	if task.UserID != userID {
 		return nil, nil, ErrWechatPublicationForbidden
 	}
-	if ((strings.TrimSpace(task.Channel) != "" && task.Channel != model.ChannelArticle && task.Channel != model.ChannelWechatPicture) ||
-		(strings.TrimSpace(task.Channel) == "" && task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture)) || task.ProjectID == "" {
+	if (task.Channel != model.ChannelArticle && task.Channel != model.ChannelWechatPicture) || task.ProjectID == "" {
 		return nil, nil, ErrWechatPublicationModeConflict
 	}
 	project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
@@ -232,30 +231,13 @@ func (s *WechatPublicationService) ownedTaskProject(ctx context.Context, userID,
 	if project.UserID != userID {
 		return nil, nil, ErrWechatPublicationForbidden
 	}
-	// WeChat credentials are owned by the task's channel configuration. Hydrate
-	// a private copy for the Server-owned connector; the response model never
-	// serializes these values. During the cutover, picture tasks may reuse the
-	// article connector row when a dedicated picture row has not been created.
-	channel := strings.TrimSpace(task.Channel)
-	if channel == "" {
-		if task.Type == model.TaskTypeWechatPicture {
-			channel = model.ChannelWechatPicture
-		} else {
-			channel = model.ChannelArticle
-		}
-	}
-	cfg, cfgErr := s.repo.ProjectChannelConfigs().Get(ctx, project.ID, channel)
-	if cfgErr != nil && channel == model.ChannelWechatPicture {
-		cfg, cfgErr = s.repo.ProjectChannelConfigs().Get(ctx, project.ID, model.ChannelArticle)
+	// Publishing uses only the connector configured for this task's channel.
+	cfg, cfgErr := s.repo.ProjectChannelConfigs().Get(ctx, project.ID, task.Channel)
+	if cfgErr != nil && !errors.Is(cfgErr, gorm.ErrRecordNotFound) {
+		return nil, nil, fmt.Errorf("load task channel credentials: %w", cfgErr)
 	}
 	if cfgErr == nil && cfg != nil {
-		values := cfg.Config.Data()
-		if appID, ok := values["wechat_app_id"].(string); ok {
-			project.Config.WechatAppID = strings.TrimSpace(appID)
-		}
-		if secret, ok := values["wechat_secret"].(string); ok {
-			project.Config.WechatSecret = strings.TrimSpace(secret)
-		}
+		project.RuntimeChannelConfig = cfg.Config.Data()
 	}
 	return task, project, nil
 }

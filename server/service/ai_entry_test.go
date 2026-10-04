@@ -113,10 +113,9 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
-		Channel:   "studio",
 		Text:      "帮我写一篇新品发布公众号文章",
 		Attachments: []model.EntryAttachment{{
 			Type:        "image",
@@ -183,7 +182,7 @@ func TestAIEntryServiceSubmitCreatesMontageTaskWithImageSettings(t *testing.T) {
 
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"做一条新品发布短片"}`}}, nil, AIEntryModelConfig{}, &logger)
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		UserID:             userID,
 		ProjectID:          projectID,
 		ExecutionProfile:   "effective",
@@ -245,7 +244,7 @@ func TestAIEntryServiceSubmitMontageIgnoresInferredRatioWhenRequestOmitsIt(t *te
 		AIEntryModelConfig{},
 		nil,
 	)
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		UserID:           userID,
 		ProjectID:        projectID,
 		ExecutionProfile: "effective",
@@ -292,7 +291,7 @@ func TestAIEntryServiceSubmitPropagatesProfileAndSKUErrorsFromTaskCreation(t *te
 				taskSvc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 				entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, nil, AIEntryModelConfig{}, &logger)
 
-				result, err := entrySvc.Submit(t.Context(), AIEntrySubmitRequest{
+				result, err := entrySvc.Submit(t.Context(), AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 					UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
 				})
 				if result != nil || !errors.Is(err, sentinel) {
@@ -314,7 +313,7 @@ func TestAIEntryServiceSubmitKeepsUnrelatedTaskCreationFailureAsStatusError(t *t
 	taskSvc := newTestTaskService(repo, &mockEnqueuer{}, nil, &logger, "", nil, nil)
 	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write"}`}}, nil, AIEntryModelConfig{}, &logger)
 
-	result, err := entrySvc.Submit(t.Context(), AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(t.Context(), AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
 	})
 	if err != nil || result == nil || result.Status != AIEntryStatusError {
@@ -369,7 +368,8 @@ func TestAIEntryUsesFinalizedAttachmentAssetAsTaskReference(t *testing.T) {
 			entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+			agentID, channel, taskKind := testOutputIdentity(platform)
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: agentID, Channel: channel, TaskKind: taskKind, ExecutionProfile: "effective",
 				UserID: userID, ProjectID: projectID, Text: "write content",
 				Quantity:    2,
 				Attachments: []model.EntryAttachment{{Type: "image", UploadID: asset.ID, URL: "https://staging.example.com/ref.png", FileName: asset.FileName, ContentType: asset.ContentType, Size: asset.Size}},
@@ -421,7 +421,7 @@ func TestAIEntryPresentsInheritedProjectReferenceBeforeTaskCreation(t *testing.T
 	entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, nil, AIEntryModelConfig{}, &logger)
 	entrySvc.SetReferenceAssetService(referenceSvc)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write article"})
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write article"})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestAIEntrySeednotePresentsInheritedProjectReferenceAndKeepsAttachments(t *
 	entrySvc.SetReferenceAssetService(referenceSvc)
 	attachment := model.EntryAttachment{Type: "image", URL: "/api/v1/files/product.png", FileName: "product.png", ContentType: "image/png", Instruction: "keep logo"}
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write seednote", Attachments: []model.EntryAttachment{attachment}})
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write seednote", Attachments: []model.EntryAttachment{attachment}})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -517,7 +517,8 @@ func TestAIEntryProjectReferenceSigningFailureDoesNotCreateOrCharge(t *testing.T
 			entrySvc := NewAIEntryService(repo, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write content"}`}}, nil, AIEntryModelConfig{}, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write content"})
+			agentID, channel, taskKind := testOutputIdentity(platform)
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: agentID, Channel: channel, TaskKind: taskKind, ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write content"})
 			if result != nil || !errors.Is(err, ErrReferenceAssetUnavailable) {
 				t.Fatalf("result/error = %#v/%v, want unavailable", result, err)
 			}
@@ -585,7 +586,7 @@ func TestAIEntryPreservesSecondReferenceValidationErrorsBeforeCreationOrBilling(
 			entrySvc := NewAIEntryService(repoWithTopics, taskSvc, &fakeAIEntryLLM{responses: []string{`{"prompt":"write article"}`}}, nil, AIEntryModelConfig{}, &logger)
 			entrySvc.SetReferenceAssetService(referenceSvc)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write article"})
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", UserID: userID, ProjectID: projectID, Text: "write article"})
 			if result != nil || !errors.Is(err, tt.want) {
 				t.Fatalf("result/error = %#v/%v, want %v", result, err, tt.want)
 			}
@@ -617,10 +618,9 @@ func TestAIEntryServiceSubmitDropsUnsafeLLMImageFields(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
-		Channel:   "studio",
 		Text:      "写一篇新品发布文章",
 	})
 	if err != nil {
@@ -669,7 +669,7 @@ func TestAIEntryServiceSubmitUsesExplicitImageParametersForEveryTask(t *testing.
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "写新品文章",
 		Quantity: 2, ImageRatio: " 16:9 ", ImageCapabilityKey: " professional ",
 	})
@@ -712,7 +712,7 @@ func TestAIEntryServiceSubmitRejectsUnauthorizedExplicitImageCapability(t *testi
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
 		ImageCapabilityKey: "professional",
 	})
@@ -742,7 +742,7 @@ func TestAIEntryServiceSubmitFailsClosedWhenExplicitImageCapabilityResolverIsUna
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
 		ImageCapabilityKey: "professional",
 	})
@@ -783,7 +783,7 @@ func TestAIEntryServiceSubmitRejectsInvalidExplicitParametersBeforeIntentParsing
 			logger := zerolog.New(io.Discard)
 			entrySvc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 				UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "write",
 				Quantity: tt.quantity, ImageRatio: tt.imageRatio,
 			})
@@ -815,10 +815,9 @@ func TestAIEntryServiceSubmitNeedsConfigurationForEcommerceWithoutProductImage(t
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: "ecommerce", Channel: model.ChannelEcommerce, TaskKind: model.PlatformEcommerce, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
-		Channel:   "studio",
 		Text:      "做一套保温杯电商主图",
 	})
 	if err != nil {
@@ -850,8 +849,8 @@ func TestAIEntryServiceSubmitCreatesEcommerceTaskFromKeyFirstImage(t *testing.T)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 	key := "uploads/pending/" + userID + "/image-upload/product.png"
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
-		UserID: userID, ProjectID: projectID, Channel: "studio", Text: "制作保温杯电商主图",
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: "ecommerce", Channel: model.ChannelEcommerce, TaskKind: model.PlatformEcommerce, ExecutionProfile: "effective",
+		UserID: userID, ProjectID: projectID, Text: "制作保温杯电商主图",
 		Attachments: []model.EntryAttachment{{
 			Type: "image", UploadID: "image-upload", Key: key,
 			FileName: "product.png", ContentType: "image/png", Size: 2048,
@@ -888,10 +887,9 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 		logger := zerolog.New(io.Discard)
 		entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: "ecommerce", Channel: model.ChannelEcommerce, TaskKind: model.PlatformEcommerce, ExecutionProfile: "effective",
 			UserID:    userID,
 			ProjectID: projectID,
-			Channel:   "studio",
 			Text:      "做一套保温杯主图",
 			Attachments: []model.EntryAttachment{{
 				Type:        "image",
@@ -928,10 +926,9 @@ func TestAIEntryServiceSubmitNormalizesEcommerceModules(t *testing.T) {
 		logger := zerolog.New(io.Discard)
 		entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+		result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: "ecommerce", Channel: model.ChannelEcommerce, TaskKind: model.PlatformEcommerce, ExecutionProfile: "effective",
 			UserID:    userID,
 			ProjectID: projectID,
-			Channel:   "studio",
 			Text:      "做一套保温杯商详",
 			Attachments: []model.EntryAttachment{{
 				Type:        "image",
@@ -970,10 +967,9 @@ func TestAIEntryRepairsInvalidJSONWithSameServerInternalClient(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
-		Channel:   "studio",
 		Text:      "写一篇可露营咖啡壶种草笔记",
 	})
 	if err != nil {
@@ -998,10 +994,9 @@ func TestAIEntryRequiresServerInternalClientBeforeTaskCreation(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, nil, nil, AIEntryModelConfig{}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
-		Channel:   "studio",
 		Text:      "写一篇文章",
 	})
 	if err != nil {
@@ -1025,8 +1020,8 @@ func TestAIEntryRecordsEverySuccessfulServerInternalResponse(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
-	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{
-		UserID: userID, ProjectID: projectID, Channel: "studio", ExecutionProfile: "effective", Text: "整理成文章",
+	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "整理成文章",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1056,8 +1051,8 @@ func TestAIEntryRecordsMissingUsageAsUnreconciled(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
-	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{
-		UserID: userID, ProjectID: projectID, Channel: "studio", ExecutionProfile: "effective", Text: "整理成文章",
+	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "整理成文章",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1083,8 +1078,8 @@ func TestAIEntryRecordsTotalOnlyUsageAsUnreconciled(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	svc := NewAIEntryService(repo, taskSvc, llm, costs, AIEntryModelConfig{ProviderKey: "moonshot", Model: "kimi-k2.7-code"}, &logger)
 
-	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{
-		UserID: userID, ProjectID: projectID, Channel: "studio", ExecutionProfile: "effective", Text: "整理成文章",
+	_, err := svc.Submit(context.Background(), AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Text: "整理成文章",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1103,10 +1098,9 @@ func TestAIEntrySeednoteDoesNotPromoteFirstImageToReferenceAsset(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID:    userID,
 		ProjectID: projectID,
-		Channel:   "studio",
 		Text:      "参考产品图生成种草内容",
 		Attachments: []model.EntryAttachment{{
 			Type:        "image",
@@ -1149,10 +1143,10 @@ func TestAIEntryArticleAndMomentsDoNotPersistURLOnlyReference(t *testing.T) {
 			logger := zerolog.New(io.Discard)
 			entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
-			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{ExecutionProfile: "effective",
+			agentID, channel, taskKind := testOutputIdentity(platform)
+			result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: agentID, Channel: channel, TaskKind: taskKind, ExecutionProfile: "effective",
 				UserID:    userID,
 				ProjectID: projectID,
-				Channel:   "studio",
 				Text:      "参考产品图生成内容",
 				Attachments: []model.EntryAttachment{{
 					Type:        "image",

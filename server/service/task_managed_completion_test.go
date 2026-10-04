@@ -383,7 +383,7 @@ func TestCompleteCloudExecutionBillingUsesManagedDurableDelivery(t *testing.T) {
 			ctx := context.Background()
 			svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 			projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
-			tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+			tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 				UserID: billingWalletUserID, ProjectID: projectID, Prompt: test.name, Quantity: 1,
 			})
 			if err != nil {
@@ -439,7 +439,7 @@ func TestCompleteCloudExecutionRollsBackInsertedSettlementWithCoreTransaction(t 
 	ctx := context.Background()
 	svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ExecutionProfile: "effective", UserID: billingWalletUserID, ProjectID: projectID,
 		Prompt: "atomic cloud reversal", Quantity: 1,
 	})
@@ -492,7 +492,7 @@ func TestReconcileResumedExecutionFailureKeepsChargeForPriorPublishedDelivery(t 
 	ctx := context.Background()
 	svc, billing, _ := newFixedTaskBillingFixture(t, 1_000, 0)
 	projectID := createTestProject(t, billing.repo, billingWalletUserID, model.PlatformWechat)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID: billingWalletUserID, ProjectID: projectID, Prompt: "original request", Quantity: 1,
 	})
 	if err != nil {

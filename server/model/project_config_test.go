@@ -13,24 +13,15 @@ func TestProjectConfigModelsAllowMultipleScopesAndEnforceUniqueScope(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&Project{}, &ProjectAgentConfig{}, &ProjectChannelConfig{}); err != nil {
+	if err := db.AutoMigrate(&Project{}, &ProjectChannelConfig{}); err != nil {
 		t.Fatal(err)
 	}
 	projectID := uuid.NewString()
-	if err := db.Create(&ProjectAgentConfig{ID: uuid.NewString(), ProjectID: projectID, AgentID: AgentIDArticle}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&ProjectAgentConfig{ID: uuid.NewString(), ProjectID: projectID, AgentID: AgentIDSeednote}).Error; err != nil {
-		t.Fatal(err)
-	}
 	if err := db.Create(&ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: ChannelArticle}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: ChannelSeednote}).Error; err != nil {
 		t.Fatal(err)
-	}
-	if err := db.Create(&ProjectAgentConfig{ID: uuid.NewString(), ProjectID: projectID, AgentID: AgentIDArticle}).Error; err == nil {
-		t.Fatal("duplicate project+agent should be rejected")
 	}
 	if err := db.Create(&ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: ChannelArticle}).Error; err == nil {
 		t.Fatal("duplicate project+channel should be rejected")

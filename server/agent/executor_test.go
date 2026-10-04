@@ -47,10 +47,6 @@ func TestBuildAppConfig(t *testing.T) {
 				Name:        "Test Account",
 				Keywords:    "写作,效率",
 				Positioning: "个人成长",
-				Config: model.ProjectConfig{
-					WechatAppID:  "test_appid",
-					WechatSecret: "test_secret",
-				},
 				Author:      "TestAuthor",
 				VisualStyle: "dan-koe",
 				Theme:       "default",
@@ -325,12 +321,12 @@ func TestTaskTypeToAgent(t *testing.T) {
 		taskType string
 		want     string
 	}{
-		{model.ScopeWechat, "wechat-article"},
+		{model.TaskTypeWechatArticle, "wechat-article"},
 		{model.ScopeSeednote, "seednote"},
 		{model.ScopeMoments, "moments"},
 		{model.ScopeEcommerce, "ecommerce"},
 		{model.TaskTypeViralAnalysis, "seednote"},
-		{"unknown", "seednote"},
+		{"unknown", ""},
 	}
 
 	for _, tt := range tests {
@@ -344,11 +340,11 @@ func TestTaskTypeToAgent(t *testing.T) {
 }
 
 func TestTaskTypeToAgentViralAnalysisIsAnExplicitRoute(t *testing.T) {
-	if got, explicit := taskTypeToAgentRoute(model.TaskTypeViralAnalysis); got != "seednote" || !explicit {
-		t.Fatalf("viral analysis route = %q, explicit=%v; want seednote/true", got, explicit)
+	if got := TaskTypeToAgent(model.TaskTypeViralAnalysis); got != "seednote" {
+		t.Fatalf("viral analysis route = %q; want seednote", got)
 	}
-	if got, explicit := taskTypeToAgentRoute("unknown"); got != "seednote" || explicit {
-		t.Fatalf("unknown fallback = %q, explicit=%v; want seednote/false", got, explicit)
+	if got := TaskTypeToAgent("unknown"); got != "" {
+		t.Fatalf("unknown task route = %q", got)
 	}
 }
 
@@ -361,7 +357,7 @@ func TestDefaultMaxTurns(t *testing.T) {
 		taskType string
 		want     int
 	}{
-		{model.ScopeWechat, 100},
+		{model.TaskTypeWechatArticle, 100},
 		{model.ScopeSeednote, 60},
 		{model.TaskTypeViralAnalysis, 60},
 		{"unknown", 40},
@@ -383,7 +379,7 @@ func TestDefaultMaxTurnsUsesManagedRuntimeBudget(t *testing.T) {
 		taskType string
 		want     int
 	}{
-		{model.PlatformWechat, 60},
+		{model.TaskTypeWechatArticle, 60},
 		{model.PlatformSeednote, 20},
 		{model.TaskTypeViralAnalysis, 20},
 		{model.PlatformMoments, 25},

@@ -18,7 +18,7 @@ func TestTaskServiceCreateManualFailsClosedWithoutImageCapabilityResolver(t *tes
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 
-	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{
+	tasks, err := svc.CreateManual(context.Background(), CreateManualParams{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Prompt: "春季穿搭",
 	})
 	if err == nil || !strings.Contains(err.Error(), "image capability resolver is unavailable") {
@@ -32,7 +32,8 @@ func TestTaskServiceCreateFromPlanFailsClosedWithoutImageCapabilityResolver(t *t
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
 	plan := &model.Plan{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
 		ExecutionProfile: "effective", Prompt: "春季穿搭",
 	}
 
@@ -56,8 +57,8 @@ func TestTaskServiceCloneRevalidatesFrozenImageCapability(t *testing.T) {
 			},
 		}},
 	}))
-	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
+	source := &model.Task{Type: model.PlatformSeednote, AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ImageCapabilityKey: "professional",
 	}
 	freezeTestTaskImageCapability(t, source, "professional", testImageCapabilityRoute("image.professional"))
@@ -85,7 +86,7 @@ func TestTaskServiceCreateManualPersistsResolvedDefaultImageCapability(t *testin
 		}},
 	}))
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Prompt: "春季穿搭",
 	})
 	if err != nil {
@@ -122,7 +123,7 @@ func TestTaskServiceCreateManualMontagePersistsResolvedDefaultImageCapability(t 
 		}},
 	}))
 
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.PlatformMontage,
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
 		ImageRatio: "9:16", MontageInput: &model.MontageInput{Brief: "新品发布短片"},
 	})
@@ -147,8 +148,8 @@ func TestTaskServiceCloneRejectsLegacySourceWithoutFrozenImageCapability(t *test
 			},
 		}},
 	}))
-	source := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
+	source := &model.Task{Type: model.PlatformSeednote, AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		Status: model.TaskStatusCompleted, ExecutionProfile: "effective", ImageCapabilityKey: "",
 	}
 	if err := repo.Tasks().Create(ctx, source); err != nil {
@@ -167,8 +168,8 @@ func TestTaskServiceResumeRejectsLegacyTaskWithoutFrozenImageCapability(t *testi
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformSeednote)
-	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
+	task := &model.Task{Type: model.PlatformSeednote, AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		Status: model.TaskStatusFailed, ImageCapabilityKey: "",
 	}
 	freezeTestTaskProfile(t, task)
@@ -206,8 +207,8 @@ func TestTaskServiceResumeRevalidatesFrozenImageCapabilityBeforeMutation(t *test
 			},
 		}},
 	}))
-	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.PlatformSeednote,
+	task := &model.Task{Type: model.PlatformSeednote, AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		Status: model.TaskStatusFailed, ImageCapabilityKey: "professional",
 	}
 	freezeTestTaskImageCapability(t, task, "professional", testImageCapabilityRoute("image.professional"))
@@ -255,7 +256,7 @@ func TestTaskServiceGetVisibleFilesForUserChecksTaskOwnership(t *testing.T) {
 	ctx := context.Background()
 	ownerID := uuid.NewString()
 	projectID := createTestProject(t, repo, ownerID, model.PlatformWechat)
-	tasks, err := svc.CreateManual(ctx, CreateManualParams{ExecutionProfile: "effective",
+	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
 		UserID: ownerID, ProjectID: projectID, Quantity: 1, Prompt: "topic",
 	})
 	if err != nil {

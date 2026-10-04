@@ -406,166 +406,71 @@ describe('normalizeImageRatio', () => {
 })
 
 describe('planSchema', () => {
-  it('requires a selected execution profile', () => {
-    const base = { type: 'wechat-article', cron_expr: '0 9 * * 1' }
-    expect(rawPlanSchema.safeParse(base).success).toBe(false)
+  const base = {
+    project_id: 'project-1',
+    agent_ids: ['wechat-article'],
+    execution_profile: 'effective',
+    cron_expr: '0 9 * * 1',
+  }
+
+  it('requires a project, at least one output, and an execution profile', () => {
+    expect(rawPlanSchema.safeParse(base).success).toBe(true)
+    expect(rawPlanSchema.safeParse({ ...base, project_id: '' }).success).toBe(false)
+    expect(rawPlanSchema.safeParse({ ...base, agent_ids: [] }).success).toBe(false)
     expect(rawPlanSchema.safeParse({ ...base, execution_profile: '' }).success).toBe(false)
   })
 
   it('defaults plan input attachments to an empty snapshot', () => {
-    const result = planSchema.parse({
-      type: 'seednote',
-      cron_expr: '0 9 * * 1',
-    })
-
+    const result = planSchema.parse(base)
     expect(result.input_attachments).toEqual([])
   })
 
-  it('accepts up to 16 image references for Seednote plans', () => {
+  it('accepts multiple output IDs and up to 16 shared materials', () => {
     const result = planSchema.safeParse({
-      type: 'seednote',
-      cron_expr: '0 9 * * 1',
+      ...base,
+      agent_ids: ['wechat-article', 'seednote', 'wechat-picture'],
       input_attachments: Array.from({ length: 16 }, (_, index) => ({
         type: 'image',
         url: `/plan-reference-${index + 1}.png`,
       })),
     })
-
     expect(result.success).toBe(true)
-  })
-
-  it('rejects more than 16 attachments and accepts non-image Seednote plan materials', () => {
     expect(planSchema.safeParse({
-      type: 'seednote',
-      cron_expr: '0 9 * * 1',
+      ...base,
       input_attachments: Array.from({ length: 17 }, (_, index) => ({
         type: 'image',
         url: `/plan-reference-${index + 1}.png`,
       })),
     }).success).toBe(false)
-
-    expect(planSchema.safeParse({
-      type: 'seednote',
-      cron_expr: '0 9 * * 1',
-      input_attachments: [{ type: 'document', url: '/brief.pdf' }],
-    }).success).toBe(true)
   })
 
-  it('accepts valid plan data', () => {
-    expect(planSchema.safeParse({
-      type: 'wechat-article',
-      cron_expr: '0 9 * * 1',
-    }).success).toBe(true)
-  })
-
-  it('accepts the plan portrait toggle without embedding an upload', () => {
-    const base = {
-      type: 'wechat-article',
-      cron_expr: '0 9 * * 1',
-    }
-
-    expect(planSchema.safeParse({ ...base, article_with_cover: true }).success).toBe(true)
-    expect(planSchema.safeParse({ ...base, article_with_cover: false }).success).toBe(true)
-  })
-
-  it('accepts optional prompt', () => {
+  it('accepts shared prompt and image settings', () => {
     const result = planSchema.safeParse({
-      type: 'wechat-article',
-      cron_expr: '0 9 * * 1',
+      ...base,
       prompt: '写一篇护肤指南',
+      image_capability_key: 'standard',
+      image_ratio: '3:4',
+      skip_reference_image: true,
+      watermark: true,
+      input_attachments: [{ type: 'document', url: '/brief.pdf' }],
     })
     expect(result.success).toBe(true)
   })
 
-  it('accepts prompt at max length', () => {
-    const result = planSchema.safeParse({
-      type: 'wechat-article',
-      cron_expr: '0 9 * * 1',
-      prompt: 'a'.repeat(5120),
-    })
-    expect(result.success).toBe(true)
+  it('enforces prompt and schedule limits', () => {
+    expect(planSchema.safeParse({ ...base, prompt: 'a'.repeat(5120) }).success).toBe(true)
+    expect(planSchema.safeParse({ ...base, prompt: 'a'.repeat(5121) }).success).toBe(false)
+    expect(planSchema.safeParse({ ...base, prompt: '😀'.repeat(5120) }).success).toBe(true)
+    expect(planSchema.safeParse({ ...base, cron_expr: '' }).success).toBe(false)
   })
 
-  it('counts unicode prompt length like the API', () => {
-    const result = planSchema.safeParse({
-      type: 'wechat-article',
-      cron_expr: '0 9 * * 1',
-      prompt: '😀'.repeat(5120),
-    })
-    expect(result.success).toBe(true)
-  })
-
-  it('rejects prompt exceeding max length', () => {
-    const result = planSchema.safeParse({
-      type: 'wechat-article',
-      cron_expr: '0 9 * * 1',
-      prompt: 'a'.repeat(5121),
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it('rejects empty cron expression', () => {
-    const result = planSchema.safeParse({
-      type: 'wechat-article',
-      cron_expr: '',
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it('does not accept moments plans in V1', () => {
-    const result = planSchema.safeParse({
-      project_id: 'moments-1',
-      type: 'moments',
-      cron_expr: '0 9 * * *',
-      prompt: '每日朋友圈',
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it('accepts optional fields', () => {
-    const result = planSchema.safeParse({
-      type: 'seednote',
-      cron_expr: '0 9 * * 1',
-      prompt: '主题方向',
-      project_id: 'ch-1',
-    })
-    expect(result.success).toBe(true)
-  })
-
-  it('defaults article image toggles to true', () => {
-    const result = planSchema.parse({
-      type: 'wechat-article',
-      cron_expr: '0 9 * * 1',
-      prompt: '主题方向',
-    })
-    expect(result.article_with_cover).toBe(true)
-    expect(result.article_with_content_images).toBe(true)
-  })
-
-  it('accepts montage plans', () => {
-    const result = planSchema.safeParse({
-      project_id: 'project-montage',
-      type: 'montage',
-      cron_expr: '0 10 * * *',
-      montage_input: {
-        brief: '每天生成一条品牌短片',
-      },
-    })
-
-    expect(result.success).toBe(true)
-  })
-
-  it('uses video generation wording when a plan brief is missing', () => {
-    const result = planSchema.safeParse({
-      project_id: 'project-montage',
-      type: 'montage',
-      cron_expr: '0 10 * * *',
-      montage_input: { brief: '' },
-    })
-
-    expect(result.success).toBe(false)
-    if (result.success) throw new Error('expected video generation plan brief validation to fail')
-    expect(result.error.issues[0]?.message).toBe('请填写视频生成需求')
+  it('rejects the removed platform-specific plan contract', () => {
+    expect(planSchema.safeParse({ ...base, type: 'wechat-article' }).success).toBe(false)
+    expect(planSchema.safeParse({ ...base, agent_input: {} }).success).toBe(false)
+    expect(planSchema.safeParse({ ...base, article_with_cover: true }).success).toBe(false)
+    expect(planSchema.safeParse({ ...base, article_with_content_images: true }).success).toBe(false)
+    expect(planSchema.safeParse({ ...base, hypit_input: {} }).success).toBe(false)
+    expect(planSchema.safeParse({ ...base, montage_input: {} }).success).toBe(false)
   })
 })
 

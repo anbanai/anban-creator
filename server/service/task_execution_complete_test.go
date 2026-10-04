@@ -64,7 +64,7 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 		t.Fatal(err)
 	}
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		Status: model.TaskStatusRunning, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
 		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 	}
@@ -1653,11 +1653,11 @@ func TestFinalizationDispatchReplayDoesNotDuplicateQueueOrInflateSlot(t *testing
 		t.Fatal(err)
 	}
 	executionID := uuid.NewString()
-	completedTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
+	completedTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusRunning, CurrentExecutionID: &executionID}
 	if err := repo.Tasks().Create(ctx, completedTask); err != nil {
 		t.Fatal(err)
 	}
-	pendingTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending}
+	pendingTask := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusPending}
 	if err := repo.Tasks().Create(ctx, pendingTask); err != nil {
 		t.Fatal(err)
 	}

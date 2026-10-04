@@ -357,11 +357,9 @@ func TestE2E_PlanLifecycle(t *testing.T) {
 	}
 
 	// Step 1: Create a plan.
-	planBody, _ := json.Marshal(map[string]string{
+	planBody, _ := json.Marshal(map[string]any{
 		"project_id":        testProject.ID,
-		"agent_id":          model.AgentIDSeednote,
-		"channel":           model.ChannelSeednote,
-		"task_kind":         model.TaskKindContentGeneration,
+		"agent_ids":         []string{model.AgentIDSeednote},
 		"cron_expr":         "0 9 * * *",
 		"prompt":            "spring fashion",
 		"execution_profile": "effective",
@@ -682,8 +680,9 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 	}
 
 	// User 1 creates a plan.
-	planBody, _ := json.Marshal(map[string]string{
+	planBody, _ := json.Marshal(map[string]any{
 		"project_id":        testProject.ID,
+		"agent_ids":         []string{model.AgentIDSeednote},
 		"cron_expr":         "0 10 * * *",
 		"prompt":            "daily inspiration",
 		"execution_profile": "effective",
@@ -853,6 +852,9 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	// User 1 creates a task.
 	taskBody, _ := json.Marshal(map[string]string{
 		"project_id":        testProject.ID,
+		"agent_id":          model.AgentIDSeednote,
+		"channel":           model.ChannelSeednote,
+		"task_kind":         model.TaskKindContentGeneration,
 		"prompt":            "Runner1 Task",
 		"execution_profile": "effective",
 	})

@@ -106,9 +106,17 @@ func BuildAppConfig(ch *model.Project, resolved resolver.Resolved, imageAPICfg *
 		}
 	}
 
-	// WeChat credentials from Project.
-	cfg.Wechat.AppID = ch.GetWechatAppID()
-	cfg.Wechat.Secret = ch.GetWechatSecret()
+	// WeChat credentials are loaded from ProjectChannelConfig by the Server-owned
+	// publishing/connector flow. Managed Agent bootstrap intentionally leaves them
+	// empty and reaches publishing through authenticated MCP capabilities.
+	if ch != nil && ch.RuntimeChannelConfig != nil {
+		if appID, ok := ch.RuntimeChannelConfig["wechat_app_id"].(string); ok {
+			cfg.Wechat.AppID = strings.TrimSpace(appID)
+		}
+		if secret, ok := ch.RuntimeChannelConfig["wechat_secret"].(string); ok {
+			cfg.Wechat.Secret = strings.TrimSpace(secret)
+		}
+	}
 
 	// Platform-specific fields. The style/author/theme values come from the
 	// resolved set. For current tasks, the raw project already represents the
@@ -202,46 +210,24 @@ func writeProjectCLAUDEMD(workDir string, project *model.Project) error {
 
 // TaskTypeToAgent maps server task types to Claude Code agent names.
 func TaskTypeToAgent(taskType string) string {
-	// Legacy task-type callers are kept at this compatibility boundary. New
-	// admission and dispatch paths use Task.AgentID directly.
-	switch taskType {
-	case model.PlatformWechat, model.TaskTypeWechatArticle:
-		return "wechat-article"
-	case model.PlatformMontage:
-		return "montage"
-	case model.PlatformSeednote:
-		return model.AgentIDSeednote
-	case model.PlatformMoments:
-		return "moments"
-	case model.PlatformEcommerce:
-		return "ecommerce"
-	}
-	agentName, _ := taskTypeToAgentRoute(taskType)
-	return agentName
-}
-
-func taskTypeToAgentRoute(taskType string) (string, bool) {
-	if taskType == model.PlatformWechat {
-		taskType = model.TaskTypeWechatArticle
-	}
 	if pack, ok := agentpack.Default().ForTaskType(taskType); ok {
-		return pack.Agent.Name, true
+		return pack.Agent.Name
 	}
-	if pack, ok := agentpack.Default().ForProjectPlatform(taskType); ok {
-		return pack.Agent.Name, true
+	if pack, ok := agentpack.Default().ForAgent(taskType); ok {
+		return pack.Agent.Name
 	}
-	return model.PlatformSeednote, false
+	return ""
 }
 
 // TaskToAgent maps a full task snapshot to the Claude Code agent name.
 func TaskToAgent(task *model.Task) string {
 	if task == nil {
-		return TaskTypeToAgent("")
+		return ""
 	}
 	if strings.TrimSpace(task.AgentID) != "" {
 		return task.AgentID
 	}
-	return TaskTypeToAgent(task.Type)
+	return ""
 }
 
 // MaterializeReferenceAsset reads only the repository-owned storage key. It

@@ -47,7 +47,6 @@ const {
 
     image_ratio: '16:9',
     max_concurrent_tasks: 1,
-    config: { wechat_app_id: 'wx-app' },
     status: 'active',
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:00:00.000Z',
@@ -62,7 +61,6 @@ const {
       name: '种草项目',
       description: '种草笔记内容',
       image_ratio: '3:4',
-      config: {},
     } as const,
     momentsProject: {
       ...articleProject,
@@ -71,7 +69,6 @@ const {
       name: '朋友圈项目',
       description: '朋友圈内容',
       image_ratio: '1:1',
-      config: {},
     } as const,
     ecommerceProject: {
       ...articleProject,
@@ -80,7 +77,6 @@ const {
       name: '电商项目',
       description: '电商图片内容',
       image_ratio: '4:3',
-      config: {},
     } as const,
     montageProject: {
       ...articleProject,
@@ -89,7 +85,6 @@ const {
       name: '短片项目',
       description: '视频生成短片内容',
       image_ratio: '9:16',
-      config: {},
       montage_defaults: {
         default_pipeline: 'social-short',
         preferences: { duration_seconds: 30 },

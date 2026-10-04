@@ -147,6 +147,15 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 		if windowed && s.windowAlreadyRun(cadence, p, at) {
 			continue
 		}
+		if p.Platform == model.PlatformWechat {
+			row, configErr := s.repo.ProjectChannelConfigs().Get(ctx, p.ID, model.ChannelArticle)
+			if configErr != nil && !errors.Is(configErr, gorm.ErrRecordNotFound) {
+				return out, fmt.Errorf("load feedback account config: %w", configErr)
+			}
+			if row != nil {
+				p.RuntimeChannelConfig = row.Config.Data()
+			}
+		}
 		accountID := feedbackAccountID(p)
 		if feedbackLimitReached(userCounts[p.UserID], s.maxPerUser) || feedbackLimitReached(projectCounts[p.ID], s.maxPerProject) || feedbackLimitReached(accountCounts[accountID], s.maxPerAccount) {
 			continue
@@ -547,7 +556,8 @@ func feedbackAccountID(p *model.Project) string {
 		return ""
 	}
 	if p.Platform == model.ScopeWechat || p.Platform == model.PlatformWechat {
-		if id := strings.TrimSpace(p.GetWechatAppID()); id != "" {
+		id := strings.TrimSpace(mapStringValue(p.RuntimeChannelConfig, "wechat_app_id"))
+		if id != "" {
 			return "wechat:" + id
 		}
 	}

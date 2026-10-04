@@ -319,17 +319,17 @@ func TestResolveAttachmentDownloadURLByOwner(t *testing.T) {
 	taskKey := "uploads/finalized/" + userID + "/task/input.png"
 	planKey := "uploads/finalized/" + userID + "/plan/reference.png"
 
-	task := &model.Task{ID: taskID, UserID: userID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending}
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ID: taskID, UserID: userID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending}
 	task.SetInputAttachments([]model.EntryAttachment{{Type: "image", Key: taskKey, URL: "/api/v1/files/" + taskKey}})
 	if err := repo.Tasks().Create(t.Context(), task); err != nil {
 		t.Fatal(err)
 	}
-	otherTask := &model.Task{ID: uuid.NewString(), UserID: otherUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending}
+	otherTask := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ID: uuid.NewString(), UserID: otherUserID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending}
 	otherTask.SetInputAttachments([]model.EntryAttachment{{Type: "image", Key: "uploads/finalized/other/secret.png"}})
 	if err := repo.Tasks().Create(t.Context(), otherTask); err != nil {
 		t.Fatal(err)
 	}
-	plan := &model.Plan{ID: planID, UserID: userID, Type: model.TaskTypeWechatArticle, Status: model.PlanStatusActive}
+	plan := &model.Plan{ID: planID, UserID: userID, Status: model.PlanStatusActive}
 	if err := repo.Plans().Create(t.Context(), plan); err != nil {
 		t.Fatal(err)
 	}
@@ -388,9 +388,9 @@ func TestAttachmentAPIResponseEmitsOwnedKeysWithoutSigningOrMutation(t *testing.
 	store := &resolveDownloadStore{}
 	ownedKey := "uploads/finalized/user-1/owned.png"
 	externalURL := "https://external.example.com/public.png"
-	task := &model.Task{ID: "task-1", Type: model.TaskTypeWechatArticle}
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ID: "task-1", Type: model.TaskTypeWechatArticle}
 	task.SetInputAttachments([]model.EntryAttachment{{Type: "image", URL: "/api/v1/files/" + ownedKey}, {Type: "image", URL: externalURL}})
-	plan := &model.Plan{ID: "plan-1", Type: model.TaskTypeWechatArticle}
+	plan := &model.Plan{ID: "plan-1"}
 	plan.SetInputAttachments([]model.EntryAttachment{{Type: "image", URL: "/api/v1/files/" + ownedKey}, {Type: "image", URL: externalURL}})
 
 	taskResp := taskAPIResponse(task, store)

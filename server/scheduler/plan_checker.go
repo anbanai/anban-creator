@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -202,21 +203,17 @@ func triggerPlan(ctx context.Context, repo repository.Repository, taskSvc *servi
 
 	entries, err := repo.PlanEntries().ListByPlanID(ctx, plan.ID)
 	if err != nil {
-		lower := strings.ToLower(err.Error())
-		if !strings.Contains(lower, "no such table") && !strings.Contains(lower, "doesn't exist") && !strings.Contains(lower, "does not exist") {
-			return fmt.Errorf("list plan entries for %s: %w", plan.ID, err)
-		}
-		return fmt.Errorf("plan entries are unavailable for %s; migration is required", plan.ID)
+		return fmt.Errorf("list plan entries for %s: %w", plan.ID, err)
 	}
 	if len(entries) > 0 {
-		var failures int
+		var failures []error
 		for _, entry := range entries {
 			if entry == nil || entry.Status != model.PlanEntryStatusActive {
 				continue
 			}
 			task, createErr := taskSvc.CreateFromPlanEntry(ctx, plan, entry)
 			if createErr != nil {
-				failures++
+				failures = append(failures, fmt.Errorf("entry %s: %w", entry.ID, createErr))
 				planLogger.Error().Err(createErr).Str("entry_id", entry.ID).Str("agent_id", entry.AgentID).Msg("failed to create task from plan entry")
 				continue
 			}
@@ -227,33 +224,12 @@ func triggerPlan(ctx context.Context, repo repository.Repository, taskSvc *servi
 		if _, err := advancePlanNextRun(ctx, repo, plan); err != nil {
 			return fmt.Errorf("advance plan %s next_run_at: %w", plan.ID, err)
 		}
-		if failures > 0 {
-			return fmt.Errorf("%d plan entries failed", failures)
+		if len(failures) > 0 {
+			return errors.Join(failures...)
 		}
 		return nil
 	}
-	// A migrated database can still contain a historical plan whose entry rows
-	// were not backfilled. Use the legacy plan service once so the schedule does
-	// not silently advance without producing its task; newly created plans always
-	// have at least one entry and use the branch above.
-	task, err := taskSvc.CreateFromPlan(ctx, plan)
-	if err != nil {
-		return fmt.Errorf("create task from legacy plan %s: %w", plan.ID, err)
-	}
-	if task == nil {
-		planLogger.Info().Msg("legacy plan task not created")
-		return nil
-	}
-	planLogger.Info().Str("task_id", task.ID).Msg("legacy plan task created")
-
-	nextRun, err := advancePlanNextRun(ctx, repo, plan)
-	if err != nil {
-		return fmt.Errorf("advance plan %s next_run_at: %w", plan.ID, err)
-	}
-	if nextRun != nil {
-		planLogger.Info().Time("next_run", *nextRun).Msg("plan next_run_at advanced")
-	}
-	return nil
+	return fmt.Errorf("plan %s has no executable entries; migration is required", plan.ID)
 }
 
 // advancePlanNextRun advances the plan's next_run_at to the next cron occurrence

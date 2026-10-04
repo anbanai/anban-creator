@@ -80,7 +80,7 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 		}
 	})
 
-	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Plan{}, &model.PlanEntry{}, &model.Task{}, &model.TaskExecution{}, &model.TaskFile{}, &model.Asset{}, &model.ProjectAgentConfig{}, &model.ProjectChannelConfig{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Plan{}, &model.PlanEntry{}, &model.Task{}, &model.TaskExecution{}, &model.TaskFile{}, &model.Asset{}, &model.ProjectChannelConfig{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -154,7 +154,6 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 		ID:                    uuid.New().String(),
 		UserID:                userID,
 		ProjectID:             projectID,
-		Type:                  model.TaskTypeWechatArticle,
 		Title:                 "Fallback title",
 		CronExpr:              "0 * * * *",
 		Prompt:                "Write from this plan",
@@ -164,8 +163,12 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 		Watermark:             true,
 		NextRunAt:             &originalNextRun,
 	}
+	plan.Entries = []*model.PlanEntry{{ID: uuid.NewString(), PlanID: plan.ID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", Status: model.PlanEntryStatusActive}}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
 		t.Fatalf("create plan: %v", err)
+	}
+	if err := repo.PlanEntries().Create(ctx, plan.Entries[0]); err != nil {
+		t.Fatalf("create plan entry: %v", err)
 	}
 
 	if err := TriggerPlanNow(ctx, repo, taskSvc, plan.ID, logger); err != nil {
@@ -226,12 +229,16 @@ func TestTriggerPlanNowRejectsInvalidReferenceBeforeTaskCreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan := &model.Plan{ExecutionProfile: "effective",
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		CronExpr: "0 * * * *", Status: model.PlanStatusActive, NextRunAt: &nextRun,
 		ImageRatio:            "16:9",
 		ReferenceImageAssetID: "missing-asset",
 	}
+	plan.Entries = []*model.PlanEntry{{ID: uuid.NewString(), PlanID: plan.ID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", Status: model.PlanEntryStatusActive}}
 	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlanEntries().Create(ctx, plan.Entries[0]); err != nil {
 		t.Fatal(err)
 	}
 
@@ -250,8 +257,8 @@ func TestTriggerPlanNowRejectsInvalidReferenceBeforeTaskCreation(t *testing.T) {
 	if findErr != nil {
 		t.Fatal(findErr)
 	}
-	if updated.NextRunAt == nil || !updated.NextRunAt.Equal(nextRun) {
-		t.Fatalf("next_run_at advanced after invalid reference: %v", updated.NextRunAt)
+	if updated.NextRunAt == nil || !updated.NextRunAt.After(nextRun) {
+		t.Fatalf("next_run_at did not advance after invalid reference: %v", updated.NextRunAt)
 	}
 }
 
@@ -259,7 +266,7 @@ func TestAdvancePlanNextRunDoesNotOverwriteConcurrentReferenceUpdate(t *testing.
 	base, _, _, _ := setupPlanCheckerTest(t)
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 	plan := &model.Plan{ExecutionProfile: "effective",
-		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.TaskTypeWechatArticle,
+		ID: uuid.NewString(), UserID: uuid.NewString(),
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
 		Status: model.PlanStatusActive, NextRunAt: &oldNext,
 	}
@@ -307,7 +314,7 @@ func TestAdvancePlanNextRunSkipsConcurrentNextRunUpdate(t *testing.T) {
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 	concurrentNext := oldNext.Add(30 * time.Minute)
 	plan := &model.Plan{ExecutionProfile: "effective",
-		ID: uuid.NewString(), UserID: uuid.NewString(), Type: model.TaskTypeWechatArticle,
+		ID: uuid.NewString(), UserID: uuid.NewString(),
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *",
 		Status: model.PlanStatusActive, NextRunAt: &oldNext,
 	}
@@ -355,7 +362,6 @@ func TestTriggerPlanNowSkipsInactivePlanWithoutRetryableError(t *testing.T) {
 	plan := &model.Plan{ExecutionProfile: "effective",
 		ID:       uuid.New().String(),
 		UserID:   uuid.New().String(),
-		Type:     model.PlatformSeednote,
 		CronExpr: "0 * * * *",
 		Status:   model.PlanStatusPaused,
 	}
@@ -394,8 +400,7 @@ func TestPlanCheckerDoesNotRedispatchHistoricalPendingTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := &model.Task{
-		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
-		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending,
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusPending,
 	}
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
@@ -427,5 +432,48 @@ func TestStuckTaskReaperSkipsDurableExecution(t *testing.T) {
 	}
 	if found.Status != model.TaskStatusRunning {
 		t.Fatalf("durable execution was reaped: status=%q error=%q", found.Status, found.ErrorMessage)
+	}
+}
+
+func TestTriggerPlanCreatesIndependentOutputsAndIsolatesEntryFailure(t *testing.T) {
+	repo, svc, _, logger := setupPlanCheckerTest(t)
+	ctx := context.Background()
+	userID, projectID := uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@test.com", Password: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Name: "WeChat account", Platform: model.PlatformWechat, MaxConcurrentTasks: 10, Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	due := time.Now().Add(-time.Minute).Truncate(time.Minute)
+	plan := &model.Plan{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Prompt: "Shared brief", CronExpr: "* * * * *", Status: model.PlanStatusActive, NextRunAt: &due}
+	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{model.AgentIDArticle, "invalid-output", model.AgentIDSeednote} {
+		if err := repo.PlanEntries().Create(ctx, &model.PlanEntry{ID: uuid.NewString(), PlanID: plan.ID, AgentID: id, Channel: id, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", Status: model.PlanEntryStatusActive}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := TriggerPlanNow(ctx, repo, svc, plan.ID, logger); err == nil {
+		t.Fatal("failed entry must report an error")
+	}
+	tasks, total, err := svc.List(ctx, userID, 0, 10, "", projectID, "")
+	if err != nil || total != 2 || len(tasks) != 2 {
+		t.Fatalf("independent tasks = %d, %v", total, err)
+	}
+	seen := map[string]bool{}
+	for _, task := range tasks {
+		seen[task.AgentID] = true
+		if task.Prompt != plan.Prompt || task.ProjectID != projectID {
+			t.Fatal("shared context not preserved")
+		}
+	}
+	if !seen[model.AgentIDArticle] || !seen[model.AgentIDSeednote] || tasks[0].ID == tasks[1].ID {
+		t.Fatal("output identities are not independent")
+	}
+	updated, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil || updated.NextRunAt == nil || !updated.NextRunAt.Equal(due.Add(time.Minute)) {
+		t.Fatalf("schedule must advance exactly once: %#v, %v", updated, err)
 	}
 }

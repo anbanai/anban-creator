@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -450,45 +451,23 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err != nil {
 		return nil, respondTaskCreationProjectError(c, h.logger, err)
 	}
-	// Canonical task identity is derived from the project only for migrated
-	// internal callers that omit the fields. Public callers may still provide
-	// an explicit identity, while the service rejects obsolete aliases.
-	if source == nil && strings.TrimSpace(req.AgentID) == "" && strings.TrimSpace(req.Channel) == "" && strings.TrimSpace(req.TaskKind) == "" {
-		req.Type = strings.TrimSpace(req.Type)
-		if req.Type == "article" {
-			return nil, Error(c, fiber.StatusBadRequest, "unsupported task type article")
-		}
-		if req.Type == "" {
-			switch project.Platform {
-			case model.PlatformWechat:
-				req.Type = model.TaskTypeWechatArticle
-			case model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit:
-				req.Type = project.Platform
-			}
-		}
+	if source == nil && (strings.TrimSpace(req.AgentID) == "" || strings.TrimSpace(req.Channel) == "" || strings.TrimSpace(req.TaskKind) == "") {
+		return nil, Error(c, fiber.StatusBadRequest, "agent_id, channel, and task_kind are required")
 	}
 	requestedTaskType := strings.TrimSpace(req.Type)
 	// Project is shared context. Resolve and validate execution identity from the
 	// request; never derive Agent/channel from the owning project.
 	requestedChannel := strings.TrimSpace(req.Channel)
-	if requestedChannel == "" && strings.TrimSpace(req.AgentID) != "" {
-		requestedChannel, _ = model.AgentChannel(strings.TrimSpace(req.AgentID))
+	pack, exists := agentpack.Default().ForAgent(strings.TrimSpace(req.AgentID))
+	if !exists {
+		return nil, Error(c, fiber.StatusBadRequest, "unknown agent_id")
 	}
-	if requestedChannel == "" {
-		switch requestedTaskType {
-		case model.TaskTypeWechatArticle, model.PlatformWechat:
-			requestedChannel = model.ChannelArticle
-		case model.TaskTypeWechatPicture:
-			requestedChannel = model.ChannelWechatPicture
-		case model.PlatformSeednote, model.TaskTypeViralAnalysis:
-			requestedChannel = model.ChannelSeednote
+	if pack.Kind == agentpack.KindPlugin {
+		if requestedChannel != pack.ID || strings.TrimSpace(req.TaskKind) != pack.ID {
+			return nil, Error(c, fiber.StatusBadRequest, "plugin task identity must match its agent_id")
 		}
-	}
-	if source == nil {
-		if requestedPlatform := model.PlatformForChannel(requestedChannel); requestedPlatform != "" &&
-			strings.TrimSpace(project.Platform) != "" && requestedPlatform != strings.TrimSpace(project.Platform) {
-			return nil, Error(c, fiber.StatusBadRequest, "task channel is incompatible with project platform")
-		}
+	} else if requestedChannel != pack.Channel || !pack.SupportsTaskKind(strings.TrimSpace(req.TaskKind)) {
+		return nil, Error(c, fiber.StatusBadRequest, "agent_id, channel, and task_kind are inconsistent")
 	}
 	projectSnapshot := model.SnapshotProject(project)
 
@@ -560,7 +539,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
-	if strings.TrimSpace(req.ImageCapabilityKey) == "" && project.Platform == model.PlatformEcommerce {
+	if strings.TrimSpace(req.ImageCapabilityKey) == "" && requestedChannel == model.ChannelEcommerce {
 		req.ImageCapabilityKey = strings.TrimSpace(project.EcommerceDefaults.Data().ImageCapabilityKey)
 	}
 	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
@@ -594,14 +573,14 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 				Instruction: fmt.Sprintf("电商产品参考图 %d", i+1),
 			})
 		}
-		if model.IsHypitPlatform(project.Platform) {
+		if requestedChannel == model.ChannelHypit {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeHypitAsset, hypitAssetURLs(req.HypitInput))
 			if err != nil {
 				return nil, respondUploadSessionFinalizeError(c, h.logger, err)
 			}
 			rewriteHypitAssetURLs(req.HypitInput, rewrites)
 		}
-		if model.IsMontagePlatform(project.Platform) {
+		if requestedChannel == model.ChannelMontage {
 			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, montageSourceAssetURLs(req.MontageInput))
 			if err != nil {
 				return nil, respondUploadSessionFinalizeError(c, h.logger, err)
@@ -662,9 +641,6 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	}
 	if handled, response := respondAgentProfileError(c, err); handled {
 		return response
-	}
-	if errors.Is(err, service.ErrViralAnalysisRequiresSeednoteProject) {
-		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if errors.Is(err, service.ErrTaskIdentityIncompatible) {
 		return Error(c, fiber.StatusBadRequest, err.Error())

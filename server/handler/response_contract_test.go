@@ -11,7 +11,7 @@ import (
 
 func TestTaskAPIResponseHidesServerInternalFields(t *testing.T) {
 	now := time.Now()
-	task := &model.Task{
+	task := &model.Task{AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
 		ID:                      uuid.NewString(),
 		UserID:                  uuid.NewString(),
 		ProjectID:               uuid.NewString(),
@@ -123,7 +123,7 @@ func TestTaskAPIResponseHidesServerInternalFields(t *testing.T) {
 }
 
 func TestTaskAPIResponseDropsEmptyProfileAndCleansProgressLog(t *testing.T) {
-	task := &model.Task{
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ID:          uuid.NewString(),
 		UserID:      uuid.NewString(),
 		ProjectID:   uuid.NewString(),

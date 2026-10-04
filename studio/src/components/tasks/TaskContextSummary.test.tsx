@@ -21,7 +21,6 @@ const currentProject: Project = {
 
   image_ratio: '1:1',
   max_concurrent_tasks: 1,
-  config: {},
   status: 'active',
   created_at: '2026-07-10T00:00:00.000Z',
   updated_at: '2026-07-10T00:00:00.000Z',

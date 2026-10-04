@@ -17,7 +17,11 @@ type Manifest struct {
 	ID string `yaml:"id" json:"id"`
 	// Channel is the single output channel owned by this Pack. Plugin-only
 	// Packs leave it empty; managed product Packs must declare exactly one.
-	Channel             string                    `yaml:"channel,omitempty" json:"channel,omitempty"`
+	Channel string `yaml:"channel,omitempty" json:"channel,omitempty"`
+	// PlanTaskKind is the single task kind used when this Pack is selected from
+	// the plan composer. It keeps plan selection user-facing while channel and
+	// task routing remain server-owned catalog data.
+	PlanTaskKind        string                    `yaml:"plan_task_kind,omitempty" json:"plan_task_kind,omitempty"`
 	Version             string                    `yaml:"version" json:"version"`
 	Kind                string                    `yaml:"kind" json:"kind"`
 	DisplayName         string                    `yaml:"display_name" json:"display_name"`
@@ -45,6 +49,18 @@ func (m Manifest) SupportsTaskKind(taskKind string) bool {
 	for _, supported := range m.Bindings.TaskKinds {
 		if supported == taskKind {
 			return true
+		}
+	}
+	return false
+}
+
+func (m Manifest) SupportsPlan() bool {
+	if m.Kind != KindManaged || strings.TrimSpace(m.Channel) == "" || strings.TrimSpace(m.PlanTaskKind) == "" {
+		return false
+	}
+	for _, surface := range m.Surfaces {
+		if surface == "plan" {
+			return m.SupportsTaskKind(m.PlanTaskKind)
 		}
 	}
 	return false
@@ -100,17 +116,15 @@ type DataDeliverySpec struct {
 }
 
 type SchemaRefs struct {
-	ProjectConfig string `yaml:"project_config" json:"project_config,omitempty"`
-	TaskInput     string `yaml:"task_input" json:"task_input,omitempty"`
-	UI            string `yaml:"ui" json:"ui,omitempty"`
-	Output        string `yaml:"output" json:"output,omitempty"`
+	TaskInput string `yaml:"task_input" json:"task_input,omitempty"`
+	UI        string `yaml:"ui" json:"ui,omitempty"`
+	Output    string `yaml:"output" json:"output,omitempty"`
 }
 
 type SchemaDocuments struct {
-	ProjectConfig json.RawMessage `json:"project_config,omitempty"`
-	TaskInput     json.RawMessage `json:"task_input,omitempty"`
-	UI            json.RawMessage `json:"ui,omitempty"`
-	Output        json.RawMessage `json:"output,omitempty"`
+	TaskInput json.RawMessage `json:"task_input,omitempty"`
+	UI        json.RawMessage `json:"ui,omitempty"`
+	Output    json.RawMessage `json:"output,omitempty"`
 }
 
 type UISpec struct {
@@ -199,6 +213,22 @@ func (c *Catalog) ForChannel(channel string) (Manifest, bool) {
 	return c.Packs[i], true
 }
 
+// PlanPacks returns the managed Packs exposed by the plan composer. The
+// catalog is already deterministically sorted, so callers can render this
+// slice without inventing a second product ordering.
+func (c *Catalog) PlanPacks() []Manifest {
+	if c == nil {
+		return nil
+	}
+	packs := make([]Manifest, 0)
+	for _, pack := range c.Packs {
+		if pack.SupportsPlan() {
+			packs = append(packs, pack)
+		}
+	}
+	return packs
+}
+
 // ForTaskKind resolves a workflow task kind to its owning Pack.
 func (c *Catalog) ForTaskKind(taskKind string) (Manifest, bool) {
 	if c == nil {
@@ -234,19 +264,6 @@ func (c *Catalog) ForTaskType(taskType string) (Manifest, bool) {
 		return c.Pack("profile-analysis")
 	}
 	return c.ForChannel(taskType)
-}
-
-// ForProjectPlatform resolves a project platform to its default output
-// channel. A WeChat project exposes separate article and picture task types;
-// long-form articles remain the default project workflow.
-func (c *Catalog) ForProjectPlatform(platform string) (Manifest, bool) {
-	if platform == "wechat" {
-		return c.ForChannel("wechat-article")
-	}
-	if pack, ok := c.ForChannel(platform); ok {
-		return pack, true
-	}
-	return c.ForTaskType(platform)
 }
 
 func (c *Catalog) BillingOperation(taskType string) (string, bool) {

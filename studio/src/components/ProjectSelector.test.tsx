@@ -32,7 +32,6 @@ const projects: Project[] = [
 
     image_ratio: '16:9',
     max_concurrent_tasks: 2,
-    config: {},
     status: 'active',
     created_at: '2026-08-01T00:00:00Z',
     updated_at: '2026-08-01T00:00:00Z',
@@ -54,7 +53,6 @@ const projects: Project[] = [
 
     image_ratio: '3:4',
     max_concurrent_tasks: 1,
-    config: {},
     status: 'active',
     created_at: '2026-08-01T00:00:00Z',
     updated_at: '2026-08-01T00:00:00Z',

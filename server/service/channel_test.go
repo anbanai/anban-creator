@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -39,7 +38,6 @@ func TestProjectServiceDoesNotBakeArticleWriter(t *testing.T) {
 			ch, err := svc.Create(context.Background(), "user-1", &model.Project{
 				Platform: platform,
 				Name:     "Default Style Project",
-				Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 			})
 			if err != nil {
 				t.Fatalf("Create: %v", err)
@@ -81,7 +79,6 @@ func TestProjectServiceUpdateDoesNotBakeArticleWriter(t *testing.T) {
 	created, err := svc.Create(context.Background(), "user-1", &model.Project{
 		Platform: model.PlatformWechat,
 		Name:     "Article Project",
-		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -113,7 +110,6 @@ func TestProjectServiceUpdatePreservesExistingWriterWhenOmitted(t *testing.T) {
 		Platform: model.PlatformWechat,
 		Name:     "Article Project",
 		Writer:   "casual-science",
-		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -164,49 +160,5 @@ func TestProjectServiceUpdateInstructionsSetControlsClear(t *testing.T) {
 	}
 	if updated.Instructions != "" {
 		t.Fatalf("Instructions after explicit clear = %q, want empty", updated.Instructions)
-	}
-}
-
-func TestProjectServiceCreateRequiresWechatCredentials(t *testing.T) {
-	tests := []struct {
-		name   string
-		config model.ProjectConfig
-	}{
-		{name: "both missing"},
-		{name: "missing secret", config: model.ProjectConfig{WechatAppID: "wx-app"}},
-		{name: "missing app id", config: model.ProjectConfig{WechatSecret: "secret"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			svc, _ := setupTestProjectService(t)
-			_, err := svc.Create(context.Background(), "user-1", &model.Project{
-				Platform: model.PlatformWechat,
-				Name:     "Article",
-				Config:   tt.config,
-			})
-			if !errors.Is(err, ErrWechatCredentialsRequired) {
-				t.Fatalf("Create error = %v, want ErrWechatCredentialsRequired", err)
-			}
-		})
-	}
-}
-
-func TestProjectServiceUpdatePreservesWechatCredentialsWhenOmitted(t *testing.T) {
-	svc, _ := setupTestProjectService(t)
-	created, err := svc.Create(context.Background(), "user-1", &model.Project{
-		Platform: model.PlatformWechat,
-		Name:     "Article",
-		Config:   model.ProjectConfig{WechatAppID: "wx-app", WechatSecret: "secret"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	updated, err := svc.Update(context.Background(), "user-1", created.ID, &model.Project{Name: "Renamed"})
-	if err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-	if updated.Config.WechatAppID != "wx-app" || updated.Config.WechatSecret != "secret" {
-		t.Fatalf("credentials after update = %#v, want existing credentials preserved", updated.Config)
 	}
 }

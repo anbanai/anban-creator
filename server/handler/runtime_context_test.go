@@ -11,9 +11,9 @@ import (
 
 func TestBuildRuntimeContextSanitizesAndGroupsTaskState(t *testing.T) {
 	now := time.Now()
-	task := &model.Task{
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
 		ID:                      "task-1",
-		Type:                    model.PlatformWechat,
+		Type:                    model.TaskTypeWechatArticle,
 		Status:                  model.TaskStatusFailed,
 		CreatedAt:               now.Add(-time.Hour),
 		AgentProfileFingerprint: strings.Repeat("a", 64),
@@ -53,7 +53,7 @@ func TestBuildRuntimeContextSanitizesAndGroupsTaskState(t *testing.T) {
 }
 
 func TestBuildRuntimeContextUsesFrozenArtifactContractAndSanitizedRuntimeFacts(t *testing.T) {
-	task := &model.Task{Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed, Outcome: &model.TaskOutcome{Diagnostic: &model.ExecutionDiagnostic{Code: "endpoint_timeout", Summary: "图片服务暂时不可用", Recoverable: true}}}
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed, Outcome: &model.TaskOutcome{Diagnostic: &model.ExecutionDiagnostic{Code: "endpoint_timeout", Summary: "图片服务暂时不可用", Recoverable: true}}}
 	execution := &model.TaskExecution{
 		ID: "exec-2", Status: model.TaskExecutionFailed, RuntimeProfile: "balanced", RuntimeImage: "creator-agent@sha256:" + strings.Repeat("c", 64),
 		AgentPackRequiredArtifactContract: []byte(`[{"role":"markdown","path":"output/article.md","mime_type":"text/markdown","required":true},{"role":"cover","path":"output/cover.png","mime_type":"image/png","required":true}]`),
@@ -81,8 +81,8 @@ func TestBuildRuntimeContextUsesFrozenArtifactContractAndSanitizedRuntimeFacts(t
 
 func TestBuildRuntimeContextMarksProfileConflictWhenProjectChanged(t *testing.T) {
 	created := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
-	task := &model.Task{
-		Type:      model.PlatformWechat,
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusCompleted,
 		CreatedAt: created,
 		ProjectID: "project-1",
@@ -100,7 +100,7 @@ func TestBuildRuntimeContextMarksProfileConflictWhenProjectChanged(t *testing.T)
 }
 
 func TestBuildRuntimeContextDoesNotCountArtifactsFromOlderExecution(t *testing.T) {
-	task := &model.Task{Type: model.PlatformMontage, Status: model.TaskStatusFailed}
+	task := &model.Task{AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.TaskKindContentGeneration, Type: model.PlatformMontage, Status: model.TaskStatusFailed}
 	execution := &model.TaskExecution{
 		ID:     "current-execution",
 		Status: model.TaskExecutionFailed,
@@ -130,7 +130,7 @@ func TestBuildRuntimeContextDoesNotCountArtifactsFromOlderExecution(t *testing.T
 }
 
 func TestBuildRuntimeContextRequiresArtifactRoleAndPath(t *testing.T) {
-	task := &model.Task{Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}
+	task := &model.Task{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}
 	execution := &model.TaskExecution{
 		ID:                                "current-execution",
 		Status:                            model.TaskExecutionSucceeded,

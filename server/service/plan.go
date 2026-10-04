@@ -75,16 +75,12 @@ func validatePlanEntryIdentity(entry CreatePlanEntryParams) error {
 	if entry.AgentID == "" || entry.Channel == "" || entry.TaskKind == "" {
 		return fmt.Errorf("agent_id, channel, and task_kind are required")
 	}
-	expectedChannel, ok := model.AgentChannel(entry.AgentID)
-	if !ok {
-		return fmt.Errorf("unknown agent_id %q", entry.AgentID)
-	}
-	if expectedChannel != entry.Channel {
-		return fmt.Errorf("agent %q is bound to channel %q", entry.AgentID, expectedChannel)
-	}
 	pack, ok := agentpack.Default().ForAgent(entry.AgentID)
 	if !ok || pack.Kind != agentpack.KindManaged {
 		return fmt.Errorf("unknown managed agent_id %q", entry.AgentID)
+	}
+	if strings.TrimSpace(pack.Channel) != strings.TrimSpace(entry.Channel) {
+		return fmt.Errorf("agent %q is bound to channel %q", entry.AgentID, pack.Channel)
 	}
 	if !pack.SupportsTaskKind(entry.TaskKind) {
 		return fmt.Errorf("unsupported task_kind %q", entry.TaskKind)
@@ -96,6 +92,85 @@ var (
 	ErrPlanEntryNotFound  = errors.New("plan entry not found")
 	ErrDuplicatePlanAgent = errors.New("plan already contains this Agent")
 )
+
+func planEntriesFromAgentIDs(agentIDs []string, executionProfile string) ([]CreatePlanEntryParams, error) {
+	profile := strings.TrimSpace(executionProfile)
+	if profile == "" {
+		return nil, fmt.Errorf("execution_profile is required")
+	}
+	entries := make([]CreatePlanEntryParams, 0, len(agentIDs))
+	seen := make(map[string]struct{}, len(agentIDs))
+	for _, rawID := range agentIDs {
+		agentID := strings.TrimSpace(rawID)
+		if agentID == "" {
+			return nil, fmt.Errorf("agent_ids must not contain empty values")
+		}
+		if _, exists := seen[agentID]; exists {
+			return nil, ErrDuplicatePlanAgent
+		}
+		seen[agentID] = struct{}{}
+		pack, ok := agentpack.Default().ForAgent(agentID)
+		if !ok || !pack.SupportsPlan() {
+			return nil, fmt.Errorf("agent_id %q is not available for plans", agentID)
+		}
+		entries = append(entries, CreatePlanEntryParams{
+			AgentID: agentID, Channel: strings.TrimSpace(pack.Channel),
+			TaskKind: strings.TrimSpace(pack.PlanTaskKind), ExecutionProfile: profile,
+		})
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("at least one agent_id is required")
+	}
+	return entries, nil
+}
+
+func syncPlanEntries(ctx context.Context, repo repository.Repository, planID string, desired []CreatePlanEntryParams) error {
+	existing, err := repo.PlanEntries().ListByPlanID(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("list plan entries: %w", err)
+	}
+	byAgent := make(map[string]*model.PlanEntry, len(existing))
+	for _, entry := range existing {
+		if entry != nil {
+			byAgent[entry.AgentID] = entry
+		}
+	}
+	keep := make(map[string]struct{}, len(desired))
+	for _, params := range desired {
+		keep[params.AgentID] = struct{}{}
+		if entry := byAgent[params.AgentID]; entry != nil {
+			entry.Channel = params.Channel
+			entry.TaskKind = params.TaskKind
+			entry.ExecutionProfile = params.ExecutionProfile
+			entry.Status = model.PlanEntryStatusActive
+			if err := repo.PlanEntries().Update(ctx, entry); err != nil {
+				return fmt.Errorf("update plan entry %s: %w", entry.ID, err)
+			}
+			continue
+		}
+		entry := &model.PlanEntry{
+			ID: uuid.NewString(), PlanID: planID, AgentID: params.AgentID,
+			Channel: params.Channel, TaskKind: params.TaskKind,
+			ExecutionProfile: params.ExecutionProfile, Status: model.PlanEntryStatusActive,
+		}
+		entry.SetAgentInput(params.AgentInput)
+		entry.SetImageDefaults(params.ImageDefaults)
+		if err := repo.PlanEntries().Create(ctx, entry); err != nil {
+			return fmt.Errorf("create plan entry: %w", err)
+		}
+	}
+	for _, entry := range existing {
+		if entry == nil {
+			continue
+		}
+		if _, ok := keep[entry.AgentID]; !ok {
+			if err := repo.PlanEntries().Delete(ctx, entry.ID); err != nil {
+				return fmt.Errorf("delete plan entry %s: %w", entry.ID, err)
+			}
+		}
+	}
+	return nil
+}
 
 // NewPlanService creates a new PlanService.
 func NewPlanService(repo repository.Repository, logger *zerolog.Logger) *PlanService {
@@ -192,10 +267,13 @@ func (s *PlanService) UpdateEntry(ctx context.Context, p UpdatePlanEntryParams) 
 		return nil, err
 	}
 	if p.AgentID != nil && strings.TrimSpace(*p.AgentID) != entry.AgentID {
-		if expectedChannel, ok := model.AgentChannel(strings.TrimSpace(*p.AgentID)); !ok {
-			return nil, fmt.Errorf("unknown agent_id %q", strings.TrimSpace(*p.AgentID))
-		} else if entry.Channel != "" && expectedChannel != entry.Channel {
-			return nil, fmt.Errorf("agent %q is bound to channel %q", strings.TrimSpace(*p.AgentID), expectedChannel)
+		candidate := strings.TrimSpace(*p.AgentID)
+		pack, ok := agentpack.Default().ForAgent(candidate)
+		if !ok || pack.Kind != agentpack.KindManaged {
+			return nil, fmt.Errorf("unknown managed agent_id %q", candidate)
+		}
+		if strings.TrimSpace(pack.Channel) != strings.TrimSpace(entry.Channel) {
+			return nil, fmt.Errorf("agent %q is bound to channel %q", candidate, pack.Channel)
 		}
 		if _, err := s.repo.PlanEntries().FindByPlanIDAndAgentID(ctx, entry.PlanID, strings.TrimSpace(*p.AgentID)); err == nil {
 			return nil, ErrDuplicatePlanAgent
@@ -222,13 +300,8 @@ func (s *PlanService) UpdateEntry(ctx context.Context, p UpdatePlanEntryParams) 
 	if p.Status != nil {
 		entry.Status = strings.TrimSpace(*p.Status)
 	}
-	if expectedChannel, ok := model.AgentChannel(entry.AgentID); !ok {
-		return nil, fmt.Errorf("unknown agent_id %q", entry.AgentID)
-	} else if expectedChannel != entry.Channel {
-		return nil, fmt.Errorf("agent %q is bound to channel %q", entry.AgentID, expectedChannel)
-	}
 	pack, ok := agentpack.Default().ForAgent(entry.AgentID)
-	if !ok || pack.Kind != agentpack.KindManaged || !pack.SupportsTaskKind(entry.TaskKind) {
+	if !ok || pack.Kind != agentpack.KindManaged || strings.TrimSpace(pack.Channel) != strings.TrimSpace(entry.Channel) || !pack.SupportsTaskKind(entry.TaskKind) {
 		return nil, fmt.Errorf("unsupported task_kind %q", entry.TaskKind)
 	}
 	if entry.AgentID == "" || entry.Channel == "" || entry.TaskKind == "" || entry.ExecutionProfile == "" {
@@ -280,33 +353,20 @@ type CreatePlanParams struct {
 	SkipReferenceImage    *bool
 	ReferenceImageAssetID string
 	Watermark             *bool
-	// HasContentImage / HasTailImage: seednote image composition (cover always
-	// generated). nil → fall back to plan model defaults (content on, tail off);
-	// non-nil honors explicit user choice.
-	HasContentImage *bool
-	HasTailImage    *bool
-	// ArticleWithCover / ArticleWithContentImages: 公众号 article image toggles
-	// (cover NOT mandatory). nil → fall back to plan model defaults (both on);
-	// non-nil honors explicit user choice.
-	ArticleWithCover         *bool
-	ArticleWithContentImages *bool
-	CoverUsePortrait         bool
-	MontageInput             *model.MontageInput
-	HypitInput               *model.HypitInput
-	InputAttachments         []model.EntryAttachment
-	AgentInput               map[string]any
+	InputAttachments      []model.EntryAttachment
+	// AgentIDs is the public plan selection. Channel and task kind are resolved
+	// from the server-owned Agent Pack Catalog.
+	AgentIDs []string
 	// Entries are the independently executable Agent declarations for this
-	// schedule. When present, each entry supplies its own execution profile and
-	// identity; the legacy shared fields remain accepted for migrated plans.
+	// schedule. They are populated by the server from AgentIDs for public calls;
+	// migration code may provide fully resolved entries directly.
 	Entries []CreatePlanEntryParams
 }
 
-// Create validates the cron expression, resolves the project, computes the next run
-// time, and persists the plan. The task type is derived from the project's platform.
-// ImageCapabilityKey optionally selects a per-plan image model (validated upstream by the handler).
-//
-// HasContentImage / HasTailImage control seednote image composition on spawned
-// tasks. nil falls back to the model's column defaults (content on, tail off).
+// Create validates the public schedule contract, resolves the project, computes
+// the next run time, and persists the plan plus its independently executable
+// entries. Task identity always comes from AgentIDs or explicit migration
+// entries; project platform is context only.
 func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Plan, error) {
 	if strings.TrimSpace(p.ExecutionProfile) == "" && len(p.Entries) == 0 {
 		return nil, fmt.Errorf("execution_profile is required")
@@ -316,6 +376,19 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	}
 	if p.CronExpr == "" {
 		return nil, fmt.Errorf("cron_expr is required")
+	}
+	if len(p.AgentIDs) > 0 {
+		entries, err := planEntriesFromAgentIDs(p.AgentIDs, p.ExecutionProfile)
+		if err != nil {
+			return nil, err
+		}
+		p.Entries = entries
+	}
+	if len(p.Entries) == 0 {
+		return nil, fmt.Errorf("at least one agent_id is required")
+	}
+	if strings.TrimSpace(p.ExecutionProfile) == "" {
+		p.ExecutionProfile = strings.TrimSpace(p.Entries[0].ExecutionProfile)
 	}
 	if len(p.Entries) > 0 {
 		seen := make(map[string]struct{}, len(p.Entries))
@@ -335,7 +408,8 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		}
 	}
 
-	// Load project to derive type and validate ownership.
+	// Load the project for ownership/context only. Its platform never determines
+	// the task identity or the set of outputs in a plan.
 	project, err := s.repo.Projects().FindByID(ctx, p.ProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("find project: %w", err)
@@ -346,53 +420,12 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
 	}
-	// New channel-neutral projects derive task validation from their entries.
-	// Legacy projects may still use the migration bridge on Project.Platform.
-	validationTaskType := ""
-	validationChannel := ""
-	if len(p.Entries) > 0 {
-		validationTaskType = legacyTaskTypeForIdentity(p.Entries[0].AgentID, p.Entries[0].Channel, p.Entries[0].TaskKind)
-		validationChannel = p.Entries[0].Channel
-	}
-	effectivePlatform := strings.TrimSpace(project.Platform)
-	if validationTaskType != "" {
-		effectivePlatform = validationTaskType
-	} else if effectivePlatform == "" {
-		effectivePlatform = validationTaskType
-	}
-	legacySingleEntry := len(p.Entries) == 0
-	if len(p.Entries) == 0 {
-		requested := strings.TrimSpace(project.Platform)
-		if requested == model.PlatformWechat {
-			requested = model.TaskTypeWechatArticle
-		}
-		agentID, channel, taskKind, _, identityErr := resolveTaskIdentity(project, CreateManualParams{RequestedTaskType: requested})
-		if identityErr != nil {
-			return nil, identityErr
-		}
-		p.Entries = []CreatePlanEntryParams{{
-			AgentID: agentID, Channel: channel, TaskKind: taskKind,
-			ExecutionProfile: strings.TrimSpace(p.ExecutionProfile), AgentInput: p.AgentInput,
-		}}
-		validationTaskType = legacyTaskTypeForIdentity(agentID, channel, taskKind)
-		validationChannel = channel
-		effectivePlatform = validationTaskType
-	}
-	legacySingleEntry = legacySingleEntry || (len(p.Entries) == 1 && strings.TrimSpace(p.Entries[0].AgentID) != "")
-	if effectivePlatform == "" {
-		return nil, fmt.Errorf("plan requires at least one Agent entry")
-	}
-	if p.CoverUsePortrait && (!model.SupportsPortraitCover(effectivePlatform) || strings.TrimSpace(project.PortraitReferenceImageAssetID) == "") {
-		return nil, ErrCoverPortraitUnavailable
-	}
 	var profile AgentExecutionProfile
-	if strings.TrimSpace(p.ExecutionProfile) != "" {
-		profile, err = resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
-		if err != nil {
-			return nil, err
-		}
-		p.ExecutionProfile = profile.ID
+	profile, err = resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
+	if err != nil {
+		return nil, err
 	}
+	p.ExecutionProfile = profile.ID
 	if p.ReferenceImageAssetID != "" {
 		if s.referenceAssets == nil {
 			return nil, ErrReferenceAssetUnavailable
@@ -401,94 +434,15 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 			return nil, err
 		}
 	}
-	// Package-priced or one-off-only legacy platforms can't back plans. Reject up front
-	// so API/MCP callers fail fast instead of creating schedules the task runner
-	// should never execute for that platform.
-	switch effectivePlatform {
-	case model.PlatformEcommerce:
-		return nil, fmt.Errorf("plans are not supported for e-commerce projects: %w", ErrUnsupportedPlanPlatform)
-	case model.PlatformMoments:
-		return nil, fmt.Errorf("plans are not supported for moments projects: %w", ErrUnsupportedPlanPlatform)
-	}
-	if effectivePlatform == model.PlatformWhiteboardAnimation {
-		if err := validateWhiteboardAnimationInputs(p.InputAttachments); err != nil {
-			return nil, err
-		}
-	}
-	if legacySingleEntry && p.HypitInput != nil && !model.IsHypitPlatform(effectivePlatform) {
-		return nil, ErrHypitInput
-	}
-	if legacySingleEntry && model.IsHypitPlatform(effectivePlatform) {
-		if err := s.hypitCapabilities.NormalizeAndValidateInput(p.HypitInput, project.HypitDefaults.Data(), false); err != nil {
-			return nil, err
-		}
-		if err := s.validateHypitPlanUploads(ctx, p.UserID, p.HypitInput); err != nil {
-			return nil, err
-		}
-		if err := validateHypitTaskFiles(ctx, s.repo, p.UserID, p.ProjectID, s.montageStorageProviderName(), p.HypitInput, s.hypitCapabilities.config.Limits); err != nil {
-			return nil, err
-		}
-	}
-	if legacySingleEntry && p.MontageInput != nil && !model.IsMontagePlatform(effectivePlatform) {
-		return nil, fmt.Errorf("%w: montage_input 只能用于视频生成计划", ErrMontageInput)
-	}
-	if legacySingleEntry && model.IsMontagePlatform(effectivePlatform) {
-		if s.montageCapabilities != nil {
-			var input *model.MontageInput
-			if p.MontageInput != nil {
-				copy := *p.MontageInput
-				input = &copy
-			}
-			if err := s.montageCapabilities.NormalizeAndValidateInput(input, project.MontageDefaults.Data()); err != nil {
-				return nil, err
-			}
-			if err := ValidateMaterializableMontageSourceTaskFiles(ctx, s.repo, s.montageStorageProviderName(), p.UserID, p.ProjectID, input.SourceAssets); err != nil {
-				return nil, err
-			}
-			if err := ValidateMontageInlineBootstrapBudget(input, project, s.montageCapabilities.config.ToolPolicy, s.montageCapabilities.config.PipelineDefaults, p.InputAttachments); err != nil {
-				return nil, err
-			}
-			p.MontageInput = input
-		}
-		if p.MontageInput == nil || strings.TrimSpace(p.MontageInput.Brief) == "" {
-			return nil, fmt.Errorf("%w: 视频生成任务需要填写需求", ErrMontageInput)
-		}
-	}
-	if validationTaskType == "" {
-		validationTaskType = effectivePlatform
-	}
-	if validationTaskType == model.PlatformWechat {
-		validationTaskType = model.TaskTypeWechatArticle
-	}
-	agentInput, err := validateAndCloneAgentInput(validationTaskType, p.AgentInput)
-	if err != nil {
-		return nil, err
-	}
 	effectiveImageRatio := strings.TrimSpace(p.ImageRatio)
-	if legacySingleEntry && model.IsHypitPlatform(effectivePlatform) && p.CoverUsePortrait {
-		effectiveImageRatio = hypitPortraitCoverRatio(p.HypitInput.Preferences)
-	}
-	if legacySingleEntry && model.IsMontagePlatform(effectivePlatform) && effectiveImageRatio == model.ImageRatioAuto {
-		effectiveImageRatio = ""
-	}
 	if effectiveImageRatio == "" {
 		effectiveImageRatio = strings.TrimSpace(project.ImageRatio)
 	}
-	if legacySingleEntry && model.IsMontagePlatform(effectivePlatform) && effectiveImageRatio == model.ImageRatioAuto {
-		effectiveImageRatio = ""
-	}
 	if effectiveImageRatio == "" {
-		if validationChannel != "" {
-			effectiveImageRatio = model.DefaultImageRatioForChannel(validationChannel)
-		} else {
-			effectiveImageRatio = model.DefaultImageRatio(effectivePlatform)
-		}
+		effectiveImageRatio = model.ImageRatioAuto
 	}
-	if validationChannel != "" && len(model.SupportedImageRatiosForChannel(validationChannel)) > 0 && !model.IsBusinessImageRatioAllowedForChannel(validationChannel, effectiveImageRatio) {
-		return nil, fmt.Errorf("%s for channel %s: %s", model.ValidImageRatioHint, validationChannel, effectiveImageRatio)
-	}
-	if validationChannel == "" && len(model.SupportedImageRatios(effectivePlatform)) > 0 && !model.IsBusinessImageRatioAllowed(effectivePlatform, effectiveImageRatio) {
-		return nil, fmt.Errorf("%s for channel %s: %s", model.ValidImageRatioHint, effectivePlatform, effectiveImageRatio)
+	if !model.ValidImageRatios[effectiveImageRatio] {
+		return nil, fmt.Errorf("%s: %s", model.ValidImageRatioHint, effectiveImageRatio)
 	}
 	effectiveImageCapabilityKey := strings.TrimSpace(p.ImageCapabilityKey)
 
@@ -497,70 +451,24 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		return nil, fmt.Errorf("invalid cron expression: %w", err)
 	}
 
-	// Seednote image composition: honor caller's explicit choice, otherwise rely
-	// on the model's column defaults (content on, tail off).
-	hasContent := true
-	if p.HasContentImage != nil {
-		hasContent = *p.HasContentImage
-	}
-	hasTail := false
-	if p.HasTailImage != nil {
-		hasTail = *p.HasTailImage
-	}
-	// Article image toggles: honor caller's explicit choice, otherwise rely on the
-	// model's column defaults (both on). Ignored for non-article types.
-	articleCover := true
-	if p.ArticleWithCover != nil {
-		articleCover = *p.ArticleWithCover
-	}
-	articleContent := true
-	if p.ArticleWithContentImages != nil {
-		articleContent = *p.ArticleWithContentImages
-	}
-	if p.CoverUsePortrait && (effectivePlatform == model.PlatformWechat || effectivePlatform == model.ChannelArticle) && !articleCover {
-		return nil, ErrCoverPortraitUnavailable
-	}
 	// A plan carries scheduling-adjacent "what to produce" image params.
 	// Project/account style config is snapshotted when a task is spawned.
 	plan := &model.Plan{
-		ID:        uuid.New().String(),
-		UserID:    p.UserID,
-		ProjectID: p.ProjectID,
-		Type: func() string {
-			if !legacySingleEntry {
-				return ""
-			}
-			if project.Platform == model.PlatformWechat {
-				return model.TaskTypeWechatArticle
-			}
-			return project.Platform
-		}(),
-		ExecutionProfile:         strings.TrimSpace(p.ExecutionProfile),
-		CronExpr:                 p.CronExpr,
-		Prompt:                   p.Prompt,
-		Status:                   model.PlanStatusActive,
-		NextRunAt:                nextRun,
-		ImageCapabilityKey:       effectiveImageCapabilityKey,
-		ImageRatio:               effectiveImageRatio,
-		ReferenceImageAssetID:    p.ReferenceImageAssetID,
-		SkipReferenceImage:       p.SkipReferenceImage != nil && *p.SkipReferenceImage,
-		Watermark:                p.Watermark != nil && *p.Watermark,
-		HasContentImage:          hasContent,
-		HasTailImage:             hasTail,
-		ArticleWithCover:         &articleCover,
-		ArticleWithContentImages: &articleContent,
-		CoverUsePortrait:         p.CoverUsePortrait,
+		ID:                    uuid.New().String(),
+		UserID:                p.UserID,
+		ProjectID:             p.ProjectID,
+		ExecutionProfile:      strings.TrimSpace(p.ExecutionProfile),
+		CronExpr:              p.CronExpr,
+		Prompt:                p.Prompt,
+		Status:                model.PlanStatusActive,
+		NextRunAt:             nextRun,
+		ImageCapabilityKey:    effectiveImageCapabilityKey,
+		ImageRatio:            effectiveImageRatio,
+		ReferenceImageAssetID: p.ReferenceImageAssetID,
+		SkipReferenceImage:    p.SkipReferenceImage != nil && *p.SkipReferenceImage,
+		Watermark:             p.Watermark != nil && *p.Watermark,
 	}
 	plan.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
-	if agentInput != nil {
-		plan.SetAgentInput(agentInput)
-	}
-	if p.HypitInput != nil {
-		plan.SetHypitInput(*p.HypitInput)
-	}
-	if model.IsMontagePlatform(project.Platform) && p.MontageInput != nil {
-		plan.SetMontageInput(*p.MontageInput)
-	}
 
 	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		authoritative, err := tx.Projects().FindByIDForUpdate(ctx, p.ProjectID)
@@ -599,6 +507,10 @@ func (s *PlanService) GetByID(ctx context.Context, id string) (*model.Plan, erro
 	if err != nil {
 		return nil, fmt.Errorf("find plan: %w", err)
 	}
+	plan.Entries, err = s.repo.PlanEntries().ListByPlanID(ctx, plan.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list plan entries: %w", err)
+	}
 	return plan, nil
 }
 
@@ -615,6 +527,12 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 		return nil, 0, fmt.Errorf("count plans: %w", err)
 	}
 
+	for _, plan := range plans {
+		plan.Entries, err = s.repo.PlanEntries().ListByPlanID(ctx, plan.ID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("list plan entries: %w", err)
+		}
+	}
 	return plans, total, nil
 }
 
@@ -624,58 +542,84 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 //   - SkipReferenceImage: nil = leave unchanged; &true/&false = set
 //   - ReferenceImageAssetID: nil = leave unchanged; &"" = clear; &"value" = set
 //   - Watermark: nil = leave unchanged; &true/&false = set
-//   - HasContentImage / HasTailImage: nil = leave unchanged; &true/&false = set
 //
 // ID, CronExpr, and Prompt are plain strings. CronExpr=="" means "leave
 // unchanged"; an empty Prompt is a valid value meaning "no prompt".
 type UpdatePlanParams struct {
-	ID                       string
-	ExecutionProfile         string
-	CronExpr                 string
-	Prompt                   string
-	ImageCapabilityKey       *string
-	ImageRatio               *string
-	SkipReferenceImage       *bool
-	ReferenceImageAssetID    *string
-	Watermark                *bool
-	HasContentImage          *bool
-	HasTailImage             *bool
-	ArticleWithCover         *bool
-	ArticleWithContentImages *bool
-	CoverUsePortrait         *bool
-	MontageInput             *model.MontageInput
-	HypitInput               *model.HypitInput
-	InputAttachments         *[]model.EntryAttachment
-	AgentInput               *map[string]any
+	ID                    string
+	ExecutionProfile      string
+	CronExpr              string
+	Prompt                string
+	ImageCapabilityKey    *string
+	ImageRatio            *string
+	SkipReferenceImage    *bool
+	ReferenceImageAssetID *string
+	Watermark             *bool
+	InputAttachments      *[]model.EntryAttachment
+	// AgentIDs replaces the complete output selection when non-nil.
+	AgentIDs *[]string
 }
 
 // Update modifies a plan's fields per UpdatePlanParams. If the cron expression
 // changed, next_run_at is recomputed. See UpdatePlanParams for field semantics.
 func (s *PlanService) Update(ctx context.Context, p UpdatePlanParams) (*model.Plan, error) {
-	plan, scheduleChanged, err := s.preparePlanUpdate(ctx, p)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.Plans().UpdateEditable(ctx, plan, scheduleChanged); err != nil {
-		return nil, fmt.Errorf("update plan: %w", err)
-	}
-	return plan, nil
+	return s.updatePlan(ctx, p, nil)
 }
 
 func (s *PlanService) UpdateIfReferenceImageAssetID(ctx context.Context, p UpdatePlanParams, expectedID string) (*model.Plan, error) {
+	return s.updatePlan(ctx, p, &expectedID)
+}
+
+func (s *PlanService) updatePlan(ctx context.Context, p UpdatePlanParams, expectedID *string) (*model.Plan, error) {
 	plan, scheduleChanged, err := s.preparePlanUpdate(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	if plan.ReferenceImageAssetID != expectedID {
+	var desired []CreatePlanEntryParams
+	if p.AgentIDs != nil {
+		desired, err = planEntriesFromAgentIDs(*p.AgentIDs, plan.ExecutionProfile)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if expectedID != nil && plan.ReferenceImageAssetID != *expectedID {
 		return nil, ErrPlanUpdateConflict
 	}
-	won, err := s.repo.Plans().UpdateEditableIfReferenceImageAssetID(ctx, plan, expectedID, scheduleChanged)
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if expectedID == nil {
+			if err := tx.Plans().UpdateEditable(ctx, plan, scheduleChanged); err != nil {
+				return fmt.Errorf("update plan: %w", err)
+			}
+		} else {
+			won, err := tx.Plans().UpdateEditableIfReferenceImageAssetID(ctx, plan, *expectedID, scheduleChanged)
+			if err != nil {
+				return fmt.Errorf("update plan: %w", err)
+			}
+			if !won {
+				return ErrPlanUpdateConflict
+			}
+		}
+		if p.AgentIDs != nil {
+			if err := syncPlanEntries(ctx, tx, plan.ID, desired); err != nil {
+				return err
+			}
+		} else {
+			entries, err := tx.PlanEntries().ListByPlanID(ctx, plan.ID)
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				entry.ExecutionProfile = plan.ExecutionProfile
+				if err := tx.PlanEntries().Update(ctx, entry); err != nil {
+					return err
+				}
+			}
+		}
+		plan.Entries, err = tx.PlanEntries().ListByPlanID(ctx, plan.ID)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("update plan: %w", err)
-	}
-	if !won {
-		return nil, ErrPlanUpdateConflict
+		return nil, err
 	}
 	return plan, nil
 }
@@ -715,16 +659,9 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 		plan.ReferenceImageAssetID = *p.ReferenceImageAssetID
 	}
 	if p.ImageRatio != nil {
-		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		if len(model.SupportedImageRatios(project.Platform)) > 0 && !model.IsBusinessImageRatioAllowed(project.Platform, strings.TrimSpace(*p.ImageRatio)) {
-			return nil, fmt.Errorf("%s for platform %s: %s", model.ValidImageRatioHint, project.Platform, *p.ImageRatio)
-		}
 		nextRatio := strings.TrimSpace(*p.ImageRatio)
-		if model.IsMontagePlatform(plan.Type) && nextRatio == model.ImageRatioAuto {
-			nextRatio = model.DefaultImageRatio(plan.Type)
+		if nextRatio != "" && !model.ValidImageRatios[nextRatio] {
+			return nil, fmt.Errorf("%s: %s", model.ValidImageRatioHint, nextRatio)
 		}
 		plan.ImageRatio = nextRatio
 	}
@@ -737,105 +674,8 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 	if p.Watermark != nil {
 		plan.Watermark = *p.Watermark
 	}
-	if p.HasContentImage != nil {
-		plan.HasContentImage = *p.HasContentImage
-	}
-	if p.HasTailImage != nil {
-		plan.HasTailImage = *p.HasTailImage
-	}
-	if p.ArticleWithCover != nil {
-		v := *p.ArticleWithCover
-		plan.ArticleWithCover = &v
-	}
-	if p.ArticleWithContentImages != nil {
-		v := *p.ArticleWithContentImages
-		plan.ArticleWithContentImages = &v
-	}
-	if p.CoverUsePortrait != nil {
-		plan.CoverUsePortrait = *p.CoverUsePortrait
-	}
-	if plan.CoverUsePortrait {
-		if !model.SupportsPortraitCover(plan.Type) || ((plan.Type == model.TaskTypeWechatArticle || plan.Type == model.TaskTypeWechatPicture) && plan.ArticleWithCover != nil && !*plan.ArticleWithCover) {
-			return nil, ErrCoverPortraitUnavailable
-		}
-		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(project.PortraitReferenceImageAssetID) == "" {
-			return nil, ErrCoverPortraitUnavailable
-		}
-	}
 	if p.InputAttachments != nil {
 		plan.SetInputAttachments(cloneEntryAttachments(*p.InputAttachments))
-	}
-	if plan.Type == model.PlatformWhiteboardAnimation {
-		if err := validateWhiteboardAnimationInputs(plan.InputAttachments.Data()); err != nil {
-			return nil, err
-		}
-	}
-	if p.AgentInput != nil {
-		agentInput, err := validateAndCloneAgentInput(plan.Type, *p.AgentInput)
-		if err != nil {
-			return nil, err
-		}
-		plan.SetAgentInput(agentInput)
-	}
-	if p.HypitInput != nil || model.IsHypitPlatform(plan.Type) {
-		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		if !model.IsHypitPlatform(project.Platform) {
-			return nil, ErrHypitInput
-		}
-		in := plan.HypitInput.Data()
-		if p.HypitInput != nil {
-			in = *p.HypitInput
-		}
-		if err := s.hypitCapabilities.NormalizeAndValidateInput(&in, project.HypitDefaults.Data(), false); err != nil {
-			return nil, err
-		}
-		if err := s.validateHypitPlanUploads(ctx, plan.UserID, &in); err != nil {
-			return nil, err
-		}
-		if err := validateHypitTaskFiles(ctx, s.repo, plan.UserID, plan.ProjectID, s.montageStorageProviderName(), &in, s.hypitCapabilities.config.Limits); err != nil {
-			return nil, err
-		}
-		plan.SetHypitInput(in)
-		if plan.CoverUsePortrait {
-			plan.ImageRatio = hypitPortraitCoverRatio(in.Preferences)
-		}
-	}
-	if p.MontageInput != nil || (model.IsMontagePlatform(plan.Type) && s.montageCapabilities != nil) {
-		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
-		if err != nil {
-			return nil, fmt.Errorf("find project: %w", err)
-		}
-		if !model.IsMontagePlatform(project.Platform) {
-			return nil, fmt.Errorf("%w: montage_input 只能用于视频生成计划", ErrMontageInput)
-		}
-		candidate := plan.MontageInput.Data()
-		if p.MontageInput != nil {
-			candidate = *p.MontageInput
-		}
-		if s.montageCapabilities != nil {
-			if err := s.montageCapabilities.NormalizeAndValidateInput(&candidate, project.MontageDefaults.Data()); err != nil {
-				return nil, err
-			}
-			if err := ValidateMaterializableMontageSourceTaskFiles(ctx, s.repo, s.montageStorageProviderName(), plan.UserID, plan.ProjectID, candidate.SourceAssets); err != nil {
-				return nil, err
-			}
-			if err := ValidateMontageInlineBootstrapBudget(&candidate, project, s.montageCapabilities.config.ToolPolicy, s.montageCapabilities.config.PipelineDefaults, plan.InputAttachments.Data()); err != nil {
-				return nil, err
-			}
-		}
-		if strings.TrimSpace(candidate.Brief) == "" {
-			return nil, fmt.Errorf("%w: 视频生成任务需要填写需求", ErrMontageInput)
-		}
-		if p.MontageInput != nil {
-			plan.SetMontageInput(candidate)
-		}
 	}
 	// If cron expression changed, validate and recompute next run.
 	if scheduleChanged {

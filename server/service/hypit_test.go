@@ -39,7 +39,7 @@ func TestHypitTaskAdmissionFreezesNativeProfileWithoutSecrets(t *testing.T) {
 	svc.SetHypitConfig(hypitTestConfig())
 	user := uuid.NewString()
 	project := createTestProject(t, repo, user, model.PlatformHypit)
-	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{ExecutionProfile: "effective", UserID: user, ProjectID: project, Quantity: 4, HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch?v=x"}}})
+	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, ExecutionProfile: "effective", UserID: user, ProjectID: project, Quantity: 4, HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch?v=x"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestHypitCompletionRequiresDurableExactRoles(t *testing.T) {
 func TestHypitLargerArtifactAndBootstrapLimitsScoped(t *testing.T) {
 	cfg := hypitTestConfig()
 	b, _ := json.Marshal(hypitRuntimeSnapshot{Limits: cfg.Limits})
-	task := &model.Task{Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(b)}
+	task := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(b)}
 	if taskArtifactByteLimit(task, "output/project.zip") != 2<<30 || taskArtifactByteLimit(task, "output/other.zip") != 512<<20 {
 		t.Fatal("incorrect scoped upload limits")
 	}
@@ -94,7 +94,7 @@ func TestHypitLargerArtifactAndBootstrapLimitsScoped(t *testing.T) {
 func TestHypitBootstrapKeepsExternalVideoLinkForOfficialFetch(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetHypitConfig(hypitTestConfig())
-	task := &model.Task{Type: model.PlatformHypit}
+	task := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, Type: model.PlatformHypit}
 	task.SetHypitInput(model.HypitInput{Brief: "a", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch?v=x"}})
 	if err := svc.freezeHypitTask(t.Context(), task); err != nil {
 		t.Fatal(err)
@@ -112,34 +112,13 @@ func TestHypitBootstrapKeepsExternalVideoLinkForOfficialFetch(t *testing.T) {
 	}
 }
 
-func TestHypitPlanCreationUpdateAndScheduledInput(t *testing.T) {
-	svc, repo := setupTestPlanService(t)
-	svc.SetHypitCapabilityService(NewHypitCapabilityService(hypitTestConfig()))
-	user := uuid.NewString()
-	project := createTestProject(t, repo, user, model.PlatformHypit)
-	p, err := svc.Create(t.Context(), CreatePlanParams{UserID: user, ProjectID: project, ExecutionProfile: "effective", CronExpr: "0 9 * * *", HypitInput: &model.HypitInput{Brief: "first", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch?v=a"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	input := p.HypitInput.Data()
-	input.Brief = "updated"
-	p, err = svc.Update(t.Context(), UpdatePlanParams{ID: p.ID, ExecutionProfile: "effective", HypitInput: &input})
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored, err := repo.Plans().FindByID(t.Context(), p.ID)
-	if err != nil || stored.HypitInput.Data().Brief != "updated" {
-		t.Fatalf("input not persisted: %v", err)
-	}
-}
-
 func TestHypitCloneUsesVerifiedSourceArchiveAndFrozenProvider(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "image@sha256:old"}})
 	svc.SetHypitConfig(hypitTestConfig())
 	user := uuid.NewString()
 	project := createTestProject(t, repo, user, model.PlatformHypit)
-	src := &model.Task{ID: uuid.NewString(), UserID: user, ProjectID: project, Type: model.PlatformHypit, Status: model.TaskStatusCompleted}
+	src := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, ID: uuid.NewString(), UserID: user, ProjectID: project, Type: model.PlatformHypit, Status: model.TaskStatusCompleted}
 	src.SetHypitInput(model.HypitInput{Brief: "original", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch?v=a"}})
 	if err := svc.freezeHypitTask(t.Context(), src); err != nil {
 		t.Fatal(err)
@@ -152,7 +131,7 @@ func TestHypitCloneUsesVerifiedSourceArchiveAndFrozenProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "image@sha256:new"}})
-	next := &model.Task{ID: uuid.NewString(), UserID: user, ProjectID: project, Type: model.PlatformHypit, InputSourceTaskID: src.ID, InputSourceProjectID: project}
+	next := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, ID: uuid.NewString(), UserID: user, ProjectID: project, Type: model.PlatformHypit, InputSourceTaskID: src.ID, InputSourceProjectID: project}
 	next.SetHypitInput(src.HypitInput.Data())
 	if err := svc.freezeHypitTask(t.Context(), next); err != nil {
 		t.Fatal(err)
@@ -190,7 +169,7 @@ func TestHypitCloneUsesVerifiedSourceArchiveAndFrozenProvider(t *testing.T) {
 func TestHypitReportsAcceptUpgradeButRejectMixedRevisionsAndFailedChecks(t *testing.T) {
 	cfg := hypitTestConfig()
 	snap, _ := json.Marshal(hypitRuntimeSnapshot{Limits: cfg.Limits})
-	task := &model.Task{Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(snap)}
+	task := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(snap)}
 	revision := strings.Repeat("b", 40)
 	upstream := map[string]any{"repository": "https://github.com/hypit-ai/hypit", "revision": revision}
 	checks := map[string]bool{}
@@ -223,27 +202,10 @@ func TestHypitReportsAcceptUpgradeButRejectMixedRevisionsAndFailedChecks(t *test
 	}
 }
 
-func TestHypitScheduledTaskFreezesInput(t *testing.T) {
-	svc, repo := setupTaskServiceWithEnqueuer(t)
-	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "image@sha256:pinned"}})
-	svc.SetHypitConfig(hypitTestConfig())
-	user := uuid.NewString()
-	project := createTestProject(t, repo, user, model.PlatformHypit)
-	p := &model.Plan{ID: uuid.NewString(), UserID: user, ProjectID: project, Type: model.PlatformHypit, Status: model.PlanStatusActive, ExecutionProfile: "effective"}
-	p.SetHypitInput(model.HypitInput{Brief: "scheduled", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}})
-	task, err := svc.CreateFromPlan(t.Context(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if task == nil || task.HypitInput.Data().Brief != "scheduled" || readHypitSnapshot(task).Image != "image@sha256:pinned" {
-		t.Fatalf("incorrect scheduled task %+v", task)
-	}
-}
-
 func TestHypitDurableDeliveryAcceptsArchiveAboveLegacyLimit(t *testing.T) {
 	cfg := hypitTestConfig()
 	b, _ := json.Marshal(hypitRuntimeSnapshot{Limits: cfg.Limits})
-	task := &model.Task{ID: "hypit-task", UserID: "owner", ProjectID: "project", Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(b)}
+	task := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, ID: "hypit-task", UserID: "owner", ProjectID: "project", Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(b)}
 	file := &model.TaskFile{TaskID: task.ID, ExecutionID: "execution", FilePath: "output/project.zip", MimeType: "application/zip", FileSize: 1 << 30, ContentHash: strings.Repeat("a", 64), StorageProvider: "oss"}
 	file.OSSKey = buildTaskArtifactFinalStorageKey(task, file.ExecutionID, file.ContentHash, file.FilePath)
 	store := &fakeTaskArtifactStorage{name: "oss", stats: map[string]*storage.ObjectInfo{file.OSSKey: {Size: file.FileSize, ContentType: file.MimeType, SHA256: file.ContentHash}}}
@@ -267,7 +229,7 @@ func TestHypitRejectsUnownedInternalURLAdmission(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	svc.SetHypitConfig(hypitTestConfig())
 	project := createTestProject(t, repo, "review-user", model.PlatformHypit)
-	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{UserID: "review-user", ProjectID: project, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video", URL: "/api/v1/files/tasks/another-user/private.mp4"}}})
+	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, UserID: "review-user", ProjectID: project, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video", URL: "/api/v1/files/tasks/another-user/private.mp4"}}})
 	if err == nil {
 		t.Fatalf("accepted unowned URL on tasks %v", tasks)
 	}
@@ -279,7 +241,7 @@ func TestHypitCloneKeepsFrozenLimitsAfterConfigChange(t *testing.T) {
 	svc.SetHypitConfig(cfg)
 	svc.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "image@sha256:old"}})
 	project := createTestProject(t, repo, "review-user", model.PlatformHypit)
-	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{UserID: "review-user", ProjectID: project, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}, Preferences: model.HypitPreferences{DurationSeconds: hypitDuration(120)}}})
+	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, UserID: "review-user", ProjectID: project, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}, Preferences: model.HypitPreferences{DurationSeconds: hypitDuration(120)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +274,7 @@ func TestHypitCloneSelectsRuntimeForArchiveReuse(t *testing.T) {
 			svc.SetRuntimeDispatcher(&dispatchTestDispatcher{runtimeSelection: config.RuntimeImageSelection{Profile: "hypit", Image: "registry/hypit@sha256:old"}})
 			user := uuid.NewString()
 			project := createTestProject(t, repo, user, model.PlatformHypit)
-			tasks, err := svc.CreateManual(t.Context(), CreateManualParams{UserID: user, ProjectID: project, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}}})
+			tasks, err := svc.CreateManual(t.Context(), CreateManualParams{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, UserID: user, ProjectID: project, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "replicate", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -366,8 +328,8 @@ func TestHypitCloneSelectsRuntimeForArchiveReuse(t *testing.T) {
 
 func TestHypitSourceLineageAuthorizesAncestorMediaOnly(t *testing.T) {
 	_, repo := setupTaskServiceWithEnqueuer(t)
-	root := &model.Task{ID: uuid.NewString(), UserID: "owner", ProjectID: "old-project", Type: model.PlatformHypit}
-	middle := &model.Task{ID: uuid.NewString(), UserID: "owner", ProjectID: "middle-project", Type: model.PlatformHypit, InputSourceTaskID: root.ID}
+	root := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, ID: uuid.NewString(), UserID: "owner", ProjectID: "old-project", Type: model.PlatformHypit}
+	middle := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, ID: uuid.NewString(), UserID: "owner", ProjectID: "middle-project", Type: model.PlatformHypit, InputSourceTaskID: root.ID}
 	for _, task := range []*model.Task{root, middle} {
 		if err := repo.Tasks().Create(t.Context(), task); err != nil {
 			t.Fatal(err)
@@ -425,7 +387,7 @@ func TestHypitSourceCapabilitiesUseFrozenLimitsCurrentCredentialsAndOwnership(t 
 	cfg := hypitTestConfig()
 	cfg.RuntimeProfile["endpoints"] = map[string]any{"native": map[string]any{"use": "@hypit/provider-hiapi", "config": map[string]any{"apiKey": map[string]any{"store": "env", "key": "HYPIT_PROVIDER_TOKEN"}}}}
 	svc.SetHypitConfig(cfg)
-	src := &model.Task{ID: uuid.NewString(), UserID: "owner", Type: model.PlatformHypit}
+	src := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, ID: uuid.NewString(), UserID: "owner", Type: model.PlatformHypit}
 	if err := svc.freezeHypitTask(t.Context(), src); err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +427,7 @@ func TestHypitExplicitZeroDurationPersistsAndClones(t *testing.T) {
 	if err := repo.Projects().Update(t.Context(), project); err != nil {
 		t.Fatal(err)
 	}
-	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{UserID: user, ProjectID: id, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "source", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}, Preferences: model.HypitPreferences{DurationSeconds: hypitDuration(0)}}})
+	tasks, err := svc.CreateManual(t.Context(), CreateManualParams{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.PlatformHypit, UserID: user, ProjectID: id, ExecutionProfile: "effective", HypitInput: &model.HypitInput{Brief: "source", Reference: &model.HypitAsset{Type: "video_url", URL: "https://example.com/watch"}, Preferences: model.HypitPreferences{DurationSeconds: hypitDuration(0)}}})
 	if err != nil {
 		t.Fatal(err)
 	}

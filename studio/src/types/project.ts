@@ -3,25 +3,11 @@ import type { MontagePreferences } from './montage'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { ImageAnalysis } from './image-analysis'
 
-/** @deprecated Projects are channel-neutral; keep this only for migrated API rows. */
 export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
 // The open string branch keeps migrated/plugin-only rows readable while the
 // product picker exposes only the three supported channels above.
 export type OutputChannel = 'wechat-article' | 'seednote' | 'wechat-picture' | 'whiteboard-animation' | (string & {})
 export type ProjectStatus = 'active' | 'archived'
-export interface ProjectConfig {
-  wechat_app_id?: string
-  wechat_secret?: string
-}
-
-export interface ProjectAgentConfig {
-  id: string
-  project_id: string
-  agent_id: string
-  /** Server redacts credential-like keys before returning this object. */
-  config: Record<string, unknown>
-}
-
 export interface ProjectChannelConfig {
   id: string
   project_id: string
@@ -33,8 +19,7 @@ export interface ProjectChannelConfig {
 export interface Project {
   id: string
   user_id: string
-	/** @deprecated Present only on migrated legacy rows. */
-	platform?: ProjectPlatform
+  platform: ProjectPlatform
   name: string
   avatar_url: string
 	profile_url?: string
@@ -55,12 +40,9 @@ export interface Project {
   ecommerce_defaults?: EcommerceProjectDefaults
   hypit_defaults?: HypitDefaults
   montage_defaults?: MontageProjectDefaults
-  agent_config?: Record<string, unknown>
   max_concurrent_tasks: number
   timezone?: string
   feedback_paused?: boolean
-	/** @deprecated credentials now live in project channel configs. */
-	config?: ProjectConfig
   status: ProjectStatus
   stats?: ProjectStats
   created_at: string
@@ -162,8 +144,7 @@ export interface ProjectMemory {
 }
 
 export interface CreateProjectRequest {
-  /** @deprecated ignored for new projects; retained for migration compatibility. */
-  platform?: string
+  platform: ProjectPlatform
   name?: string
   profile_url?: string
   avatar_url?: string
@@ -181,10 +162,7 @@ export interface CreateProjectRequest {
   ecommerce_defaults?: EcommerceProjectDefaults
   hypit_defaults?: HypitDefaults
   montage_defaults?: MontageProjectDefaults
-  agent_config?: Record<string, unknown>
   max_concurrent_tasks?: number
-  wechat_app_id?: string
-  wechat_secret?: string
 }
 
 export interface CreateProjectResponse {

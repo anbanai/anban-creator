@@ -174,21 +174,10 @@ func articleImageMode(withCover, withContent bool) string {
 // DefaultMaxTurns returns the max turns for a given task type from the config map.
 // Falls back to 40 if the task type is not configured.
 func DefaultMaxTurns(taskType string, maxTurns map[string]int) int {
-	if taskType == model.PlatformWechat {
-		taskType = model.TaskTypeWechatArticle
-	}
 	if v, ok := maxTurns[taskType]; ok && v > 0 {
 		return v
 	}
 	if pack, ok := agentpack.Default().ForTaskType(taskType); ok {
-		if v, ok := maxTurns[pack.ID]; ok && v > 0 {
-			return v
-		}
-		if pack.Runtime.MaxTurns > 0 {
-			return pack.Runtime.MaxTurns
-		}
-	}
-	if pack, ok := agentpack.Default().ForProjectPlatform(taskType); ok {
 		if v, ok := maxTurns[pack.ID]; ok && v > 0 {
 			return v
 		}

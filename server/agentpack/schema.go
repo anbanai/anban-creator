@@ -168,16 +168,6 @@ func ValidateTaskInput(pack Manifest, input map[string]any) error {
 	return validateSchemaValue(pack.Schemas.TaskInput, input, "agent_input", 0)
 }
 
-func ValidateProjectConfig(pack Manifest, config map[string]any) error {
-	if pack.Schemas == nil || len(pack.Schemas.ProjectConfig) == 0 {
-		if len(config) == 0 {
-			return nil
-		}
-		return fmt.Errorf("Agent Pack %q does not declare project config", pack.ID)
-	}
-	return validateSchemaValue(pack.Schemas.ProjectConfig, config, "agent_config", 0)
-}
-
 func validateSchemaValue(raw json.RawMessage, value any, path string, depth int) error {
 	if depth > 16 {
 		return fmt.Errorf("%s exceeds maximum Schema depth", path)

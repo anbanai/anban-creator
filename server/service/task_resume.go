@@ -81,6 +81,9 @@ func (s *TaskService) Resume(ctx context.Context, userID, taskID string, params 
 	if task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
 		return nil, ErrTaskResumeNotTerminal
 	}
+	if err := validateTaskIdentity(task); err != nil {
+		return nil, err
+	}
 	if taskUsesFrozenImageCapability(task.Type) {
 		if strings.TrimSpace(task.ImageCapabilityKey) == "" {
 			return nil, ErrTaskResumeImageCapabilityMissing

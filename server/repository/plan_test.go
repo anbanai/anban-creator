@@ -10,7 +10,7 @@ import (
 func TestPlanUpdateIfReferenceImageAssetID(t *testing.T) {
 	repo := New(setupTestDB(t))
 	plan := &model.Plan{
-		ID: "plan-cas", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle,
+		ID: "plan-cas", UserID: "user-1", ProjectID: "project-1",
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
 	}
 	if err := repo.Plans().Create(t.Context(), plan); err != nil {
@@ -66,7 +66,7 @@ func TestPlanUpdateIfReferenceImageAssetIDMatchesEmptyAndNull(t *testing.T) {
 			db := setupTestDB(t)
 			repo := New(db)
 			plan := &model.Plan{
-				ID: tt.id, UserID: "user-1", ProjectID: "project-1", Type: model.PlatformSeednote,
+				ID: tt.id, UserID: "user-1", ProjectID: "project-1",
 				Prompt: "before", CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
 			}
 			if err := repo.Plans().Create(t.Context(), plan); err != nil {
@@ -106,7 +106,7 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 	schedulerNext := oldNext.Add(time.Hour)
 	plan := &model.Plan{
-		ID: "plan-editable", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle,
+		ID: "plan-editable", UserID: "user-1", ProjectID: "project-1",
 		ExecutionProfile: "effective", Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
 		NextRunAt: &oldNext, CreatedAt: createdAt,
 	}
@@ -124,12 +124,10 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 
 	stale.UserID = "must-not-write-user"
 	stale.ProjectID = "must-not-write-project"
-	stale.Type = model.PlatformSeednote
 	stale.Status = model.PlanStatusPaused
 	stale.CreatedAt = createdAt.Add(time.Hour)
 	stale.ExecutionProfile = "balanced"
 	stale.Prompt = "after"
-	stale.CoverUsePortrait = true
 	if err := repo.Plans().UpdateEditable(t.Context(), stale, false); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +135,7 @@ func TestPlanUpdateEditableDoesNotOverwriteSchedulerOrProtectedFields(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ExecutionProfile != "balanced" || got.Prompt != "after" || !got.CoverUsePortrait || got.UserID != "user-1" || got.ProjectID != "project-1" || got.Type != model.TaskTypeWechatArticle || got.Status != model.PlanStatusActive || !got.CreatedAt.Equal(createdAt) {
+	if got.ExecutionProfile != "balanced" || got.Prompt != "after" || got.UserID != "user-1" || got.ProjectID != "project-1" || got.Status != model.PlanStatusActive || !got.CreatedAt.Equal(createdAt) {
 		t.Fatalf("editable update changed protected fields: %#v", got)
 	}
 	if got.NextRunAt == nil || !got.NextRunAt.Equal(schedulerNext) || got.CronExpr != "0 * * * *" {
@@ -164,7 +162,7 @@ func TestPlanUpdateStatusAndNextRunAtDoesNotOverwriteEditableFields(t *testing.T
 	repo := New(db)
 	next := time.Now().Add(time.Hour).Truncate(time.Second)
 	plan := &model.Plan{
-		ID: "plan-status", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle,
+		ID: "plan-status", UserID: "user-1", ProjectID: "project-1",
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
 		NextRunAt: &next,
 	}
@@ -195,7 +193,7 @@ func TestPlanUpdateNextRunAtIfDoesNotOverwriteConcurrentFields(t *testing.T) {
 	oldNext := time.Now().Add(-time.Hour).Truncate(time.Second)
 	newNext := oldNext.Add(time.Hour)
 	plan := &model.Plan{
-		ID: "plan-next-run", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle,
+		ID: "plan-next-run", UserID: "user-1", ProjectID: "project-1",
 		Prompt: "before", ReferenceImageAssetID: "asset-a", CronExpr: "0 * * * *", Status: model.PlanStatusActive,
 		NextRunAt: &oldNext,
 	}
@@ -236,9 +234,9 @@ func TestPlanListActiveNextRunAtProjectsOnlyScheduledActivePlans(t *testing.T) {
 	repo := New(db)
 	next := time.Now().Add(time.Hour).Truncate(time.Second)
 	for _, plan := range []*model.Plan{
-		{ID: "active-next", UserID: "user-1", Type: model.TaskTypeWechatArticle, ExecutionProfile: "balanced", Status: model.PlanStatusActive, NextRunAt: &next},
-		{ID: "active-nil", UserID: "user-1", Type: model.TaskTypeWechatArticle, ExecutionProfile: "balanced", Status: model.PlanStatusActive},
-		{ID: "paused-next", UserID: "user-1", Type: model.TaskTypeWechatArticle, ExecutionProfile: "balanced", Status: model.PlanStatusPaused, NextRunAt: &next},
+		{ID: "active-next", UserID: "user-1", ExecutionProfile: "balanced", Status: model.PlanStatusActive, NextRunAt: &next},
+		{ID: "active-nil", UserID: "user-1", ExecutionProfile: "balanced", Status: model.PlanStatusActive},
+		{ID: "paused-next", UserID: "user-1", ExecutionProfile: "balanced", Status: model.PlanStatusPaused, NextRunAt: &next},
 	} {
 		if err := repo.Plans().Create(t.Context(), plan); err != nil {
 			t.Fatal(err)

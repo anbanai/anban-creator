@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "ecommerce",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "kind": "plugin",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -25,7 +25,6 @@
       },
       "surfaces": [
         "plugin",
-        "project",
         "task"
       ],
       "features": [
@@ -143,7 +142,7 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "f0313533514d17ada223f5dd124893fba118d39f7a4fe11b7a4cd56f6218612c"
+      "digest": "e80632720cdf338b07091c56f393b5086c68e4f092ddcb07b1f41699f1dd7eca"
     },
     {
       "id": "feedback",
@@ -396,7 +395,7 @@
     },
     {
       "id": "moments",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "kind": "plugin",
       "display_name": "朋友圈素材包",
       "description": "从素材拆解到朋友圈正文、质量复盘和交付的创作流程。",
@@ -416,7 +415,6 @@
       },
       "surfaces": [
         "plugin",
-        "project",
         "task"
       ],
       "features": [
@@ -484,11 +482,11 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "dd8766713c857e8eedff29cd7323b5cd0946cbd5d36dc21362702ee76f529310"
+      "digest": "b30b5184c99c03a59c8b4f6367c8dacd92d863bea86c73620a196fd26ddab1b1"
     },
     {
       "id": "montage",
-      "version": "2.0.4",
+      "version": "2.0.5",
       "kind": "plugin",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
@@ -508,9 +506,7 @@
       },
       "surfaces": [
         "plugin",
-        "project",
-        "task",
-        "plan"
+        "task"
       ],
       "features": [
         "video-generation",
@@ -596,12 +592,12 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "f0f69557e86af87f0d873b740d2b46402d97d9e04e7a5ffa624729ea25715abd"
+      "digest": "75bab610d27debbffa41dbff0129857b785c1481c4b329b23b1e53d498a4f186"
     },
     {
       "id": "profile-analysis",
       "channel": "profile-analysis",
-      "version": "2.1.2",
+      "version": "2.1.3",
       "kind": "managed",
       "display_name": "账号画像分析",
       "description": "基于用户提供的公开资料和问答生成并提交六维项目账号画像。",
@@ -624,7 +620,6 @@
       },
       "surfaces": [
         "plugin",
-        "project",
         "task"
       ],
       "features": [
@@ -802,12 +797,13 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "d05b296c8d1002c21be6ab8da0525ae4e151aff68750cd0df70584af362fcd87"
+      "digest": "f2bcd19cfe8b20406d25c78cb20d5c46d356ede2829a211bd919052487fe227d"
     },
     {
       "id": "seednote",
       "channel": "seednote",
-      "version": "2.0.5",
+      "plan_task_kind": "content_generation",
+      "version": "2.0.6",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -839,7 +835,6 @@
       },
       "surfaces": [
         "plugin",
-        "project",
         "task",
         "plan"
       ],
@@ -1023,12 +1018,13 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "d9dc62e952730271ed0a072246f34c3255e54228e42eabcc6e5992eaf7a61d45"
+      "digest": "1b25581fe3f9042054c95792ccc726b563f28768fc237b33317bc38573222d70"
     },
     {
       "id": "wechat-article",
       "channel": "wechat-article",
-      "version": "2.0.6",
+      "plan_task_kind": "content_generation",
+      "version": "2.0.7",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -1062,7 +1058,6 @@
       },
       "surfaces": [
         "plugin",
-        "project",
         "task",
         "plan"
       ],
@@ -1244,12 +1239,13 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "8278be9fc5ebd163542dd691a7ce78886c312488d8daa5c9ee84af5065d3b026"
+      "digest": "554aeb998a743f700a1231ab40a813ca186dfdbbcf1ef59d0ad96a2fc4288bf5"
     },
     {
       "id": "wechat-picture",
       "channel": "wechat-picture",
-      "version": "1.0.0",
+      "plan_task_kind": "content_generation",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -1274,7 +1270,6 @@
       },
       "surfaces": [
         "plugin",
-        "project",
         "task",
         "plan"
       ],
@@ -1379,12 +1374,12 @@
       "ui": {
         "renderer": "custom:wechat-picture"
       },
-      "digest": "258cb0020f774838933ead30639b30e2cc5b19a2b2bcb71d15917a9831694470"
+      "digest": "d622cf4a18466f6df1415d76fe9d7ea434c8445d13d8b9f341b975aa23722d39"
     },
     {
       "id": "whiteboard-animation",
       "channel": "whiteboard-animation",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "kind": "managed",
       "display_name": "白板动画",
       "description": "根据 SRT 字幕生成分镜、白板手绘场景和最终动画视频。",
@@ -1407,7 +1402,6 @@
       },
       "surfaces": [
         "plugin",
-        "project",
         "task"
       ],
       "features": [
@@ -1521,7 +1515,7 @@
       "ui": {
         "renderer": "custom:whiteboard-animation"
       },
-      "digest": "fb696ae564e003425c4571eefe808edf8dbb67f771ccbc0c1bf0bd4d8769cf63"
+      "digest": "9296892b37272c6589fc9260082ac07dfe2f4eec63fedeed7396bab4af6bd860"
     }
   ]
 }
