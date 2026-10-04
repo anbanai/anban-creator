@@ -274,6 +274,14 @@ func (c *Catalog) BillingOperation(taskType string) (string, bool) {
 	if operation := strings.TrimSpace(pack.BillingOperations[taskType]); operation != "" {
 		return operation, true
 	}
+	// Content-generation task types use the channel identity. A Pack may also
+	// expose other task kinds (for example seednote's viral_analysis), so this
+	// mapping must not depend on the Pack having only one bound task kind.
+	if taskType == pack.Channel {
+		if operation := strings.TrimSpace(pack.BillingOperations["content_generation"]); operation != "" {
+			return operation, true
+		}
+	}
 	// Managed packs persist a canonical task type but declare billing by the
 	// bound task kind. Resolve that indirection without requiring every pack to
 	// duplicate the same operation under both identities.

@@ -11,6 +11,7 @@ import (
 	"github.com/anbanai/anban-creator/server/agent"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
@@ -46,6 +47,65 @@ func addDurableArticleDelivery(t *testing.T, repo repository.Repository, store *
 		}); err != nil {
 			t.Fatalf("create durable published delivery %s: %v", spec.path, err)
 		}
+	}
+}
+
+func TestTaskFixedBillingSeednoteClone(t *testing.T) {
+	for _, editable := range []bool{false, true} {
+		name := "exact"
+		if editable {
+			name = "editable"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, f, enqueuer := newFixedTaskBillingFixture(t, 1_500, 0)
+			bundle := testBillingBundle()
+			bundle.Products.CatalogID = "seednote-clone-test"
+			bundle.Products.SKUs[0].ID = "task.seednote.effective"
+			bundle.Products.SKUs[0].Operation = "task.seednote"
+			bundle.Products.SKUs[0].ExecutionProfile = "effective"
+			catalog := NewBillingCatalogService(f.repo, &bundle, BillingCatalogOptions{Now: func() time.Time { return f.now.Add(time.Hour) }})
+			if _, err := catalog.Publish(ctx); err != nil {
+				t.Fatal(err)
+			}
+			svc.SetBillingCatalogService(catalog)
+			projectID := createTestProject(t, f.repo, billingWalletUserID, model.PlatformSeednote)
+			source := &model.Task{
+				ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID,
+				AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
+				Type: model.PlatformSeednote, Status: model.TaskStatusCompleted, ExecutionProfile: "effective", Prompt: "source note",
+			}
+			freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
+			if err := f.repo.Tasks().Create(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+			params := CloneTaskParams{ExecutionProfile: "effective"}
+			if editable {
+				params.Overrides = &CloneTaskOverrides{ProjectID: projectID, Quantity: 1, Prompt: "edited note", ImageCapabilityKey: "standard"}
+			}
+			tasks, err := svc.Clone(ctx, source.ID, params)
+			if err != nil {
+				t.Fatalf("Clone: %v", err)
+			}
+			if len(tasks) != 1 || len(enqueuer.enqueued) != 1 {
+				t.Fatalf("created=%d enqueued=%d, want 1/1", len(tasks), len(enqueuer.enqueued))
+			}
+			clone := tasks[0]
+			if clone.ID == source.ID || clone.Type != model.PlatformSeednote || clone.TaskKind != model.TaskKindContentGeneration || clone.BillingSKUID != "task.seednote.effective" {
+				t.Fatalf("unexpected clone identity: %#v", clone)
+			}
+			charge, err := f.repo.Billing().FindChargeByTask(ctx, clone.ID)
+			if err != nil || charge.PriceCredits != 500 {
+				t.Fatalf("clone charge = %#v, %v", charge, err)
+			}
+			if account := f.account(t, billingWalletUserID); account.PaidCredits != 1_000 {
+				t.Fatalf("paid credits=%d, want one 500-credit charge", account.PaidCredits)
+			}
+			stored, err := f.repo.Tasks().FindByID(ctx, source.ID)
+			if err != nil || stored.Status != model.TaskStatusCompleted || stored.Prompt != "source note" {
+				t.Fatalf("clone changed source: %#v, %v", stored, err)
+			}
+		})
 	}
 }
 

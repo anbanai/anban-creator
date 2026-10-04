@@ -1031,6 +1031,20 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	}
 }
 
+func TestEmbeddedCatalogResolvesSeednoteBillingOperations(t *testing.T) {
+	for _, tt := range []struct{ taskType, operation string }{
+		{"seednote", "task.seednote"},
+		{"viral_analysis", "task.viral_analysis"},
+	} {
+		t.Run(tt.taskType, func(t *testing.T) {
+			operation, ok := Default().BillingOperation(tt.taskType)
+			if !ok || operation != tt.operation {
+				t.Fatalf("BillingOperation(%q) = %q, %v; want %q", tt.taskType, operation, ok, tt.operation)
+			}
+		})
+	}
+}
+
 func TestEmbeddedCatalogResolvesCurrentManagedRoutes(t *testing.T) {
 	catalog := Default()
 	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "whiteboard-animation"} {
