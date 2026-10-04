@@ -97,6 +97,7 @@ describe('task form mapping', () => {
     }
 
     expect(taskFormValuesToRequest(values)).toEqual({
+      agent_id: 'seednote', channel: 'seednote', task_kind: 'viral_analysis',
       type: 'viral_analysis',
       execution_profile: 'effective',
       prompt: 'https://www.xiaohongshu.com/explore/note-1',
@@ -822,5 +823,12 @@ describe('task form mapping', () => {
       portrait_reference_image: null,
     }))
     expect(switched.cover_use_portrait).toBe(false)
+  })
+})
+
+describe('specialist task identity', () => {
+  it.each(['montage', 'hypit', 'moments', 'ecommerce', 'whiteboard-animation'] as const)('keeps %s identity instead of dispatching an article agent', (type) => {
+    const values = { ...createTaskFormDefaults(), type, execution_profile: 'effective' as const }
+    expect(taskFormValuesToRequest(values)).toMatchObject({ type, agent_id: type, channel: type, task_kind: type })
   })
 })

@@ -13,7 +13,6 @@ describe('TasksPage recovery workspace contract', () => {
     expect(source).toContain('需要处理')
     expect(source).toContain('个失败任务')
     expect(source).not.toContain('待发布确认')
-    expect(source).toContain("to=\"/tasks?status=failed\"")
   })
 
   it('shows bulk controls only after tasks are selected', () => {

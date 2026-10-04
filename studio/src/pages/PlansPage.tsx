@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type BaseSyntheticEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  BookOpen,
-  FileImage,
-  FileText,
   Inbox,
-  Layers3,
   Pause,
   Play,
   Plus,
@@ -27,33 +23,32 @@ import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { parseCreationIntent } from '@/lib/command-center'
 import { cheapestAvailableExecutionProfileForTasks } from '@/lib/pricing'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
-import type { InputAttachment } from '@/types/input-attachment'
 import type { ReferenceImageValue } from '@/types/asset'
 import { planStatusLabel, cronToHuman, formatDateTimeCN, getBadgeVariant } from '@/lib/labels'
-import { cn } from '@/lib/utils'
 
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import QueryErrorState from '@/components/QueryErrorState'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
-import { ReferenceMaterialInput } from '@/components/ReferenceMaterialInput'
+import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
+import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
+import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
+import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
 import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import SchedulePicker from '@/components/SchedulePicker'
-import { ImageCapabilitySelector } from '@/components/ImageCapabilitySelector'
-import { ImageAspectRatioField } from '@/components/tasks/ImageAspectRatioField'
+import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 
 const DEFAULT_CRON = '0 9 * * 1,3,5'
+const PLAN_ATTACHMENT_POLICY = { ...GENERAL_AGENT_ATTACHMENT_POLICY, maxCount: 16 }
 
 type OutputPack = AgentPack & { channel: string; plan_task_kind: string }
 
@@ -61,18 +56,6 @@ const outputLabels: Record<string, string> = {
   'wechat-article': '公众号文章',
   seednote: '种草笔记',
   'wechat-picture': '公众号贴图',
-}
-
-const outputIcons: Record<string, typeof FileText> = {
-  'wechat-article': FileText,
-  seednote: BookOpen,
-  'wechat-picture': FileImage,
-}
-
-const outputTones: Record<string, string> = {
-  'wechat-article': 'aria-pressed:border-sky-500 aria-pressed:bg-sky-50 aria-pressed:text-sky-700 dark:aria-pressed:bg-sky-950/40 dark:aria-pressed:text-sky-300',
-  seednote: 'aria-pressed:border-rose-500 aria-pressed:bg-rose-50 aria-pressed:text-rose-700 dark:aria-pressed:bg-rose-950/40 dark:aria-pressed:text-rose-300',
-  'wechat-picture': 'aria-pressed:border-amber-500 aria-pressed:bg-amber-50 aria-pressed:text-amber-700 dark:aria-pressed:bg-amber-950/40 dark:aria-pressed:text-amber-300',
 }
 
 function canUseForPlan(pack: AgentPack): pack is OutputPack {
@@ -87,10 +70,6 @@ function canUseForPlan(pack: AgentPack): pack is OutputPack {
 
 function outputLabel(pack: OutputPack) {
   return outputLabels[pack.id] ?? pack.display_name.replace(/^微信公众号/, '公众号')
-}
-
-function outputIcon(pack: OutputPack) {
-  return outputIcons[pack.id] ?? Layers3
 }
 
 function cronWithTime(cron: string, time: string) {
@@ -147,8 +126,6 @@ export default function PlansPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [scheduleValid, setScheduleValid] = useState(true)
-  const [attachmentUploading, setAttachmentUploading] = useState(false)
-  const [attachmentFailed, setAttachmentFailed] = useState(false)
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
   const recommendationRequestRef = useRef(0)
@@ -159,15 +136,45 @@ export default function PlansPage() {
     defaultValues: defaultValues(),
   })
   useFormDirtyCheck(form, modalOpen)
+  const attachmentController = usePromptAttachments({
+    adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
+    policy: PLAN_ATTACHMENT_POLICY,
+    onAttachmentsChange: () => form.setValue('input_attachments', attachmentController.toInputAttachments(), { shouldDirty: true, shouldValidate: true }),
+  })
+  const resetAttachments = attachmentController.reset
+  const attachmentUploading = attachmentController.uploading
+  const attachmentFailed = attachmentController.hasFailures
+
 
   const watchedProjectID = useWatch({ control: form.control, name: 'project_id' })
   const watchedAgentIDs = useWatch({ control: form.control, name: 'agent_ids' }) ?? []
   const watchedExecutionProfile = useWatch({ control: form.control, name: 'execution_profile' })
   const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' }) ?? ''
+  const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' }) ?? 'auto'
   const watchedSkipReference = useWatch({ control: form.control, name: 'skip_reference_image' }) ?? false
 
   const packsQuery = useAgentPacks()
   const outputPacks = useMemo(() => (packsQuery.data?.packs ?? []).filter(canUseForPlan), [packsQuery.data?.packs])
+  const { data: platformConfigs = [] } = useQuery({
+    queryKey: ['platform-configs'],
+    queryFn: () => api.projects.platformConfigs(),
+    staleTime: Infinity,
+  })
+  const sharedImageRatios = useMemo(() => {
+    const ratiosByOutput = watchedAgentIDs.map((id) => {
+      const channel = outputPacks.find((pack) => pack.id === id)?.channel
+      const platform = channel === 'wechat-article' || channel === 'wechat-picture' ? 'wechat' : channel
+      return platformConfigs.find((config) => config.id === platform)?.supported_image_ratios ?? []
+    })
+    return (ratiosByOutput[0] ?? []).filter((ratio) => ratiosByOutput.every((ratios) => ratios.includes(ratio)))
+  }, [outputPacks, platformConfigs, watchedAgentIDs])
+  useEffect(() => {
+    if (!modalOpen || platformConfigs.length === 0 || watchedAgentIDs.length === 0
+      || watchedAgentIDs.some((id) => !outputPacks.some((pack) => pack.id === id))) return
+    if (watchedImageRatio !== 'auto' && !sharedImageRatios.includes(watchedImageRatio)) {
+      form.setValue('image_ratio', 'auto', { shouldValidate: true })
+    }
+  }, [form, modalOpen, outputPacks, platformConfigs.length, sharedImageRatios, watchedAgentIDs, watchedImageRatio])
   const executionProfilesQuery = useAgentExecutionProfiles()
   const { items: imageCapabilities, defaultCapability: defaultImageCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(modalOpen)
   const effectiveImageCapability = watchedImageCapabilityKey || defaultImageCapability || ''
@@ -249,17 +256,17 @@ export default function PlansPage() {
     setShowDirtyDialog(false)
     setScheduleValid(true)
     setRecommendationUnavailable(false)
-    setAttachmentUploading(false)
-    setAttachmentFailed(false)
+    resetAttachments([])
     setReferenceUploading(false)
     form.reset(defaultValues())
-  }, [form])
+  }, [form, resetAttachments])
 
   const openCreate = useCallback(() => {
     const projectID = createIntent.projectId && projectMap[createIntent.projectId] ? createIntent.projectId : ''
     setEditingPlan(null)
     setRecommendationUnavailable(false)
     scheduleManuallyChangedRef.current = false
+    resetAttachments([])
     form.reset(defaultValues(projectID))
     setModalOpen(true)
     const requestID = ++recommendationRequestRef.current
@@ -267,8 +274,8 @@ export default function PlansPage() {
       if (requestID !== recommendationRequestRef.current || scheduleManuallyChangedRef.current) return
       form.setValue('cron_expr', cronWithTime(form.getValues('cron_expr'), recommendation.time), { shouldDirty: false, shouldValidate: true })
       setRecommendationUnavailable(!recommendation.load_balanced)
-    }).catch(() => setRecommendationUnavailable(true))
-  }, [createIntent.projectId, form, projectMap])
+    }).catch(() => { if (requestID === recommendationRequestRef.current) setRecommendationUnavailable(true) })
+  }, [createIntent.projectId, form, projectMap, resetAttachments])
 
   useEffect(() => {
     if (!createIntent.shouldCreate || (createIntent.projectId && projects.length === 0)) return
@@ -280,12 +287,14 @@ export default function PlansPage() {
     recommendationRequestRef.current += 1
     setEditingPlan(plan)
     setRecommendationUnavailable(false)
+    resetAttachments(plan.input_attachments ?? [])
     form.reset(formValuesForPlan(plan))
     setModalOpen(true)
   }
 
   function closeModal() {
-    if (form.formState.isDirty) { setShowDirtyDialog(true); return }
+    if (isSubmitting) return
+    if (form.formState.isDirty || attachmentUploading || attachmentFailed || referenceUploading) { setShowDirtyDialog(true); return }
     resetModal()
   }
 
@@ -297,7 +306,7 @@ export default function PlansPage() {
 
   async function onSubmit(values: PlanFormValues) {
     if (values.agent_ids.length === 0) { form.setError('agent_ids', { type: 'validate', message: '至少选择一种输出类型' }); return }
-    if (referenceUploading || attachmentUploading || attachmentFailed || !scheduleValid) return
+    if (!outputsAvailable || !selectedProfileAvailable || imageUnavailable || referenceUploading || attachmentUploading || attachmentFailed || !scheduleValid) return
     const prepared = prepareReusableInputAttachments(values.input_attachments ?? [], { allowExternalURLs: true })
     if (prepared.error) { toast.error(prepared.error); return }
     const shared = {
@@ -333,11 +342,14 @@ export default function PlansPage() {
     void form.handleSubmit(onSubmit)(event)
   }
 
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
-  const selectedPackSet = useMemo(() => new Set(watchedAgentIDs), [watchedAgentIDs])
+  const isSubmitting = form.formState.isSubmitting || createMutation.isPending || updateMutation.isPending
   const selectedImageCapability = imageCapabilities.find((item) => item.key === effectiveImageCapability)
-  const imageUnavailable = !imageCapabilitiesLoading && !imageCapabilitiesError && selectedImageCapability !== undefined
-    && (selectedImageCapability.enabled !== true || selectedImageCapability.price_available !== true)
+  const imageUnavailable = imageCapabilitiesLoading || imageCapabilitiesError || !effectiveImageCapability
+    || !selectedImageCapability || selectedImageCapability.enabled !== true || selectedImageCapability.price_available !== true
+  const selectedProfileAvailable = executionProfileOptions.some((profile) => profile.id === watchedExecutionProfile && profile.available)
+  const outputsAvailable = watchedAgentIDs.length > 0 && watchedAgentIDs.every((id) => outputPacks.some((pack) => pack.id === id))
+  const submitDisabled = isSubmitting || !outputsAvailable || !watchedProjectID || !selectedProfileAvailable || !scheduleValid || referenceUploading || attachmentUploading || attachmentFailed || imageUnavailable
+
 
   return (
     <div className="space-y-6">
@@ -389,6 +401,7 @@ export default function PlansPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
+                    <Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} className="mr-2 text-sm text-primary hover:underline">查看任务</Link>
                     <Button type="button" size="icon-sm" variant="ghost" aria-label="编辑" onClick={() => openEdit(plan)}><Sparkles className="h-4 w-4" /></Button>
                     {plan.status === 'active' ? <Button type="button" size="icon-sm" variant="ghost" aria-label="暂停" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="h-4 w-4" /></Button> : <Button type="button" size="icon-sm" variant="ghost" aria-label="恢复" onClick={() => void resumeMutation.mutateAsync(plan.id)}><Play className="h-4 w-4" /></Button>}
                     <Button type="button" size="icon-sm" variant="ghost" aria-label="删除" onClick={() => setDeleteTarget(plan.id)}><Trash2 className="h-4 w-4" /></Button>
@@ -402,31 +415,90 @@ export default function PlansPage() {
       )}
 
       <Dialog open={modalOpen} onOpenChange={(open) => { if (!open) closeModal() }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle></DialogHeader>
+        <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="shrink-0 border-b border-border px-4 py-3"><DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle><DialogDescription>选择创作类型，设置每次创作的要求和排期。生成的内容可在任务中查看。</DialogDescription></DialogHeader>
           <Form {...form}>
-            <form id="plan-form" onSubmit={handleSubmit} className="max-h-[78vh] space-y-5 overflow-y-auto px-1">
+            <form id="plan-form" onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+              <fieldset disabled={isSubmitting} className="min-w-0 space-y-5">
               <section className="space-y-2">
-                <div className="flex items-baseline justify-between gap-3"><div><h3 className="text-sm font-semibold">输出类型</h3><p className="mt-1 text-xs text-muted-foreground">可多选，下一次触发会为每种输出分别创建任务。</p></div>{watchedAgentIDs.length > 0 ? <span className="text-xs text-muted-foreground">已选 {watchedAgentIDs.length} 项</span> : null}</div>
-                <FormField control={form.control} name="agent_ids" render={({ field }) => <FormItem><FormControl><ToggleGroup multiple value={field.value} onValueChange={field.onChange} variant="outline" spacing={2} className="grid w-full grid-cols-1 sm:grid-cols-3" aria-label="输出类型">
-                  {packsQuery.isLoading ? <div className="col-span-full rounded-md border border-dashed p-4 text-sm text-muted-foreground">正在加载可用输出...</div> : null}
-                  {outputPacks.map((pack) => { const Icon = outputIcon(pack); const selected = selectedPackSet.has(pack.id); return <ToggleGroupItem key={pack.id} value={pack.id} aria-label={outputLabel(pack)} aria-pressed={selected} className={cn('h-auto min-h-20 justify-start gap-2 px-3 py-3 text-left', outputTones[pack.id])}><Icon className="h-5 w-5 shrink-0" /><span className="min-w-0"><span className="block truncate font-medium">{outputLabel(pack)}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{pack.description}</span></span></ToggleGroupItem> })}
-                </ToggleGroup></FormControl><FormMessage />{packsQuery.isError || outputPacks.length === 0 ? <p className="text-sm text-destructive">暂时没有可用于计划的输出类型。</p> : null}</FormItem>} />
+                <div className="flex items-baseline justify-between gap-3">
+                  <div><h3 className="text-sm font-semibold">创作类型</h3><p className="mt-1 text-xs text-muted-foreground">可多选，每次按排期为每种类型创建一个任务。</p></div>
+                  <span className="shrink-0 text-xs text-muted-foreground">已选 {watchedAgentIDs.length} 项</span>
+                </div>
+                <FormField control={form.control} name="agent_ids" render={({ field }) => <FormItem>
+                  <CreationTypePicker multiple options={outputPacks.map((pack) => ({ id: pack.id, label: outputLabel(pack), description: pack.description }))} value={field.value} onChange={field.onChange} disabled={isSubmitting} />
+                  {packsQuery.isLoading ? <p className="text-sm text-muted-foreground">正在加载可用输出...</p> : null}
+                  <FormMessage />
+                  {!packsQuery.isLoading && (packsQuery.isError || outputPacks.length === 0) ? <p role="alert" className="text-sm text-destructive">暂时没有可用于计划的输出类型。</p> : null}
+                  {watchedAgentIDs.some((id) => !outputPacks.some((pack) => pack.id === id)) && !packsQuery.isLoading ? <p role="alert" className="text-sm text-destructive">部分创作类型已不可用，请重新选择。<Button type="button" variant="link" size="sm" onClick={() => field.onChange(field.value.filter((id) => outputPacks.some((pack) => pack.id === id)))}>移除不可用类型</Button></p> : null}
+                </FormItem>} />
               </section>
 
-              <section className="space-y-2"><h3 className="text-sm font-semibold">项目</h3><FormField control={form.control} name="project_id" render={({ field }) => <FormItem><FormControl>{editingPlan ? <ProjectContextControl mode="readonly" project={selectedProject ?? projectMap[field.value] ?? null} compact /> : <ProjectContextControl mode="select" projects={projects} value={field.value || null} onValueChange={changeProject} loading={projectsLoading} disabled={isSubmitting} allowNoProject={false} placeholder="选择项目" ariaLabel="项目" />}</FormControl><FormMessage /></FormItem>} /></section>
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold">创作提示</h3>
+                <AgentPromptInput
+                  value={{ prompt: form.watch('prompt') ?? '', attachments: attachmentController.attachments }}
+                  onChange={(value) => form.setValue('prompt', value.prompt, { shouldDirty: true, shouldValidate: true })}
+                  onSubmit={() => handleSubmit()}
+                  attachmentController={attachmentController}
+                  attachmentPolicy={PLAN_ATTACHMENT_POLICY}
+                  attachmentPreviewOwner={editingPlan ? { ownerType: 'plan', ownerId: editingPlan.id } : undefined}
+                  ariaLabel="创作提示"
+                  placeholder="描述每次创作的方向、要求和素材使用方式"
+                  submitMode="external"
+                  disabled={isSubmitting}
+                  leadingTools={(
+                    <div className="flex min-w-0 flex-wrap items-center gap-1">
+                      {editingPlan ? <ProjectContextControl mode="readonly" project={selectedProject ?? null} compact /> : <ProjectContextControl mode="select" projects={projects} value={watchedProjectID || null} onValueChange={changeProject} loading={projectsLoading} disabled={isSubmitting} allowNoProject={false} placeholder="选择项目" ariaLabel="项目" compact />}
+                      <TaskComposerParameters
+                        execution={{ profiles: executionProfileOptions, value: watchedExecutionProfile as AgentExecutionProfileID | '', onChange: (value) => form.setValue('execution_profile', value, { shouldDirty: true, shouldValidate: true }), loading: executionProfilesQuery.isLoading, disabled: isSubmitting || executionProfilesQuery.isError }}
+                        image={{ ratios: sharedImageRatios, ratio: watchedImageRatio, onRatioChange: (value) => form.setValue('image_ratio', value, { shouldDirty: true }), capabilities: imageCapabilities, capabilityKey: effectiveImageCapability, onCapabilityChange: (value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true }), loading: imageCapabilitiesLoading, disabled: isSubmitting || imageCapabilitiesError }}
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                  )}
+                  status={<span className="hidden text-xs text-muted-foreground sm:inline">每次创作均使用</span>}
+                />
+                <p className="text-xs text-muted-foreground">项目提供定位、关键词、视觉风格和作者设置；附件会用于每次创作。</p>
+                {form.formState.errors.prompt ? <p role="alert" className="text-sm text-destructive">{form.formState.errors.prompt.message}</p> : null}
+                {attachmentUploading || attachmentFailed ? <p role="status" className="text-xs text-destructive">{attachmentUploading ? '素材上传中，请稍候。' : '素材上传失败，请重试或移除后保存。'}</p> : null}
+              </section>
 
-              <section className="space-y-2"><h3 className="text-sm font-semibold">创作提示</h3><FormField control={form.control} name="prompt" render={({ field }) => <FormItem><FormControl><Textarea aria-label="创作提示" {...field} value={field.value ?? ''} rows={4} placeholder="描述每次创作的方向、要求和素材使用方式" /></FormControl><FormDescription>项目中的定位、关键词、视觉风格和作者设置会自动作为公共上下文。</FormDescription><FormMessage /></FormItem>} /></section>
-
+              <div className="grid items-start gap-5 lg:grid-cols-2">
               <section className="space-y-2"><h3 className="text-sm font-semibold">排期</h3><FormField control={form.control} name="cron_expr" render={({ field }) => <FormItem><FormControl><SchedulePicker value={field.value} onChange={handleScheduleChange} onInteraction={handleScheduleInteraction} onValidityChange={handleScheduleValidity} /></FormControl>{recommendationUnavailable ? <p className="text-xs text-muted-foreground">智能排期暂不可用，已保留默认时间。</p> : null}<FormMessage /></FormItem>} /></section>
 
-              <section className="space-y-2"><h3 className="text-sm font-semibold">执行配置</h3><FormField control={form.control} name="execution_profile" render={({ field }) => <FormItem><FormControl><ToggleGroup value={field.value ? [field.value] : []} onValueChange={(value) => { if (value[0]) field.onChange(value[0]) }} variant="outline" className="grid w-full grid-cols-1 sm:grid-cols-3" aria-label="执行配置">{executionProfileOptions.map((profile) => <ToggleGroupItem key={profile.id} value={profile.id} disabled={!profile.available} className="h-auto min-h-16 flex-col items-start gap-1 px-3 py-2 text-left"><span className="font-medium">{profile.display_name}</span><span className="text-xs text-muted-foreground">{profile.available ? profile.description : '当前不可用'}</span></ToggleGroupItem>)}</ToggleGroup></FormControl><FormMessage /></FormItem>} /></section>
-
-              <section className="space-y-2"><h3 className="text-sm font-semibold">共享图片设置</h3><div className="rounded-md border border-border/70 p-3"><div className="space-y-3"><div><p className="mb-2 text-xs font-medium text-muted-foreground">图片能力</p><ImageCapabilitySelector options={imageCapabilities} value={effectiveImageCapability} onChange={(value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true })} disabled={imageCapabilitiesLoading || imageCapabilitiesError} /></div><div><p className="mb-2 text-xs font-medium text-muted-foreground">图片比例</p><ImageAspectRatioField value={form.watch('image_ratio') || 'auto'} ratios={['9:16', '3:4', '1:1', '4:3', '16:9']} onChange={(value) => form.setValue('image_ratio', value, { shouldDirty: true })} /></div></div><details className="mt-3 border-t border-border/70 pt-3"><summary className="cursor-pointer text-sm font-medium">高级设置</summary><div className="mt-3 space-y-4"><FormField control={form.control} name="skip_reference_image" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>跳过参考图</FormLabel><FormDescription>本次计划不使用参考图。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />{!watchedSkipReference ? <FormField control={form.control} name="reference_image" render={({ field }) => <FormItem><FormLabel>参考图</FormLabel><FormControl><ReferenceAssetUpload value={(field.value as ReferenceImageValue | null) ?? null} onChange={field.onChange} purpose="task_reference" onUploadingChange={setReferenceUploading} disabled={isSubmitting} /></FormControl><FormMessage /></FormItem>} /> : null}<FormField control={form.control} name="watermark" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>水印</FormLabel><FormDescription>在支持的图片能力中启用水印。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} /><FormField control={form.control} name="input_attachments" render={({ field }) => <FormItem><FormLabel>附件</FormLabel><FormControl><ReferenceMaterialInput value={(field.value ?? []) as InputAttachment[]} onChange={field.onChange} allowedTypes={['image', 'audio', 'video', 'document', 'text']} maxCount={16} compact onUploadingChange={setAttachmentUploading} onFailuresChange={setAttachmentFailed} hint="可添加图片、文档或其他公共素材。" /></FormControl><FormMessage /></FormItem>} /></div></details></div>{imageUnavailable ? <p role="alert" className="text-sm text-destructive">当前图像能力不可用，请重新选择。</p> : null}</section>
-
-              <DialogFooter><Button type="button" variant="outline" onClick={closeModal}>取消</Button><Button type="submit" loading={isSubmitting} disabled={isSubmitting || watchedAgentIDs.length === 0 || !watchedProjectID || !watchedExecutionProfile || !scheduleValid || referenceUploading || attachmentUploading || attachmentFailed || imageUnavailable}>{editingPlan ? '保存' : '创建'}</Button></DialogFooter>
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold">执行设置</h3>
+                <div className="rounded-lg border border-border p-4">
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+                    <dt className="text-muted-foreground">执行配置</dt><dd>{executionProfileOptions.find((profile) => profile.id === watchedExecutionProfile)?.display_name || '请选择'}</dd>
+                    <dt className="text-muted-foreground">图片能力</dt><dd>{selectedImageCapability?.display_name || '请选择'}</dd>
+                    <dt className="text-muted-foreground">图片比例</dt><dd>{form.watch('image_ratio') === 'auto' ? '智能适配' : form.watch('image_ratio')}</dd>
+                  </dl>
+                  <p className="mt-3 text-xs text-muted-foreground">可在提示框的「创作参数」中调整，应用于所有选中的创作类型。</p>
+                  <details className="mt-4 border-t border-border pt-3">
+                    <summary className="cursor-pointer text-sm font-medium">高级设置</summary>
+                    <div className="mt-3 space-y-4">
+                      <FormField control={form.control} name="skip_reference_image" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>跳过参考图</FormLabel><FormDescription>本次计划不使用参考图。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />
+                      {!watchedSkipReference ? <FormField control={form.control} name="reference_image" render={({ field }) => <FormItem><FormLabel>参考图</FormLabel><FormControl><ReferenceAssetUpload value={(field.value as ReferenceImageValue | null) ?? null} onChange={field.onChange} purpose="task_reference" onUploadingChange={setReferenceUploading} disabled={isSubmitting} /></FormControl><FormMessage /></FormItem>} /> : null}
+                      <FormField control={form.control} name="watermark" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>水印</FormLabel><FormDescription>在支持的图片能力中启用水印。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />
+                    </div>
+                  </details>
+                </div>
+                {imageUnavailable && !imageCapabilitiesLoading ? <p role="alert" className="text-sm text-destructive">当前图像能力不可用，请在创作参数中重新选择。</p> : null}
+                {!selectedProfileAvailable && !executionProfilesQuery.isLoading ? <p role="alert" className="text-sm text-destructive">当前执行配置不可用，请在创作参数中重新选择。</p> : null}
+              </div>
+              </div>
+              </fieldset>
             </form>
           </Form>
+          <DialogFooter className="mx-0 mb-0 shrink-0 border-t border-border bg-popover px-4 py-3 sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">每次生成 {watchedAgentIDs.length} 个任务 · {cronToHuman(form.watch('cron_expr'))} · 北京时间</p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={closeModal} disabled={isSubmitting}>取消</Button>
+              <Button type="submit" form="plan-form" loading={isSubmitting} disabled={submitDisabled}>{editingPlan ? '保存' : '创建'}</Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

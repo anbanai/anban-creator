@@ -41,6 +41,8 @@ import { createTaskSchema } from '@/lib/schemas'
 import { taskCreationCostPreview } from '@/lib/studio-ux'
 import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, taskFormValuesToRequest, type TaskFormDefaults } from '@/lib/task-form'
 import type { CreateTaskRequest, PlatformConfig, Project, Task, TaskType } from '@/types'
+import { CreationTypePicker } from './CreationTypePicker'
+import { contentTypeOptions } from '@/lib/labels'
 import { TaskComposerParameters } from './TaskComposerParameters'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
@@ -57,20 +59,6 @@ const WHITEBOARD_ATTACHMENT_POLICY = {
   maxBytes: { text: 25 * 1024 * 1024, image: 10 * 1024 * 1024 },
 } as const
 const BATCH_TASK_TYPES = new Set<TaskType>(['wechat-article', 'wechat-picture', 'seednote', 'moments'])
-
-const PRODUCT_AGENT_OPTIONS = [
-  { agent_id: 'wechat-article', channel: 'wechat-article', label: '公众号文章' },
-  { agent_id: 'seednote', channel: 'seednote', label: '种草笔记' },
-  { agent_id: 'wechat-picture', channel: 'wechat-picture', label: '公众号贴图' },
-  { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', label: '白板动画' },
-] as const
-
-function agentIDForTaskType(type: TaskType) {
-  if (type === 'seednote' || type === 'viral_analysis') return 'seednote'
-  if (type === 'wechat-picture') return 'wechat-picture'
-  if (type === 'whiteboard-animation') return 'whiteboard-animation'
-  return 'wechat-article'
-}
 
 function maxTaskQuantity(type: TaskType) {
   return BATCH_TASK_TYPES.has(type) ? 5 : 1
@@ -122,6 +110,7 @@ export function TaskFormDialog({
   const queryClient = useQueryClient()
   const { submit } = useSubmitLock()
   const initializedKeyRef = useRef<string | undefined>(undefined)
+  const explicitTaskTypeRef = useRef(false)
   const [montageUploading, setMontageUploading] = useState(false)
   const [montageReady, setMontageReady] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
@@ -221,7 +210,7 @@ export function TaskFormDialog({
 	)
 	const selectedProject = projectMap.get(watchedProjectId ?? '')
 	const selectedAgentPack = useMemo(
-		() => agentPacksQuery.data?.packs?.find((pack) => pack.bindings.task_kinds?.includes(watchedType)),
+		() => agentPacksQuery.data?.packs?.find((pack) => (pack.channel === watchedType || pack.id === watchedType || pack.bindings.task_kinds?.includes(watchedType))),
 		[agentPacksQuery.data, watchedType],
 	)
 	const imageCapabilityOptionsForValue = useMemo(() => {
@@ -247,7 +236,17 @@ export function TaskFormDialog({
       || selectedImageCapability.enabled !== true
       || selectedImageCapability.price_available !== true
     )
-  const businessImageRatios = platformConfigMap.get(selectedProject?.platform ?? watchedType)?.supported_image_ratios ?? []
+  const outputPlatform = watchedType === 'wechat-article' || watchedType === 'wechat-picture'
+    ? 'wechat'
+    : watchedType === 'viral_analysis' ? 'seednote' : watchedType
+  const outputPlatformConfig = platformConfigMap.get(outputPlatform)
+  const businessImageRatios = outputPlatformConfig?.supported_image_ratios ?? []
+  useEffect(() => {
+    if (!outputPlatformConfig || !watchedImageRatio || watchedImageRatio === 'auto') return
+    if (!outputPlatformConfig.supported_image_ratios.includes(watchedImageRatio)) {
+      form.setValue('image_ratio', 'auto', { shouldValidate: true })
+    }
+  }, [form, outputPlatformConfig, watchedImageRatio])
   useFormDirtyCheck(form, open)
 
   useEffect(() => {
@@ -282,6 +281,7 @@ export function TaskFormDialog({
     setMontageUploading(false)
     setMontageReady(false)
     setShowDirtyDialog(false)
+    explicitTaskTypeRef.current = false
     const focusTimeout = setTimeout(() => form.setFocus('prompt'), 100)
     return () => clearTimeout(focusTimeout)
   }, [form, initialProjectId, initialType, mode, open, projectMap, projectsLoading, resetAttachments, sourceTask])
@@ -341,7 +341,7 @@ export function TaskFormDialog({
 
   function requestClose() {
     if (isSubmitting) return
-    if (form.formState.isDirty) {
+    if (form.formState.isDirty || attachmentController.uploading || attachmentController.hasFailures || montageUploading) {
       setShowDirtyDialog(true)
       return
     }
@@ -358,7 +358,16 @@ export function TaskFormDialog({
       ...form.getValues(),
       input_attachments: attachmentController.toInputAttachments(),
     }
-    const switched = switchTaskFormDefaults(current, project)
+    // Project defaults may suggest a type, but must not override the user's explicit choice.
+    const projectDefaults = switchTaskFormDefaults(current, project)
+    const switched = explicitTaskTypeRef.current && projectDefaults.type !== current.type
+      ? {
+          ...current,
+          project_id: project?.id ?? '',
+          image_ratio: defaultTaskImageRatio(current.type, project) as TaskFormDefaults['image_ratio'],
+          cover_use_portrait: current.cover_use_portrait && Boolean(project?.portrait_reference_image),
+        }
+      : projectDefaults
     switched.quantity = Math.min(switched.quantity, maxTaskQuantity(switched.type))
     form.reset(switched, { keepDefaultValues: true })
   }
@@ -419,6 +428,8 @@ export function TaskFormDialog({
               ? { message: '源任务项目不可用，请选择一个有效项目。', href: '' }
           : hasIncompatibleSeednoteAttachments
             ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
+            : !selectedProject
+              ? { message: '请在提示框中选择一个项目。', href: '' }
             : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageCapabilityUnavailable
@@ -480,49 +491,30 @@ export function TaskFormDialog({
     />
   )
 
-  const selectedAgentID = agentIDForTaskType(watchedType)
+  const taskTypeOptions = [...contentTypeOptions, { value: 'viral_analysis', label: '爆文拆解' }]
+    .filter((option) => option.value === watchedType || agentPacksQuery.data?.packs?.some((pack) => (
+      pack.surfaces.includes('task')
+      && (pack.channel === option.value || pack.id === option.value || pack.bindings.task_kinds?.includes(option.value))
+    )))
   const agentControl = (
-    <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
-      <div>
-        <p className="text-sm font-medium text-foreground">执行 Agent</p>
-        <p className="text-xs text-muted-foreground">Agent 负责生成内容，并固定一个输出渠道。</p>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Select
-          value={selectedAgentID}
-          onValueChange={(value) => {
-            if (value === 'seednote') {
-              setFormValue('type', watchedType === 'viral_analysis' ? 'viral_analysis' : 'seednote')
-              return
-            }
-            setFormValue('type', value as TaskType)
-          }}
-          disabled={isSubmitting || mode === 'clone'}
-        >
-          <FormControl><SelectTrigger aria-label="执行 Agent"><SelectValue placeholder="选择 Agent" /></SelectTrigger></FormControl>
-          <SelectContent>
-            {PRODUCT_AGENT_OPTIONS.map((option) => <SelectItem key={option.agent_id} value={option.agent_id}>{option.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        {selectedAgentID === 'seednote' ? (
-          <Select
-            value={watchedType === 'viral_analysis' ? 'viral_analysis' : 'content_generation'}
-            onValueChange={(value) => setFormValue('type', value === 'viral_analysis' ? 'viral_analysis' : 'seednote')}
-            disabled={isSubmitting}
-          >
-            <FormControl><SelectTrigger aria-label="任务类别"><SelectValue placeholder="选择任务类别" /></SelectTrigger></FormControl>
-            <SelectContent>
-              <SelectItem value="content_generation">内容生成</SelectItem>
-              <SelectItem value="viral_analysis">爆款分析</SelectItem>
-            </SelectContent>
-          </Select>
-        ) : (
-          <div className="flex items-center rounded-md border border-border bg-background px-3 text-sm text-muted-foreground">
-            固定渠道：{PRODUCT_AGENT_OPTIONS.find((option) => option.agent_id === selectedAgentID)?.channel}
-          </div>
-        )}
-      </div>
-    </div>
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold">创作类型</h3>
+      <CreationTypePicker
+        options={taskTypeOptions.map((option) => ({ id: option.value, label: option.label }))}
+        value={[watchedType]}
+        onChange={([value]) => {
+          explicitTaskTypeRef.current = true
+          const type = value as TaskType
+          setFormValue('type', type)
+          setFormValue('quantity', Math.min(quantity, maxTaskQuantity(type)))
+          if (type === 'viral_analysis' && selectedProject?.platform !== 'seednote') setFormValue('project_id', '')
+          if (type === 'hypit' && !form.getValues('hypit_input')) setFormValue('hypit_input', initialHypitInput(watchedPrompt))
+          if (type === 'montage' && !form.getValues('montage_input')) setFormValue('montage_input', initialMontageInput(watchedPrompt))
+        }}
+        disabled={isSubmitting || mode === 'clone'}
+      />
+      {agentPacksQuery.isError ? <p role="alert" className="text-xs text-destructive">创作类型暂时无法加载，请稍后重试。</p> : null}
+    </section>
   )
 
   const promptComposer = isViralAnalysisTask ? (
@@ -560,6 +552,7 @@ export function TaskFormDialog({
       placeholder={watchedType === 'hypit' ? '描述希望保留的镜头、节奏及需要替换的内容…' : '描述创作目标、内容要求和素材使用方式...'}
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
       submitting={isSubmitting}
+      disabled={isSubmitting}
       submitDisabled={Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontageTask && !montageReady)}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -575,8 +568,8 @@ export function TaskFormDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !isSubmitting) requestClose() }}>
-        <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-5xl">
-          <DialogHeader className="border-b border-border px-4 py-3">
+        <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
             <DialogTitle>{mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆任务') : '新建任务'}</DialogTitle>
             <DialogDescription>
               {mode === 'clone'
@@ -591,31 +584,21 @@ export function TaskFormDialog({
           <Form {...form}>
             <form id="task-create-form" onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
               {agentControl}
-              {selectedProject && watchedType !== 'viral_analysis' ? (
-                <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-3">
-                  <p className="text-xs font-medium text-foreground/80">将使用项目「{selectedProject.name}」的快照</p>
-                  <p className="text-xs text-muted-foreground">
-                    {isMontageTask ? (
-                      <>项目定位 {selectedProject.instructions || selectedProject.positioning || '—'}</>
-                    ) : (
-                      <>视觉风格 {selectedProject.visual_style || '—'}</>
-                    )}
-                    {watchedType === 'wechat-article' ? (
-                      <> · 署名 {selectedProject.author || '—'} · 写作风格 {selectedProject.writer || '—'} · 排版 {selectedProject.theme || '默认'}</>
-                    ) : null}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground/80">创建后项目再修改，不会影响这个任务。</p>
-                </div>
-              ) : null}
-
               {selectedProject ? (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground" aria-label="本次将使用">
-                  <span className="font-medium text-foreground">本次将使用</span>
-                  <span>项目：{selectedProject.name}</span>
-                  <span>画像：当前版本</span>
-                  <span>执行配置：{selectedExecutionProfile?.display_name || watchedExecutionProfile || '加载中'}</span>
-                  <span>预计费用：{costPreview.priceAvailable ? `${costPreview.totalCost.toLocaleString()} 积分` : '待确认'}</span>
-                </div>
+                <details className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
+                  <summary className="cursor-pointer text-muted-foreground">
+                    <span className="ml-1 inline-flex flex-wrap gap-x-3 gap-y-1" aria-label="本次将使用">
+                      <span className="font-medium text-foreground">{selectedProject.name}</span>
+                      <span>{selectedExecutionProfile?.display_name || '执行配置加载中'}</span>
+                      <span>预计费用：{costPreview.priceAvailable ? `${costPreview.totalCost.toLocaleString()} 积分` : '待确认'}</span>
+                    </span>
+                  </summary>
+                  <div className="mt-2 space-y-1 border-t border-border pt-2 text-muted-foreground">
+                    <p>{isMontageTask ? `项目定位：${selectedProject.instructions || selectedProject.positioning || '—'}` : `视觉风格：${selectedProject.visual_style || '—'}`}</p>
+                    {watchedType === 'wechat-article' ? <p>署名：{selectedProject.author || '—'} · 写作风格：{selectedProject.writer || '—'} · 排版：{selectedProject.theme || '默认'}</p> : null}
+                    <p>创建后项目再修改，不会影响这个任务。</p>
+                  </div>
+                </details>
               ) : null}
 
               <TaskTimePricingNotice

@@ -47,6 +47,7 @@ export default function TasksPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
+  const planFilter = searchParams.get('plan_id') || ''
   const initialStatus = normalizeTaskStatusFilter(searchParams.get('status'))
   const createIntent = parseCreationIntent(searchParams)
   const shouldCreate = createIntent.shouldCreate
@@ -104,7 +105,7 @@ export default function TasksPage() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['tasks', { status: statusFilter, project_id: projectFilter }],
+    queryKey: ['tasks', { status: statusFilter, project_id: projectFilter, plan_id: planFilter }],
     initialPageParam: null as TaskCursor | null,
     queryFn: ({ pageParam }) => pageParam
       ? api.tasks.listBefore({
@@ -113,11 +114,13 @@ export default function TasksPage() {
         before_id: pageParam.id,
         status: statusFilter === 'all' ? undefined : statusFilter,
         project_id: projectFilter || undefined,
+        plan_id: planFilter || undefined,
       })
       : api.tasks.list({
         limit: TASK_PAGE_SIZE,
         status: statusFilter === 'all' ? undefined : statusFilter,
         project_id: projectFilter || undefined,
+        plan_id: planFilter || undefined,
       }),
     getNextPageParam: (lastPage) => {
       if (lastPage.items.length === 0) return undefined
@@ -325,6 +328,8 @@ export default function TasksPage() {
     active: tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
     failed: tasks.filter((t) => t.status === 'failed').length,
   }), [tasks])
+  const failedTaskParams = new URLSearchParams(searchParams)
+  failedTaskParams.set('status', 'failed')
 
   return (
     <div className="space-y-6">
@@ -342,11 +347,24 @@ export default function TasksPage() {
         </Button>
       </PageHeader>
 
+      {planFilter ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+          <span>正在查看此计划生成的任务</span>
+          <div className="flex items-center gap-3">
+            <Link to="/plans" className="text-primary hover:underline">返回计划</Link>
+            <Button variant="ghost" size="sm" onClick={() => {
+              setSelectedTaskIds([])
+              setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('plan_id'); return next }, { replace: true })
+            }}>查看全部任务</Button>
+          </div>
+        </div>
+      ) : null}
+
       {queueStats.failed > 0 && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-border py-3 text-sm">
           <span className="font-medium text-foreground">需要处理</span>
           {queueStats.failed > 0 && (
-            <Link to="/tasks?status=failed" className="inline-flex items-center gap-1.5 text-destructive hover:underline">
+            <Link to={`/tasks?${failedTaskParams}`} className="inline-flex items-center gap-1.5 text-destructive hover:underline">
               <AlertTriangle className="h-4 w-4" />
               {queueStats.failed} 个失败任务
             </Link>
@@ -437,9 +455,11 @@ export default function TasksPage() {
       ) : filteredTasks.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
-          title={searchFilter.trim() || projectFilter ? '未找到匹配的任务' : statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
+          title={planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all' ? '此计划还没有生成任务' : searchFilter.trim() || projectFilter ? '未找到匹配的任务' : statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
           description={
-            searchFilter.trim() || projectFilter
+            planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all'
+              ? '计划会按排期自动创建任务，可返回计划检查排期与启用状态。'
+              : searchFilter.trim() || projectFilter
               ? '试试其他关键词、清空筛选，或继续向下滚动加载任务。搜索仅匹配已加载任务。'
               : statusFilter === 'all'
               ? projects.length === 0
@@ -448,7 +468,7 @@ export default function TasksPage() {
               : '尝试其他筛选条件或创建新任务。'
           }
           action={
-            !searchFilter.trim() && !projectFilter && statusFilter === 'all'
+            !planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all'
               ? projects.length === 0
                 ? { label: '去创建项目', onClick: () => navigate('/projects') }
                 : { label: '新建任务', onClick: openCreate }

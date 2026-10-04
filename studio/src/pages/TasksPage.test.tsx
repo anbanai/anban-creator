@@ -275,6 +275,17 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project])
   })
 
+  it('keeps the plan filter across pagination and can return to all tasks', async () => {
+    const items = Array.from({ length: 20 }, (_, index) => ({ ...fixtures.failedTask, id: `plan-task-${index}` })) as Task[]
+    vi.mocked(api.tasks.list).mockResolvedValue({ items, total: 21 })
+    renderTasksPage('/tasks?plan_id=plan-1')
+    await waitFor(() => expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ plan_id: 'plan-1' })))
+    fireEvent.click(await screen.findByRole('button', { name: '继续加载' }))
+    await waitFor(() => expect(api.tasks.listBefore).toHaveBeenCalledWith(expect.objectContaining({ plan_id: 'plan-1' })))
+    fireEvent.click(screen.getByRole('button', { name: '查看全部任务' }))
+    await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ plan_id: undefined })))
+  })
+
   it('reports when a search has no matches among loaded tasks', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({ items: [fixtures.failedTask as Task], total: 100 })
     renderTasksPage()
@@ -284,6 +295,15 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.queryByText('还没有任务')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '清空筛选' }))
     expect(await screen.findByText('失败文章')).toBeInTheDocument()
+  })
+
+  it('keeps the plan context when opening failed tasks', async () => {
+    renderTasksPage('/tasks?plan_id=plan-1')
+    fireEvent.click(await screen.findByRole('link', { name: /失败任务/ }))
+    await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({
+      plan_id: 'plan-1', status: 'failed',
+    })))
+    expect(screen.getByText('正在查看此计划生成的任务')).toBeInTheDocument()
   })
 
   it('loads the next task batch from the scroll fallback control', async () => {

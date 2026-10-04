@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { contentTypeDisplayName, contentTypeLabel, contentTypeOptions, platformDefaultRatio, platformDisplayName, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
+import { cronToHuman, contentTypeDisplayName, contentTypeLabel, contentTypeOptions, platformDefaultRatio, platformDisplayName, platformLabels, progressStageLabel, statusBadgeVariant, taskFailurePresentation, taskTypeLabelCN } from './labels'
 
 describe('statusBadgeVariant', () => {
   it('returns "outline" for running', () => {
@@ -95,5 +95,17 @@ describe('video platform labels', () => {
     expect(contentTypeDisplayName('viral_analysis')).toBe('爆文拆解')
     expect(contentTypeDisplayName(null)).toBe('通用')
     expect(contentTypeDisplayName('unknown_type')).toBe('unknown_type')
+  })
+})
+
+describe('plan schedule summaries', () => {
+  it.each([
+    ['0 9 * * 1,3,5', '每周一、三、五 09:00'],
+    ['7 12 * * *', '每天 12:07'],
+    ['0 9 * * 0', '每周日 09:00'],
+    ['0 9 1 * *', '0 9 1 * *'],
+    ['*/15 * * * *', '*/15 * * * *'],
+  ])('describes the complete schedule %s', (cron, expected) => {
+    expect(cronToHuman(cron)).toBe(expected)
   })
 })

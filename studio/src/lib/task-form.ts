@@ -15,7 +15,7 @@ export interface TaskFormDefaults extends CreateTaskFormValues {
   cover_use_portrait: boolean
 }
 
-function taskIdentity(type: TaskType): { agent_id: string; channel: 'wechat-article' | 'seednote' | 'wechat-picture' | 'whiteboard-animation'; task_kind: string } {
+function taskIdentity(type: TaskType): { agent_id: string; channel: NonNullable<CreateTaskRequest['channel']>; task_kind: string } {
   switch (type) {
     case 'seednote':
     case 'viral_analysis':
@@ -25,8 +25,9 @@ function taskIdentity(type: TaskType): { agent_id: string; channel: 'wechat-arti
     case 'whiteboard-animation':
       return { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', task_kind: 'whiteboard-animation' }
     case 'wechat-article':
-    default:
       return { agent_id: 'wechat-article', channel: 'wechat-article', task_kind: 'content_generation' }
+    default:
+      return { agent_id: type, channel: type, task_kind: type }
   }
 }
 
@@ -189,6 +190,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
   const identity = taskIdentity(values.type)
   if (values.type === 'viral_analysis') {
     return {
+      ...identity,
       type: values.type,
       execution_profile: values.execution_profile as AgentExecutionProfileID,
       prompt,

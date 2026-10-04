@@ -297,19 +297,16 @@ export const weekDayLabels = ['周日', '周一', '周二', '周三', '周四', 
 
 export function cronToHuman(cron: string): string {
   const parts = cron.trim().split(/\s+/)
-  if (parts.length < 5) return cron
-
+  if (parts.length !== 5) return cron
   const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
-
-  if (dayOfWeek !== '*' && month === '*' && dayOfMonth === '*') {
-    const dayNum = parseInt(dayOfWeek, 10)
-    const dayLabel = !isNaN(dayNum) && dayNum >= 0 && dayNum < weekDayLabels.length
-      ? weekDayLabels[dayNum]
-      : dayOfWeek
-    return `每周${dayLabel} ${hour}:${minute.padStart(2, '0')}`
-  }
-
-  return `${hour}:${minute.padStart(2, '0')}`
+  if (!/^\d{1,2}$/.test(minute) || !/^\d{1,2}$/.test(hour)
+    || Number(minute) > 59 || Number(hour) > 23 || month !== '*' || dayOfMonth !== '*') return cron
+  const time = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
+  if (dayOfWeek === '*') return `每天 ${time}`
+  if (!/^[0-6](?:,[0-6])*$/.test(dayOfWeek)) return cron
+  const selectedDays = new Set(dayOfWeek.split(',').map(Number))
+  const days = [1, 2, 3, 4, 5, 6, 0].filter((day) => selectedDays.has(day))
+  return `每周${days.map((day) => weekDayLabels[day].slice(1)).join('、')} ${time}`
 }
 
 // --- Date Formatting ---

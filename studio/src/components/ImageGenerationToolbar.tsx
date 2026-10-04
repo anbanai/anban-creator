@@ -39,7 +39,7 @@ export function ImageGenerationSettings({
           size="sm"
           spacing={1}
           disabled={disabled}
-          className="flex min-w-0 flex-nowrap justify-start"
+          className="flex min-w-0 flex-wrap justify-start"
         >
           <ToggleGroupItem value="auto">智能适配</ToggleGroupItem>
           {ratios.map((item) => (
