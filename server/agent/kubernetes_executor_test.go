@@ -1972,3 +1972,120 @@ func ownTestPod(job *batchv1.Job, pod *corev1.Pod) {
 
 func boolPtr(value bool) *bool       { return &value }
 func stringPtr(value string) *string { return &value }
+
+func TestKubernetesRecoveryUsesFrozenIdentityAfterConfigDrift(t *testing.T) {
+	execution, task := testExecution(), testTask()
+	job := buildKubernetesJob(testJobConfig(), execution, task)
+	job.UID = types.UID("historical-job")
+	execution.RuntimeScope = job.Namespace
+	client := fake.NewSimpleClientset(job)
+	dispatcher := testDispatcher(client)
+	dispatcher.config.RuntimeImages[execution.RuntimeProfile] = "registry.example.com/new-image:v2"
+	dispatcher.config.ServerURL = "https://new-server.example.com"
+	dispatcher.config.Namespace = "new-namespace"
+	resolved, err := dispatcher.ResolvePrepared(context.Background(), execution, task)
+	if err != nil || resolved == nil || resolved.Scope != job.Namespace || resolved.InstanceID != string(job.UID) {
+		t.Fatalf("recovery after drift = %#v, %v", resolved, err)
+	}
+	for _, action := range client.Actions() {
+		if action.GetVerb() != "get" {
+			t.Fatalf("recovery mutation: %v", action)
+		}
+	}
+	execution.RuntimeWorkload, execution.RuntimeInstanceID = resolved.Workload, resolved.InstanceID
+	if err := dispatcher.Delete(context.Background(), execution); err != nil {
+		t.Fatalf("delete historical namespace: %v", err)
+	}
+}
+
+func TestKubernetesRecoveryWithoutScopeRequiresExistingVerifiedJob(t *testing.T) {
+	for _, found := range []bool{false, true} {
+		t.Run(fmt.Sprintf("current_namespace_job=%t", found), func(t *testing.T) {
+			execution, task := testExecution(), testTask()
+			execution.RuntimeScope, execution.RuntimeWorkload = "", ""
+			job := buildKubernetesJob(testJobConfig(), execution, task)
+			job.UID = types.UID("historical-job")
+			client := fake.NewSimpleClientset(job)
+			dispatcher := testDispatcher(client)
+			if !found {
+				dispatcher.config.Namespace = "new-namespace"
+			}
+			resolved, err := dispatcher.ResolvePrepared(context.Background(), execution, task)
+			if found {
+				if err != nil || resolved == nil || resolved.Scope != job.Namespace || resolved.InstanceID != string(job.UID) {
+					t.Fatalf("verified recovery = %#v, %v", resolved, err)
+				}
+			} else if !IsPermanentDispatchError(err) || errors.Is(err, ErrRuntimeWorkloadNotFound) {
+				t.Fatalf("missing unknown-scope workload = %v, want permanent unresolved identity (not proven absence)", err)
+			}
+			for _, action := range client.Actions() {
+				if action.GetVerb() != "get" {
+					t.Fatalf("recovery mutated workload: %v", action)
+				}
+			}
+		})
+	}
+}
+
+func TestKubernetesRecoveryRejectsForeignOwnershipAndImage(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*batchv1.Job)
+	}{
+		{"user", func(j *batchv1.Job) { j.Labels[kubernetesUserIDLabel] = "foreign-user" }},
+		{"project", func(j *batchv1.Job) { j.Labels[kubernetesProjectIDLabel] = "foreign-project" }},
+		{"template", func(j *batchv1.Job) { j.Spec.Template.Labels[kubernetesTaskIDLabel] = "foreign-task" }},
+		{"image", func(j *batchv1.Job) { j.Spec.Template.Spec.Containers[0].Image = "foreign-image" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			execution, task := testExecution(), testTask()
+			job := buildKubernetesJob(testJobConfig(), execution, task)
+			job.UID = types.UID("original")
+			tc.mutate(job)
+			client := fake.NewSimpleClientset(job)
+			if _, err := testDispatcher(client).ResolvePrepared(context.Background(), execution, task); err == nil || !IsPermanentDispatchError(err) {
+				t.Fatalf("foreign recovery = %v", err)
+			}
+			for _, action := range client.Actions() {
+				if action.GetVerb() != "get" {
+					t.Fatal("foreign workload mutated")
+				}
+			}
+		})
+	}
+}
+
+func TestKubernetesCleanupClassifiesProviderErrors(t *testing.T) {
+	resource := schema.GroupResource{Group: "batch", Resource: "jobs"}
+	for _, stage := range []string{"get", "delete"} {
+		for _, tc := range []struct {
+			name      string
+			err       error
+			permanent bool
+			missing   bool
+		}{
+			{"forbidden", apierrors.NewForbidden(resource, "job", errors.New("denied")), true, false},
+			{"unauthorized", apierrors.NewUnauthorized("expired credentials"), true, false},
+			{"invalid", apierrors.NewBadRequest("invalid provider input"), true, false},
+			{"transient", errors.New("API unavailable"), false, false},
+			{"missing", apierrors.NewNotFound(resource, "job"), false, true},
+		} {
+			t.Run(stage+"/"+tc.name, func(t *testing.T) {
+				job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+				job.UID = types.UID("original")
+				client := fake.NewSimpleClientset(job)
+				client.PrependReactor(stage, "jobs", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, tc.err })
+				err := testDispatcher(client).Delete(context.Background(), persistedKubernetesTestExecution(job))
+				if tc.missing {
+					if err != nil {
+						t.Fatalf("missing cleanup = %v", err)
+					}
+					return
+				}
+				if !errors.Is(err, tc.err) || IsPermanentDispatchError(err) != tc.permanent {
+					t.Fatalf("cleanup error = %v, permanent=%t, want permanent=%t", err, IsPermanentDispatchError(err), tc.permanent)
+				}
+			})
+		}
+	}
+}

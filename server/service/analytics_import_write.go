@@ -40,7 +40,7 @@ func analyticsDecimal(raw string, fallback *float64, rate bool) (*model.Analytic
 	return &result, nil
 }
 func analyticsWechatInput(candidate AnalyticsCandidate, row *model.WechatAnalyticsImportRow, batch *model.WechatAnalyticsImportBatch, now time.Time) (AnalyticsObservationInput, error) {
-	content := model.AnalyticsContent{ProjectID: batch.ProjectID, Channel: model.ChannelArticle, Platform: model.PlatformWechat, Title: candidate.Title, ContentType: candidate.ContentType, Status: candidate.Status, URL: candidate.URL, Date: candidate.Date}
+	content := model.AnalyticsContent{ProjectID: batch.ProjectID, Channel: candidate.ContentType, Platform: model.PlatformWechat, Title: candidate.Title, ContentType: candidate.ContentType, Status: candidate.Status, URL: candidate.URL, Date: candidate.Date}
 	if candidate.Task != nil {
 		content.ID = "task:" + candidate.Task.ID
 		content.TaskID = candidate.Task.ID
@@ -84,9 +84,9 @@ func analyticsSeednoteInput(post *model.SeednotePost, row *model.SeednoteImportR
 
 func analyticsSeednoteType(genre string) string {
 	switch genre {
-	case "video", "视频":
+	case "video", "video_note", "视频":
 		return "video"
-	case "image", "image_text", "图文", "图文笔记":
+	case "image", "image_text", "image_note", "图文", "图文笔记":
 		return "image_text"
 	default:
 		return "unknown"

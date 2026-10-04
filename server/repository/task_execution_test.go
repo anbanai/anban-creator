@@ -817,3 +817,62 @@ func TestTaskExecutionRepositoryIsAvailableInTransactions(t *testing.T) {
 		t.Fatalf("missing execution error = %v, want %v", err, gorm.ErrRecordNotFound)
 	}
 }
+
+func TestBlockedCleanupRequiresMatchingReviewedEvidence(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTaskExecutionRepository(t)
+	execution := seedTaskExecution(t, repo, model.TaskExecutionFailed)
+	if err := repo.db.Model(execution).Updates(map[string]any{"cleanup_status": model.TaskExecutionCleanupPending, "finalization_status": model.TaskExecutionFinalizationDone, "runtime_scope": "docker", "runtime_workload": "historical-workload", "runtime_instance_id": "historical-instance", "runtime_profile": "historical-profile", "runtime_image": "historical-image", "terminal_reason": "dispatch_failed"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	won, err := repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, "owner", time.Minute)
+	if err != nil || !won {
+		t.Fatalf("claim = %v, %v", won, err)
+	}
+	if won, err := repo.TaskExecutions().BlockCleanup(ctx, execution.ID, "stale-owner", "runtime_identity_conflict"); err != nil || won {
+		t.Fatalf("stale block = %v, %v", won, err)
+	}
+	if won, err := repo.TaskExecutions().BlockCleanup(ctx, execution.ID, "owner", "runtime_identity_conflict"); err != nil || !won {
+		t.Fatalf("block = %v, %v", won, err)
+	}
+	blocked, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.CleanupStatus != model.TaskExecutionCleanupBlocked || blocked.CleanupToken != "" || blocked.CleanupNextAt != nil || blocked.CleanupDiagnostic != "runtime_identity_conflict" {
+		t.Fatalf("invalid blocked cleanup state")
+	}
+	if won, err := repo.TaskExecutions().ClaimCleanup(ctx, execution.ID, "new-owner", time.Minute); err != nil || won {
+		t.Fatalf("blocked claim = %v, %v", won, err)
+	}
+	candidates, err := repo.TaskExecutions().FindReconcilable(ctx, time.Now().Add(time.Hour), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range candidates {
+		if candidate.ID == execution.ID {
+			t.Fatal("blocked cleanup remains in automatic reconcile queue")
+		}
+	}
+	review := blocked.CleanupReview()
+	for _, mutate := range []func(*model.CleanupReview){func(r *model.CleanupReview) { r.InstanceID = "foreign" }, func(r *model.CleanupReview) { r.RuntimeImage = "new-image" }, func(r *model.CleanupReview) { r.Attempts++ }, func(r *model.CleanupReview) { r.Diagnostic = "another-block" }} {
+		stale := review
+		mutate(&stale)
+		if won, err := repo.TaskExecutions().ReopenBlockedCleanup(ctx, stale); err != nil || won {
+			t.Fatalf("stale reopen = %v, %v", won, err)
+		}
+	}
+	if won, err := repo.TaskExecutions().ReopenBlockedCleanup(ctx, review); err != nil || !won {
+		t.Fatalf("reviewed reopen = %v, %v", won, err)
+	}
+	if won, err := repo.TaskExecutions().ReopenBlockedCleanup(ctx, review); err != nil || won {
+		t.Fatalf("duplicate reopen = %v, %v", won, err)
+	}
+	reopened, err := repo.TaskExecutions().FindByID(ctx, execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Status != model.TaskExecutionFailed || reopened.TerminalReason != "dispatch_failed" || reopened.FinalizationStatus != model.TaskExecutionFinalizationDone || reopened.CleanupReview() != review || reopened.CleanupStatus != model.TaskExecutionCleanupPending {
+		t.Fatal("reopen changed frozen identity, failure outcome, or cleanup evidence")
+	}
+}

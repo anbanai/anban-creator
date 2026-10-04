@@ -30,6 +30,7 @@ import (
 	"github.com/anbanai/anban-creator/server/handler"
 	"github.com/anbanai/anban-creator/server/mcp"
 	projectmemory "github.com/anbanai/anban-creator/server/memory"
+	"github.com/anbanai/anban-creator/server/migrations"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
@@ -105,6 +106,9 @@ func main() {
 		if err := requireTaskBillingSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for fixed-SKU task billing")
 		}
+		if err := requireRuntimeCleanupSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database schema is not ready for runtime cleanup evidence")
+		}
 		if err := requireAgentExecutionProfileSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for Agent execution profiles")
 		}
@@ -113,6 +117,9 @@ func main() {
 		}
 		if err := requireServerOwnedArticlePublicationSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for Server-owned article publication")
+		}
+		if err := service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database executable identity is not ready")
 		}
 		if _, err := service.MigrateImageCapabilities(context.Background(), mysqlDB, cfg.ModelRoutes.ImageGeneration.DefaultCapability, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate image capabilities")
@@ -125,22 +132,19 @@ func main() {
 		} else {
 			log.Info().Msg("database migration completed")
 		}
+		if err := service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database executable identity is not ready")
+		}
+		if err := requireServerOwnedArticlePublicationSchema(mysqlDB); err != nil {
+			log.Fatal().Err(err).Msg("database publication constraint is not ready")
+		}
 		if err := service.MigrateProjectProfiles(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate project profile read models")
 		}
-		// Migrate the legacy channel/account rows before identity backfill so
-		// credentials are available when they are copied into channel configs.
+		// Retain the independent legacy channel/account schema migration.
+		// Identity cutovers now require an explicit maintenance operation.
 		if err := service.MigrateChannelsToProjects(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to migrate channels to projects")
-		}
-		if err := service.MigrateMultiAgentChannelIdentity(context.Background(), mysqlDB); err != nil {
-			log.Fatal().Err(err).Msg("failed to migrate multi-Agent channel identity")
-		}
-		if err := service.MigrateProjectAgentConfigRemoval(context.Background(), mysqlDB); err != nil {
-			log.Fatal().Err(err).Msg("failed to remove project Agent configuration")
-		}
-		if err := service.MigrateWechatIdentity(context.Background(), mysqlDB, log); err != nil {
-			log.Fatal().Err(err).Msg("failed to migrate WeChat identities")
 		}
 		if err := service.MigrateDesktopExecutionRemoval(context.Background(), mysqlDB, log); err != nil {
 			log.Fatal().Err(err).Msg("failed to remove desktop execution schema")
@@ -1135,7 +1139,7 @@ func requireServerOwnedArticlePublicationSchema(db *gorm.DB) error {
 		!db.Migrator().HasColumn(&model.WechatPublication{}, "DraftCoverCropPercentList") {
 		return fmt.Errorf("existing database requires server/migrations/20260916_server_owned_article_publication.sql and 20261001_wechat_picture_publication_evidence.sql before startup")
 	}
-	return nil
+	return migrations.RequireWechatPublicationStatusConstraint(context.Background(), db)
 }
 
 func requireMySQLTaskDeliveryConstraints(db *gorm.DB) error {
@@ -1597,4 +1601,14 @@ func startPeriodicArtifactCleanup(ctx context.Context, taskSvc *service.TaskServ
 			cleanup()
 		}
 	}
+}
+
+func requireRuntimeCleanupSchema(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&model.TaskExecution{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&model.TaskExecution{}, "CleanupDiagnostic") {
+		return fmt.Errorf("existing database requires server/migrations/20261004_runtime_cleanup_diagnostic.sql before startup")
+	}
+	return nil
 }

@@ -494,3 +494,49 @@ func TestMainWiresRequiredBillingRuntime(t *testing.T) {
 		t.Fatal("main must cancel the shared lifecycle context when Listen returns")
 	}
 }
+
+func TestStartupIdentityChecksAreReadOnlyAndPrecedeServing(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	for _, forbidden := range []string{"service.MigrateWechatIdentity(", "service.MigrateMultiAgentChannelIdentity(", "service.MigrateProjectAgentConfigRemoval("} {
+		if strings.Contains(src, forbidden) {
+			t.Errorf("startup retains destructive identity cutover %s", forbidden)
+		}
+	}
+	check := strings.Index(src, "service.AssertExecutableIdentityReadiness(")
+	migration := strings.Index(src, "migrateModels(mysqlDB, model.AutoMigrate)")
+	serving := strings.Index(src, "// 7. Create repository.")
+	if check < 0 || check >= migration || migration >= serving {
+		t.Fatal("read-only identity readiness must precede migration and serving")
+	}
+	if !strings.Contains(src, "migrations.RequireWechatPublicationStatusConstraint(context.Background(), db)") {
+		t.Fatal("startup must validate live publication CHECK")
+	}
+}
+
+func TestRequireRuntimeCleanupSchema(t *testing.T) {
+	fresh, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requireRuntimeCleanupSchema(fresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Exec("CREATE TABLE task_executions (id text)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireRuntimeCleanupSchema(fresh); err == nil || !strings.Contains(err.Error(), "20261004_runtime_cleanup_diagnostic.sql") {
+		t.Fatalf("missing diagnostic guard: %v", err)
+	}
+	if err := fresh.Exec("ALTER TABLE task_executions ADD COLUMN cleanup_diagnostic text").Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := requireRuntimeCleanupSchema(fresh); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

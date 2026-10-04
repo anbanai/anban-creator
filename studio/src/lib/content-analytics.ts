@@ -13,9 +13,12 @@ export interface AnalyticsPage<T> { revision: number; items: T[]; total: number;
 export interface AnalyticsListParams extends AnalyticsParams { search?: string; content_type?: string; sort?: string; direction?: 'asc' | 'desc'; offset?: number; limit?: number }
 export interface AnalyticsObservation { id: string; stat_date: string; source: string; metric_basis: MetricBasis; effective_at: string; received_at: string; revoked_at?: string; metrics: Record<string, number | null> }
 const metric = (key: string, label: string, kind: AnalyticsMetric['kind'] = 'count', summary = true): AnalyticsMetric => ({ key, label, kind, summary, color: 'var(--primary)', format: (value) => kind === 'rate' ? `${(value * 100).toFixed(2)}%` : kind === 'duration' ? `${value.toFixed(1)} 秒` : value.toLocaleString('zh-CN') })
-const wechatMetrics = [metric('read_users', '阅读人数'), metric('share_users', '分享人数'), metric('read_to_follow_users', '阅读后关注'), metric('delivered_users', '送达人数'), metric('read_completion_rate', '阅读完成率', 'rate', false)]
+const wechatMetrics = [metric('read_users', '阅读人数'), metric('share_users', '分享人数'), metric('read_to_follow_users', '阅读后关注'), metric('delivered_users', '送达人数'), metric('read_completion_rate', '阅读完成率', 'rate', false), metric('average_read_active_time', '平均阅读时长', 'duration', false), metric('delivery_completion_rate', '送达完成率', 'rate', false), metric('collection_users', '收藏人数', 'count', false), metric('like_users', '点赞人数', 'count', false), metric('zaikan_users', '在看人数', 'count', false), metric('comment_count', '评论', 'count', false)]
 const seednoteMetrics = [metric('exposure_count', '曝光'), metric('view_count', '观看量'), metric('like_count', '点赞'), metric('comment_count', '评论'), metric('collect_count', '收藏'), metric('follower_gain_count', '涨粉'), metric('cover_click_rate', '封面点击率', 'rate', false), metric('share_count', '分享', 'count', false), metric('avg_watch_duration', '人均观看时长', 'duration', false), metric('barrage_count', '弹幕', 'count', false)]
 export const metricsFor = (platform: string) => platform === 'wechat' ? wechatMetrics : seednoteMetrics
+const metricMetadata = new Map([...wechatMetrics, ...seednoteMetrics].map(item => [item.key, item]))
+export const metricLabel = (key: string) => metricMetadata.get(key)?.label ?? '未知指标'
+export const formatMetric = (key: string, value: number | null | undefined) => value == null ? '—' : (metricMetadata.get(key)?.format(value) ?? value.toLocaleString('zh-CN'))
 export const targetKey = (target: AnalyticsTarget) => `${target.kind}:${target.id}`
 const targetKinds = ['task', 'wechat_publication', 'seednote_post'] as const satisfies readonly AnalyticsTarget['kind'][]
 export function parseTargetKey(value?: string): AnalyticsTarget | undefined {
@@ -30,7 +33,10 @@ function contentAnalyticsHref(projectId: string, target: AnalyticsTarget) {
   return `/content-analytics?${new URLSearchParams({ account: projectId, content: targetKey(target) })}`
 }
 export function taskContentAnalyticsHref(projectId: string, taskId: string) { return contentAnalyticsHref(projectId, { kind: 'task', id: taskId }) }
-export const contentTypeLabel = (type: string) => ({ wechat: '文章', 'wechat-article': '公众号文章', 'wechat-picture': '公众号贴图', image: '贴图', image_text: '图文', '图文': '图文', '视频': '视频', video: '视频', unknown: '类型未知' }[type] ?? '类型未知')
+// Seednote import previews also return the original Chinese genre values.
+const contentTypeLabels: Record<string, string> = { 'wechat-article': '公众号文章', 'wechat-picture': '公众号贴图', image_text: '图文', video: '视频', unknown: '类型未知', '图文': '图文', '视频': '视频' }
+export const contentTypeLabel = (type: string) => contentTypeLabels[type] ?? contentTypeLabels.unknown
+export const contentTypesFor = (platform: string) => platform === 'wechat' ? ['wechat-article', 'wechat-picture', 'unknown'] : ['image_text', 'video', 'unknown']
 export function descriptionFor() { return '每篇内容取范围内最新累计记录；缺失记录不补零。' }
 const path = (id: string) => `/projects/${encodeURIComponent(id)}/content-analytics`
 const nativePath = (project: Project) => `/projects/${project.id}/${project.platform === 'wechat' ? 'wechat' : 'seednote'}-analytics`

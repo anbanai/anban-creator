@@ -508,9 +508,13 @@ func feedbackMaturityCutoffForProject(now time.Time, timezone string, age time.D
 }
 
 func analyticsValidMetricPredicate(platform string) string {
+	family, err := model.AnalyticsMetricFamilyForPlatform(platform)
+	if err != nil {
+		return ""
+	}
 	columns := make([]string, 0, len(model.AnalyticsMetricColumns()))
 	for _, column := range model.AnalyticsMetricColumns() {
-		if model.AnalyticsMetricForPlatform(column, platform) {
+		if family.Contains(column) {
 			columns = append(columns, column+" IS NOT NULL")
 		}
 	}

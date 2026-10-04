@@ -63,7 +63,11 @@ func (s *ContentAnalyticsService) Candidates(ctx context.Context, userID, projec
 	if project.UserID != userID {
 		return nil, 0, errors.New("project does not belong to user")
 	}
-	rows, total, err := s.repo.Analytics().CandidatePage(ctx, userID, projectID, "", search, offset, limit)
+	family, err := model.AnalyticsMetricFamilyForPlatform(project.Platform)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, total, err := s.repo.Analytics().CandidatePage(ctx, userID, projectID, family, search, offset, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -161,7 +165,7 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 			if matchDateErr != nil {
 				return nil, matchDateErr
 			}
-			c := AnalyticsCandidate{Target: AnalyticsTarget{"seednote_post", post.ID}, Title: post.Title, ContentType: post.Genre, Status: "recorded", Date: post.FirstPublishedAt, URL: post.NoteURL, Post: post, matchDate: matchDate}
+			c := AnalyticsCandidate{Target: AnalyticsTarget{"seednote_post", post.ID}, Title: post.Title, ContentType: analyticsSeednoteType(post.Genre), Status: "recorded", Date: post.FirstPublishedAt, URL: post.NoteURL, Post: post, matchDate: matchDate}
 			if c.ContentType == "" {
 				c.ContentType = "unknown"
 			}

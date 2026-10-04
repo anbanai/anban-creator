@@ -1726,7 +1726,13 @@ func (s *TaskService) cleanupCancelledExecution(ctx context.Context, execution *
 		if backoff <= 0 {
 			backoff = 10 * time.Second
 		}
-		failed, failErr := s.repo.TaskExecutions().FailCleanup(context.WithoutCancel(ctx), execution.ID, token, backoff)
+		var failed bool
+		var failErr error
+		if agent.IsPermanentDispatchError(deleteErr) {
+			failed, failErr = s.BlockExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, deleteErr)
+		} else {
+			failed, failErr = s.repo.TaskExecutions().FailCleanup(context.WithoutCancel(ctx), execution.ID, token, backoff)
+		}
 		if failErr != nil {
 			return errors.Join(fmt.Errorf("delete cancelled runtime workload: %w", deleteErr), failErr)
 		}

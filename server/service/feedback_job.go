@@ -200,8 +200,17 @@ func loadFeedbackMetricSummary(ctx context.Context, repo repository.Repository, 
 }
 
 func hasValidFeedbackMetric(row model.AnalyticsObservation, platform string) bool {
+	// Scheduled jobs store the account platform; content-attribution jobs
+	// store their output channel. Resolve each explicit vocabulary here.
+	family, err := model.AnalyticsMetricFamilyForPlatform(platform)
+	if platform == model.ChannelArticle || platform == model.ChannelWechatPicture {
+		family, err = model.AnalyticsMetricsWechat, nil
+	}
+	if err != nil {
+		return false
+	}
 	for _, column := range model.AnalyticsMetricColumns() {
-		if model.AnalyticsMetricForPlatform(column, platform) && feedbackMetricPresent(row, column) {
+		if family.Contains(column) && feedbackMetricPresent(row, column) {
 			return true
 		}
 	}

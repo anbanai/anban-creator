@@ -275,6 +275,16 @@ func (r *AnalyticsRepository) RangeTotals(ctx context.Context, project string, g
 	return row.AnalyticsMetrics, row.Coverage, e
 }
 func (r *AnalyticsRepository) ResolveContent(ctx context.Context, project, id string) (*model.AnalyticsContent, error) {
+	content, err := r.resolveContentIdentity(ctx, project, id)
+	if err != nil {
+		return content, err
+	}
+	metadata := r.contentMetadata(ctx, project)
+	err = metadata.query.Select(metadata.columns()).Where("c.id = ?", content.ID).Take(content).Error
+	return content, err
+}
+
+func (r *AnalyticsRepository) resolveContentIdentity(ctx context.Context, project, id string) (*model.AnalyticsContent, error) {
 	q := r.db.WithContext(ctx).Where("project_id = ?", project)
 	parts := strings.SplitN(id, ":", 2)
 	if len(parts) == 2 {
@@ -338,14 +348,24 @@ type AnalyticsContentFilter struct {
 	Offset, Limit                        int
 }
 
-func (r *AnalyticsRepository) Contents(ctx context.Context, project string, generation int64, basis, from, to string, f AnalyticsContentFilter) ([]AnalyticsContentRow, int64, error) {
-	sub := r.contentRange(ctx, project, generation, basis, from, to, "")
-	q := r.db.WithContext(ctx).Table("analytics_contents AS c").Joins("LEFT JOIN (?) AS m ON m.content_id = c.id", sub).Where("c.project_id = ?", project)
-	liveTitle, liveType, liveStatus, liveURL := "c.title", "c.content_type", "c.status", "c.url"
+// contentMetadata resolves operational metadata once for list, filter and detail.
+// Stored analytics identity and observation dates remain unchanged.
+type analyticsContentMetadata struct {
+	query                           *gorm.DB
+	title, contentType, status, url string
+}
+
+func (m analyticsContentMetadata) columns() string {
+	return "c.*, " + m.title + " AS title, " + m.contentType + " AS content_type, " + m.status + " AS status, " + m.url + " AS url"
+}
+
+func (r *AnalyticsRepository) contentMetadata(ctx context.Context, project string) analyticsContentMetadata {
+	q := r.db.WithContext(ctx).Table("analytics_contents AS c").Where("c.project_id = ?", project)
+	liveTitle, liveType, liveStatus, liveURL := "c.title", analyticsContentTypeSQL("c.content_type"), "c.status", "c.url"
 	if r.db.Migrator().HasTable("tasks") {
 		q = q.Joins("LEFT JOIN tasks AS t ON t.id = c.task_id AND t.project_id = c.project_id")
 		liveTitle = "COALESCE(NULLIF(t.title,''), c.title)"
-		liveType = "COALESCE(NULLIF(t.type,''), c.content_type)"
+		liveType = analyticsContentTypeSQL("COALESCE(NULLIF(t.type,''), c.content_type)")
 		liveStatus = "COALESCE(NULLIF(t.status,''), c.status)"
 	}
 	if r.db.Migrator().HasTable("wechat_publications") {
@@ -353,13 +373,22 @@ func (r *AnalyticsRepository) Contents(ctx context.Context, project string, gene
 		liveTitle = "COALESCE(NULLIF(p.draft_title,''), " + liveTitle + ")"
 		liveStatus = "COALESCE(NULLIF(p.status,''), " + liveStatus + ")"
 		liveURL = "COALESCE(NULLIF(p.article_url,''), " + liveURL + ")"
+		liveType = "CASE WHEN p.id IS NOT NULL THEN " + analyticsWechatTypeSQL("p.draft_article_type") + " ELSE " + liveType + " END"
 	}
 	if r.db.Migrator().HasTable("seednote_posts") {
 		q = q.Joins("LEFT JOIN seednote_posts AS sp ON sp.id = c.post_id AND sp.project_id = c.project_id")
 		liveTitle = "COALESCE(NULLIF(sp.title,''), " + liveTitle + ")"
-		liveType = "COALESCE(NULLIF(sp.genre,''), " + liveType + ")"
+		liveType = "CASE WHEN sp.id IS NOT NULL THEN " + analyticsSeednoteTypeSQL("sp.genre") + " ELSE " + liveType + " END"
 		liveURL = "COALESCE(NULLIF(sp.note_url,''), " + liveURL + ")"
 	}
+	return analyticsContentMetadata{q, liveTitle, liveType, liveStatus, liveURL}
+}
+
+func (r *AnalyticsRepository) Contents(ctx context.Context, project string, generation int64, basis, from, to string, f AnalyticsContentFilter) ([]AnalyticsContentRow, int64, error) {
+	sub := r.contentRange(ctx, project, generation, basis, from, to, "")
+	metadata := r.contentMetadata(ctx, project)
+	q := metadata.query.Joins("LEFT JOIN (?) AS m ON m.content_id = c.id", sub)
+	liveTitle, liveType := metadata.title, metadata.contentType
 	if f.Search != "" {
 		q = q.Where(liveTitle+" LIKE ?", "%"+f.Search+"%")
 	}
@@ -370,7 +399,7 @@ func (r *AnalyticsRepository) Contents(ctx context.Context, project string, gene
 	if e := q.Count(&n).Error; e != nil {
 		return nil, 0, e
 	}
-	column := "COALESCE(m.last_stat_date, c.date)"
+	column := "m.last_stat_date"
 	switch f.Sort {
 	case "title":
 		column = liveTitle
@@ -399,7 +428,7 @@ func (r *AnalyticsRepository) Contents(ctx context.Context, project string, gene
 		}
 	}
 	rows := []AnalyticsContentRow{}
-	e := q.Select("c.*, " + liveTitle + " AS title, " + liveType + " AS content_type, " + liveStatus + " AS status, " + liveURL + " AS url, COALESCE(m.last_stat_date, '') AS last_stat_date, " + analyticsMetricColumns("m.")).Order(order).Offset(f.Offset).Limit(f.Limit).Scan(&rows).Error
+	e := q.Select(metadata.columns() + ", COALESCE(m.last_stat_date, '') AS last_stat_date, " + analyticsMetricColumns("m.")).Order(order).Offset(f.Offset).Limit(f.Limit).Scan(&rows).Error
 	return rows, n, e
 }
 func (r *AnalyticsRepository) ObservationPage(ctx context.Context, project, content, from, to, basis string, offset, limit int) ([]model.AnalyticsObservation, int64, error) {
@@ -582,4 +611,16 @@ func (r *AnalyticsRepository) PublishRebuild(ctx context.Context, project string
 // later retry can start from the durable legacy facts/checkpoint.
 func (r *AnalyticsRepository) AbortRebuild(ctx context.Context, project string) error {
 	return r.db.WithContext(ctx).Model(&model.AnalyticsState{}).Where("project_id = ? AND status = ?", project, "rebuilding").Updates(map[string]any{"status": "ready", "updated_at": time.Now().UTC()}).Error
+}
+
+// Expressions are internal column references, never request values. Keep the
+// selected value and filter expression identical so labels and filters agree.
+func analyticsContentTypeSQL(expression string) string {
+	return "CASE WHEN " + expression + " IN ('wechat-article','wechat-picture','image_text','video') THEN " + expression + " ELSE 'unknown' END"
+}
+func analyticsWechatTypeSQL(expression string) string {
+	return "CASE " + expression + " WHEN 'news' THEN 'wechat-article' WHEN 'newspic' THEN 'wechat-picture' ELSE 'unknown' END"
+}
+func analyticsSeednoteTypeSQL(expression string) string {
+	return "CASE WHEN " + expression + " IN ('image','image_text','image_note','图文','图文笔记') THEN 'image_text' WHEN " + expression + " IN ('video','video_note','视频') THEN 'video' ELSE 'unknown' END"
 }

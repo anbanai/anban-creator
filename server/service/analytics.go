@@ -47,7 +47,8 @@ type AnalyticsQuery struct {
 type AnalyticsMetricMap = map[string]any
 type AnalyticsContentView struct {
 	model.AnalyticsContent
-	Metrics AnalyticsMetricMap `json:"metrics"`
+	Metrics      AnalyticsMetricMap `json:"metrics"`
+	LastStatDate string             `json:"last_stat_date,omitempty"`
 }
 type AnalyticsOverview struct {
 	Revision    int64                `json:"revision"`
@@ -259,7 +260,7 @@ func normalizeAnalyticsQuery(q AnalyticsQuery) (AnalyticsQuery, error) {
 	}
 	return q, nil
 }
-func (s *AnalyticsService) read(ctx context.Context, user, project string, q AnalyticsQuery, fn func(*repository.AnalyticsRepository, *model.Project, *model.AnalyticsState) error) error {
+func (s *AnalyticsService) read(ctx context.Context, user, project string, q AnalyticsQuery, fn func(*repository.AnalyticsRepository, *model.Project, *model.AnalyticsState, model.AnalyticsMetricFamily) error) error {
 	return s.repo.Analytics().Snapshot(ctx, func(r *repository.AnalyticsRepository) error {
 		p, e := r.Project(ctx, project)
 		if e != nil {
@@ -267,6 +268,10 @@ func (s *AnalyticsService) read(ctx context.Context, user, project string, q Ana
 		}
 		if p.UserID != user {
 			return ErrAnalyticsForbidden
+		}
+		family, e := model.AnalyticsMetricFamilyForPlatform(p.Platform)
+		if e != nil {
+			return fmt.Errorf("%w: %v", ErrAnalyticsInvalidQuery, e)
 		}
 		state, e := r.State(ctx, project)
 		if e != nil {
@@ -280,25 +285,25 @@ func (s *AnalyticsService) read(ctx context.Context, user, project string, q Ana
 		if q.ExpectedRevision != nil && *q.ExpectedRevision != state.Revision {
 			return ErrAnalyticsRevisionConflict
 		}
-		return fn(r, p, state)
+		return fn(r, p, state, family)
 	})
 }
-func analyticsUnavailable(platform string) map[string]string {
+func analyticsUnavailable(family model.AnalyticsMetricFamily) map[string]string {
 	out := map[string]string{}
 	for _, k := range model.AnalyticsDecimalColumns() {
-		if model.AnalyticsMetricForPlatform(k, platform) {
+		if family.Contains(k) {
 			out[k] = "缺少可靠分母，无法汇总比例或平均时长"
 		}
 	}
 	return out
 }
-func analyticsOverviewRead(ctx context.Context, r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState, q AnalyticsQuery, content string) (AnalyticsOverview, error) {
-	out := AnalyticsOverview{Revision: state.Revision, UpdatedAt: state.UpdatedAt, MetricBasis: q.MetricBasis, Series: []AnalyticsMetricMap{}, UnavailableMetrics: analyticsUnavailable(p.Platform)}
+func analyticsOverviewRead(ctx context.Context, r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState, q AnalyticsQuery, content string, family model.AnalyticsMetricFamily) (AnalyticsOverview, error) {
+	out := AnalyticsOverview{Revision: state.Revision, UpdatedAt: state.UpdatedAt, MetricBasis: q.MetricBasis, Series: []AnalyticsMetricMap{}, UnavailableMetrics: analyticsUnavailable(family)}
 	m, n, e := r.RangeTotals(ctx, p.ID, state.ActiveGeneration, q.MetricBasis, q.From, q.To, content, content != "")
 	if e != nil {
 		return out, e
 	}
-	out.Totals = m.Map(p.Platform)
+	out.Totals = m.Map(family)
 	out.Coverage.Contents = n
 	if content != "" {
 		out.UnavailableMetrics = map[string]string{}
@@ -316,7 +321,7 @@ func analyticsOverviewRead(ctx context.Context, r *repository.AnalyticsRepositor
 			metrics.CoverClickRate = nil
 			metrics.AvgWatchDuration = nil
 		}
-		point := metrics.Map(p.Platform)
+		point := metrics.Map(family)
 		point["date"] = row.BucketStart
 		out.Series = append(out.Series, point)
 	}
@@ -328,9 +333,9 @@ func (s *AnalyticsService) Overview(ctx context.Context, user, project string, q
 		return AnalyticsOverview{}, e
 	}
 	var out AnalyticsOverview
-	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState) error {
+	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState, family model.AnalyticsMetricFamily) error {
 		var err error
-		out, err = analyticsOverviewRead(ctx, r, p, state, q, "")
+		out, err = analyticsOverviewRead(ctx, r, p, state, q, "", family)
 		return err
 	})
 	return out, e
@@ -341,7 +346,7 @@ func (s *AnalyticsService) Contents(ctx context.Context, user, project string, q
 		return AnalyticsContentPage{}, e
 	}
 	out := AnalyticsContentPage{Items: []AnalyticsContentView{}, Offset: q.Offset, Limit: q.Limit}
-	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState) error {
+	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState, family model.AnalyticsMetricFamily) error {
 		out.Revision = state.Revision
 		rows, n, e := r.Contents(ctx, project, state.ActiveGeneration, q.MetricBasis, q.From, q.To, repository.AnalyticsContentFilter{Search: q.Search, ContentType: q.ContentType, Sort: q.Sort, Direction: q.Direction, Offset: q.Offset, Limit: q.Limit})
 		if e != nil {
@@ -349,7 +354,7 @@ func (s *AnalyticsService) Contents(ctx context.Context, user, project string, q
 		}
 		out.Total = n
 		for _, row := range rows {
-			out.Items = append(out.Items, AnalyticsContentView{AnalyticsContent: row.AnalyticsContent, Metrics: row.AnalyticsMetrics.Map(p.Platform)})
+			out.Items = append(out.Items, AnalyticsContentView{AnalyticsContent: row.AnalyticsContent, Metrics: row.AnalyticsMetrics.Map(family), LastStatDate: row.LastStatDate})
 		}
 		return nil
 	})
@@ -361,12 +366,12 @@ func (s *AnalyticsService) Detail(ctx context.Context, user, project, contentID 
 		return AnalyticsContentDetail{}, e
 	}
 	var out AnalyticsContentDetail
-	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState) error {
+	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState, family model.AnalyticsMetricFamily) error {
 		c, e := r.ResolveContent(ctx, project, contentID)
 		if e != nil {
 			return e
 		}
-		out.AnalyticsOverview, e = analyticsOverviewRead(ctx, r, p, state, q, c.ID)
+		out.AnalyticsOverview, e = analyticsOverviewRead(ctx, r, p, state, q, c.ID, family)
 		if e != nil {
 			return e
 		}
@@ -381,7 +386,7 @@ func (s *AnalyticsService) Observations(ctx context.Context, user, project, cont
 		return AnalyticsObservationPage{}, e
 	}
 	out := AnalyticsObservationPage{Items: []AnalyticsObservationView{}, Offset: q.Offset, Limit: q.Limit}
-	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState) error {
+	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState, family model.AnalyticsMetricFamily) error {
 		out.Revision = state.Revision
 		c, e := r.ResolveContent(ctx, project, contentID)
 		if e != nil {
@@ -393,7 +398,7 @@ func (s *AnalyticsService) Observations(ctx context.Context, user, project, cont
 		}
 		out.Total = n
 		for _, row := range rows {
-			out.Items = append(out.Items, AnalyticsObservationView{AnalyticsObservation: row, Metrics: row.AnalyticsMetrics.Map(p.Platform)})
+			out.Items = append(out.Items, AnalyticsObservationView{AnalyticsObservation: row, Metrics: row.AnalyticsMetrics.Map(family)})
 		}
 		return nil
 	})
@@ -410,7 +415,7 @@ func (s *AnalyticsService) Dates(ctx context.Context, user, project string, year
 		return AnalyticsDates{}, e
 	}
 	out := AnalyticsDates{Dates: []string{}}
-	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState) error {
+	e = s.read(ctx, user, project, q, func(r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState, family model.AnalyticsMetricFamily) error {
 		out.Revision = state.Revision
 		var e error
 		out.Dates, e = r.Dates(ctx, project, state.ActiveGeneration, q.MetricBasis, year)

@@ -632,3 +632,42 @@ func TestRuntimeReconcilerFinalizesExitedContainer(t *testing.T) {
 		t.Fatalf("deleted = %v, want [%s]", dispatcher.deleted, execution.ID)
 	}
 }
+
+func (s *reconcileTestService) BlockExecutionCleanup(_ context.Context, id, token string, cause error) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cleanup[id] != token {
+		return false, nil
+	}
+	s.cleanup[id] = "blocked"
+	return true, nil
+}
+
+func TestRuntimeCleanupBlocksPermanentFailureWithoutRetry(t *testing.T) {
+	execution := &model.TaskExecution{ID: "blocked", Status: model.TaskExecutionFailed, CleanupStatus: model.TaskExecutionCleanupPending}
+	service := &reconcileTestService{executions: []*model.TaskExecution{execution}}
+	dispatcher := &reconcileTestDispatcher{deleteErrs: []error{NewPermanentDispatchError(errors.New("instance identity mismatch token=private"))}}
+	reconciler := NewRuntimeReconciler(dispatcher, service, RuntimeReconcilerConfig{}, zerolog.Nop())
+	if err := reconciler.cleanupExecution(context.Background(), execution); err == nil {
+		t.Fatal("expected permanent failure")
+	}
+	if service.cleanup[execution.ID] != "blocked" {
+		t.Fatalf("cleanup = %q", service.cleanup[execution.ID])
+	}
+	execution.CleanupStatus = model.TaskExecutionCleanupBlocked
+	if err := reconciler.cleanupExecution(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	if len(dispatcher.deleted) != 1 {
+		t.Fatal("blocked cleanup retried")
+	}
+}
+
+func TestCleanupDiagnosticNeverCopiesProviderSecrets(t *testing.T) {
+	for _, raw := range []string{"ownership mismatch token=secret", "runtime image https://user:pass@host?secret=yes", "UID mismatch authorization: private", "provider failure password=secret"} {
+		diagnostic := CleanupDiagnostic(errors.New(raw))
+		if strings.Contains(diagnostic, "secret") || strings.Contains(diagnostic, "private") || strings.Contains(diagnostic, "https") {
+			t.Fatalf("unsafe diagnostic %q", diagnostic)
+		}
+	}
+}

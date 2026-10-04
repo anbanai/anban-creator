@@ -43,7 +43,7 @@ func TestTaskExecutionMigrationAndCurrentAttempt(t *testing.T) {
 		!db.Migrator().HasColumn(&TaskExecution{}, "DispatchClaimedAt") {
 		t.Fatal("dispatch lease columns missing")
 	}
-	for _, column := range []string{"ParentExecutionID", "ResumeSessionID", "AgentPackID", "AgentPackVersion", "AgentPackDigest", "AgentPackDeliveryContract", "AgentPackRequiredArtifactContract", "RuntimeAdapter", "RuntimeProfile", "RuntimeImage", "ManifestSealed", "FinalizationStatus", "FinalizationToken", "CleanupStatus", "CleanupToken", "CleanupNextAt", "DraftDeliveryStatus", "DraftDeliveryResult", "Result"} {
+	for _, column := range []string{"ParentExecutionID", "ResumeSessionID", "AgentPackID", "AgentPackVersion", "AgentPackDigest", "AgentPackDeliveryContract", "AgentPackRequiredArtifactContract", "RuntimeAdapter", "RuntimeProfile", "RuntimeImage", "ManifestSealed", "FinalizationStatus", "FinalizationToken", "CleanupStatus", "CleanupDiagnostic", "CleanupToken", "CleanupNextAt", "DraftDeliveryStatus", "DraftDeliveryResult", "Result"} {
 		if !db.Migrator().HasColumn(&TaskExecution{}, column) {
 			t.Fatalf("task execution durability column %s missing", column)
 		}
@@ -117,5 +117,15 @@ func TestTaskExecutionPublicJSONHidesRawDiagnostics(t *testing.T) {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("public execution JSON exposed %q: %s", forbidden, raw)
 		}
+	}
+}
+
+func TestCleanupDiagnosticIsPrivate(t *testing.T) {
+	encoded, err := json.Marshal(TaskExecution{CleanupStatus: TaskExecutionCleanupBlocked, CleanupDiagnostic: "private-diagnostic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private-diagnostic") || strings.Contains(string(encoded), "cleanup_diagnostic") {
+		t.Fatal("private cleanup diagnostic leaked into public JSON")
 	}
 }

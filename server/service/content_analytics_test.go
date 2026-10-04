@@ -72,6 +72,9 @@ func TestContentAnalyticsCandidatesAllStatesAndIsolation(t *testing.T) {
 		t.Fatalf("candidates=%d total=%d err=%v", len(items), total, err)
 	}
 	for _, item := range items {
+		if item.ContentType != "wechat-article" {
+			t.Errorf("candidate type = %q", item.ContentType)
+		}
 		if item.Target.Kind != "task" {
 			t.Fatalf("publication was not canonicalized: %+v", item)
 		}

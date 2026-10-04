@@ -28,6 +28,14 @@ beforeEach(() => {
   vi.mocked(contentAnalyticsApi.candidates).mockResolvedValue({ items: [{ target, title: '当前账号草稿', content_type: 'image_text', status: 'pending' }], total: 1 })
 })
 describe('统一导入确认', () => {
+  it('labels the Chinese content types returned by Seednote import preview', async () => {
+    vi.mocked(contentAnalyticsApi.preview).mockResolvedValue({ ...preview, rows: preview.rows.map((row, index) => ({ ...row, content_type: index === 0 ? '图文' : index === 1 ? '视频' : 'unknown' })) })
+    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    await upload()
+    expect(within(screen.getByText('已识别内容', { selector: 'p' }).closest('tr')!).getByText('图文')).toBeInTheDocument()
+    expect(within(screen.getByText('未识别内容').closest('tr')!).getByText('视频')).toBeInTheDocument()
+  })
+
   it('keeps the upload flow focused on the file and confirmation actions', async () => {
     render(<ContentImportDialog project={project} onClose={vi.fn()} />)
 

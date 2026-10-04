@@ -87,7 +87,7 @@ func (s *TaskService) ResolveExecutionCleanupRuntime(ctx context.Context, execut
 		return nil, false, err
 	}
 	if strings.TrimSpace(execution.Target) != dispatcherTarget {
-		return nil, false, fmt.Errorf("%w: execution target is %q, dispatcher scope is %q", ErrRuntimeDispatcherTargetMismatch, execution.Target, dispatcherTarget)
+		return nil, false, agent.NewPermanentDispatchError(fmt.Errorf("%w: execution target is %q, dispatcher scope is %q", ErrRuntimeDispatcherTargetMismatch, execution.Target, dispatcherTarget))
 	}
 	if completeRuntimeIdentity(runtimeIdentityFromExecution(execution)) {
 		return execution, true, nil
@@ -115,10 +115,13 @@ func (s *TaskService) ResolveExecutionCleanupRuntime(ctx context.Context, execut
 		if err == nil {
 			err = fmt.Errorf("runtime dispatcher returned incomplete recovered runtime identity")
 		}
-		return nil, false, err
+		return nil, false, agent.NewPermanentDispatchError(err)
 	}
 	bound, err := s.repo.TaskExecutions().SetCleanupRuntimeIdentity(ctx, execution.ID, token, normalized)
 	if err != nil {
+		if errors.Is(err, repository.ErrRuntimeIdentityConflict) {
+			err = agent.NewPermanentDispatchError(err)
+		}
 		return nil, false, fmt.Errorf("persist recovered runtime identity: %w", err)
 	}
 	if !bound {
@@ -132,7 +135,7 @@ func (s *TaskService) ResolveExecutionCleanupRuntime(ctx context.Context, execut
 		return nil, false, ErrExecutionCleanupLeaseLost
 	}
 	if runtimeIdentityFromExecution(authoritative) != normalized {
-		return nil, false, repository.ErrRuntimeIdentityConflict
+		return nil, false, agent.NewPermanentDispatchError(repository.ErrRuntimeIdentityConflict)
 	}
 	return authoritative, true, nil
 }
@@ -161,4 +164,8 @@ func (s *TaskService) ReconcileExecutionFailure(ctx context.Context, executionID
 		return err
 	}
 	return s.TerminalizeCurrentExecution(ctx, executionID, status, reason, diagnostics)
+}
+
+func (s *TaskService) BlockExecutionCleanup(ctx context.Context, executionID, token string, cause error) (bool, error) {
+	return s.repo.TaskExecutions().BlockCleanup(ctx, executionID, token, agent.CleanupDiagnostic(cause))
 }

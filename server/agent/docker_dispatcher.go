@@ -185,43 +185,53 @@ func (d *DockerDispatcher) Prepare(ctx context.Context, execution *model.TaskExe
 }
 
 func (d *DockerDispatcher) ResolvePrepared(ctx context.Context, execution *model.TaskExecution, task *model.Task) (*model.RuntimeIdentity, error) {
-	if err := d.validateDispatch(execution, task); err != nil {
+	if err := d.validateExecution(execution); err != nil {
 		return nil, NewPermanentDispatchError(err)
 	}
-
+	if err := validateDockerTaskIdentity(task); err != nil {
+		return nil, NewPermanentDispatchError(err)
+	}
+	if execution.TaskID != task.ID {
+		return nil, NewPermanentDispatchError(fmt.Errorf("execution task identity mismatch"))
+	}
 	resolveCtx, cancel := context.WithTimeout(ctx, time.Duration(d.config.TimeoutSec)*time.Second)
 	defer cancel()
-	inspectedImage, err := d.engine.ImageInspect(resolveCtx, execution.RuntimeImage)
-	if err != nil {
-		if errdefs.IsNotFound(err) || errdefs.IsInvalidParameter(err) || errdefs.IsForbidden(err) || errdefs.IsUnauthorized(err) {
-			err = NewPermanentDispatchError(err)
-		}
-		return nil, fmt.Errorf("inspect Docker runtime image %q while resolving prepared container: %w", execution.RuntimeImage, err)
-	}
-	if strings.TrimSpace(inspectedImage.ID) == "" || inspectedImage.Config == nil {
-		return nil, NewPermanentDispatchError(fmt.Errorf("Docker runtime image %q has incomplete trusted identity", execution.RuntimeImage))
-	}
-
-	spec := buildDockerRuntimeSpec(dockerRuntimeConfig{
-		DockerConfig: d.config,
-		ServerURL:    d.serverURL,
-		ImageID:      inspectedImage.ID,
-		ImageConfig:  dockerContainerConfigFromInspect(inspectedImage.Config),
-	}, execution, task)
-	inspected, err := d.engine.ContainerInspect(resolveCtx, spec.ContainerName)
+	name := dockerRuntimeContainerName(execution.ID)
+	inspected, err := d.engine.ContainerInspect(resolveCtx, name)
 	if errdefs.IsNotFound(err) {
-		return nil, fmt.Errorf("resolve prepared Docker container %q: %w", spec.ContainerName, ErrRuntimeWorkloadNotFound)
+		return nil, fmt.Errorf("resolve prepared Docker container %q: %w", name, ErrRuntimeWorkloadNotFound)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("inspect prepared Docker container %q: %w", spec.ContainerName, classifyDockerAccessOrInputError(err))
+		return nil, fmt.Errorf("inspect prepared Docker container %q: %w", name, classifyDockerAccessOrInputError(err))
 	}
-	if err := verifyExistingDockerContainer(inspected, spec, execution.RuntimeInstanceID); err != nil {
-		return nil, err
+	if err := verifyDockerExecutionContainer(inspected, execution); err != nil {
+		return nil, NewPermanentDispatchError(err)
 	}
-	if strings.TrimSpace(inspected.ID) == "" {
-		return nil, NewPermanentDispatchError(fmt.Errorf("Docker container %q has no instance identity", spec.ContainerName))
+	if inspected.Config.Labels[dockerProjectIDLabel] != task.ProjectID || inspected.Config.Labels[dockerUserIDLabel] != task.UserID {
+		return nil, NewPermanentDispatchError(fmt.Errorf("Docker container %q ownership labels mismatch", name))
 	}
-	return &model.RuntimeIdentity{Scope: dockerRuntimeScope, Workload: spec.ContainerName, InstanceID: inspected.ID}, nil
+	// A fully persisted immutable container ID was verified at preparation.
+	// Its image cannot change, even when a mutable image tag later rolls over.
+	// Reconstructing incomplete identity still requires frozen image evidence.
+	persisted := execution.RuntimeScope == dockerRuntimeScope && execution.RuntimeWorkload == name && execution.RuntimeInstanceID != ""
+	if !persisted {
+		if err := d.verifyFrozenContainerImage(resolveCtx, inspected, execution); err != nil {
+			return nil, err
+		}
+	}
+	return &model.RuntimeIdentity{Scope: dockerRuntimeScope, Workload: name, InstanceID: inspected.ID}, nil
+}
+
+// Inspect the actual immutable image, never a mutable tag's current target.
+func (d *DockerDispatcher) verifyFrozenContainerImage(ctx context.Context, inspected containertypes.InspectResponse, execution *model.TaskExecution) error {
+	image, err := d.engine.ImageInspect(ctx, inspected.Image)
+	if err != nil {
+		return fmt.Errorf("inspect Docker workload image: %w", classifyDockerCreateError(err))
+	}
+	if image.ID != inspected.Image || (execution.RuntimeImage != image.ID && !slices.Contains(image.RepoDigests, execution.RuntimeImage) && !slices.Contains(image.RepoTags, execution.RuntimeImage)) {
+		return NewPermanentDispatchError(fmt.Errorf("Docker workload frozen runtime image identity mismatch"))
+	}
+	return nil
 }
 
 func (d *DockerDispatcher) Activate(ctx context.Context, execution *model.TaskExecution) error {
@@ -501,19 +511,19 @@ func (d *DockerDispatcher) Delete(ctx context.Context, execution *model.TaskExec
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("inspect Docker container %q before delete: %w", name, err)
+		return fmt.Errorf("inspect Docker container %q before delete: %w", name, classifyDockerAccessOrInputError(err))
 	}
 	if err := verifyDockerExecutionContainer(inspected, execution); err != nil {
-		return err
+		return NewPermanentDispatchError(err)
 	}
 	if inspected.State != nil && (inspected.State.Running || inspected.State.Paused || inspected.State.Restarting) {
 		timeout := dockerContainerStopTimeout
 		if err := d.engine.ContainerStop(ctx, inspected.ID, containertypes.StopOptions{Timeout: &timeout}); err != nil && !errdefs.IsNotFound(err) && !errdefs.IsNotModified(err) {
-			return fmt.Errorf("stop Docker container %q: %w", name, err)
+			return fmt.Errorf("stop Docker container %q: %w", name, classifyDockerAccessOrInputError(err))
 		}
 	}
 	if err := d.engine.ContainerRemove(ctx, inspected.ID, containertypes.RemoveOptions{}); err != nil && !errdefs.IsNotFound(err) {
-		return fmt.Errorf("remove Docker container %q: %w", name, err)
+		return fmt.Errorf("remove Docker container %q: %w", name, classifyDockerAccessOrInputError(err))
 	}
 	return nil
 }

@@ -254,6 +254,8 @@ type TaskExecutionRepository interface {
 	ClaimCleanup(ctx context.Context, id, token string, lease time.Duration) (bool, error)
 	CompleteCleanup(ctx context.Context, id, token string) (bool, error)
 	FailCleanup(ctx context.Context, id, token string, backoff time.Duration) (bool, error)
+	BlockCleanup(ctx context.Context, id, token, diagnostic string) (bool, error)
+	ReopenBlockedCleanup(ctx context.Context, review model.CleanupReview) (bool, error)
 	ReleaseCleanup(ctx context.Context, id, token string) error
 }
 

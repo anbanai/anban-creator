@@ -1964,7 +1964,7 @@ func TestCancelCloudRejectsCleanupDispatcherTargetMismatch(t *testing.T) {
 	if findErr != nil {
 		t.Fatal(findErr)
 	}
-	if found.CleanupStatus != model.TaskExecutionCleanupPending || dispatcher.resolveCalls != 0 || dispatcher.statusAtDelete != "" {
+	if found.CleanupStatus != model.TaskExecutionCleanupBlocked || dispatcher.resolveCalls != 0 || dispatcher.statusAtDelete != "" {
 		t.Fatalf("cleanup=%s resolve=%d delete_status=%q", found.CleanupStatus, dispatcher.resolveCalls, dispatcher.statusAtDelete)
 	}
 }
@@ -2154,5 +2154,25 @@ func TestBootstrapStartedBoundaryPreventsPreStartReplacement(t *testing.T) {
 	}
 	if dispatcher.createCount() != 0 {
 		t.Fatalf("replacement jobs=%d", dispatcher.createCount())
+	}
+}
+
+func TestCancelCloudBlocksPermanentCleanupConflict(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, true)
+	dispatcher := &cancelOrderingDispatcher{repo: repo, resolveErr: agent.NewPermanentDispatchError(errors.New("ownership mismatch token=secret-value"))}
+	svc.SetRuntimeDispatcher(dispatcher)
+	if err := svc.CancelForUser(context.Background(), task.UserID, task.ID); err == nil {
+		t.Fatal("expected identity conflict")
+	}
+	found, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.CleanupStatus != "blocked" || found.CleanupNextAt != nil || found.CleanupToken != "" || found.CleanupDiagnostic != "runtime_ownership_conflict" {
+		t.Fatalf("cleanup state = %s", found.CleanupStatus)
+	}
+	won, err := svc.ClaimExecutionCleanup(context.Background(), execution.ID, "new-owner", time.Minute)
+	if err != nil || won {
+		t.Fatalf("blocked cleanup reclaimed = %v, %v", won, err)
 	}
 }

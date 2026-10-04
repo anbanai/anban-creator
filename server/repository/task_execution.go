@@ -675,3 +675,33 @@ func isTerminalTaskExecutionStatus(status string) bool {
 		return false
 	}
 }
+
+// BlockCleanup fences permanent failures out of automated cleanup claims.
+func (r *taskExecutionRepository) BlockCleanup(ctx context.Context, id, token, diagnostic string) (bool, error) {
+	if err := validateLeaseToken("cleanup", token); err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(diagnostic) == "" {
+		return false, fmt.Errorf("cleanup diagnostic is required")
+	}
+	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND cleanup_status = ? AND cleanup_token = ?", id, model.TaskExecutionCleanupPending, token).
+		Updates(map[string]any{"cleanup_status": model.TaskExecutionCleanupBlocked, "cleanup_token": "", "cleanup_at": nil, "cleanup_next_at": nil, "cleanup_attempts": gorm.Expr("cleanup_attempts + 1"), "cleanup_diagnostic": diagnostic})
+	return result.RowsAffected == 1, result.Error
+}
+
+// ReopenBlockedCleanup compares every reviewed identity member, including empty
+// members, and the blocked attempt revision. A stale review cannot reopen a new block.
+func (r *taskExecutionRepository) ReopenBlockedCleanup(ctx context.Context, review model.CleanupReview) (bool, error) {
+	if review.ExecutionID == "" || review.TaskID == "" || review.Target == "" || review.Attempts <= 0 || review.Diagnostic == "" {
+		return false, fmt.Errorf("complete blocked cleanup review is required")
+	}
+	result := r.db.WithContext(ctx).Model(&model.TaskExecution{}).
+		Where("id = ? AND task_id = ? AND target = ? AND cleanup_status = ?", review.ExecutionID, review.TaskID, review.Target, model.TaskExecutionCleanupBlocked).
+		Where("COALESCE(runtime_profile, '') = ? AND COALESCE(runtime_image, '') = ?", review.RuntimeProfile, review.RuntimeImage).
+		Where("COALESCE(runtime_scope, '') = ? AND COALESCE(runtime_workload, '') = ? AND COALESCE(runtime_instance_id, '') = ?", review.Scope, review.Workload, review.InstanceID).
+		Where("cleanup_attempts = ? AND cleanup_diagnostic = ?", review.Attempts, review.Diagnostic).
+		Where("status IN ?", []string{model.TaskExecutionFailed, model.TaskExecutionCancelled, model.TaskExecutionTimedOut, model.TaskExecutionSucceeded}).
+		Updates(map[string]any{"cleanup_status": model.TaskExecutionCleanupPending, "cleanup_token": "", "cleanup_at": nil, "cleanup_next_at": nil})
+	return result.RowsAffected == 1, result.Error
+}

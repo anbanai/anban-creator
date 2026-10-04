@@ -28,6 +28,7 @@ type RuntimeReconcileService interface {
 	ResolveExecutionCleanupRuntime(context.Context, string, string) (*model.TaskExecution, bool, error)
 	CompleteExecutionCleanup(context.Context, string, string) (bool, error)
 	FailExecutionCleanup(context.Context, string, string, time.Duration) (bool, error)
+	BlockExecutionCleanup(context.Context, string, string, error) (bool, error)
 	ReleaseExecutionCleanup(context.Context, string, string) error
 }
 
@@ -229,7 +230,7 @@ func (r *RuntimeReconciler) fail(ctx context.Context, execution *model.TaskExecu
 }
 
 func (r *RuntimeReconciler) cleanupExecution(ctx context.Context, execution *model.TaskExecution) (err error) {
-	if execution == nil || execution.CleanupStatus == model.TaskExecutionCleanupDone {
+	if execution == nil || (execution.CleanupStatus == model.TaskExecutionCleanupDone || execution.CleanupStatus == model.TaskExecutionCleanupBlocked) {
 		return nil
 	}
 	if isDiagnosticRuntimeStatus(execution.Status) && r.config.DiagnosticRetention > 0 {
@@ -262,7 +263,13 @@ func (r *RuntimeReconciler) cleanupExecution(ctx context.Context, execution *mod
 	}
 	cancel()
 	if deleteErr != nil {
-		failed, failErr := r.service.FailExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, r.config.CleanupRetryBackoff)
+		var failed bool
+		var failErr error
+		if IsPermanentDispatchError(deleteErr) {
+			failed, failErr = r.service.BlockExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, deleteErr)
+		} else {
+			failed, failErr = r.service.FailExecutionCleanup(context.WithoutCancel(ctx), execution.ID, token, r.config.CleanupRetryBackoff)
+		}
 		if failErr != nil {
 			return errors.Join(deleteErr, failErr)
 		}

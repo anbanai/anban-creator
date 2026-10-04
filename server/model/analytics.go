@@ -80,13 +80,13 @@ type AnalyticsMetrics struct {
 }
 
 // Map preserves nil separately from an observed zero and exact decimal JSON numbers.
-func (m AnalyticsMetrics) Map(channel string) map[string]any {
+func (m AnalyticsMetrics) Map(family AnalyticsMetricFamily) map[string]any {
 	out := map[string]any{}
 	v := reflect.ValueOf(m)
 	t := v.Type()
 	for i := 0; i < v.NumField(); i++ {
 		key := t.Field(i).Tag.Get("json")
-		if !AnalyticsMetricForChannel(key, channel) {
+		if !family.Contains(key) {
 			continue
 		}
 		out[key] = nil
@@ -116,24 +116,41 @@ func (m AnalyticsMetrics) Validate() error {
 	}
 	return nil
 }
-func AnalyticsMetricForChannel(key, channel string) bool {
-	if channel == "" {
-		return true
+
+// AnalyticsMetricFamily is a metric vocabulary, not a project, channel or Agent
+// identity. Resolve it explicitly at the service boundary.
+type AnalyticsMetricFamily uint8
+
+const (
+	AnalyticsMetricsWechat AnalyticsMetricFamily = iota + 1
+	AnalyticsMetricsSeednote
+)
+
+func AnalyticsMetricFamilyForPlatform(platform string) (AnalyticsMetricFamily, error) {
+	switch platform {
+	case PlatformWechat:
+		return AnalyticsMetricsWechat, nil
+	case PlatformSeednote:
+		return AnalyticsMetricsSeednote, nil
+	default:
+		return 0, fmt.Errorf("unsupported analytics platform %q", platform)
 	}
-	wechat := map[string]bool{"delivered_users": true, "delivery_completion_rate": true, "read_users": true, "share_users": true, "collection_users": true, "like_users": true, "zaikan_users": true, "comment_count": true, "read_to_follow_users": true, "read_completion_rate": true, "average_read_active_time": true}
-	if channel == ChannelArticle {
-		return wechat[key]
-	}
-	return !wechat[key] || key == "comment_count"
 }
 
-// AnalyticsMetricForPlatform is retained as a source compatibility alias for
-// historical import code. New routing must pass the Task/Content channel.
-func AnalyticsMetricForPlatform(key, platform string) bool {
-	if platform == PlatformWechat || platform == TaskTypeWechatArticle {
-		platform = ChannelArticle
+func (family AnalyticsMetricFamily) Contains(key string) bool {
+	switch family {
+	case AnalyticsMetricsWechat:
+		switch key {
+		case "delivered_users", "delivery_completion_rate", "read_users", "share_users", "collection_users", "like_users", "zaikan_users", "comment_count", "read_to_follow_users", "read_completion_rate", "average_read_active_time":
+			return true
+		}
+	case AnalyticsMetricsSeednote:
+		switch key {
+		case "exposure_count", "view_count", "like_count", "comment_count", "collect_count", "follower_gain_count", "share_count", "barrage_count", "cover_click_rate", "avg_watch_duration":
+			return true
+		}
 	}
-	return AnalyticsMetricForChannel(key, platform)
+	return false
 }
 func AnalyticsMetricColumns() []string {
 	return []string{"delivered_users", "read_users", "share_users", "collection_users", "like_users", "zaikan_users", "comment_count", "read_to_follow_users", "exposure_count", "view_count", "like_count", "collect_count", "follower_gain_count", "share_count", "barrage_count", "read_completion_rate", "average_read_active_time", "cover_click_rate", "avg_watch_duration", "delivery_completion_rate"}

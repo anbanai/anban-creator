@@ -302,10 +302,14 @@ func observationWindowDays(window string) (int, error) {
 	}
 }
 
+// Admission only asks whether an observation carries evidence. MetricBasis
+// describes time semantics and must never select a platform's vocabulary.
 func observationHasMetric(o model.AnalyticsObservation) bool {
-	for _, value := range o.Map(o.MetricBasis) {
-		if value != nil {
-			return true
+	for _, family := range []model.AnalyticsMetricFamily{model.AnalyticsMetricsWechat, model.AnalyticsMetricsSeednote} {
+		for _, value := range o.Map(family) {
+			if value != nil {
+				return true
+			}
 		}
 	}
 	return false

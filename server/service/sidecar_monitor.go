@@ -13,12 +13,13 @@ type Readiness interface {
 }
 
 type SidecarMonitorConfig struct {
-	Name            string
-	HealthCheck     func(context.Context) error
-	InitialBackoff  time.Duration
-	MaxBackoff      time.Duration
-	HealthyInterval time.Duration
-	CheckTimeout    time.Duration
+	Name               string
+	HealthCheck        func(context.Context) error
+	InitialBackoff     time.Duration
+	MaxBackoff         time.Duration
+	HealthyInterval    time.Duration
+	CheckTimeout       time.Duration
+	FailureLogInterval time.Duration
 }
 
 type SidecarSnapshot struct {
@@ -49,6 +50,9 @@ func NewSidecarMonitor(cfg SidecarMonitorConfig, logger *zerolog.Logger) *Sideca
 	}
 	if cfg.CheckTimeout <= 0 {
 		cfg.CheckTimeout = 3 * time.Second
+	}
+	if cfg.FailureLogInterval <= 0 {
+		cfg.FailureLogInterval = 5 * time.Minute
 	}
 	return &SidecarMonitor{
 		cfg:    cfg,
@@ -82,18 +86,43 @@ func (m *SidecarMonitor) Run(ctx context.Context) {
 		return
 	}
 	backoff := m.cfg.InitialBackoff
-	for {
+	var unhealthy bool
+	var lastError string
+	var lastFailureLogAt time.Time
+	var suppressedFailures uint64
+	for ctx.Err() == nil {
 		err := m.check(ctx)
+		if ctx.Err() != nil {
+			return
+		}
 		if err == nil {
+			if unhealthy && m.logger != nil {
+				m.logger.Info().Str("sidecar", m.cfg.Name).Str("previous_error", lastError).Uint64("suppressed_failures", suppressedFailures).Msg("sidecar recovered")
+			}
+			unhealthy = false
+			suppressedFailures = 0
 			backoff = m.cfg.InitialBackoff
 			if !sleepContext(ctx, m.cfg.HealthyInterval) {
 				return
 			}
 			continue
 		}
-		if m.logger != nil {
-			m.logger.Warn().Err(err).Str("sidecar", m.cfg.Name).Dur("retry_after", backoff).Msg("sidecar health check failed")
+		now := time.Now()
+		if !unhealthy || err.Error() != lastError || now.Sub(lastFailureLogAt) >= m.cfg.FailureLogInterval {
+			if m.logger != nil {
+				event := m.logger.Warn().Err(err).Str("sidecar", m.cfg.Name).Dur("retry_after", backoff).Uint64("suppressed_failures", suppressedFailures)
+				if unhealthy && err.Error() != lastError && suppressedFailures > 0 {
+					event.Str("previous_error", lastError)
+				}
+				event.Msg("sidecar health check failed")
+			}
+			lastFailureLogAt = now
+			suppressedFailures = 0
+		} else {
+			suppressedFailures++
 		}
+		unhealthy = true
+		lastError = err.Error()
 		if !sleepContext(ctx, backoff) {
 			return
 		}
@@ -105,10 +134,18 @@ func (m *SidecarMonitor) Run(ctx context.Context) {
 }
 
 func (m *SidecarMonitor) check(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	checkCtx, cancel := context.WithTimeout(ctx, m.cfg.CheckTimeout)
 	defer cancel()
 
 	err := m.cfg.HealthCheck(checkCtx)
+	// A parent cancellation is shutdown, not an observation about the sidecar.
+	// The check's own deadline still counts as a health-check failure.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	now := time.Now()
 
 	m.mu.Lock()

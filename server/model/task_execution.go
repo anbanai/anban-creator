@@ -56,6 +56,7 @@ type TaskExecution struct {
 	FinalizationToken   string         `gorm:"type:char(36);default:'';index" json:"-"`
 	FinalizationAt      *time.Time     `json:"-"`
 	CleanupStatus       string         `gorm:"type:varchar(20);default:'';index" json:"cleanup_status,omitempty"`
+	CleanupDiagnostic   string         `gorm:"type:text" json:"-"`
 	CleanupToken        string         `gorm:"type:char(36);default:'';index" json:"-"`
 	CleanupAt           *time.Time     `json:"-"`
 	CleanupAttempts     int            `gorm:"default:0" json:"-"`
@@ -114,6 +115,7 @@ const (
 const (
 	TaskExecutionCleanupPending = "pending"
 	TaskExecutionCleanupDone    = "done"
+	TaskExecutionCleanupBlocked = "blocked"
 )
 
 const (
@@ -144,4 +146,23 @@ type ExecutionTransition struct {
 	Result             datatypes.JSON
 	FinalizationStatus string
 	CleanupStatus      string
+}
+
+// CleanupReview is the exact frozen evidence an operator must review before
+// reopening cleanup. It never changes workload identity or business outcomes.
+type CleanupReview struct {
+	ExecutionID    string `json:"execution_id"`
+	TaskID         string `json:"task_id"`
+	Target         string `json:"target"`
+	RuntimeProfile string `json:"runtime_profile"`
+	RuntimeImage   string `json:"runtime_image"`
+	Scope          string `json:"scope"`
+	Workload       string `json:"workload"`
+	InstanceID     string `json:"instance_id"`
+	Attempts       int    `json:"attempts"`
+	Diagnostic     string `json:"diagnostic"`
+}
+
+func (e *TaskExecution) CleanupReview() CleanupReview {
+	return CleanupReview{ExecutionID: e.ID, TaskID: e.TaskID, Target: e.Target, RuntimeProfile: e.RuntimeProfile, RuntimeImage: e.RuntimeImage, Scope: e.RuntimeScope, Workload: e.RuntimeWorkload, InstanceID: e.RuntimeInstanceID, Attempts: e.CleanupAttempts, Diagnostic: e.CleanupDiagnostic}
 }

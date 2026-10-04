@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"reflect"
@@ -172,7 +173,7 @@ func TestDockerDispatcherResolvePreparedIsLookupOnlyAndInstanceFenced(t *testing
 	if *resolved != *prepared {
 		t.Fatalf("resolved identity = %#v, want %#v", resolved, prepared)
 	}
-	if !slices.Equal(engine.calls, []string{"image-inspect", "container-inspect"}) {
+	if !slices.Equal(engine.calls, []string{"container-inspect", "image-inspect"}) {
 		t.Fatalf("recovery calls = %v, want lookup only", engine.calls)
 	}
 
@@ -193,7 +194,7 @@ func TestDockerDispatcherResolvePreparedReportsNotFoundWithoutCreating(t *testin
 	if !errors.Is(err, ErrRuntimeWorkloadNotFound) {
 		t.Fatalf("ResolvePrepared error = %v, want ErrRuntimeWorkloadNotFound", err)
 	}
-	if !slices.Equal(engine.calls, []string{"image-inspect", "container-inspect"}) {
+	if !slices.Equal(engine.calls, []string{"container-inspect"}) {
 		t.Fatalf("missing recovery calls = %v, want lookup only", engine.calls)
 	}
 }
@@ -715,7 +716,8 @@ func dockerDispatcherTestTask() *model.Task {
 
 func dockerDispatcherTestImage() imageTypes.InspectResponse {
 	return imageTypes.InspectResponse{
-		ID: dockerDispatcherTestImageID,
+		ID:          dockerDispatcherTestImageID,
+		RepoDigests: []string{dockerDispatcherTestImages()["wechat-article"], "registry.example.com/creator-agent-montage@sha256:parent"},
 		Config: &dockerspec.DockerOCIImageConfig{
 			ImageConfig: ocispec.ImageConfig{
 				Env:          []string{"PATH=/trusted/bin:/usr/bin", "HOME=/home/node"},
@@ -760,6 +762,7 @@ type fakeDockerEngine struct {
 	copyError                   error
 	startError                  error
 	stopError                   error
+	removeError                 error
 	allDispatchCallsHadDeadline bool
 }
 
@@ -767,6 +770,7 @@ func newFakeDockerEngine() *fakeDockerEngine {
 	image := dockerDispatcherTestImage()
 	return &fakeDockerEngine{
 		images: map[string]imageTypes.InspectResponse{
+			dockerDispatcherTestImageID:                                image,
 			dockerDispatcherTestImages()["wechat-article"]:             image,
 			"registry.example.com/creator-agent-montage@sha256:parent": image,
 		},
@@ -934,6 +938,9 @@ func (e *fakeDockerEngine) ContainerStop(_ context.Context, name string, _ conta
 
 func (e *fakeDockerEngine) ContainerRemove(_ context.Context, name string, options containertypes.RemoveOptions) error {
 	e.calls = append(e.calls, "container-remove")
+	if e.removeError != nil {
+		return e.removeError
+	}
 	found := false
 	for key, candidate := range e.containers {
 		if key == name || candidate.ID == name {
@@ -1036,3 +1043,225 @@ var _ interface {
 	ContainerStop(context.Context, string, containertypes.StopOptions) error
 	ContainerRemove(context.Context, string, containertypes.RemoveOptions) error
 } = (*fakeDockerEngine)(nil)
+
+func TestDockerRecoveryUsesFrozenIdentityAfterConfigDrift(t *testing.T) {
+	engine := newFakeDockerEngine()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+	execution, task := dockerDispatcherTestExecution(), dockerDispatcherTestTask()
+	prepared, err := dispatcher.Prepare(context.Background(), execution, task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.runtimeImages[execution.RuntimeProfile] = "registry.example.com/new-image:v2"
+	dispatcher.config.Network = "new-network"
+	dispatcher.serverURL = "https://new-server.example.com"
+	delete(engine.images, execution.RuntimeImage)
+	engine.calls = nil
+	resolved, err := dispatcher.ResolvePrepared(context.Background(), execution, task)
+	if err != nil || resolved == nil || *resolved != *prepared {
+		t.Fatalf("recovery after config drift = %#v, %v", resolved, err)
+	}
+	if slices.Contains(engine.calls, "container-create") || slices.Contains(engine.calls, "container-start") {
+		t.Fatalf("recovery mutated runtime: %v", engine.calls)
+	}
+}
+
+func TestDockerRecoveryMissingWorkloadDoesNotNeedOldImage(t *testing.T) {
+	engine := newFakeDockerEngine()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+	engine.images = nil
+	_, err := dispatcher.ResolvePrepared(context.Background(), dockerDispatcherTestExecution(), dockerDispatcherTestTask())
+	if !errors.Is(err, ErrRuntimeWorkloadNotFound) {
+		t.Fatalf("missing workload with removed image = %v", err)
+	}
+	if !slices.Equal(engine.calls, []string{"container-inspect"}) {
+		t.Fatalf("calls = %v", engine.calls)
+	}
+}
+
+func TestDockerRecoveryRejectsForeignOwnershipAndImage(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*containertypes.InspectResponse)
+	}{
+		{"user", func(c *containertypes.InspectResponse) { c.Config.Labels[dockerUserIDLabel] = "foreign-user" }},
+		{"project", func(c *containertypes.InspectResponse) { c.Config.Labels[dockerProjectIDLabel] = "foreign-project" }},
+		{"task", func(c *containertypes.InspectResponse) { c.Config.Labels[dockerTaskIDLabel] = "foreign-task" }},
+		{"execution", func(c *containertypes.InspectResponse) { c.Config.Labels[dockerExecutionIDLabel] = "foreign-execution" }},
+		{"image", func(c *containertypes.InspectResponse) { c.Image = "sha256:foreign"; c.Config.Image = c.Image }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := newFakeDockerEngine()
+			dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+			execution, task := dockerDispatcherTestExecution(), dockerDispatcherTestTask()
+			prepared, err := dispatcher.Prepare(context.Background(), execution, task)
+			if err != nil {
+				t.Fatal(err)
+			}
+			container := engine.containers[prepared.Workload]
+			tc.mutate(&container)
+			engine.containers[prepared.Workload] = container
+			engine.calls = nil
+			if _, err := dispatcher.ResolvePrepared(context.Background(), execution, task); err == nil || !IsPermanentDispatchError(err) {
+				t.Fatalf("foreign runtime recovery = %v", err)
+			}
+			if slices.Contains(engine.calls, "container-create") || slices.Contains(engine.calls, "container-start") || len(engine.removedContainers) > 0 {
+				t.Fatal("foreign workload mutated")
+			}
+		})
+	}
+}
+
+func TestDockerRecoveryDoesNotTrustRetargetedTag(t *testing.T) {
+	engine := newFakeDockerEngine()
+	dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+	execution, task := dockerDispatcherTestExecution(), dockerDispatcherTestTask()
+	prepared, err := dispatcher.Prepare(context.Background(), execution, task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution.RuntimeImage = "registry.example.com/agent:old-tag"
+	image := dockerDispatcherTestImage()
+	image.ID = "sha256:replacement"
+	image.RepoTags = []string{execution.RuntimeImage}
+	engine.images[execution.RuntimeImage] = image
+	if _, err := dispatcher.ResolvePrepared(context.Background(), execution, task); err == nil || !IsPermanentDispatchError(err) {
+		t.Fatalf("retargeted tag recovery = %v", err)
+	}
+	if engine.containers[prepared.Workload].ID != prepared.InstanceID {
+		t.Fatal("recovery changed historical workload")
+	}
+}
+
+func TestDockerCleanupOfPersistedInstanceSurvivesMutableTagRollover(t *testing.T) {
+	for _, persisted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("persisted=%t", persisted), func(t *testing.T) {
+			ctx := context.Background()
+			engine := newFakeDockerEngine()
+			dispatcher := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t))
+			execution, task := dockerDispatcherTestExecution(), dockerDispatcherTestTask()
+			execution.RuntimeImage = "registry.example.com/creator-agent:release"
+			dispatcher.runtimeImages[execution.RuntimeProfile] = execution.RuntimeImage
+			originalImage := dockerDispatcherTestImage()
+			originalImage.RepoTags = []string{execution.RuntimeImage}
+			engine.images[execution.RuntimeImage] = originalImage
+			engine.images[originalImage.ID] = originalImage
+			prepared, err := dispatcher.Prepare(ctx, execution, task)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted {
+				bindDockerRuntimeIdentity(execution, prepared)
+			}
+
+			// Tag rollover detaches the tag from the old image while the original
+			// immutable container and its persisted instance identity remain unchanged.
+			originalImage.RepoTags = nil
+			engine.images[originalImage.ID] = originalImage
+			replacementImage := dockerDispatcherTestImage()
+			replacementImage.ID = "sha256:replacement"
+			replacementImage.RepoTags = []string{execution.RuntimeImage}
+			engine.images[execution.RuntimeImage] = replacementImage
+			dispatcher.runtimeImages[execution.RuntimeProfile] = "registry.example.com/creator-agent:v2"
+			engine.calls = nil
+
+			resolved, err := dispatcher.ResolvePrepared(ctx, execution, task)
+			if !persisted {
+				if err == nil || !IsPermanentDispatchError(err) {
+					t.Fatalf("unbound recovery without historical tag evidence = %#v, %v", resolved, err)
+				}
+				if len(engine.removedContainers) != 0 {
+					t.Fatal("unbound workload deleted")
+				}
+				return
+			}
+			if err != nil || resolved == nil || *resolved != *prepared {
+				t.Fatalf("persisted recovery after tag rollover = %#v, %v", resolved, err)
+			}
+			if err := dispatcher.Delete(ctx, execution); err != nil {
+				t.Fatalf("delete persisted instance after tag rollover: %v", err)
+			}
+			if len(engine.removedContainers) != 1 || engine.removedContainers[0] != prepared.InstanceID {
+				t.Fatalf("removed containers = %v", engine.removedContainers)
+			}
+			if slices.Contains(engine.calls, "image-inspect") || slices.Contains(engine.calls, "container-create") || slices.Contains(engine.calls, "container-start") {
+				t.Fatalf("persisted cleanup calls = %v", engine.calls)
+			}
+		})
+	}
+}
+
+func TestDockerPersistedCleanupRetainsIdentityGuards(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*containertypes.InspectResponse)
+	}{
+		{"instance", func(c *containertypes.InspectResponse) { c.ID = "replacement-instance" }},
+		{"name", func(c *containertypes.InspectResponse) { c.Name = "/foreign-workload" }},
+		{"task", func(c *containertypes.InspectResponse) { c.Config.Labels[dockerTaskIDLabel] = "foreign-task" }},
+		{"execution", func(c *containertypes.InspectResponse) { c.Config.Labels[dockerExecutionIDLabel] = "foreign-execution" }},
+		{"missing-user", func(c *containertypes.InspectResponse) { delete(c.Config.Labels, dockerUserIDLabel) }},
+		{"missing-project", func(c *containertypes.InspectResponse) { delete(c.Config.Labels, dockerProjectIDLabel) }},
+		{"image-id", func(c *containertypes.InspectResponse) { c.Config.Image = "sha256:foreign" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := newFakeDockerEngine()
+			execution := dockerDispatcherTestExecution()
+			execution.RuntimeScope = "docker"
+			execution.RuntimeWorkload = dockerRuntimeContainerName(execution.ID)
+			execution.RuntimeInstanceID = engine.containerID
+			container := dockerIdentityInspect(execution, engine.containerID, &containertypes.State{Status: containertypes.StateRunning, Running: true})
+			tc.mutate(&container)
+			engine.containers[execution.RuntimeWorkload] = container
+			err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Delete(context.Background(), execution)
+			if err == nil || !IsPermanentDispatchError(err) {
+				t.Fatalf("Delete = %v", err)
+			}
+			if len(engine.stoppedContainers) != 0 || len(engine.removedContainers) != 0 {
+				t.Fatal("mismatched container mutated")
+			}
+		})
+	}
+}
+
+func TestDockerCleanupClassifiesProviderErrors(t *testing.T) {
+	for _, stage := range []string{"inspect", "stop", "remove"} {
+		for _, tc := range []struct {
+			name      string
+			err       error
+			permanent bool
+			missing   bool
+		}{
+			{"forbidden", errdefs.Forbidden(errors.New("denied")), true, false},
+			{"unauthorized", errdefs.Unauthorized(errors.New("expired credentials")), true, false},
+			{"invalid", errdefs.InvalidParameter(errors.New("invalid provider input")), true, false},
+			{"transient", errors.New("daemon unavailable"), false, false},
+			{"missing", errdefs.NotFound(errors.New("container disappeared")), false, true},
+		} {
+			t.Run(stage+"/"+tc.name, func(t *testing.T) {
+				engine := newFakeDockerEngine()
+				execution := dockerDispatcherTestExecution()
+				bindDockerRuntimeIdentity(execution, &model.RuntimeIdentity{Scope: "docker", Workload: dockerRuntimeContainerName(execution.ID), InstanceID: engine.containerID})
+				engine.containers[execution.RuntimeWorkload] = dockerIdentityInspect(execution, engine.containerID, &containertypes.State{Status: containertypes.StateRunning, Running: true})
+				switch stage {
+				case "inspect":
+					engine.containerInspectError = tc.err
+				case "stop":
+					engine.stopError = tc.err
+				case "remove":
+					engine.removeError = tc.err
+				}
+				err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Delete(context.Background(), execution)
+				if tc.missing {
+					if err != nil {
+						t.Fatalf("missing cleanup = %v", err)
+					}
+					return
+				}
+				if !errors.Is(err, tc.err) || IsPermanentDispatchError(err) != tc.permanent {
+					t.Fatalf("cleanup error = %v, permanent=%t, want permanent=%t", err, IsPermanentDispatchError(err), tc.permanent)
+				}
+			})
+		}
+	}
+}

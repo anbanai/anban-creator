@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
@@ -36,4 +37,20 @@ type RuntimeExecutionState struct {
 	Message     string
 	ExitCode    *int32
 	CompletedAt *time.Time
+}
+
+// CleanupDiagnostic stores only allowlisted failure categories. Provider errors
+// may contain credentials, signed URLs, or environment values and stay private.
+func CleanupDiagnostic(err error) string {
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "image"):
+		return "runtime_image_identity_conflict"
+	case strings.Contains(text, "ownership") || strings.Contains(text, "label"):
+		return "runtime_ownership_conflict"
+	case strings.Contains(text, "identity") || strings.Contains(text, "uid mismatch"):
+		return "runtime_identity_conflict"
+	default:
+		return "permanent_runtime_cleanup_failure"
+	}
 }
