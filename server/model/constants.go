@@ -93,7 +93,7 @@ const (
 
 func IsChannel(value string) bool {
 	switch value {
-	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelFeedback, ChannelProfileAnalysis, ChannelWhiteboard:
+	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedback, ChannelProfileAnalysis, ChannelWhiteboard:
 		return true
 	default:
 		return false

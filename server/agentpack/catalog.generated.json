@@ -227,8 +227,10 @@
     },
     {
       "id": "hypit",
+      "channel": "hypit",
+      "plan_task_kind": "hypit",
       "version": "2.0.4",
-      "kind": "plugin",
+      "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
       "agent": {
@@ -238,14 +240,21 @@
         ],
         "max_turns": 180
       },
-      "bindings": {},
+      "bindings": {
+        "task_kinds": [
+          "content_generation",
+          "hypit"
+        ]
+      },
       "runtime": {
         "profile": "hypit",
         "adapter": "standard",
         "max_turns": 180
       },
       "surfaces": [
-        "plugin"
+        "plugin",
+        "task",
+        "plan"
       ],
       "features": [
         "video-replication",
@@ -253,6 +262,7 @@
         "editable-video"
       ],
       "billing_operations": {
+        "content_generation": "task.hypit",
         "hypit": "task.hypit"
       },
       "artifacts": [
@@ -391,7 +401,7 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "3145cc414f92bb2a65949a4a81e736bc465d7e6979f9012edeeb8ed9993768b9"
+      "digest": "13534a466ef71f5b824f66e24dfa0989b964d745a8ce323084b7c1408c6c7e09"
     },
     {
       "id": "moments",
@@ -486,8 +496,10 @@
     },
     {
       "id": "montage",
+      "channel": "montage",
+      "plan_task_kind": "content_generation",
       "version": "2.0.5",
-      "kind": "plugin",
+      "kind": "managed",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
       "agent": {
@@ -498,7 +510,12 @@
         ],
         "max_turns": 180
       },
-      "bindings": {},
+      "bindings": {
+        "task_kinds": [
+          "content_generation",
+          "montage"
+        ]
+      },
       "runtime": {
         "profile": "montage",
         "adapter": "openmontage",
@@ -506,13 +523,15 @@
       },
       "surfaces": [
         "plugin",
-        "task"
+        "task",
+        "plan"
       ],
       "features": [
         "video-generation",
         "source-assets"
       ],
       "billing_operations": {
+        "content_generation": "task.montage",
         "montage": "task.montage"
       },
       "artifacts": [
@@ -592,7 +611,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "75bab610d27debbffa41dbff0129857b785c1481c4b329b23b1e53d498a4f186"
+      "digest": "cd6d6ac7fba9893576fc4d93054b5a91b20eff0e294da8ad20148d83a68c291e"
     },
     {
       "id": "profile-analysis",
@@ -1379,6 +1398,7 @@
     {
       "id": "whiteboard-animation",
       "channel": "whiteboard-animation",
+      "plan_task_kind": "content_generation",
       "version": "2.0.3",
       "kind": "managed",
       "display_name": "白板动画",
@@ -1392,7 +1412,8 @@
       },
       "bindings": {
         "task_kinds": [
-          "whiteboard-animation"
+          "whiteboard-animation",
+          "content_generation"
         ]
       },
       "runtime": {
@@ -1402,7 +1423,8 @@
       },
       "surfaces": [
         "plugin",
-        "task"
+        "task",
+        "plan"
       ],
       "features": [
         "subtitle-to-video",
@@ -1410,6 +1432,7 @@
         "source-assets"
       ],
       "billing_operations": {
+        "content_generation": "task.whiteboard-animation",
         "whiteboard-animation": "task.whiteboard-animation"
       },
       "artifacts": [
@@ -1515,7 +1538,7 @@
       "ui": {
         "renderer": "custom:whiteboard-animation"
       },
-      "digest": "9296892b37272c6589fc9260082ac07dfe2f4eec63fedeed7396bab4af6bd860"
+      "digest": "7f086c0a65240d9d85899be6f4b0dc39767aba95d50c6f03bf4c98ed52735550"
     }
   ]
 }

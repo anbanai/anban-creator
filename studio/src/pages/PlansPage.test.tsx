@@ -96,7 +96,7 @@ describe('PlansPage multi-output plans', () => {
     render(<PlansPage />)
     const dialog = await openCreate()
     expect(await within(dialog).findByRole('button', { name: '新增输出' })).toBeInTheDocument()
-    for (const name of ['插件输出', '缺少渠道', '错误任务', '仅任务', '视频生成']) expect(within(dialog).queryByRole('button', { name })).not.toBeInTheDocument()
+    for (const name of ['插件输出', '缺少渠道', '错误任务', '仅任务', '视频复刻']) expect(within(dialog).queryByRole('button', { name })).not.toBeInTheDocument()
   })
   it('preserves multiple outputs across project platforms and submits only shared fields', async () => {
     render(<PlansPage />)

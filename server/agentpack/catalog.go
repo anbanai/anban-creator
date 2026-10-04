@@ -29,6 +29,8 @@ var supportedChannels = map[string]struct{}{
 	"profile-analysis":     {},
 	"feedback":             {},
 	"whiteboard-animation": {},
+	"hypit":                {},
+	"montage":              {},
 }
 
 func isSupportedChannel(channel string) bool {
