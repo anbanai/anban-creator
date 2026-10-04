@@ -1553,12 +1553,12 @@ describe('TaskDetailPage', () => {
     const { unmount } = render(<TaskDetailPage />)
 
     const dataLink = await screen.findByRole('link', { name: '查看内容分析' })
-    expect(dataLink).toHaveAttribute('href', '/content-analytics?account=ch-1&content=task%3Atask-1')
+    expect(dataLink).toHaveAttribute('href', '/content-analytics?account=ch-1&content=task%3Atask-1&platform=wechat')
 
     unmount()
     mockTask(taskWith({ id: 'task-1', type: 'seednote', status: 'completed' }))
     render(<TaskDetailPage />)
-    expect(await screen.findByRole('link', { name: '查看内容分析' })).toHaveAttribute('href', '/content-analytics?account=ch-1&content=task%3Atask-1')
+    expect(await screen.findByRole('link', { name: '查看内容分析' })).toHaveAttribute('href', '/content-analytics?account=ch-1&content=task%3Atask-1&platform=seednote')
   })
 
   it('omits the 内容分析 link for task types without a content analytics board', async () => {

@@ -477,20 +477,22 @@ describe('planSchema', () => {
 describe('projectSchema', () => {
   it('accepts article platform with wechat_app_id', () => {
     expect(projectSchema.safeParse({
+      name: '测试项目',
       platform: 'wechat',
       wechat_app_id: 'wx123',
     }).success).toBe(true)
   })
 
-  it('rejects article platform without wechat_app_id', () => {
+  it('accepts shared project information without publishing credentials', () => {
     const result = projectSchema.safeParse({
-      platform: 'wechat',
+      name: '通用项目',
     })
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
   })
 
   it('accepts seednote platform without wechat_app_id', () => {
     expect(projectSchema.safeParse({
+      name: '测试项目',
       platform: 'seednote',
     }).success).toBe(true)
   })
@@ -527,10 +529,11 @@ describe('projectSchema', () => {
 
   it('accepts all optional fields', () => {
     const result = projectSchema.safeParse({
+      name: '测试项目',
       platform: 'wechat',
       wechat_app_id: 'wx123',
       wechat_secret: 'secret',
-      name: '项目名称',
+
       keywords: '测试',
       instructions: '定位',
       style: 'casual-science',

@@ -5,8 +5,6 @@ import { api } from '@/lib/api'
 import { render } from '@/test/test-utils'
 import { mockPlatformConfigs } from '@/test/mocks/handlers'
 import type { Project } from '@/types'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 
 const { errorMock, successMock, authState } = vi.hoisted(() => ({
   errorMock: vi.fn(),
@@ -158,256 +156,34 @@ describe('ProjectsPage', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps Montage visible while hiding internal project platforms from ordinary users', async () => {
-    authState.isAdmin = false
-    vi.mocked(api.projects.list).mockResolvedValue([
-      projectWithReference,
-      { ...projectWithReference, id: 'moments-1', name: '内部朋友圈', platform: 'moments' },
-      { ...projectWithReference, id: 'ecommerce-1', name: '内部电商', platform: 'ecommerce' },
-      { ...projectWithReference, id: 'hypit-1', name: '内部复刻', platform: 'hypit' },
-      { ...projectWithReference, id: 'montage-1', name: '内部剪辑', platform: 'montage' },
-    ])
-
+  it('requires a nonblank project name before creating a shared project', async () => {
+    window.history.pushState({}, '', '/projects?create=true')
     render(<ProjectsPage />)
-
-    expect(await screen.findByText('测试项目')).toBeInTheDocument()
-    expect(screen.queryByText('内部朋友圈')).not.toBeInTheDocument()
-    expect(screen.queryByText('内部电商')).not.toBeInTheDocument()
-    expect(screen.queryByText('内部复刻')).not.toBeInTheDocument()
-    expect(screen.getByText('内部剪辑')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    fireEvent.click(within(dialog).getAllByRole('combobox')[0])
-    expect(await screen.findByRole('option', { name: '公众号' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '种草笔记' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '朋友圈' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '电商出图' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: '视频复刻' })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '视频生成' })).toBeInTheDocument()
+    await screen.findByRole('dialog', { name: '新建项目' })
+    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '   ' } })
+    if (!screen.getByPlaceholderText<HTMLInputElement>('例如 我的科技博客').value) fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '测试品牌' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+    expect(await screen.findByText('请输入项目名称')).toBeInTheDocument()
+    expect(api.projects.create).not.toHaveBeenCalled()
   })
 
-  it('does not open internal replication defaults from an ordinary-user deep link', async () => {
-    authState.isAdmin = false
-    window.history.pushState({}, '', '/projects?create=true&type=hypit&intent=new')
+  it.each(['wechat-article', 'seednote', 'moments', 'montage', 'hypit'])('creates a shared project from %s without binding it to a platform', async (type) => {
+    vi.mocked(api.projects.create).mockResolvedValueOnce({ project: { ...projectWithReference, id: 'shared-project' } })
+    window.history.pushState({}, '', `/projects?create=true&type=${type}&intent=new`)
     render(<ProjectsPage />)
     const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    expect(within(dialog).getAllByRole('combobox')[0]).not.toHaveTextContent('视频复刻')
-    expect(within(dialog).queryByRole('region', { name: '视频复刻默认设置' })).not.toBeInTheDocument()
-  })
-
-  it('opens Montage project creation from a deep link for ordinary users', async () => {
-    authState.isAdmin = false
-    window.history.pushState({}, '', '/projects?create=true&type=montage&intent=new')
-
-    render(<ProjectsPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    expect(within(dialog).getAllByRole('combobox')[0]).toHaveTextContent('视频生成')
-    expect(within(dialog).getByText('视频默认设置')).toBeInTheDocument()
-  })
-
-  it('does not ask seednote projects for a publishing author', async () => {
-    window.history.pushState({}, '', '/projects?create=true&type=seednote&intent=new')
-
-    render(<ProjectsPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    expect(within(dialog).queryByLabelText('作者名')).not.toBeInTheDocument()
-    expect(within(dialog).queryByText('作者名')).not.toBeInTheDocument()
-  })
-
-  it('explains the project fields whose effect is invisible in the form', async () => {
-    window.history.pushState({}, '', '/projects?create=true&type=wechat-article&intent=new')
-
-    render(<ProjectsPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    expect(within(dialog).getByText('写清受众、领域和语气；定位会作为长期约束注入每一次创作，任务里可再补充单次要求。')).toBeInTheDocument()
-    expect(within(dialog).getByText('在公众号后台「设置与开发 → 基本配置」获取，用于向微信创建草稿和正式发布。')).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '用于账号配置、项目默认值和创作画像上下文，创建后不可修改。' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '只用于项目列表和发布信息展示，不影响生成内容。留空则使用平台默认图标。' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: '每次创作都会参考这些要求，保持账号定位与表达风格一致。' })).toBeInTheDocument()
-  })
-
-  it('keeps account platform and saves credentials through channel configuration only', async () => {
-    vi.mocked(api.projects.update).mockResolvedValue(projectWithReference)
-    render(<ProjectsPage />)
-    await clickProjectAction('测试项目', '编辑项目')
-    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
-    await waitFor(() => expect(within(dialog).getByLabelText('微信 AppID')).toHaveValue('wx-test'))
-    expect(api.projects.getChannelConfig).toHaveBeenCalledWith('ch-1', 'wechat-article')
-    expect(dialog).not.toHaveTextContent(/Agent|执行配置|Agent 参数/)
-    fireEvent.change(within(dialog).getByLabelText('微信 AppSecret'), { target: { value: 'new-secret' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.projects.upsertChannelConfig).toHaveBeenCalledWith('ch-1', 'wechat-article', { wechat_app_id: 'wx-test', wechat_secret: 'new-secret' }))
-    await waitFor(() => expect(api.projects.upsertChannelConfig).toHaveBeenCalledWith('ch-1', 'wechat-picture', { wechat_app_id: 'wx-test', wechat_secret: 'new-secret' }))
-    const payload = vi.mocked(api.projects.update).mock.calls[0][1]
-    expect(payload.platform).toBe('wechat')
-    expect(payload).not.toHaveProperty('wechat_secret')
-    expect(payload).not.toHaveProperty('wechat_app_id')
-    expect(payload).not.toHaveProperty('config')
-    expect(api.agentPacks.list).not.toHaveBeenCalled()
-  })
-
-  it('keeps an edited AppID when account configuration finishes loading', async () => {
-    let resolveConfig!: (value: Awaited<ReturnType<typeof api.projects.getChannelConfig>>) => void
-    vi.mocked(api.projects.getChannelConfig).mockReturnValueOnce(new Promise((resolve) => { resolveConfig = resolve }))
-    vi.mocked(api.projects.update).mockResolvedValue(projectWithReference)
-    render(<ProjectsPage />)
-    await clickProjectAction('测试项目', '编辑项目')
-    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
-    fireEvent.change(within(dialog).getByLabelText('微信 AppID'), { target: { value: 'wx-replacement' } })
-    fireEvent.change(within(dialog).getByLabelText('微信 AppSecret'), { target: { value: 'replacement-secret' } })
-    await act(async () => resolveConfig({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', config: { wechat_app_id: 'wx-old' } }))
-    expect(within(dialog).getByLabelText('微信 AppID')).toHaveValue('wx-replacement')
-    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.projects.upsertChannelConfig).toHaveBeenCalledWith('ch-1', 'wechat-article', { wechat_app_id: 'wx-replacement', wechat_secret: 'replacement-secret' }))
-  })
-
-  it.each(['wechat-article', 'wechat-picture'])('retries credentials after %s fails without creating a duplicate', async (failedChannel) => {
-    const createdProject = { ...projectWithReference, id: 'new-project' }
-    vi.mocked(api.projects.create).mockResolvedValue({ project: createdProject })
-    vi.mocked(api.projects.update).mockResolvedValue(createdProject)
-    let failed = false
-    vi.mocked(api.projects.upsertChannelConfig).mockImplementation(async (id, channel, config) => {
-      if (!failed && channel === failedChannel) { failed = true; throw new Error('账号凭据保存失败') }
-      return { id: 'saved-config', project_id: id, channel, config }
-    })
-    window.history.pushState({}, '', '/projects?create=true&type=wechat-article')
-    render(<ProjectsPage />)
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    fireEvent.change(within(dialog).getByLabelText('微信 AppID'), { target: { value: 'wx-new' } })
-    fireEvent.change(within(dialog).getByLabelText('微信 AppSecret'), { target: { value: 'new-secret' } })
+    expect(within(dialog).queryByText('平台', { exact: true })).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('头像', { exact: true })).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('微信 AppID')).not.toBeInTheDocument()
+    fireEvent.change(within(dialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '共享品牌项目' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(errorMock).toHaveBeenCalled())
-    const editDialog = await screen.findByRole('dialog', { name: '编辑项目' })
-    expect(within(editDialog).getByLabelText('微信 AppID')).toHaveValue('wx-new')
-    expect(within(editDialog).getByLabelText('微信 AppSecret')).toHaveValue('new-secret')
-    fireEvent.click(within(editDialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目' })).not.toBeInTheDocument())
-    expect(api.projects.upsertChannelConfig).toHaveBeenCalledTimes(failedChannel === 'wechat-article' ? 3 : 4)
-    expect(api.projects.create).toHaveBeenCalledTimes(1)
-    expect(api.projects.update).toHaveBeenCalledWith('new-project', expect.objectContaining({ platform: 'wechat' }))
-    expect(api.projects.upsertChannelConfig).toHaveBeenLastCalledWith('new-project', 'wechat-picture', { wechat_app_id: 'wx-new', wechat_secret: 'new-secret' })
-  })
-
-  it.each(['create failure', 'create success', 'update success'])('ignores a stale %s after another editor opens', async (outcome) => {
-    const secondProject = { ...projectWithReference, id: 'second-project', name: '第二项目' }
-    vi.mocked(api.projects.list).mockResolvedValue([projectWithReference, secondProject])
-    vi.mocked(api.projects.create).mockResolvedValue({ project: { ...projectWithReference, id: 'created-project' } })
-    vi.mocked(api.projects.update).mockResolvedValue(secondProject)
-    let resolveWrite!: (value: Awaited<ReturnType<typeof api.projects.upsertChannelConfig>>) => void
-    let rejectWrite!: (reason: Error) => void
-    vi.mocked(api.projects.upsertChannelConfig).mockImplementationOnce(() => new Promise((resolve, reject) => { resolveWrite = resolve; rejectWrite = reject }))
-    render(<ProjectsPage />)
-    if (outcome.startsWith('create')) fireEvent.click(await screen.findByRole('button', { name: '新建项目' }))
-    else await clickProjectAction('测试项目', '编辑项目')
-    const originalDialog = await screen.findByRole('dialog', { name: outcome.startsWith('create') ? '新建项目' : '编辑项目' })
-    fireEvent.change(within(originalDialog).getByLabelText('微信 AppID'), { target: { value: 'wx-original' } })
-    fireEvent.click(within(originalDialog).getByRole('button', { name: outcome.startsWith('create') ? '创建' : '更新' }))
-    await waitFor(() => expect(api.projects.upsertChannelConfig).toHaveBeenCalledTimes(1))
-    fireEvent.click(within(originalDialog).getByRole('button', { name: '取消' }))
-    const confirmation = await screen.findByRole('alertdialog')
-    fireEvent.click(within(confirmation).getByRole('button', { name: '放弃' }))
-    await clickProjectAction('第二项目', '编辑项目')
-    const currentDialog = await screen.findByRole('dialog', { name: '编辑项目' })
-    fireEvent.change(within(currentDialog).getByLabelText('微信 AppID'), { target: { value: 'wx-second' } })
-    await act(async () => {
-      if (outcome === 'create failure') rejectWrite(new Error('late credential failure'))
-      else resolveWrite({ id: 'config', project_id: 'old-project', channel: 'wechat-article', config: {} })
-    })
-    expect(currentDialog).toBeInTheDocument()
-    expect(within(currentDialog).getByLabelText('微信 AppID')).toHaveValue('wx-second')
-    fireEvent.click(within(currentDialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.projects.update).toHaveBeenLastCalledWith('second-project', expect.objectContaining({ platform: 'wechat' })))
-  })
-
-  it('returns to task creation with the created project after a credential retry', async () => {
-    const createdProject = { ...projectWithReference, id: 'created-project' }
-    vi.mocked(api.projects.create).mockResolvedValue({ project: createdProject })
-    vi.mocked(api.projects.update).mockResolvedValue(createdProject)
-    vi.mocked(api.projects.upsertChannelConfig).mockRejectedValueOnce(new Error('retry credentials'))
-    window.history.pushState({}, '', '/projects?create=true&type=wechat-article&return_to=/tasks&intent=new')
-    render(<ProjectsPage />)
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    fireEvent.change(within(dialog).getByLabelText('微信 AppID'), { target: { value: 'wx-created' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
-    const editDialog = await screen.findByRole('dialog', { name: '编辑项目' })
-    fireEvent.click(within(editDialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(window.location.pathname).toBe('/tasks'))
-    const params = new URLSearchParams(window.location.search)
-    expect(params.get('project_id')).toBe('created-project')
-    expect(params.get('type')).toBe('wechat-article')
-    expect(params.get('create')).toBe('true')
-    expect(api.projects.create).toHaveBeenCalledTimes(1)
-  })
-
-  it('surfaces a channel credential save failure and keeps the editor open', async () => {
-    vi.mocked(api.projects.update).mockResolvedValue(projectWithReference)
-    vi.mocked(api.projects.upsertChannelConfig).mockRejectedValueOnce({ response: { data: { msg: '账号凭据保存失败' } } })
-    render(<ProjectsPage />)
-    await clickProjectAction('测试项目', '编辑项目')
-    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
-    await waitFor(() => expect(within(dialog).getByLabelText('微信 AppID')).toHaveValue('wx-test'))
-    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('账号凭据保存失败'))
-    expect(dialog).toBeInTheDocument()
-    expect(successMock).not.toHaveBeenCalled()
-  })
-
-  it('explains the ecommerce project defaults', async () => {
-    window.history.pushState({}, '', '/projects?create=true&type=ecommerce&intent=new')
-
-    render(<ProjectsPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    expect(within(dialog).getByText('决定图片尺寸与该平台的合规、违禁词规范，新建任务时预填。')).toBeInTheDocument()
-    expect(within(dialog).getByText('决定出图模型与计费单价，单个任务仍可临时切换。')).toBeInTheDocument()
-    expect(within(dialog).getByText('作为长期约束注入该项目的每次电商出图，避免每次重复交代品牌要求。')).toBeInTheDocument()
-  })
-
-  it('constrains project ratios with the selected business platform', () => {
-    const source = readFileSync(resolve(import.meta.dirname, 'ProjectsPage.tsx'), 'utf8')
-    expect(source).toContain('ratios={currentPlatformConfig?.supported_image_ratios ?? []}')
-    expect(source).not.toContain('generation_features')
-    expect(source).not.toContain('generationFeatures')
-    expect(source).not.toContain('sizePresets')
-    expect(source).not.toContain('imageRatioUnsupported')
-    expect(source).toContain('该图像能力已停用，请重新选择')
-    expect(source).toContain('submittedImageCapability.price_available !== true')
-    expect(source).toContain('submittedImageCapability.enabled !== true')
-  })
-
-	it('keeps the project composer usable when the optional Agent Pack catalog is partial', async () => {
-		vi.mocked(api.agentPacks.list).mockResolvedValueOnce({} as Awaited<ReturnType<typeof api.agentPacks.list>>)
-		window.history.pushState({}, '', '/projects?create=true&type=wechat-article&intent=new')
-
-		render(<ProjectsPage />)
-
-		expect(await screen.findByRole('dialog', { name: '新建项目' })).toBeInTheDocument()
-	})
-
-  it('shows the catalog default capability for a new ecommerce project', async () => {
-    vi.mocked(api.imageCapabilities.list).mockResolvedValueOnce({
-      tier: 'pro',
-      default_capability: 'catalog-default',
-      items: [
-        { key: 'first-sorted', display_name: '首个排序能力', min_tier: 'free', sort_order: 1, enabled: true, price_available: true },
-        { key: 'catalog-default', display_name: '目录默认能力', min_tier: 'free', sort_order: 2, enabled: true, price_available: true },
-      ],
-    })
-    window.history.pushState({}, '', '/projects?create=true&type=ecommerce&intent=new')
-
-    render(<ProjectsPage />)
-
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
-    await waitFor(() => {
-      const selector = Array.from(dialog.querySelectorAll('[role="combobox"]')).find((element) =>
-        element.textContent?.includes('目录默认能力'),
-      )
-      expect(selector).toBeDefined()
-    })
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalledTimes(1))
+    const payload = vi.mocked(api.projects.create).mock.calls[0][0]
+    expect(payload.name).toBe('共享品牌项目')
+    for (const key of ['platform', 'avatar_url', 'agent_config', 'wechat_app_id', 'wechat_secret', 'hypit_defaults', 'montage_defaults', 'ecommerce_defaults']) {
+      expect(payload).not.toHaveProperty(key)
+    }
+    expect(api.projects.upsertChannelConfig).not.toHaveBeenCalled()
   })
 
   it('creates a project with a reference session and no legacy URL field', async () => {
@@ -433,6 +209,7 @@ describe('ProjectsPage', () => {
       target: { files: [new File(['reference'], 'reference.png', { type: 'image/png' })] },
     })
     await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    if (!screen.getByPlaceholderText<HTMLInputElement>('例如 我的科技博客').value) fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '测试品牌' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() => expect(api.projects.create).toHaveBeenCalled())
@@ -484,6 +261,7 @@ describe('ProjectsPage', () => {
     })
     const preview = await screen.findByRole('img', { name: '参考图' })
     await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    if (!screen.getByPlaceholderText<HTMLInputElement>('例如 我的科技博客').value) fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '测试品牌' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() => expect(errorMock).toHaveBeenCalledWith('上传会话已过期，请重新上传参考图'))
@@ -607,190 +385,70 @@ describe('ProjectsPage', () => {
     expect(style).toHaveValue('最新自动视觉风格')
   })
 
-  it('opens moments project creation without social-card preset jargon', async () => {
-    window.history.pushState({}, '', '/projects?return_to=/tasks&create=true&type=moments&intent=new')
+  it('edits legacy projects without resubmitting platform or account settings', async () => {
+    vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
-
-    expect(await screen.findByText('朋友圈')).toBeInTheDocument()
-    const styleField = await screen.findByPlaceholderText(/可手动描述真实生活感/)
-
-    expect(screen.queryByRole('button', { name: /归藏社交卡/ })).not.toBeInTheDocument()
-    expect(screen.queryByText(/Guizang|归藏|社交卡片/)).not.toBeInTheDocument()
-    expect((styleField as HTMLTextAreaElement).value).toBe('')
+    await clickProjectAction('测试项目', '编辑项目')
+    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    expect(within(dialog).queryByText('平台', { exact: true })).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('头像', { exact: true })).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('微信 AppID')).not.toBeInTheDocument()
+    fireEvent.change(within(dialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '新的品牌名称' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.projects.update).toHaveBeenCalledWith('ch-1', { name: '新的品牌名称', instructions: '测试定位', keywords: '测试' }))
+    expect(api.projects.upsertChannelConfig).not.toHaveBeenCalled()
   })
 
-  it('creates a video replication project without a fixed default duration', async () => {
-    window.history.pushState({}, '', '/projects?create=true&type=hypit&intent=new')
-    vi.mocked(api.projects.create).mockResolvedValue({ project: { ...projectWithReference, platform: 'hypit' } })
+  it.each(['create failure', 'create success', 'update success'])('ignores a stale %s after another editor opens', async (outcome) => {
+    const secondProject = { ...projectWithReference, id: 'second-project', name: '第二项目' }
+    vi.mocked(api.projects.list).mockResolvedValue([projectWithReference, secondProject])
+    vi.mocked(api.projects.update).mockResolvedValue(secondProject)
+    let resolveWrite!: () => void
+    let rejectWrite!: (reason: Error) => void
+    if (outcome.startsWith('create')) {
+      vi.mocked(api.projects.create).mockImplementationOnce(() => new Promise((resolve, reject) => {
+        resolveWrite = () => resolve({ project: { ...projectWithReference, id: 'created-project' } })
+        rejectWrite = reject
+      }))
+    } else {
+      vi.mocked(api.projects.update).mockImplementationOnce(() => new Promise((resolve) => {
+        resolveWrite = () => resolve(projectWithReference)
+      }))
+    }
     render(<ProjectsPage />)
-    await screen.findByRole('region', { name: '视频复刻默认设置' })
-    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '跟随参考视频的项目' } })
-    expect(screen.getByLabelText('默认时长（可选）')).toHaveValue(null)
-    await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
+    if (outcome.startsWith('create')) fireEvent.click(await screen.findByRole('button', { name: '新建项目' }))
+    else await clickProjectAction('测试项目', '编辑项目')
+    const originalDialog = await screen.findByRole('dialog', { name: outcome.startsWith('create') ? '新建项目' : '编辑项目' })
+    fireEvent.change(within(originalDialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '第一个编辑会话' } })
+    fireEvent.click(within(originalDialog).getByRole('button', { name: outcome.startsWith('create') ? '创建' : '更新' }))
+    await waitFor(() => expect(outcome.startsWith('create') ? api.projects.create : api.projects.update).toHaveBeenCalledTimes(1))
+    fireEvent.click(within(originalDialog).getByRole('button', { name: '取消' }))
+    const confirmation = await screen.findByRole('alertdialog')
+    fireEvent.click(within(confirmation).getByRole('button', { name: '放弃' }))
+    await clickProjectAction('第二项目', '编辑项目')
+    const currentDialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    fireEvent.change(within(currentDialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '第二个编辑会话' } })
+    await act(async () => {
+      if (outcome === 'create failure') rejectWrite(new Error('late failure'))
+      else resolveWrite()
+    })
+    expect(currentDialog).toBeInTheDocument()
+    expect(within(currentDialog).getByPlaceholderText('例如 我的科技博客')).toHaveValue('第二个编辑会话')
+    fireEvent.click(within(currentDialog).getByRole('button', { name: '更新' }))
+    await waitFor(() => expect(api.projects.update).toHaveBeenLastCalledWith('second-project', expect.objectContaining({ name: '第二个编辑会话' })))
+  })
+
+  it('returns to the original task flow with a newly created shared project', async () => {
+    vi.mocked(api.projects.create).mockResolvedValueOnce({ project: { ...projectWithReference, platform: '', id: 'shared-project' } })
+    window.history.pushState({}, '', '/projects?create=true&type=wechat-picture&intent=new&return_to=/tasks')
+    render(<ProjectsPage />)
+    await screen.findByRole('dialog', { name: '新建项目' })
+    if (!screen.getByPlaceholderText<HTMLInputElement>('例如 我的科技博客').value) fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '测试品牌' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(api.projects.create).toHaveBeenCalled())
-    expect(vi.mocked(api.projects.create).mock.calls[0][0].hypit_defaults?.preferences?.duration_seconds).toBeUndefined()
-  })
-
-  it('clears an existing project default duration without serializing zero', async () => {
-    const project = { ...projectWithReference, platform: 'hypit', hypit_defaults: { preferences: { duration_seconds: 30, aspect_ratio: '16:9' } } } as Project
-    vi.mocked(api.projects.list).mockResolvedValue([project])
-    vi.mocked(api.projects.update).mockResolvedValue(project)
-    render(<ProjectsPage />)
-    await clickProjectAction(project.name, '编辑项目')
-    const duration = await screen.findByLabelText('默认时长（可选）')
-    expect(duration).toHaveValue(30)
-    fireEvent.change(duration, { target: { value: '' } })
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-    await waitFor(() => expect(api.projects.update).toHaveBeenCalled())
-    const payload = vi.mocked(api.projects.update).mock.calls[0][1]
-    expect(JSON.parse(JSON.stringify(payload.hypit_defaults))).toEqual({ preferences: { aspect_ratio: '16:9' } })
-  })
-
-  it('creates a video replication project with typed defaults', async () => {
-    window.history.pushState({}, '', '/projects?create=true&type=hypit&intent=new')
-    vi.mocked(api.projects.create).mockResolvedValue({ project: { ...projectWithReference, platform: 'hypit' } })
-    render(<ProjectsPage />)
-    await screen.findByRole('region', { name: '视频复刻默认设置' })
-    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '视频复刻项目' } })
-    fireEvent.change(screen.getByLabelText('复刻视频比例'), { target: { value: '16:9' } })
-    fireEvent.change(screen.getByLabelText('默认时长（可选）'), { target: { value: '30' } })
-    fireEvent.change(screen.getByLabelText('语言'), { target: { value: '中文' } })
-    fireEvent.change(screen.getByLabelText('素材使用说明'), { target: { value: '使用品牌素材' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({ platform: 'hypit', hypit_defaults: { preferences: { aspect_ratio: '16:9', duration_seconds: 30, language: '中文' }, asset_guidance: '使用品牌素材' } })))
-  })
-
-  it('creates a Montage project with every project default', async () => {
-    window.history.pushState({}, '', '/projects?return_to=/tasks&create=true&type=montage&intent=new')
-    vi.mocked(api.projects.create).mockResolvedValue({ project: {
-      id: 'montage-created',
-      user_id: '1',
-      platform: 'montage',
-      name: 'Launch montage',
-      avatar_url: '',
-      profile_url: '',
-      keywords: '',
-      visual_style: '',
-      writer: '',
-      theme: '',
-      author: '',
-
-      reference_image: null,
-      image_ratio: '9:16',
-      montage_defaults: {},
-      max_concurrent_tasks: 1,
-      status: 'active',
-      created_at: '2026-07-17T00:00:00Z',
-      updated_at: '2026-07-17T00:00:00Z',
-    } })
-
-    render(<ProjectsPage />)
-
-    expect(await screen.findByText('视频默认设置')).toBeInTheDocument()
-    expect(screen.getByText('默认人物参考')).toBeInTheDocument()
-    expect(screen.getByText('用于任务和计划中勾选的人物封面；未勾选时生成普通封面。')).toBeInTheDocument()
-    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: 'Launch montage' } })
-    fireEvent.click(screen.getByRole('radio', { name: /口播精剪/ }))
-    fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '45' } })
-    fireEvent.change(screen.getByLabelText('音乐提示'), { target: { value: 'minimal electronic' } })
-    fireEvent.change(screen.getByLabelText('默认字幕'), { target: { value: 'burned_in' } })
-    fireEvent.change(screen.getByLabelText('默认配音'), { target: { value: 'narrated' } })
-    fireEvent.change(screen.getByLabelText('素材使用说明'), { target: { value: '优先使用实拍素材' } })
-    const deliveryInput = screen.getByPlaceholderText('输入交付目标后按回车')
-    fireEvent.change(deliveryInput, { target: { value: 'final_video' } })
-    fireEvent.keyDown(deliveryInput, { key: 'Enter' })
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
-
-    await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
-      platform: 'montage',
-      name: 'Launch montage',
-      montage_defaults: {
-        default_pipeline: 'talking-head',
-        preferences: expect.objectContaining({
-          duration_seconds: 45,
-          music_prompt: 'minimal electronic',
-          subtitle_mode: 'burned_in',
-          voiceover_mode: 'narrated',
-        }),
-        asset_guidance: '优先使用实拍素材',
-        delivery_targets: ['final_video'],
-      },
-    })))
-  })
-
-  it('restores and updates saved Montage project defaults', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'montage-1',
-      user_id: '1',
-      platform: 'montage',
-      name: 'Saved montage',
-      avatar_url: '',
-      profile_url: '',
-      keywords: '',
-      visual_style: '',
-      writer: '',
-      theme: '',
-      author: '',
-
-      reference_image: null,
-      image_ratio: '16:9',
-      montage_defaults: {
-        default_pipeline: 'cinematic',
-        preferences: { duration_seconds: 60, music_prompt: 'cinematic' },
-        asset_guidance: '保留品牌标志',
-        delivery_targets: ['final_video', 'subtitles'],
-      },
-      max_concurrent_tasks: 1,
-      status: 'active',
-      created_at: '2026-07-17T00:00:00Z',
-      updated_at: '2026-07-17T00:00:00Z',
-    }])
-    vi.mocked(api.projects.update).mockResolvedValue({} as never)
-
-    render(<ProjectsPage />)
-
-    await screen.findByText('Saved montage')
-    await clickProjectAction('Saved montage', '编辑项目')
-    expect(await screen.findByRole('radio', { name: /电影感制作/ })).toBeChecked()
-    expect(screen.getByText('默认视频比例')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '16:9' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByLabelText('默认时长（秒）')).toHaveValue(60)
-    expect(screen.getByLabelText('音乐提示')).toHaveValue('cinematic')
-    expect(screen.getByText('final_video')).toBeInTheDocument()
-    expect(screen.getByText('subtitles')).toBeInTheDocument()
-
-    fireEvent.change(screen.getByLabelText('默认时长（秒）'), { target: { value: '45' } })
-    fireEvent.click(screen.getByRole('button', { name: '更新' }))
-
-    await waitFor(() => expect(api.projects.update).toHaveBeenCalledWith('montage-1', expect.objectContaining({
-      platform: 'montage',
-      image_ratio: '16:9',
-      montage_defaults: expect.objectContaining({
-        default_pipeline: 'cinematic',
-        preferences: expect.objectContaining({ duration_seconds: 45, music_prompt: 'cinematic' }),
-        asset_guidance: '保留品牌标志',
-        delivery_targets: ['final_video', 'subtitles'],
-      }),
-    })))
-  })
-
-  it('blocks saving a Montage project whose historical pipeline is no longer available', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{
-      ...projectWithReference,
-      id: 'montage-retired',
-      platform: 'montage',
-      name: 'Retired montage',
-      montage_defaults: {
-        default_pipeline: 'retired-pipeline',
-        preferences: { duration_seconds: 30 },
-      },
-    }])
-
-    render(<ProjectsPage />)
-
-    await clickProjectAction('Retired montage', '编辑项目')
-    expect(await screen.findByText('当前视频类型已停用，请重新选择')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '更新' })).toBeDisabled()
+    await waitFor(() => expect(window.location.pathname).toBe('/tasks'))
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('project_id')).toBe('shared-project')
+    expect(params.get('type')).toBe('wechat-picture')
+    expect(api.projects.upsertChannelConfig).not.toHaveBeenCalled()
   })
 })

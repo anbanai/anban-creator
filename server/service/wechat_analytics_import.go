@@ -111,7 +111,7 @@ func (s *WechatAnalyticsImportService) Preview(ctx context.Context, req WechatAn
 	if err != nil {
 		return nil, err
 	}
-	candidates, err := loadAnalyticsCandidates(ctx, s.repo, req.UserID, project.ID)
+	candidates, err := loadAnalyticsCandidates(ctx, s.repo, req.UserID, project.ID, model.AnalyticsMetricsWechat)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func (s *WechatAnalyticsImportService) Import(ctx context.Context, req WechatAna
 		if err := tx.WechatAnalyticsImports().LockProject(ctx, project.ID); err != nil {
 			return err
 		}
-		candidates, err := loadAnalyticsCandidates(ctx, tx, req.UserID, project.ID)
+		candidates, err := loadAnalyticsCandidates(ctx, tx, req.UserID, project.ID, model.AnalyticsMetricsWechat)
 		if err != nil {
 			return err
 		}
@@ -397,7 +397,7 @@ func (s *WechatAnalyticsImportService) ListArticles(ctx context.Context, userID,
 	if project.UserID != userID {
 		return nil, errors.New("project does not belong to user")
 	}
-	candidates, err := loadAnalyticsCandidates(ctx, s.repo, userID, projectID)
+	candidates, err := loadAnalyticsCandidates(ctx, s.repo, userID, projectID, model.AnalyticsMetricsWechat)
 	if err != nil {
 		return nil, err
 	}

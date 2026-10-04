@@ -83,7 +83,7 @@ func TestWechatAnalyticsHistoricalImportURL(t *testing.T) {
 				t.Fatalf("read changed stored URL to %q", stored.ArticleURL)
 			}
 			if tc.want != "" {
-				candidates, err := loadAnalyticsCandidates(ctx, f.repo, f.userID, f.projectID)
+				candidates, err := loadAnalyticsCandidates(ctx, f.repo, f.userID, f.projectID, model.AnalyticsMetricsWechat)
 				if err != nil {
 					t.Fatal(err)
 				}

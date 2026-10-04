@@ -17,7 +17,40 @@ var ErrAnalyticsRebuilding = errors.New("analytics rebuilding")
 var ErrAnalyticsIdempotencyConflict = errors.New("analytics idempotency key reused with changed request")
 var ErrAnalyticsRebuildSuperseded = errors.New("analytics rebuild publication was superseded")
 
-type AnalyticsRepository struct{ db *gorm.DB }
+type AnalyticsRepository struct {
+	db           *gorm.DB
+	metricFamily model.AnalyticsMetricFamily
+}
+
+// WithMetricFamily scopes every content read in this snapshot to the selected channel family.
+func (r *AnalyticsRepository) WithMetricFamily(family model.AnalyticsMetricFamily) *AnalyticsRepository {
+	return &AnalyticsRepository{db: r.db, metricFamily: family}
+}
+
+func (r *AnalyticsRepository) scopeContent(q *gorm.DB, prefix string) *gorm.DB {
+	if r.metricFamily == 0 {
+		return q
+	}
+	// New content has an immutable channel; old projections retain a platform or
+	// a publication/post identity. Never infer a channel from its parent project.
+	expression := "CASE WHEN COALESCE(" + prefix + "channel,'') <> '' THEN CASE WHEN " + prefix + "channel IN ('wechat-article','wechat-picture') THEN 'wechat' ELSE " + prefix + "channel END WHEN COALESCE(" + prefix + "platform,'') <> '' THEN " + prefix + "platform WHEN COALESCE(" + prefix + "post_id,'') <> '' THEN 'seednote' WHEN COALESCE(" + prefix + "publication_id,'') <> '' THEN 'wechat' ELSE '' END"
+	platform := ""
+	switch r.metricFamily {
+	case model.AnalyticsMetricsWechat:
+		platform = model.PlatformWechat
+	case model.AnalyticsMetricsSeednote:
+		platform = model.PlatformSeednote
+	}
+	return q.Where(expression+" = ?", platform)
+}
+
+func (r *AnalyticsRepository) scopeBuckets(ctx context.Context, q *gorm.DB, project string) *gorm.DB {
+	if r.metricFamily == 0 {
+		return q
+	}
+	contents := r.scopeContent(r.db.WithContext(ctx).Model(&model.AnalyticsContent{}).Select("id").Where("project_id = ?", project), "")
+	return q.Where("content_id IN (?)", contents)
+}
 
 // DB is intentionally limited to migration code. Runtime reads and writes use
 // the typed methods below so analytics queries cannot accidentally depend on
@@ -27,7 +60,7 @@ func (r *AnalyticsRepository) DB() *gorm.DB { return r.db }
 // Snapshot explicitly requests repeatable read: revision, page, totals and series
 // must come from the same committed projection generation.
 func (r *AnalyticsRepository) Snapshot(ctx context.Context, fn func(*AnalyticsRepository) error) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return fn(&AnalyticsRepository{db: tx}) }, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return fn(&AnalyticsRepository{db: tx, metricFamily: r.metricFamily}) }, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 }
 func (r *AnalyticsRepository) Project(ctx context.Context, id string) (*model.Project, error) {
 	var p model.Project
@@ -251,7 +284,7 @@ func (r *AnalyticsRepository) rangeQuery(ctx context.Context, project string, ge
 	if content != "" {
 		q = q.Where("content_id = ?", content)
 	}
-	return q
+	return r.scopeBuckets(ctx, q, project)
 }
 func (r *AnalyticsRepository) contentRange(ctx context.Context, project string, generation int64, basis, from, to, content string) *gorm.DB {
 	q := r.rangeQuery(ctx, project, generation, basis, from, to, content)
@@ -285,7 +318,7 @@ func (r *AnalyticsRepository) ResolveContent(ctx context.Context, project, id st
 }
 
 func (r *AnalyticsRepository) resolveContentIdentity(ctx context.Context, project, id string) (*model.AnalyticsContent, error) {
-	q := r.db.WithContext(ctx).Where("project_id = ?", project)
+	q := r.scopeContent(r.db.WithContext(ctx).Where("project_id = ?", project), "")
 	parts := strings.SplitN(id, ":", 2)
 	if len(parts) == 2 {
 		switch parts[0] {
@@ -311,7 +344,7 @@ func (r *AnalyticsRepository) resolveContentIdentity(ctx context.Context, projec
 	// link through the authoritative operational identity tables as a fallback.
 	if r.db.Migrator().HasTable("wechat_publications") {
 		var alias model.AnalyticsContent
-		e2 := r.db.WithContext(ctx).Table("analytics_contents AS c").Select("c.*").
+		e2 := r.scopeContent(r.db.WithContext(ctx).Table("analytics_contents AS c"), "c.").Select("c.*").
 			Joins("JOIN wechat_publications AS p ON p.id = c.publication_id AND p.project_id = c.project_id").
 			Where("c.project_id = ? AND p.task_id = ?", project, parts[1]).
 			Order("c.date IS NULL ASC, c.date DESC, c.id ASC").First(&alias).Error
@@ -324,7 +357,7 @@ func (r *AnalyticsRepository) resolveContentIdentity(ctx context.Context, projec
 	}
 	if r.db.Migrator().HasTable("seednote_posts") {
 		var alias model.AnalyticsContent
-		e2 := r.db.WithContext(ctx).Table("analytics_contents AS c").Select("c.*").
+		e2 := r.scopeContent(r.db.WithContext(ctx).Table("analytics_contents AS c"), "c.").Select("c.*").
 			Joins("JOIN seednote_posts AS p ON p.id = c.post_id AND p.project_id = c.project_id").
 			Where("c.project_id = ? AND p.task_id = ?", project, parts[1]).
 			Order("c.date IS NULL ASC, c.date DESC, c.id ASC").First(&alias).Error
@@ -360,12 +393,12 @@ func (m analyticsContentMetadata) columns() string {
 }
 
 func (r *AnalyticsRepository) contentMetadata(ctx context.Context, project string) analyticsContentMetadata {
-	q := r.db.WithContext(ctx).Table("analytics_contents AS c").Where("c.project_id = ?", project)
+	q := r.scopeContent(r.db.WithContext(ctx).Table("analytics_contents AS c").Where("c.project_id = ?", project), "c.")
 	liveTitle, liveType, liveStatus, liveURL := "c.title", analyticsContentTypeSQL("c.content_type"), "c.status", "c.url"
 	if r.db.Migrator().HasTable("tasks") {
 		q = q.Joins("LEFT JOIN tasks AS t ON t.id = c.task_id AND t.project_id = c.project_id")
 		liveTitle = "COALESCE(NULLIF(t.title,''), c.title)"
-		liveType = analyticsContentTypeSQL("COALESCE(NULLIF(t.type,''), c.content_type)")
+		liveType = analyticsContentTypeSQL("COALESCE(NULLIF(t.channel,''),NULLIF(t.type,''), c.content_type)")
 		liveStatus = "COALESCE(NULLIF(t.status,''), c.status)"
 	}
 	if r.db.Migrator().HasTable("wechat_publications") {
@@ -433,6 +466,7 @@ func (r *AnalyticsRepository) Contents(ctx context.Context, project string, gene
 }
 func (r *AnalyticsRepository) ObservationPage(ctx context.Context, project, content, from, to, basis string, offset, limit int) ([]model.AnalyticsObservation, int64, error) {
 	q := r.db.WithContext(ctx).Model(&model.AnalyticsObservation{}).Where("project_id = ? AND content_id = ? AND metric_basis = ? AND stat_date BETWEEN ? AND ?", project, content, basis, from, to)
+	q = r.scopeBuckets(ctx, q, project)
 	var count int64
 	if e := q.Count(&count).Error; e != nil {
 		return nil, 0, e
@@ -443,14 +477,21 @@ func (r *AnalyticsRepository) ObservationPage(ctx context.Context, project, cont
 }
 func (r *AnalyticsRepository) Dates(ctx context.Context, project string, generation int64, basis string, year int) ([]string, error) {
 	dates := []string{}
-	e := r.db.WithContext(ctx).Model(&model.AnalyticsBucket{}).Where("project_id = ? AND generation = ? AND content_id = '' AND metric_basis = ? AND granularity = 'day' AND bucket_start >= ? AND bucket_start < ?", project, generation, basis, fmt.Sprintf("%04d-01-01", year), fmt.Sprintf("%04d-01-01", year+1)).Order("bucket_start").Pluck("bucket_start", &dates).Error
+	q := r.db.WithContext(ctx).Model(&model.AnalyticsBucket{}).Where("project_id = ? AND generation = ? AND content_id <> '' AND metric_basis = ? AND granularity = 'day' AND bucket_start >= ? AND bucket_start < ?", project, generation, basis, fmt.Sprintf("%04d-01-01", year), fmt.Sprintf("%04d-01-01", year+1))
+	e := r.scopeBuckets(ctx, q, project).Distinct("bucket_start").Order("bucket_start").Pluck("bucket_start", &dates).Error
 	return dates, e
 }
 
 func (r *AnalyticsRepository) Series(ctx context.Context, project string, generation int64, basis, from, to, granularity, content string) ([]model.AnalyticsBucket, error) {
 	start, _ := AnalyticsBucketBounds(from, granularity)
 	rows := []model.AnalyticsBucket{}
-	e := r.db.WithContext(ctx).Where("project_id = ? AND generation = ? AND content_id = ? AND metric_basis = ? AND granularity = ? AND bucket_start BETWEEN ? AND ?", project, generation, content, basis, granularity, start, to).Order("bucket_start").Find(&rows).Error
+	q := r.db.WithContext(ctx).Model(&model.AnalyticsBucket{}).Where("project_id = ? AND generation = ? AND metric_basis = ? AND granularity = ? AND bucket_start BETWEEN ? AND ?", project, generation, basis, granularity, start, to)
+	if content != "" || r.metricFamily == 0 {
+		q = r.scopeBuckets(ctx, q.Where("content_id = ?", content), project)
+	} else {
+		q = r.scopeBuckets(ctx, q.Where("content_id <> ''"), project).Select("bucket_start," + analyticsSumColumns("") + ", COUNT(*) AS coverage, MAX(last_stat_date) AS last_stat_date").Group("bucket_start")
+	}
+	e := q.Order("bucket_start").Find(&rows).Error
 	if e != nil {
 		return nil, e
 	}

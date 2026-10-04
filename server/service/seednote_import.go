@@ -161,7 +161,7 @@ func (s *SeednoteImportService) Import(ctx context.Context, req SeednoteImportRe
 		}
 		writes := make([]AnalyticsObservationInput, 0, len(rows))
 		// Serialize creation of the analytics identity shared by a task.
-		candidates, err := loadAnalyticsCandidates(ctx, tx, req.UserID, req.ProjectID)
+		candidates, err := loadAnalyticsCandidates(ctx, tx, req.UserID, req.ProjectID, model.AnalyticsMetricsSeednote)
 		if err != nil {
 			return err
 		}
@@ -609,9 +609,6 @@ func (s *SeednoteImportService) checkProject(ctx context.Context, userID, projec
 	}
 	if project.UserID != userID {
 		return errors.New("project does not belong to user")
-	}
-	if project.Platform != model.PlatformSeednote {
-		return errors.New("project is not a seednote project")
 	}
 	return nil
 }

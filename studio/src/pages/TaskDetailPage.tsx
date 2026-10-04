@@ -631,7 +631,7 @@ export default function TaskDetailPage() {
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
           {canViewContentAnalytics && (
-            <Link to={taskContentAnalyticsHref(task.project_id, task.id)} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            <Link to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               <BarChart3 className="h-4 w-4" />
               查看内容分析
             </Link>

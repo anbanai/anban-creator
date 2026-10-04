@@ -61,7 +61,9 @@ type Project struct {
 	// Theme is the 排版 (layout/typesetting) resource key (e.g. "autumn-warm").
 	Theme string `gorm:"type:varchar(50)" json:"theme"`
 	// Author is the 作者（署名）— the published author name, passed to create_draft.
-	Author                        string     `gorm:"column:author;type:varchar(50)" json:"author"`
+	Author string `gorm:"column:author;type:varchar(50)" json:"author"`
+	// AuthorSet distinguishes omitted updates from an explicit empty byline.
+	AuthorSet                     bool       `gorm:"-" json:"-"`
 	ReferenceImageAssetID         string     `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage                *AssetView `gorm:"-" json:"reference_image,omitempty"`
 	ReferenceImageSet             bool       `gorm:"-" json:"-"`

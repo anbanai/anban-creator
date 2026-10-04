@@ -133,34 +133,27 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 			}
 		}
 	}
+	scopes, err := feedbackProjectScopes(ctx, s.repo, projects)
+	if err != nil {
+		return FeedbackScanResult{}, err
+	}
 	var out FeedbackScanResult
-	for _, p := range projects {
+	for _, scope := range scopes {
+		p := scope.Project
 		if s.maxPerRun > 0 && out.Enqueued >= s.maxPerRun {
 			break
-		}
-		if p == nil || (p.Platform != model.ScopeWechat && p.Platform != model.ScopeSeednote) {
-			continue
 		}
 		if windowed && !feedbackWindowOpen(cadence, at, p.Timezone) {
 			continue
 		}
-		if windowed && s.windowAlreadyRun(cadence, p, at) {
+		if windowed && s.windowAlreadyRun(cadence, p, scope.Channel, at) {
 			continue
 		}
-		if p.Platform == model.PlatformWechat {
-			row, configErr := s.repo.ProjectChannelConfigs().Get(ctx, p.ID, model.ChannelArticle)
-			if configErr != nil && !errors.Is(configErr, gorm.ErrRecordNotFound) {
-				return out, fmt.Errorf("load feedback account config: %w", configErr)
-			}
-			if row != nil {
-				p.RuntimeChannelConfig = row.Config.Data()
-			}
-		}
-		accountID := feedbackAccountID(p)
+		accountID := scope.AccountID
 		if feedbackLimitReached(userCounts[p.UserID], s.maxPerUser) || feedbackLimitReached(projectCounts[p.ID], s.maxPerProject) || feedbackLimitReached(accountCounts[accountID], s.maxPerAccount) {
 			continue
 		}
-		jobs, err := s.buildCadenceJobs(ctx, p, cadence, at, override)
+		jobs, err := s.buildCadenceJobs(ctx, scope, cadence, at, override)
 		if err != nil {
 			return out, err
 		}
@@ -252,7 +245,7 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 			}
 		}
 		if windowed {
-			s.markWindowRun(cadence, p, at)
+			s.markWindowRun(cadence, p, scope.Channel, at)
 		}
 	}
 	return out, nil
@@ -262,7 +255,7 @@ func feedbackLimitReached(current, limit int) bool {
 	return limit > 0 && current >= limit
 }
 
-func feedbackWindowKey(cadence string, p *model.Project, at time.Time) string {
+func feedbackWindowKey(cadence string, p *model.Project, channel string, at time.Time) string {
 	if p == nil {
 		return ""
 	}
@@ -270,14 +263,14 @@ func feedbackWindowKey(cadence string, p *model.Project, at time.Time) string {
 	if err != nil {
 		loc = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
-	return cadence + "|" + p.ID + "|" + at.In(loc).Format("2006-01-02")
+	return cadence + "|" + p.ID + "|" + channel + "|" + at.In(loc).Format("2006-01-02")
 }
 
-func (s *FeedbackScheduler) windowAlreadyRun(cadence string, p *model.Project, at time.Time) bool {
+func (s *FeedbackScheduler) windowAlreadyRun(cadence string, p *model.Project, channel string, at time.Time) bool {
 	if s == nil || p == nil {
 		return false
 	}
-	key := feedbackWindowKey(cadence, p, at)
+	key := feedbackWindowKey(cadence, p, channel, at)
 	s.windowMu.Lock()
 	defer s.windowMu.Unlock()
 	for existing, seenAt := range s.windowRuns {
@@ -294,11 +287,11 @@ func (s *FeedbackScheduler) windowAlreadyRun(cadence string, p *model.Project, a
 // markWindowRun makes the frequent background wake-up idempotent per project
 // and project-local calendar day. Durable fingerprints still protect against
 // duplicate work after a process restart or across multiple server instances.
-func (s *FeedbackScheduler) markWindowRun(cadence string, p *model.Project, at time.Time) {
+func (s *FeedbackScheduler) markWindowRun(cadence string, p *model.Project, channel string, at time.Time) {
 	if s == nil || p == nil {
 		return
 	}
-	key := feedbackWindowKey(cadence, p, at)
+	key := feedbackWindowKey(cadence, p, channel, at)
 	s.windowMu.Lock()
 	defer s.windowMu.Unlock()
 	if s.windowRuns == nil {
@@ -402,7 +395,8 @@ func feedbackWindowOpen(cadence string, at time.Time, timezone string) bool {
 	}
 }
 
-func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Project, cadence string, at time.Time, override *FeedbackPeriodOverride) ([]model.FeedbackJob, error) {
+func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, scope feedbackProjectScope, cadence string, at time.Time, override *FeedbackPeriodOverride) ([]model.FeedbackJob, error) {
+	p := scope.Project
 	state, err := s.repo.Analytics().State(ctx, p.ID)
 	if err != nil {
 		return nil, err
@@ -412,20 +406,20 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 		from, to = override.Start, override.End
 	}
 	if state.Status != "ready" {
-		return []model.FeedbackJob{s.skippedJob(p, cadence, at, "", FeedbackSkipAnalyticsRebuilding, 0, state.Revision)}, nil
+		return []model.FeedbackJob{s.skippedJob(scope, cadence, at, "", FeedbackSkipAnalyticsRebuilding, 0, state.Revision)}, nil
 	}
 	if p.FeedbackPaused || p.Status != model.ProjectStatusActive {
-		return []model.FeedbackJob{s.skippedJob(p, cadence, at, "", FeedbackSkipProjectPaused, 0, state.Revision)}, nil
+		return []model.FeedbackJob{s.skippedJob(scope, cadence, at, "", FeedbackSkipProjectPaused, 0, state.Revision)}, nil
 	}
 	var contentCount int64
 	db := s.repo.Analytics().DB().WithContext(ctx)
 	defaultMaturityCutoff := feedbackMaturityCutoffForProject(at, p.Timezone, 24*time.Hour)
-	if err := db.Model(&model.AnalyticsContent{}).
-		Where("project_id = ? AND date IS NOT NULL AND date <= ? AND date BETWEEN ? AND ?", p.ID, defaultMaturityCutoff, from, to).
+	if err := scopeFeedbackContents(db.Model(&model.AnalyticsContent{}), "", scope.Channel).
+		Where("project_id = ? AND date IS NOT NULL AND date(date) <= ? AND date(date) BETWEEN ? AND ?", p.ID, defaultMaturityCutoff, from, to).
 		Count(&contentCount).Error; err != nil {
 		return nil, err
 	}
-	validObservationPredicate := analyticsValidMetricPredicate(p.Platform)
+	validObservationPredicate := analyticsValidMetricPredicate(model.PlatformForChannel(scope.Channel))
 	operations := feedbackOperations(cadence)
 	jobs := make([]model.FeedbackJob, 0, len(operations))
 	for _, operation := range operations {
@@ -434,24 +428,24 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 		maturityCutoff := defaultMaturityCutoff
 		if operation == "content_postmortem" {
 			maturityCutoff = feedbackMaturityCutoffForProject(at, p.Timezone, 7*24*time.Hour)
-			matureContentCount = s.countMatureContents(ctx, db, p, from, to, maturityCutoff)
+			matureContentCount = s.countMatureContents(ctx, db, scope, from, to, maturityCutoff)
 		}
-		observationCount, err := feedbackObservationCount(ctx, db, p.ID, from, to, maturityCutoff, validObservationPredicate)
+		observationCount, err := feedbackObservationCount(ctx, db, p.ID, scope.Channel, from, to, maturityCutoff, validObservationPredicate)
 		if err != nil {
 			return nil, err
 		}
-		contentIDs, err := feedbackContentIDs(ctx, db, p.ID, from, to, maturityCutoff)
+		contentIDs, err := feedbackContentIDs(ctx, db, p.ID, scope.Channel, from, to, maturityCutoff)
 		if err != nil {
 			return nil, err
 		}
 		digest := contentDigest(contentIDs, observationCount, from, to, state.Revision)
 		strategyRevision := int64(0)
-		if strategy, strategyErr := s.repo.FeedbackLoop().FindActiveStrategy(ctx, p.ID, p.Platform); strategyErr != nil {
+		if strategy, strategyErr := s.repo.FeedbackLoop().FindActiveStrategy(ctx, p.ID, scope.Channel); strategyErr != nil {
 			return nil, strategyErr
 		} else if strategy != nil {
 			strategyRevision = strategy.Revision
 		}
-		fingerprintInput := FeedbackEligibilityInput{ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, AnalyticsRevision: state.Revision, ContentSetDigest: digest, StrategyRevision: strategyRevision}
+		fingerprintInput := FeedbackEligibilityInput{ProjectID: p.ID, Platform: scope.Channel, AccountID: scope.AccountID, Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, AnalyticsRevision: state.Revision, ContentSetDigest: digest, StrategyRevision: strategyRevision}
 		fingerprint := FeedbackJobFingerprint(fingerprintInput)
 		alreadySucceeded, running := false, false
 		prior, err := s.repo.FeedbackLoop().FindJobByFingerprint(ctx, fingerprint)
@@ -461,7 +455,7 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 		if prior != nil && prior.Status == model.FeedbackJobSucceeded {
 			alreadySucceeded = true
 		}
-		runningJob, err := s.repo.FeedbackLoop().FindRunningJob(ctx, p.ID, operation)
+		runningJob, err := s.repo.FeedbackLoop().FindRunningJob(ctx, p.ID, operation, scope.Channel)
 		if err != nil {
 			return nil, err
 		}
@@ -478,7 +472,7 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 		in.AlreadySucceeded = alreadySucceeded
 		in.RunningDuplicate = running
 		decision := EvaluateFeedbackEligibility(in)
-		job := model.FeedbackJob{ID: uuid.NewString(), UserID: p.UserID, ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, Trigger: cadence, PeriodStart: from, PeriodEnd: to, MaturityCutoff: maturityCutoff, AnalyticsRevision: state.Revision, ContentSetDigest: digest, StrategyRevision: strategyRevision, Fingerprint: fingerprint, Status: model.FeedbackJobQueued, SampleCount: int(observationCount), Coverage: "partial"}
+		job := model.FeedbackJob{ID: uuid.NewString(), UserID: p.UserID, ProjectID: p.ID, Platform: scope.Channel, AccountID: scope.AccountID, Operation: operation, Cadence: cadence, Trigger: cadence, PeriodStart: from, PeriodEnd: to, MaturityCutoff: maturityCutoff, AnalyticsRevision: state.Revision, ContentSetDigest: digest, StrategyRevision: strategyRevision, Fingerprint: fingerprint, Status: model.FeedbackJobQueued, SampleCount: int(observationCount), Coverage: "partial"}
 		if decision.Status != FeedbackJobEligible {
 			job.Status = model.FeedbackJobSkipped
 			job.SkipReason = decision.SkipReason
@@ -488,13 +482,14 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, p *model.Proje
 	return jobs, nil
 }
 
-func (s *FeedbackScheduler) countMatureContents(ctx context.Context, db *gorm.DB, p *model.Project, from, to, cutoff string) int64 {
+func (s *FeedbackScheduler) countMatureContents(ctx context.Context, db *gorm.DB, scope feedbackProjectScope, from, to, cutoff string) int64 {
+	p := scope.Project
 	var count int64
 	if db == nil || p == nil {
 		return 0
 	}
-	_ = db.WithContext(ctx).Model(&model.AnalyticsContent{}).
-		Where("project_id = ? AND date IS NOT NULL AND date <= ? AND date BETWEEN ? AND ?", p.ID, cutoff, from, to).
+	_ = scopeFeedbackContents(db.WithContext(ctx).Model(&model.AnalyticsContent{}), "", scope.Channel).
+		Where("project_id = ? AND date IS NOT NULL AND date(date) <= ? AND date(date) BETWEEN ? AND ?", p.ID, cutoff, from, to).
 		Count(&count).Error
 	return count
 }
@@ -521,20 +516,20 @@ func analyticsValidMetricPredicate(platform string) string {
 	return strings.Join(columns, " OR ")
 }
 
-func feedbackContentIDs(ctx context.Context, db *gorm.DB, projectID, from, to, cutoff string) ([]string, error) {
+func feedbackContentIDs(ctx context.Context, db *gorm.DB, projectID, channel, from, to, cutoff string) ([]string, error) {
 	var ids []string
-	err := db.WithContext(ctx).Model(&model.AnalyticsContent{}).
-		Where("project_id = ? AND date IS NOT NULL AND date <= ? AND date BETWEEN ? AND ?", projectID, cutoff, from, to).
+	err := scopeFeedbackContents(db.WithContext(ctx).Model(&model.AnalyticsContent{}), "", channel).
+		Where("project_id = ? AND date IS NOT NULL AND date(date) <= ? AND date(date) BETWEEN ? AND ?", projectID, cutoff, from, to).
 		Order("id asc").Pluck("id", &ids).Error
 	return ids, err
 }
 
-func feedbackObservationCount(ctx context.Context, db *gorm.DB, projectID, from, to, cutoff, validPredicate string) (int64, error) {
+func feedbackObservationCount(ctx context.Context, db *gorm.DB, projectID, channel, from, to, cutoff, validPredicate string) (int64, error) {
 	if validPredicate == "" {
 		return 0, nil
 	}
 	var count int64
-	err := db.WithContext(ctx).Model(&model.AnalyticsObservation{}).
+	err := scopeFeedbackContents(db.WithContext(ctx).Model(&model.AnalyticsObservation{}), "ac.", channel).
 		Joins("JOIN analytics_contents ac ON ac.id = analytics_observations.content_id AND ac.project_id = analytics_observations.project_id").
 		Where("analytics_observations.project_id = ? AND analytics_observations.stat_date BETWEEN ? AND ? AND analytics_observations.metric_basis IN ? AND analytics_observations.revoked_at IS NULL AND analytics_observations.content_id <> '' AND ac.date IS NOT NULL AND date(ac.date) <= ? AND ("+validPredicate+")", projectID, from, to, []string{"daily", "cumulative"}, cutoff).
 		Distinct("content_id").Count(&count).Error
@@ -546,13 +541,14 @@ func contentDigest(contents []string, observations int64, from, to string, revis
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *FeedbackScheduler) skippedJob(p *model.Project, cadence string, at time.Time, operation, reason string, sample int, revision int64) model.FeedbackJob {
+func (s *FeedbackScheduler) skippedJob(scope feedbackProjectScope, cadence string, at time.Time, operation, reason string, sample int, revision int64) model.FeedbackJob {
+	p := scope.Project
 	from, to := feedbackPeriodForProject(cadence, at, p.Timezone)
 	if operation == "" {
 		operation = feedbackOperations(cadence)[0]
 	}
-	in := FeedbackEligibilityInput{ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, AnalyticsRevision: revision}
-	return model.FeedbackJob{ID: uuid.NewString(), UserID: p.UserID, ProjectID: p.ID, Platform: p.Platform, AccountID: feedbackAccountID(p), Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, MaturityCutoff: feedbackMaturityCutoffForProject(at, p.Timezone, 24*time.Hour), AnalyticsRevision: revision, Fingerprint: FeedbackJobFingerprint(in), Status: model.FeedbackJobSkipped, SkipReason: reason, SampleCount: sample}
+	in := FeedbackEligibilityInput{ProjectID: p.ID, Platform: scope.Channel, AccountID: scope.AccountID, Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, AnalyticsRevision: revision}
+	return model.FeedbackJob{ID: uuid.NewString(), UserID: p.UserID, ProjectID: p.ID, Platform: scope.Channel, AccountID: scope.AccountID, Operation: operation, Cadence: cadence, PeriodStart: from, PeriodEnd: to, MaturityCutoff: feedbackMaturityCutoffForProject(at, p.Timezone, 24*time.Hour), AnalyticsRevision: revision, Fingerprint: FeedbackJobFingerprint(in), Status: model.FeedbackJobSkipped, SkipReason: reason, SampleCount: sample}
 }
 
 func feedbackAccountID(p *model.Project) string {

@@ -9,7 +9,7 @@ import (
 )
 
 type ContentAnalyticsAPI interface {
-	Candidates(context.Context, string, string, string, int, int) ([]service.AnalyticsCandidate, int, error)
+	Candidates(context.Context, string, string, string, string, int, int) ([]service.AnalyticsCandidate, int, error)
 }
 type ContentAnalyticsHandler struct{ service ContentAnalyticsAPI }
 
@@ -27,7 +27,7 @@ func (h *ContentAnalyticsHandler) Candidates(c fiber.Ctx) error {
 	}
 	offset, _ := strconv.Atoi(c.Query("offset", "0"))
 	limit, _ := strconv.Atoi(c.Query("limit", "25"))
-	items, total, err := h.service.Candidates(c.Context(), userID, projectID, c.Query("search"), offset, limit)
+	items, total, err := h.service.Candidates(c.Context(), userID, projectID, c.Query("platform"), c.Query("search"), offset, limit)
 	if err != nil {
 		if strings.Contains(err.Error(), "does not belong") {
 			return Forbidden(c, "you do not have access to this project")

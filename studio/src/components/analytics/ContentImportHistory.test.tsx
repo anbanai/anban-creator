@@ -16,7 +16,7 @@ for (const platform of ['wechat', 'seednote'] as const) describe(`${platform} �
       return {} as never
     })
     const onRevoked = vi.fn()
-    render(<ContentImportHistory project={{ id: 'p1', name: '账号', platform } as Project} onClose={vi.fn()} onRevoked={onRevoked} />)
+    render(<ContentImportHistory project={{ id: 'p1', name: '账号', platform } as Project} platform={platform} onClose={vi.fn()} onRevoked={onRevoked} />)
     fireEvent.click(await screen.findByRole('button', { name: '撤销本次导入' }))
     expect(method.revoke).not.toHaveBeenCalled()
     expect(screen.getByRole('region', { name: '确认撤销导入' })).toHaveTextContent('数据.xlsx')

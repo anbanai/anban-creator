@@ -72,13 +72,13 @@ describe('ProjectSelector', () => {
     await waitFor(() => expect(trigger).toHaveTextContent('Morning Brief'))
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
     expect(trigger).not.toHaveTextContent('公众号')
-    expect(trigger.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
+    expect(trigger.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
 
     fireEvent.click(trigger)
     const option = await screen.findByRole('option', { name: /Morning Brief/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
     expect(option).not.toHaveTextContent('公众号项目')
-    expect(option.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
+    expect(option.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
   })
 
   it('forwards project identity and clears to empty values', async () => {

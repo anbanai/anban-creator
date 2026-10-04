@@ -30,14 +30,14 @@ beforeEach(() => {
 describe('统一导入确认', () => {
   it('labels the Chinese content types returned by Seednote import preview', async () => {
     vi.mocked(contentAnalyticsApi.preview).mockResolvedValue({ ...preview, rows: preview.rows.map((row, index) => ({ ...row, content_type: index === 0 ? '图文' : index === 1 ? '视频' : 'unknown' })) })
-    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
     await upload()
     expect(within(screen.getByText('已识别内容', { selector: 'p' }).closest('tr')!).getByText('图文')).toBeInTheDocument()
     expect(within(screen.getByText('未识别内容').closest('tr')!).getByText('视频')).toBeInTheDocument()
   })
 
   it('keeps the upload flow focused on the file and confirmation actions', async () => {
-    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
 
     expect(screen.queryByLabelText('数据截至时间')).not.toBeInTheDocument()
 
@@ -51,12 +51,12 @@ describe('统一导入确认', () => {
   it('uses the current Beijing minute without exposing a date control', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-09-28T00:12:34.000Z'))
-    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
     await upload()
     expect(screen.getByText(/文件已解析/)).toBeInTheDocument()
     expect(screen.getByText('data.xlsx')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
-    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ data_as_of_at: '2026-09-28T00:12:00.000Z' })))
+    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ data_as_of_at: '2026-09-28T00:12:00.000Z' }), expect.any(String)))
     vi.useRealTimers()
   })
 
@@ -74,7 +74,7 @@ describe('统一导入确认', () => {
   })
   it('fixes WeChat imports to cumulative while using the default date', async () => {
     const wechat = { ...project, platform: 'wechat' as const }
-    render(<ContentImportDialog project={wechat} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={wechat} platform="wechat" onClose={vi.fn()} />)
     await upload()
     expect(screen.queryByLabelText('导入统计口径')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeEnabled()
@@ -82,16 +82,16 @@ describe('统一导入确认', () => {
     await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(wechat, expect.objectContaining({ metric_basis: 'cumulative' })))
   })
   it('imports latest cumulative Seednote values with the default date', async () => {
-    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
     await upload()
     expect(screen.queryByLabelText('导入统计口径')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
-    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ metric_basis: 'cumulative', data_as_of_at: expect.any(String), idempotency_key: expect.any(String) })))
+    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ metric_basis: 'cumulative', data_as_of_at: expect.any(String), idempotency_key: expect.any(String) }), expect.any(String)))
   })
   it('retains the idempotency key on retry and replaces it after editing the request', async () => {
     vi.mocked(contentAnalyticsApi.import).mockRejectedValue(new Error('网络中断'))
-    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
     await upload()
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
     await screen.findByRole('alert')
@@ -109,19 +109,19 @@ describe('统一导入确认', () => {
   })
   it('previews without importing and submits only explicitly selected linked rows', async () => {
     const onImported = vi.fn(); const onClose = vi.fn()
-    render(<ContentImportDialog project={project} onClose={onClose} onImported={onImported} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={onClose} onImported={onImported} />)
     await upload()
     expect(contentAnalyticsApi.import).not.toHaveBeenCalled()
     expect(screen.getByLabelText('选择第 3 行')).toBeDisabled()
     expect(screen.getByLabelText('选择第 4 行')).toBeDisabled()
     expect(screen.getByText('日期无效')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
-    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ upload_id: 'upload-1', selections: [{ source_row: 2, target }] })))
+    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ platform: 'wechat', upload_id: 'upload-1', selections: [{ source_row: 2, target }] }), expect.any(String)))
     await waitFor(() => expect(onImported).toHaveBeenCalledWith({ revision: 4, count: 1, date: '2026-09-24' }))
     expect(onClose).toHaveBeenCalledOnce()
   })
   it('supports manual current-account all-status matching and blocks duplicate targets', async () => {
-    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
     await upload()
     fireEvent.click(screen.getByRole('button', { name: '第 3 行选择对应内容' }))
     fireEvent.click(await screen.findByRole('button', { name: /当前账号草稿/ }))
@@ -130,18 +130,18 @@ describe('统一导入确认', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('同一内容只能导入一行')
     fireEvent.click(screen.getByLabelText('选择第 2 行'))
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
-    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ selections: [{ source_row: 3, target }] })))
+    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ platform: 'seednote', selections: [{ source_row: 3, target }] }), expect.any(String)))
   })
   it('keeps confirmation failures and choices for retry', async () => {
     vi.mocked(contentAnalyticsApi.import).mockRejectedValueOnce(new Error('匹配内容已改变，请重试'))
-    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
     await upload(); fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('匹配内容已改变')
     expect(screen.getByLabelText('选择第 2 行')).toBeChecked()
     expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeEnabled()
   })
   it('does not upload unsupported files, and prevents importing no matches', async () => {
-    render(<ContentImportDialog project={project} onClose={vi.fn()} />)
+    render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('选择导入文件'), { target: { files: [new File(['x'], 'data.xls')] } })
     expect(uploadToOSS).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('.xlsx')

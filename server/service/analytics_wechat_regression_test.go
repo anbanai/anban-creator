@@ -124,8 +124,8 @@ func TestAnalyticsContentTypeFilterUsesPublicationAndPostIdentity(t *testing.T) 
 	if err := db.Create(&[]model.AnalyticsContent{{ID: "wechat_publication:pic", ProjectID: "p", PublicationID: "pic", ContentType: "unknown"}, {ID: "seednote_post:note", ProjectID: "p", PostID: "note", ContentType: "unknown"}}).Error; err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ typ, id string }{{"wechat-picture", "wechat_publication:pic"}, {"image_text", "seednote_post:note"}} {
-		q := AnalyticsQuery{From: "2026-09-28", To: "2026-10-04", MetricBasis: "cumulative", ContentType: tc.typ}
+	for _, tc := range []struct{ typ, id, platform string }{{"wechat-picture", "wechat_publication:pic", "wechat"}, {"image_text", "seednote_post:note", "seednote"}} {
+		q := AnalyticsQuery{From: "2026-09-28", To: "2026-10-04", MetricBasis: "cumulative", ContentType: tc.typ, Platform: tc.platform}
 		page, err := s.Contents(context.Background(), "u", "p", q)
 		if err != nil || len(page.Items) != 1 || page.Items[0].ContentType != tc.typ || page.Items[0].ID != tc.id {
 			t.Errorf("filter %s: %+v %v", tc.typ, page, err)

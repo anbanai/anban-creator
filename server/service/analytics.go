@@ -39,6 +39,7 @@ type AnalyticsWriteRequest struct {
 	Observations []AnalyticsObservationInput
 }
 type AnalyticsQuery struct {
+	Platform                             string
 	From, To, Granularity, MetricBasis   string
 	ExpectedRevision                     *int64
 	Search, ContentType, Sort, Direction string
@@ -214,6 +215,11 @@ func normalizeAnalyticsQuery(q AnalyticsQuery) (AnalyticsQuery, error) {
 	bad := func(msg string) (AnalyticsQuery, error) {
 		return q, fmt.Errorf("%w: %s", ErrAnalyticsInvalidQuery, msg)
 	}
+	if q.Platform != "" {
+		if _, err := model.AnalyticsMetricFamilyForPlatform(q.Platform); err != nil {
+			return bad("platform must be wechat or seednote")
+		}
+	}
 	if !validAnalyticsDate(q.From) || !validAnalyticsDate(q.To) {
 		return bad("from and to must be calendar dates")
 	}
@@ -269,7 +275,7 @@ func (s *AnalyticsService) read(ctx context.Context, user, project string, q Ana
 		if p.UserID != user {
 			return ErrAnalyticsForbidden
 		}
-		family, e := model.AnalyticsMetricFamilyForPlatform(p.Platform)
+		family, e := analyticsQueryFamily(q.Platform, p.Platform)
 		if e != nil {
 			return fmt.Errorf("%w: %v", ErrAnalyticsInvalidQuery, e)
 		}
@@ -285,8 +291,20 @@ func (s *AnalyticsService) read(ctx context.Context, user, project string, q Ana
 		if q.ExpectedRevision != nil && *q.ExpectedRevision != state.Revision {
 			return ErrAnalyticsRevisionConflict
 		}
-		return fn(r, p, state, family)
+		return fn(r.WithMetricFamily(family), p, state, family)
 	})
+}
+
+// analyticsQueryFamily permits legacy project defaults only when no explicit selector is supplied.
+func analyticsQueryFamily(platform, legacyPlatform string) (model.AnalyticsMetricFamily, error) {
+	if platform == "" {
+		platform = legacyPlatform
+	}
+	family, err := model.AnalyticsMetricFamilyForPlatform(platform)
+	if err != nil {
+		return 0, fmt.Errorf("%w: platform must be wechat or seednote", ErrAnalyticsInvalidQuery)
+	}
+	return family, nil
 }
 func analyticsUnavailable(family model.AnalyticsMetricFamily) map[string]string {
 	out := map[string]string{}

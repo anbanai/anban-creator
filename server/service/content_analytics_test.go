@@ -67,7 +67,7 @@ func TestContentAnalyticsCandidatesAllStatesAndIsolation(t *testing.T) {
 		}
 	}
 	svc := NewContentAnalyticsService(f.repo)
-	items, total, err := svc.Candidates(ctx, f.userID, f.projectID, "", 0, 100)
+	items, total, err := svc.Candidates(ctx, f.userID, f.projectID, "", "", 0, 100)
 	if err != nil || total != 6 || len(items) != 6 {
 		t.Fatalf("candidates=%d total=%d err=%v", len(items), total, err)
 	}
@@ -79,11 +79,11 @@ func TestContentAnalyticsCandidatesAllStatesAndIsolation(t *testing.T) {
 			t.Fatalf("publication was not canonicalized: %+v", item)
 		}
 	}
-	items, total, err = svc.Candidates(ctx, f.userID, f.projectID, "筛选", 1, 2)
+	items, total, err = svc.Candidates(ctx, f.userID, f.projectID, "", "筛选", 1, 2)
 	if err != nil || total != 5 || len(items) != 2 {
 		t.Fatalf("search pagination items=%d total=%d err=%v", len(items), total, err)
 	}
-	if _, _, err := svc.Candidates(ctx, uuid.NewString(), f.projectID, "", 0, 25); err == nil {
+	if _, _, err := svc.Candidates(ctx, uuid.NewString(), f.projectID, "", "", 0, 25); err == nil {
 		t.Fatal("foreign user accessed project")
 	}
 }

@@ -32,7 +32,7 @@ func decodeAnalyticsContentID(raw string) (string, error) {
 }
 
 func analyticsQuery(c fiber.Ctx) (service.AnalyticsQuery, error) {
-	q := service.AnalyticsQuery{From: c.Query("from"), To: c.Query("to"), Granularity: c.Query("granularity"), MetricBasis: c.Query("metric_basis"), Search: c.Query("search"), ContentType: c.Query("content_type"), Sort: c.Query("sort"), Direction: c.Query("direction")}
+	q := service.AnalyticsQuery{Platform: c.Query("platform"), From: c.Query("from"), To: c.Query("to"), Granularity: c.Query("granularity"), MetricBasis: c.Query("metric_basis"), Search: c.Query("search"), ContentType: c.Query("content_type"), Sort: c.Query("sort"), Direction: c.Query("direction")}
 	var err error
 	q.Offset, err = strconv.Atoi(c.Query("offset", "0"))
 	if err != nil {

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { render } from '@/test/test-utils'
+import { api } from '@/lib/api'
+import type { Project } from '@/types'
 import ContentAnalyticsPage from './ContentAnalyticsPage'
 import { contentAnalyticsApi } from '@/lib/content-analytics'
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1' } }) }))
@@ -12,6 +14,7 @@ vi.mock('@/lib/content-analytics', async importOriginal => ({ ...await importOri
 const content = { id: 'canonical-1', title: '服务器内容', content_type: 'image_text', metrics: { view_count: 12 } }
 const summary = { revision: 4, updated_at: '', metric_basis: 'cumulative' as const, totals: { view_count: 12 }, series: [], unavailable_metrics: {} }
 beforeEach(() => {
+  vi.mocked(api.projects.list).mockResolvedValue([{ id: 'notes', platform: 'seednote', name: '生活笔记' } as Project])
   vi.clearAllMocks(); localStorage.clear(); window.history.replaceState(null, '', '/content-analytics?account=notes')
   vi.mocked(contentAnalyticsApi.overview).mockResolvedValue({ ...summary, coverage: { contents: 51 } })
   vi.mocked(contentAnalyticsApi.contents).mockResolvedValue({ revision: 4, items: [content], total: 51, offset: 0, limit: 25 })
@@ -20,13 +23,24 @@ beforeEach(() => {
   vi.mocked(contentAnalyticsApi.observations).mockResolvedValue({ revision: 4, items: [], total: 0, offset: 0, limit: 25 })
 })
 describe('server analytics queries', () => {
+  it('reads a neutral project by the selected analytics platform', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'shared', platform: '', name: '通用项目' } as Project])
+    window.history.replaceState(null, '', '/content-analytics?account=shared&platform=seednote')
+    render(<ContentAnalyticsPage />)
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选项目' })).toHaveTextContent('通用项目'))
+    await waitFor(() => expect(contentAnalyticsApi.overview).toHaveBeenCalledWith('shared', expect.objectContaining({ platform: 'seednote' }), expect.any(AbortSignal)))
+    fireEvent.change(screen.getByLabelText('分析平台'), { target: { value: 'wechat' } })
+    await waitFor(() => expect(contentAnalyticsApi.overview).toHaveBeenLastCalledWith('shared', expect.objectContaining({ platform: 'wechat' }), expect.any(AbortSignal)))
+    expect(screen.getByLabelText('分析平台')).toHaveValue('wechat')
+  })
+
   it('uses the shared compact project selector and removes redundant date controls', async () => {
     render(<ContentAnalyticsPage />)
 
     const projectSelector = await screen.findByRole('combobox', { name: '筛选项目' })
     await waitFor(() => expect(projectSelector).toHaveTextContent('生活笔记'))
     expect(projectSelector).not.toHaveClass('border-border')
-    expect(projectSelector.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
+    expect(projectSelector.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
     expect(screen.queryByText(/最近数据/)).not.toBeInTheDocument()
     expect(screen.queryByLabelText('数据年份')).not.toBeInTheDocument()
     expect(contentAnalyticsApi.dates).not.toHaveBeenCalled()

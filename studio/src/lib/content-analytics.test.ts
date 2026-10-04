@@ -24,7 +24,7 @@ describe('bounded analytics API', () => {
     expect(http.get).toHaveBeenCalledWith('/projects/p1/content-analytics/dates', { params: { year: 2026, metric_basis: 'cumulative' }, signal: undefined })
   })
   it('retains the business task deep-link contract', () => {
-    expect(taskContentAnalyticsHref('p1', 't1')).toBe('/content-analytics?account=p1&content=task%3At1')
+    expect(taskContentAnalyticsHref('p1', 't1', 'seednote')).toBe('/content-analytics?account=p1&content=task%3At1&platform=seednote')
     expect(parseTargetKey('task:t1')).toEqual({ kind: 'task', id: 't1' })
     expect(parseTargetKey('unknown:t1')).toBeUndefined()
   })

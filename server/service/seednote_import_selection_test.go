@@ -276,7 +276,7 @@ func TestSeednoteRevokedImportCannotTeachFutureMatching(t *testing.T) {
 	if err != nil || revokedDate != nil {
 		t.Fatalf("revoked date still evidence: %v err=%v", revokedDate, err)
 	}
-	candidates, err := loadAnalyticsCandidates(ctx, repo, req.UserID, req.ProjectID)
+	candidates, err := loadAnalyticsCandidates(ctx, repo, req.UserID, req.ProjectID, model.AnalyticsMetricsSeednote)
 	if err != nil {
 		t.Fatal(err)
 	}

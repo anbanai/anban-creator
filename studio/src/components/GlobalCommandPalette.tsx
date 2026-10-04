@@ -136,7 +136,7 @@ export default function GlobalCommandPalette() {
             </CommandItem>
           ))}
           {nextActions.length === 0 && (
-            <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: defaultProject?.platform === 'wechat' ? 'wechat-article' : defaultProject?.platform, projectId: defaultProject?.id, intent: 'new' })))}>
+            <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: defaultProject?.platform === 'wechat' ? 'wechat-article' : defaultProject?.platform || undefined, projectId: defaultProject?.id, intent: 'new' })))}>
               <Plus className="mr-2 h-4 w-4" />
               新建创作任务
             </CommandItem>

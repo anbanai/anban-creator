@@ -418,7 +418,7 @@ export default function DashboardPage() {
         )}
 
         <SeednoteTemplateGallery
-          platform={selectedProject?.platform}
+          platform={selectedProject?.platform || undefined}
           onApply={(templatePrompt) => setPrompt(templatePrompt)}
           className="mx-auto w-full max-w-3xl"
         />

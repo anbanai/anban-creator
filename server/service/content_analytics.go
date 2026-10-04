@@ -55,7 +55,7 @@ func analyticsCandidateDate(value string) *time.Time {
 	}
 	return nil
 }
-func (s *ContentAnalyticsService) Candidates(ctx context.Context, userID, projectID, search string, offset, limit int) ([]AnalyticsCandidate, int, error) {
+func (s *ContentAnalyticsService) Candidates(ctx context.Context, userID, projectID, platform, search string, offset, limit int) ([]AnalyticsCandidate, int, error) {
 	project, err := s.repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		return nil, 0, err
@@ -63,7 +63,7 @@ func (s *ContentAnalyticsService) Candidates(ctx context.Context, userID, projec
 	if project.UserID != userID {
 		return nil, 0, errors.New("project does not belong to user")
 	}
-	family, err := model.AnalyticsMetricFamilyForPlatform(project.Platform)
+	family, err := analyticsQueryFamily(platform, project.Platform)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -78,13 +78,16 @@ func (s *ContentAnalyticsService) Candidates(ctx context.Context, userID, projec
 	return result, int(total), nil
 }
 
-func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, userID, projectID string) ([]AnalyticsCandidate, error) {
+func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, userID, projectID string, family model.AnalyticsMetricFamily) ([]AnalyticsCandidate, error) {
 	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 	if project.UserID != userID {
 		return nil, errors.New("project does not belong to user")
+	}
+	if family != model.AnalyticsMetricsWechat && family != model.AnalyticsMetricsSeednote {
+		return nil, fmt.Errorf("unsupported analytics metric family")
 	}
 	tasks, err := repo.Tasks().FindByUserID(ctx, userID, projectID, "", 0, 0)
 	if err != nil {
@@ -93,7 +96,7 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 	result := make([]AnalyticsCandidate, 0, len(tasks))
 	byTask := map[string]int{}
 	for _, task := range tasks {
-		if task.ProjectID != projectID || task.UserID != userID {
+		if task.ProjectID != projectID || task.UserID != userID || !analyticsCandidateTaskMatches(task, family) {
 			continue
 		}
 		title := task.Title
@@ -103,14 +106,14 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 		byTask[task.ID] = len(result)
 		contentType := strings.TrimSpace(task.Channel)
 		if contentType == "" {
-			contentType = strings.TrimSpace(task.TaskKind)
+			contentType = strings.TrimSpace(task.Type)
 		}
 		if contentType == "" {
 			contentType = "unknown"
 		}
 		result = append(result, AnalyticsCandidate{Target: AnalyticsTarget{"task", task.ID}, Title: title, ContentType: contentType, Status: task.Status, Date: &task.CreatedAt, Task: task})
 	}
-	{
+	if family == model.AnalyticsMetricsWechat {
 		pubs, err := repo.WechatPublications().ListByProject(ctx, projectID)
 		if err != nil {
 			return nil, err
@@ -140,7 +143,7 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 			}
 		}
 	}
-	{
+	if family == model.AnalyticsMetricsSeednote {
 		posts, total, err := repo.SeednotePosts().ListByProject(ctx, projectID, "", 0, 100)
 		if err != nil {
 			return nil, err
@@ -186,7 +189,7 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 			result = append(result, c)
 		}
 	}
-	{
+	if family == model.AnalyticsMetricsWechat {
 		for i := range result {
 			var snapshots []*model.WechatAnalyticsSnapshot
 			if result[i].Task != nil {
@@ -340,4 +343,19 @@ func analyticsPublicIdentity(value string) string {
 		}
 	}
 	return value
+}
+
+func analyticsCandidateTaskMatches(task *model.Task, family model.AnalyticsMetricFamily) bool {
+	channel := task.Channel
+	if channel == "" {
+		channel = task.Type
+	}
+	switch family {
+	case model.AnalyticsMetricsWechat:
+		return channel == model.ChannelArticle || channel == model.ChannelWechatPicture
+	case model.AnalyticsMetricsSeednote:
+		return channel == model.ChannelSeednote
+	default:
+		return false
+	}
 }

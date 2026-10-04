@@ -85,7 +85,7 @@ export function switchTaskFormDefaults(
   current: TaskFormDefaults,
   project?: Project | null,
 ): TaskFormDefaults {
-  if (project && ((project.platform === 'wechat' && (current.type === 'wechat-article' || current.type === 'wechat-picture')) || current.type === project.platform || (current.type === 'viral_analysis' && project.platform === 'seednote'))) {
+  if (project && ((project.platform === 'wechat' && (current.type === 'wechat-article' || current.type === 'wechat-picture')) || current.type === project.platform || (current.type === 'viral_analysis'))) {
     const defaults = createTaskFormDefaults(project)
     const switched = {
       ...cloneValue(current),

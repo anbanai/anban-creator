@@ -165,8 +165,8 @@ func loadFeedbackMetricSummary(ctx context.Context, repo repository.Repository, 
 		return feedbackMetricSummary{}, nil, errors.New("feedback analytics repository unavailable")
 	}
 	var rows []model.AnalyticsObservation
-	query := repo.Analytics().DB().WithContext(ctx).
-		Model(&model.AnalyticsObservation{}).
+	query := scopeFeedbackContents(repo.Analytics().DB().WithContext(ctx).
+		Model(&model.AnalyticsObservation{}), "ac.", job.Platform).
 		Joins("JOIN analytics_contents ac ON ac.id = analytics_observations.content_id AND ac.project_id = analytics_observations.project_id").
 		Where("analytics_observations.project_id = ? AND analytics_observations.stat_date BETWEEN ? AND ? AND analytics_observations.metric_basis IN ? AND analytics_observations.revoked_at IS NULL AND analytics_observations.content_id <> ''", job.ProjectID, job.PeriodStart, job.PeriodEnd, []string{"daily", "cumulative"})
 	if strings.TrimSpace(job.MaturityCutoff) != "" {
@@ -267,7 +267,7 @@ func feedbackMetricPresent(row model.AnalyticsObservation, column string) bool {
 
 func feedbackEngagementRate(row model.AnalyticsObservation, platform string) (float64, bool) {
 	var denominator, numerator int64
-	if platform == model.PlatformWechat || platform == model.ScopeWechat {
+	if platform == model.PlatformWechat || platform == model.ChannelArticle || platform == model.ChannelWechatPicture {
 		if row.ReadUsers == nil || *row.ReadUsers <= 0 {
 			return 0, false
 		}

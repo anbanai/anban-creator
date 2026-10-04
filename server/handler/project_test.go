@@ -1427,3 +1427,50 @@ func TestProjectWechatCredentialUpdatePreservesOmittedSecret(t *testing.T) {
 		t.Fatalf("project response exposed private configuration: %s", body)
 	}
 }
+
+func TestProjectUpdateAuthorPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{"omitted preserves existing author", map[string]any{"name": "renamed"}, "Original author"},
+		{"explicit empty clears author", map[string]any{"author": ""}, ""},
+		{"explicit value replaces author", map[string]any{"author": "New author"}, "New author"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, repo, _ := setupProjectHandlerTest(t)
+			ctx := context.Background()
+			userID := uuid.NewString()
+			project := &model.Project{ID: uuid.NewString(), UserID: userID, Name: "Original", Platform: model.PlatformWechat, Author: "Original author", Status: model.ProjectStatusActive}
+			if err := repo.Projects().Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			resp := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID, userID, tc.body)
+			body := decodeBody(t, resp)
+			if resp.StatusCode != fiber.StatusOK {
+				t.Fatalf("status/body = %d/%#v", resp.StatusCode, body)
+			}
+			updated, err := repo.Projects().FindByID(ctx, project.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.Author != tc.want {
+				t.Fatalf("author = %q, want %q", updated.Author, tc.want)
+			}
+		})
+	}
+}
+
+func TestNeutralProjectCreationRequiresName(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+	for _, name := range []string{"", "   "} {
+		resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{"name": name})
+		body := decodeBody(t, resp)
+		if resp.StatusCode != fiber.StatusBadRequest { t.Fatalf("blank name status/body = %d/%#v", resp.StatusCode, body) }
+	}
+	projects, err := repo.Projects().ListByUserID(t.Context(), userID, repository.ProjectListOptions{})
+	if err != nil { t.Fatal(err) }
+	if len(projects) != 0 { t.Fatalf("blank projects persisted: %d", len(projects)) }
+}

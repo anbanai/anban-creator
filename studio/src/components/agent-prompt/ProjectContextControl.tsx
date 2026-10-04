@@ -16,8 +16,6 @@ import {
   ComboboxTrigger,
 } from '@/components/ui/combobox'
 import { Separator } from '@/components/ui/separator'
-import { platformBgColor, platformBorderColor, renderPlatformIcon } from '@/lib/PlatformIcon'
-import { platformDisplayName } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import {
   ProjectIdentity,
@@ -71,7 +69,6 @@ type ProjectContextItem = ProjectItem | NoProjectItem
 
 interface ProjectContextGroup {
   value: string
-  platform?: string
   items: ProjectContextItem[]
 }
 
@@ -84,23 +81,9 @@ function projectGroups(
   allowNoProject: boolean,
   noProjectItem: NoProjectItem,
 ): ProjectContextGroup[] {
-  const groups = new Map<string, ProjectItem[]>()
-  for (const project of projects) {
-    const platform = project.platform || 'project'
-    const group = groups.get(platform) ?? []
-    group.push({ ...project, kind: 'project' })
-    groups.set(platform, group)
-  }
-
   const result: ProjectContextGroup[] = []
   if (allowNoProject) result.push({ value: '上下文', items: [noProjectItem] })
-  for (const [platform, items] of groups) {
-    result.push({
-      value: platform === 'project' ? '项目' : platformDisplayName(platform, platform),
-      platform,
-      items,
-    })
-  }
+  if (projects.length) result.push({ value: '项目', items: projects.map((project) => ({ ...project, kind: 'project' })) })
   return result
 }
 
@@ -176,10 +159,6 @@ function SelectProjectContext({
                 compact ? 'w-auto max-w-full' : 'w-full',
                 compact ? 'h-8' : selected?.kind === 'project' ? 'h-auto min-h-14 py-2' : undefined,
                 compact && 'px-1.5 shadow-none hover:bg-muted/70',
-                selected?.kind === 'project' && selected.platform && !compact && [
-                  'border-l-2',
-                  platformBorderColor[selected.platform],
-                ],
               )}
             />
           }
@@ -194,8 +173,6 @@ function SelectProjectContext({
               <ProjectIdentity
                 project={selected}
                 compact={compact}
-                showType={false}
-                avatarMode="platform"
               />
             ) : selected?.name ?? placeholder}
           </span>
@@ -211,22 +188,7 @@ function SelectProjectContext({
                 className="min-w-0"
               >
                 <ComboboxLabel className="px-1.5 py-0.5">
-                  <span
-                    data-platform={group.platform}
-                    className="flex min-w-0 items-center gap-2"
-                  >
-                    {group.platform ? (
-                      <span
-                        className={cn(
-                          'flex size-5 shrink-0 items-center justify-center rounded-md [&_svg]:size-3',
-                          platformBgColor[group.platform],
-                        )}
-                      >
-                        {renderPlatformIcon(group.platform)}
-                      </span>
-                    ) : null}
-                    <span className="truncate font-medium text-foreground/80">{group.value}</span>
-                  </span>
+                  <span className="truncate font-medium text-foreground/80">{group.value}</span>
                 </ComboboxLabel>
                 <ComboboxCollection>
                   {(item: ProjectContextItem) => (
@@ -234,14 +196,14 @@ function SelectProjectContext({
                       key={item.id}
                       value={item}
                       aria-label={item.kind === 'project'
-                        ? [item.name, item.platform ? platformDisplayName(item.platform) : undefined, item.description]
+                        ? [item.name, item.description]
                           .filter(Boolean)
                           .join(' · ')
                         : item.name}
                       className="min-h-10 rounded-lg border border-transparent px-2 py-1 pr-9 aria-selected:border-border/70 aria-selected:bg-accent/70"
                     >
                       {item.kind === 'project' ? (
-                        <ProjectIdentity project={item} showType={false} avatarMode="platform" />
+                        <ProjectIdentity project={item} />
                       ) : item.name}
                     </ComboboxItem>
                   )}
@@ -287,8 +249,6 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
           <ProjectIdentity
             project={props.project}
             compact={props.compact}
-            showType={false}
-            avatarMode="platform"
           />
         ) : props.noProjectLabel ?? '未关联项目'}
       </div>

@@ -191,7 +191,7 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrProjectUpdateConflict) {
 		return Error(c, fiber.StatusConflict, "project reference changed concurrently; retry the update")
 	}
-	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) {
+	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
@@ -231,6 +231,7 @@ type projectRequest struct {
 	Writer                        string                           `json:"writer"`
 	Theme                         string                           `json:"theme"`
 	Author                        string                           `json:"author"`
+	AuthorSet                     bool                             `json:"-"`
 	ReferenceImage                *service.ReferenceImageSelection `json:"reference_image"`
 	ReferenceImageSet             bool                             `json:"-"`
 	ReferenceImageAssetID         string                           `json:"-"`
@@ -341,6 +342,7 @@ func (req *projectRequest) toProject() *model.Project {
 		Writer:                        req.Writer,
 		Theme:                         req.Theme,
 		Author:                        req.Author,
+		AuthorSet:                     req.AuthorSet,
 		ReferenceImageAssetID:         req.ReferenceImageAssetID,
 		ReferenceImageSet:             req.ReferenceImageSet,
 		PortraitReferenceImageAssetID: req.PortraitReferenceImageAssetID,
@@ -502,6 +504,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if hasJSONField(c.Body(), "instructions") {
 		req.InstructionsSet = true
 	}
+	req.AuthorSet = hasJSONField(c.Body(), "author")
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 	req.VisualStyleSet = hasJSONField(c.Body(), "visual_style")
 	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
@@ -568,7 +571,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) {
+		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
@@ -1183,6 +1186,7 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	if hasJSONField(c.Body(), "instructions") {
 		req.InstructionsSet = true
 	}
+	req.AuthorSet = hasJSONField(c.Body(), "author")
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
 	req.VisualStyleSet = hasJSONField(c.Body(), "visual_style")
 	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")

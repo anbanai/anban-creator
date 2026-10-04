@@ -82,7 +82,7 @@ function createInitialDefaults(project?: Project, initialType?: TaskType): TaskF
   }
   if (initialType === 'viral_analysis') {
     return {
-      ...createTaskFormDefaults(project?.platform === 'seednote' ? project : undefined),
+      ...createTaskFormDefaults(project),
       type: 'viral_analysis',
     }
   }
@@ -204,10 +204,7 @@ export function TaskFormDialog({
     : []
   const hasWhiteboardSubtitle = whiteboardSubtitles.length === 1 && whiteboardSubtitles[0]?.type === 'text'
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
-  const availableProjects = useMemo(
-    () => isViralAnalysisTask ? projects.filter((project) => project.platform === 'seednote') : projects,
-    [isViralAnalysisTask, projects],
-	)
+  const availableProjects = projects
 	const selectedProject = projectMap.get(watchedProjectId ?? '')
 	const selectedAgentPack = useMemo(
 		() => agentPacksQuery.data?.packs?.find((pack) => (pack.channel === watchedType || pack.id === watchedType || pack.bindings.task_kinds?.includes(watchedType))),
@@ -263,6 +260,7 @@ export function TaskFormDialog({
     if (initializedKeyRef.current === initializationKey) return
 
     const project = initialProjectId ? projectMap.get(initialProjectId) : undefined
+    const firstProject = projects[0]
     const defaults = mode === 'clone' && sourceTask
       ? (() => {
           const cloned = cloneTaskFormDefaults(sourceTask)
@@ -274,7 +272,7 @@ export function TaskFormDialog({
               : switchTaskFormDefaults(cloned, sourceProject)
             : { ...cloned, project_id: '' }
         })()
-      : createInitialDefaults(project, initialType)
+      : createInitialDefaults(project ?? (initialType === 'viral_analysis' ? firstProject : undefined), initialType)
     initializedKeyRef.current = initializationKey
     form.reset(defaults)
     resetAttachments(defaults.input_attachments)
@@ -360,6 +358,7 @@ export function TaskFormDialog({
     }
     // Project defaults may suggest a type, but must not override the user's explicit choice.
     const projectDefaults = switchTaskFormDefaults(current, project)
+    if (current.type === 'viral_analysis') projectDefaults.type = 'viral_analysis'
     const switched = explicitTaskTypeRef.current && projectDefaults.type !== current.type
       ? {
           ...current,
@@ -507,7 +506,6 @@ export function TaskFormDialog({
           const type = value as TaskType
           setFormValue('type', type)
           setFormValue('quantity', Math.min(quantity, maxTaskQuantity(type)))
-          if (type === 'viral_analysis' && selectedProject?.platform !== 'seednote') setFormValue('project_id', '')
           if (type === 'hypit' && !form.getValues('hypit_input')) setFormValue('hypit_input', initialHypitInput(watchedPrompt))
           if (type === 'montage' && !form.getValues('montage_input')) setFormValue('montage_input', initialMontageInput(watchedPrompt))
         }}
@@ -612,7 +610,7 @@ export function TaskFormDialog({
                 <p className="mb-2 text-xs text-muted-foreground">写清目标、素材用法和不能出现的表达；未填写的部分按项目默认值执行。</p>
                 {!isViralAnalysisTask ? (
                   <SeednoteTemplateGallery
-                    platform={selectedProject?.platform}
+                    platform={selectedProject?.platform || undefined}
                     onApply={(prompt) => setFormValue('prompt', prompt)}
                     className="mb-4"
                   />

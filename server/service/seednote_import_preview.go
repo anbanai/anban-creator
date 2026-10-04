@@ -29,7 +29,7 @@ func (s *SeednoteImportService) Preview(ctx context.Context, req SeednoteImportR
 	if err != nil {
 		return nil, err
 	}
-	candidates, err := loadAnalyticsCandidates(ctx, s.repo, req.UserID, req.ProjectID)
+	candidates, err := loadAnalyticsCandidates(ctx, s.repo, req.UserID, req.ProjectID, model.AnalyticsMetricsSeednote)
 	if err != nil {
 		return nil, err
 	}

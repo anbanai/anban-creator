@@ -38,19 +38,16 @@ describe('ProjectContextControl', () => {
     expect(trigger).toHaveTextContent('Morning Brief')
     expect(trigger).toHaveTextContent('Daily editorial briefing')
     expect(trigger).not.toHaveTextContent('公众号项目')
-    expect(trigger.querySelector('.lucide-signature')).toBeInTheDocument()
+    expect(trigger.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
     expect(trigger).toHaveClass('border-border')
 
     fireEvent.click(trigger)
     const popup = screen.getByPlaceholderText('搜索项目...').closest('[data-slot="combobox-content"]')
     expect(popup).toHaveClass('w-[min(36rem,calc(100vw-2rem))]')
     expect(popup?.querySelector('[data-slot="combobox-list"]')).toHaveClass('sm:grid-cols-2')
-    const articleGroup = (await screen.findByText('公众号')).closest('[data-platform]')
-    expect(articleGroup).toHaveAttribute('data-platform', 'wechat')
-    expect(articleGroup?.closest('[data-slot="combobox-label"]')).toHaveClass('py-0.5')
-    expect(articleGroup?.closest('[data-slot="combobox-label"]')).not.toHaveTextContent('1 个')
-    expect(screen.getByText('种草笔记')).toBeInTheDocument()
-    const selectedOption = screen.getByRole('option', { name: /Morning Brief.*公众号/ })
+    expect(screen.queryByText('公众号', { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByText('种草笔记', { exact: true })).not.toBeInTheDocument()
+    const selectedOption = screen.getByRole('option', { name: /Morning Brief.*Daily editorial briefing/ })
     expect(selectedOption).toHaveTextContent('Daily editorial briefing')
     expect(selectedOption).not.toHaveTextContent('公众号项目')
     expect(selectedOption).toHaveAttribute('aria-selected', 'true')
@@ -144,7 +141,7 @@ describe('ProjectContextControl', () => {
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
     expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
-    expect(document.querySelector('.lucide-signature')).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
     expect(screen.queryByRole('img', { name: 'Morning Brief' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
 
@@ -165,7 +162,7 @@ describe('ProjectContextControl', () => {
 
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.queryByText('公众号')).not.toBeInTheDocument()
-    expect(document.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
     expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
     expect(screen.queryByText('Daily editorial briefing')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
@@ -189,7 +186,7 @@ describe('ProjectContextControl', () => {
     const trigger = screen.getByRole('combobox', { name: 'Choose project context' })
     expect(trigger).toHaveTextContent('Morning Brief')
     expect(trigger).not.toHaveTextContent('公众号')
-    expect(trigger.querySelector('[data-slot="avatar-fallback"] svg')).toBeInTheDocument()
+    expect(trigger.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
     expect(trigger).not.toHaveClass('border-border')
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
@@ -198,12 +195,12 @@ describe('ProjectContextControl', () => {
     )
 
     fireEvent.click(trigger)
-    const option = await screen.findByRole('option', { name: /Morning Brief.*公众号/ })
+    const option = await screen.findByRole('option', { name: /Morning Brief.*Daily editorial briefing/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
     expect(option).not.toHaveTextContent('公众号项目')
   })
 
-  it('keeps the video brand visible for projects still named after the legacy platform', async () => {
+  it('selects legacy projects without showing their old platform identity', async () => {
     render(
       <ProjectContextControl
         mode="select"
@@ -218,18 +215,14 @@ describe('ProjectContextControl', () => {
 
     const trigger = screen.getByRole('combobox', { name: '项目上下文' })
     expect(trigger).not.toHaveTextContent('视频复刻项目')
-    expect(trigger.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
+    expect(trigger.querySelector('[data-platform-icon]')).not.toBeInTheDocument()
 
     fireEvent.click(trigger)
-    const replicationGroup = (await screen.findByText('视频复刻')).closest('[data-platform]')
-    expect(replicationGroup).toHaveAttribute('data-platform', 'hypit')
-    expect(screen.getByText('视频生成').closest('[data-platform]')).toHaveAttribute(
-      'data-platform',
-      'montage',
-    )
-    const replication = await screen.findByRole('option', { name: /Hypit.*视频复刻/ })
+    expect(screen.queryByText('视频复刻', { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByText('视频生成', { exact: true })).not.toBeInTheDocument()
+    const replication = await screen.findByRole('option', { name: 'Hypit' })
     expect(replication).toHaveTextContent('Hypit')
-    const generation = screen.getByRole('option', { name: /Montage.*视频生成/ })
+    const generation = screen.getByRole('option', { name: 'Montage' })
     expect(generation).toHaveTextContent('Montage')
   })
 

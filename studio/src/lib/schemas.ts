@@ -241,8 +241,8 @@ export const planSchema = z.object({
 export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
-  platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit"]).or(z.literal('')),
-  name: z.string().max(100, "名称不能超过 100 个字符").optional(),
+  platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit"]).or(z.literal('')).optional(),
+  name: z.string().trim().min(1, "请输入项目名称").max(100, "名称不能超过 100 个字符"),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
   wechat_app_id: z.string().optional(),
@@ -267,14 +267,6 @@ export const projectSchema = z.object({
   reference_image: referenceImageSelectionSchema.nullable().optional(),
   portrait_reference_image: referenceImageSelectionSchema.nullable().optional(),
   image_ratio: imageRatioSchema.optional(),
-}).refine((data) => {
-  if (data.platform === 'wechat') {
-    return !!data.wechat_app_id?.trim()
-  }
-  return true
-}, {
-  message: "启用公众号草稿投递时，微信 AppID 为必填项",
-  path: ["wechat_app_id"],
 })
 export type ProjectFormValues = z.infer<typeof projectSchema>
 

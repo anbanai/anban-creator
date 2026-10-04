@@ -52,15 +52,11 @@ describe('ProjectCard', () => {
     unused_topics: 6,
   }
 
-  it.each([
-    ['montage', '视频生成', 'text-purple-700', 'generate'],
-    ['hypit', '视频复刻', 'text-orange-700', 'replicate'],
-  ] as const)('shows the %s platform identity on project cards', (platform, label, color, symbol) => {
-    render(<ProjectCard project={project({ platform })} />)
-    const badge = screen.getByText(label)
-    expect(badge).toHaveClass(color)
-    expect(badge.querySelector(`[data-platform-icon="${platform}"]`)).toBeInTheDocument()
-    expect(badge.querySelector(`[data-platform-symbol="${symbol}"]`)).toBeInTheDocument()
+  it('shows project identity without a platform badge or avatar', () => {
+    render(<ProjectCard project={project({ name: '共享品牌', avatar_url: 'https://example.com/avatar.png' })} />)
+    expect(screen.getByText('共享品牌')).toBeInTheDocument()
+    expect(screen.queryByText('公众号', { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
   it('shows only basic project activity', () => {
@@ -99,7 +95,7 @@ describe('ProjectCard', () => {
     expect(topicPoolButton).not.toHaveTextContent('0')
   })
 
-  it.each(['wechat', 'seednote', 'moments'] as const)('shows the project profile action for %s projects', (platform) => {
+  it.each(['', 'wechat', 'seednote', 'moments'] as const)('shows the project profile action for %s projects', (platform) => {
     const onProfile = vi.fn()
     render(<ProjectCard project={project({ platform })} onProfile={onProfile} />)
 
@@ -123,6 +119,12 @@ describe('ProjectCard', () => {
     expect(screen.queryByRole('button', { name: '归档项目：公众号项目' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '恢复项目：公众号项目' }))
     expect(onRestore).toHaveBeenCalledWith('project-1')
+  })
+
+  it('shows feedback controls for a neutral project', async () => {
+    render(<ProjectCard project={project({ platform: '' })} />)
+    expect(await screen.findByText('反馈闭环')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /暂停/ })).toBeEnabled()
   })
 
   it('pauses feedback scheduling and submits an explicit monthly period', async () => {

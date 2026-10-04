@@ -27,6 +27,7 @@ var (
 	ErrProjectProfileResultAlreadyStored = errors.New("project profile result already submitted")
 	ErrProjectProfileUnsupportedPlatform = errors.New("project profile is only supported for WeChat and Seednote projects")
 	ErrInvalidProjectChannel             = errors.New("invalid project channel")
+	ErrProjectNameRequired              = errors.New("project name is required")
 )
 
 var supportedProjectChannels = map[string]struct{}{
@@ -129,6 +130,10 @@ func (s *ProjectService) SetImageAnalysisService(analyses *ImageAnalysisService)
 // is injected at RESOLUTION time (resolver.ResolveStyle) so every consumer agrees
 // on the single source of truth. The project stores only what the user set.
 func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
+	if strings.TrimSpace(ch.Name) == "" {
+		return nil, ErrProjectNameRequired
+	}
+	ch.Name = strings.TrimSpace(ch.Name)
 	if strings.TrimSpace(ch.Platform) != "" && !validProjectPlatform(ch.Platform) {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
 	}
@@ -897,9 +902,11 @@ func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
 	if ch.Theme != "" {
 		existing.Theme = ch.Theme
 	}
-	// 作者署名（author）：unconditional assign 以支持清空。
-	// 导入模型下"导入模板→清空署名"是合法操作，guarded assign 会让清空后的保存静默回填旧署名。
-	existing.Author = ch.Author
+	// Shared project edits omit channel-specific defaults. Preserve the author
+	// unless supplied, while allowing an explicit empty byline to clear it.
+	if ch.AuthorSet || ch.Author != "" {
+		existing.Author = ch.Author
+	}
 	if ch.ReferenceImageSet {
 		existing.ReferenceImageAssetID = ch.ReferenceImageAssetID
 	}

@@ -53,10 +53,10 @@ func (r *feedbackLoopRepository) FindJobByIDOrFingerprint(ctx context.Context, i
 	return &job, err
 }
 
-func (r *feedbackLoopRepository) FindRunningJob(ctx context.Context, projectID, operation string) (*model.FeedbackJob, error) {
+func (r *feedbackLoopRepository) FindRunningJob(ctx context.Context, projectID, operation, channel string) (*model.FeedbackJob, error) {
 	var job model.FeedbackJob
 	err := r.db.WithContext(ctx).
-		Where("project_id = ? AND operation = ? AND status IN ?", projectID, operation, []string{model.FeedbackJobQueued, model.FeedbackJobRunning}).
+		Where("project_id = ? AND operation = ? AND platform = ? AND status IN ?", projectID, operation, channel, []string{model.FeedbackJobQueued, model.FeedbackJobRunning}).
 		Order("created_at asc").First(&job).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil

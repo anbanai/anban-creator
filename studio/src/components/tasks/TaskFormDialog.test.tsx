@@ -444,7 +444,8 @@ describe('TaskFormDialog', () => {
     expect(within(dialog).getByText('指定文案与图片中文字的输出语言。')).toBeInTheDocument()
   })
 
-  it('creates viral analysis through the task API with only Seednote projects', async () => {
+  it('creates viral analysis using a neutral shared project', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ ...fixtures.seednoteProject, platform: '' }])
     renderDialog({ initialProjectId: undefined, initialType: 'viral_analysis' })
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
 
@@ -1117,7 +1118,7 @@ describe('video replication task integration', () => {
     await waitFor(() => expect(selector).toHaveTextContent('Hypit'))
     expect(selector).toHaveTextContent('Hypit')
     expect(selector).not.toHaveTextContent('视频复刻')
-    expect(selector.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
+    expect(selector.querySelector('[data-platform-icon]')).not.toBeInTheDocument()
     expect(selector).not.toHaveTextContent('Hypit项目')
     expect(screen.queryByText('hypit')).not.toBeInTheDocument()
   })

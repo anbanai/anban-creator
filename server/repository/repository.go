@@ -469,7 +469,7 @@ type FeedbackLoopRepository interface {
 	CreateJob(ctx context.Context, job *model.FeedbackJob) (bool, error)
 	FindJobByFingerprint(ctx context.Context, fingerprint string) (*model.FeedbackJob, error)
 	FindJobByIDOrFingerprint(ctx context.Context, identity string) (*model.FeedbackJob, error)
-	FindRunningJob(ctx context.Context, projectID, operation string) (*model.FeedbackJob, error)
+	FindRunningJob(ctx context.Context, projectID, operation, channel string) (*model.FeedbackJob, error)
 	ClaimQueuedJob(ctx context.Context, identity string, now time.Time) (*model.FeedbackJob, bool, error)
 	ClaimTaskID(ctx context.Context, jobID, expectedTaskID, taskID string) (bool, error)
 	AcquireFeedbackLease(ctx context.Context, scope, jobID string, now time.Time, ttl time.Duration) (bool, error)

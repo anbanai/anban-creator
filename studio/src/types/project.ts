@@ -19,7 +19,7 @@ export interface ProjectChannelConfig {
 export interface Project {
   id: string
   user_id: string
-  platform: ProjectPlatform
+  platform: ProjectPlatform | ''
   name: string
   avatar_url: string
 	profile_url?: string
@@ -144,7 +144,7 @@ export interface ProjectMemory {
 }
 
 export interface CreateProjectRequest {
-  platform: ProjectPlatform
+  platform?: ProjectPlatform
   name?: string
   profile_url?: string
   avatar_url?: string

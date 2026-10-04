@@ -1,12 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, Brain, CalendarClock, Database, Lightbulb, Pause, Pencil, Play, RefreshCw, RotateCcw, UserRound } from 'lucide-react'
+import { Archive, Settings2, Brain, CalendarClock, Database, Lightbulb, Pause, Pencil, Play, RefreshCw, RotateCcw, UserRound } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { api } from '@/lib/api'
-import { platformDisplayName } from '@/lib/labels'
-import { renderPlatformIcon, platformBadgeVariant, platformBadgeClassName } from '@/lib/PlatformIcon'
-import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
@@ -19,6 +16,7 @@ interface ProjectCardProps {
   project: Project
   stats?: ProjectStats
   onEdit?: (project: Project) => void
+  onChannelConfig?: (project: Project) => void
   onProfile?: (project: Project) => void
   archiving?: boolean
   restoring?: boolean
@@ -26,23 +24,21 @@ interface ProjectCardProps {
   onRestore?: (id: string) => void
 }
 
-export function ProjectCard({ project, stats, onEdit, onProfile, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
+export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [monthlyRerunOpen, setMonthlyRerunOpen] = useState(false)
   const [periodStart, setPeriodStart] = useState('')
   const [periodEnd, setPeriodEnd] = useState('')
   const queryClient = useQueryClient()
-  const platform = project.platform ?? 'wechat'
-  const platformLabel = platformDisplayName(platform)
-  const platformBadge = platformBadgeVariant[platform] || ('secondary' as const)
+  const platform = project.platform
   const positioning = project.instructions || project.positioning || ''
   const isArchived = project.status === 'archived'
   const unusedTopics = stats?.unused_topics
   const cardTone = isArchived
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
-  const feedbackEnabled = platform === 'wechat' || platform === 'seednote'
+  const feedbackEnabled = platform === '' || platform === 'wechat' || platform === 'seednote'
   const feedbackQuery = useQuery({
     queryKey: ['project-feedback', project.id],
     queryFn: ({ signal }) => api.projects.feedback(project.id, signal),
@@ -85,13 +81,8 @@ export function ProjectCard({ project, stats, onEdit, onProfile, archiving, rest
     <div className={`flex h-full flex-col rounded-lg border p-4 transition-[border-color,box-shadow] ${cardTone}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <PlatformAvatar avatarUrl={project.avatar_url} name={project.name} platform={platform} size="lg" />
           <div className="min-w-0">
             <h3 className="truncate text-sm font-semibold text-foreground">{project.name}</h3>
-            <Badge variant={platformBadge} className={`mt-1 text-[10px] font-normal ${platformBadgeClassName[platform] || ''}`}>
-              {renderPlatformIcon(platform)}
-              {platformLabel}
-            </Badge>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -161,13 +152,18 @@ export function ProjectCard({ project, stats, onEdit, onProfile, archiving, rest
           </div>
         )}
         <div className="mt-2 flex flex-wrap justify-end gap-1">
+          {onChannelConfig && (
+            <Button variant="ghost" size="xs" onClick={() => onChannelConfig(project)} aria-label={`渠道配置：${project.name}`}>
+              <Settings2 />渠道配置
+            </Button>
+          )}
           {onEdit && (
             <Button variant="ghost" size="xs" onClick={() => onEdit(project)} aria-label={`编辑项目：${project.name}`}>
               <Pencil />
               编辑
             </Button>
           )}
-          {onProfile && (platform === 'wechat' || platform === 'seednote' || platform === 'moments') && (
+          {onProfile && (
             <Button variant="ghost" size="xs" onClick={() => onProfile(project)} aria-label={`项目画像：${project.name}`}>
               <UserRound />
               项目画像

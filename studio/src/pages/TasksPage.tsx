@@ -594,7 +594,7 @@ export default function TasksPage() {
                     </Link>
                     {task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') && (
                       <Link
-                        to={taskContentAnalyticsHref(task.project_id, task.id)}
+                        to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
                         aria-label="查看内容分析"
                         title="查看内容分析"
                         className="mt-0.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
