@@ -1519,6 +1519,67 @@ test.each([false, true])(
     }
   },
 );
+test("Agent provider failure contract survives a failing Hypit finalizer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "hypit-declared-failure-"));
+  try {
+    await mkdir(join(root, "output"));
+    await writeFile(
+      join(root, "output/failure-state.json"),
+      JSON.stringify({
+        version: "1.0",
+        status: "recoverable_failure",
+        stage: "execution",
+        error_code: "hypit_provider_protocol_error",
+        message: "供应商响应格式不符合预期。",
+        resume_from: "inspect_results",
+      }),
+    );
+    const h = runJobHarness();
+    h.dependencies.bootstrap = async () => ({
+      ...bootstrapData,
+      task_type: "hypit",
+    });
+    h.dependencies.prepareHypitWorkspace = async () => {};
+    h.dependencies.cleanupHypit = async () => {};
+    h.dependencies.runClaude = async () => ({
+      success: true,
+      work_dir: root,
+    });
+    h.dependencies.finalizeHypit = async () => {
+      throw new Error("semantic quality report did not pass");
+    };
+    let uploadedState: Record<string, string> | undefined;
+    h.dependencies.uploadWorkspaceArtifacts = async (workspace) => {
+      uploadedState = JSON.parse(
+        await readFile(join(workspace, "output/failure-state.json"), "utf8"),
+      ) as Record<string, string>;
+      return { uploaded: 2, failures: [] };
+    };
+
+    const result = await runJob(
+      jobArgs(root),
+      h.stdout,
+      h.stderr,
+      h.dependencies,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.workflow_error_code).toBe("hypit_provider_protocol_error");
+    expect(result.failure_stage).toBe("execution");
+    expect(result.resume_from).toBe("inspect_results");
+    expect(result.error).toBe(
+      "供应商响应格式不符合预期。检查保留的官方 Results，修复供应商兼容性后再重试。",
+    );
+    expect(uploadedState).toMatchObject({
+      error_code: "hypit_provider_protocol_error",
+      stage: "execution",
+      resume_from: "inspect_results",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("frozen absolute deadline cancels agent even if workspace input is edited", async () => {
   const root = await mkdtemp(join(tmpdir(), "hypit-deadline-"));
   try {

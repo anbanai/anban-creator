@@ -393,7 +393,7 @@ export async function runJob(
           result.success ? hypitReceipt : undefined,
           artifactAbort.signal,
           hypitFailureDetails(
-            hypitFailureReason ?? result,
+            hypitDeclaredFailure(result, hypitFailureReason),
             result.failure_stage,
           ),
         );
@@ -471,12 +471,12 @@ export async function runJob(
       }
       if (data.task_type === "hypit") {
         if (!result.success) {
-          const details = hypitFailureDetails(
-            shutdown.signal.aborted
-              ? shutdown.signal.reason
-              : (hypitFailureReason ?? result),
-            result.failure_stage,
-          );
+          const details = shutdown.signal.aborted
+            ? hypitFailureDetails(shutdown.signal.reason, result.failure_stage)
+            : hypitFailureDetails(
+                hypitDeclaredFailure(result, hypitFailureReason),
+                result.failure_stage,
+              );
           result = {
             ...result,
             error: details.message,
@@ -528,6 +528,27 @@ function failure(workspace: string, error: unknown): ExecutionResult {
     error: error instanceof Error ? error.message : "agent execution failed",
     work_dir: workspace,
     terminal_reason: "platform_error",
+  };
+}
+
+/**
+ * Keep the Agent failure contract visible while the locally observed finalize
+ * diagnostic stays the error text. Passing only the finalize error would drop
+ * an allowlisted provider category and report a generic execution failure.
+ */
+function hypitDeclaredFailure(
+  result: ExecutionResult,
+  reason: unknown,
+): unknown {
+  if (reason == null || reason === result) return result;
+  return {
+    ...result,
+    error:
+      reason instanceof Error
+        ? reason.message
+        : typeof reason === "string"
+          ? reason
+          : String(reason),
   };
 }
 

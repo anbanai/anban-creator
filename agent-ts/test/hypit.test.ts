@@ -26,6 +26,78 @@ test("maps classified provider failures to safe Hypit recovery states", () => {
   });
 });
 
+test("keeps an Agent failure contract instead of a generic execution failure", () => {
+  const declared = {
+    success: false,
+    error: "任务执行未完成，已有产物已保留。",
+    terminal_reason: "workflow_error",
+    workflow_error_code: "hypit_provider_protocol_error",
+    failure_stage: "execution",
+  };
+  expect(hypitFailureDetails(declared, declared.failure_stage)).toEqual({
+    error_code: "hypit_provider_protocol_error",
+    stage: "execution",
+    resume_from: "inspect_results",
+    message: "供应商响应格式不符合预期。检查保留的官方 Results，修复供应商兼容性后再重试。",
+  });
+  expect(hypitFailureDetails({ ...declared, workflow_error_code: "provider_policy_rejection" })).toMatchObject({
+    error_code: "hypit_provider_content_policy",
+    resume_from: "inspect_results",
+  });
+});
+
+test("a locally observed fault outranks an Agent declared failure contract", () => {
+  expect(
+    hypitFailureDetails(
+      {
+        error: "A managed credential was found in delivery content",
+        workflow_error_code: "hypit_provider_protocol_error",
+      },
+      "execution",
+    ),
+  ).toMatchObject({
+    error_code: "hypit_credential_rejected",
+    resume_from: "repair_project",
+  });
+  expect(
+    hypitFailureDetails(
+      { error: "delivery rejected", workflow_error_code: "hypit_provider_protocol_error" },
+      "quality_validation",
+    ),
+  ).toMatchObject({
+    error_code: "hypit_delivery_rejected",
+    resume_from: "repair_project",
+  });
+  expect(
+    hypitFailureDetails(
+      { error: "delivery rejected", workflow_error_code: "hypit_provider_protocol_error" },
+      "artifact_upload",
+    ),
+  ).toMatchObject({
+    error_code: "hypit_delivery_transfer_failed",
+    resume_from: "retry_transfer",
+  });
+});
+
+test("untrusted or unknown Agent failure codes never reach the public taxonomy", () => {
+  const fallback = {
+    error_code: "hypit_execution_failed",
+    stage: "execution",
+    resume_from: "inspect_results",
+    message: "Video execution did not complete. Inspect preserved official Results before retrying.",
+  };
+  for (const workflow_error_code of [
+    "provider_protocol_error ",
+    "PROVIDER_PROTOCOL_ERROR",
+    "hypit_credential_rejected",
+    "hypit_provider_protocol_error_extra",
+    "../../secret",
+    "",
+  ]) {
+    expect(hypitFailureDetails({ error: "任务执行未完成，已有产物已保留。", workflow_error_code }, "execution")).toEqual(fallback);
+  }
+});
+
 test("preserves classified provider failure artifacts through the Hypit allowlist", async () => {
   const root = await mkdtemp(join(tmpdir(), "hypit-failure-state-"));
   try {
