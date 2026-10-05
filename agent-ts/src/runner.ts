@@ -244,11 +244,15 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
             resume_from: toolUseDiagnostics.resume_from,
           };
         } else if (!consumed.terminal.success) {
-          consumed.terminal.terminal_reason = "provider_error";
+          // Only provider failures may be re-attributed to the provider. A platform
+          // or workflow classification is authoritative and must survive normalization.
+          if (consumed.terminal.terminal_reason !== "platform_error" && consumed.terminal.terminal_reason !== "workflow_error") {
+            consumed.terminal.terminal_reason = "provider_error";
+          }
           if (!consumed.terminal.error) consumed.terminal.error = terminalFailureMessage(consumed.terminal, toolUseDiagnostics);
         }
         if (consumed.terminal.success && !initValidated) {
-          consumed.terminal = { ...consumed.terminal, success: false, terminal_reason: "provider_error", error: "managed plugin readiness failed: Claude Code did not emit system/init" };
+          consumed.terminal = { ...consumed.terminal, success: false, terminal_reason: "platform_error", root_error_code: "plugin_init_missing", error: "managed plugin readiness failed: Claude Code did not emit system/init" };
         }
         if (consumed.terminal.success && toolUseDiagnostics.tool_use_count === 0) consumed.terminal.agent_likely_failed = true;
         return consumed.terminal;
@@ -261,7 +265,7 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
     return {
       success: false,
       error: error instanceof Error ? error.message : "agent execution failed",
-      terminal_reason: error instanceof RuntimeArtifactMaterializationError || error instanceof ProjectMemoryError ? "platform_error" : "provider_error",
+      terminal_reason: "platform_error",
       ...(error instanceof ProjectMemoryError ? { root_error_code: "project_memory_unavailable" } : {}),
       work_dir: cwd,
       log_text: logText,
@@ -273,7 +277,7 @@ export async function runClaude(workspace: string, data: ResolvedBootstrapRespon
   if (toolUseDiagnostics.root_error_code === "execution_identity_unavailable") {
     return trustedExecutionIdentityFailure(cwd, logText, toolUseDiagnostics);
   }
-  return { success: false, error: "managed agent stream ended without a result message", terminal_reason: "provider_error", work_dir: cwd, log_text: logText, cost_status: "unreconciled", cost_diagnostics: [{ code: "missing_terminal_model_usage" }], ...toolUseDiagnostics };
+  return { success: false, error: "managed agent stream ended without a result message", terminal_reason: "platform_error", root_error_code: "stream_ended_without_result", work_dir: cwd, log_text: logText, cost_status: "unreconciled", cost_diagnostics: [{ code: "missing_terminal_model_usage" }], ...toolUseDiagnostics };
 }
 
 function trustedExecutionIdentityFailure(cwd: string, logText: string, diagnostics: ToolUseDiagnostics): ExecutionResult {
@@ -690,20 +694,22 @@ export function terminalExecutionResult(message: Extract<SDKMessage, { type: "re
 }
 
 function classifyTerminalMessage(message: Extract<SDKMessage, { type: "result" }>): ExecutionResult {
-  const isAPIFailure = message.is_error === true
-    || message.terminal_reason === "api_error"
+  // Only an explicit provider API failure may be attributed to the provider. A
+  // local runtime stop (turn, budget, execution, or startup failure) is a
+  // platform fault even when the SDK also marks the result as an error.
+  const isAPIFailure = message.terminal_reason === "api_error"
     || ("api_error_status" in message && typeof message.api_error_status === "number");
   if (!isAPIFailure && message.subtype === "success") return { success: true };
 
-  const providerText = message.subtype === "success"
-    ? message.result
-    : message.errors.map(compactDiagnostic).filter(Boolean).join("; ");
   const httpStatus = "api_error_status" in message && typeof message.api_error_status === "number"
     ? message.api_error_status
     : undefined;
-  const requestID = providerRequestID(providerText);
-  const classification = classifyProviderFailure(providerText, httpStatus);
   if (isAPIFailure) {
+    const providerText = message.subtype === "success"
+      ? message.result
+      : message.errors.map(compactDiagnostic).filter(Boolean).join("; ");
+    const requestID = providerRequestID(providerText);
+    const classification = classifyProviderFailure(providerText, httpStatus);
     return {
       success: false,
       error: providerFailureMessage(classification.category),
@@ -719,10 +725,20 @@ function classifyTerminalMessage(message: Extract<SDKMessage, { type: "result" }
       resume_from: classification.resume_from,
     };
   }
-  const error = message.subtype === "success"
+  const runtimeError = message.subtype === "success"
     ? undefined
-    : message.errors.map(compactDiagnostic).filter(Boolean).join("; ") || undefined;
-  return { success: false, error };
+    : message.errors.map(compactDiagnostic).filter(Boolean).join("; ");
+  return {
+    success: false,
+    error: runtimeError || agentRuntimeFailureMessage(message.subtype),
+    terminal_reason: "platform_error",
+    root_error_code: "agent_runtime_error",
+    failure_stage: "provider_request",
+  };
+}
+
+function agentRuntimeFailureMessage(subtype: string): string {
+  return `agent runtime stopped without a provider failure (subtype=${subtype})`;
 }
 
 export type ProviderFailureCategory =

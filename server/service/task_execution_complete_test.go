@@ -1084,6 +1084,57 @@ func TestPublicExecutionDiagnosticRejectsUnregisteredProviderValues(t *testing.T
 	}
 }
 
+func TestPublicExecutionDiagnosticSummarizesRuntimeRootCodes(t *testing.T) {
+	execution := &model.TaskExecution{Provider: "minimax"}
+	secret := "TOKENDANCE_ERROR secret=https://private.example/token"
+	for code, summary := range map[string]string{
+		"execution_identity_unavailable": "执行环境未就绪，暂时无法生成或结算图片。",
+		"plugin_init_missing":            "插件就绪失败，Agent 初始化未完成。",
+		"stream_ended_without_result":    "Agent 流意外结束，未收到最终执行结果。",
+		"agent_runtime_error":            "Agent 运行时异常，执行未正常完成。",
+		"project_memory_unavailable":     "项目内存准备失败。",
+		"artifact_manifest_failed":       "产物清单提交失败，交付尚未确认。",
+	} {
+		diagnostic := publicExecutionDiagnostic(execution, &agent.ExecutionResult{
+			Success: false, RootErrorCode: code, TerminalReason: model.TaskBillingTerminalPlatformError,
+			Error: secret, FailureStage: "provider_request",
+		})
+		if diagnostic == nil {
+			t.Fatalf("%s: diagnostic = nil", code)
+		}
+		if diagnostic.Code != code || diagnostic.Summary != summary {
+			t.Fatalf("%s: diagnostic = %#v", code, diagnostic)
+		}
+		if diagnostic.Provider != "" || diagnostic.ProviderCode != "" || diagnostic.HTTPStatus != 0 ||
+			diagnostic.ContentDirection != "" || diagnostic.RequestID != "" || strings.Contains(diagnostic.Summary, secret) {
+			t.Fatalf("%s: diagnostic leaked executor-controlled context: %#v", code, diagnostic)
+		}
+		if code == "artifact_manifest_failed" && diagnostic.Stage != "artifact_upload" {
+			t.Fatalf("%s: stage = %q", code, diagnostic.Stage)
+		}
+	}
+
+	if diagnostic := publicExecutionDiagnostic(execution, &agent.ExecutionResult{Success: false, RootErrorCode: "unregistered_root_code"}); diagnostic != nil {
+		t.Fatalf("unregistered root code produced a public diagnostic: %#v", diagnostic)
+	}
+}
+
+func TestPublicExecutionDiagnosticSummarizesUnknownProviderFailure(t *testing.T) {
+	execution := &model.TaskExecution{Provider: "minimax"}
+	result := &agent.ExecutionResult{
+		Success: false, Error: "opaque remote failure", ErrorCode: "provider_unknown",
+		ContentDirection: "unknown", Recoverable: true, FailureStage: "provider_request", ResumeFrom: "inspect_results",
+	}
+
+	diagnostic := publicExecutionDiagnostic(execution, result)
+	if diagnostic == nil || diagnostic.Code != "provider_unknown" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if diagnostic.Summary != "供应商请求异常，远端未返回可确认的结果或上下文已脱敏。" || strings.Contains(diagnostic.Summary, result.Error) {
+		t.Fatalf("summary is not sanitized: %#v", diagnostic)
+	}
+}
+
 func TestCompleteCloudExecutionUsesDurableDraftPublication(t *testing.T) {
 	svc, repo, task, execution := setupCloudCompletionTest(t, true)
 	ctx := context.Background()

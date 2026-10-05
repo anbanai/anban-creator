@@ -1395,7 +1395,7 @@ func publicExecutionDiagnostic(execution *model.TaskExecution, result *agent.Exe
 	}
 	providerFailure := result.ErrorCode != "" || result.ProviderCode != "" || result.HTTPStatus != 0 || result.TerminalReason == model.TaskBillingTerminalProviderError
 	if !providerFailure {
-		return nil
+		return publicPlatformDiagnostic(result.RootErrorCode)
 	}
 	direction := safePublicContentDirection(result.ContentDirection)
 	summary := "供应商请求失败，原始执行上下文未对外披露。"
@@ -1417,11 +1417,35 @@ func publicExecutionDiagnostic(execution *model.TaskExecution, result *agent.Exe
 		summary = "供应商拒绝了无效请求参数。"
 	case "provider_protocol_error":
 		summary = "供应商响应格式不符合预期，远端结果仍需核对。"
+	case "provider_unknown":
+		summary = "供应商请求异常，远端未返回可确认的结果或上下文已脱敏。"
 	}
 	return &model.ExecutionDiagnostic{
 		Code: safePublicDiagnosticCode(result.ErrorCode), Provider: execution.Provider, ProviderCode: safePublicProviderCode(result.ProviderCode), HTTPStatus: safePublicHTTPStatus(result.HTTPStatus),
 		Stage: safePublicDiagnosticStage(result.FailureStage), ContentDirection: direction, Recoverable: result.Recoverable,
 		ResumePoint: safePublicDiagnosticStage(result.ResumeFrom), RequestID: safePublicRequestID(result.RequestID), Summary: summary,
+	}
+}
+
+// publicPlatformDiagnostic maps a runtime-owned root error code to a controlled
+// public summary. Unregistered codes return nil so executor-controlled text is
+// never reflected into the task outcome.
+func publicPlatformDiagnostic(rootErrorCode string) *model.ExecutionDiagnostic {
+	switch strings.TrimSpace(rootErrorCode) {
+	case "execution_identity_unavailable":
+		return &model.ExecutionDiagnostic{Code: "execution_identity_unavailable", Summary: "执行环境未就绪，暂时无法生成或结算图片。"}
+	case "plugin_init_missing":
+		return &model.ExecutionDiagnostic{Code: "plugin_init_missing", Summary: "插件就绪失败，Agent 初始化未完成。"}
+	case "stream_ended_without_result":
+		return &model.ExecutionDiagnostic{Code: "stream_ended_without_result", Summary: "Agent 流意外结束，未收到最终执行结果。"}
+	case "agent_runtime_error":
+		return &model.ExecutionDiagnostic{Code: "agent_runtime_error", Summary: "Agent 运行时异常，执行未正常完成。"}
+	case "project_memory_unavailable":
+		return &model.ExecutionDiagnostic{Code: "project_memory_unavailable", Summary: "项目内存准备失败。"}
+	case "artifact_manifest_failed":
+		return &model.ExecutionDiagnostic{Code: "artifact_manifest_failed", Stage: "artifact_upload", Summary: "产物清单提交失败，交付尚未确认。"}
+	default:
+		return nil
 	}
 }
 

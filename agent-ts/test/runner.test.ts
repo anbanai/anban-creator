@@ -804,6 +804,54 @@ describe("recordAssistantToolUses", () => {
       resume_from: "provider_request",
     });
   });
+
+  test("classifies non-provider SDK error subtypes as runtime platform failures", () => {
+    const terminal = runner.terminalExecutionResult({
+      type: "result",
+      subtype: "error_max_turns",
+      is_error: true,
+      errors: ["max turns reached while writing the article"],
+      session_id: "session-2",
+      num_turns: 40,
+      duration_ms: 120,
+      duration_api_ms: 90,
+      modelUsage: {},
+    } as Parameters<typeof runner.terminalExecutionResult>[0], "/workspace", "done", {}, {
+      tool_use_count: 1,
+      tool_use_summary: { Write: 1 },
+    });
+
+    expect(terminal).toMatchObject({
+      success: false,
+      error: "max turns reached while writing the article",
+      terminal_reason: "platform_error",
+      root_error_code: "agent_runtime_error",
+      failure_stage: "provider_request",
+    });
+    expect(terminal.error_code).toBeUndefined();
+    expect(terminal.http_status).toBeUndefined();
+  });
+
+  test("falls back to a stable runtime error when the SDK reports no diagnostic text", () => {
+    const terminal = runner.terminalExecutionResult({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: [],
+      session_id: "session-3",
+      num_turns: 1,
+      duration_ms: 10,
+      duration_api_ms: 5,
+      modelUsage: {},
+    } as Parameters<typeof runner.terminalExecutionResult>[0], "/workspace", "done", {}, {});
+
+    expect(terminal).toMatchObject({
+      success: false,
+      terminal_reason: "platform_error",
+      root_error_code: "agent_runtime_error",
+    });
+    expect(terminal.error).toContain("error_during_execution");
+  });
 });
 
 describe("classifyProviderFailure", () => {
