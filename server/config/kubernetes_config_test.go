@@ -25,7 +25,7 @@ func baseKubernetesConfigForTest() Config {
 		"moments":                         "registry.example.com/creator-agent-moments@sha256:" + strings.Repeat("h", 64),
 		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("i", 64),
 		"profile-analysis":                "registry.example.com/creator-agent-profile-analysis@sha256:" + strings.Repeat("j", 64),
-		"feedback":                        "registry.example.com/creator-agent-feedback@sha256:" + strings.Repeat("k", 64),
+		"feedback-analysis":               "registry.example.com/creator-agent-feedback-analysis@sha256:" + strings.Repeat("k", 64),
 		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:" + strings.Repeat("l", 64),
 		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:" + strings.Repeat("m", 64),
 	}
@@ -72,7 +72,7 @@ func TestRuntimeImageForTaskUsesCanonicalProfileMap(t *testing.T) {
 		model.PlatformMontage:             "creator-agent-montage:latest",
 		model.PlatformWhiteboardAnimation: "creator-agent-whiteboard-animation:latest",
 		"profile-analysis":                "creator-agent-profile-analysis:latest",
-		"feedback":                        "creator-agent-feedback:latest",
+		"feedback-analysis":               "creator-agent-feedback-analysis:latest",
 		model.PlatformHypit:               "creator-agent-hypit:latest",
 	}
 	for _, test := range []struct {

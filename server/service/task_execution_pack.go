@@ -97,7 +97,7 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 			} else {
 				execution.TaskKind = model.TaskKindContentGeneration
 			}
-		case model.AgentIDFeedback:
+		case model.AgentIDFeedbackAnalysis:
 			execution.TaskKind = model.TaskKindFeedbackAnalysis
 		case model.AgentIDWhiteboard:
 			execution.TaskKind = model.PlatformWhiteboardAnimation

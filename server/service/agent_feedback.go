@@ -59,8 +59,8 @@ func (s *AgentFeedbackService) create(ctx context.Context, taskID, executionID, 
 			return nil, fmt.Errorf("agent_name does not match the current task execution")
 		}
 	}
-	if task.TaskKind == model.TaskKindFeedbackAnalysis && agentName != model.AgentIDFeedback {
-		return nil, fmt.Errorf("feedback task requires agent_name=feedback")
+	if task.TaskKind == model.TaskKindFeedbackAnalysis && agentName != model.AgentIDFeedbackAnalysis {
+		return nil, fmt.Errorf("feedback task requires agent_name=feedback-analysis")
 	}
 	if agentName == "" {
 		return nil, fmt.Errorf("agent_name is required")

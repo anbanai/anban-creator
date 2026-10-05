@@ -51,29 +51,29 @@ const (
 // Agent IDs are stable execution identities. An Agent owns exactly one output
 // channel; task kind selects the workflow exposed by that Agent.
 const (
-	AgentIDArticle         = "wechat-article"
-	AgentIDSeednote        = "seednote"
-	AgentIDWechatPicture   = "wechat-picture"
-	AgentIDMontage         = "montage"
-	AgentIDHypit           = "hypit"
-	AgentIDFeedback        = "feedback"
-	AgentIDProfileAnalysis = "profile-analysis"
-	AgentIDWhiteboard      = "whiteboard-animation"
+	AgentIDArticle          = "wechat-article"
+	AgentIDSeednote         = "seednote"
+	AgentIDWechatPicture    = "wechat-picture"
+	AgentIDMontage          = "montage"
+	AgentIDHypit            = "hypit"
+	AgentIDFeedbackAnalysis = "feedback-analysis"
+	AgentIDProfileAnalysis  = "profile-analysis"
+	AgentIDWhiteboard       = "whiteboard-animation"
 )
 
 // Channel constants. Keep these values provider-neutral; labels belong to the
 // Studio and connector implementations.
 const (
-	ChannelArticle         = "wechat-article"
-	ChannelSeednote        = "seednote"
-	ChannelWechatPicture   = "wechat-picture"
-	ChannelHypit           = "hypit"
-	ChannelMoments         = "moments"
-	ChannelEcommerce       = "ecommerce"
-	ChannelProfileAnalysis = "profile-analysis"
-	ChannelMontage         = "montage"
-	ChannelFeedback        = "feedback"
-	ChannelWhiteboard      = "whiteboard-animation"
+	ChannelArticle          = "wechat-article"
+	ChannelSeednote         = "seednote"
+	ChannelWechatPicture    = "wechat-picture"
+	ChannelHypit            = "hypit"
+	ChannelMoments          = "moments"
+	ChannelEcommerce        = "ecommerce"
+	ChannelProfileAnalysis  = "profile-analysis"
+	ChannelMontage          = "montage"
+	ChannelFeedbackAnalysis = "feedback-analysis"
+	ChannelWhiteboard       = "whiteboard-animation"
 )
 
 // Task kinds are workflow identities within one Agent/channel.
@@ -93,7 +93,7 @@ const (
 
 func IsChannel(value string) bool {
 	switch value {
-	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedback, ChannelProfileAnalysis, ChannelWhiteboard:
+	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard:
 		return true
 	default:
 		return false
@@ -102,7 +102,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedback, AgentIDProfileAnalysis, AgentIDWhiteboard:
+	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard:
 		return true
 	default:
 		return false
@@ -121,8 +121,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelMontage, true
 	case AgentIDHypit:
 		return ChannelHypit, true
-	case AgentIDFeedback:
-		return ChannelFeedback, true
+	case AgentIDFeedbackAnalysis:
+		return ChannelFeedbackAnalysis, true
 	case AgentIDWhiteboard:
 		return ChannelWhiteboard, true
 	default:

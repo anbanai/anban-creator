@@ -359,7 +359,7 @@ claude:
     ecommerce: "${ECOMMERCE_RUNTIME_IMAGE:-creator-agent-ecommerce:latest}"
     profile-analysis: "${PROFILE_ANALYSIS_RUNTIME_IMAGE:-creator-agent-profile-analysis:latest}"
     whiteboard-animation: "${WHITEBOARD_ANIMATION_RUNTIME_IMAGE:-creator-agent-whiteboard-animation:latest}"
-    feedback: "${FEEDBACK_RUNTIME_IMAGE:-creator-agent-feedback:latest}"
+    feedback-analysis: "${FEEDBACK_ANALYSIS_RUNTIME_IMAGE:-creator-agent-feedback-analysis:latest}"
   execution_token_secret: "runtime-smoke-execution-token-secret-32-bytes-minimum"
   agent_server_url: "http://server:8080"
   plugin_dir: "/anbanai"

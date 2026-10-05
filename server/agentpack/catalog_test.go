@@ -988,6 +988,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		"hypit":                {packID: "hypit", profile: "hypit", adapter: AdapterStandard},
 		"montage":              {packID: "montage", profile: "montage", adapter: AdapterOpenMontage},
 		"whiteboard-animation": {packID: "whiteboard-animation", profile: "whiteboard-animation", adapter: AdapterStandard},
+		"feedback_analysis":    {packID: "feedback-analysis", profile: "feedback-analysis", adapter: AdapterStandard},
 	}
 	for taskType, want := range wantRoutes {
 		pack, ok := catalog.ForTaskType(taskType)
@@ -1045,9 +1046,45 @@ func TestEmbeddedCatalogResolvesSeednoteBillingOperations(t *testing.T) {
 	}
 }
 
+func TestRepositoryAgentPacksUseOneKebabCaseIdentity(t *testing.T) {
+	pluginRoot := filepath.Clean(filepath.Join("..", "..", "harness"))
+	catalog, err := LoadCatalog(pluginRoot)
+	if err != nil {
+		t.Fatalf("LoadCatalog repository Packs: %v", err)
+	}
+	// Shipped Packs keep one kebab-case identity for the Pack, its channel, its
+	// Agent name, and its runtime profile, so the image key, environment
+	// variable, and Dockerfile derived from that profile stay unambiguous. Task
+	// kinds stay in a separate business vocabulary and must never collide with
+	// another Pack identity.
+	identities := make(map[string]string, len(catalog.Packs))
+	for _, pack := range catalog.Packs {
+		identities[pack.ID] = pack.ID
+	}
+	for _, pack := range catalog.Packs {
+		if !kebabIDPattern.MatchString(pack.ID) {
+			t.Errorf("Pack %q id must use kebab-case", pack.ID)
+		}
+		if pack.Runtime.Profile != pack.ID {
+			t.Errorf("Pack %q runtime.profile = %q, want the Pack id", pack.ID, pack.Runtime.Profile)
+		}
+		if pack.Agent.Name != pack.ID {
+			t.Errorf("Pack %q agent.name = %q, want the Pack id", pack.ID, pack.Agent.Name)
+		}
+		if pack.Channel != "" && pack.Channel != pack.ID {
+			t.Errorf("Pack %q channel = %q, want the Pack id", pack.ID, pack.Channel)
+		}
+		for _, taskKind := range pack.Bindings.TaskKinds {
+			if owner, taken := identities[taskKind]; taken && owner != pack.ID {
+				t.Errorf("Pack %q task kind %q collides with Pack identity %q", pack.ID, taskKind, owner)
+			}
+		}
+	}
+}
+
 func TestEmbeddedCatalogResolvesCurrentManagedRoutes(t *testing.T) {
 	catalog := Default()
-	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "whiteboard-animation"} {
+	for _, taskType := range []string{"wechat-article", "wechat-picture", "seednote", "viral_analysis", "moments", "ecommerce", "montage", "hypit", "whiteboard-animation", "feedback_analysis"} {
 		if _, ok := catalog.ForTaskType(taskType); !ok {
 			t.Errorf("embedded Catalog has no route for %q", taskType)
 		}

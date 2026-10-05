@@ -194,17 +194,17 @@ func newFeedbackFinalizerFixture(t *testing.T) *managedCompletionFixture {
 	if err := repo.Projects().Create(context.Background(), &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Feedback", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, AgentID: model.AgentIDFeedback, Channel: model.ChannelFeedback, TaskKind: model.TaskKindFeedbackAnalysis, Type: model.TaskKindFeedbackAnalysis, Status: model.TaskStatusRunning}
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, AgentID: model.AgentIDFeedbackAnalysis, Channel: model.ChannelFeedbackAnalysis, TaskKind: model.TaskKindFeedbackAnalysis, Type: model.TaskKindFeedbackAnalysis, Status: model.TaskStatusRunning}
 	task.SetAgentInput(map[string]any{})
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	execution := &model.TaskExecution{ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "managed-test", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, RuntimeProfile: "feedback", RuntimeImage: "registry/feedback@sha256:test"}
-	execution.AgentID = model.AgentIDFeedback
-	execution.Channel = model.ChannelFeedback
+	execution := &model.TaskExecution{ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "managed-test", Status: model.TaskExecutionRunning, Started: true, StartedAt: &now, RuntimeProfile: "feedback-analysis", RuntimeImage: "registry/feedback-analysis@sha256:test"}
+	execution.AgentID = model.AgentIDFeedbackAnalysis
+	execution.Channel = model.ChannelFeedbackAnalysis
 	execution.TaskKind = model.TaskKindFeedbackAnalysis
-	execution.AgentPackID = "feedback"
+	execution.AgentPackID = "feedback-analysis"
 	execution.AgentPackVersion = "1.1.0"
 	execution.AgentPackDigest = "test-feedback-pack"
 	execution.AgentPackDeliveryContract = []byte(`[{"role":"analysis_result","path":"output/feedback-analysis.json","mime_type":"application/json","internal_only":true},{"role":"evidence","path":"output/feedback-evidence.json","mime_type":"application/json","internal_only":true}]`)

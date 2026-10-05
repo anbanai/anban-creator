@@ -27,7 +27,7 @@ var supportedChannels = map[string]struct{}{
 	"seednote":             {},
 	"wechat-picture":       {},
 	"profile-analysis":     {},
-	"feedback":             {},
+	"feedback-analysis":    {},
 	"whiteboard-animation": {},
 	"hypit":                {},
 	"montage":              {},

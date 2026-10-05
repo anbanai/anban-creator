@@ -602,3 +602,32 @@ func TestAgentProfileEnvsQuoteExpiryIsNarrow(t *testing.T) {
 		}
 	}
 }
+
+func TestFeedbackAnalysisIdentityMigrationIsOneWay(t *testing.T) {
+	raw, err := os.ReadFile("20261005_feedback_analysis_identity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	for _, required := range []string{
+		"UPDATE `tasks` SET `agent_id` = 'feedback-analysis' WHERE `agent_id` = 'feedback'",
+		"UPDATE `tasks` SET `channel` = 'feedback-analysis' WHERE `channel` = 'feedback'",
+		"UPDATE `task_executions` SET `agent_id` = 'feedback-analysis' WHERE `agent_id` = 'feedback'",
+		"UPDATE `task_executions` SET `channel` = 'feedback-analysis' WHERE `channel` = 'feedback'",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("feedback analysis identity migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"DELETE", "DROP", "ALTER TABLE", "TRUNCATE", "feedback_analysis",
+		"`type` = ", "SET `type`",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("feedback analysis identity migration contains %q", forbidden)
+		}
+	}
+	if got := strings.Count(sql, ";"); got != 4 {
+		t.Errorf("feedback analysis identity migration has %d statements, want 4 idempotent renames", got)
+	}
+}

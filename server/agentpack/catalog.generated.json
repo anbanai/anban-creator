@@ -145,14 +145,14 @@
       "digest": "e80632720cdf338b07091c56f393b5086c68e4f092ddcb07b1f41699f1dd7eca"
     },
     {
-      "id": "feedback",
-      "channel": "feedback",
-      "version": "1.0.1",
+      "id": "feedback-analysis",
+      "channel": "feedback-analysis",
+      "version": "1.0.2",
       "kind": "managed",
       "display_name": "反馈分析",
       "description": "周期性分析公众号与种草笔记数据并生成可追溯的反馈证据。",
       "agent": {
-        "name": "feedback",
+        "name": "feedback-analysis",
         "skills": [
           "data-tracker",
           "publish-analytics",
@@ -168,7 +168,7 @@
         ]
       },
       "runtime": {
-        "profile": "feedback",
+        "profile": "feedback-analysis",
         "adapter": "standard",
         "max_turns": 40
       },
@@ -177,7 +177,7 @@
         "task"
       ],
       "features": [
-        "feedback"
+        "feedback-analysis"
       ],
       "billing_operations": {
         "feedback_analysis": "feedback_analysis"
@@ -223,7 +223,7 @@
         }
       ],
       "ui": {},
-      "digest": "c268bc3ad802774208960457697d22c6d31a5b2d683c2816881b7061850105cc"
+      "digest": "a9724802a54f61e8016c1db1b4a67f81af52009dbfeffeb384b177282a9d0f39"
     },
     {
       "id": "hypit",

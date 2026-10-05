@@ -693,7 +693,7 @@ func dockerDispatcherTestImages() srvconfig.RuntimeImages {
 		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:whiteboard",
 		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:hypit",
 		"profile-analysis":                "registry.example.com/creator-agent-profile-analysis@sha256:profile",
-		"feedback":                        "registry.example.com/creator-agent-feedback@sha256:feedback",
+		"feedback-analysis":               "registry.example.com/creator-agent-feedback-analysis@sha256:feedback",
 	}
 }
 

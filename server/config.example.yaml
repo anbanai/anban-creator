@@ -358,7 +358,7 @@ claude:
     moments: "${ANBAN_AGENT_IMAGE_MOMENTS:-creator-agent-moments:latest}"
     ecommerce: "${ANBAN_AGENT_IMAGE_ECOMMERCE:-creator-agent-ecommerce:latest}"
     profile-analysis: "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}"
-    feedback: "${ANBAN_AGENT_IMAGE_FEEDBACK:-creator-agent-feedback:latest}"
+    feedback-analysis: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
     whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
     hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
   # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。

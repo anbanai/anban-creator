@@ -363,6 +363,14 @@ func AssertMultiAgentChannelReadiness(ctx context.Context, db *gorm.DB) error {
 	return nil
 }
 
+// legacyRenamedAgentIDs maps a retired Agent Pack identity to its current
+// identity. Renames are one-way, and the retired spelling is never accepted as
+// a write path. Apply the matching one-way migration under
+// server/migrations/ before relying on this reader.
+var legacyRenamedAgentIDs = map[string]string{
+	"feedback": model.AgentIDFeedbackAnalysis,
+}
+
 func migrateLegacyIdentity(value string) (agentID, channel, taskKind string, ok bool) {
 	switch strings.TrimSpace(value) {
 	case "article", "wechat", "wechat-article":
@@ -388,7 +396,7 @@ func migrateLegacyIdentity(value string) (agentID, channel, taskKind string, ok 
 	case model.PlatformWhiteboardAnimation:
 		return model.AgentIDWhiteboard, model.ChannelWhiteboard, model.PlatformWhiteboardAnimation, true
 	case "feedback":
-		return model.AgentIDFeedback, model.ChannelFeedback, model.TaskKindFeedbackAnalysis, true
+		return model.AgentIDFeedbackAnalysis, model.ChannelFeedbackAnalysis, model.TaskKindFeedbackAnalysis, true
 	default:
 		value = strings.TrimSpace(value)
 		if value == "" {
@@ -406,6 +414,9 @@ func migrateLegacyTaskIdentity(task model.Task) (agentID, channel, taskKind stri
 	// but still has the stable Agent ID. Recover the remaining fields from the
 	// Agent Pack contract instead of guessing from project metadata.
 	agentID = strings.TrimSpace(task.AgentID)
+	if renamed, found := legacyRenamedAgentIDs[agentID]; found {
+		agentID = renamed
+	}
 	if agentID == "" {
 		return "", "", "", false
 	}
