@@ -19,6 +19,8 @@ export interface CreationTypeOption {
   id: string
   label?: string
   description?: string
+  disabled?: boolean
+  disabledReason?: string
 }
 
 export function CreationTypePicker({ options, value, onChange, multiple = false, disabled = false }: {
@@ -46,13 +48,14 @@ export function CreationTypePicker({ options, value, onChange, multiple = false,
           <ToggleGroupItem
             key={option.id}
             value={option.id}
+            disabled={option.disabled}
             aria-label={label}
             className="h-auto min-h-16 min-w-0 justify-start gap-2.5 whitespace-normal rounded-lg px-3 py-2.5 text-left aria-pressed:border-primary aria-pressed:bg-primary/5 aria-pressed:text-foreground"
           >
             <Icon className="size-4 shrink-0" />
             <span className="min-w-0 flex-1">
               <span className="block font-medium">{label}</span>
-              <span className="mt-0.5 block text-xs font-normal leading-relaxed text-muted-foreground">{creationTypeDescriptions[option.id] ?? option.description}</span>
+              <span className="mt-0.5 block text-xs font-normal leading-relaxed text-muted-foreground">{option.disabledReason ?? creationTypeDescriptions[option.id] ?? option.description}</span>
             </span>
             <Check aria-hidden="true" className={`size-3.5 shrink-0 ${selected ? 'text-primary' : 'invisible'}`} />
           </ToggleGroupItem>

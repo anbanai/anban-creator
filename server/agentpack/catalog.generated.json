@@ -228,7 +228,6 @@
     {
       "id": "hypit",
       "channel": "hypit",
-      "plan_task_kind": "hypit",
       "version": "2.0.4",
       "kind": "managed",
       "display_name": "视频复刻",
@@ -242,7 +241,6 @@
       },
       "bindings": {
         "task_kinds": [
-          "content_generation",
           "hypit"
         ]
       },
@@ -253,8 +251,7 @@
       },
       "surfaces": [
         "plugin",
-        "task",
-        "plan"
+        "task"
       ],
       "features": [
         "video-replication",
@@ -262,7 +259,6 @@
         "editable-video"
       ],
       "billing_operations": {
-        "content_generation": "task.hypit",
         "hypit": "task.hypit"
       },
       "artifacts": [
@@ -401,7 +397,7 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "13534a466ef71f5b824f66e24dfa0989b964d745a8ce323084b7c1408c6c7e09"
+      "digest": "d0d2b89a273cd3c3667f53e92389e2f889de276ca38fed80d78e0c9d6ccbefa7"
     },
     {
       "id": "moments",
@@ -497,7 +493,6 @@
     {
       "id": "montage",
       "channel": "montage",
-      "plan_task_kind": "content_generation",
       "version": "2.0.5",
       "kind": "managed",
       "display_name": "视频生成",
@@ -512,7 +507,6 @@
       },
       "bindings": {
         "task_kinds": [
-          "content_generation",
           "montage"
         ]
       },
@@ -523,15 +517,13 @@
       },
       "surfaces": [
         "plugin",
-        "task",
-        "plan"
+        "task"
       ],
       "features": [
         "video-generation",
         "source-assets"
       ],
       "billing_operations": {
-        "content_generation": "task.montage",
         "montage": "task.montage"
       },
       "artifacts": [
@@ -611,7 +603,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "cd6d6ac7fba9893576fc4d93054b5a91b20eff0e294da8ad20148d83a68c291e"
+      "digest": "82489a0ce09659d93b957b0a4c1de998136f47f9f1bc35ca0c3fac5d38f52241"
     },
     {
       "id": "profile-analysis",
@@ -1398,7 +1390,6 @@
     {
       "id": "whiteboard-animation",
       "channel": "whiteboard-animation",
-      "plan_task_kind": "content_generation",
       "version": "2.0.3",
       "kind": "managed",
       "display_name": "白板动画",
@@ -1412,8 +1403,7 @@
       },
       "bindings": {
         "task_kinds": [
-          "whiteboard-animation",
-          "content_generation"
+          "whiteboard-animation"
         ]
       },
       "runtime": {
@@ -1423,8 +1413,7 @@
       },
       "surfaces": [
         "plugin",
-        "task",
-        "plan"
+        "task"
       ],
       "features": [
         "subtitle-to-video",
@@ -1432,7 +1421,6 @@
         "source-assets"
       ],
       "billing_operations": {
-        "content_generation": "task.whiteboard-animation",
         "whiteboard-animation": "task.whiteboard-animation"
       },
       "artifacts": [
@@ -1538,7 +1526,7 @@
       "ui": {
         "renderer": "custom:whiteboard-animation"
       },
-      "digest": "7f086c0a65240d9d85899be6f4b0dc39767aba95d50c6f03bf4c98ed52735550"
+      "digest": "d38ff3e48f586184dcc099a14b774c6b7de73947ce531628d8caeaba8fc761f4"
     }
   ]
 }

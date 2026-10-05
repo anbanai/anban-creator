@@ -102,7 +102,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDFeedback, AgentIDProfileAnalysis, AgentIDWhiteboard:
+	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedback, AgentIDProfileAnalysis, AgentIDWhiteboard:
 		return true
 	default:
 		return false
@@ -119,6 +119,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelWechatPicture, true
 	case AgentIDMontage:
 		return ChannelMontage, true
+	case AgentIDHypit:
+		return ChannelHypit, true
 	case AgentIDFeedback:
 		return ChannelFeedback, true
 	case AgentIDWhiteboard:

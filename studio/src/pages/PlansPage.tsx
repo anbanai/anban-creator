@@ -50,7 +50,8 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 const DEFAULT_CRON = '0 9 * * 1,3,5'
 const PLAN_ATTACHMENT_POLICY = { ...GENERAL_AGENT_ATTACHMENT_POLICY, maxCount: 16 }
 
-type OutputPack = AgentPack & { channel: string; plan_task_kind: string }
+type TaskPack = AgentPack & { channel: string }
+type OutputPack = TaskPack & { plan_task_kind: string }
 
 const outputLabels: Record<string, string> = {
   'wechat-article': '公众号文章',
@@ -58,17 +59,23 @@ const outputLabels: Record<string, string> = {
   'wechat-picture': '公众号贴图',
 }
 
-function canUseForPlan(pack: AgentPack): pack is OutputPack {
+function canUseForTask(pack: AgentPack): pack is TaskPack {
   return pack.kind === 'managed'
-    && pack.surfaces.includes('plan')
+    && pack.surfaces.includes('task')
     && typeof pack.channel === 'string'
     && pack.channel.trim() !== ''
+    && (pack.bindings.task_kinds ?? []).length > 0
+}
+
+function canUseForPlan(pack: TaskPack): pack is OutputPack {
+  return pack.kind === 'managed'
+    && pack.surfaces.includes('plan')
     && typeof pack.plan_task_kind === 'string'
     && pack.plan_task_kind.trim() !== ''
     && (pack.bindings.task_kinds ?? []).includes(pack.plan_task_kind)
 }
 
-function outputLabel(pack: OutputPack) {
+function outputLabel(pack: TaskPack) {
   return outputLabels[pack.id] ?? pack.display_name.replace(/^微信公众号/, '公众号')
 }
 
@@ -154,7 +161,8 @@ export default function PlansPage() {
   const watchedSkipReference = useWatch({ control: form.control, name: 'skip_reference_image' }) ?? false
 
   const packsQuery = useAgentPacks()
-  const outputPacks = useMemo(() => (packsQuery.data?.packs ?? []).filter(canUseForPlan), [packsQuery.data?.packs])
+  const taskPacks = useMemo(() => (packsQuery.data?.packs ?? []).filter(canUseForTask), [packsQuery.data?.packs])
+  const outputPacks = useMemo(() => taskPacks.filter(canUseForPlan), [taskPacks])
   const { data: platformConfigs = [] } = useQuery({
     queryKey: ['platform-configs'],
     queryFn: () => api.projects.platformConfigs(),
@@ -162,12 +170,12 @@ export default function PlansPage() {
   })
   const sharedImageRatios = useMemo(() => {
     const ratiosByOutput = watchedAgentIDs.map((id) => {
-      const channel = outputPacks.find((pack) => pack.id === id)?.channel
+      const channel = taskPacks.find((pack) => pack.id === id)?.channel
       const platform = channel === 'wechat-article' || channel === 'wechat-picture' ? 'wechat' : channel
       return platformConfigs.find((config) => config.id === platform)?.supported_image_ratios ?? []
     })
     return (ratiosByOutput[0] ?? []).filter((ratio) => ratiosByOutput.every((ratios) => ratios.includes(ratio)))
-  }, [outputPacks, platformConfigs, watchedAgentIDs])
+  }, [platformConfigs, taskPacks, watchedAgentIDs])
   useEffect(() => {
     if (!modalOpen || platformConfigs.length === 0 || watchedAgentIDs.length === 0
       || watchedAgentIDs.some((id) => !outputPacks.some((pack) => pack.id === id))) return
@@ -426,7 +434,13 @@ export default function PlansPage() {
                   <span className="shrink-0 text-xs text-muted-foreground">已选 {watchedAgentIDs.length} 项</span>
                 </div>
                 <FormField control={form.control} name="agent_ids" render={({ field }) => <FormItem>
-                  <CreationTypePicker multiple options={outputPacks.map((pack) => ({ id: pack.id, label: outputLabel(pack), description: pack.description }))} value={field.value} onChange={field.onChange} disabled={isSubmitting} />
+                  <CreationTypePicker multiple options={taskPacks.map((pack) => ({
+                    id: pack.id,
+                    label: outputLabel(pack),
+                    description: pack.description,
+                    disabled: !canUseForPlan(pack),
+                    disabledReason: canUseForPlan(pack) ? undefined : '需要任务级输入，暂不支持定时计划',
+                  }))} value={field.value} onChange={field.onChange} disabled={isSubmitting} />
                   {packsQuery.isLoading ? <p className="text-sm text-muted-foreground">正在加载可用输出...</p> : null}
                   <FormMessage />
                   {!packsQuery.isLoading && (packsQuery.isError || outputPacks.length === 0) ? <p role="alert" className="text-sm text-destructive">暂时没有可用于计划的输出类型。</p> : null}

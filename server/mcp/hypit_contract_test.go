@@ -2,12 +2,13 @@ package mcp
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
 )
 
-func TestHypitPluginDeliveryContract(t *testing.T) {
+func TestHypitManagedDeliveryContract(t *testing.T) {
 	catalog, err := agentpack.LoadCatalog(filepath.Join("..", "..", "harness"))
 	if err != nil {
 		t.Fatal(err)
@@ -18,8 +19,11 @@ func TestHypitPluginDeliveryContract(t *testing.T) {
 			if !ok {
 				t.Fatal("video replication has no managed task route")
 			}
-			if pack.Kind != agentpack.KindPlugin || pack.Runtime.Profile != "hypit" || pack.Runtime.Adapter != agentpack.AdapterStandard {
+			if pack.Kind != agentpack.KindManaged || pack.Channel != "hypit" || pack.Runtime.Profile != "hypit" || pack.Runtime.Adapter != agentpack.AdapterStandard {
 				t.Fatalf("wrong execution route: %#v", pack)
+			}
+			if !pack.SupportsTaskKind("hypit") || !slices.Contains(pack.Surfaces, "task") || pack.SupportsPlan() {
+				t.Fatalf("wrong Hypit surfaces or task contract: %#v", pack)
 			}
 			resolved, ok := c.ForTaskType("hypit")
 			if !ok || resolved.ID != pack.ID {
@@ -51,4 +55,36 @@ func TestHypitPluginDeliveryContract(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVideoPacksAreTaskOnlyWhenTheirInputsCannotBeScheduled(t *testing.T) {
+	for name, c := range map[string]*agentpack.Catalog{"source": mustLoadCatalog(t), "embedded": agentpack.Default()} {
+		t.Run(name, func(t *testing.T) {
+			for _, tt := range []struct {
+				packID   string
+				channel  string
+				taskKind string
+			}{
+				{packID: "montage", channel: "montage", taskKind: "montage"},
+				{packID: "whiteboard-animation", channel: "whiteboard-animation", taskKind: "whiteboard-animation"},
+			} {
+				pack, ok := c.Pack(tt.packID)
+				if !ok {
+					t.Fatalf("%s Pack missing", tt.packID)
+				}
+				if pack.Kind != agentpack.KindManaged || pack.Channel != tt.channel || !pack.SupportsTaskKind(tt.taskKind) || !slices.Contains(pack.Surfaces, "task") || pack.SupportsPlan() {
+					t.Fatalf("%s has invalid task-only contract: %#v", tt.packID, pack)
+				}
+			}
+		})
+	}
+}
+
+func mustLoadCatalog(t *testing.T) *agentpack.Catalog {
+	t.Helper()
+	catalog, err := agentpack.LoadCatalog(filepath.Join("..", "..", "harness"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalog
 }

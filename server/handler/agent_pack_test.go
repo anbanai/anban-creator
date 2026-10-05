@@ -47,8 +47,8 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 	}
 	for _, pack := range envelope.Data.Packs {
 		if pack.ID == "hypit" {
-			if pack.Kind != "plugin" || !slices.Equal(pack.Surfaces, []string{"plugin"}) || pack.Channel != "" {
-				t.Fatalf("plugin-only Pack exposed as a channel Agent: %#v", pack)
+			if pack.Kind != "managed" || !slices.Equal(pack.Surfaces, []string{"plugin", "task"}) || pack.Channel != "hypit" || !slices.Equal(pack.Bindings.TaskKinds, []string{"hypit"}) {
+				t.Fatalf("managed video Pack has an incomplete task contract: %#v", pack)
 			}
 		}
 	}
