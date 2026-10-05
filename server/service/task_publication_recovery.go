@@ -11,14 +11,21 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 var ErrWechatPublicationRecoveryUnavailable = errors.New("WeChat publication recovery is unavailable")
 
 func (s *TaskService) RecoverWechatPublication(ctx context.Context, userID, taskID string) (model.TaskPublicationOutcome, error) {
 	task, err := s.repo.Tasks().FindByID(ctx, strings.TrimSpace(taskID))
-	if err != nil || task.UserID != userID {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.TaskPublicationOutcome{}, ErrWechatPublicationNotFound
+	}
+	if err != nil {
+		return model.TaskPublicationOutcome{}, fmt.Errorf("find recovery task: %w", err)
+	}
+	if task.UserID != userID {
+		return model.TaskPublicationOutcome{}, ErrWechatPublicationForbidden
 	}
 	if (strings.TrimSpace(task.Channel) != "" && task.Channel != model.ChannelArticle && task.Channel != model.ChannelWechatPicture) || (strings.TrimSpace(task.Channel) == "" && task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture) || task.Outcome == nil {
 		return model.TaskPublicationOutcome{}, ErrWechatPublicationRecoveryUnavailable

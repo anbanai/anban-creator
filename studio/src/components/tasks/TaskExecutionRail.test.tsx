@@ -64,7 +64,8 @@ describe('TaskExecutionRail', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(api.tasks.getWechatPublication).mockRejectedValue({ response: { status: 404 } })
+    // A blocked draft has no publication record yet; the API reads that 404 as null.
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue(null)
     vi.mocked(api.tasks.publishWechat).mockResolvedValue({
       id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'publishing',
     })
@@ -258,6 +259,26 @@ describe('TaskExecutionRail', () => {
     fireEvent.click(screen.getByRole('button', { name: '修复交付并重试' }))
     await waitFor(() => expect(api.tasks.recoverWechatPublication).toHaveBeenCalledWith('task-1'))
     expect(api.tasks.publishWechat).not.toHaveBeenCalled()
+  })
+
+  it('recovers a blocked draft without reporting a missing publication as a failure', async () => {
+    const outcome: TaskOutcome = {
+      core_delivery: { status: 'complete' }, visual: { status: 'complete' }, review: { status: 'passed' }, warnings: [],
+      publication: {
+        status: 'blocked', attempted: false, action: 'retry_visuals', code: 'cover_media_missing',
+        message: '封面尚未生成或上传完成，微信尚未收到请求。',
+      },
+    }
+    render(<TaskExecutionRail taskId="task-1" status="completed" outcome={outcome} lifecycle={{
+      ...lifecycle,
+      stages: [...lifecycle.stages, { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'blocked', latest_update: outcome.publication.message }],
+    }} onOpenLogs={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '补齐图片并重试' }))
+
+    await waitFor(() => expect(api.tasks.recoverWechatPublication).toHaveBeenCalledWith('task-1'))
+    expect(await screen.findByText('封面尚未生成或上传完成，微信尚未收到请求。')).toBeVisible()
+    expect(screen.queryByText('公众号操作失败，请稍后重试。')).not.toBeInTheDocument()
   })
 
   it('refreshes publication details when a server-owned stage changes', async () => {
