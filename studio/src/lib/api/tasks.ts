@@ -1,4 +1,4 @@
-import { http, unwrap } from '@/lib/http-client'
+import { http, isApiNotFoundError, unwrap } from '@/lib/http-client'
 import type { AgentExecutionProfileID, Task, TaskFile, CreateTaskRequest, CloneTaskRequest, PaginatedResponse, BulkTasksResponse, InputAttachment, WechatPublication } from '@/types'
 
 export interface ResumeTaskRequest {
@@ -8,6 +8,21 @@ export interface ResumeTaskRequest {
 
 export interface ReconcileWechatResponse {
   reconciled: boolean
+}
+
+/**
+ * The Server only records a WeChat publication once its finalizer reaches
+ * WeChat. A blocked draft such as a missing cover has no record yet, which the
+ * Server reports as 404. That is an empty state rather than a failed request, so
+ * callers read it as "no publication" and keep rendering the task.
+ */
+const readWechatPublication = async (id: string): Promise<WechatPublication | null> => {
+  try {
+    return await unwrap<WechatPublication>(http.get(`/tasks/${id}/wechat-publication`))
+  } catch (error) {
+    if (isApiNotFoundError(error)) return null
+    throw error
+  }
 }
 
 export const tasksApi = {
@@ -56,8 +71,7 @@ export const tasksApi = {
   bulkDelete: (ids: string[]) =>
     unwrap<BulkTasksResponse>(http.post('/tasks/bulk-delete', { task_ids: ids })),
 
-  getWechatPublication: (id: string) =>
-    unwrap<WechatPublication>(http.get(`/tasks/${id}/wechat-publication`)),
+  getWechatPublication: readWechatPublication,
   publishWechat: (id: string) =>
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/publish`)),
   retryWechatPublish: (id: string) =>

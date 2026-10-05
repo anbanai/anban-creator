@@ -112,7 +112,7 @@ function automaticallyExpandedStageIds(
   return new Set(expanded)
 }
 
-function hasSubmissionEvidence(publication?: WechatPublication) {
+function hasSubmissionEvidence(publication?: WechatPublication | null) {
   return Boolean(
     publication?.submit_attempted_at
       || publication?.publish_id
@@ -428,7 +428,7 @@ function PublicationStageActions({
   onRecoverDraft,
 }: {
   stage: TaskLifecycleStage
-  publication?: WechatPublication
+  publication?: WechatPublication | null
   outcome?: TaskOutcome
   pending: boolean
   onPublish: () => void

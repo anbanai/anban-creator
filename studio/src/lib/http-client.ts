@@ -199,6 +199,12 @@ export function getApiErrorCode(err: unknown): number | undefined {
   return typeof code === 'number' ? code : undefined
 }
 
+/** Whether a request failed because the addressed resource does not exist. */
+export function isApiNotFoundError(err: unknown): boolean {
+  const status = (err as { response?: { status?: unknown } } | null)?.response?.status
+  return status === 404
+}
+
 function isNetworkError(err: unknown): boolean {
   if (!axios.isAxiosError(err) || err.response) return false
   return err.code === 'ERR_NETWORK' || err.message === 'Network Error'

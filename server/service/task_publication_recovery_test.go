@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 func makeCompletedPublicationRecoveryFixture(t *testing.T, action string) (*TaskService, repository.Repository, *model.Task, *model.TaskExecution, *mockEnqueuer) {
@@ -277,6 +278,33 @@ func TestRecoverWechatPublicationRetriesAuthorizedDefinitiveDraftRejection(t *te
 	}
 }
 
+// A blocked visual draft has no publication row, because the finalizer blocks
+// before it ever calls WeChat. The Studio reads that missing record on every
+// render, so recovery must not depend on the record existing.
+func TestVisualRecoverySucceedsWhilePublicationRecordIsStillAbsent(t *testing.T) {
+	svc, repo, task, _, enqueuer := makeCompletedPublicationRecoveryFixture(t, "retry_visuals")
+	ctx := context.Background()
+
+	if _, err := repo.WechatPublications().FindByTaskID(ctx, task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("publication before recovery = %v, want no record", err)
+	}
+
+	publicationSvc := NewWechatPublicationService(repo, nil, nil)
+	publicationSvc.SetRecovery(svc.RecoverWechatPublication)
+	if _, err := publicationSvc.Recover(ctx, task.UserID, task.ID); err != nil {
+		t.Fatalf("recover a blocked visual draft: %v", err)
+	}
+	if len(enqueuer.enqueued) != 1 {
+		t.Fatalf("enqueued = %d, want the visual recovery execution", len(enqueuer.enqueued))
+	}
+	if _, err := repo.WechatPublications().FindByTaskID(ctx, task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("publication after recovery = %v, want still no record", err)
+	}
+	if _, err := publicationSvc.Get(ctx, task.UserID, task.ID); !errors.Is(err, ErrWechatPublicationNotFound) {
+		t.Fatalf("Get before the agent delivers a cover = %v, want %v", err, ErrWechatPublicationNotFound)
+	}
+}
+
 func TestRecoverWechatPublicationVisualsEnqueueFailureRestoresCompletedTask(t *testing.T) {
 	svc, repo, task, _, _ := makeCompletedPublicationRecoveryFixture(t, "retry_visuals")
 	svc.enqueuer = &failOnceEnqueuer{err: errors.New("queue unavailable")}
@@ -295,6 +323,22 @@ func TestRecoverWechatPublicationVisualsEnqueueFailureRestoresCompletedTask(t *t
 	gotInput, _ := json.Marshal(found.AgentInput.Data())
 	if string(gotInput) != string(beforeInput) {
 		t.Fatalf("agent input after rollback = %s, want %s", gotInput, beforeInput)
+	}
+}
+
+func TestRecoverWechatPublicationDoesNotReportOwnershipAsMissingPublication(t *testing.T) {
+	svc, _, task, _, _ := makeCompletedPublicationRecoveryFixture(t, "retry_visuals")
+	_, err := svc.RecoverWechatPublication(context.Background(), uuid.NewString(), task.ID)
+	if !errors.Is(err, ErrWechatPublicationForbidden) {
+		t.Fatalf("recovery for another owner = %v, want %v", err, ErrWechatPublicationForbidden)
+	}
+}
+
+func TestRecoverWechatPublicationReportsUnknownTaskAsMissingPublication(t *testing.T) {
+	svc, _, _, _, _ := makeCompletedPublicationRecoveryFixture(t, "retry_visuals")
+	_, err := svc.RecoverWechatPublication(context.Background(), uuid.NewString(), uuid.NewString())
+	if !errors.Is(err, ErrWechatPublicationNotFound) {
+		t.Fatalf("recovery for unknown task = %v, want %v", err, ErrWechatPublicationNotFound)
 	}
 }
 
