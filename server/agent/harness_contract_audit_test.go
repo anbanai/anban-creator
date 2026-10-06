@@ -49,6 +49,8 @@ func TestHarnessAutonomyAndFailureContracts(t *testing.T) {
 	checks := map[string][]string{
 		"harness/packs/wechat-article/agent.claude.md":  {"readiness.status", "blocked", "output/draft.json"},
 		"harness/packs/wechat-article/agent.codex.toml": {"readiness.status", "blocked", "output/draft.json"},
+		"harness/packs/wechat-picture/agent.claude.md":  {"output/publish-package.json", "schema_version", "readiness.status", "\"content\"", "image_paths"},
+		"harness/packs/wechat-picture/agent.codex.toml": {"output/publish-package.json", "schema_version", "readiness.status", "\"content\"", "image_paths"},
 		"harness/packs/moments/agent.codex.toml":        {"不得询问", "结构化失败"},
 		"harness/packs/seednote/agent.claude.md":        {"viral_analysis", "quality_status=failed", "generate_image"},
 		"harness/packs/seednote/agent.codex.toml":       {"viral_analysis", "quality_status=failed", "generate_image"},

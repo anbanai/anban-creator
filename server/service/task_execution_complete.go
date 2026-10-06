@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -879,16 +880,57 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	return block(wechatDraftDeliveryFailureCode(createErr), "retry_draft")
 }
 
+type picturePublicationReadiness struct {
+	Status string `json:"status"`
+}
+
 type picturePublicationPackage struct {
-	SchemaVersion string   `json:"schema_version"`
-	Title         string   `json:"title"`
-	Digest        string   `json:"digest"`
-	Content       string   `json:"content"`
-	CoverPath     string   `json:"cover_path"`
-	ImagePaths    []string `json:"image_paths"`
-	Readiness     struct {
-		Status string `json:"status"`
-	} `json:"readiness"`
+	SchemaVersion string                       `json:"schema_version"`
+	Status        string                       `json:"status"`
+	Source        string                       `json:"source"`
+	DataAt        string                       `json:"data_at"`
+	Missing       []string                     `json:"missing"`
+	Title         string                       `json:"title"`
+	Digest        string                       `json:"digest"`
+	Content       string                       `json:"content"`
+	CoverPath     string                       `json:"cover_path"`
+	ImagePaths    []string                     `json:"image_paths"`
+	Readiness     *picturePublicationReadiness `json:"readiness"`
+}
+
+func validPicturePublicationPackage(pkg *picturePublicationPackage) bool {
+	if pkg == nil || pkg.SchemaVersion != "1.0" || pkg.Source != "wechat-picture-agent" ||
+		strings.TrimSpace(pkg.Title) == "" || strings.TrimSpace(pkg.Content) == "" ||
+		pkg.Missing == nil || pkg.ImagePaths == nil || pkg.Readiness == nil {
+		return false
+	}
+	if _, err := time.Parse(time.RFC3339, strings.TrimSpace(pkg.DataAt)); err != nil {
+		return false
+	}
+	for _, missing := range pkg.Missing {
+		if strings.TrimSpace(missing) == "" {
+			return false
+		}
+	}
+	if pkg.Status != pkg.Readiness.Status {
+		return false
+	}
+	switch pkg.Status {
+	case "ready":
+		return len(pkg.Missing) == 0
+	case "blocked":
+		return true
+	default:
+		return false
+	}
+}
+
+func validPicturePublicationPath(value string) bool {
+	return value != "" &&
+		strings.HasPrefix(value, "output/") &&
+		pathpkg.Clean(value) == value &&
+		!strings.Contains(value, "\\") &&
+		!strings.ContainsAny(value, "*?[]{}")
 }
 
 func (s *TaskService) finalizePicturePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
@@ -909,8 +951,19 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 	}
 	var pkg picturePublicationPackage
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	if err := decoder.Decode(&pkg); err != nil || pkg.SchemaVersion != "1.0" || pkg.Readiness.Status != "ready" || strings.TrimSpace(pkg.Title) == "" {
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&pkg); err != nil {
 		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+	}
+	if !validPicturePublicationPackage(&pkg) {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+	}
+	if pkg.Status != "ready" {
+		return block("semantic_review_blocked", "review_content")
 	}
 	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
 	if err != nil {
@@ -922,18 +975,22 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 			byPath[file.FilePath] = file
 		}
 	}
-	if s.wechatPublicationSvc == nil {
-		return block("publication_service_unavailable", "retry_draft")
+	coverPath := strings.TrimSpace(pkg.CoverPath)
+	if !validPicturePublicationPath(coverPath) {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
 	}
 	paths := make([]string, 0, len(pkg.ImagePaths)+1)
-	if strings.TrimSpace(pkg.CoverPath) != "" {
-		paths = append(paths, strings.TrimSpace(pkg.CoverPath))
-	}
+	paths = append(paths, coverPath)
+	seenPaths := map[string]struct{}{coverPath: {}}
 	for _, path := range pkg.ImagePaths {
 		path = strings.TrimSpace(path)
-		if path == "" || path == pkg.CoverPath {
-			continue
+		if !validPicturePublicationPath(path) {
+			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
 		}
+		if _, exists := seenPaths[path]; exists {
+			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
+		}
+		seenPaths[path] = struct{}{}
 		paths = append(paths, path)
 	}
 	if input := task.AgentInput.Data(); input != nil {
@@ -949,6 +1006,9 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 	}
 	if len(paths) < 1 || len(paths) > 20 {
 		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_invalid", false, "retry_visuals"), nil
+	}
+	if s.wechatPublicationSvc == nil {
+		return block("publication_service_unavailable", "retry_draft")
 	}
 	images := make([]appwechat.DraftImage, 0, len(paths))
 	seen := map[string]struct{}{}

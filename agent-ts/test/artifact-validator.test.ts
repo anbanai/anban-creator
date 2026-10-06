@@ -42,6 +42,17 @@ const viralAnalysisPack: AgentPack = {
   ],
 };
 
+const picturePack: AgentPack = {
+  ...pack,
+  id: "wechat-picture",
+  agent: { name: "wechat-picture" },
+  bindings: { task_types: ["wechat-picture"] },
+  runtime: { profile: "wechat-picture", adapter: "standard" },
+  artifacts: [
+    { role: "image", path: "output/image_*.png", required: true },
+  ],
+};
+
 async function workspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "anban-progress-artifacts-"));
   roots.push(root);
@@ -138,6 +149,36 @@ describe("artifact validation", () => {
       ok: false,
       reason: "missing_artifacts",
       missing: ["output/topic-analysis.md", "output/final.md"],
+    });
+  });
+
+  test("expands a required image glob and validates every concrete match", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "image_01.png"), "first image");
+    await writeFile(join(root, "output", "image_02.png"), "second image");
+
+    expect(await validateFinalArtifacts(picturePack, root)).toEqual({ ok: true });
+  });
+
+  test("does not accept a literal wildcard compatibility placeholder for a glob", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "image_*.png"), "placeholder");
+
+    expect(await validateFinalArtifacts(picturePack, root)).toEqual({
+      ok: false,
+      reason: "missing_artifacts",
+      missing: ["output/image_*.png"],
+    });
+  });
+
+  test("reports a required glob when no concrete image matches", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "image.txt"), "not an image");
+
+    expect(await validateFinalArtifacts(picturePack, root)).toEqual({
+      ok: false,
+      reason: "missing_artifacts",
+      missing: ["output/image_*.png"],
     });
   });
 });

@@ -3,10 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	appwechat "github.com/anbanai/anban-creator/server/app/wechat"
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 )
 
 func TestCompleteCloudExecutionProjectsPreflightPublicationBlock(t *testing.T) {
@@ -58,6 +62,170 @@ func TestCompleteCloudExecutionProjectsPreflightPublicationBlock(t *testing.T) {
 				t.Fatalf("draft stage = %#v, want blocked with actual preflight reason %q", draft, stored.Outcome.Publication.Message)
 			}
 		})
+	}
+}
+
+func TestFinalizePicturePublicationUsesCanonicalServerPackageSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantStatus string
+		wantCode   string
+	}{
+		{
+			name:       "agent-only caption shape is rejected",
+			body:       `{"status":"ready","title":"图片消息","caption":"图下注释","cover_path":"output/cover.png","image_paths":[]}`,
+			wantStatus: model.TaskExecutionDraftDeliveryFailed,
+			wantCode:   "publication_package_invalid",
+		},
+		{
+			name:       "nested readiness and content shape is accepted",
+			body:       `{"schema_version":"1.0","status":"ready","source":"wechat-picture-agent","data_at":"2026-10-06T00:00:00Z","missing":[],"title":"图片消息","digest":"摘要","content":"图下注释","cover_path":"output/cover.png","image_paths":[],"readiness":{"status":"ready"}}`,
+			wantStatus: model.TaskExecutionDraftDeliveryBlocked,
+			wantCode:   "publication_service_unavailable",
+		},
+		{
+			name:       "valid package with blocked readiness is recoverable review block",
+			body:       string(canonicalPicturePublicationPackage(t, "blocked", "blocked", []string{"visual_review"}, nil)),
+			wantStatus: model.TaskExecutionDraftDeliveryBlocked,
+			wantCode:   "semantic_review_blocked",
+		},
+		{
+			name:       "unknown compatibility field is rejected",
+			body:       string(canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"caption": "图下注释"})),
+			wantStatus: model.TaskExecutionDraftDeliveryFailed,
+			wantCode:   "publication_package_invalid",
+		},
+		{
+			name:       "root and readiness status must agree",
+			body:       string(canonicalPicturePublicationPackage(t, "ready", "blocked", []string{"visual_review"}, nil)),
+			wantStatus: model.TaskExecutionDraftDeliveryFailed,
+			wantCode:   "publication_package_invalid",
+		},
+		{
+			name:       "source is required to identify the producer",
+			body:       string(canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"source": "legacy-agent"})),
+			wantStatus: model.TaskExecutionDraftDeliveryFailed,
+			wantCode:   "publication_package_invalid",
+		},
+		{
+			name:       "data timestamp must be RFC3339",
+			body:       string(canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"data_at": "yesterday"})),
+			wantStatus: model.TaskExecutionDraftDeliveryFailed,
+			wantCode:   "publication_package_invalid",
+		},
+		{
+			name:       "missing must be an array",
+			body:       string(canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"missing": nil})),
+			wantStatus: model.TaskExecutionDraftDeliveryFailed,
+			wantCode:   "publication_package_invalid",
+		},
+		{
+			name:       "wildcard image path is rejected",
+			body:       string(canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"cover_path": "output/image_*.png"})),
+			wantStatus: model.TaskExecutionDraftDeliveryFailed,
+			wantCode:   "publication_package_invalid",
+		},
+		{
+			name:       "missing readiness is a malformed package",
+			body:       `{"schema_version":"1.0","title":"图片消息","digest":"摘要","content":"图下注释","cover_path":"output/cover.png","image_paths":[]}`,
+			wantStatus: model.TaskExecutionDraftDeliveryFailed,
+			wantCode:   "publication_package_invalid",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, execution := setupCloudCompletionTest(t, false)
+			task.Type = model.TaskTypeWechatPicture
+			task.Channel = model.ChannelWechatPicture
+			addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", []byte(tc.body))
+
+			status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result publicationDeliveryResult
+			if err := json.Unmarshal(evidence, &result); err != nil {
+				t.Fatal(err)
+			}
+			if status != tc.wantStatus || result.Code != tc.wantCode || result.Attempted {
+				t.Fatalf("status=%q evidence=%s", status, evidence)
+			}
+		})
+	}
+}
+
+func canonicalPicturePublicationPackage(t *testing.T, status, readiness string, missing []string, extra map[string]any) []byte {
+	t.Helper()
+	if missing == nil {
+		missing = []string{}
+	}
+	pkg := map[string]any{
+		"schema_version": "1.0",
+		"status":         status,
+		"source":         "wechat-picture-agent",
+		"data_at":        "2026-10-06T00:00:00Z",
+		"missing":        missing,
+		"title":          "图片消息",
+		"digest":         "摘要",
+		"content":        "图下注释",
+		"cover_path":     "output/cover.png",
+		"image_paths":    []string{},
+		"readiness":      map[string]string{"status": readiness},
+	}
+	for key, value := range extra {
+		pkg[key] = value
+	}
+	body, err := json.Marshal(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestFinalizePicturePublicationDeliversCanonicalPackageToWechat(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	task.Type = model.TaskTypeWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeWechatPublicationAPI{
+		draftListResponse: &appwechat.DraftBatchGetResponse{},
+		addResponse:       &appwechat.DraftAddResponse{MediaID: "picture-draft-1"},
+	}
+	logger := zerolog.New(io.Discard)
+	publication := NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+		return api, nil
+	}, &logger)
+	svc.SetWechatPublicationService(publication)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", canonicalPicturePublicationPackage(t, "ready", "ready", nil, nil))
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStateDelivered,
+		Role: model.FileRoleCover, FilePath: "output/cover.png", FileName: "cover.png", MimeType: "image/png",
+		FileSize: 1, MediaID: "image-media-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliverySucceeded || result.Status != status || !result.Attempted || result.Code != "" {
+		t.Fatalf("status=%q evidence=%s", status, evidence)
+	}
+	if api.addCalls != 1 || len(api.addRequests) != 1 || len(api.addRequests[0].Articles) != 1 {
+		t.Fatalf("WeChat newspic calls=%d requests=%#v", api.addCalls, api.addRequests)
+	}
+	article := api.addRequests[0].Articles[0]
+	if article.ArticleType != "newspic" || article.Title != "图片消息" || article.Content != "图下注释" || article.ImageInfo == nil || len(article.ImageInfo.ImageList) != 1 || article.ImageInfo.ImageList[0].ImageMediaID != "image-media-1" {
+		t.Fatalf("newspic request=%#v", article)
 	}
 }
 
