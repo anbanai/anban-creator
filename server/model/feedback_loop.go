@@ -25,6 +25,7 @@ const (
 	FeedbackSkipRevokedBatch        = "revoked_batch"
 	FeedbackSkipIdentityMismatch    = "identity_mismatch"
 	FeedbackSkipResourceLimit       = "resource_limit"
+	FeedbackSkipManualOnly          = "manual_only"
 	FeedbackPromotionNone           = "none"
 	FeedbackPromotionCandidate      = "candidate"
 	FeedbackPromotionConfirmed      = "confirmed"

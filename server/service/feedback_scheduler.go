@@ -572,7 +572,10 @@ func feedbackOperations(cadence string) []string {
 	case FeedbackCadenceDaily:
 		return []string{"data_tracker"}
 	case FeedbackCadenceWeekly:
-		return []string{"publish_analytics", "content_postmortem"}
+		// Content postmortem/attribution is an explicit per-content action. The
+		// background cadence may aggregate publication analytics, but it must not
+		// create an Agent run that looks like a user task.
+		return []string{"publish_analytics"}
 	case FeedbackCadenceMonthly:
 		return []string{"performance_review", "strategy_advisor"}
 	default:

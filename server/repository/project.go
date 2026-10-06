@@ -13,6 +13,12 @@ import (
 
 var ErrProjectDeleteDependencies = errors.New("project has task or plan dependencies")
 
+const publicTaskStatsPredicate = `
+		COALESCE(task_kind, '') <> ? AND
+		COALESCE(type, '') <> ? AND
+		COALESCE(agent_id, '') <> ? AND
+		COALESCE(channel, '') <> ?`
+
 // ProjectStats holds computed statistics for a project.
 type ProjectStats struct {
 	TotalTasks     int64      `json:"total_tasks"`
@@ -221,8 +227,10 @@ func (r *gormProjectRepository) GetStats(ctx context.Context, projectID string) 
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
 			(SELECT COUNT(*) FROM topic_pool WHERE project_id = ? AND status = ?) as unused_topics,
 			MAX(completed_at) as last_activity_at
-		FROM tasks WHERE project_id = ?
-	`, projectID, model.TopicStatusUnused, projectID).Scan(&stats).Error
+		FROM tasks WHERE project_id = ? AND`+publicTaskStatsPredicate+`
+	`, projectID, model.TopicStatusUnused, projectID,
+		model.TaskKindFeedbackAnalysis, model.TaskKindFeedbackAnalysis,
+		model.AgentIDFeedbackAnalysis, model.ChannelFeedbackAnalysis).Scan(&stats).Error
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table: topic_pool") {
 		err = r.db.WithContext(ctx).Raw(`
 			SELECT COUNT(*) as total_tasks,
@@ -231,8 +239,10 @@ func (r *gormProjectRepository) GetStats(ctx context.Context, projectID string) 
 			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_tasks,
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
 			0 as unused_topics, MAX(completed_at) as last_activity_at
-			FROM tasks WHERE project_id = ?
-		`, projectID).Scan(&stats).Error
+			FROM tasks WHERE project_id = ? AND`+publicTaskStatsPredicate+`
+		`, projectID,
+			model.TaskKindFeedbackAnalysis, model.TaskKindFeedbackAnalysis,
+			model.AgentIDFeedbackAnalysis, model.ChannelFeedbackAnalysis).Scan(&stats).Error
 	}
 
 	if err != nil {
@@ -282,9 +292,11 @@ func (r *gormProjectRepository) GetStatsByProjectIDs(ctx context.Context, projec
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_tasks,
 			MAX(completed_at) as last_activity_at
 		FROM tasks
-		WHERE project_id IN ?
+		WHERE project_id IN ? AND`+publicTaskStatsPredicate+`
 		GROUP BY project_id
-	`, projectIDs).Scan(&rows).Error
+	`, projectIDs,
+		model.TaskKindFeedbackAnalysis, model.TaskKindFeedbackAnalysis,
+		model.AgentIDFeedbackAnalysis, model.ChannelFeedbackAnalysis).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

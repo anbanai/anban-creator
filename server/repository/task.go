@@ -30,6 +30,18 @@ func newTaskRepository(db *gorm.DB) TaskRepository {
 	return &taskRepository{db: db}
 }
 
+// excludeInternalFeedbackTasks keeps the managed feedback Agent's execution
+// task private. It is linked to a user/project for ownership and finalization,
+// but it is not a user-delivery task and must not appear in Studio lists,
+// timeline, counts, or usage summaries.
+func excludeInternalFeedbackTasks(q *gorm.DB) *gorm.DB {
+	return q.
+		Where("COALESCE(task_kind, '') <> ?", model.TaskKindFeedbackAnalysis).
+		Where("COALESCE(type, '') <> ?", model.TaskKindFeedbackAnalysis).
+		Where("COALESCE(agent_id, '') <> ?", model.AgentIDFeedbackAnalysis).
+		Where("COALESCE(channel, '') <> ?", model.ChannelFeedbackAnalysis)
+}
+
 func (r *taskRepository) Create(ctx context.Context, task *model.Task) error {
 	return r.db.WithContext(ctx).Create(task).Error
 }
@@ -52,7 +64,7 @@ func (r *taskRepository) FindByIDForUpdate(ctx context.Context, id string) (*mod
 
 func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Order("id DESC")
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Where("user_id = ?", userID)).Order("created_at DESC").Order("id DESC")
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
 	}
@@ -70,7 +82,7 @@ func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projec
 
 func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status).Order("created_at DESC").Order("id DESC")
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status)).Order("created_at DESC").Order("id DESC")
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
 	}
@@ -88,7 +100,7 @@ func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, stat
 
 func (r *taskRepository) FindByUserIDBefore(ctx context.Context, userID string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
 		Where("user_id = ?", userID).
 		Where("(created_at < ?) OR (created_at = ? AND id < ?)", beforeCreatedAt, beforeCreatedAt, beforeID).
 		Order("created_at DESC").Order("id DESC")
@@ -109,7 +121,7 @@ func (r *taskRepository) FindByUserIDBefore(ctx context.Context, userID string, 
 
 func (r *taskRepository) FindByUserIDAndStatusBefore(ctx context.Context, userID, status string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
 		Where("user_id = ? AND status = ?", userID, status).
 		Where("(created_at < ?) OR (created_at = ? AND id < ?)", beforeCreatedAt, beforeCreatedAt, beforeID).
 		Order("created_at DESC").Order("id DESC")
@@ -130,7 +142,7 @@ func (r *taskRepository) FindByUserIDAndStatusBefore(ctx context.Context, userID
 
 func (r *taskRepository) FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).Where("created_at >= ? AND created_at <= ?", from, to).Order("created_at DESC")
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Where("created_at >= ? AND created_at <= ?", from, to)).Order("created_at DESC")
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
 	}
@@ -142,7 +154,7 @@ func (r *taskRepository) FindByCreatedAtRange(ctx context.Context, from, to time
 
 func (r *taskRepository) FindByUserIDAndCreatedAtRange(ctx context.Context, userID string, from, to time.Time, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).Where("user_id = ? AND created_at >= ? AND created_at <= ?", userID, from, to).Order("created_at DESC")
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Where("user_id = ? AND created_at >= ? AND created_at <= ?", userID, from, to)).Order("created_at DESC")
 	if limit > 0 {
 		q = q.Offset(offset).Limit(limit)
 	}
@@ -162,7 +174,7 @@ func (r *taskRepository) FindRunning(ctx context.Context) ([]*model.Task, error)
 
 func (r *taskRepository) FindRunningByUser(ctx context.Context, userID string, projectID string) ([]*model.Task, error) {
 	var tasks []*model.Task
-	q := r.db.WithContext(ctx).
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
 		Where("user_id = ?", userID).
 		Where("status = ?", model.TaskStatusRunning)
 	if projectID != "" {
@@ -446,7 +458,7 @@ func (r *taskRepository) UpdateHeartbeat(ctx context.Context, id string) error {
 
 func (r *taskRepository) CountByUserID(ctx context.Context, userID string, projectID string, planID string) (int64, error) {
 	var count int64
-	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID)
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ?", userID))
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
 	}
@@ -461,7 +473,7 @@ func (r *taskRepository) CountByUserID(ctx context.Context, userID string, proje
 
 func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string) (int64, error) {
 	var count int64
-	q := r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ? AND status = ?", userID, status)
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Model(&model.Task{}).Where("user_id = ? AND status = ?", userID, status))
 	if projectID != "" {
 		q = q.Where("project_id = ?", projectID)
 	}
@@ -476,7 +488,7 @@ func (r *taskRepository) CountByUserIDAndStatus(ctx context.Context, userID, sta
 
 func (r *taskRepository) CountRunningByProject(ctx context.Context, projectID string) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&model.Task{}).
+	err := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Model(&model.Task{})).
 		Where("project_id = ? AND status = ?", projectID, model.TaskStatusRunning).
 		Count(&count).Error
 	return count, err
@@ -484,7 +496,7 @@ func (r *taskRepository) CountRunningByProject(ctx context.Context, projectID st
 
 func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID string, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
-	err := r.db.WithContext(ctx).
+	err := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
 		Where("project_id = ? AND status = ? AND deleting_at IS NULL", projectID, model.TaskStatusPending).
 		Where("(plan_id IS NULL OR EXISTS (SELECT 1 FROM plans WHERE plans.id = tasks.plan_id AND plans.status = ?))", model.PlanStatusActive).
 		Where("NOT (retry_count > 0 AND updated_at > ?)", time.Now().Add(-2*time.Minute)).
@@ -496,7 +508,7 @@ func (r *taskRepository) FindPendingByProject(ctx context.Context, projectID str
 
 func (r *taskRepository) FindPendingByPlanID(ctx context.Context, planID string) ([]*model.Task, error) {
 	var tasks []*model.Task
-	err := r.db.WithContext(ctx).
+	err := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
 		Where("plan_id = ? AND status = ? AND current_execution_id IS NULL AND deleting_at IS NULL", planID, model.TaskStatusPending).
 		Order("created_at ASC").
 		Find(&tasks).Error
@@ -527,7 +539,7 @@ func (r *taskRepository) DeleteIfDeleting(ctx context.Context, taskID string) (b
 // FindTitlesByProjectID returns all recorded titles for a project, ordered by creation time descending.
 func (r *taskRepository) FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error) {
 	var titles []string
-	err := r.db.WithContext(ctx).
+	err := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
 		Model(&model.Task{}).
 		Where("project_id = ? AND title != ''", projectID).
 		Group("title").
@@ -539,7 +551,7 @@ func (r *taskRepository) FindTitlesByProjectID(ctx context.Context, projectID st
 
 func (r *taskRepository) FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error) {
 	var tasks []*model.Task
-	err := r.db.WithContext(ctx).
+	err := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
 		Where("project_id = ? AND title != ''", projectID).
 		Order("created_at DESC").
 		Limit(200).
@@ -775,7 +787,7 @@ func (r *taskRepository) AggregateUsageByUser(ctx context.Context, userID string
 		CacheCreated int64
 	}
 	var r2 row
-	q := r.db.WithContext(ctx).Model(&model.Task{}).
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Model(&model.Task{})).
 		Select(
 			"COUNT(*) AS tasks",
 			"COALESCE(SUM(input_tokens), 0) AS input",
@@ -808,7 +820,7 @@ type TypeUsageRow struct {
 // AggregateUsageByType returns per-type token usage via SQL GROUP BY.
 func (r *taskRepository) AggregateUsageByType(ctx context.Context, userID string, from, to time.Time, projectID string) ([]TypeUsageRow, error) {
 	var rows []TypeUsageRow
-	q := r.db.WithContext(ctx).Model(&model.Task{}).
+	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Model(&model.Task{})).
 		Select(
 			"type",
 			"COUNT(*) AS count",

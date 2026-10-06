@@ -1370,6 +1370,11 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 			if job.Status == model.FeedbackJobSkipped {
 				return nil
 			}
+			// Content postmortem is manual-only. This guard drains jobs created by
+			// older scheduler versions without creating another internal Task.
+			if skipAutomaticContentPostmortem(job, time.Now().UTC()) {
+				return repo.FeedbackLoop().UpdateJob(ctx, job)
+			}
 			if job.Operation == "data_tracker" {
 				return service.ProcessFeedbackJob(ctx, repo, fingerprint)
 			}
@@ -1419,6 +1424,20 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	}()
 
 	return srv
+}
+
+func skipAutomaticContentPostmortem(job *model.FeedbackJob, now time.Time) bool {
+	if job == nil || job.Operation != "content_postmortem" || job.Trigger == service.FeedbackTriggerUserAttribution {
+		return false
+	}
+	job.Status = model.FeedbackJobSkipped
+	job.SkipReason = model.FeedbackSkipManualOnly
+	job.LastError = ""
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	job.CompletedAt = &now
+	return true
 }
 
 func startFeedbackCadenceLoop(ctx context.Context, feedbackScheduler *service.FeedbackScheduler, log *zerolog.Logger) {

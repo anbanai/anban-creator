@@ -2963,6 +2963,29 @@ func TestTaskService_List(t *testing.T) {
 	}
 }
 
+func TestTaskService_ListHidesInternalFeedbackAnalysisTasks(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	userID := uuid.New().String()
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+
+	public := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, Prompt: "用户文章"}
+	internal := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, AgentID: model.AgentIDFeedbackAnalysis, Channel: model.ChannelFeedbackAnalysis, TaskKind: model.TaskKindFeedbackAnalysis, Type: model.TaskKindFeedbackAnalysis, Status: model.TaskStatusFailed, Prompt: "Run the frozen feedback analysis job."}
+	if err := repo.Tasks().Create(t.Context(), public); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(t.Context(), internal); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, total, err := svc.List(t.Context(), userID, 0, 20, "", "", "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if total != 1 || len(tasks) != 1 || tasks[0].ID != public.ID {
+		t.Fatalf("List returned total=%d tasks=%#v, want only public task", total, tasks)
+	}
+}
+
 func TestTaskService_List_ByStatus(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	userID := uuid.New().String()

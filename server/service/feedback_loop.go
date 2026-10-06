@@ -75,6 +75,7 @@ const (
 	FeedbackCadenceDaily            = "daily"
 	FeedbackCadenceWeekly           = "weekly"
 	FeedbackCadenceMonthly          = "monthly"
+	FeedbackTriggerUserAttribution  = "user_attribution"
 	FeedbackJobEligible             = "eligible"
 	FeedbackJobSkipped              = "skipped"
 	FeedbackSkipNoNewRevision       = "no_new_revision"

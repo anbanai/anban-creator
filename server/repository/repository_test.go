@@ -546,6 +546,30 @@ func TestTaskRepository_FindTitlesByProjectID(t *testing.T) {
 	}
 }
 
+func TestTaskRepository_AggregateUsageByTypeExcludesInternalFeedbackTasks(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 6, 4, 0, 0, 0, time.UTC)
+
+	for _, task := range []*model.Task{
+		{ID: "task-usage-public", UserID: "user-usage", ProjectID: "project-usage", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, CreatedAt: now},
+		{ID: "task-usage-feedback", UserID: "user-usage", ProjectID: "project-usage", AgentID: model.AgentIDFeedbackAnalysis, Channel: model.ChannelFeedbackAnalysis, TaskKind: model.TaskKindFeedbackAnalysis, Type: model.TaskKindFeedbackAnalysis, Status: model.TaskStatusFailed, CreatedAt: now},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("Create task %s: %v", task.ID, err)
+		}
+	}
+
+	rows, err := repo.Tasks().AggregateUsageByType(ctx, "user-usage", now.Add(-time.Hour), now.Add(time.Hour), "")
+	if err != nil {
+		t.Fatalf("AggregateUsageByType: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Type != model.TaskTypeWechatArticle || rows[0].Count != 1 {
+		t.Fatalf("usage rows = %#v, want only one public article task", rows)
+	}
+}
+
 func TestTaskRepository_ClearArtifactTitles(t *testing.T) {
 	db := setupTestDB(t)
 	repo := New(db)

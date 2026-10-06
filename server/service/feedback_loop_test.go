@@ -137,6 +137,12 @@ func TestFeedbackSampleThresholdUsesOperationSpecificMinimums(t *testing.T) {
 	}
 }
 
+func TestFeedbackOperationsKeepContentPostmortemManual(t *testing.T) {
+	if got := feedbackOperations(FeedbackCadenceWeekly); len(got) != 1 || got[0] != "publish_analytics" {
+		t.Fatalf("weekly feedback operations = %#v, want only publish_analytics", got)
+	}
+}
+
 func TestFeedbackJitterIsStableAndBounded(t *testing.T) {
 	fingerprint := "abcdef0123456789"
 	if first, second := feedbackJitter(fingerprint), feedbackJitter(fingerprint); first != second {

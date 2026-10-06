@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	serverbilling "github.com/anbanai/anban-creator/server/billing"
@@ -43,6 +44,25 @@ func TestMainUsesAsyncSidecarMonitors(t *testing.T) {
 		if !strings.Contains(src, want) {
 			t.Fatalf("main.go missing async sidecar wiring %q", want)
 		}
+	}
+}
+
+func TestSkipAutomaticContentPostmortem(t *testing.T) {
+	completedAt := time.Date(2026, 10, 6, 4, 0, 0, 0, time.UTC)
+	automatic := &model.FeedbackJob{Operation: "content_postmortem", Trigger: service.FeedbackCadenceWeekly, Status: model.FeedbackJobQueued, LastError: "old enqueue error"}
+	if !skipAutomaticContentPostmortem(automatic, completedAt) {
+		t.Fatal("automatic content postmortem was not skipped")
+	}
+	if automatic.Status != model.FeedbackJobSkipped || automatic.SkipReason != model.FeedbackSkipManualOnly || automatic.LastError != "" || automatic.CompletedAt == nil || !automatic.CompletedAt.Equal(completedAt) {
+		t.Fatalf("automatic job after skip = %#v", automatic)
+	}
+
+	manual := &model.FeedbackJob{Operation: "content_postmortem", Trigger: service.FeedbackTriggerUserAttribution, Status: model.FeedbackJobQueued}
+	if skipAutomaticContentPostmortem(manual, completedAt) {
+		t.Fatal("manual content postmortem was incorrectly skipped")
+	}
+	if manual.Status != model.FeedbackJobQueued || manual.CompletedAt != nil {
+		t.Fatalf("manual job changed = %#v", manual)
 	}
 }
 
