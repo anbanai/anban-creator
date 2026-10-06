@@ -38,6 +38,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatFullDateTimeCN, progressStageLabel, providerDiagnosticLabels, statusBadgeVariant, taskFailurePresentation, taskStatusLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskBillingChargeDetail, TaskFile } from '@/types'
+import { ProjectIdentity, resolveProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 
 export type TaskDetailsTab = 'overview' | 'configuration' | 'materials' | 'logs'
 
@@ -105,7 +106,7 @@ function TaskDetailsSection({
   )
 }
 
-function DetailRows({ rows }: { rows: Array<[string, string]> }) {
+function DetailRows({ rows }: { rows: Array<[string, ReactNode]> }) {
   return (
     <dl className="flex flex-col">
       {rows.map(([label, value]) => (
@@ -194,7 +195,16 @@ function TaskOverviewDetails({
   const projectName = hasSnapshot
     ? task.project_snapshot?.project_name || '—'
     : project?.name || '—'
-  const timingRows: Array<[string, string]> = [
+  const projectIdentity = project || task.project_snapshot?.project_name || task.project_snapshot?.platform
+    ? resolveProjectIdentity({
+      project,
+      snapshot: task.project_snapshot,
+      projectId: task.project_id,
+      fallbackPlatform: task.type,
+      fallbackName: projectName,
+    })
+    : null
+  const timingRows: Array<[string, ReactNode]> = [
     ['创建时间', formatFullDateTimeCN(task.created_at)],
     ['开始时间', formatFullDateTimeCN(task.started_at)],
     ['完成时间', formatFullDateTimeCN(task.completed_at)],
@@ -219,7 +229,7 @@ function TaskOverviewDetails({
       </TaskDetailsSection>
       <TaskDetailsSection label="项目" title="项目" icon={FolderKanban}>
         <DetailRows rows={[
-          ['项目', projectName],
+          ['项目', projectIdentity ? <ProjectIdentity project={projectIdentity} compact /> : projectName],
         ]} />
       </TaskDetailsSection>
       <TaskBillingDetails task={task} />
@@ -364,6 +374,15 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
   const projectName = hasSnapshot
     ? props.task.project_snapshot?.project_name || '未设置项目'
     : props.project?.name || '未设置项目'
+  const projectIdentity = props.project || props.task.project_snapshot?.project_name || props.task.project_snapshot?.platform
+    ? resolveProjectIdentity({
+      project: props.project,
+      snapshot: props.task.project_snapshot,
+      projectId: props.task.project_id,
+      fallbackPlatform: props.task.type,
+      fallbackName: projectName,
+    })
+    : null
   const taskTitle = props.task.title || props.task.topic || props.task.prompt
 
   return (
@@ -381,7 +400,9 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
             <Badge variant={statusBadgeVariant(props.task.status)}>
               {taskStatusLabel[props.task.status] || props.task.status}
             </Badge>
-            <span className="min-w-0 truncate" title={projectName}>{projectName}</span>
+            <span className="min-w-0 truncate" title={projectName}>
+              {projectIdentity ? <ProjectIdentity project={projectIdentity} compact className="max-w-full" /> : projectName}
+            </span>
           </div>
         </SheetHeader>
         <Tabs

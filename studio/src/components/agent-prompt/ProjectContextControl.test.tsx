@@ -38,15 +38,15 @@ describe('ProjectContextControl', () => {
     expect(trigger).toHaveTextContent('Morning Brief')
     expect(trigger).toHaveTextContent('Daily editorial briefing')
     expect(trigger).not.toHaveTextContent('公众号项目')
-    expect(trigger.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
+    expect(trigger.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
     expect(trigger).toHaveClass('border-border')
 
     fireEvent.click(trigger)
     const popup = screen.getByPlaceholderText('搜索项目...').closest('[data-slot="combobox-content"]')
     expect(popup).toHaveClass('w-[min(36rem,calc(100vw-2rem))]')
     expect(popup?.querySelector('[data-slot="combobox-list"]')).toHaveClass('sm:grid-cols-2')
-    expect(screen.queryByText('公众号', { exact: true })).not.toBeInTheDocument()
-    expect(screen.queryByText('种草笔记', { exact: true })).not.toBeInTheDocument()
+    expect(screen.getAllByText('公众号', { exact: true }).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('种草笔记', { exact: true }).length).toBeGreaterThan(0)
     const selectedOption = screen.getByRole('option', { name: /Morning Brief.*Daily editorial briefing/ })
     expect(selectedOption).toHaveTextContent('Daily editorial briefing')
     expect(selectedOption).not.toHaveTextContent('公众号项目')
@@ -141,7 +141,7 @@ describe('ProjectContextControl', () => {
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
     expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
-    expect(document.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: 'Morning Brief' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
 
@@ -161,8 +161,8 @@ describe('ProjectContextControl', () => {
     )
 
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
-    expect(screen.queryByText('公众号')).not.toBeInTheDocument()
-    expect(document.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
+    expect(screen.getByText('公众号')).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
     expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
     expect(screen.queryByText('Daily editorial briefing')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
@@ -185,8 +185,8 @@ describe('ProjectContextControl', () => {
 
     const trigger = screen.getByRole('combobox', { name: 'Choose project context' })
     expect(trigger).toHaveTextContent('Morning Brief')
-    expect(trigger).not.toHaveTextContent('公众号')
-    expect(trigger.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
+    expect(trigger).toHaveTextContent('公众号')
+    expect(trigger.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
     expect(trigger).not.toHaveClass('border-border')
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
@@ -215,14 +215,14 @@ describe('ProjectContextControl', () => {
 
     const trigger = screen.getByRole('combobox', { name: '项目上下文' })
     expect(trigger).not.toHaveTextContent('视频复刻项目')
-    expect(trigger.querySelector('[data-platform-icon]')).not.toBeInTheDocument()
+    expect(trigger.querySelector('[data-platform-icon]')).toBeInTheDocument()
 
     fireEvent.click(trigger)
-    expect(screen.queryByText('视频复刻', { exact: true })).not.toBeInTheDocument()
-    expect(screen.queryByText('视频生成', { exact: true })).not.toBeInTheDocument()
-    const replication = await screen.findByRole('option', { name: 'Hypit' })
+    expect(screen.getAllByText('视频复刻', { exact: true }).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('视频生成', { exact: true }).length).toBeGreaterThan(0)
+    const replication = await screen.findByRole('option', { name: /Hypit/ })
     expect(replication).toHaveTextContent('Hypit')
-    const generation = screen.getByRole('option', { name: 'Montage' })
+    const generation = screen.getByRole('option', { name: /Montage/ })
     expect(generation).toHaveTextContent('Montage')
   })
 

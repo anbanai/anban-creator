@@ -33,6 +33,7 @@ import EmptyState from '@/components/EmptyState'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { CalendarRangePicker } from '@/components/CalendarRangePicker'
 import { ProjectSelector } from '@/components/ProjectSelector'
+import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 
 // --- Helpers ---
 
@@ -369,9 +370,15 @@ export default function TimelinePage() {
                                       {timelineItemTypeLabel[item.type] || item.type}
                                     </Badge>
                                     {item.project_name && (
-                                      <Badge variant="secondary" className="text-[10px]">
-                                        {item.project_name}
-                                      </Badge>
+                                      <ProjectIdentity
+                                        compact
+                                        className="max-w-[min(16rem,42vw)]"
+                                        project={{
+                                          id: item.project_id || item.project_name,
+                                          name: item.project_name,
+                                          platform: item.platform || item.content_type,
+                                        }}
+                                      />
                                     )}
                                     {item.type === 'task' && item.current_stage && (
                                       <Badge variant="secondary" className="text-[10px]">

@@ -19,6 +19,7 @@ import {
 import { contentTypeDisplayName } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskFile } from '@/types'
+import { ProjectIdentity, resolveProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
 
 export interface TaskContextSummaryProps {
   compact?: boolean
@@ -45,6 +46,7 @@ interface SummaryItemProps {
   neutral?: boolean
   onClick: () => void
   value: string
+  identity?: ProjectIdentityProject | null
 }
 
 const MARKDOWN_PREFIX = /^(?:[#>*_~`+-]+\s*)+/
@@ -73,6 +75,7 @@ function SummaryItem({
   neutral = false,
   onClick,
   value,
+  identity,
 }: SummaryItemProps) {
   return (
     <Button
@@ -99,7 +102,7 @@ function SummaryItem({
       </span>
       <span id={descriptionId} className="flex w-full min-w-0 flex-col items-start gap-1">
         <span className="w-full truncate text-sm font-medium text-foreground" title={value}>
-          {value}
+          {identity ? <ProjectIdentity project={identity} compact className="max-w-full" /> : value}
         </span>
         <span
           className={cn(
@@ -142,6 +145,15 @@ export function TaskContextSummary({
   const snapshot = task.project_snapshot
   const hasSnapshot = Boolean(snapshot?.platform)
   const projectName = hasSnapshot ? snapshot?.project_name || '—' : project?.name || '—'
+  const projectIdentity = project || snapshot?.project_name || snapshot?.platform
+    ? resolveProjectIdentity({
+      project,
+      snapshot,
+      projectId: task.project_id,
+      fallbackPlatform: task.type,
+      fallbackName: projectName,
+    })
+    : null
   const visualStyle = hasSnapshot
     ? snapshot?.visual_style
     : task.overrides?.visual_style || project?.visual_style
@@ -176,6 +188,7 @@ export function TaskContextSummary({
             index={0}
             label="任务概览"
             value={projectName}
+            identity={projectIdentity}
             detail={task.plan_id ? '计划任务' : '手动创建'}
             detailSuffix={`累计扣费 ${(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分`}
             onClick={() => onOpenTab('overview')}

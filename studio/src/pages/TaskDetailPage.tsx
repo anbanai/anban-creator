@@ -16,7 +16,6 @@ import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button, buttonVariants } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
-import { SignedImage } from '@/components/ui/SignedImage'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
@@ -37,6 +36,7 @@ import { platformBadgeClassName, renderPlatformIcon } from '@/lib/PlatformIcon'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 import { TaskRuntimeContext } from '@/components/tasks/TaskRuntimeContext'
+import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
 const RESUME_ATTACHMENT_POLICY = {
@@ -607,24 +607,9 @@ export default function TaskDetailPage() {
               <button
                 type="button"
                 onClick={() => setShowProjectDialog(true)}
-                className="flex items-center gap-1.5 rounded-md bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                className="rounded-md bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
-                {project.avatar_url ? (
-                  <span className="h-4 w-4 overflow-hidden rounded-full bg-secondary">
-                    <SignedImage
-                      src={project.avatar_url}
-                      alt=""
-                      className="h-full w-full object-cover"
-                      fallbackClassName="h-full w-full"
-                      fallbackIcon={<span className="text-[8px] font-medium text-secondary-foreground">{project.name.charAt(0)}</span>}
-                    />
-                  </span>
-                ) : (
-                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-secondary text-[8px] font-medium">
-                    {project.name.charAt(0)}
-                  </span>
-                )}
-                {project.name}
+                <ProjectIdentity project={project} compact />
               </button>
             )}
           </div>
@@ -811,8 +796,8 @@ export default function TaskDetailPage() {
             <div className="max-h-[70vh] overflow-y-auto pr-1">
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">项目名称</p>
-                  <p className="mt-1 text-base font-semibold text-foreground">{project.name}</p>
+                  <p className="text-xs text-muted-foreground">项目身份</p>
+                  <ProjectIdentity project={project} className="mt-1" />
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">平台</p>

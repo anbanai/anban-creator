@@ -7,10 +7,12 @@ import { Brain, FileText, ImageOff, Loader2, RefreshCw, X } from 'lucide-react'
 import { projectsApi } from '@/lib/api/projects'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
 
 interface ProjectMemoryDialogProps {
   projectId: string
   projectName: string
+  project?: ProjectIdentityProject
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -33,7 +35,7 @@ function fileDirectory(path: string) {
   return parts.length > 1 ? parts.slice(0, -1).join('/') : ''
 }
 
-export function ProjectMemoryDialog({ projectId, projectName, open, onOpenChange }: ProjectMemoryDialogProps) {
+export function ProjectMemoryDialog({ projectId, projectName, project, open, onOpenChange }: ProjectMemoryDialogProps) {
   const [selectedPath, setSelectedPath] = useState('')
   const readingPaneRef = useRef<HTMLElement>(null)
   const query = useQuery({
@@ -69,7 +71,7 @@ export function ProjectMemoryDialog({ projectId, projectName, open, onOpenChange
             <DialogTitle className="truncate text-lg">项目记忆</DialogTitle>
           </div>
           <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="break-words font-medium text-foreground/80">{projectName}</span>
+            {project ? <ProjectIdentity project={project} compact /> : <span className="break-words font-medium text-foreground/80">{projectName}</span>}
             <span aria-hidden="true">·</span>
             <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的项目上下文'}</span>
           </DialogDescription>

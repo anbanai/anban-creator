@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
 
 const channels = [
   { value: 'wechat-article', label: '公众号文章' },
@@ -18,7 +19,7 @@ const channels = [
 type Channel = typeof channels[number]['value']
 type Credentials = { appID: string; secret: string }
 interface Props {
-  project: { id: string; name: string }
+  project: ProjectIdentityProject
   onClose: () => void
 }
 
@@ -113,7 +114,7 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
       <DialogContent className="sm:max-w-lg" closeButtonDisabled={editorState.busy}>
         <DialogHeader>
           <DialogTitle>渠道配置</DialogTitle>
-          <DialogDescription>为「{project.name}」配置发布账号。项目可供不同创作任务共用。</DialogDescription>
+          <DialogDescription className="flex items-center gap-2">为「<ProjectIdentity project={project} compact />」配置发布账号。项目可供不同创作任务共用。</DialogDescription>
         </DialogHeader>
         {configs.isPending || (!configs.isFetchedAfterMount && !configs.isError) ? <p role="status">正在加载渠道配置…</p> : configs.isError ? (
           <div role="alert" className="space-y-3">

@@ -40,7 +40,7 @@ describe('server analytics queries', () => {
     const projectSelector = await screen.findByRole('combobox', { name: '筛选项目' })
     await waitFor(() => expect(projectSelector).toHaveTextContent('生活笔记'))
     expect(projectSelector).not.toHaveClass('border-border')
-    expect(projectSelector.querySelector('[data-slot="avatar"]')).not.toBeInTheDocument()
+    expect(projectSelector.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
     expect(screen.queryByText(/最近数据/)).not.toBeInTheDocument()
     expect(screen.queryByLabelText('数据年份')).not.toBeInTheDocument()
     expect(contentAnalyticsApi.dates).not.toHaveBeenCalled()

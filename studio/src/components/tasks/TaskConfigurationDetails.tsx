@@ -1,9 +1,11 @@
+import type { ReactNode } from 'react'
 import { Separator } from '@/components/ui/separator'
 import { contentTypeDisplayName } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task } from '@/types'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
+import { ProjectIdentity, resolveProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 
 export interface TaskConfigurationDetailsProps {
   task: Task
@@ -12,7 +14,7 @@ export interface TaskConfigurationDetailsProps {
 
 interface DetailProps {
   label: string
-  value: string
+  value: ReactNode
   wide?: boolean
 }
 
@@ -24,7 +26,7 @@ function Detail({ label, value, wide = false }: DetailProps) {
   return (
     <div className={cn('flex min-w-0 flex-col gap-1', wide && 'sm:col-span-2')}>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="break-words text-sm text-foreground">{value}</dd>
+      <dd className="min-w-0 break-words text-sm text-foreground">{value}</dd>
     </div>
   )
 }
@@ -114,6 +116,15 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
   const snapshot = task.project_snapshot
   const hasSnapshot = Boolean(snapshot?.platform)
   const projectName = hasSnapshot ? snapshot?.project_name || '—' : project?.name || '—'
+  const projectIdentity = project || snapshot?.project_name || snapshot?.platform
+    ? resolveProjectIdentity({
+      project,
+      snapshot,
+      projectId: task.project_id,
+      fallbackPlatform: task.type,
+      fallbackName: projectName,
+    })
+    : null
   const visualStyle = hasSnapshot
     ? snapshot?.visual_style || '—'
     : task.overrides?.visual_style || project?.visual_style || '—'
@@ -138,7 +149,7 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
       <section aria-labelledby="task-project-snapshot" className="flex flex-col gap-3">
         <h3 id="task-project-snapshot" className="text-sm font-semibold">项目快照</h3>
         <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-          <Detail label="项目" value={projectName} />
+          <Detail label="项目" value={projectIdentity ? <ProjectIdentity project={projectIdentity} compact /> : projectName} />
           <Detail label="内容类型" value={contentTypeDisplayName(task.type)} />
           <Detail label="视觉风格" value={visualStyle} wide />
           <Detail label={ratioLabel} value={task.type === 'hypit' ? task.hypit_input?.preferences?.aspect_ratio || '跟随参考视频' : imageRatio} />

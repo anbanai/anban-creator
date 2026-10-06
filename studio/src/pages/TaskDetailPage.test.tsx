@@ -2051,7 +2051,9 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const badge = await screen.findByText('视频复刻', { selector: '[data-slot="badge"]' })
+    const badge = (await screen.findAllByText('视频复刻', { selector: '[data-slot="badge"]' }))
+      .find((candidate) => candidate.querySelector('[data-platform-icon="hypit"]'))
+    if (!badge) throw new Error('未找到视频复刻平台徽标')
     expect(badge.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
     expect(badge.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('视频复刻 任务')

@@ -11,6 +11,7 @@ import { ProjectMemoryDialog } from '@/components/projects/ProjectMemoryDialog'
 import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBadge'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 
 interface ProjectCardProps {
   project: Project
@@ -81,9 +82,9 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
     <div className={`flex h-full flex-col rounded-lg border p-4 transition-[border-color,box-shadow] ${cardTone}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold text-foreground">{project.name}</h3>
-          </div>
+          <h3 className="min-w-0 flex-1">
+            <ProjectIdentity project={project} />
+          </h3>
         </div>
         <div className="flex flex-col items-end gap-1">
           {isArchived && <Badge variant="outline">已归档</Badge>}
@@ -202,7 +203,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
         </div>
       </div>
       <TopicPoolDialog project={project} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
-      <ProjectMemoryDialog projectId={project.id} projectName={project.name} open={memoryOpen} onOpenChange={setMemoryOpen} />
+      <ProjectMemoryDialog projectId={project.id} projectName={project.name} project={project} open={memoryOpen} onOpenChange={setMemoryOpen} />
       <Dialog open={monthlyRerunOpen} onOpenChange={setMonthlyRerunOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>重跑月度反馈</DialogTitle></DialogHeader>

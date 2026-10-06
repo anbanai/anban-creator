@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import {
   CheckCircle2,
   CircleDashed,
@@ -21,6 +21,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 import { contentTypeDisplayName, progressStageLabel, taskFailurePresentation } from '@/lib/labels'
+import { ProjectIdentity, resolveProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
 
 type RuntimeStatus = 'ready' | 'starting' | 'failed' | 'recoverable' | 'unknown'
 type ContextKey = 'profile' | 'execution' | 'artifacts' | 'connectivity'
@@ -40,6 +41,7 @@ interface ContextItem {
   status: RuntimeStatus
   icon: LucideIcon
   action?: string
+  identity?: ProjectIdentityProject | null
 }
 
 const statusCopy: Record<RuntimeStatus, { label: string; className: string; icon: LucideIcon }> = {
@@ -61,22 +63,32 @@ function runtimeStatus(task: Task): RuntimeStatus {
 function profileSummary(task: Task, project?: Project) {
   const snapshot = task.project_snapshot
   const projectName = snapshot?.project_name || project?.name || '未设置项目'
+  const identity = project || snapshot?.project_name || snapshot?.platform
+    ? resolveProjectIdentity({
+      project,
+      snapshot,
+      projectId: task.project_id,
+      fallbackPlatform: task.type,
+      fallbackName: projectName,
+    })
+    : null
   const profile = task.agent_profile_snapshot
   const profileLabel = profile?.display_name || profile?.profile_id || task.execution_profile || '当前配置'
-  return { projectName, profileLabel }
+  return { projectName, profileLabel, identity }
 }
 
 function makeItems(task: Task, project: Project | undefined, files: TaskFile[], context?: RuntimeContext): ContextItem[] {
+  const { identity: projectIdentity } = profileSummary(task, project)
   if (context) {
     const statusFor = (status: string): RuntimeStatus => status === 'healthy' || status === 'ready' || status === 'conflict' ? 'ready' : status === 'starting' ? 'starting' : status === 'recoverable' ? 'recoverable' : status === 'failed' || status === 'degraded' ? 'failed' : 'unknown'
     return [
-      { key: 'profile', label: '创作身份', value: context.profile.label, detail: context.profile.changed_since_snapshot ? '项目已更新，任务仍使用冻结版本' : context.profile.summary || '任务已冻结', status: statusFor(context.profile.status), icon: UserRound },
+      { key: 'profile', label: '创作身份', value: context.profile.label, identity: projectIdentity, detail: context.profile.changed_since_snapshot ? '项目已更新，任务仍使用冻结版本' : context.profile.summary || '任务已冻结', status: statusFor(context.profile.status), icon: UserRound },
       { key: 'execution', label: '执行环境', value: context.execution.status === 'starting' ? '建立中' : context.execution.status === 'recoverable' ? '可恢复' : context.execution.status === 'failed' ? '未建立' : '已建立', detail: context.execution.recovery_stage ? `可从${progressStageLabel[context.execution.recovery_stage] || context.execution.recovery_stage}继续` : '工作区已绑定到本次任务', status: statusFor(context.execution.status), icon: CloudCog, action: context.execution.recovery_stage ? `可从${progressStageLabel[context.execution.recovery_stage] || context.execution.recovery_stage}继续` : undefined },
       { key: 'artifacts', label: '作品文件', value: `${context.artifacts.completed} / ${context.artifacts.required || context.artifacts.completed} 个`, detail: context.artifacts.failed ? `${context.artifacts.failed} 个文件需要处理` : context.artifacts.missing ? `缺少 ${context.artifacts.missing} 个文件` : context.artifacts.completed ? '产物清单已更新' : '等待产物', status: context.artifacts.failed || context.artifacts.missing ? 'recoverable' : context.artifacts.completed ? 'ready' : 'unknown', icon: FileCheck2 },
       { key: 'connectivity', label: '连接状态', value: context.connectivity.summary, detail: context.connectivity.checked_at ? `最近检查 ${new Date(context.connectivity.checked_at).toLocaleString('zh-CN')}` : '暂无检查记录', status: statusFor(context.connectivity.status), icon: Network },
     ]
   }
-  const { projectName, profileLabel } = profileSummary(task, project)
+  const { projectName, profileLabel, identity } = profileSummary(task, project)
   const delivered = files.filter((file) => file.state === 'delivered' || file.state === 'retained')
   const failed = task.outcome?.diagnostic?.code?.startsWith('artifact_') || task.outcome?.diagnostic?.code === 'artifact_manifest_failed'
   const executionStatus = runtimeStatus(task)
@@ -84,7 +96,7 @@ function makeItems(task: Task, project: Project | undefined, files: TaskFile[], 
   const recoveryStage = task.outcome?.diagnostic?.resume_point
   return [
     {
-      key: 'profile', label: '创作身份', value: projectName,
+      key: 'profile', label: '创作身份', value: projectName, identity,
       detail: `${profileLabel} · 任务已冻结`, status: 'ready', icon: UserRound,
     },
     {
@@ -125,20 +137,21 @@ function CopyValue({ value }: { value: string }) {
   )
 }
 
-function DetailRow({ label, value, copy }: { label: string; value: string; copy?: boolean }) {
+function DetailRow({ label, value, copy }: { label: string; value: ReactNode; copy?: boolean }) {
+  const copyText = typeof value === 'string' ? value : undefined
   return (
     <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 border-b border-border py-2.5 last:border-0">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="flex min-w-0 items-center gap-1 break-words text-sm text-foreground">
         <span className="min-w-0 break-words">{value}</span>
-        {copy ? <CopyValue value={value} /> : null}
+        {copy && copyText ? <CopyValue value={copyText} /> : null}
       </dd>
     </div>
   )
 }
 
 function RuntimeDetail({ item, task, project, files, context, onResume }: { item: ContextItem; task: Task; project?: Project; files: TaskFile[]; context?: RuntimeContext; onResume?: () => void }) {
-  const { projectName, profileLabel } = profileSummary(task, project)
+  const { projectName, profileLabel, identity } = profileSummary(task, project)
   const status = statusCopy[item.status]
   const StatusIcon = status.icon
   const artifactNames = (context?.artifacts.items.map((file) => file.label) || files.slice(0, 12).map((file) => file.file_name)).join('、') || '暂无'
@@ -161,7 +174,7 @@ function RuntimeDetail({ item, task, project, files, context, onResume }: { item
       </div>
       {item.key === 'profile' ? (
         <dl>
-          <DetailRow label="项目" value={projectName} />
+          <DetailRow label="项目" value={identity ? <ProjectIdentity project={identity} compact /> : projectName} />
           <DetailRow label="执行配置" value={profileLabel} />
           <DetailRow label="平台" value={contentTypeDisplayName(task.type)} />
           <DetailRow label="状态" value={context?.profile.changed_since_snapshot ? '项目已更新，任务继续执行时仍使用冻结版本' : '任务继续执行时仍使用冻结版本'} />
@@ -230,7 +243,7 @@ export function TaskRuntimeContext({ task, project, files, onResume }: TaskRunti
             return (
               <button key={item.key} type="button" aria-label={`${item.label}详情`} className="group min-w-0 px-3 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={() => setSelected(item.key)}>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="size-3.5" />{item.label}</div>
-                <div className="mt-2 flex min-w-0 items-center gap-1.5"><StatusIcon className={cn('size-4 shrink-0', status.className, item.status === 'starting' && 'animate-spin')} /><span className="truncate text-sm font-medium text-foreground">{item.value}</span></div>
+                <div className="mt-2 flex min-w-0 items-center gap-1.5"><StatusIcon className={cn('size-4 shrink-0', status.className, item.status === 'starting' && 'animate-spin')} /><span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.identity ? <ProjectIdentity project={item.identity} compact className="max-w-full" /> : item.value}</span></div>
                 <p className="mt-1 truncate text-xs text-muted-foreground" title={item.status === 'failed' || item.status === 'recoverable' ? item.detail : undefined}>{summaryDetail}</p>
               </button>
             )

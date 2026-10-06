@@ -8,6 +8,7 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { AgentExecutionProfileID, TaskStatus, Project, TaskType } from '@/types'
 import { ProjectSelector } from '@/components/ProjectSelector'
+import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +17,6 @@ import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeDisplayName, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
 import { platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
-import { PlatformAvatar } from '@/components/PlatformAvatar'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
 import { taskContentAnalyticsHref } from '@/lib/content-analytics'
@@ -565,9 +565,7 @@ export default function TasksPage() {
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
                     <Link to={`/tasks/${task.id}`} className="flex min-w-0 flex-1 items-start gap-3 rounded-md">
-                      <span className="hidden sm:block">
-                        <PlatformAvatar avatarUrl={project?.avatar_url} name={project?.name} platform={task.type} />
-                      </span>
+                      {project ? <ProjectIdentity project={project} compact className="flex max-w-[min(16rem,42vw)]" /> : null}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}</h3>
@@ -577,9 +575,6 @@ export default function TasksPage() {
                             </Badge>
                           </div>
                         </div>
-                        {project?.name && (
-                          <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.name}</p>
-                        )}
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
                           <Badge variant="outline" className={`text-[10px] ${platformBadgeClassName[task.type] || ''}`}>
                             {contentTypeDisplayName(task.type)}

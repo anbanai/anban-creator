@@ -79,7 +79,7 @@ describe('统一导入确认', () => {
     expect(screen.queryByLabelText('导入统计口径')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认导入 1 条' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
-    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(wechat, expect.objectContaining({ metric_basis: 'cumulative' })))
+    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(wechat, expect.objectContaining({ metric_basis: 'cumulative' }), 'wechat'))
   })
   it('imports latest cumulative Seednote values with the default date', async () => {
     render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
@@ -116,7 +116,7 @@ describe('统一导入确认', () => {
     expect(screen.getByLabelText('选择第 4 行')).toBeDisabled()
     expect(screen.getByText('日期无效')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
-    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ platform: 'wechat', upload_id: 'upload-1', selections: [{ source_row: 2, target }] }), expect.any(String)))
+    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ upload_id: 'upload-1', selections: [{ source_row: 2, target }] }), 'seednote'))
     await waitFor(() => expect(onImported).toHaveBeenCalledWith({ revision: 4, count: 1, date: '2026-09-24' }))
     expect(onClose).toHaveBeenCalledOnce()
   })
@@ -130,7 +130,7 @@ describe('统一导入确认', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('同一内容只能导入一行')
     fireEvent.click(screen.getByLabelText('选择第 2 行'))
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
-    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ platform: 'seednote', selections: [{ source_row: 3, target }] }), expect.any(String)))
+    await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(project, expect.objectContaining({ selections: [{ source_row: 3, target }] }), 'seednote'))
   })
   it('keeps confirmation failures and choices for retry', async () => {
     vi.mocked(contentAnalyticsApi.import).mockRejectedValueOnce(new Error('匹配内容已改变，请重试'))

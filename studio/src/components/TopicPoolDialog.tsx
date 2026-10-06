@@ -10,6 +10,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { toast } from 'sonner'
 import { getApiErrorMessage } from '@/lib/http-client'
 import type { Project, TopicPool } from '@/types'
+import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 
 interface TopicPoolDialogProps {
   project: Project
@@ -80,7 +81,7 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>选题池 - {project.name}</DialogTitle>
+          <DialogTitle className="flex min-w-0 items-center gap-2">选题池 - <ProjectIdentity project={project} compact /></DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">

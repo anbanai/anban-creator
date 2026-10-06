@@ -52,11 +52,12 @@ describe('ProjectCard', () => {
     unused_topics: 6,
   }
 
-  it('shows project identity without a platform badge or avatar', () => {
-    render(<ProjectCard project={project({ name: '共享品牌', avatar_url: 'https://example.com/avatar.png' })} />)
+  it('shows project identity with a platform badge and avatar fallback', () => {
+    render(<ProjectCard project={project({ name: '共享品牌', avatar_url: 'https://example.com/avatar.png', keywords: '科技, 内容' })} />)
     expect(screen.getByText('共享品牌')).toBeInTheDocument()
-    expect(screen.queryByText('公众号', { exact: true })).not.toBeInTheDocument()
-    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+    expect(screen.getByText('公众号', { exact: true })).toBeInTheDocument()
+    expect(screen.getByText('科技', { exact: true })).toBeInTheDocument()
+    expect(document.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
   })
 
   it('shows only basic project activity', () => {
@@ -84,7 +85,7 @@ describe('ProjectCard', () => {
     expect(onArchive).toHaveBeenCalledWith('project-1')
 
     fireEvent.click(screen.getByRole('button', { name: '选题池：公众号项目，剩余 6 个' }))
-    expect(await screen.findByRole('dialog', { name: '选题池 - 公众号项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: /选题池 - 公众号项目/ })).toBeInTheDocument()
   })
 
   it('does not report zero remaining topics before stats are available', () => {
