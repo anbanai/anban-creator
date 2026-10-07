@@ -92,7 +92,7 @@ describe("validateBootstrapResponse", () => {
         allowHTTPServer: false,
       };
       await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
-      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("4");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("5");
       expect(request?.body).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
@@ -380,6 +380,29 @@ describe("validateBootstrapResponse", () => {
     expect(paths).toContain("output/cover-quality.json");
     const response = validResponse();
     response.files = paths.map((path) => ({ path, download_url: "https://bootstrap.example/source", content_sha256: "a".repeat(64), expected_size: 2, max_bytes: 4 << 20, mode: 0o644, replace_existing: true }));
+    expect(validateBootstrapResponse("execution-1", response).files).toHaveLength(paths.length);
+  });
+
+  test("accepts every picture publication recovery replacement emitted by the server", () => {
+    const paths = [
+      "output/topic-analysis.md",
+      "output/content-dna.json",
+      "output/content-script.md",
+      "output/content.md",
+      "output/image-plan.md",
+      "output/image-prompts.md",
+      "output/quality-review.md",
+    ];
+    const response = validResponse();
+    response.files = paths.map((path) => ({
+      path,
+      download_url: "https://bootstrap.example/source",
+      content_sha256: "a".repeat(64),
+      expected_size: 2,
+      max_bytes: 8 << 20,
+      mode: 0o644,
+      replace_existing: true,
+    }));
     expect(validateBootstrapResponse("execution-1", response).files).toHaveLength(paths.length);
   });
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented as runtime contract v4. Current-execution requests derive execution identity from verified credentials; historical metadata tools retain an explicit target selector for user/API-key calls. Server and runtime images require a coordinated release: build and publish v4 runtime images before enabling the new Server; do not mix runtime contract versions. No database migration is required.
+Implemented as runtime contract v5. Current-execution requests derive execution identity from verified credentials; historical metadata tools retain an explicit target selector for user/API-key calls. Server and runtime images require a coordinated release: build and publish v5 runtime images before enabling the new Server; do not mix runtime contract versions. No database migration is required.
 
 ## Goal
 

@@ -17,7 +17,7 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
-export const AGENT_RUNTIME_CONTRACT_VERSION = 4;
+export const AGENT_RUNTIME_CONTRACT_VERSION = 5;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "execution_id", "task_id", "task_type", "agent_id", "channel", "task_kind", "project_id", "prompt",
@@ -88,6 +88,12 @@ const PUBLICATION_RECOVERY_REPLACE_PATHS = new Set([
   "output/image-plan.md",
   "output/images.json",
   "output/cover-quality.json",
+  "output/topic-analysis.md",
+  "output/content-dna.json",
+  "output/content-script.md",
+  "output/content.md",
+  "output/image-prompts.md",
+  "output/quality-review.md",
   "output/05-article.html",
   "output/final-review.md",
   "output/viral-audit.md",
