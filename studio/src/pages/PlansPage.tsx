@@ -6,8 +6,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   Inbox,
+  ListTodo,
   Pause,
-  Pencil,
+  SquarePen,
   Play,
   Plus,
   Trash2,
@@ -30,6 +31,7 @@ import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import QueryErrorState from '@/components/QueryErrorState'
 import { Button, buttonVariants } from '@/components/common/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
@@ -401,8 +403,22 @@ export default function PlansPage() {
           </div>
           <div className="flex min-h-16 min-w-36 flex-col items-end justify-between gap-3">
             <div className="flex flex-wrap items-center justify-end gap-1.5">
-              <Button data-primary-action type="button" size="icon-sm" aria-label="编辑" title="编辑" onClick={() => openEdit(plan)}><Pencil className="size-4" /></Button>
-              <Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>查看任务</Link>
+              <Tooltip>
+                <TooltipTrigger
+                  render={<Button data-primary-action type="button" size="icon-sm" aria-label="编辑" onClick={() => openEdit(plan)} />}
+                >
+                  <SquarePen className="size-4" />
+                </TooltipTrigger>
+                <TooltipContent>编辑</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={<Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} aria-label="查看任务" className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} />}
+                >
+                  <ListTodo className="size-4" />
+                </TooltipTrigger>
+                <TooltipContent>查看任务</TooltipContent>
+              </Tooltip>
               {plan.status === 'active' ? (
                 <Button type="button" variant="ghost" size="sm" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="size-3.5" />暂停</Button>
               ) : plan.status === 'paused' ? (
