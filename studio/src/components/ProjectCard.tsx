@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, Pause, Pencil, Play, RefreshCw, RotateCcw, UserRound } from 'lucide-react'
+import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, MoreHorizontal, Pause, Pencil, Play, RefreshCw, RotateCcw, UserRound } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
@@ -12,6 +12,7 @@ import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBad
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
+import { MetricStrip, ProgressRing, StatusPill } from '@/components/workspace'
 
 interface ProjectCardProps {
   project: Project
@@ -36,6 +37,9 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
   const platform = project.platform
   const isArchived = project.status === 'archived'
   const unusedTopics = stats?.unused_topics
+  const completionRate = stats && stats.total_tasks > 0
+    ? Math.round((stats.completed_tasks / stats.total_tasks) * 100)
+    : 0
   const cardTone = isArchived
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
@@ -88,16 +92,29 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
           </h3>
         </div>
         <div className="flex flex-col items-end gap-1">
-          {isArchived && <Badge variant="outline">已归档</Badge>}
+          {isArchived && <StatusPill status="archived" label="已归档" />}
           <ImageAnalysisBadge analysis={project.image_analysis} />
         </div>
       </div>
       <div className="mt-auto pt-4">
         {stats && (
-          <div className="flex min-h-8 items-center border-t border-border pt-3">
-            <div className="flex gap-3 text-xs text-muted-foreground">
-              <span>{stats.total_tasks} 个任务</span>
-              {stats.total_tasks > 0 && <span>{stats.completed_tasks} 个已完成</span>}
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border pt-3">
+            <ProgressRing value={completionRate} label="任务完成率" size={64} />
+            <div className="min-w-0 space-y-2">
+              <MetricStrip
+                testId="project-overview-strip"
+                metrics={[
+                  { label: '任务', value: stats.total_tasks },
+                  { label: '已完成', value: stats.completed_tasks },
+                  { label: '失败', value: stats.failed_tasks },
+                ]}
+              />
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="项目活动">
+                <span>{stats.total_tasks} 个任务</span>
+                {stats.total_tasks > 0 && <span>{stats.completed_tasks} 个已完成</span>}
+                {stats.running_tasks > 0 && <span>{stats.running_tasks} 个运行中</span>}
+                {stats.pending_tasks > 0 && <span>{stats.pending_tasks} 个待执行</span>}
+              </div>
             </div>
           </div>
         )}
@@ -162,11 +179,6 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
           </div>
         )}
         <div className="mt-2 flex flex-wrap justify-end gap-1">
-          {onChannelConfig && (
-            <Button variant="ghost" size="xs" onClick={() => onChannelConfig(project)} aria-label={`渠道配置：${project.name}`}>
-              <Settings2 />渠道配置
-            </Button>
-          )}
           {onEdit && (
             <Button variant="ghost" size="xs" onClick={() => onEdit(project)} aria-label={`编辑项目：${project.name}`}>
               <Pencil />
@@ -179,10 +191,6 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
               项目画像
             </Button>
           )}
-          <Button variant="ghost" size="xs" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`}>
-            <Brain />
-            记忆
-          </Button>
           <Button
             variant="ghost"
             size="xs"
@@ -197,6 +205,25 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
               <span className="min-w-4 text-center tabular-nums text-foreground">{unusedTopics}</span>
             )}
           </Button>
+          <details className="relative">
+            <summary
+              aria-label={`更多项目操作：${project.name}`}
+              className="flex h-6 cursor-pointer list-none items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            >
+              <MoreHorizontal aria-hidden="true" className="size-3" />
+              <span>更多</span>
+            </summary>
+            <div className="absolute right-0 z-10 mt-1 min-w-32 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+              {onChannelConfig && (
+                <button type="button" aria-label={`渠道配置：${project.name}`} className="flex min-h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => onChannelConfig(project)}>
+                  <Settings2 className="size-3.5" />渠道配置
+                </button>
+              )}
+              <button type="button" className="flex min-h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`}>
+                <Brain className="size-3.5" />记忆
+              </button>
+            </div>
+          </details>
           {!isArchived && onArchive && (
             <Button variant="ghost" size="xs" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档项目：${project.name}`}>
               <Archive />

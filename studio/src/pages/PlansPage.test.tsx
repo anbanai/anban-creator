@@ -4,6 +4,7 @@ import PlansPage from './PlansPage'
 import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
 import { mockAgentPackCatalog, mockPlans, mockProjects } from '@/test/mocks/handlers'
+import type { Plan } from '@/types'
 
 
 const harness = vi.hoisted(() => ({ error: vi.fn(), upload: vi.fn() }))
@@ -150,6 +151,20 @@ describe('PlansPage multi-output plans', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ agent_ids: ['seednote', 'wechat-picture', 'wechat-article'] })))
     expect(api.plans.scheduleRecommendation).not.toHaveBeenCalled()
+  })
+
+  it('groups schedule cards by active and paused state with cadence and next-run details', async () => {
+    const activePlan: Plan = { ...mockPlans.items[0], id: 'active-plan', title: '活跃计划', prompt: '活跃内容', status: 'active', next_run_at: '2026-10-08T01:00:00Z' }
+    const pausedPlan: Plan = { ...mockPlans.items[0], id: 'paused-plan', title: '暂停计划', prompt: '暂停内容', status: 'paused', next_run_at: '' }
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [activePlan, pausedPlan], total: 2 })
+    render(<PlansPage />)
+
+    expect(await screen.findByRole('region', { name: '运行中的计划' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '已暂停的计划' })).toBeInTheDocument()
+    expect(screen.getByTestId('plan-card-active-plan')).toHaveTextContent('下次运行')
+    expect(screen.getByTestId('plan-card-active-plan')).toHaveTextContent('每')
+    expect(screen.getByTestId('plan-card-paused-plan')).toHaveTextContent('已暂停')
+    expect(screen.getByTestId('plan-card-active-plan').querySelector('[data-primary-action]')).toBeInTheDocument()
   })
   it.each([false, true])('shows the saved reference and submits its selection after removal=%s', async (remove) => {
     const reference = { asset_id: '44444444-4444-4444-8444-444444444444', file_name: 'cover.png', content_type: 'image/png', size: 9, download_url: 'https://signed.example/cover.png', download_expires_at: '2026-10-04T10:00:00Z' }

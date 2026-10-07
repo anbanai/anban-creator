@@ -24,13 +24,12 @@ import { parseCreationIntent } from '@/lib/command-center'
 import { cheapestAvailableExecutionProfileForTasks } from '@/lib/pricing'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 import type { ReferenceImageValue } from '@/types/asset'
-import { planStatusLabel, cronToHuman, formatDateTimeCN, getBadgeVariant } from '@/lib/labels'
+import { planStatusLabel, cronToHuman, formatDateTimeCN } from '@/lib/labels'
 
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import QueryErrorState from '@/components/QueryErrorState'
 import { Button } from '@/components/common/button'
-import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
@@ -48,6 +47,7 @@ import SchedulePicker from '@/components/SchedulePicker'
 import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
+import { StatusPill, WorkspaceSubnav } from '@/components/workspace'
 
 const DEFAULT_CRON = '0 9 * * 1,3,5'
 const PLAN_ATTACHMENT_POLICY = { ...GENERAL_AGENT_ATTACHMENT_POLICY, maxCount: 16 }
@@ -206,6 +206,9 @@ export default function PlansPage() {
     const query = searchFilter.trim().toLowerCase()
     return query ? items.filter((plan) => `${plan.prompt} ${plan.title}`.toLowerCase().includes(query)) : items
   }, [planData?.items, searchFilter])
+  const activePlans = useMemo(() => plans.filter((plan) => plan.status === 'active'), [plans])
+  const pausedPlans = useMemo(() => plans.filter((plan) => plan.status === 'paused'), [plans])
+  const completedPlans = useMemo(() => plans.filter((plan) => plan.status === 'completed'), [plans])
   const totalPages = Math.max(1, Math.ceil((planData?.total ?? 0) / 50))
 
   const executionProfileOptions = executionProfilesQuery.data ?? []
@@ -360,12 +363,93 @@ export default function PlansPage() {
   const outputsAvailable = watchedAgentIDs.length > 0 && watchedAgentIDs.every((id) => outputPacks.some((pack) => pack.id === id))
   const submitDisabled = isSubmitting || !outputsAvailable || !watchedProjectID || !selectedProfileAvailable || !scheduleValid || referenceUploading || attachmentUploading || attachmentFailed || imageUnavailable
 
+  function renderPlanCard(plan: Plan) {
+    const project = projectMap[plan.project_id]
+    const outputIDs = plan.agent_ids ?? plan.entries?.map((entry) => entry.agent_id) ?? []
+    const statusLabel = planStatusLabel[plan.status] ?? plan.status
+    return (
+      <article key={plan.id} className="rounded-xl border border-border bg-card p-4 shadow-xs" data-plan-id={plan.id} data-testid={`plan-card-${plan.id}`}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="flex flex-wrap items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-sm font-semibold text-foreground">{plan.prompt || plan.title || '定时创作计划'}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  {project ? <ProjectIdentity project={project} compact /> : <span>未命名项目</span>}
+                  <span aria-hidden="true">·</span>
+                  <span>{outputIDs.length} 种输出</span>
+                </div>
+              </div>
+              <StatusPill status={plan.status} label={statusLabel} />
+            </div>
+            <div className="grid gap-2 border-t border-border pt-3 text-xs sm:grid-cols-3">
+              <div className="min-w-0">
+                <p className="text-muted-foreground">排期</p>
+                <p className="mt-1 truncate font-medium text-foreground" title={cronToHuman(plan.cron_expr)}>{cronToHuman(plan.cron_expr)}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="text-muted-foreground">下次运行</p>
+                <p className="mt-1 truncate font-medium text-foreground">{plan.next_run_at ? formatDateTimeCN(plan.next_run_at) : '暂停中'}</p>
+              </div>
+              <div className="min-w-0" aria-label="输出类型">
+                <p className="text-muted-foreground">输出</p>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <AgentIconStack agentIds={outputIDs} compact maxVisible={5} />
+                  <span className="sr-only">{outputIDs.length} 种输出类型</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 lg:pt-0.5">
+            <Button data-primary-action type="button" size="sm" onClick={() => openEdit(plan)}><Sparkles className="size-3.5" />编辑</Button>
+            <details className="relative">
+              <summary className="flex min-h-8 cursor-pointer list-none items-center rounded-lg border border-transparent px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50">
+                更多操作
+              </summary>
+              <div className="absolute right-0 z-10 mt-1 min-w-32 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+                <Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} className="flex min-h-8 items-center rounded-md px-2 text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none">查看任务</Link>
+                {plan.status === 'active' ? (
+                  <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="mr-1.5 size-3.5" />暂停</button>
+                ) : plan.status === 'paused' ? (
+                  <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => void resumeMutation.mutateAsync(plan.id)}><Play className="mr-1.5 size-3.5" />恢复</button>
+                ) : null}
+                <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none" onClick={() => setDeleteTarget(plan.id)}><Trash2 className="mr-1.5 size-3.5" />删除</button>
+              </div>
+            </details>
+          </div>
+        </div>
+      </article>
+    )
+  }
+
+  function renderPlanGroup(title: string, items: Plan[], ariaLabel: string) {
+    if (items.length === 0) return null
+    return (
+      <section role="region" aria-label={ariaLabel} className="space-y-2">
+        <div className="flex items-center gap-2 px-1">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">{title}</h2>
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">{items.length}</span>
+        </div>
+        <div className="space-y-2">{items.map(renderPlanCard)}</div>
+      </section>
+    )
+  }
+
 
   return (
     <div className="space-y-6">
       <PageHeader title="计划" description="一次排期可同时生成多种输出，每种输出独立执行。">
         <Button onClick={openCreate}><Plus className="h-4 w-4" />新建计划</Button>
       </PageHeader>
+
+      <WorkspaceSubnav
+        items={[
+          { label: '项目', href: '/projects' },
+          { label: '计划', href: '/plans' },
+          { label: '任务', href: '/tasks' },
+          { label: '时间线', href: '/timeline' },
+        ]}
+      />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <ProjectContextControl
@@ -387,37 +471,10 @@ export default function PlansPage() {
       ) : plans.length === 0 ? (
         <EmptyState icon={Inbox} title="还没有计划" description="创建计划后，系统会按排期自动生成任务。" action={{ label: '新建计划', onClick: openCreate }} />
       ) : (
-        <div className="space-y-3">
-          {plans.map((plan) => {
-            const project = projectMap[plan.project_id]
-            const outputIDs = plan.agent_ids ?? plan.entries?.map((entry) => entry.agent_id) ?? []
-            return (
-              <div key={plan.id} className="rounded-lg border border-border bg-card p-4" data-plan-id={plan.id}>
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div className="min-w-0 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="truncate text-sm font-semibold">{plan.prompt || '定时创作计划'}</h2>
-                      <Badge variant={getBadgeVariant(plan.status, 'plan')}>{planStatusLabel[plan.status] ?? plan.status}</Badge>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      {project ? <ProjectIdentity project={project} compact /> : <span>未命名项目</span>}<span aria-hidden="true">·</span><span>{cronToHuman(plan.cron_expr)}</span>
-                      {plan.next_run_at ? <><span aria-hidden="true">·</span><span>下次 {formatDateTimeCN(plan.next_run_at)}</span></> : null}
-                    </div>
-                    <div className="flex items-center gap-1.5" aria-label="输出类型">
-                      <span className="sr-only">输出类型：</span>
-                      <AgentIconStack agentIds={outputIDs} compact maxVisible={5} />
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} className="mr-2 text-sm text-primary hover:underline">查看任务</Link>
-                    <Button type="button" size="icon-sm" variant="ghost" aria-label="编辑" onClick={() => openEdit(plan)}><Sparkles className="h-4 w-4" /></Button>
-                    {plan.status === 'active' ? <Button type="button" size="icon-sm" variant="ghost" aria-label="暂停" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="h-4 w-4" /></Button> : <Button type="button" size="icon-sm" variant="ghost" aria-label="恢复" onClick={() => void resumeMutation.mutateAsync(plan.id)}><Play className="h-4 w-4" /></Button>}
-                    <Button type="button" size="icon-sm" variant="ghost" aria-label="删除" onClick={() => setDeleteTarget(plan.id)}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+        <div className="space-y-5">
+          {renderPlanGroup('运行中的计划', activePlans, '运行中的计划')}
+          {renderPlanGroup('已暂停的计划', pausedPlans, '已暂停的计划')}
+          {renderPlanGroup('已完成的计划', completedPlans, '已完成的计划')}
           {totalPages > 1 ? <div className="flex items-center justify-between pt-2 text-sm text-muted-foreground"><span>第 {page} / {totalPages} 页</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</Button><Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>下一页</Button></div></div> : null}
         </div>
       )}

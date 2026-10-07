@@ -34,6 +34,7 @@ import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-cen
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
+import { MetricStrip, WorkspaceSubnav } from '@/components/workspace'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
@@ -138,6 +139,20 @@ export default function ProjectsPage() {
     },
     enabled: visibleProjects.length > 0,
   })
+
+  const projectOverview = useMemo(() => {
+    const stats = visibleProjects.map((project) => projectStats[project.id]).filter(Boolean)
+    const tasks = stats.reduce((sum, item) => sum + item.total_tasks, 0)
+    const completed = stats.reduce((sum, item) => sum + item.completed_tasks, 0)
+    const running = stats.reduce((sum, item) => sum + item.running_tasks, 0)
+    return {
+      projects: visibleProjects.length,
+      tasks,
+      completed,
+      running,
+      completion: tasks > 0 ? `${Math.round((completed / tasks) * 100)}%` : '—',
+    }
+  }, [projectStats, visibleProjects])
 
   const editingProjectQuery = useQuery({
     queryKey: queryKeys.projects.detail(editingProject?.id ?? ''),
@@ -417,6 +432,24 @@ export default function ProjectsPage() {
           新建项目
         </Button>
       </PageHeader>
+
+      <WorkspaceSubnav
+        items={[
+          { label: '项目', href: '/projects' },
+          { label: '计划', href: '/plans' },
+          { label: '任务', href: '/tasks' },
+          { label: '时间线', href: '/timeline' },
+        ]}
+      />
+
+      <MetricStrip
+        label="项目概览"
+        metrics={[
+          { label: '项目', value: projectOverview.projects },
+          { label: '任务', value: projectOverview.tasks, detail: projectOverview.running ? `${projectOverview.running} 个运行中` : undefined },
+          { label: '完成率', value: projectOverview.completion, detail: projectOverview.completed ? `${projectOverview.completed} 个已完成` : '暂无任务' },
+        ]}
+      />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <ToggleGroup
