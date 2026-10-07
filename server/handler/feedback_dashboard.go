@@ -70,7 +70,7 @@ func (h *FeedbackDashboardHandler) Get(c fiber.Ctx) error {
 	if err := db.Model(&model.AnalyticsContent{}).Where("project_id = ?", project.ID).Count(&contentCount).Error; err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to load feedback coverage")
 	}
-	if err := db.Model(&model.AnalyticsObservation{}).Where("project_id = ? AND revoked_at IS NULL AND content_id <> ''").Count(&observationCount).Error; err != nil {
+	if err := db.Model(&model.AnalyticsObservation{}).Where("project_id = ? AND revoked_at IS NULL AND content_id <> ''", project.ID).Count(&observationCount).Error; err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to load feedback coverage")
 	}
 

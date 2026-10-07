@@ -32,6 +32,7 @@ function project(overrides: Partial<Project> = {}): Project {
 
 describe('ProjectCard', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.spyOn(api.projects, 'feedback').mockResolvedValue({
       project_id: 'project-1', platform: 'wechat', timezone: 'Asia/Shanghai', feedback_paused: false,
       analytics: { revision: 3, status: 'ready', content_count: 6, valid_observation_count: 5 },
@@ -123,16 +124,33 @@ describe('ProjectCard', () => {
     expect(onRestore).toHaveBeenCalledWith('project-1')
   })
 
-  it('shows feedback controls for a neutral project', async () => {
+  it('loads feedback on demand and retries only after an explicit action', async () => {
     render(<ProjectCard project={project({ platform: '' })} />)
+
+    expect(api.projects.feedback).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '查看反馈闭环' }))
     expect(await screen.findByText('反馈闭环')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /暂停/ })).toBeEnabled()
+    expect(await screen.findByRole('button', { name: /暂停/ })).toBeEnabled()
+    expect(api.projects.feedback).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not automatically retry a failed feedback dashboard request', async () => {
+    vi.mocked(api.projects.feedback).mockRejectedValue(new Error('server error'))
+    render(<ProjectCard project={project()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '查看反馈闭环' }))
+    expect(await screen.findByText('反馈状态暂不可用')).toBeInTheDocument()
+    expect(api.projects.feedback).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '重新加载反馈状态' }))
+    await waitFor(() => expect(api.projects.feedback).toHaveBeenCalledTimes(2))
   })
 
   it('pauses feedback scheduling and submits an explicit monthly period', async () => {
     render(<ProjectCard project={project()} />)
 
-    await screen.findByText('反馈闭环')
+    fireEvent.click(screen.getByRole('button', { name: '查看反馈闭环' }))
+    await screen.findByRole('button', { name: /暂停/ })
     fireEvent.click(screen.getByRole('button', { name: /暂停/ }))
     await waitFor(() => expect(api.projects.setFeedbackPaused).toHaveBeenCalledWith('project-1', true))
 

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, Settings2, Brain, CalendarClock, Database, Lightbulb, Pause, Pencil, Play, RefreshCw, RotateCcw, UserRound } from 'lucide-react'
+import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, Pause, Pencil, Play, RefreshCw, RotateCcw, UserRound } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
@@ -29,6 +29,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [monthlyRerunOpen, setMonthlyRerunOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [periodStart, setPeriodStart] = useState('')
   const [periodEnd, setPeriodEnd] = useState('')
   const queryClient = useQueryClient()
@@ -42,8 +43,9 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
   const feedbackQuery = useQuery({
     queryKey: ['project-feedback', project.id],
     queryFn: ({ signal }) => api.projects.feedback(project.id, signal),
-    enabled: feedbackEnabled,
+    enabled: feedbackEnabled && feedbackOpen,
     staleTime: 60_000,
+    retry: false,
   })
   const feedbackStateMutation = useMutation({
     mutationFn: (paused: boolean) => api.projects.setFeedbackPaused(project.id, paused),
@@ -101,51 +103,62 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
         )}
         {feedbackEnabled && (
           <div className="mt-3 border-t border-border pt-3">
-            {feedbackQuery.isPending ? (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Database className="h-3.5 w-3.5" />加载反馈状态…</div>
-            ) : feedbackQuery.isError ? (
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>反馈状态暂不可用</span>
-                <Button variant="ghost" size="xs" onClick={() => void feedbackQuery.refetch()} aria-label="重新加载反馈状态"><RefreshCw />重试</Button>
-              </div>
-            ) : feedbackQuery.data ? (
-              <div className="space-y-2 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-1.5 font-medium text-foreground"><Database className="h-3.5 w-3.5" />反馈闭环</span>
-                  <Badge variant={feedbackQuery.data.feedback_paused ? 'outline' : 'secondary'}>
-                    {feedbackQuery.data.feedback_paused ? '已暂停' : `数据 rev ${feedbackQuery.data.analytics.revision}`}
-                  </Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-muted-foreground">
-                  <span>内容 {feedbackQuery.data.analytics.content_count}</span>
-                  <span>观测 {feedbackQuery.data.analytics.valid_observation_count}</span>
-                  <span>队列中 {feedbackQuery.data.queue.counts.queued + feedbackQuery.data.queue.counts.running}</span>
-                  <span>已完成 {feedbackQuery.data.queue.counts.succeeded}</span>
-                </div>
-                <div className="flex items-center justify-between gap-2 text-muted-foreground">
-                  <span>策略 {feedbackQuery.data.strategy.status === 'active' ? `rev ${feedbackQuery.data.strategy.revision}` : '暂无'}</span>
-                  <span>上次 {formatTime(feedbackQuery.data.queue.last_success_at)}</span>
-                </div>
-                {feedbackQuery.data.queue.latest_skip && (
-                  <p className="truncate text-muted-foreground" title={feedbackQuery.data.queue.latest_skip.reason}>最近跳过：{feedbackQuery.data.queue.latest_skip.reason}</p>
-                )}
-                <div className="flex flex-wrap gap-1">
-                  <Button variant="ghost" size="xs" disabled={feedbackStateMutation.isPending} onClick={() => feedbackStateMutation.mutate(!feedbackQuery.data!.feedback_paused)}>
-                    {feedbackQuery.data.feedback_paused ? <Play /> : <Pause />}
-                    {feedbackQuery.data.feedback_paused ? '恢复' : '暂停'}
-                  </Button>
-                  <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('daily')} title={`下次日周期：${formatTime(feedbackQuery.data.next_runs.daily)}`}>
-                    <RefreshCw />日
-                  </Button>
-                  <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('weekly')} title={`下次周周期：${formatTime(feedbackQuery.data.next_runs.weekly)}`}>
-                    <CalendarClock />周
-                  </Button>
-                  <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('monthly')} title={`下次月周期：${formatTime(feedbackQuery.data.next_runs.monthly)}`}>
-                    <CalendarClock />月
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+            {!feedbackOpen ? (
+              <Button variant="ghost" size="xs" onClick={() => setFeedbackOpen(true)} aria-label="查看反馈闭环">
+                <Database />反馈闭环<ChevronDown />
+              </Button>
+            ) : (
+              <>
+                <Button variant="ghost" size="xs" onClick={() => setFeedbackOpen(false)} aria-expanded="true">
+                  <Database />反馈闭环<ChevronUp />
+                </Button>
+                {feedbackQuery.isPending ? (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><Database className="h-3.5 w-3.5" />加载反馈状态…</div>
+                ) : feedbackQuery.isError ? (
+                  <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>反馈状态暂不可用</span>
+                    <Button variant="ghost" size="xs" onClick={() => void feedbackQuery.refetch()} aria-label="重新加载反馈状态"><RefreshCw />重试</Button>
+                  </div>
+                ) : feedbackQuery.data ? (
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 font-medium text-foreground"><Database className="h-3.5 w-3.5" />反馈闭环</span>
+                      <Badge variant={feedbackQuery.data.feedback_paused ? 'outline' : 'secondary'}>
+                        {feedbackQuery.data.feedback_paused ? '已暂停' : `数据 rev ${feedbackQuery.data.analytics.revision}`}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-muted-foreground">
+                      <span>内容 {feedbackQuery.data.analytics.content_count}</span>
+                      <span>观测 {feedbackQuery.data.analytics.valid_observation_count}</span>
+                      <span>队列中 {feedbackQuery.data.queue.counts.queued + feedbackQuery.data.queue.counts.running}</span>
+                      <span>已完成 {feedbackQuery.data.queue.counts.succeeded}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                      <span>策略 {feedbackQuery.data.strategy.status === 'active' ? `rev ${feedbackQuery.data.strategy.revision}` : '暂无'}</span>
+                      <span>上次 {formatTime(feedbackQuery.data.queue.last_success_at)}</span>
+                    </div>
+                    {feedbackQuery.data.queue.latest_skip && (
+                      <p className="truncate text-muted-foreground" title={feedbackQuery.data.queue.latest_skip.reason}>最近跳过：{feedbackQuery.data.queue.latest_skip.reason}</p>
+                    )}
+                    <div className="flex flex-wrap gap-1">
+                      <Button variant="ghost" size="xs" disabled={feedbackStateMutation.isPending} onClick={() => feedbackStateMutation.mutate(!feedbackQuery.data!.feedback_paused)}>
+                        {feedbackQuery.data.feedback_paused ? <Play /> : <Pause />}
+                        {feedbackQuery.data.feedback_paused ? '恢复' : '暂停'}
+                      </Button>
+                      <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('daily')} title={`下次日周期：${formatTime(feedbackQuery.data.next_runs.daily)}`}>
+                        <RefreshCw />日
+                      </Button>
+                      <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('weekly')} title={`下次周周期：${formatTime(feedbackQuery.data.next_runs.weekly)}`}>
+                        <CalendarClock />周
+                      </Button>
+                      <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('monthly')} title={`下次月周期：${formatTime(feedbackQuery.data.next_runs.monthly)}`}>
+                        <CalendarClock />月
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
         )}
         <div className="mt-2 flex flex-wrap justify-end gap-1">
