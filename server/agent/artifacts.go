@@ -12,6 +12,7 @@ import (
 const NestedAgentDelegationError = "agent delegated to nested Agent tool and produced no required deliverables"
 
 var seednoteContentImagePattern = regexp.MustCompile(`^image_\d+\.(png|jpe?g|webp)$`)
+var wechatPictureContentImagePattern = regexp.MustCompile(`^image_\d+\.png$`)
 var whiteboardSceneImagePattern = regexp.MustCompile(`^scene-\d+\.png$`)
 var whiteboardSceneAnnotationPattern = regexp.MustCompile(`^scene-\d+\.annotation\.json$`)
 
@@ -135,6 +136,34 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		result.Valid = true
 		return result
 	}
+	if task != nil && task.Type == model.TaskTypeWechatPicture {
+		var missing []string
+		for _, name := range []string{
+			"topic-analysis.md",
+			"content-dna.json",
+			"content-script.md",
+			"content.md",
+			"image-plan.md",
+			"image-prompts.md",
+			"publish-package.json",
+			"quality-review.md",
+			"cover.png",
+		} {
+			if !files[name] {
+				missing = append(missing, name)
+			}
+		}
+		if !hasWechatPictureContentImage(files) {
+			missing = append(missing, "concrete image_NN.png")
+		}
+		if len(missing) > 0 {
+			result.Missing = missing
+			result.Reason = "wechat picture missing required deliverables: " + strings.Join(missing, ", ")
+			return result
+		}
+		result.Valid = true
+		return result
+	}
 	if task != nil && task.Type == model.PlatformWhiteboardAnimation {
 		return validateWhiteboardAnimationArtifacts(files, meaningful)
 	}
@@ -241,6 +270,15 @@ func validateWhiteboardAnimationArtifacts(files map[string]bool, meaningful int)
 func hasSeednoteContentImage(files map[string]bool) bool {
 	for name := range files {
 		if seednoteContentImagePattern.MatchString(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasWechatPictureContentImage(files map[string]bool) bool {
+	for name := range files {
+		if strings.HasPrefix(name, "output/") && wechatPictureContentImagePattern.MatchString(filepath.Base(name)) && !strings.ContainsAny(name, "*?[]{}") {
 			return true
 		}
 	}

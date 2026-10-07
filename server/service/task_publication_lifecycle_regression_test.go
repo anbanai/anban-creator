@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -199,9 +200,9 @@ func picturePublicationPackageWithImages(t *testing.T, imagePaths []string) []by
 
 func TestFinalizePicturePublicationRequiresExactRequestedImageCount(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		requested    int
-		imagePaths   []string
+		name       string
+		requested  int
+		imagePaths []string
 	}{
 		{name: "insufficient", requested: 2, imagePaths: []string{}},
 		{name: "exceeded", requested: 1, imagePaths: []string{"output/image_01.png"}},
@@ -224,6 +225,99 @@ func TestFinalizePicturePublicationRequiresExactRequestedImageCount(t *testing.T
 			}
 			if status != model.TaskExecutionDraftDeliveryBlocked || result.Code != "image_count_mismatch" || result.Attempted {
 				t.Fatalf("status=%q evidence=%s", status, evidence)
+			}
+		})
+	}
+}
+
+func TestFinalizePicturePublicationRejectsWildcardImagePath(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	task.Type = model.TaskTypeWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	api := &fakeWechatPublicationAPI{draftListResponse: &appwechat.DraftBatchGetResponse{}, addResponse: &appwechat.DraftAddResponse{MediaID: "must-not-publish"}}
+	logger := zerolog.New(io.Discard)
+	svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) { return api, nil }, &logger))
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"image_paths": []string{"output/image_*.png"}}))
+	status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliveryFailed || result.Code != "publication_package_invalid" || result.Attempted || api.addCalls != 0 {
+		t.Fatalf("status=%q code=%q attempted=%t add_calls=%d", status, result.Code, result.Attempted, api.addCalls)
+	}
+}
+
+func TestFinalizePicturePublicationRejectsNonImageTaskFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		role     string
+		mimeType string
+	}{
+		{name: "non-image role and mime", role: model.FileRoleOther, mimeType: "application/json"},
+		{name: "image role with non-image mime", role: model.FileRoleCover, mimeType: "application/json"},
+		{name: "content role used as cover", role: model.FileRoleImage, mimeType: "image/png"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, execution := setupCloudCompletionTest(t, false)
+			task.Type = model.TaskTypeWechatPicture
+			task.Channel = model.ChannelWechatPicture
+			api := &fakeWechatPublicationAPI{
+				draftListResponse: &appwechat.DraftBatchGetResponse{},
+				addResponse:       &appwechat.DraftAddResponse{MediaID: "must-not-publish"},
+			}
+			logger := zerolog.New(io.Discard)
+			svc.SetWechatPublicationService(NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) {
+				return api, nil
+			}, &logger))
+			addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", canonicalPicturePublicationPackage(t, "ready", "ready", nil, nil))
+			if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+				ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStateDelivered,
+				Role: tc.role, FilePath: "output/cover.png", FileName: "cover.png", MimeType: tc.mimeType,
+				FileSize: 1, MediaID: "forged-media-id",
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result publicationDeliveryResult
+			if err := json.Unmarshal(evidence, &result); err != nil {
+				t.Fatal(err)
+			}
+			if status != model.TaskExecutionDraftDeliveryBlocked || result.Code != "image_media_invalid" || result.Attempted {
+				t.Fatalf("status=%q evidence=%s", status, evidence)
+			}
+			if api.addCalls != 0 {
+				t.Fatalf("WeChat draft calls=%d, want none", api.addCalls)
+			}
+		})
+	}
+}
+
+func TestPictureImageCountRejectsNonIntegersAndNonFiniteValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  any
+	}{
+		{name: "fractional float", raw: float64(1.5)},
+		{name: "nan", raw: math.NaN()},
+		{name: "positive infinity", raw: math.Inf(1)},
+		{name: "fractional json number", raw: json.Number("1.5")},
+		{name: "large json integer", raw: json.Number("9223372036854775807")},
+		{name: "zero", raw: float64(0)},
+		{name: "too large", raw: float64(21)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, ok := pictureImageCount(tc.raw); ok || got != 0 {
+				t.Fatalf("pictureImageCount(%v) = (%d, %t), want (0, false)", tc.raw, got, ok)
 			}
 		})
 	}

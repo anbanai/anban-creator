@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"mime"
 	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +33,7 @@ var ErrStaleTaskExecution = errors.New("task execution is no longer current")
 var ErrTaskCompletionConflict = errors.New("task completion result conflicts with the terminal execution outcome")
 var ErrFinalizationLeaseLost = errors.New("task execution finalization lease lost")
 var ErrCloudPublishingAmbiguous = errors.New("cloud draft publication outcome is ambiguous and requires reconciliation")
+var pictureContentImagePathPattern = regexp.MustCompile(`^image_\d+\.png$`)
 
 func taskUsesChannel(task *model.Task, channel string) bool {
 	if task == nil {
@@ -933,6 +937,25 @@ func validPicturePublicationPath(value string) bool {
 		!strings.ContainsAny(value, "*?[]{}")
 }
 
+func validPicturePublicationImageFile(file *model.TaskFile, cover bool) bool {
+	if file == nil || file.State != model.TaskFileStateDelivered {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(file.MimeType))
+	if err != nil || !strings.HasPrefix(strings.ToLower(mediaType), "image/") {
+		return false
+	}
+	if cover {
+		return file.Role == model.FileRoleCover
+	}
+	return file.Role == model.FileRoleImage
+}
+
+func isConcretePictureContentPath(path string) bool {
+	base := filepath.Base(path)
+	return pictureContentImagePathPattern.MatchString(base) && !strings.ContainsAny(base, "*?[]{}")
+}
+
 func (s *TaskService) finalizePicturePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
 	block := func(code, action string) (string, []byte, error) {
 		return model.TaskExecutionDraftDeliveryBlocked, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryBlocked, code, false, action), nil
@@ -984,7 +1007,7 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 	seenPaths := map[string]struct{}{coverPath: {}}
 	for _, path := range pkg.ImagePaths {
 		path = strings.TrimSpace(path)
-		if !validPicturePublicationPath(path) {
+		if !validPicturePublicationPath(path) || !isConcretePictureContentPath(path) {
 			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "publication_package_invalid", false, "review_content"), nil
 		}
 		if _, exists := seenPaths[path]; exists {
@@ -1020,6 +1043,9 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 		file := byPath[path]
 		if file == nil || file.State != model.TaskFileStateDelivered {
 			return block("image_media_missing", "retry_visuals")
+		}
+		if !validPicturePublicationImageFile(file, index == 0) {
+			return block("image_media_invalid", "retry_visuals")
 		}
 		mediaID := strings.TrimSpace(file.MediaID)
 		if mediaID == "" {
@@ -1098,10 +1124,13 @@ func pictureImageCount(raw any) (int, bool) {
 	case int:
 		count = value
 	case float64:
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || value < 1 || value > 20 {
+			return 0, false
+		}
 		count = int(value)
 	case json.Number:
 		parsed, err := value.Int64()
-		if err != nil {
+		if err != nil || parsed < 1 || parsed > 20 {
 			return 0, false
 		}
 		count = int(parsed)

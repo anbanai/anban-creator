@@ -24,6 +24,24 @@ func TestValidateSeednoteArtifactsFromTaskFiles(t *testing.T) {
 	}
 }
 
+func TestValidateWechatPictureArtifactsRequiresConcreteContentImage(t *testing.T) {
+	task := &model.Task{Type: model.TaskTypeWechatPicture}
+	required := []string{"topic-analysis.md", "content-dna.json", "content-script.md", "content.md", "image-plan.md", "image-prompts.md", "publish-package.json", "quality-review.md", "cover.png"}
+	files := make([]*model.TaskFile, 0, len(required)+1)
+	for _, name := range required {
+		files = append(files, &model.TaskFile{FileName: name, FilePath: filepath.Join("output", name)})
+	}
+	files = append(files, &model.TaskFile{FileName: "image_*.png", FilePath: "output/image_*.png"})
+	got := ValidateTaskArtifactsFromTaskFiles(task, files)
+	if got.Valid || !containsArtifactName(got.Missing, "concrete image_NN.png") {
+		t.Fatalf("literal wildcard placeholder accepted: %#v", got)
+	}
+	files = append(files, &model.TaskFile{FileName: "image_01.png", FilePath: "output/image_01.png"})
+	if got = ValidateTaskArtifactsFromTaskFiles(task, files); !got.Valid {
+		t.Fatalf("concrete picture image rejected: %#v", got)
+	}
+}
+
 func TestValidateViralAnalysisArtifactsFromTaskFiles(t *testing.T) {
 	required := []string{"source-analysis.md", "viral-template.json"}
 	tests := []struct {
