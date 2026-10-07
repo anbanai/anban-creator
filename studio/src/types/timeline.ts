@@ -12,6 +12,8 @@ export interface TimelineItem {
   project_id?: string
   project_name?: string
   platform?: string
+  /** Derived Agent capabilities associated with the project. */
+  agent_ids?: string[]
   scheduled_at: string
   completed_at: string
   created_at: string

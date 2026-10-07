@@ -38,6 +38,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
+import { AgentIconStack } from '@/components/agent-prompt/AgentIconStack'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
@@ -402,11 +403,9 @@ export default function PlansPage() {
                       {project ? <ProjectIdentity project={project} compact /> : <span>未命名项目</span>}<span aria-hidden="true">·</span><span>{cronToHuman(plan.cron_expr)}</span>
                       {plan.next_run_at ? <><span aria-hidden="true">·</span><span>下次 {formatDateTimeCN(plan.next_run_at)}</span></> : null}
                     </div>
-                    <div className="flex flex-wrap gap-1.5" aria-label="输出类型">
-                      {outputIDs.map((agentID) => {
-                        const pack = outputPacks.find((item) => item.id === agentID)
-                        return <Badge key={agentID} variant="outline" className="font-normal">{pack ? outputLabel(pack) : outputLabels[agentID] ?? agentID}</Badge>
-                      })}
+                    <div className="flex items-center gap-1.5" aria-label="输出类型">
+                      <span className="sr-only">输出类型：</span>
+                      <AgentIconStack agentIds={outputIDs} compact maxVisible={5} />
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">

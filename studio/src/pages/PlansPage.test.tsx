@@ -129,7 +129,7 @@ describe('PlansPage multi-output plans', () => {
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
     expect(api.plans.create).not.toHaveBeenCalled()
   })
-  it('shows output labels and restores the saved selection when editing', async () => {
+  it('shows output Agent icons and restores the saved selection when editing', async () => {
     const plan = { ...mockPlans.items[0], prompt: '多种输出', agent_ids: ['seednote', 'wechat-picture'] }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
@@ -137,8 +137,10 @@ describe('PlansPage multi-output plans', () => {
     const planCard = document.querySelector('[data-plan-id="plan-1"]')
     expect(planCard).toBeInTheDocument()
     expect(planCard?.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
-    expect(await screen.findByText('种草笔记')).toBeInTheDocument()
-    expect(await screen.findByText('公众号贴图')).toBeInTheDocument()
+    expect(planCard?.querySelector('[data-agent-id="seednote"]')).toBeInTheDocument()
+    expect(planCard?.querySelector('[data-agent-id="wechat-picture"]')).toBeInTheDocument()
+    expect(planCard).not.toHaveTextContent('种草笔记')
+    expect(planCard).not.toHaveTextContent('公众号贴图')
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
     expect(within(dialog).getByRole('button', { name: '种草笔记' })).toHaveAttribute('aria-pressed', 'true')

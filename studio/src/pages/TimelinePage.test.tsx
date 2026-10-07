@@ -5,6 +5,31 @@ import TimelinePage from './TimelinePage'
 import { api } from '@/lib/api'
 
 describe('TimelinePage filters', () => {
+  it('renders every derived project Agent icon in a timeline item', async () => {
+    const timeline = vi.spyOn(api.timeline, 'get').mockResolvedValueOnce({
+      items: [{
+        id: 'multi-agent-task',
+        type: 'task',
+        content_type: 'montage',
+        title: '多 Agent 任务',
+        status: 'pending',
+        project_id: 'multi-agent-project',
+        project_name: '多 Agent 项目',
+        platform: 'wechat',
+        agent_ids: ['montage', 'seednote', 'hypit'],
+        scheduled_at: '2026-09-24T09:00:00Z',
+        created_at: '2026-09-24T09:00:00Z',
+        completed_at: '',
+      }],
+    })
+    render(<TimelinePage />)
+    await screen.findByText('多 Agent 任务')
+    expect(document.querySelector('[data-agent-id="montage"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-agent-id="seednote"]')).toBeInTheDocument()
+    expect(document.querySelector('[data-agent-id="hypit"]')).toBeInTheDocument()
+    timeline.mockRestore()
+  })
+
   it('distinguishes video generation and replication in cards and filters', async () => {
     const timeline = vi.spyOn(api.timeline, 'get').mockResolvedValueOnce({
       items: (['montage', 'hypit'] as const).map(content_type => ({

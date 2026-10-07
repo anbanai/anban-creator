@@ -21,6 +21,7 @@ type TimelineItem struct {
 	ProjectID    string             `json:"project_id,omitempty"`
 	ProjectName  string             `json:"project_name,omitempty"`
 	Platform     string             `json:"platform,omitempty"`
+	AgentIDs     []string           `json:"agent_ids,omitempty"`
 	ScheduledAt  *time.Time         `json:"scheduled_at,omitempty"`
 	CompletedAt  *time.Time         `json:"completed_at,omitempty"`
 	CreatedAt    time.Time          `json:"created_at"`
@@ -45,6 +46,20 @@ func timelineCurrentStage(lifecycle model.TaskLifecycle) *TimelineTaskStage {
 	}
 	stage := lifecycle.Stages[len(lifecycle.Stages)-1]
 	return &TimelineTaskStage{Title: stage.Title, State: stage.State}
+}
+
+func timelineProjectAgentIDs(project *model.Project, derived map[string][]string) []string {
+	if project == nil {
+		return nil
+	}
+	ids := derived[project.ID]
+	if len(ids) == 0 {
+		ids = defaultProjectAgentIDs(project.Platform)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return append([]string(nil), ids...)
 }
 
 // TimelineHandler handles the timeline API endpoint.
@@ -100,8 +115,21 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 		// Non-fatal: proceed without project info.
 	}
 	projectMap := make(map[string]*model.Project)
+	projectIDs := make([]string, 0, len(projects))
 	for _, ch := range projects {
+		if ch == nil {
+			continue
+		}
 		projectMap[ch.ID] = ch
+		projectIDs = append(projectIDs, ch.ID)
+	}
+	projectAgentIDs := make(map[string][]string)
+	if len(projectIDs) > 0 {
+		projectAgentIDs, err = h.repo.Projects().ListAgentIDsByProjectIDs(ctx, projectIDs)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("failed to derive project agents for timeline")
+			projectAgentIDs = nil
+		}
 	}
 
 	var items []TimelineItem
@@ -125,9 +153,11 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			title = t.Type + " task"
 		}
 		var projectName, platform string
+		var agentIDs []string
 		if ch, ok := projectMap[t.ProjectID]; ok {
 			projectName = ch.Name
 			platform = ch.Platform
+			agentIDs = timelineProjectAgentIDs(ch, projectAgentIDs)
 		}
 		items = append(items, TimelineItem{
 			ID:           t.ID,
@@ -138,6 +168,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 			ProjectID:    t.ProjectID,
 			ProjectName:  projectName,
 			Platform:     platform,
+			AgentIDs:     agentIDs,
 			CompletedAt:  t.CompletedAt,
 			CreatedAt:    t.CreatedAt,
 			CurrentStage: timelineCurrentStage(t.Lifecycle.Data()),
@@ -160,9 +191,11 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 					title = "计划"
 				}
 				var projectName, platform string
+				var agentIDs []string
 				if ch, ok := projectMap[p.ProjectID]; ok {
 					projectName = ch.Name
 					platform = ch.Platform
+					agentIDs = timelineProjectAgentIDs(ch, projectAgentIDs)
 				}
 				items = append(items, TimelineItem{
 					ID:          p.ID,
@@ -173,6 +206,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 					ProjectID:   p.ProjectID,
 					ProjectName: projectName,
 					Platform:    platform,
+					AgentIDs:    agentIDs,
 					ScheduledAt: p.NextRunAt,
 					CreatedAt:   p.CreatedAt,
 				})
@@ -205,9 +239,11 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 				title = t.Type + " task"
 			}
 			var projectName, platform string
+			var agentIDs []string
 			if ch, ok := projectMap[t.ProjectID]; ok {
 				projectName = ch.Name
 				platform = ch.Platform
+				agentIDs = timelineProjectAgentIDs(ch, projectAgentIDs)
 			}
 			items = append(items, TimelineItem{
 				ID:           t.ID,
@@ -218,6 +254,7 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 				ProjectID:    t.ProjectID,
 				ProjectName:  projectName,
 				Platform:     platform,
+				AgentIDs:     agentIDs,
 				CreatedAt:    t.CreatedAt,
 				CurrentStage: timelineCurrentStage(t.Lifecycle.Data()),
 			})

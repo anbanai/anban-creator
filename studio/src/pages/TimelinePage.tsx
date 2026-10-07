@@ -377,6 +377,7 @@ export default function TimelinePage() {
                                           id: item.project_id || item.project_name,
                                           name: item.project_name,
                                           platform: item.platform || item.content_type,
+                                          agent_ids: item.agent_ids,
                                         }}
                                       />
                                     )}

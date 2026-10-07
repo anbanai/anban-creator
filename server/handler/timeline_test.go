@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ func setupTestDBForHandler(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.Project{},
 		&model.Plan{},
+		&model.PlanEntry{},
 		&model.Task{},
 		&model.User{},
 		&model.LoginSession{},
@@ -34,6 +36,76 @@ func setupTestDBForHandler(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 	return db
+}
+
+func TestTimelineIncludesDerivedProjectAgentIDs(t *testing.T) {
+	repo, logger := setupTimelineHandler(t)
+	ctx := t.Context()
+	userID := "user-timeline-agent-identity"
+	projectID := "project-timeline-agent-identity"
+	project := &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "多 Agent 项目", Status: model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	createdAt := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: "task-timeline-agent-identity", UserID: userID, ProjectID: projectID,
+		AgentID: model.AgentIDMontage, Channel: model.ChannelMontage, TaskKind: model.TaskKindContentGeneration,
+		Type: model.ScopeWechat, Status: model.TaskStatusCompleted, Prompt: "视频任务", CreatedAt: createdAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	nextRun := time.Date(2026, 4, 20, 9, 0, 0, 0, time.UTC)
+	if err := repo.Plans().Create(ctx, &model.Plan{
+		ID: "plan-timeline-agent-identity", UserID: userID, ProjectID: projectID,
+		ExecutionProfile: "effective", CronExpr: "0 9 * * 1-5", Status: model.PlanStatusActive,
+		Prompt: "种草计划", NextRunAt: &nextRun,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlanEntries().Create(ctx, &model.PlanEntry{
+		ID: "entry-timeline-agent-identity", PlanID: "plan-timeline-agent-identity",
+		AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration,
+		ExecutionProfile: "effective", Status: model.PlanEntryStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewTimelineHandler(repo, logger)
+	app := fiber.New()
+	app.Get("/timeline", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return handler.GetTimeline(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/timeline?from=2026-04-01&to=2026-04-30", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	var envelope struct {
+		Data struct {
+			Items []TimelineItem `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{model.AgentIDMontage, model.AgentIDSeednote}
+	if len(envelope.Data.Items) != 2 {
+		t.Fatalf("timeline items = %#v, want task and plan", envelope.Data.Items)
+	}
+	for _, item := range envelope.Data.Items {
+		if !reflect.DeepEqual(item.AgentIDs, want) {
+			t.Fatalf("%s agent_ids = %#v, want %#v", item.ID, item.AgentIDs, want)
+		}
+	}
 }
 
 func TestTimelineCurrentStagePrefersAttentionThenPending(t *testing.T) {
