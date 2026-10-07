@@ -40,6 +40,7 @@ import type {
 } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/common/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Dialog,
   DialogContent,
@@ -413,7 +414,12 @@ function RailHeading({ onOpenLogs, taskId, files, stages }: { onOpenLogs: () => 
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <TaskFileDownloads taskId={taskId} files={files} />
-        <Button size="xs" variant="ghost" onClick={onOpenLogs}><ScrollText className="size-3.5" />查看完整日志</Button>
+        <Tooltip>
+          <TooltipTrigger render={<Button size="icon-xs" variant="ghost" onClick={onOpenLogs} aria-label="查看完整日志" />}>
+            <ScrollText className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipContent>查看完整日志</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   )

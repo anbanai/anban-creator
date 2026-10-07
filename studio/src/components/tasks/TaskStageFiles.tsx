@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { Download } from 'lucide-react'
+import { ArchiveRestore, Download, FileDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import type { TaskFile } from '@/types'
 import { Button } from '@/components/common/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { FilePreviewGallery } from '@/components/FilePreview'
 import { EcommerceFilesGallery } from '@/components/tasks/EcommerceFilesGallery'
 
@@ -30,10 +32,37 @@ export function TaskFileDownloads({ taskId, files }: { taskId: string; files: Ta
     }
   }
 
-  return <>
-    {hasDelivery && <Button size="icon-xs" variant="ghost" loading={downloading === 'delivered'} disabled={!!downloading} onClick={() => void download('delivered')} aria-label="下载交付成果 (ZIP)" title="下载交付成果 (ZIP)"><Download className="size-3.5" /></Button>}
-    {hasRetained && <Button size="icon-xs" variant="ghost" loading={downloading === 'retained'} disabled={!!downloading} onClick={() => void download('retained')} aria-label="下载已保留产物 (ZIP)" title="下载已保留产物 (ZIP)"><Download className="size-3.5" /></Button>}
-  </>
+  if (!hasDelivery && !hasRetained) return null
+  if (hasDelivery !== hasRetained) {
+    const scope = hasDelivery ? 'delivered' : 'retained'
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={<Button size="icon-xs" variant="ghost" loading={downloading === scope} disabled={!!downloading} onClick={() => void download(scope)} aria-label={hasDelivery ? '下载交付成果 (ZIP)' : '下载已保留产物 (ZIP)'} />}
+        >
+          <Download className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipContent>{hasDelivery ? '下载交付成果' : '下载已保留产物'}</TooltipContent>
+      </Tooltip>
+    )
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<Button size="icon-xs" variant="ghost" aria-label="下载产物" title="下载产物" />}
+      >
+          <Download className="size-3.5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem disabled={!!downloading} onClick={() => void download('delivered')}>
+          <FileDown className="size-4" />下载交付成果
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!!downloading} onClick={() => void download('retained')}>
+          <ArchiveRestore className="size-4" />下载已保留产物
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 export function TaskStageFiles({ files, taskId, taskType }: { files: TaskFile[]; taskId: string; taskType?: string }) {
