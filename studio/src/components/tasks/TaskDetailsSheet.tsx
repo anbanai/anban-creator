@@ -11,6 +11,7 @@ import {
   ReceiptText,
   ScrollText,
   Settings2,
+  TerminalSquare,
   type LucideIcon,
 } from 'lucide-react'
 import { Streamdown } from 'streamdown'
@@ -187,6 +188,28 @@ function TaskBillingDetails({ task }: { task: Task }) {
   )
 }
 
+function TaskTechnicalDetails({ task }: { task: Task }) {
+  const runtime = task.runtime_context
+  const executionId = runtime?.execution.execution_id || task.lifecycle?.execution_id
+  const snapshotId = runtime?.profile.snapshot_id || task.agent_profile_fingerprint
+  const rows: Array<[string, ReactNode]> = [
+    ...(executionId ? [['执行 ID', executionId] as [string, ReactNode]] : []),
+    ...(task.execution_profile ? [['运行配置', task.execution_profile] as [string, ReactNode]] : []),
+    ...(snapshotId ? [['任务快照', snapshotId] as [string, ReactNode]] : []),
+    ...(runtime?.connectivity.summary ? [['连接状态', runtime.connectivity.summary] as [string, ReactNode]] : []),
+    ...(runtime?.connectivity.diagnostic_code ? [['诊断代码', runtime.connectivity.diagnostic_code] as [string, ReactNode]] : []),
+  ]
+
+  if (rows.length === 0) return null
+
+  return (
+    <TaskDetailsSection label="技术信息" title="技术信息" icon={TerminalSquare}>
+      <DetailRows rows={rows} />
+      <p className="mt-3 text-xs text-muted-foreground">仅用于排查任务问题，不影响任务内容。</p>
+    </TaskDetailsSection>
+  )
+}
+
 function TaskOverviewDetails({
   task,
   project,
@@ -233,6 +256,7 @@ function TaskOverviewDetails({
         ]} />
       </TaskDetailsSection>
       <TaskBillingDetails task={task} />
+      <TaskTechnicalDetails task={task} />
       {failure && (
         <TaskDetailsSection label="故障诊断" title="故障诊断" icon={AlertTriangle}>
           <DetailRows rows={[

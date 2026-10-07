@@ -356,7 +356,7 @@ describe('TaskDetailPage', () => {
     expect(provider).toHaveTextContent('供应商未披露具体片段')
   })
 
-  it('surfaces outcome, stage, artifact, health, and credit metrics above the fold', async () => {
+  it('keeps completed results compact and leaves detailed metrics to their owning sections', async () => {
     const task = taskWith({
       status: 'completed',
       billing_price_credits: 5000,
@@ -382,15 +382,11 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('region', { name: '任务状态摘要' })).toHaveTextContent('任务已完成')
-    const metrics = screen.getByRole('region', { name: '任务关键指标' })
-    expect(metrics).toHaveTextContent('环节')
-    expect(metrics).toHaveTextContent('交付产物')
-    expect(metrics).toHaveTextContent('健康状态')
-    expect(metrics).toHaveTextContent('累计扣费')
-    expect(metrics).toHaveTextContent('2 个')
-    expect(metrics).toHaveTextContent('模型和 MCP 正常')
-    expect(metrics).toHaveTextContent('6,800 积分')
+    expect(await screen.findByText('任务已完成，交付成果已保存。')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '任务状态摘要' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '任务关键指标' })).not.toBeInTheDocument()
+    expect(screen.queryByText('模型和 MCP 正常')).not.toBeInTheDocument()
+    expect(screen.queryByText('6,800 积分')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看内容分析' })).toBeInTheDocument()
   })
 
