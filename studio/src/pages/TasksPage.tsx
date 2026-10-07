@@ -635,10 +635,6 @@ export default function TasksPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}</h3>
-                          <div className="flex w-7 shrink-0 items-center justify-end gap-1.5" title={taskStatusLabel[task.status] || task.status}>
-                            <TaskStatusMark status={task.status} />
-                            <span className="sr-only">{taskStatusLabel[task.status] || task.status}</span>
-                          </div>
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
                           {project ? <span className="max-w-[min(16rem,42vw)] truncate text-muted-foreground">{project.name}</span> : <span>未设置项目</span>}
@@ -649,7 +645,7 @@ export default function TasksPage() {
                         </div>
                       </div>
                     </Link>
-                    <div className="flex w-9 shrink-0 items-center justify-center">
+                    <div className="flex min-h-16 w-9 shrink-0 flex-col items-center justify-between self-stretch">
                       {task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? (
                         <Link
                           to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
@@ -658,6 +654,10 @@ export default function TasksPage() {
                           className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                         ><BarChart3 className="size-4" /></Link>
                       ) : <span aria-hidden="true" className="size-9" />}
+                      <div className="flex size-9 items-center justify-center" title={taskStatusLabel[task.status] || task.status}>
+                        <TaskStatusMark status={task.status} />
+                        <span className="sr-only">{taskStatusLabel[task.status] || task.status}</span>
+                      </div>
                     </div>
                   </div>
                 </div>

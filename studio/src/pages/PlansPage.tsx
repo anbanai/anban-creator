@@ -369,8 +369,8 @@ export default function PlansPage() {
     const statusLabel = planStatusLabel[plan.status] ?? plan.status
     return (
       <article key={plan.id} className="rounded-xl border border-border bg-card p-4 shadow-xs" data-plan-id={plan.id} data-testid={`plan-card-${plan.id}`}>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 flex-1 space-y-3">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-start gap-2">
               <div className="min-w-0 flex-1">
                 <h2 className="truncate text-sm font-semibold text-foreground">{plan.prompt || plan.title || '定时创作计划'}</h2>
@@ -400,22 +400,25 @@ export default function PlansPage() {
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2 lg:pt-0.5">
-            <Button data-primary-action type="button" size="sm" onClick={() => openEdit(plan)}><Sparkles className="size-3.5" />编辑</Button>
-            <details className="relative">
-              <summary className="flex min-h-8 cursor-pointer list-none items-center rounded-lg border border-transparent px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50">
-                更多操作
-              </summary>
-              <div className="absolute right-0 z-10 mt-1 min-w-32 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
-                <Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} className="flex min-h-8 items-center rounded-md px-2 text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none">查看任务</Link>
-                {plan.status === 'active' ? (
-                  <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="mr-1.5 size-3.5" />暂停</button>
-                ) : plan.status === 'paused' ? (
-                  <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => void resumeMutation.mutateAsync(plan.id)}><Play className="mr-1.5 size-3.5" />恢复</button>
-                ) : null}
-                <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none" onClick={() => setDeleteTarget(plan.id)}><Trash2 className="mr-1.5 size-3.5" />删除</button>
-              </div>
-            </details>
+          <div className="flex min-h-16 min-w-36 flex-col items-end justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Button data-primary-action type="button" size="sm" onClick={() => openEdit(plan)}><Sparkles className="size-3.5" />编辑</Button>
+              <details className="relative">
+                <summary className="flex min-h-8 cursor-pointer list-none items-center rounded-lg border border-transparent px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50">
+                  更多操作
+                </summary>
+                <div className="absolute right-0 z-10 mt-1 min-w-32 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+                  <Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} className="flex min-h-8 items-center rounded-md px-2 text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none">查看任务</Link>
+                  {plan.status === 'active' ? (
+                    <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="mr-1.5 size-3.5" />暂停</button>
+                  ) : plan.status === 'paused' ? (
+                    <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => void resumeMutation.mutateAsync(plan.id)}><Play className="mr-1.5 size-3.5" />恢复</button>
+                  ) : null}
+                  <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 text-left text-xs text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none" onClick={() => setDeleteTarget(plan.id)}><Trash2 className="mr-1.5 size-3.5" />删除</button>
+                </div>
+              </details>
+            </div>
+            <StatusPill status={plan.status} label={statusLabel} />
           </div>
         </div>
       </article>
