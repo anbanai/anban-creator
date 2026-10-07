@@ -55,43 +55,39 @@ describe('video platform identity', () => {
     expect(replicationBadge.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
   })
 
-  it('draws the video marks from unmodified lucide geometry', () => {
+  it('draws both video marks from the same frame geometry', () => {
     const { container, rerender } = render(<>{renderPlatformIcon('montage')}</>)
     const generation = container.querySelector('[data-platform-icon="montage"]')
-    expect(generation?.getAttribute('stroke-width')).toBe('2')
-    expect(generation).toHaveStyle({ overflow: 'visible' })
-    expect([...generation!.querySelectorAll('path')].map((path) => path.getAttribute('d'))).toEqual([
-      'm12.296 3.464 3.02 3.956',
-      'M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z',
-      'm6.18 5.276 3.1 3.899',
-      'M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
-    ])
+    expect(generation?.getAttribute('stroke-width')).toBe('1.75')
+    const generationFrame = generation?.querySelector('rect')
+    expect([generationFrame?.getAttribute('width'), generationFrame?.getAttribute('height'), generationFrame?.getAttribute('rx')]).toEqual(['18', '18', '5'])
 
     rerender(<>{renderPlatformIcon('hypit')}</>)
     const replication = container.querySelector('[data-platform-icon="hypit"]')
-    expect(replication?.getAttribute('stroke-width')).toBe('2')
-    expect(replication).toHaveStyle({ overflow: 'visible' })
-    expect(replication?.querySelector('path')?.getAttribute('d')).toBe(
-      'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2',
-    )
-    const sheet = replication?.querySelector('rect')
-    expect([sheet?.getAttribute('width'), sheet?.getAttribute('height'), sheet?.getAttribute('rx')]).toEqual(['14', '14', '2'])
+    expect(replication?.getAttribute('stroke-width')).toBe('1.75')
+    const replicationFrames = replication!.querySelectorAll('rect')
+    expect(replicationFrames).toHaveLength(2)
+    for (const frame of replicationFrames) {
+      expect(frame.getAttribute('width')).toBe('15')
+      expect(frame.getAttribute('height')).toBe('15')
+      expect(frame.getAttribute('rx')).toBe('4.25')
+    }
   })
 
-  it('animates the clapper lid together with its stripes', () => {
-    const { container } = render(<>{renderPlatformIcon('montage')}</>)
+  it('keeps the play mark and light sweep inside the generation symbol', () => {
+    const { container, rerender } = render(<>{renderPlatformIcon('montage')}</>)
     const symbol = container.querySelector('[data-platform-symbol="generate"]')
-    const animated = symbol!.querySelector('g')
-    expect(animated?.tagName).toBe('g')
+    const play = symbol!.querySelector('path')
+    expect(play?.getAttribute('d')).toBe('M10.2 8.7v6.6a.55.55 0 0 0 .84.47l5.3-3.3a.55.55 0 0 0 0-.94l-5.3-3.3a.55.55 0 0 0-.84.47Z')
+    expect(play).toHaveAttribute('fill', 'currentColor')
+    const sweep = symbol!.querySelector('rect[fill="currentColor"]')
+    expect([sweep?.getAttribute('width'), sweep?.getAttribute('height'), sweep?.getAttribute('x')]).toEqual(['3.5', '14', '6'])
 
-    const lidGroupPaths = [...animated!.querySelectorAll('path')].map((path) => path.getAttribute('d'))
-    expect(lidGroupPaths).toHaveLength(3)
-    expect(lidGroupPaths).toContain('M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z')
-    expect(lidGroupPaths).toContain('m12.296 3.464 3.02 3.956')
-    expect(lidGroupPaths).toContain('m6.18 5.276 3.1 3.899')
-    expect([...symbol!.querySelectorAll(':scope > path')].map((path) => path.getAttribute('d'))).toEqual([
-      'M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
-    ])
+    rerender(<>{renderPlatformIcon('hypit')}</>)
+    const replicationSymbol = container.querySelector('[data-platform-symbol="replicate"]')
+    expect(replicationSymbol!.querySelector('path')?.getAttribute('d')).toBe(
+      'M9.2 11.2v4.6a.5.5 0 0 0 .76.43l3.9-2.3a.5.5 0 0 0 0-.86l-3.9-2.3a.5.5 0 0 0-.76.43Z',
+    )
   })
 
   it.each(['montage', 'hypit'] as const)('animates %s on hover and settles on leave', (platform) => {
@@ -140,6 +136,19 @@ describe('video platform identity', () => {
 
     expect(picturePaths).not.toEqual(articlePaths)
     expect(renderPlatformIcon('wechat-article')).not.toEqual(renderPlatformIcon('wechat-picture'))
+  })
+
+  it('gives every content agent its own glyph', () => {
+    const types = ['wechat-article', 'wechat-picture', 'seednote', 'viral_analysis', 'moments', 'ecommerce']
+    const seen = new Map<string, string>()
+    const { container, rerender } = render(<>{renderPlatformIcon(types[0])}</>)
+    for (const type of types) {
+      rerender(<>{renderPlatformIcon(type)}</>)
+      const shape = container.querySelector('svg')?.innerHTML ?? ''
+      expect(shape, `${type} must render its own glyph`).toBeTruthy()
+      expect(seen.has(shape), `${type} duplicates the ${seen.get(shape)} glyph`).toBe(false)
+      seen.set(shape, type)
+    }
   })
 
   it('does not render an unrelated icon for an unknown platform', () => {

@@ -1,41 +1,43 @@
 import type { ComponentType } from 'react'
 import { useCallback } from 'react'
-import { BookOpen, Images, MessageCircle, ShoppingBag, Signature, PenLine } from 'lucide-react'
+import { BookOpen, Flame, Images, MessageCircle, ShoppingBag, Signature, PenLine } from 'lucide-react'
 import { motion, useAnimation, useReducedMotion, type Variants } from 'motion/react'
 
 type PlatformIconComponent = ComponentType<{ className?: string }>
 
-const clapperLidVariants: Variants = {
-  normal: { rotate: 0, originX: '2.75px', originY: '7.35px' },
+const generateSweepVariants: Variants = {
+  normal: { x: 0, opacity: 0 },
   animate: {
-    rotate: [0, -6.5, 2.5, 0],
+    x: [0, 9],
+    opacity: [0, 0.16, 0.16, 0],
+    transition: { duration: 0.7, times: [0, 0.25, 0.65, 1], ease: 'easeInOut' },
+  },
+}
+
+const generatePlayVariants: Variants = {
+  normal: { scale: 1, originX: '12px', originY: '12.5px' },
+  animate: {
+    scale: [1, 0.88, 1.08, 1],
     transition: { duration: 0.5, velocity: 0.3 },
   },
 }
 
-const clapperBodyVariants: Variants = {
-  normal: { scale: 1, originX: '12px', originY: '21px' },
+const replicateEchoVariants: Variants = {
+  normal: { scale: 1, x: 0, y: 0, opacity: 0.4, originX: '13px', originY: '10.5px' },
   animate: {
-    scale: [1, 1.04, 1],
-    transition: { duration: 0.4, velocity: 0.3 },
+    scale: [1, 1.16, 0.97, 1],
+    x: [0, -1.6, 0.7, 0],
+    y: [0, -1.2, 0.5, 0],
+    opacity: [0.4, 0.95, 0.5, 0.4],
+    transition: { duration: 0.6, velocity: 0.3 },
   },
 }
 
-const copySheetVariants: Variants = {
-  normal: { x: 0, y: 0, scale: 1, originX: '8px', originY: '8px' },
+const replicateFrameVariants: Variants = {
+  normal: { scale: 1, originX: '10.5px', originY: '13.5px' },
   animate: {
-    x: [0, 1.8, -0.6, 0],
-    y: [0, -1.8, 0.6, 0],
-    scale: [1, 0.96, 1.02, 1],
-    transition: { duration: 0.55, velocity: 0.3 },
-  },
-}
-
-const copyFrontVariants: Variants = {
-  normal: { scale: 1, originX: '2px', originY: '16px' },
-  animate: {
-    scale: [1, 1.05, 1],
-    transition: { duration: 0.4, velocity: 0.3 },
+    scale: [1, 0.95, 1.05, 1],
+    transition: { duration: 0.45, velocity: 0.3 },
   },
 }
 
@@ -64,40 +66,58 @@ function VideoPlatformIcon({ platform, className }: { platform: 'montage' | 'hyp
       stroke="currentColor"
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="2"
-      style={{ overflow: 'visible' }}
+      strokeWidth="1.75"
       viewBox="0 0 24 24"
       width="24"
     >
       {platform === 'montage' ? (
         <g data-platform-symbol="generate">
-          <motion.g animate={controls} variants={clapperLidVariants}>
-            <path d="m12.296 3.464 3.02 3.956" />
-            <path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z" />
-            <path d="m6.18 5.276 3.1 3.899" />
-          </motion.g>
+          <rect height="18" rx="5" width="18" x="3" y="3" />
           <motion.path
             animate={controls}
-            d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-            variants={clapperBodyVariants}
+            d="M10.2 8.7v6.6a.55.55 0 0 0 .84.47l5.3-3.3a.55.55 0 0 0 0-.94l-5.3-3.3a.55.55 0 0 0-.84.47Z"
+            fill="currentColor"
+            stroke="none"
+            variants={generatePlayVariants}
+          />
+          <motion.rect
+            animate={controls}
+            fill="currentColor"
+            height="14"
+            opacity="0"
+            rx="1.75"
+            stroke="none"
+            variants={generateSweepVariants}
+            width="3.5"
+            x="6"
+            y="5"
           />
         </g>
       ) : (
         <g data-platform-symbol="replicate">
           <motion.rect
             animate={controls}
-            height="14"
-            rx="2"
-            ry="2"
-            variants={copySheetVariants}
-            width="14"
-            x="8"
-            y="8"
+            height="15"
+            opacity="0.4"
+            rx="4.25"
+            variants={replicateEchoVariants}
+            width="15"
+            x="5.5"
+            y="3"
           />
-          <motion.path
+          <motion.rect
             animate={controls}
-            d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
-            variants={copyFrontVariants}
+            height="15"
+            rx="4.25"
+            variants={replicateFrameVariants}
+            width="15"
+            x="3"
+            y="6"
+          />
+          <path
+            d="M9.2 11.2v4.6a.5.5 0 0 0 .76.43l3.9-2.3a.5.5 0 0 0 0-.86l-3.9-2.3a.5.5 0 0 0-.76.43Z"
+            fill="currentColor"
+            stroke="none"
           />
         </g>
       )}
@@ -123,7 +143,7 @@ export const platformIcon: Record<string, PlatformIconComponent> = {
   'wechat-picture': Images,
   moments: MessageCircle,
   ecommerce: ShoppingBag,
-  viral_analysis: BookOpen,
+  viral_analysis: Flame,
   profile_analysis: BookOpen,
   montage: VideoGenerationIcon,
   'whiteboard-animation': PenLine,
