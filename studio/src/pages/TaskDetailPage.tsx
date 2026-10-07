@@ -716,7 +716,7 @@ export default function TaskDetailPage() {
               loading={cancelMutation.isPending}
               onClick={() => setShowCancelDialog(true)}
             >
-              <Ban className="h-4 w-4" />
+              {cancelMutation.isPending ? null : <Ban className="h-4 w-4" aria-hidden="true" />}
               取消任务
             </Button>
           )}

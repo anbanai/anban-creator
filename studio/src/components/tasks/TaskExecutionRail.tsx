@@ -444,6 +444,17 @@ function PublicationStageActions({
   onReconcile: () => void
   onRecoverDraft: () => void
 }) {
+  const retryAction = (label: string, onClick: () => void) => (
+    <Tooltip>
+      <TooltipTrigger
+        render={<Button size="icon-sm" variant="outline" loading={pending} onClick={onClick} aria-label={label} />}
+      >
+        {pending ? null : <RefreshCw className="size-4" aria-hidden="true" />}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+
   const backendLink = (
     <Button
       size="xs"
@@ -464,17 +475,19 @@ function PublicationStageActions({
       return (
         <div className="flex shrink-0 flex-wrap gap-1.5">
           {backendLink}
-          <Button size="xs" variant="outline" loading={pending} onClick={onReconcile}><RefreshCw className="size-3" />检测状态</Button>
+          <Button size="xs" variant="outline" loading={pending} onClick={onReconcile}>
+            {pending ? null : <RefreshCw className="size-3" aria-hidden="true" />}
+            检测状态
+          </Button>
         </div>
       )
     }
     const action = outcome?.publication.action
     const repairPackage = action === 'review_content' && outcome?.publication.code === 'publication_package_invalid' && outcome.publication.attempted === false
     if (action !== 'retry_draft' && action !== 'retry_visuals' && !repairPackage) return null
-    return (
-      <Button size="xs" variant="outline" loading={pending} onClick={onRecoverDraft}>
-        <RefreshCw className="size-3" />{repairPackage ? '修复交付并重试' : action === 'retry_visuals' ? '补齐图片并重试' : '重试创建草稿'}
-      </Button>
+    return retryAction(
+      repairPackage ? '修复交付并重试' : action === 'retry_visuals' ? '补齐图片并重试' : '重试创建草稿',
+      onRecoverDraft,
     )
   }
 
@@ -492,7 +505,7 @@ function PublicationStageActions({
 
   const submitted = hasSubmissionEvidence(publication)
   if (stage.state === 'pending' && publication?.status === 'drafted' && !submitted) {
-    return <Button size="xs" loading={pending} onClick={onPublish}><Send className="size-3" />正式发布</Button>
+    return <Button size="xs" loading={pending} onClick={onPublish}>{pending ? null : <Send className="size-3" aria-hidden="true" />}正式发布</Button>
   }
   if (stage.state === 'blocked' && publication?.status === 'awaiting_manual_publish' && publication.draft_media_id) {
     return backendLink
@@ -501,15 +514,11 @@ function PublicationStageActions({
     if (submitted) {
       return (
         <Button size="xs" variant="outline" loading={pending} onClick={onReconcile}>
-          <RefreshCw className="size-3" />检测状态
+          {pending ? null : <RefreshCw className="size-3" aria-hidden="true" />}检测状态
         </Button>
       )
     }
-    return (
-      <Button size="xs" variant="outline" loading={pending} onClick={onRetryPublish}>
-        <RefreshCw className="size-3" />重试发布
-      </Button>
-    )
+    return retryAction('重试发布', onRetryPublish)
   }
   return null
 }

@@ -40,7 +40,7 @@ export function TaskFileDownloads({ taskId, files }: { taskId: string; files: Ta
         <TooltipTrigger
           render={<Button size="icon-xs" variant="ghost" loading={downloading === scope} disabled={!!downloading} onClick={() => void download(scope)} aria-label={hasDelivery ? '下载交付成果 (ZIP)' : '下载已保留产物 (ZIP)'} />}
         >
-          <Download className="size-3.5" />
+          {downloading === scope ? null : <Download className="size-3.5" aria-hidden="true" />}
         </TooltipTrigger>
         <TooltipContent>{hasDelivery ? '下载交付成果' : '下载已保留产物'}</TooltipContent>
       </Tooltip>

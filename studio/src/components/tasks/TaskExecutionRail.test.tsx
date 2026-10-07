@@ -245,6 +245,26 @@ describe('TaskExecutionRail', () => {
     }
   })
 
+  it('renders one icon for a retry action in both idle and loading states', async () => {
+    const outcome: TaskOutcome = {
+      core_delivery: { status: 'complete' }, visual: { status: 'complete' }, review: { status: 'passed' }, warnings: [],
+      publication: { status: 'blocked', attempted: false, action: 'retry_draft', message: '发布前检查未通过。' },
+    }
+    vi.mocked(api.tasks.recoverWechatPublication).mockImplementation(() => new Promise(() => {}))
+    render(<TaskExecutionRail taskId="task-1" status="completed" outcome={outcome} lifecycle={{
+      ...lifecycle,
+      stages: [...lifecycle.stages, { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'blocked' }],
+    }} onOpenLogs={vi.fn()} />)
+
+    const retry = screen.getByRole('button', { name: '重试创建草稿' })
+    expect(retry.querySelectorAll('svg')).toHaveLength(1)
+    expect(retry).not.toHaveTextContent('重试创建草稿')
+
+    fireEvent.click(retry)
+    await waitFor(() => expect(retry).toHaveAttribute('aria-busy', 'true'))
+    expect(retry.querySelectorAll('svg')).toHaveLength(1)
+  })
+
   it('offers artifact repair for an invalid package that never reached WeChat', async () => {
     const outcome: TaskOutcome = {
       core_delivery: { status: 'complete' }, visual: { status: 'complete' }, review: { status: 'passed' }, warnings: [],
