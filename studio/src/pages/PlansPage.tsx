@@ -7,9 +7,9 @@ import { toast } from 'sonner'
 import {
   Inbox,
   Pause,
+  Pencil,
   Play,
   Plus,
-  Sparkles,
   Trash2,
 } from 'lucide-react'
 
@@ -380,7 +380,6 @@ export default function PlansPage() {
                   <span>{outputIDs.length} 种输出</span>
                 </div>
               </div>
-              <StatusPill status={plan.status} label={statusLabel} />
             </div>
             <div className="grid gap-2 border-t border-border pt-3 text-xs sm:grid-cols-3">
               <div className="min-w-0">
@@ -402,7 +401,7 @@ export default function PlansPage() {
           </div>
           <div className="flex min-h-16 min-w-36 flex-col items-end justify-between gap-3">
             <div className="flex flex-wrap items-center justify-end gap-1.5">
-              <Button data-primary-action type="button" size="sm" onClick={() => openEdit(plan)}><Sparkles className="size-3.5" />编辑</Button>
+              <Button data-primary-action type="button" size="icon-sm" aria-label="编辑" title="编辑" onClick={() => openEdit(plan)}><Pencil className="size-4" /></Button>
               <Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>查看任务</Link>
               {plan.status === 'active' ? (
                 <Button type="button" variant="ghost" size="sm" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="size-3.5" />暂停</Button>
