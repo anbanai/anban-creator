@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, Trash2, RefreshCw, Loader2, Ban, BarChart3, MessageSquare } from 'lucide-react'
+import { Activity, ArrowLeft, BarChart3, Ban, CheckCircle2, CircleDashed, Coins, FileCheck2, ListChecks, Loader2, MessageSquare, RefreshCw, Send, Trash2, XCircle, type LucideIcon } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -31,7 +31,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { taskStatusLabel, contentTypeDisplayName, platformDisplayName, statusBadgeVariant } from '@/lib/labels'
+import { formatDateTimeCN, taskFailurePresentation, taskStatusLabel, contentTypeDisplayName, platformDisplayName, statusBadgeVariant } from '@/lib/labels'
 import { platformBadgeClassName, renderPlatformIcon } from '@/lib/PlatformIcon'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
@@ -186,6 +186,103 @@ function appendPollingReplay(prev: string[], replay: string): string[] {
   }
 
   return [...prev, ...replayLines].slice(-MAX_SSE_LOGS)
+}
+
+function OutcomeMetric({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: string; value: string; detail?: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-border/70 bg-card/80 px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Icon className="size-3.5" aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+      <p className="mt-1 truncate text-sm font-semibold text-foreground" title={value}>{value}</p>
+      {detail ? <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={detail}>{detail}</p> : null}
+    </div>
+  )
+}
+
+function TaskOutcomeSummary({
+  task,
+  failure,
+  canResume,
+  deliveredCount,
+  onResume,
+  onOpenMaterials,
+  onOpenLogs,
+}: {
+  task: Task
+  failure: ReturnType<typeof taskFailurePresentation>
+  canResume: boolean
+  deliveredCount: number
+  onResume?: () => void
+  onOpenMaterials: () => void
+  onOpenLogs: () => void
+}) {
+  const stages = task.lifecycle?.stages ?? []
+  const completeStages = stages.filter((stage) => stage.state === 'complete').length
+  const stageValue = stages.length > 0 ? `${completeStages} / ${stages.length} 个` : task.status === 'completed' ? '已完成' : '未开始'
+  const stageDetail = task.status === 'running'
+    ? '实时执行中'
+    : task.status === 'pending'
+      ? '等待执行'
+      : task.status === 'failed' || task.status === 'cancelled'
+        ? '需要处理'
+        : '所有环节已完成'
+  const context = task.runtime_context
+  const healthValue = context?.connectivity.summary
+    || (task.status === 'failed' ? '需要处理' : task.status === 'running' ? '连接中' : '正常')
+  const healthDetail = context?.connectivity.checked_at
+    ? `检查于 ${formatDateTimeCN(context.connectivity.checked_at)}`
+    : undefined
+  const credits = (task.billing_total_credits ?? task.billing_price_credits).toLocaleString()
+  const artifactCount = Math.max(deliveredCount, context?.artifacts.completed ?? 0)
+  const outcomeMessage = task.status === 'failed'
+    ? '请查看下方失败提醒中的原因和恢复建议。'
+    : task.status === 'cancelled'
+      ? '执行已停止，可从已有上下文继续。'
+      : task.status === 'completed'
+        ? task.outcome?.review.status === 'warning' ? '任务已完成，但验收结果包含提醒。' : '任务已完成，交付成果已保存。'
+        : task.status === 'running' ? '任务正在执行，阶段和产物会持续更新。' : '任务已进入队列，等待执行。'
+  const outcomeTitle = task.status === 'failed' ? '任务需要处理'
+    : task.status === 'cancelled' ? '执行已停止'
+      : taskStatusLabel[task.status] || task.status
+  const primaryAction = task.status === 'failed' || task.status === 'cancelled'
+    ? canResume && onResume
+      ? <Button size="sm" onClick={onResume}><Send className="size-3.5" />继续执行</Button>
+      : null
+    : task.status === 'completed' && deliveredCount > 0
+        ? <Button size="sm" onClick={onOpenMaterials}><FileCheck2 className="size-3.5" />查看交付成果</Button>
+        : task.status === 'running'
+          ? <Button size="sm" variant="outline" onClick={onOpenLogs}><Activity className="size-3.5" />查看实时日志</Button>
+          : null
+
+  return (
+    <section aria-label="任务状态摘要" className="overflow-hidden rounded-xl border border-border/70 bg-card">
+      <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {task.status === 'completed' ? <CheckCircle2 className="size-4 text-emerald-600" /> : task.status === 'failed' ? <XCircle className="size-4 text-destructive" /> : task.status === 'running' || task.status === 'pending' ? <CircleDashed className="size-4 text-primary" /> : <XCircle className="size-4 text-muted-foreground" />}
+            <h2 className="text-sm font-semibold text-foreground">{outcomeTitle}</h2>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">{outcomeMessage}</p>
+        </div>
+        {primaryAction ? <div className="shrink-0">{primaryAction}</div> : null}
+      </div>
+      {task.status === 'failed' && (
+        <div role="alert" aria-label="任务结果提醒" className="mx-4 mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 sm:mx-5">
+          <h3 className="text-xs font-medium text-destructive">{failure?.title || '执行失败'}</h3>
+          <p className="mt-1 break-words text-sm text-foreground/85">{failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。'}</p>
+          {failure?.recovery ? <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p> : null}
+        </div>
+      )}
+      <div role="region" aria-label="任务关键指标" className="grid grid-cols-2 border-t border-border/70 bg-muted/15 sm:grid-cols-4">
+        <OutcomeMetric icon={ListChecks} label="环节" value={stageValue} detail={stageDetail} />
+        <OutcomeMetric icon={FileCheck2} label="交付产物" value={`${artifactCount} 个`} detail={artifactCount > 0 ? '可预览或下载' : '暂无交付成果'} />
+        <OutcomeMetric icon={Activity} label="健康状态" value={healthValue} detail={healthDetail} />
+        <OutcomeMetric icon={Coins} label="累计扣费" value={`${credits} 积分`} detail={task.billing_charge_details?.length ? `${task.billing_charge_details.length} 笔计费记录` : '任务固定费'} />
+      </div>
+    </section>
+  )
 }
 
 export default function TaskDetailPage() {
@@ -671,14 +768,35 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
+      {!showTaskDetails && (
+        <TaskOutcomeSummary
+          task={task}
+          failure={taskFailurePresentation(task)}
+          canResume={canResume}
+          deliveredCount={deliveredFiles.length}
+          onResume={() => setShowResumeDialog(true)}
+          onOpenMaterials={() => openTaskDetails('materials')}
+          onOpenLogs={() => openTaskDetails('logs')}
+        />
+      )}
+
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
-          <TaskRuntimeContext
-            task={task}
-            project={project}
-            files={deliveredFiles}
-            onResume={canResume ? () => setShowResumeDialog(true) : undefined}
-          />
+          <details className="group rounded-lg border border-border/70 bg-card/70">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium text-foreground outline-none marker:hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
+              <span>技术运行信息</span>
+              <span className="text-xs font-normal text-muted-foreground group-open:hidden">展开</span>
+              <span className="hidden text-xs font-normal text-muted-foreground group-open:inline">收起</span>
+            </summary>
+            <div className="border-t border-border/70 px-3 pb-3">
+              <TaskRuntimeContext
+                task={task}
+                project={project}
+                files={deliveredFiles}
+                onResume={canResume ? () => setShowResumeDialog(true) : undefined}
+              />
+            </div>
+          </details>
           <TaskExecutionRail
             key={task.id}
             taskId={task.id}
@@ -689,6 +807,7 @@ export default function TaskDetailPage() {
             errorMessage={task.error_message}
             onOpenLogs={() => openTaskDetails('logs')}
             onResume={canResume ? () => setShowResumeDialog(true) : undefined}
+            showFailureSummary={false}
             files={files}
             taskType={task.type}
             filesLoading={filesLoading}
@@ -713,6 +832,7 @@ export default function TaskDetailPage() {
           <TaskContextSummary
             compact
             layout="sidebar"
+            showBillingDetail={false}
             task={task}
             project={project}
             files={deliveredFiles}

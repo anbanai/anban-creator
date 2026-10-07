@@ -356,6 +356,56 @@ describe('TaskDetailPage', () => {
     expect(provider).toHaveTextContent('供应商未披露具体片段')
   })
 
+  it('surfaces outcome, stage, artifact, health, and credit metrics above the fold', async () => {
+    const task = taskWith({
+      status: 'completed',
+      billing_price_credits: 5000,
+      billing_total_credits: 6800,
+      runtime_context: {
+        profile: { status: 'frozen', label: '茶小茶' },
+        execution: { status: 'ready', resumable: false },
+        artifacts: { completed: 2, required: 2, failed: 0, missing: 0, items: [] },
+        connectivity: { status: 'healthy', summary: '模型和 MCP 正常', checked_at: '2026-09-17T08:00:00Z' },
+      },
+      outcome: {
+        core_delivery: { status: 'complete' },
+        visual: { status: 'complete' },
+        review: { status: 'passed' },
+        publication: { status: 'not_requested' },
+        warnings: [],
+      },
+    })
+    mockTask(task)
+    vi.mocked(api.tasks.files).mockResolvedValue([
+      { id: 'deliverable', task_id: task.id, state: 'delivered', role: 'artifact', file_name: 'article.md', mime_type: 'text/markdown', file_size: 100, url: '', is_deliverable: true, created_at: '' },
+    ])
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('region', { name: '任务状态摘要' })).toHaveTextContent('任务已完成')
+    const metrics = screen.getByRole('region', { name: '任务关键指标' })
+    expect(metrics).toHaveTextContent('环节')
+    expect(metrics).toHaveTextContent('交付产物')
+    expect(metrics).toHaveTextContent('健康状态')
+    expect(metrics).toHaveTextContent('累计扣费')
+    expect(metrics).toHaveTextContent('2 个')
+    expect(metrics).toHaveTextContent('模型和 MCP 正常')
+    expect(metrics).toHaveTextContent('6,800 积分')
+    expect(screen.getByRole('link', { name: '查看内容分析' })).toBeInTheDocument()
+  })
+
+  it('uses one failure callout and one primary recovery action', async () => {
+    mockTask(taskWith({ status: 'failed', error_message: '模型超时' }))
+
+    render(<TaskDetailPage />)
+
+    const outcome = await screen.findByRole('alert', { name: '任务结果提醒' })
+    expect(outcome).toHaveTextContent('执行失败')
+    expect(outcome).toHaveTextContent('模型超时')
+    expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: '克隆任务' })).toBeInTheDocument()
+  })
+
   it('shows the active lifecycle stage without percentage or tool noise', async () => {
     mockTask(taskWith({
       status: 'running',

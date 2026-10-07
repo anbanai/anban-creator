@@ -355,6 +355,51 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.queryByText('待发布确认')).not.toBeInTheDocument()
   })
 
+  it('shows a compact status summary and an explicit loaded range', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [
+        { ...fixtures.failedTask as Task, id: 'failed-task-2' },
+        { ...fixtures.completedTask as Task, id: 'completed-task-2' },
+        { ...fixtures.failedTask as Task, id: 'pending-task-2', status: 'pending' },
+        { ...fixtures.failedTask as Task, id: 'running-task-2', status: 'running' },
+        { ...fixtures.failedTask as Task, id: 'cancelled-task-2', status: 'cancelled' },
+      ],
+      total: 12,
+    })
+
+    renderTasksPage()
+
+    const summary = await screen.findByRole('region', { name: '任务状态概览' })
+    expect(summary).toHaveTextContent('待执行 1')
+    expect(summary).toHaveTextContent('运行中 1')
+    expect(summary).toHaveTextContent('已完成 1')
+    expect(summary).toHaveTextContent('失败 1')
+    expect(summary).toHaveTextContent('已取消 1')
+    expect(screen.getByText('当前筛选共 12 个 · 已加载 1–5 / 12 个')).toBeInTheDocument()
+  })
+
+  it('keeps one failure alert and gives each row a stage and latest activity', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [{
+        ...fixtures.failedTask as Task,
+        lifecycle: {
+          version: 1,
+          revision: 1,
+          updated_at: '2026-07-06T01:02:00.000Z',
+          stages: [{ id: 'writing', title: '撰写正文', source: 'agent', kind: 'work', state: 'failed' }],
+        },
+      }],
+      total: 1,
+    })
+
+    renderTasksPage()
+
+    expect(await screen.findByRole('alert', { name: '失败任务提醒' })).toHaveTextContent('1 个失败任务')
+    expect(screen.getAllByRole('link', { name: /1 个失败任务/ })).toHaveLength(1)
+    expect(screen.getByText('阶段：撰写正文')).toBeInTheDocument()
+    expect(screen.getByText('最近活动：7/6 09:02')).toBeInTheDocument()
+  })
+
   it('offers content analytics from completed article task rows', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({
       items: [fixtures.completedTask as Task, { ...fixtures.failedTask, type: 'montage', id: 'montage-task' } as Task],

@@ -24,6 +24,7 @@ import { ProjectIdentity, resolveProjectIdentity, type ProjectIdentityProject } 
 export interface TaskContextSummaryProps {
   compact?: boolean
   layout?: 'grid' | 'sidebar'
+  showBillingDetail?: boolean
   task: Task
   project?: Project
   files: TaskFile[]
@@ -133,6 +134,7 @@ function taskLogState(task: Task, sseError: string | null) {
 export function TaskContextSummary({
   compact = false,
   layout = 'grid',
+  showBillingDetail = true,
   task,
   project,
   files,
@@ -190,7 +192,7 @@ export function TaskContextSummary({
             value={projectName}
             identity={projectIdentity}
             detail={task.plan_id ? '计划任务' : '手动创建'}
-            detailSuffix={`累计扣费 ${(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分`}
+            detailSuffix={showBillingDetail ? `累计扣费 ${(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分` : undefined}
             onClick={() => onOpenTab('overview')}
           />
           <SummaryItem

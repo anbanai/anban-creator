@@ -135,6 +135,8 @@ export interface TaskExecutionRailProps {
   filesLoading?: boolean
   filesError?: boolean
   onRetryFiles?: () => void
+  /** The parent can render one consolidated terminal failure callout above the rail. */
+  showFailureSummary?: boolean
 }
 
 export function TaskExecutionRail({
@@ -151,6 +153,7 @@ export function TaskExecutionRail({
   filesLoading,
   filesError,
   onRetryFiles,
+  showFailureSummary = true,
 }: TaskExecutionRailProps) {
   const queryClient = useQueryClient()
   const stages = lifecycle?.stages ?? []
@@ -236,7 +239,7 @@ export function TaskExecutionRail({
     ? `${currentStage.title}，${lifecycleStatePresentation[currentStage.state].label}`
     : status === 'running' ? '正在制定执行计划' : ''
 
-  const infrastructureError = infrastructureFailure && failure && (
+  const infrastructureError = showFailureSummary && infrastructureFailure && failure && (
     <div className="mx-4 mt-4 rounded-lg border border-destructive/20 bg-destructive/5 p-4" role="alert">
       <h3 className="text-sm font-semibold text-destructive">{failure.title}</h3>
       <p className="mt-1 text-sm">{failure.message}</p>
@@ -249,7 +252,7 @@ export function TaskExecutionRail({
     const emptyState = status === 'running'
       ? { title: '正在制定执行计划', description: 'Agent 声明阶段后会在这里持续更新', icon: CircleDashed, iconClassName: 'border-primary/30 bg-primary/10 text-primary' }
       : status === 'failed'
-        ? { title: failure?.title || '任务未完成', description: failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。', icon: XCircle, iconClassName: 'border-destructive/30 bg-destructive/10 text-destructive' }
+        ? { title: failure?.title || '任务未完成', description: showFailureSummary ? failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。' : '失败详情已在上方显示。', icon: XCircle, iconClassName: 'border-destructive/30 bg-destructive/10 text-destructive' }
         : status === 'cancelled'
           ? { title: '执行已停止', description: '任务已取消，可从已有上下文继续。', icon: Ban, iconClassName: 'border-border bg-muted text-muted-foreground' }
           : status === 'completed'
@@ -260,15 +263,17 @@ export function TaskExecutionRail({
       <section className="rounded-xl border border-border/70 bg-card py-4" aria-labelledby="task-execution-heading">
         {heading}
         {infrastructureError}
-        {!infrastructureFailure && <div className="mx-4 mt-4 flex min-h-14 items-start gap-3 border-l border-border pl-5">
+        {(!infrastructureFailure || !showFailureSummary) && <div className="mx-4 mt-4 flex min-h-14 items-start gap-3 border-l border-border pl-5">
           <span className={cn('flex size-7 shrink-0 items-center justify-center rounded-full border', emptyState.iconClassName)}>
             <EmptyStateIcon className={cn('size-4', status === 'running' && 'animate-spin')} />
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-foreground">{emptyState.title}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{emptyState.description}</p>
-            {status === 'failed' && failure?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p>}
-            {(status === 'failed' || status === 'cancelled') && onResume && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {showFailureSummary || status !== 'failed' ? emptyState.description : '任务未完成，详情见上方结果提醒。'}
+            </p>
+            {showFailureSummary && status === 'failed' && failure?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p>}
+            {showFailureSummary && (status === 'failed' || status === 'cancelled') && onResume && (
               <Button size="xs" variant="outline" className="mt-3" onClick={onResume}>
                 <Send className="size-3" />
                 继续执行
@@ -342,7 +347,7 @@ export function TaskExecutionRail({
                       onRecoverDraft={() => recoverDraft.mutate()}
                     />
                   )}
-                  {isTerminalRecoveryPoint && onResume && (
+                  {showFailureSummary && isTerminalRecoveryPoint && onResume && (
                     <Button size="xs" variant="secondary" onClick={onResume}>
                       <Send className="size-3" />
                       继续执行
@@ -353,7 +358,7 @@ export function TaskExecutionRail({
                 {isExpanded && (
                   <div id={`stage-${stage.id}-content`} className="mt-3 min-w-0 space-y-3 pb-1 text-sm">
                     {stage.latest_update && !duplicatesFailure && <p className="break-words text-xs leading-relaxed text-muted-foreground">{stage.latest_update}</p>}
-                    {isTerminalRecoveryPoint && status === 'failed' && <FailureSummary failure={failure} />}
+                    {showFailureSummary && isTerminalRecoveryPoint && status === 'failed' && <FailureSummary failure={failure} />}
                     {isTerminalRecoveryPoint && status === 'cancelled' && stage.state !== 'cancelled' && (
                       <p className="text-xs text-muted-foreground">执行已停止，可从已有上下文继续。</p>
                     )}

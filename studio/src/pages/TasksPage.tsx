@@ -19,6 +19,7 @@ import { taskStatusLabel, contentTypeDisplayName, formatDateTimeCN, statusBadgeV
 import { platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
+import { taskStageSummary } from '@/lib/task-lifecycle'
 import { taskContentAnalyticsHref } from '@/lib/content-analytics'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
@@ -40,6 +41,11 @@ type TaskCursor = { createdAt: string; id: string }
 
 function normalizeTaskStatusFilter(value: string | null) {
   return value && statusTabs.some((tab) => tab.value === value) ? value : 'all'
+}
+
+function taskActivityTimestamp(task: { status: TaskStatus; lifecycle?: { updated_at?: string }; completed_at: string; started_at: string; created_at: string; last_heartbeat_at?: string }) {
+  if (task.status === 'completed' && task.completed_at) return task.completed_at
+  return task.lifecycle?.updated_at || task.last_heartbeat_at || task.completed_at || task.started_at || task.created_at
 }
 
 export default function TasksPage() {
@@ -328,6 +334,15 @@ export default function TasksPage() {
     active: tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
     failed: tasks.filter((t) => t.status === 'failed').length,
   }), [tasks])
+  const statusCounts = useMemo(() => statusTabs.reduce<Record<string, number>>((counts, tab) => {
+    counts[tab.value] = tab.value === 'all'
+      ? totalTasks
+      : tasks.filter((task) => task.status === tab.value).length
+    return counts
+  }, {}), [tasks, totalTasks])
+  const loadedRangeLabel = totalTasks === 0
+    ? '当前筛选共 0 个'
+    : `当前筛选共 ${totalTasks} 个 · 已加载 1–${Math.min(tasks.length, totalTasks)} / ${totalTasks} 个`
   const failedTaskParams = new URLSearchParams(searchParams)
   failedTaskParams.set('status', 'failed')
 
@@ -336,8 +351,8 @@ export default function TasksPage() {
       <PageHeader
         title="任务"
         description={
-          queueStats.active > 0 || queueStats.failed > 0
-            ? <>已加载：{queueStats.active > 0 ? `${queueStats.active} 个执行中` : '暂无执行中任务'}{queueStats.failed > 0 ? ` · ${queueStats.failed} 个失败待处理` : ''}</>
+          queueStats.active > 0
+            ? <>已加载：{queueStats.active} 个任务等待或执行中</>
             : '查看进度、产物与发布状态。'
         }
       >
@@ -360,15 +375,54 @@ export default function TasksPage() {
         </div>
       ) : null}
 
+      {!isLoading && !isError && (
+        <section aria-label="任务状态概览" className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border/70 px-3 py-2.5">
+            <h2 className="text-sm font-semibold text-foreground">任务状态</h2>
+            <p className="text-xs text-muted-foreground">状态数量按当前已加载任务统计</p>
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-y divide-border/70 sm:grid-cols-5 sm:divide-y-0">
+            {statusTabs.filter((tab) => tab.value !== 'all').map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                className="flex min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+                aria-label={`筛选${tab.label}任务`}
+                onClick={() => {
+                  setStatusFilter(tab.value)
+                  setSearchParams((current) => {
+                    const next = new URLSearchParams(current)
+                    next.set('status', tab.value)
+                    return next
+                  }, { replace: true })
+                }}
+              >
+                <span className="truncate text-xs text-muted-foreground">
+                  {tab.label}{' '}
+                  <strong className="text-sm tabular-nums text-foreground">{statusCounts[tab.value] ?? 0}</strong>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {queueStats.failed > 0 && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-border py-3 text-sm">
-          <span className="font-medium text-foreground">需要处理</span>
-          {queueStats.failed > 0 && (
-            <Link to={`/tasks?${failedTaskParams}`} className="inline-flex items-center gap-1.5 text-destructive hover:underline">
-              <AlertTriangle className="h-4 w-4" />
-              {queueStats.failed} 个失败任务
-            </Link>
-          )}
+        <div role="alert" aria-label="失败任务提醒" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div className="min-w-0">
+              <p className="font-medium text-foreground">需要处理 · {queueStats.failed} 个失败任务</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">进入详情查看失败原因，并继续执行或克隆任务。</p>
+            </div>
+          </div>
+          <Link
+            to={`/tasks?${failedTaskParams}`}
+            aria-label={`查看失败任务，${queueStats.failed} 个失败任务`}
+            className="shrink-0 text-sm font-medium text-destructive hover:underline"
+          >
+            查看失败任务
+          </Link>
         </div>
       )}
 
@@ -421,7 +475,7 @@ export default function TasksPage() {
 
       {!isLoading && !isError && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <p role="status">共 {totalTasks} 个任务 · 已加载 {filteredTasks.length} 个{searchFilter.trim() ? '匹配结果' : ''}</p>
+          <p role="status">{loadedRangeLabel}{searchFilter.trim() ? ` · 匹配 ${filteredTasks.length} 个` : ''}</p>
           {(statusFilter !== 'all' || projectFilter || searchFilter) && (
             <Button variant="ghost" size="sm" onClick={() => {
               setStatusFilter('all'); setProjectFilter(''); setSearchFilter('')
@@ -544,6 +598,8 @@ export default function TasksPage() {
             const hoverBorderColor = platformHoverBorderColor[task.type] || ''
             const selected = selectedTaskIdSet.has(task.id)
             const actionSignal = taskActionSignal(task)
+            const stage = taskStageSummary(task)
+            const activityAt = taskActivityTimestamp(task)
 
             return (
               <div key={task.id} className="border-b border-border last:border-b-0">
@@ -579,10 +635,9 @@ export default function TasksPage() {
                           <Badge variant="outline" className={`text-[10px] ${platformBadgeClassName[task.type] || ''}`}>
                             {contentTypeDisplayName(task.type)}
                           </Badge>
-                          <span className={actionSignal.tone === 'risk' ? 'text-destructive' : 'text-muted-foreground'}>{actionSignal.label}</span>
+                          <span className={actionSignal.tone === 'risk' ? 'font-medium text-destructive' : 'font-medium text-foreground'}>阶段：{stage.title}</span>
                           {actionSignal.tone === 'risk' && <span>{actionSignal.hint}</span>}
-                          <span className="hidden sm:inline">创建：{formatDateTimeCN(task.created_at)}</span>
-                          {task.completed_at && <span className="hidden sm:inline">完成：{formatDateTimeCN(task.completed_at)}</span>}
+                          <span aria-label={`最近活动：${formatDateTimeCN(activityAt)}`}>最近活动：{formatDateTimeCN(activityAt)}</span>
                           <span className="font-medium text-foreground">累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分</span>
                         </div>
                       </div>
