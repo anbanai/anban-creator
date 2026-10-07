@@ -114,6 +114,52 @@ func (h *ProjectHandler) signProjectURLs(ctx context.Context, ch *model.Project)
 	ch.AvatarURL = service.SignURL(ctx, h.store, h.logger, ch.AvatarURL, service.DefaultSignedURLTTL)
 }
 
+func (h *ProjectHandler) populateProjectAgentIDs(ctx context.Context, projects []*model.Project) error {
+	if len(projects) == 0 {
+		return nil
+	}
+	projectIDs := make([]string, 0, len(projects))
+	for _, project := range projects {
+		if project != nil {
+			projectIDs = append(projectIDs, project.ID)
+		}
+	}
+	agentIDs, err := h.service.ListAgentIDsByProjectIDs(ctx, projectIDs)
+	if err != nil {
+		return err
+	}
+	for _, project := range projects {
+		if project == nil {
+			continue
+		}
+		derived := agentIDs[project.ID]
+		if len(derived) == 0 {
+			derived = defaultProjectAgentIDs(project.Platform)
+		}
+		project.AgentIDs = append([]string(nil), derived...)
+		if project.AgentIDs == nil {
+			project.AgentIDs = []string{}
+		}
+	}
+	return nil
+}
+
+// defaultProjectAgentIDs keeps a newly created project identifiable before its
+// first task or plan is persisted. WeChat defaults to article because that is
+// the Studio task entry point; a project with durable picture/other output
+// identities replaces this default through the derived projection above.
+func defaultProjectAgentIDs(platform string) []string {
+	switch platform {
+	case model.PlatformWechat:
+		return []string{model.AgentIDArticle}
+	case model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce,
+		model.PlatformMontage, model.PlatformWhiteboardAnimation, model.PlatformHypit:
+		return []string{platform}
+	default:
+		return nil
+	}
+}
+
 func (h *ProjectHandler) resolveProjectReference(ctx context.Context, userID string, req *projectRequest) error {
 	if req == nil || !req.ReferenceImageSet || req.ReferenceImage == nil {
 		return nil
@@ -418,6 +464,10 @@ func (h *ProjectHandler) List(c fiber.Ctx) error {
 		}
 		projects = visible
 	}
+	if err := h.populateProjectAgentIDs(c.Context(), projects); err != nil {
+		h.logger.Error().Err(err).Str("user_id", userID).Msg("list project Agent IDs failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to list project Agent IDs")
+	}
 
 	// Sanitize all projects before returning.
 	for _, ch := range projects {
@@ -577,6 +627,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())
 	}
+	created.AgentIDs = append([]string(nil), defaultProjectAgentIDs(created.Platform)...)
 	if ch.Platform == model.PlatformWechat && (strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != "") {
 		if _, configErr := h.service.UpsertChannelConfig(c.Context(), userID, ch.ID, model.ChannelArticle, req.wechatChannelConfig()); configErr != nil {
 			return h.respondProjectConfigError(c, configErr)
@@ -685,6 +736,10 @@ func (h *ProjectHandler) Get(c fiber.Ctx) error {
 	}
 	if !projectPlatformIsVisibleToUser(c, ch.Platform) {
 		return Forbidden(c, "project platform is currently available to administrators only")
+	}
+	if err := h.populateProjectAgentIDs(c.Context(), []*model.Project{ch}); err != nil {
+		h.logger.Error().Err(err).Str("project_id", ch.ID).Msg("derive project Agent IDs failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to derive project Agent IDs")
 	}
 
 	h.service.SanitizeProjectForResponse(ch)
@@ -1278,6 +1333,10 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	}
 	if err != nil {
 		return h.respondProjectUpdateError(c, projectID, err)
+	}
+	if err := h.populateProjectAgentIDs(c.Context(), []*model.Project{updated}); err != nil {
+		h.logger.Error().Err(err).Str("project_id", updated.ID).Msg("derive project Agent IDs after update failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to derive project Agent IDs")
 	}
 	if updated.Platform == model.PlatformWechat && (strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != "") {
 		if _, configErr := h.service.UpsertChannelConfig(c.Context(), userID, projectID, model.ChannelArticle, req.wechatChannelConfig()); configErr != nil {

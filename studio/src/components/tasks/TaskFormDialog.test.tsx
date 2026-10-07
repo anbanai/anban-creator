@@ -315,13 +315,15 @@ describe('TaskFormDialog', () => {
 
     renderDialog()
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    expect(dialog).toBeInTheDocument()
   })
 
   it('automatically supplies the configured portrait and leaves cover usage optional by default', async () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog', { name: '新建任务' })
     expect(await within(dialog).findByText('勾选后使用项目人物与标题设计封面')).toBeInTheDocument()
+    expect(dialog.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
     await openTaskParameters(dialog)
     const portraitSwitch = within(dialog).getByRole('switch', { name: '人物封面' })
     expect(portraitSwitch).not.toBeChecked()
@@ -1117,8 +1119,8 @@ describe('video replication task integration', () => {
     const selector = screen.getByRole('combobox', { name: /^项目：/ })
     await waitFor(() => expect(selector).toHaveTextContent('Hypit'))
     expect(selector).toHaveTextContent('Hypit')
-    expect(selector).toHaveTextContent('视频复刻')
-    expect(selector.querySelector('[data-platform-icon]')).toBeInTheDocument()
+    expect(selector.querySelector('[data-agent-id="hypit"]')).toBeInTheDocument()
+    expect(selector.querySelector('[data-project-mark="true"] [data-platform-icon]')).not.toBeInTheDocument()
     expect(selector).not.toHaveTextContent('Hypit项目')
     expect(screen.queryByText('hypit')).not.toBeInTheDocument()
   })

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ type ProjectRepository interface {
 	Delete(ctx context.Context, id string) error
 	GetStats(ctx context.Context, projectID string) (*ProjectStats, error)
 	GetStatsByProjectIDs(ctx context.Context, projectIDs []string) (map[string]*ProjectStats, error)
+	ListAgentIDsByProjectIDs(ctx context.Context, projectIDs []string) (map[string][]string, error)
 }
 
 // -----------------------------------------------------------------------------
@@ -339,4 +341,74 @@ func (r *gormProjectRepository) GetStatsByProjectIDs(ctx context.Context, projec
 	}
 
 	return statsMap, nil
+}
+
+// ListAgentIDsByProjectIDs returns the Agent identities that have been used by
+// tasks or selected by plans for each project. It is a derived read model:
+// projects do not own a mutable Agent list, so the response always reflects
+// the durable execution and scheduling records.
+func (r *gormProjectRepository) ListAgentIDsByProjectIDs(ctx context.Context, projectIDs []string) (map[string][]string, error) {
+	if len(projectIDs) == 0 {
+		return map[string][]string{}, nil
+	}
+
+	type agentRow struct {
+		ProjectID string
+		AgentID   string
+	}
+	var rows []agentRow
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT project_id, COALESCE(NULLIF(agent_id, ''), NULLIF(type, '')) AS agent_id
+		FROM tasks
+		WHERE project_id IN ?
+		  AND COALESCE(task_kind, '') NOT IN (?, ?)
+		  AND COALESCE(type, '') NOT IN (?, ?)
+		  AND COALESCE(agent_id, '') NOT IN (?, ?)
+		  AND COALESCE(channel, '') NOT IN (?, ?)
+		  AND COALESCE(NULLIF(agent_id, ''), NULLIF(type, '')) <> ''
+	`, projectIDs,
+		model.TaskKindFeedbackAnalysis, model.TaskKindProfileAnalysis,
+		model.TaskKindFeedbackAnalysis, model.TaskKindProfileAnalysis,
+		model.AgentIDFeedbackAnalysis, model.AgentIDProfileAnalysis,
+		model.ChannelFeedbackAnalysis, model.ChannelProfileAnalysis).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	// Keep entries from paused/completed plans in this projection: the project
+	// identity describes the capabilities associated with the project, not only
+	// the schedules that happen to be active right now.
+	var planRows []agentRow
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT p.project_id, pe.agent_id
+		FROM plan_entries pe
+		JOIN plans p ON p.id = pe.plan_id
+		WHERE p.project_id IN ?
+		  AND COALESCE(pe.agent_id, '') NOT IN (?, ?)
+		  AND COALESCE(pe.agent_id, '') <> ''
+	`, projectIDs, model.AgentIDFeedbackAnalysis, model.AgentIDProfileAnalysis).Scan(&planRows).Error; err != nil {
+		return nil, err
+	}
+	rows = append(rows, planRows...)
+
+	agents := make(map[string]map[string]struct{}, len(projectIDs))
+	for _, row := range rows {
+		if strings.TrimSpace(row.ProjectID) == "" || strings.TrimSpace(row.AgentID) == "" {
+			continue
+		}
+		if agents[row.ProjectID] == nil {
+			agents[row.ProjectID] = make(map[string]struct{})
+		}
+		agents[row.ProjectID][row.AgentID] = struct{}{}
+	}
+
+	result := make(map[string][]string, len(agents))
+	for projectID, ids := range agents {
+		values := make([]string, 0, len(ids))
+		for agentID := range ids {
+			values = append(values, agentID)
+		}
+		sort.Strings(values)
+		result[projectID] = values
+	}
+	return result, nil
 }

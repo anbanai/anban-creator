@@ -22,6 +22,8 @@ export interface Project {
   platform: ProjectPlatform | ''
   name: string
   avatar_url: string
+  /** Derived from durable tasks and plan entries; never user-edited. */
+  agent_ids?: string[]
 	profile_url?: string
   description?: string
   /** @deprecated use instructions */

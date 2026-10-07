@@ -249,6 +249,79 @@ func doProjectRequestAsNonAdmin(t *testing.T, app *fiber.App, method, path, user
 	return resp
 }
 
+func TestProjectListIncludesDerivedAgentIDs(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Projects().Create(t.Context(), &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformWechat,
+		Name: "茶内容矩阵", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	for _, agentID := range []string{model.AgentIDSeednote, model.AgentIDMontage} {
+		if err := repo.Tasks().Create(t.Context(), &model.Task{
+			ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+			AgentID: agentID, Type: agentID, Status: model.TaskStatusCompleted,
+		}); err != nil {
+			t.Fatalf("create %s task: %v", agentID, err)
+		}
+	}
+
+	resp := doProjectRequestAsNonAdmin(t, app, http.MethodGet, "/api/v1/projects", userID, nil)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("list status = %d; body=%#v", resp.StatusCode, decodeBody(t, resp))
+	}
+	items := decodeBody(t, resp)["data"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("projects = %#v, want one item", items)
+	}
+	item := items[0].(map[string]any)
+	got, ok := item["agent_ids"].([]any)
+	if !ok {
+		t.Fatalf("agent_ids = %#v, want JSON array", item["agent_ids"])
+	}
+	if len(got) != 2 || got[0] != model.AgentIDMontage || got[1] != model.AgentIDSeednote {
+		t.Fatalf("agent_ids = %#v, want sorted derived Agent IDs", got)
+	}
+}
+
+func TestProjectListIncludesPlatformDefaultAgentIDs(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+	for _, project := range []*model.Project{
+		{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "公众号", Status: model.ProjectStatusActive},
+		{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformSeednote, Name: "种草", Status: model.ProjectStatusActive},
+	} {
+		if err := repo.Projects().Create(t.Context(), project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+	}
+
+	resp := doProjectRequestAsNonAdmin(t, app, http.MethodGet, "/api/v1/projects", userID, nil)
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("list status = %d; body=%#v", resp.StatusCode, decodeBody(t, resp))
+	}
+	items := decodeBody(t, resp)["data"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("projects = %#v, want two items", items)
+	}
+	byName := make(map[string]map[string]any, len(items))
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		byName[item["name"].(string)] = item
+	}
+	assertDefault := func(name, want string) {
+		t.Helper()
+		got, ok := byName[name]["agent_ids"].([]any)
+		if !ok || len(got) != 1 || got[0] != want {
+			t.Fatalf("%s default agent_ids = %#v, want [%q]", name, byName[name]["agent_ids"], want)
+		}
+	}
+	assertDefault("公众号", model.AgentIDArticle)
+	assertDefault("种草", model.AgentIDSeednote)
+}
+
 func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
@@ -1468,9 +1541,15 @@ func TestNeutralProjectCreationRequiresName(t *testing.T) {
 	for _, name := range []string{"", "   "} {
 		resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, map[string]any{"name": name})
 		body := decodeBody(t, resp)
-		if resp.StatusCode != fiber.StatusBadRequest { t.Fatalf("blank name status/body = %d/%#v", resp.StatusCode, body) }
+		if resp.StatusCode != fiber.StatusBadRequest {
+			t.Fatalf("blank name status/body = %d/%#v", resp.StatusCode, body)
+		}
 	}
 	projects, err := repo.Projects().ListByUserID(t.Context(), userID, repository.ProjectListOptions{})
-	if err != nil { t.Fatal(err) }
-	if len(projects) != 0 { t.Fatalf("blank projects persisted: %d", len(projects)) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("blank projects persisted: %d", len(projects))
+	}
 }

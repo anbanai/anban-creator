@@ -33,7 +33,6 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
   const [periodEnd, setPeriodEnd] = useState('')
   const queryClient = useQueryClient()
   const platform = project.platform
-  const positioning = project.instructions || project.positioning || ''
   const isArchived = project.status === 'archived'
   const unusedTopics = stats?.unused_topics
   const cardTone = isArchived
@@ -91,9 +90,6 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
           <ImageAnalysisBadge analysis={project.image_analysis} />
         </div>
       </div>
-      {positioning && (
-        <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{positioning}</p>
-      )}
       <div className="mt-auto pt-4">
         {stats && (
           <div className="flex min-h-8 items-center border-t border-border pt-3">

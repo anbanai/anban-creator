@@ -37,6 +37,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
+import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
@@ -398,7 +399,7 @@ export default function PlansPage() {
                       <Badge variant={getBadgeVariant(plan.status, 'plan')}>{planStatusLabel[plan.status] ?? plan.status}</Badge>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span>{project?.name || '未命名项目'}</span><span aria-hidden="true">·</span><span>{cronToHuman(plan.cron_expr)}</span>
+                      {project ? <ProjectIdentity project={project} compact /> : <span>未命名项目</span>}<span aria-hidden="true">·</span><span>{cronToHuman(plan.cron_expr)}</span>
                       {plan.next_run_at ? <><span aria-hidden="true">·</span><span>下次 {formatDateTimeCN(plan.next_run_at)}</span></> : null}
                     </div>
                     <div className="flex flex-wrap gap-1.5" aria-label="输出类型">

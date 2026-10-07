@@ -133,6 +133,10 @@ describe('PlansPage multi-output plans', () => {
     const plan = { ...mockPlans.items[0], prompt: '多种输出', agent_ids: ['seednote', 'wechat-picture'] }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
+    await screen.findByText('多种输出')
+    const planCard = document.querySelector('[data-plan-id="plan-1"]')
+    expect(planCard).toBeInTheDocument()
+    expect(planCard?.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
     expect(await screen.findByText('种草笔记')).toBeInTheDocument()
     expect(await screen.findByText('公众号贴图')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))

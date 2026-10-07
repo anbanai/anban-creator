@@ -19,6 +19,7 @@ const projects: Project[] = [
     id: 'article-1',
     user_id: 'user-1',
     platform: 'wechat',
+    agent_ids: ['wechat-article'],
     name: 'Morning Brief',
     avatar_url: 'https://example.com/morning.png',
     profile_url: 'https://example.com/morning',
@@ -40,6 +41,7 @@ const projects: Project[] = [
     id: 'seednote-1',
     user_id: 'user-1',
     platform: 'seednote',
+    agent_ids: ['seednote'],
     name: 'Garden Notes',
     avatar_url: 'https://example.com/garden.png',
     profile_url: 'https://example.com/garden',
@@ -71,13 +73,13 @@ describe('ProjectSelector', () => {
     const trigger = await screen.findByRole('combobox', { name: '筛选项目' })
     await waitFor(() => expect(trigger).toHaveTextContent('Morning Brief'))
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
-    expect(trigger).toHaveTextContent('公众号')
+    expect(trigger.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
     expect(trigger.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
 
     fireEvent.click(trigger)
     const option = await screen.findByRole('option', { name: /Morning Brief/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
-    expect(option).toHaveTextContent('公众号')
+    expect(option.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
     expect(option.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
   })
 

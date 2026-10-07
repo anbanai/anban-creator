@@ -1,10 +1,61 @@
 package repository
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
 )
+
+func TestListAgentIDsByProjectIDsCombinesTasksAndPlanEntries(t *testing.T) {
+	repo := New(setupTestDB(t))
+	ctx := t.Context()
+	for _, project := range []*model.Project{
+		{ID: "agent-project-1", UserID: "user-1", Platform: model.PlatformWechat, Name: "one", Status: model.ProjectStatusActive},
+		{ID: "agent-project-2", UserID: "user-1", Platform: model.PlatformWechat, Name: "two", Status: model.ProjectStatusActive},
+	} {
+		if err := repo.Projects().Create(ctx, project); err != nil {
+			t.Fatalf("create project %s: %v", project.ID, err)
+		}
+	}
+	for _, task := range []*model.Task{
+		{ID: "agent-task-1", UserID: "user-1", ProjectID: "agent-project-1", AgentID: model.AgentIDSeednote},
+		{ID: "agent-task-2", UserID: "user-1", ProjectID: "agent-project-1", AgentID: model.AgentIDMontage},
+		{ID: "agent-task-internal", UserID: "user-1", ProjectID: "agent-project-1", AgentID: model.AgentIDFeedbackAnalysis},
+		{ID: "agent-task-3", UserID: "user-1", ProjectID: "agent-project-2", AgentID: model.AgentIDHypit},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task %s: %v", task.ID, err)
+		}
+	}
+	plan := &model.Plan{ID: "agent-plan-1", UserID: "user-1", ProjectID: "agent-project-1", ExecutionProfile: "effective"}
+	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	for index, agentID := range []string{model.AgentIDMontage, model.AgentIDHypit} {
+		entry := &model.PlanEntry{ID: fmt.Sprintf("agent-entry-%d", index), PlanID: plan.ID, AgentID: agentID, Channel: agentID, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", Status: model.PlanEntryStatusActive}
+		if err := repo.PlanEntries().Create(ctx, entry); err != nil {
+			t.Fatalf("create plan entry %s: %v", agentID, err)
+		}
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: "agent-project-empty", UserID: "user-1", Platform: model.PlatformWechat, Name: "empty", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatalf("create empty project: %v", err)
+	}
+	got, err := repo.Projects().ListAgentIDsByProjectIDs(ctx, []string{"agent-project-1", "agent-project-2", "agent-project-empty"})
+	if err != nil {
+		t.Fatalf("list project agents: %v", err)
+	}
+	if want := []string{model.AgentIDHypit, model.AgentIDMontage, model.AgentIDSeednote}; !slices.Equal(got["agent-project-1"], want) {
+		t.Fatalf("project 1 Agent IDs = %v, want %v", got["agent-project-1"], want)
+	}
+	if want := []string{model.AgentIDHypit}; !slices.Equal(got["agent-project-2"], want) {
+		t.Fatalf("project 2 Agent IDs = %v, want %v", got["agent-project-2"], want)
+	}
+	if _, exists := got["agent-project-empty"]; exists {
+		t.Fatalf("empty project unexpectedly has Agent IDs: %v", got["agent-project-empty"])
+	}
+}
 
 func TestProjectStatsIncludeUnusedTopics(t *testing.T) {
 	db := setupTestDB(t)

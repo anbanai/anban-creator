@@ -19,9 +19,11 @@ import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import {
   ProjectIdentity,
+  projectAgentIDs,
   projectPlatformLabel,
   type ProjectIdentityProject,
 } from './ProjectIdentity'
+import { agentDisplayName } from './AgentIconStack'
 
 export interface ProjectContextProject extends ProjectIdentityProject {}
 
@@ -135,7 +137,7 @@ function SelectProjectContext({
         disabled={isDisabled}
         itemToStringValue={(item: ProjectContextItem) => (
           item.kind === 'project'
-            ? [item.name, item.description, item.positioning, item.instructions, projectPlatformLabel(item.platform), item.keywords].filter(Boolean).join(' ')
+            ? [item.name, item.description, item.positioning, item.instructions, projectPlatformLabel(item.platform), item.keywords, ...projectAgentIDs(item).map(agentDisplayName)].filter(Boolean).join(' ')
             : item.name
         )}
         isItemEqualToValue={isProjectContextItemEqual}
@@ -197,7 +199,7 @@ function SelectProjectContext({
                       key={item.id}
                       value={item}
                       aria-label={item.kind === 'project'
-                        ? [item.name, item.description, item.positioning, item.instructions, projectPlatformLabel(item.platform), item.keywords]
+                        ? [item.name, item.description, item.positioning, item.instructions, projectPlatformLabel(item.platform), item.keywords, ...projectAgentIDs(item).map(agentDisplayName)]
                           .filter(Boolean)
                           .join(' · ')
                         : item.name}

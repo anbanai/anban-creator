@@ -27,7 +27,7 @@ var (
 	ErrProjectProfileResultAlreadyStored = errors.New("project profile result already submitted")
 	ErrProjectProfileUnsupportedPlatform = errors.New("project profile is only supported for WeChat and Seednote projects")
 	ErrInvalidProjectChannel             = errors.New("invalid project channel")
-	ErrProjectNameRequired              = errors.New("project name is required")
+	ErrProjectNameRequired               = errors.New("project name is required")
 )
 
 var supportedProjectChannels = map[string]struct{}{
@@ -665,6 +665,16 @@ func (s *ProjectService) BatchStats(ctx context.Context, projectIDs []string) (m
 		return nil, fmt.Errorf("batch project stats: %w", err)
 	}
 	return stats, nil
+}
+
+// ListAgentIDsByProjectIDs returns the read-only Agent capability projection
+// used by Studio project identity surfaces.
+func (s *ProjectService) ListAgentIDsByProjectIDs(ctx context.Context, projectIDs []string) (map[string][]string, error) {
+	ids, err := s.repo.Projects().ListAgentIDsByProjectIDs(ctx, projectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list project Agent IDs: %w", err)
+	}
+	return ids, nil
 }
 
 func (s *ProjectService) ownedProject(ctx context.Context, userID, projectID string) (*model.Project, error) {

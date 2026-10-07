@@ -70,6 +70,9 @@ func projectAPIResponse(project *model.Project) map[string]any {
 	}
 	resp := modelAPIMap(project)
 	resp["platform"] = project.Platform
+	if project.AgentIDs == nil {
+		resp["agent_ids"] = []string{}
+	}
 	delete(resp, "profile_url")
 	delete(resp, "config")
 	return resp

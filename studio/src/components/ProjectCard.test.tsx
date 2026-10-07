@@ -11,6 +11,7 @@ function project(overrides: Partial<Project> = {}): Project {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'wechat',
+    agent_ids: ['wechat-article'],
     name: '公众号项目',
     avatar_url: '',
     profile_url: '',
@@ -52,10 +53,10 @@ describe('ProjectCard', () => {
     unused_topics: 6,
   }
 
-  it('shows project identity with a platform badge and avatar fallback', () => {
+  it('shows project identity with a neutral project mark and Agent icon', () => {
     render(<ProjectCard project={project({ name: '共享品牌', avatar_url: 'https://example.com/avatar.png', keywords: '科技, 内容' })} />)
     expect(screen.getByText('共享品牌')).toBeInTheDocument()
-    expect(screen.getByText('公众号', { exact: true })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '公众号文章' })).toBeInTheDocument()
     expect(screen.getByText('科技', { exact: true })).toBeInTheDocument()
     expect(document.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
   })

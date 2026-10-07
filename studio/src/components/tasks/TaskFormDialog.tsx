@@ -13,6 +13,7 @@ import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
 import { AgentPackSchemaFields } from '@/components/agent-pack/AgentPackSchemaFields'
 import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attachment-admission'
 import { ProjectContextControl } from '@/components/agent-prompt/ProjectContextControl'
+import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { defaultTaskImageRatio } from '@/lib/studio-ux'
 import { Button } from '@/components/common/button'
@@ -586,7 +587,7 @@ export function TaskFormDialog({
                 <details className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
                   <summary className="cursor-pointer text-muted-foreground">
                     <span className="ml-1 inline-flex flex-wrap gap-x-3 gap-y-1" aria-label="本次将使用">
-                      <span className="font-medium text-foreground">{selectedProject.name}</span>
+                      <ProjectIdentity project={selectedProject} compact className="font-medium text-foreground" />
                       <span>{selectedExecutionProfile?.display_name || '执行配置加载中'}</span>
                       <span>预计费用：{costPreview.priceAvailable ? `${costPreview.totalCost.toLocaleString()} 积分` : '待确认'}</span>
                     </span>

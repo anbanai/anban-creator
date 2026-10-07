@@ -34,10 +34,14 @@ type Project struct {
 	ID     string `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID string `gorm:"type:char(36);index;not null" json:"user_id"`
 	// Platform identifies the account context; it never selects task identity.
-	Platform   string `gorm:"type:varchar(20);not null" json:"platform"`
-	Name       string `gorm:"type:varchar(100);not null" json:"name"`
-	AvatarURL  string `gorm:"type:varchar(500)" json:"avatar_url"`
-	ProfileURL string `gorm:"type:varchar(500)" json:"-"` // legacy platform homepage link
+	Platform  string `gorm:"type:varchar(20);not null" json:"platform"`
+	Name      string `gorm:"type:varchar(100);not null" json:"name"`
+	AvatarURL string `gorm:"type:varchar(500)" json:"avatar_url"`
+	// AgentIDs is a derived, read-only projection populated by project list/get
+	// handlers from durable tasks and plan entries, with a platform default when
+	// no public execution has been recorded yet. It is never persisted.
+	AgentIDs   []string `gorm:"-" json:"agent_ids"`
+	ProfileURL string   `gorm:"type:varchar(500)" json:"-"` // legacy platform homepage link
 	// Positioning is the legacy project-positioning column. New code writes and
 	// reads Instructions; this column remains only for migration/backward reads.
 	Positioning string `gorm:"type:text" json:"positioning,omitempty"`

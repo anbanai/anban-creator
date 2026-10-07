@@ -1,8 +1,9 @@
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import { FolderKanban } from 'lucide-react'
 import { contentTypeLabel, platformLabels } from '@/lib/labels'
-import { platformIconColor, renderPlatformIcon } from '@/lib/PlatformIcon'
 import { SignedImage } from '@/components/ui/SignedImage'
+import { AgentIconStack, agentDisplayName } from './AgentIconStack'
 
 export interface ProjectIdentityProject {
   id: string
@@ -13,6 +14,8 @@ export interface ProjectIdentityProject {
   positioning?: string
   instructions?: string
   keywords?: string
+  agent_ids?: readonly string[]
+  agent_id?: string
 }
 
 export interface ProjectIdentitySnapshot {
@@ -22,6 +25,8 @@ export interface ProjectIdentitySnapshot {
   positioning?: string
   instructions?: string
   keywords?: string
+  agent_ids?: readonly string[]
+  agent_id?: string
 }
 
 interface ProjectIdentityProps {
@@ -49,6 +54,22 @@ export function projectPlatformLabel(platform?: string) {
   return platformLabels[platform] ?? contentTypeLabel[platform] ?? '通用项目'
 }
 
+const defaultProjectAgentIDs: Record<string, readonly string[]> = {
+  wechat: ['wechat-article'],
+  seednote: ['seednote'],
+  moments: ['moments'],
+  ecommerce: ['ecommerce'],
+  montage: ['montage'],
+  'whiteboard-animation': ['whiteboard-animation'],
+  hypit: ['hypit'],
+}
+
+export function projectAgentIDs(project: ProjectIdentityProject) {
+  if (project.agent_ids?.length) return project.agent_ids
+  if (project.agent_id) return [project.agent_id]
+  return defaultProjectAgentIDs[project.platform ?? ''] ?? []
+}
+
 export function resolveProjectIdentity({
   project,
   snapshot,
@@ -65,7 +86,13 @@ export function resolveProjectIdentity({
   const snapshotName = snapshot?.project_name?.trim()
   const projectName = project?.name?.trim()
   const platform = snapshot?.platform || project?.platform || fallbackPlatform
-  const hasSnapshotIdentity = Boolean(snapshotName || snapshot?.platform || snapshot?.keywords)
+  const hasSnapshotIdentity = Boolean(
+    snapshotName
+    || snapshot?.platform
+    || snapshot?.keywords
+    || snapshot?.agent_ids?.length
+    || snapshot?.agent_id,
+  )
   if (!project && !hasSnapshotIdentity && !fallbackPlatform) return null
   const name = snapshotName || (hasSnapshotIdentity ? fallbackName : projectName) || fallbackName
 
@@ -78,6 +105,9 @@ export function resolveProjectIdentity({
       ? snapshot?.description || snapshot?.positioning || snapshot?.instructions
       : project?.description || project?.positioning || project?.instructions,
     keywords: hasSnapshotIdentity ? snapshot?.keywords : project?.keywords,
+    agent_ids: hasSnapshotIdentity
+      ? snapshot?.agent_ids || (snapshot?.agent_id ? [snapshot.agent_id] : undefined)
+      : project?.agent_ids || (project?.agent_id ? [project.agent_id] : undefined),
   }
 }
 
@@ -87,20 +117,21 @@ export function ProjectIdentity({
   className,
 }: ProjectIdentityProps) {
   const description = project.description || project.positioning || project.instructions
-  const platformLabel = projectPlatformLabel(project.platform)
-  const allTags = [
-    platformLabel,
-    ...(project.keywords ?? '').split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean),
-  ].filter((tag, index, all) => all.indexOf(tag) === index)
-  const tags = allTags.slice(0, compact ? 1 : 3)
-  const hiddenTagCount = allTags.length - tags.length
-  const initials = project.name.trim().split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || '项目'
-  const identityLabel = [project.name, ...allTags, description].filter(Boolean).join('，')
-  const palette = identityPalettes[stableIdentityIndex(`${project.id}:${project.platform ?? ''}`)]
-  const platformIcon = project.platform ? renderPlatformIcon(project.platform) : null
-  const fallbackIcon = platformIcon
-    ? <span className={cn('flex size-full items-center justify-center', project.platform ? platformIconColor[project.platform] : undefined)}>{platformIcon}</span>
-    : <span className="font-semibold">{initials}</span>
+  const keywords = (project.keywords ?? '').split(/[,，\n]/).map((tag) => tag.trim()).filter(Boolean)
+    .filter((tag, index, all) => all.indexOf(tag) === index)
+  const keywordTags = keywords.slice(0, compact ? 0 : 3)
+  const hiddenKeywordCount = keywords.length - keywordTags.length
+  const agentIds = projectAgentIDs(project)
+    .map((id) => id.trim())
+    .filter((id, index, all) => id && all.indexOf(id) === index)
+  const identityLabel = [
+    project.name,
+    agentIds.map(agentDisplayName).join('、'),
+    ...keywords,
+    description,
+  ].filter(Boolean).join('，')
+  const palette = identityPalettes[stableIdentityIndex(project.id)]
+  const fallbackIcon = <FolderKanban aria-hidden="true" className={cn(compact ? 'size-3.5' : 'size-4', palette.foreground)} />
   return (
     <span
       data-slot="project-identity"
@@ -114,6 +145,7 @@ export function ProjectIdentity({
     >
       <span
         data-slot="avatar"
+        data-project-mark="true"
         aria-hidden="true"
         className={cn(
           'group/avatar relative flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full after:absolute after:inset-0 after:rounded-full after:border after:border-border/70',
@@ -131,27 +163,19 @@ export function ProjectIdentity({
       <span className={cn('flex min-w-0 flex-1', compact ? 'items-center' : 'flex-col gap-0.5')}>
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
-          {compact && tags[0] ? <Badge variant="secondary" className="max-w-28 truncate">{tags[0]}</Badge> : null}
-          {compact && hiddenTagCount > 0 ? (
-            <Badge
-              variant="outline"
-              title={`其余标签：${allTags.slice(tags.length).join('、')}`}
-              className="shrink-0"
-            >
-              +{hiddenTagCount}
-            </Badge>
-          ) : null}
+          <AgentIconStack agentIds={agentIds} compact={compact} maxVisible={compact ? 3 : 5} className="shrink-0" />
         </span>
-        {!compact && tags.length ? (
-          <span data-slot="project-identity-tags" className="flex min-w-0 flex-wrap gap-1 pt-0.5">
-            {tags.map((tag) => <Badge key={tag} variant="secondary" className="max-w-36 truncate">{tag}</Badge>)}
-            {hiddenTagCount > 0 ? (
+        {!compact && keywordTags.length ? (
+          <span data-slot="project-identity-keywords" aria-label="关键词" className="flex min-w-0 flex-wrap items-center gap-1 pt-0.5">
+            <span className="sr-only">关键词：</span>
+            {keywordTags.map((tag) => <Badge key={tag} variant="secondary" className="max-w-36 truncate">{tag}</Badge>)}
+            {hiddenKeywordCount > 0 ? (
               <Badge
                 variant="outline"
-                title={`其余标签：${allTags.slice(tags.length).join('、')}`}
+                title={`其余关键词：${keywords.slice(keywordTags.length).join('、')}`}
                 className="shrink-0"
               >
-                +{hiddenTagCount}
+                +{hiddenKeywordCount}
               </Badge>
             ) : null}
           </span>
