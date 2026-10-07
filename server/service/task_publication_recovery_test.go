@@ -305,6 +305,32 @@ func TestVisualRecoverySucceedsWhilePublicationRecordIsStillAbsent(t *testing.T)
 	}
 }
 
+func TestPicturePackageRepairSucceedsWithoutPublicationRecord(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, _, enqueuer := makeCompletedPublicationRecoveryFixture(t, "review_content")
+	task.Type = model.TaskTypeWechatPicture
+	task.AgentID = model.AgentIDWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	task.Outcome.Publication.Code = "publication_package_invalid"
+	task.Outcome.Publication.Attempted = false
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	publicationSvc := NewWechatPublicationService(repo, nil, nil)
+	publicationSvc.SetRecovery(svc.RecoverWechatPublication)
+	result, err := publicationSvc.Recover(ctx, task.UserID, task.ID)
+	if err != nil {
+		t.Fatalf("repair picture package: %v", err)
+	}
+	if result.Action != "review_content" || len(enqueuer.enqueued) != 1 {
+		t.Fatalf("recovery result=%#v enqueued=%d, want existing-task recovery", result, len(enqueuer.enqueued))
+	}
+	if _, err := repo.WechatPublications().FindByTaskID(ctx, task.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("publication after recovery = %v, want no fabricated publication", err)
+	}
+}
+
 func TestRecoverWechatPublicationVisualsEnqueueFailureRestoresCompletedTask(t *testing.T) {
 	svc, repo, task, _, _ := makeCompletedPublicationRecoveryFixture(t, "retry_visuals")
 	svc.enqueuer = &failOnceEnqueuer{err: errors.New("queue unavailable")}

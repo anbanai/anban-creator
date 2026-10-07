@@ -134,6 +134,30 @@ var publicationRecoveryArtifactSpecs = []publicationRecoveryArtifactSpec{
 	{path: "output/draft.json", mimeType: "application/json", maxBytes: 8 << 20},
 }
 
+// Picture publication recovery starts from the delivered research/content
+// artifacts and verified images. The old publish package is intentionally not
+// restored: it is the object that failed Server validation and must be rebuilt
+// by the recovery Agent.
+var picturePublicationRecoveryArtifactSpecs = []publicationRecoveryArtifactSpec{
+	{path: "output/topic-analysis.md", mimeType: "text/markdown", maxBytes: 4 << 20, required: true},
+	{path: "output/content-dna.json", mimeType: "application/json", maxBytes: 4 << 20, required: true},
+	{path: "output/content-script.md", mimeType: "text/markdown", maxBytes: 4 << 20, required: true},
+	{path: "output/content.md", mimeType: "text/markdown", maxBytes: 8 << 20, required: true},
+	{path: "output/image-plan.md", mimeType: "text/markdown", maxBytes: 4 << 20, required: true},
+	{path: "output/image-prompts.md", mimeType: "text/markdown", maxBytes: 8 << 20, required: true},
+	{path: "output/quality-review.md", mimeType: "text/markdown", maxBytes: 4 << 20, required: true},
+}
+
+func publicationRecoveryArtifactSpecsForTask(task *model.Task) ([]publicationRecoveryArtifactSpec, error) {
+	if taskUsesChannel(task, model.ChannelWechatPicture) {
+		return picturePublicationRecoveryArtifactSpecs, nil
+	}
+	if taskUsesChannel(task, model.ChannelArticle) {
+		return publicationRecoveryArtifactSpecs, nil
+	}
+	return nil, fmt.Errorf("%w: publication recovery task channel is unsupported", ErrAgentBootstrapConflict)
+}
+
 var lowercaseSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func NewAgentBootstrapService(repo repository.Repository, tokens *auth.ExecutionTokenService, cfg AgentBootstrapConfig, logger zerolog.Logger) *AgentBootstrapService {
@@ -482,17 +506,31 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,
 		CoverUsePortrait: task.CoverUsePortrait,
 	})
-	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery && task.Outcome != nil && canRepairArticlePublicationPackage(task.Outcome.Publication) {
-		prompt += "\n\n发布包修复：\n" +
-			"- Server 已恢复原执行的文章、图片与审核产物；保持正文不变，复用已经成功且可验证的图片，只补齐缺失或失败的已请求图片。\n" +
-			"- 原发布包未通过校验。必须重新执行内容质量、营销合规、最终审核和爆款审核，更新对应证据文件；不得直接沿用或强行改写 readiness 为 ready。审核仍有阻断时保留 blocked 及实际原因。\n" +
-			"- 依据本次审核结果重建 output/draft.json 并校验最终 HTML 哈希、标题、摘要及证据路径。1.0 顶层只能包含 schema_version、article、readiness；article 只能包含 title、digest、content_path、content_sha256；readiness 只能包含 status、code、evidence_paths。不得添加 cover、images 或其他字段，图片元数据由 Server 管理。"
+	if execution.Purpose == model.TaskExecutionPurposePublicationRecovery && task.Outcome != nil && canRepairPublicationPackage(task.Outcome.Publication) {
+		if taskUsesChannel(task, model.ChannelWechatPicture) {
+			prompt += "\n\n公众号贴图发布包修复：\n" +
+				"- Server 已恢复原执行的选题、Content DNA、文案、图片规划、质量报告和已验证图片；保持这些内容与图片顺序不变，不能恢复或读取旧的 output/publish-package.json。\n" +
+				"- 重新检查质量报告和图片路径后，只重建 output/publish-package.json。JSON 顶层只能包含 schema_version、status、source、data_at、missing、title、digest、content、cover_path、image_paths、readiness；readiness 只能包含 status。\n" +
+				"- schema_version 必须是 1.0，source 必须是 wechat-picture-agent；status 与 readiness.status 必须一致且只能是 ready 或 blocked，ready 时 missing 必须为空。content 是纯文本图下注释；cover_path 和 image_paths 必须是具体 output 相对路径，禁止通配符。严禁添加 notes、image_order、crop、cover、images、caption、text、html 或任何其他字段；图片元数据和微信请求由 Server finalizer 管理。"
+		} else {
+			prompt += "\n\n发布包修复：\n" +
+				"- Server 已恢复原执行的文章、图片与审核产物；保持正文不变，复用已经成功且可验证的图片，只补齐缺失或失败的已请求图片。\n" +
+				"- 原发布包未通过校验。必须重新执行内容质量、营销合规、最终审核和爆款审核，更新对应证据文件；不得直接沿用或强行改写 readiness 为 ready。审核仍有阻断时保留 blocked 及实际原因。\n" +
+				"- 依据本次审核结果重建 output/draft.json 并校验最终 HTML 哈希、标题、摘要及证据路径。1.0 顶层只能包含 schema_version、article、readiness；article 只能包含 title、digest、content_path、content_sha256；readiness 只能包含 status、code、evidence_paths。不得添加 cover、images 或其他字段，图片元数据由 Server 管理。"
+		}
 	} else if execution.Purpose == model.TaskExecutionPurposePublicationRecovery {
-		prompt += "\n\n视觉生成恢复：\n" +
-			"- 从 image_generation 阶段继续；Server 已恢复并校验原执行的文章、SEO、视觉规划、HTML 和审核产物。\n" +
-			"- 不得重新执行选题、正文创作、SEO 或语义审核，也不得改写已恢复的文章内容。\n" +
-			"- 只重新生成缺失或失败的已请求图片，然后更新图片引用、最终 HTML 和 output/draft.json；已成功且可验证的图片不得重复生成。\n" +
-			"- 重新校验并修复 output/draft.json 的 1.0 结构：顶层只能包含 schema_version、article、readiness；article 只能包含 title、digest、content_path、content_sha256；readiness 只能包含 status、code、evidence_paths。不得添加 cover、images 或其他字段，图片元数据由 Server 管理。"
+		if taskUsesChannel(task, model.ChannelWechatPicture) {
+			prompt += "\n\n公众号贴图视觉生成恢复：\n" +
+				"- 从 image_generation 阶段继续；Server 已恢复并校验原执行的选题、文案、图片规划、质量报告和已验证图片。\n" +
+				"- 不得重新执行选题或正文创作，也不得改写已恢复的文案；只重新生成缺失或失败的已请求图片，然后按实际具体路径重建发布包。\n" +
+				"- 发布包必须严格使用 Server 合同：顶层只能包含 schema_version、status、source、data_at、missing、title、digest、content、cover_path、image_paths、readiness，readiness 只能包含 status；禁止 notes、image_order、crop、cover、images、caption、text、html、通配符路径及任何其他字段。"
+		} else {
+			prompt += "\n\n视觉生成恢复：\n" +
+				"- 从 image_generation 阶段继续；Server 已恢复并校验原执行的文章、SEO、视觉规划、HTML 和审核产物。\n" +
+				"- 不得重新执行选题、正文创作、SEO 或语义审核，也不得改写已恢复的文章内容。\n" +
+				"- 只重新生成缺失或失败的已请求图片，然后更新图片引用、最终 HTML 和 output/draft.json；已成功且可验证的图片不得重复生成。\n" +
+				"- 重新校验并修复 output/draft.json 的 1.0 结构：顶层只能包含 schema_version、article、readiness；article 只能包含 title、digest、content_path、content_sha256；readiness 只能包含 status、code、evidence_paths。不得添加 cover、images 或其他字段，图片元数据由 Server 管理。"
+		}
 	}
 	resumeContextPath := ""
 	for _, attachment := range attachments {
@@ -562,6 +600,10 @@ func (s *AgentBootstrapService) buildPublicationRecoveryFiles(ctx context.Contex
 	if task == nil {
 		return nil, fmt.Errorf("%w: publication recovery task is required", ErrAgentBootstrapConflict)
 	}
+	specs, err := publicationRecoveryArtifactSpecsForTask(task)
+	if err != nil {
+		return nil, err
+	}
 	sourceExecutionID := strings.TrimSpace(execution.ParentExecutionID)
 	if sourceExecutionID == "" || sourceExecutionID != execution.ParentExecutionID || sourceExecutionID == execution.ID {
 		return nil, fmt.Errorf("%w: publication recovery source execution is invalid", ErrAgentBootstrapConflict)
@@ -585,7 +627,7 @@ func (s *AgentBootstrapService) buildPublicationRecoveryFiles(ctx context.Contex
 		if file == nil || file.TaskID != task.ID || file.ExecutionID != source.ID || file.State != model.TaskFileStateDelivered {
 			continue
 		}
-		if _, allowed := findPublicationRecoveryArtifactSpec(file.FilePath); allowed {
+		if _, allowed := findPublicationRecoveryArtifactSpecForTask(task, file.FilePath); allowed {
 			byPath[file.FilePath] = file
 		}
 	}
@@ -594,7 +636,7 @@ func (s *AgentBootstrapService) buildPublicationRecoveryFiles(ctx context.Contex
 		expectedStorageProvider = s.cfg.Store.Name()
 	}
 	expectedPrefix := buildTaskMCPArtifactStoragePrefix(task, source.ID)
-	for _, spec := range publicationRecoveryArtifactSpecs {
+	for _, spec := range specs {
 		file := byPath[spec.path]
 		if file == nil {
 			if spec.required {
@@ -612,8 +654,8 @@ func (s *AgentBootstrapService) buildPublicationRecoveryFiles(ctx context.Contex
 			return nil, fmt.Errorf("%w: publication recovery artifact %q is invalid or unavailable", ErrAgentBootstrapConflict, spec.path)
 		}
 	}
-	files := make([]BootstrapFile, 0, len(publicationRecoveryArtifactSpecs))
-	for _, spec := range publicationRecoveryArtifactSpecs {
+	files := make([]BootstrapFile, 0, len(specs))
+	for _, spec := range specs {
 		file := byPath[spec.path]
 		if file == nil {
 			continue
@@ -632,6 +674,22 @@ func (s *AgentBootstrapService) buildPublicationRecoveryFiles(ctx context.Contex
 
 func findPublicationRecoveryArtifactSpec(path string) (publicationRecoveryArtifactSpec, bool) {
 	for _, spec := range publicationRecoveryArtifactSpecs {
+		if spec.path == path {
+			return spec, true
+		}
+	}
+	return publicationRecoveryArtifactSpec{}, false
+}
+
+func findPublicationRecoveryArtifactSpecForTask(task *model.Task, path string) (publicationRecoveryArtifactSpec, bool) {
+	if task == nil {
+		return findPublicationRecoveryArtifactSpec(path)
+	}
+	specs, err := publicationRecoveryArtifactSpecsForTask(task)
+	if err != nil {
+		return publicationRecoveryArtifactSpec{}, false
+	}
+	for _, spec := range specs {
 		if spec.path == path {
 			return spec, true
 		}
@@ -979,7 +1037,7 @@ func validateBootstrapFilesForTask(files []BootstrapFile, task *model.Task) erro
 			}
 		}
 		if file.ReplaceExisting && filepath.ToSlash(clean) != ".anban-creator/settings.json" && filepath.ToSlash(clean) != ".anban-creator/feedback-strategy.json" {
-			_, recoveryArtifact := findPublicationRecoveryArtifactSpec(filepath.ToSlash(clean))
+			_, recoveryArtifact := findPublicationRecoveryArtifactSpecForTask(task, filepath.ToSlash(clean))
 			if !recoveryArtifact || strings.TrimSpace(file.DownloadURL) == "" || !lowercaseSHA256.MatchString(file.ContentSHA256) {
 				return fmt.Errorf("bootstrap file %q cannot replace existing workspace content", clean)
 			}

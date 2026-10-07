@@ -125,8 +125,137 @@ func TestPublicationPackageRecoveryPreservesImagesAndRechecksReviews(t *testing.
 	}
 }
 
+func TestPicturePackageRecoveryBootstrapsPictureArtifacts(t *testing.T) {
+	ctx := t.Context()
+	_, repo, db, task, source := setupCloudCompletionTestWithDB(t, false)
+	task.Type = model.TaskTypeWechatPicture
+	task.AgentID = model.AgentIDWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	task.TaskKind = model.TaskKindContentGeneration
+	if err := db.Save(task).Error; err != nil {
+		t.Fatal(err)
+	}
+	source.Status = model.TaskExecutionSucceeded
+	if err := applyAgentPackIdentity(source, model.AgentIDWechatPicture); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Save(source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	store := &fakeTaskStorage{files: map[string][]byte{}}
+	picturePaths := map[string]string{
+		"output/topic-analysis.md": "text/markdown",
+		"output/content-dna.json":  "application/json",
+		"output/content-script.md": "text/markdown",
+		"output/content.md":        "text/markdown",
+		"output/image-plan.md":     "text/markdown",
+		"output/image-prompts.md":  "text/markdown",
+		"output/quality-review.md": "text/markdown",
+	}
+	for filePath, mimeType := range picturePaths {
+		body := []byte("picture recovery artifact")
+		if mimeType == "application/json" {
+			body = []byte(`{"schema_version":"1.0","status":"ready","source":"wechat-picture-agent","data_at":"2026-10-07T00:00:00Z","missing":[]}`)
+		}
+		hash := fmt.Sprintf("%x", sha256.Sum256(body))
+		key := buildTaskArtifactFinalStorageKey(task, source.ID, hash, filePath)
+		store.files[key] = body
+		if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+			TaskID: task.ID, ExecutionID: source.ID, State: model.TaskFileStateDelivered,
+			Role: model.FileRoleOther, FilePath: filePath, FileName: path.Base(filePath),
+			MimeType: mimeType, FileSize: int64(len(body)), ContentHash: hash,
+			OSSKey: key, StorageProvider: store.Name(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cover := tinyImagePNG(t)
+	coverHash := fmt.Sprintf("%x", sha256.Sum256(cover))
+	coverKey := buildTaskArtifactFinalStorageKey(task, source.ID, coverHash, "output/cover.png")
+	store.files[coverKey] = cover
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		TaskID: task.ID, ExecutionID: source.ID, State: model.TaskFileStateDelivered,
+		Role: model.FileRoleCover, FilePath: "output/cover.png", FileName: "cover.png",
+		MimeType: "image/png", FileSize: int64(len(cover)), ContentHash: coverHash,
+		MediaID: "verified-cover", OSSKey: coverKey, StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Older runtimes materialized the Pack glob as a literal placeholder. It
+	// is a validation marker, never a real image, and must not be copied into a
+	// recovery workspace where it could be mistaken for a publishable image.
+	placeholderHash := fmt.Sprintf("%x", sha256.Sum256(cover))
+	placeholderPath := "output/image_*.png"
+	placeholderKey := buildTaskArtifactFinalStorageKey(task, source.ID, placeholderHash, placeholderPath)
+	store.files[placeholderKey] = cover
+	if err := repo.TaskFiles().Create(ctx, &model.TaskFile{
+		TaskID: task.ID, ExecutionID: source.ID, State: model.TaskFileStateDelivered,
+		Role: model.FileRoleImage, FilePath: placeholderPath, FileName: "image_*.png",
+		MimeType: "image/png", FileSize: int64(len(cover)), ContentHash: placeholderHash,
+		OSSKey: placeholderKey, StorageProvider: store.Name(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	recovery := *source
+	recovery.ID = uuid.NewString()
+	recovery.Attempt++
+	recovery.ParentExecutionID = source.ID
+	recovery.Purpose = model.TaskExecutionPurposePublicationRecovery
+	recovery.Status = model.TaskExecutionStarting
+	recovery.Started = false
+	task.Outcome = &model.TaskOutcome{Publication: model.TaskPublicationOutcome{
+		Action: "review_content", Code: "publication_package_invalid", Attempted: false,
+	}}
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{Store: store}, zerolog.Nop())
+	applyBootstrapTestProfile(t, svc, task, &recovery)
+	if err := applyAgentPackIdentity(&recovery, model.AgentIDWechatPicture); err != nil {
+		t.Fatal(err)
+	}
+	project := &model.Project{ID: task.ProjectID, UserID: task.UserID, Platform: model.PlatformWechat}
+
+	response, err := buildBootstrapTestResponse(t, svc, ctx, &recovery, task, project, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("picture recovery bootstrap: %v", err)
+	}
+	if !strings.Contains(response.Prompt, "公众号贴图发布包") {
+		t.Fatalf("picture recovery prompt = %q, want picture package repair instructions", response.Prompt)
+	}
+	for _, instruction := range []string{"只能包含 schema_version、status、source、data_at、missing、title、digest、content、cover_path、image_paths、readiness", "严禁添加 notes、image_order、crop", "禁止通配符"} {
+		if !strings.Contains(response.Prompt, instruction) {
+			t.Fatalf("picture recovery prompt = %q, want instruction %q", response.Prompt, instruction)
+		}
+	}
+	if strings.Contains(response.Prompt, "output/draft.json") {
+		t.Fatalf("picture recovery prompt contains article draft contract: %q", response.Prompt)
+	}
+	files := map[string]BootstrapFile{}
+	for _, file := range response.Files {
+		if strings.HasPrefix(file.Path, "output/") {
+			files[file.Path] = file
+		}
+	}
+	for filePath := range picturePaths {
+		if file := files[filePath]; file.DownloadURL == "" || !file.ReplaceExisting {
+			t.Fatalf("restored picture artifact %q = %#v", filePath, file)
+		}
+	}
+	if _, exists := files["output/publish-package.json"]; exists {
+		t.Fatal("invalid publish package was restored into picture repair workspace")
+	}
+	if _, exists := files["output/image_*.png"]; exists {
+		t.Fatal("literal wildcard placeholder was restored into picture repair workspace")
+	}
+}
+
 func TestPublicationRecoveryImagesRejectUntrustedSource(t *testing.T) {
-	for _, kind := range []string{"hash mismatch", "foreign key", "non-output image"} {
+	for _, kind := range []string{"hash mismatch", "foreign key", "non-output image", "non-marker wildcard path"} {
 		t.Run(kind, func(t *testing.T) {
 			_, repo, db, task, source := setupCloudCompletionTestWithDB(t, false)
 			if err := db.Model(source).Update("status", model.TaskExecutionSucceeded).Error; err != nil {
@@ -137,6 +266,9 @@ func TestPublicationRecoveryImagesRejectUntrustedSource(t *testing.T) {
 			p := "output/cover.png"
 			if kind == "non-output image" {
 				p = "input/cover.png"
+			}
+			if kind == "non-marker wildcard path" {
+				p = "output/image_?.png"
 			}
 			key := buildTaskMCPArtifactStoragePrefix(task, source.ID) + p
 			if kind == "foreign key" {

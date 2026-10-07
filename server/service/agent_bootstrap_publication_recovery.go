@@ -37,6 +37,15 @@ func (s *AgentBootstrapService) buildPublicationRecoveryImages(ctx context.Conte
 		if original.TaskID != task.ID || original.ExecutionID != source.ID || original.State != model.TaskFileStateDelivered || !strings.HasPrefix(original.MimeType, "image/") {
 			continue
 		}
+		// The old picture runtime created a literal `image_*.png` marker when
+		// it treated the Pack glob as an exact path. It is never a concrete
+		// publishable image and must not enter the recovery execution.
+		if strings.ContainsAny(original.FilePath, "*?[]{}") {
+			if original.FilePath == "output/image_*.png" {
+				continue
+			}
+			return nil, nil, fmt.Errorf("%w: invalid publication recovery image %q", ErrAgentBootstrapConflict, original.FilePath)
+		}
 		cleanPath, pathErr := cleanAuthorizedTaskImagePath(original.FilePath)
 		validKey := original.OSSKey == buildTaskMCPArtifactStoragePrefix(task, source.ID)+original.FilePath ||
 			original.OSSKey == buildTaskArtifactFinalStorageKey(task, source.ID, original.ContentHash, original.FilePath)

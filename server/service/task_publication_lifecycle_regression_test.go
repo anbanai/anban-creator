@@ -91,8 +91,8 @@ func TestFinalizePicturePublicationUsesCanonicalServerPackageSchema(t *testing.T
 			wantCode:   "semantic_review_blocked",
 		},
 		{
-			name:       "unknown compatibility field is rejected",
-			body:       string(canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"caption": "图下注释"})),
+			name:       "agent notes field is rejected",
+			body:       string(canonicalPicturePublicationPackage(t, "ready", "ready", nil, map[string]any{"notes": "legacy runtime metadata"})),
 			wantStatus: model.TaskExecutionDraftDeliveryFailed,
 			wantCode:   "publication_package_invalid",
 		},
