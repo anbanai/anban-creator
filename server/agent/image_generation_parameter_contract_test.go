@@ -44,6 +44,8 @@ func TestGeneratingAgentsUseBusinessAspectRatios(t *testing.T) {
 	paths := []string{
 		"harness/agents/wechat-article.md",
 		"harness/agents/wechat-article.toml",
+		"harness/agents/wechat-picture.md",
+		"harness/agents/wechat-picture.toml",
 		"harness/agents/seednote.md",
 		"harness/agents/seednote.toml",
 		"harness/agents/moments.md",
@@ -72,8 +74,8 @@ func TestGeneratingAgentsUseBusinessAspectRatios(t *testing.T) {
 func TestGeneratingSkillsDoNotOverrideImageRatioOrRelyOnImplicitCrop(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := generatingSkillContractPaths(t, root)
-	if len(paths) != 8 {
-		t.Fatalf("generating Skill count = %d (%v), want 8 direct generating Skills (article is a router)", len(paths), paths)
+	if len(paths) != 9 {
+		t.Fatalf("generating Skill count = %d (%v), want 9 direct generating Skills (article is a router)", len(paths), paths)
 	}
 	for _, rel := range paths {
 		t.Run(rel, func(t *testing.T) {
@@ -120,6 +122,8 @@ func TestEveryDocumentedGenerateImageCallPassesAspectRatio(t *testing.T) {
 	paths := []string{
 		"harness/agents/wechat-article.md",
 		"harness/agents/wechat-article.toml",
+		"harness/agents/wechat-picture.md",
+		"harness/agents/wechat-picture.toml",
 		"harness/agents/seednote.md",
 		"harness/agents/seednote.toml",
 		"harness/agents/moments.md",

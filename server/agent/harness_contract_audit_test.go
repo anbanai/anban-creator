@@ -11,6 +11,7 @@ func TestHarnessImageToolExamplesCarryTaskIdentity(t *testing.T) {
 	paths := []string{
 		"harness/skills/article-visual-design/SKILL.md",
 		"harness/skills/article-cover-design/SKILL.md",
+		"harness/skills/wechat-picture-visual-design/SKILL.md",
 		"harness/skills/ecommerce-visual-design/SKILL.md",
 		"harness/skills/ecommerce-product-analysis/SKILL.md",
 		"harness/skills/seednote-visual-design/SKILL.md",
