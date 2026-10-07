@@ -110,14 +110,18 @@ Runner 的生产依赖 `npm audit --omit=dev` 为 0 条公告。官方基线锁�
 - Pack 生成一致性、工作流审计及其 9 项回归通过。
 - 新镜像构建、官方源码逐文件校验、断网 / 非 root / 只读根目录的 540×960 示例渲染、完整解码、归档重新导入及官方 check / plan 全部通过。首次构建下载 `uv` 文件中断并被哈希校验拒绝，原命令重试后成功，未绕过校验。
 
-## 当前 Hypit 版本（2026-09-28）
+## 当前 Hypit 版本（2026-10-07）
 
-构建默认源码已升级到 Hypit `v0.2.16`，固定 commit 为
-`557497b32a6658067c11bf924c7511e61c61df4e`。该版本通过 GitHub 官方
+构建默认源码已升级到 Hypit `v0.2.17`，固定 commit 为
+`e8f94006e1eed9b299448fe5bce6afa5646e2ba5`。该版本通过 GitHub 官方
 Release 发布，Dockerfile、Make 默认值和本地 smoke 校验使用同一个不可变
-commit。v0.2.16 的 TokenDance Provider 仍要求 MiniMax 查询响应包含
+commit。v0.2.17 的 TokenDance Provider 仍要求 MiniMax 查询响应包含
 `task` 对象；网关返回不符合该协议时仍需修复网关或 Provider，版本升级本身
 不会绕过响应校验。
+
+截至 2026-10-07，上游 `main` 为
+`7f730abf72fa1e4a543eed8cd1807319d9f18196`，相对 `v0.2.17` 仅包含 README
+和文档资源更新，没有运行时变更；生产镜像继续固定最新稳定 Release。
 
 本次只完成本地升级验证；未部署或启用业务，真实 Provider 任务的端到端验收仍未完成。
 
@@ -125,7 +129,7 @@ commit。v0.2.16 的 TokenDance Provider 仍要求 MiniMax 查询响应包含
 
 托管 Runner 不把第三方 Provider 的原始错误文本作为公共错误协议。它先按结构化 HTTP 状态和受限文本模式，将失败归入固定类别：`provider_content_policy`、`provider_authentication`、`provider_rate_limited`、`provider_timeout`、`provider_unavailable`、`provider_invalid_request`、`provider_protocol_error` 或 `provider_unknown`。未知错误降级为 `provider_unknown`；原始响应、凭据、URL 和未登记的供应商代码不会进入任务结果。
 
-协议错误覆盖响应缺字段、类型错误、Schema / JSON 解析失败和协议不匹配。当前 Hypit v0.2.16 的 MiniMax/TokenDance `TOKENDANCE_ERROR: TokenDance task must be an object` 会归类为 `provider_protocol_error`，安全细节代码为 `tokendance_task_shape_invalid`。这表示网关响应与 Hypit Provider 契约不一致，不表示用户项目内容本身有问题。
+协议错误覆盖响应缺字段、类型错误、Schema / JSON 解析失败和协议不匹配。当前 Hypit v0.2.17 的 MiniMax/TokenDance `TOKENDANCE_ERROR: TokenDance task must be an object` 会归类为 `provider_protocol_error`，安全细节代码为 `tokendance_task_shape_invalid`。这表示网关响应与 Hypit Provider 契约不一致，不表示用户项目内容本身有问题。v0.2.17 同时改进了网络层错误原因，未改变该 MiniMax 查询响应契约。
 
 Hypit 对超时、协议错误和未知远端错误保留官方 Results，并从 `inspect_results` 恢复；鉴权错误从 `review_configuration` 恢复；无效请求从 `repair_project` 恢复。限流和暂时不可用错误可以在确认远端状态后重试，但不会绕过 Server 的幂等和扣费状态。新增 Provider 时只应增加内部匹配规则、固定白名单细节和对应测试，不应透传供应商原文。
 

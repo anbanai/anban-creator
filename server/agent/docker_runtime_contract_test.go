@@ -419,7 +419,7 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ARG OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git",
-		"ARG OPENMONTAGE_REF=08e2151fa02de28a5d6a312b3d575692bf147ad7",
+		"ARG OPENMONTAGE_REF=9327439db69021ab4b0e2776729bf3b58fdb5a87",
 		"apt-get install -y --no-install-recommends",
 		"ca-certificates curl git jq ffmpeg fontconfig fonts-noto-cjk fonts-noto-color-emoji",
 		"libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2",
@@ -957,7 +957,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
 		"OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git",
-		"OPENMONTAGE_SOURCE_REF ?= 08e2151fa02de28a5d6a312b3d575692bf147ad7",
+		"OPENMONTAGE_SOURCE_REF ?= 9327439db69021ab4b0e2776729bf3b58fdb5a87",
 		"SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest",
 		"SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest",
 		"STUDIO_IMAGE := anban-creator-studio:latest",

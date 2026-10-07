@@ -21,8 +21,11 @@ recorded by the removed submodule:
 
 ```text
 repository=https://github.com/calesthio/OpenMontage.git
-commit=08e2151fa02de28a5d6a312b3d575692bf147ad7
+commit=9327439db69021ab4b0e2776729bf3b58fdb5a87
 ```
+
+截至 2026-10-07，上游仓库没有 Release 标签；该提交是 `main` 的最新
+提交。生产构建固定完整 SHA，避免随分支移动而改变运行时。
 
 Build the Agent image:
 
@@ -45,7 +48,7 @@ MONTAGE_AGENT_REF=chengdu.personal.cr.aliyuncs.com/bx_anbanai/creator-agent-mont
 docker build --pull \
   -f deploy/docker/Dockerfile.agent-montage \
   --build-arg OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git \
-  --build-arg OPENMONTAGE_REF=08e2151fa02de28a5d6a312b3d575692bf147ad7 \
+  --build-arg OPENMONTAGE_REF=9327439db69021ab4b0e2776729bf3b58fdb5a87 \
   -t "$MONTAGE_AGENT_REF" .
 docker push "$MONTAGE_AGENT_REF"
 ```

@@ -9,7 +9,7 @@ RUN npm run build && npm prune --omit=dev && test -d node_modules/@anthropic-ai/
 FROM node:24-bookworm-slim
 
 ARG OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git
-ARG OPENMONTAGE_REF=08e2151fa02de28a5d6a312b3d575692bf147ad7
+ARG OPENMONTAGE_REF=9327439db69021ab4b0e2776729bf3b58fdb5a87
 
 USER root
 RUN set -eux; \
