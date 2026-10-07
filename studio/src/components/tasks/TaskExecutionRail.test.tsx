@@ -87,8 +87,6 @@ describe('TaskExecutionRail', () => {
     render(<TaskExecutionRail taskId="task-1" status="running" lifecycle={lifecycle} onOpenLogs={vi.fn()} />)
 
     expect(screen.getByText('正在收束文章结构')).toBeVisible()
-    expect(screen.getByText('形成完整初稿')).not.toBeVisible()
-    fireEvent.click(screen.getByText('环节说明'))
     expect(screen.getByText('形成完整初稿')).toBeVisible()
     expect(screen.queryByText('事实已经核验')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '撰写内容，进行中' })).toHaveAttribute('aria-current', 'step')

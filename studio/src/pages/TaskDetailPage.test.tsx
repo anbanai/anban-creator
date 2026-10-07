@@ -2101,12 +2101,10 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const badge = (await screen.findAllByText('视频复刻', { selector: '[data-slot="badge"]' }))
-      .find((candidate) => candidate.querySelector('[data-platform-icon="hypit"]'))
-    if (!badge) throw new Error('未找到视频复刻平台徽标')
-    expect(badge.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
-    expect(badge.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('视频复刻 任务')
+    const agentIcon = (await screen.findAllByRole('img', { name: '视频复刻' }))[0]
+    expect(agentIcon.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
+    expect(agentIcon.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('视频复刻任务')
     expect(screen.queryByText('hypit')).not.toBeInTheDocument()
     expect(screen.queryByText('montage')).not.toBeInTheDocument()
   })

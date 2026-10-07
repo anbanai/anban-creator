@@ -31,8 +31,8 @@ export function TaskFileDownloads({ taskId, files }: { taskId: string; files: Ta
   }
 
   return <>
-    {hasDelivery && <Button size="xs" variant="outline" loading={downloading === 'delivered'} disabled={!!downloading} onClick={() => void download('delivered')} aria-label="下载交付成果 (ZIP)"><Download className="size-3.5" />下载成果</Button>}
-    {hasRetained && <Button size="xs" variant="outline" loading={downloading === 'retained'} disabled={!!downloading} onClick={() => void download('retained')} aria-label="下载已保留产物 (ZIP)"><Download className="size-3.5" />下载已保留产物</Button>}
+    {hasDelivery && <Button size="icon-xs" variant="ghost" loading={downloading === 'delivered'} disabled={!!downloading} onClick={() => void download('delivered')} aria-label="下载交付成果 (ZIP)" title="下载交付成果 (ZIP)"><Download className="size-3.5" /></Button>}
+    {hasRetained && <Button size="icon-xs" variant="ghost" loading={downloading === 'retained'} disabled={!!downloading} onClick={() => void download('retained')} aria-label="下载已保留产物 (ZIP)" title="下载已保留产物 (ZIP)"><Download className="size-3.5" /></Button>}
   </>
 }
 

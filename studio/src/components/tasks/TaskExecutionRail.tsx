@@ -370,10 +370,7 @@ export function TaskExecutionRail({
                       <p className="flex items-start gap-2 text-xs text-destructive"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{publication.last_error}</p>
                     )}
                     {stageFiles.length > 0 && <TaskStageFiles {...fileProps} files={stageFiles} />}
-                    {stage.goal && <details className="text-xs text-muted-foreground">
-                      <summary className="w-fit cursor-pointer rounded py-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">环节说明</summary>
-                      <p className="mt-1 break-words leading-relaxed">{stage.goal}</p>
-                    </details>}
+                    {stage.goal && <p className="break-words text-xs leading-relaxed text-muted-foreground"><span className="font-medium text-foreground/70">环节说明：</span>{stage.goal}</p>}
                     {time && <p className="text-[11px] text-muted-foreground sm:hidden">{time}</p>}
                   </div>
                 )}

@@ -2,21 +2,20 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2, BarChart3 } from 'lucide-react'
+import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2, BarChart3, CheckCircle2, CircleDashed, XCircle, Ban as BanIcon, LoaderCircle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import type { AgentExecutionProfileID, TaskStatus, Project, TaskType } from '@/types'
 import { ProjectSelector } from '@/components/ProjectSelector'
-import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
+import { AgentIconStack, agentDisplayName } from '@/components/agent-prompt/AgentIconStack'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
-import { Badge } from '@/components/ui/badge'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
-import { taskStatusLabel, contentTypeDisplayName, formatDateTimeCN, statusBadgeVariant } from '@/lib/labels'
-import { platformBadgeClassName, platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
+import { taskStatusLabel, contentTypeDisplayName, formatDateTimeCN } from '@/lib/labels'
+import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
 import { taskStageSummary } from '@/lib/task-lifecycle'
@@ -46,6 +45,15 @@ function normalizeTaskStatusFilter(value: string | null) {
 function taskActivityTimestamp(task: { status: TaskStatus; lifecycle?: { updated_at?: string }; completed_at: string; started_at: string; created_at: string; last_heartbeat_at?: string }) {
   if (task.status === 'completed' && task.completed_at) return task.completed_at
   return task.lifecycle?.updated_at || task.last_heartbeat_at || task.completed_at || task.started_at || task.created_at
+}
+
+function taskAgentId(task: { agent_id?: string; type: TaskType; project_snapshot?: { agent_id?: string; channel?: string } }) {
+  return task.agent_id || task.project_snapshot?.agent_id || task.project_snapshot?.channel || task.type
+}
+
+function TaskStatusMark({ status }: { status: TaskStatus }) {
+  const Icon = status === 'completed' ? CheckCircle2 : status === 'failed' ? XCircle : status === 'cancelled' ? BanIcon : status === 'running' ? LoaderCircle : CircleDashed
+  return <Icon aria-hidden="true" className={`size-4 shrink-0 ${status === 'completed' ? 'text-emerald-600' : status === 'failed' ? 'text-destructive' : status === 'running' ? 'animate-spin text-primary motion-reduce:animate-none' : 'text-muted-foreground'}`} />
 }
 
 export default function TasksPage() {
@@ -621,38 +629,36 @@ export default function TasksPage() {
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
                     <Link to={`/tasks/${task.id}`} className="flex min-w-0 flex-1 items-start gap-3 rounded-md">
-                      {project ? <ProjectIdentity project={project} compact className="flex max-w-[min(16rem,42vw)]" /> : null}
+                      <div className="flex shrink-0 items-center gap-2 pt-0.5" title={agentDisplayName(taskAgentId(task))}>
+                        <AgentIconStack agentIds={[taskAgentId(task)]} compact />
+                      </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}</h3>
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            <Badge variant={statusBadgeVariant(task.status)}>
-                              {taskStatusLabel[task.status] || task.status}
-                            </Badge>
+                          <div className="flex w-7 shrink-0 items-center justify-end gap-1.5" title={taskStatusLabel[task.status] || task.status}>
+                            <TaskStatusMark status={task.status} />
+                            <span className="sr-only">{taskStatusLabel[task.status] || task.status}</span>
                           </div>
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
-                          <Badge variant="outline" className={`text-[10px] ${platformBadgeClassName[task.type] || ''}`}>
-                            {contentTypeDisplayName(task.type)}
-                          </Badge>
-                          <span className={actionSignal.tone === 'risk' ? 'font-medium text-destructive' : 'font-medium text-foreground'}>阶段：{stage.title}</span>
+                          {project ? <span className="max-w-[min(16rem,42vw)] truncate text-muted-foreground">{project.name}</span> : <span>未设置项目</span>}
+                          <span className={actionSignal.tone === 'risk' ? 'font-medium text-destructive' : 'font-medium text-foreground'}>{stage.title}</span>
                           {actionSignal.tone === 'risk' && <span>{actionSignal.hint}</span>}
                           <span aria-label={`最近活动：${formatDateTimeCN(activityAt)}`}>最近活动：{formatDateTimeCN(activityAt)}</span>
                           <span className="font-medium text-foreground">累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分</span>
                         </div>
                       </div>
                     </Link>
-                    {task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') && (
-                      <Link
-                        to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
-                        aria-label="查看内容分析"
-                        title="查看内容分析"
-                        className="mt-0.5 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                      >
-                        <BarChart3 className="h-4 w-4" />
-                        <span className="hidden md:inline">查看内容分析</span>
-                      </Link>
-                    )}
+                    <div className="flex w-9 shrink-0 items-center justify-center">
+                      {task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? (
+                        <Link
+                          to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
+                          aria-label="查看内容分析"
+                          title="查看内容分析"
+                          className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                        ><BarChart3 className="size-4" /></Link>
+                      ) : <span aria-hidden="true" className="size-9" />}
+                    </div>
                   </div>
                 </div>
               </div>

@@ -31,12 +31,12 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { formatDateTimeCN, taskFailurePresentation, taskStatusLabel, contentTypeDisplayName, platformDisplayName, statusBadgeVariant } from '@/lib/labels'
-import { platformBadgeClassName, renderPlatformIcon } from '@/lib/PlatformIcon'
+import { formatDateTimeCN, taskFailurePresentation, taskStatusLabel, platformDisplayName, statusBadgeVariant } from '@/lib/labels'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 import { TaskRuntimeContext } from '@/components/tasks/TaskRuntimeContext'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
+import { AgentIconStack, agentDisplayName } from '@/components/agent-prompt/AgentIconStack'
 
 const RESUME_FILE_MAX_BYTES = 25 * 1024 * 1024
 const RESUME_ATTACHMENT_POLICY = {
@@ -644,6 +644,8 @@ export default function TaskDetailPage() {
   const projectDialogPlatform = project?.platform || snapshot?.platform || task.type
   const projectDialogInstructions = project?.instructions || project?.positioning || snapshot?.instructions || '—'
   const projectDialogEcommerceDefaults = project?.ecommerce_defaults || snapshot?.ecommerce_defaults
+  const taskAgentId = task.agent_id || snapshot?.agent_id || task.channel || snapshot?.channel || task.type
+  const taskAgentLabel = agentDisplayName(taskAgentId)
 
   function openCloneDialog() {
     cloneSourceIdentityRef.current = { routeId: id!, taskId: currentTask.id }
@@ -685,18 +687,18 @@ export default function TaskDetailPage() {
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden sm:list-item" />
               <BreadcrumbItem className="hidden sm:inline-flex">
-                <BreadcrumbPage>{task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}</BreadcrumbPage>
+              <BreadcrumbPage>{task.title || task.prompt || `${taskAgentLabel}任务`}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
           <div className="flex flex-wrap items-center gap-3">
+            <div className="flex shrink-0 items-center gap-2" title={taskAgentLabel}>
+              <AgentIconStack agentIds={[taskAgentId]} />
+              <span className="sr-only">{taskAgentLabel}</span>
+            </div>
             <h1 className="min-w-0 max-w-4xl text-xl font-bold leading-tight text-foreground">
-              {task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}
+              {task.title || task.prompt || `${taskAgentLabel}任务`}
             </h1>
-            <Badge variant="outline" className={platformBadgeClassName[task.type]}>
-                {renderPlatformIcon(task.type)}
-                {contentTypeDisplayName(task.type)}
-            </Badge>
             <Badge variant={statusBadgeVariant(task.status)}>
               {taskStatusLabel[task.status] || task.status}
             </Badge>
@@ -706,7 +708,7 @@ export default function TaskDetailPage() {
                 onClick={() => setShowProjectDialog(true)}
                 className="rounded-md bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
-                <ProjectIdentity project={project} compact />
+                <span className="max-w-[min(18rem,42vw)] truncate text-xs text-muted-foreground">{project.name}</span>
               </button>
             )}
           </div>

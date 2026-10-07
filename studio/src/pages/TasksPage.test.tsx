@@ -396,7 +396,7 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     expect(await screen.findByRole('alert', { name: '失败任务提醒' })).toHaveTextContent('1 个失败任务')
     expect(screen.getAllByRole('link', { name: /1 个失败任务/ })).toHaveLength(1)
-    expect(screen.getByText('阶段：撰写正文')).toBeInTheDocument()
+    expect(screen.getByText('撰写正文')).toBeInTheDocument()
     expect(screen.getByText('最近活动：7/6 09:02')).toBeInTheDocument()
   })
 
