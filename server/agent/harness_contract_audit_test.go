@@ -158,6 +158,26 @@ func TestVisualReviewUnavailableFailsClosedAtDelivery(t *testing.T) {
 			}
 		}
 	}
+	articlePaths := []string{
+		"harness/skills/article-visual-design/SKILL.md",
+		"harness/skills/article-visual-design/references/content.md",
+		"harness/skills/article-visual-design/references/generation-contract.md",
+		"harness/skills/article/SKILL.md",
+		"harness/packs/wechat-article/agent.claude.md",
+		"harness/packs/wechat-article/agent.codex.toml",
+		"harness/packs/wechat-article/agent.dsh.yml",
+	}
+	for _, rel := range articlePaths {
+		body := readArticleContractFile(t, filepath.Join(root, rel))
+		for _, term := range []string{"quality_status=unavailable", "不得上传或插入", "readiness", "blocked"} {
+			if !strings.Contains(body, term) {
+				t.Fatalf("%s missing fail-closed article review contract %q", rel, term)
+			}
+		}
+		if strings.Contains(body, "至少 80%") {
+			t.Fatalf("%s retains partial-pass visual gate", rel)
+		}
+	}
 }
 
 func TestArticleImageUploadIsServerOwnedAndRevalidated(t *testing.T) {

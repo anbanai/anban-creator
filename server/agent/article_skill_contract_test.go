@@ -804,10 +804,9 @@ func TestArticleManagedRuntimeFailsClosedOnProjectResolutionAndMCPCalls(t *testi
 			"只有这种成功响应中的可选字段缺失",
 			"upload_image 调用失败时只重试上传",
 			"article_image_upload_failed",
-			"analyze_image 的传输或运行时失败",
-			"记录为警告",
-			"不得阻塞后续已规划的图片生成",
-			"最终质量判断由 Agent 负责",
+			"quality_status=unavailable",
+			"不得上传或插入 Markdown/HTML",
+			"最终 readiness 必须为 blocked",
 		} {
 			if !strings.Contains(normalizedBody, required) {
 				t.Fatalf("%s missing managed Article resolution term %q", path, required)
