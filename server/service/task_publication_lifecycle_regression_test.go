@@ -183,11 +183,58 @@ func canonicalPicturePublicationPackage(t *testing.T, status, readiness string, 
 	return body
 }
 
+func picturePublicationPackageWithImages(t *testing.T, imagePaths []string) []byte {
+	t.Helper()
+	var pkg map[string]any
+	if err := json.Unmarshal(canonicalPicturePublicationPackage(t, "ready", "ready", nil, nil), &pkg); err != nil {
+		t.Fatal(err)
+	}
+	pkg["image_paths"] = imagePaths
+	body, err := json.Marshal(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestFinalizePicturePublicationRequiresExactRequestedImageCount(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		requested    int
+		imagePaths   []string
+	}{
+		{name: "insufficient", requested: 2, imagePaths: []string{}},
+		{name: "exceeded", requested: 1, imagePaths: []string{"output/image_01.png"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo, task, execution := setupCloudCompletionTest(t, false)
+			task.Type = model.TaskTypeWechatPicture
+			task.Channel = model.ChannelWechatPicture
+			task.SetAgentInput(map[string]any{"picture_image_count": tc.requested})
+			addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", picturePublicationPackageWithImages(t, tc.imagePaths))
+
+			status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result publicationDeliveryResult
+			if err := json.Unmarshal(evidence, &result); err != nil {
+				t.Fatal(err)
+			}
+			if status != model.TaskExecutionDraftDeliveryBlocked || result.Code != "image_count_mismatch" || result.Attempted {
+				t.Fatalf("status=%q evidence=%s", status, evidence)
+			}
+		})
+	}
+}
+
 func TestFinalizePicturePublicationDeliversCanonicalPackageToWechat(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, task, execution := setupCloudCompletionTest(t, false)
 	task.Type = model.TaskTypeWechatPicture
 	task.Channel = model.ChannelWechatPicture
+	task.SetAgentInput(map[string]any{"picture_image_count": 1})
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}

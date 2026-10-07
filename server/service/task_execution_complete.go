@@ -999,8 +999,8 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 			if !valid {
 				return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_invalid", false, "retry_visuals"), nil
 			}
-			if len(paths) > requested {
-				return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_exceeded", false, "retry_visuals"), nil
+			if len(paths) != requested {
+				return block("image_count_mismatch", "retry_visuals")
 			}
 		}
 	}

@@ -1029,7 +1029,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "53143f102c32b2aa1345240972068a16e6e08b23c33d2b9d5e724e68b0f3c6da"
+      "digest": "a92dd718b14d1559a9eae799c6b524c759dd29efe56e124b21608573b8709e40"
     },
     {
       "id": "wechat-article",
@@ -1250,7 +1250,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "ecb83346e2f4e1f37264840f1eb9202a50eff37c43145e1379771fe635d2bdfc"
+      "digest": "cad58bc8936527e3f9b59a39e374c10f6298187752e99edb9b4662d924d1205a"
     },
     {
       "id": "wechat-picture",
@@ -1385,7 +1385,7 @@
       "ui": {
         "renderer": "custom:wechat-picture"
       },
-      "digest": "12d148fdebe32c81147eac51c612318abf07674e909048b8d7f9a1821d574a21"
+      "digest": "14a8d1726f534d9a7d43485985a490e1a4c64af5580ef7e0131e15759af08f9f"
     },
     {
       "id": "whiteboard-animation",
