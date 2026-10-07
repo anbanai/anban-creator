@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import { useCallback } from 'react'
-import { BookOpen, MessageCircle, ShoppingBag, Signature, PenLine } from 'lucide-react'
+import { BookOpen, Images, MessageCircle, ShoppingBag, Signature, PenLine } from 'lucide-react'
 import { motion, useAnimation, useReducedMotion, type Variants } from 'motion/react'
 
 type PlatformIconComponent = ComponentType<{ className?: string }>
@@ -113,14 +113,14 @@ function VideoReplicationIcon(props: { className?: string }) {
   return <VideoPlatformIcon platform="hypit" {...props} />
 }
 
-// Projects use the platform key `wechat`, while tasks use the more specific
-// `wechat-article` and `wechat-picture` task types. Keep one visual identity
-// for all three values without making `wechat` a task type.
+// Projects use the platform key `wechat`, which keeps the shared WeChat
+// identity, while tasks use the more specific `wechat-article` (long-form
+// writing) and `wechat-picture` (multi-image) task types with distinct glyphs.
 export const platformIcon: Record<string, PlatformIconComponent> = {
   seednote: BookOpen,
   wechat: Signature,
   'wechat-article': Signature,
-  'wechat-picture': Signature,
+  'wechat-picture': Images,
   moments: MessageCircle,
   ecommerce: ShoppingBag,
   viral_analysis: BookOpen,

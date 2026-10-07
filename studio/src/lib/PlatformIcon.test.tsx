@@ -127,6 +127,21 @@ describe('video platform identity', () => {
     expect(platformBadgeClassName.hypit).toContain('text-orange-700')
   })
 
+  it('distinguishes the wechat article and picture task glyphs', () => {
+    const { container, rerender } = render(<>{renderPlatformIcon('wechat-article')}</>)
+    const article = container.querySelector('svg')
+    expect(article).toBeInTheDocument()
+    const articlePaths = [...article!.querySelectorAll('path')].map((path) => path.getAttribute('d'))
+
+    rerender(<>{renderPlatformIcon('wechat-picture')}</>)
+    const picture = container.querySelector('svg')
+    expect(picture).toBeInTheDocument()
+    const picturePaths = [...picture!.querySelectorAll('path')].map((path) => path.getAttribute('d'))
+
+    expect(picturePaths).not.toEqual(articlePaths)
+    expect(renderPlatformIcon('wechat-article')).not.toEqual(renderPlatformIcon('wechat-picture'))
+  })
+
   it('does not render an unrelated icon for an unknown platform', () => {
     expect(renderPlatformIcon('unknown')).toBeNull()
   })
