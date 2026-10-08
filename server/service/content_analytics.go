@@ -127,6 +127,10 @@ func loadAnalyticsCandidates(ctx context.Context, repo repository.Repository, us
 			if i, ok := byTask[pub.TaskID]; ok {
 				old := result[i]
 				c.Target = old.Target
+				// The task/channel identity is canonical for a linked publication.
+				// Older console records default DraftArticleType to "news", which
+				// must not turn a wechat-picture task into an article candidate.
+				c.ContentType = old.ContentType
 				c.Task = old.Task
 				c.Status = old.Status
 				c.aliases = append(old.aliases, AnalyticsTarget{"wechat_publication", pub.ID})

@@ -114,6 +114,31 @@ func TestMatchWechatAnalyticsPublicationPriority(t *testing.T) {
 	}
 }
 
+func TestWechatPictureAnalyticsPreviewMatchesOnlyPictureContent(t *testing.T) {
+	date := time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC)
+	candidates := []AnalyticsCandidate{
+		{Target: AnalyticsTarget{"task", "article"}, Title: "同名内容", ContentType: model.TaskTypeWechatArticle, matchDate: &date},
+		{Target: AnalyticsTarget{"task", "picture"}, Title: "同名内容", ContentType: model.TaskTypeWechatPicture, matchDate: &date},
+	}
+	row := ParsedWechatAnalyticsRow{Title: "同名内容", ContentType: model.TaskTypeWechatPicture, PublishedDate: &date}
+
+	preview := previewWechatCandidateRow(row, candidates)
+	if preview.MatchStatus != model.WechatAnalyticsImportRowMatched || preview.Target == nil || preview.Target.ID != "picture" {
+		t.Fatalf("picture row preview = %+v, want picture task matched", preview)
+	}
+}
+
+func TestWechatPictureAnalyticsPreviewDoesNotFallBackToArticle(t *testing.T) {
+	date := time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC)
+	candidates := []AnalyticsCandidate{{Target: AnalyticsTarget{"task", "article"}, Title: "同名内容", ContentType: model.TaskTypeWechatArticle, matchDate: &date}}
+	row := ParsedWechatAnalyticsRow{Title: "同名内容", ContentType: model.TaskTypeWechatPicture, PublishedDate: &date}
+
+	preview := previewWechatCandidateRow(row, candidates)
+	if preview.MatchStatus != model.WechatAnalyticsImportRowUnmatched || preview.Target != nil {
+		t.Fatalf("picture row matched another content type: %+v", preview)
+	}
+}
+
 func TestParseWechatAnalyticsRateAndMissingValues(t *testing.T) {
 	row := parseWechatAnalyticsRow(2, []string{"来源", "标题", "2026-09-11", "", "", "", "", "40.5%", "", ""}, func() map[string]int {
 		m := make(map[string]int, len(wechatAnalyticsHeaders))
@@ -140,9 +165,11 @@ func TestWechatAnalyticsContentTypeRequiresExplicitEvidence(t *testing.T) {
 		{"sticker image type", "内容类型", "贴图", "公众号后台", model.TaskTypeWechatPicture},
 		{"gallery image type", "作品类型", "图集", "公众号后台", model.TaskTypeWechatPicture},
 		{"sticker image source", "", "", "贴图", model.TaskTypeWechatPicture},
+		{"picture source label", "", "", "公众号贴图", model.TaskTypeWechatPicture},
 		{"gallery image source", "", "", "图集", model.TaskTypeWechatPicture},
 		{"alternate type", "作品类型", "文章", "公众号后台", model.TaskTypeWechatArticle},
 		{"english type", "类型", "image", "公众号后台", model.TaskTypeWechatPicture},
+		{"wechat API picture type", "类型", "newspic", "公众号后台", model.TaskTypeWechatPicture},
 		{"explicit source", "", "", "图文", model.TaskTypeWechatArticle},
 		{"generic source", "", "", "数据来源概况", "unknown"},
 		{"missing type", "", "", "公众号后台", "unknown"},

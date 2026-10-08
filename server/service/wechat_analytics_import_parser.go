@@ -221,9 +221,9 @@ func wechatAnalyticsContentType(raw map[string]string) string {
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "图文", "图文消息", "文章", "article", "news":
+	case "图文", "图文消息", "公众号图文", "文章", "article", "news":
 		return model.TaskTypeWechatArticle
-	case "图片", "图片消息", "贴图", "图集", "image":
+	case "图片", "图片消息", "贴图", "图集", "公众号贴图", "公众号图片", "image", "newspic":
 		return model.TaskTypeWechatPicture
 	default:
 		return "unknown"

@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 function rememberKey(userId?: string) { return `content-analytics:account:${userId || 'anonymous'}` }
 function readRemembered(userId?: string) { try { return localStorage.getItem(rememberKey(userId)) || '' } catch { return '' } }
@@ -122,7 +123,7 @@ export default function ContentAnalyticsPage() {
   function sortBy(key: string) { update({ sort: key, direction: sort === key && direction === 'desc' ? 'asc' : 'desc', page: undefined }) }
 
   return <div className="space-y-5">
-    <PageHeader title="内容分析" description="把每一篇内容的表现，变成下一次创作的线索。"><div className="flex gap-2"><Button variant="outline" disabled={!project} onClick={() => setHistoryOpen(true)}><History />导入记录</Button><Button disabled={!project} onClick={() => setImportOpen(true)}><Upload />导入分析数据</Button></div></PageHeader>
+    <PageHeader title="内容分析" description="把每一篇内容的表现，变成下一次创作的线索。"><div className="flex gap-1"><Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon" disabled={!project} aria-label="查看导入记录" onClick={() => setHistoryOpen(true)} />}><History /></TooltipTrigger><TooltipContent>查看导入记录</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<Button size="icon" disabled={!project} aria-label="导入分析数据" onClick={() => setImportOpen(true)} />}><Upload /></TooltipTrigger><TooltipContent>导入分析数据</TooltipContent></Tooltip></div></PageHeader>
     <div className="flex flex-wrap items-center justify-between gap-3"><ProjectContextControl mode="select" projects={projects} value={project?.id ?? null} onValueChange={id => { if (id) changeAccount(id) }} loading={projectsQuery.isPending} disabled={!projectsQuery.isPending && !projects.length} compact ariaLabel="筛选项目" placeholder="选择项目" /><select aria-label="分析平台" value={analyticsPlatform} className="h-9 rounded-md border bg-background px-2 text-sm" onChange={event => update({ platform: event.target.value, content: undefined, metric: undefined, type: undefined, sort: undefined, page: undefined }, false)}><option value="wechat">公众号</option><option value="seednote">种草笔记</option></select></div>
     {projectsQuery.isPending && <p role="status" className="flex items-center gap-2 py-16 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />正在读取账号…</p>}
     {error && <Alert variant="destructive"><AlertCircle /><AlertTitle>数据加载失败</AlertTitle><AlertDescription>{error.message}<Button variant="outline" size="sm" onClick={() => { void projectsQuery.refetch(); void refresh() }}>重试</Button></AlertDescription></Alert>}

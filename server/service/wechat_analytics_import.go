@@ -290,7 +290,19 @@ func previewWechatCandidateRow(row ParsedWechatAnalyticsRow, candidates []Analyt
 		preview.MatchStatus = model.WechatAnalyticsImportRowInvalid
 		return preview
 	}
-	match, ambiguous := matchAnalyticsCandidate(row.Title, row.PublishedDate, row.ArticleURL, candidates)
+	// WeChat exports can contain identical titles for articles and picture posts.
+	// An explicit content type is authoritative for automatic matching; manual
+	// selection remains available when the export omits or mislabels it.
+	matching := candidates
+	if row.ContentType == model.TaskTypeWechatArticle || row.ContentType == model.TaskTypeWechatPicture {
+		matching = make([]AnalyticsCandidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			if candidate.ContentType == row.ContentType {
+				matching = append(matching, candidate)
+			}
+		}
+	}
+	match, ambiguous := matchAnalyticsCandidate(row.Title, row.PublishedDate, row.ArticleURL, matching)
 	if match != nil {
 		preview.Target = &match.Target
 		preview.TargetTitle = match.Title

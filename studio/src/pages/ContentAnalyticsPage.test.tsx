@@ -23,6 +23,14 @@ beforeEach(() => {
   vi.mocked(contentAnalyticsApi.observations).mockResolvedValue({ revision: 4, items: [], total: 0, offset: 0, limit: 25 })
 })
 describe('server analytics queries', () => {
+  it('exposes icon-only import actions with accessible names', async () => {
+    render(<ContentAnalyticsPage />)
+
+    expect(await screen.findByRole('button', { name: '查看导入记录' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导入分析数据' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看导入记录' })).not.toHaveTextContent('导入记录')
+    expect(screen.getByRole('button', { name: '导入分析数据' })).not.toHaveTextContent('导入分析数据')
+  })
   it('reads a neutral project by the selected analytics platform', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ id: 'shared', platform: '', name: '通用项目' } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=shared&platform=seednote')

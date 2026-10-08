@@ -55,6 +55,86 @@ func wechatSelectionRow(title, link string) []string {
 	return []string{"公众号后台", title, "20260911", "10", "1", "0", "100", "1", "0.5", link}
 }
 
+func TestWechatPictureImportMatchesPictureAndKeepsItSelectable(t *testing.T) {
+	ctx := context.Background()
+	row := wechatSelectionRow("文章", "")
+	row[0] = "公众号贴图"
+	f, svc, req := newWechatSelectionImport(t, [][]string{row})
+	pictureTask := &model.Task{
+		ID: uuid.NewString(), UserID: f.userID, ProjectID: f.projectID,
+		Channel: model.ChannelWechatPicture, Type: model.TaskTypeWechatPicture,
+		Status: "completed", Title: "文章",
+	}
+	if err := f.repo.Tasks().Create(ctx, pictureTask); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, total, err := NewContentAnalyticsService(f.repo).Candidates(ctx, f.userID, f.projectID, "wechat", "", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selectable bool
+	for _, candidate := range candidates {
+		if candidate.Target.Kind == "task" && candidate.Target.ID == pictureTask.ID && candidate.ContentType == model.TaskTypeWechatPicture {
+			selectable = true
+		}
+	}
+	if total != 2 || !selectable {
+		t.Fatalf("picture candidate missing from manual selection list: total=%d candidates=%+v", total, candidates)
+	}
+
+	preview, err := svc.Preview(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Rows) != 1 || preview.Rows[0].ContentType != model.TaskTypeWechatPicture || preview.Rows[0].Target == nil || preview.Rows[0].Target.ID != pictureTask.ID {
+		t.Fatalf("picture import preview = %+v, want the same-title picture task matched", preview.Rows)
+	}
+}
+
+func TestWechatPictureImportKeepsTaskTypeWhenPublicationUsesLegacyNewsDefault(t *testing.T) {
+	ctx := context.Background()
+	row := wechatSelectionRow("文章", "")
+	row[0] = "公众号贴图"
+	f, svc, req := newWechatSelectionImport(t, [][]string{row})
+	task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Channel = model.ChannelWechatPicture
+	task.Type = model.TaskTypeWechatPicture
+	if err := f.repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	f.publication.DraftArticleType = "news"
+	if err := f.repo.WechatPublications().Update(ctx, f.publication); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := loadAnalyticsCandidates(ctx, f.repo, f.userID, f.projectID, model.AnalyticsMetricsWechat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidate *AnalyticsCandidate
+	for i := range candidates {
+		if candidates[i].Target.Kind == "task" && candidates[i].Target.ID == f.taskID {
+			candidate = &candidates[i]
+			break
+		}
+	}
+	if candidate == nil || candidate.ContentType != model.TaskTypeWechatPicture {
+		t.Fatalf("linked picture candidate = %+v, want wechat-picture", candidate)
+	}
+
+	preview, err := svc.Preview(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Rows) != 1 || preview.Rows[0].MatchStatus != model.WechatAnalyticsImportRowMatched || preview.Rows[0].Target == nil || preview.Rows[0].Target.ID != f.taskID {
+		t.Fatalf("picture import preview = %+v, want legacy publication to match picture task", preview.Rows)
+	}
+}
+
 func TestWechatAnalyticsPreviewAllRowsWithAuthoritativeMatches(t *testing.T) {
 	data := [][]string{wechatSelectionRow("URL 标题不同", "https://mp.weixin.qq.com/s/matched#rd"), wechatSelectionRow("文章", ""), wechatSelectionRow("找不到", ""), wechatSelectionRow("", "")}
 	for i := 0; i < 9; i++ {
