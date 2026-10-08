@@ -25,7 +25,7 @@ const shortcutMap: Record<string, string> = {
   '项目': 'g c',
   '计划': 'g p',
   '任务': 'g t',
-  '时间轴': 'g l',
+  '时间线': 'g l',
   '钱包': 'g $',
   '设置': 'g s',
 }

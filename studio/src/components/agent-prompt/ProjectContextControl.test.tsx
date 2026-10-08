@@ -53,7 +53,7 @@ describe('ProjectContextControl', () => {
     expect(selectedOption).toHaveTextContent('Daily editorial briefing')
     expect(selectedOption).not.toHaveTextContent('公众号项目')
     expect(selectedOption).toHaveAttribute('aria-selected', 'true')
-    expect(selectedOption).toHaveClass('min-h-10')
+    expect(selectedOption).toHaveClass('min-h-11')
 
     const search = screen.getByPlaceholderText('搜索项目...')
     fireEvent.change(search, { target: { value: 'Seasonal planting' } })

@@ -494,6 +494,73 @@ func TestSeednoteAdminRoutesUseJWTAndAdminAuthorization(t *testing.T) {
 	}
 }
 
+func TestTimelineRouteUsesJWTAndAdminAuthorization(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	t.Cleanup(func() { _ = repo.Close() })
+
+	adminID, regularID := uuid.NewString(), uuid.NewString()
+	for _, user := range []*model.User{
+		{ID: adminID, Email: "timeline-admin@example.com", Tier: model.TierPro, InviteCode: "TLADMIN1", IsAdmin: true},
+		{ID: regularID, Email: "timeline-user@example.com", Tier: model.TierFree, InviteCode: "TLUSER01"},
+	} {
+		if err := repo.Users().Create(t.Context(), user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	jwtSvc, err := auth.NewJWTService("timeline-admin-router-secret", "24h", "168h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	app := NewRouter(&Services{
+		Config:          &config.Config{Server: config.ServerConfig{Host: "0.0.0.0"}},
+		Logger:          &logger,
+		Repo:            repo,
+		JWTService:      jwtSvc,
+		TimelineHandler: handler.NewTimelineHandler(repo, &logger),
+	})
+
+	adminToken, err := jwtSvc.GenerateAccessToken(adminID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	regularToken, err := jwtSvc.GenerateAccessToken(regularID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		token      string
+		wantStatus int
+	}{
+		{name: "missing token", wantStatus: http.StatusUnauthorized},
+		{name: "regular user", token: regularToken, wantStatus: http.StatusForbidden},
+		{name: "administrator", token: adminToken, wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/timeline?from=2026-10-01&to=2026-10-31", nil)
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.wantStatus)
+			}
+		})
+	}
+}
+
 func TestIlinkRoutesRemainJWTProtected(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

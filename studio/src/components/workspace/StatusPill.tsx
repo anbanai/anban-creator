@@ -1,8 +1,8 @@
 import type { ComponentType, SVGProps } from 'react'
-import { Archive, CircleCheck, CirclePause, CirclePlay, CircleX, LoaderCircle } from 'lucide-react'
+import { Archive, CircleCheck, CircleDashed, CirclePause, CirclePlay, CircleSlash, CircleX, LoaderCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export type StatusPillStatus = 'active' | 'paused' | 'completed' | 'failed' | 'archived' | 'running' | 'pending' | 'default'
+export type StatusPillStatus = 'active' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'archived' | 'running' | 'pending' | 'default'
 
 type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
 
@@ -11,8 +11,9 @@ const statusPresentation: Record<StatusPillStatus, { tone: Tone; icon: Component
   running: { tone: 'info', icon: LoaderCircle },
   completed: { tone: 'success', icon: CircleCheck },
   failed: { tone: 'danger', icon: CircleX },
+  cancelled: { tone: 'neutral', icon: CircleSlash },
   paused: { tone: 'warning', icon: CirclePause },
-  pending: { tone: 'neutral', icon: LoaderCircle },
+  pending: { tone: 'neutral', icon: CircleDashed },
   archived: { tone: 'neutral', icon: Archive },
   default: { tone: 'neutral', icon: CircleCheck },
 }
@@ -43,7 +44,7 @@ export function StatusPill({ status = 'default', label, tone, className }: Statu
         className,
       )}
     >
-      <Icon aria-hidden="true" className={cn('size-3', status === 'running' || status === 'pending' ? 'animate-spin motion-reduce:animate-none' : '')} />
+      <Icon aria-hidden="true" className={cn('size-3', status === 'running' ? 'animate-spin motion-reduce:animate-none' : '')} />
       <span>{label}</span>
     </span>
   )

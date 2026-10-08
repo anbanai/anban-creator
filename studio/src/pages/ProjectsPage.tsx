@@ -34,7 +34,7 @@ import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-cen
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
-import { MetricStrip, WorkspaceSubnav } from '@/components/workspace'
+import { MetricStrip } from '@/components/workspace'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
@@ -433,15 +433,6 @@ export default function ProjectsPage() {
         </Button>
       </PageHeader>
 
-      <WorkspaceSubnav
-        items={[
-          { label: '项目', href: '/projects' },
-          { label: '计划', href: '/plans' },
-          { label: '任务', href: '/tasks' },
-          { label: '时间线', href: '/timeline' },
-        ]}
-      />
-
       <MetricStrip
         label="项目概览"
         metrics={[
@@ -504,7 +495,7 @@ export default function ProjectsPage() {
           action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '新建项目', onClick: openCreate } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
           {filteredProjects.map((project) => (
             <ProjectCard
               key={project.id}

@@ -434,7 +434,7 @@ function FilePreviewModalContent({
             复制 HTML
           </Button>
         )}
-        <Button variant="secondary" size="sm" disabled={downloading || !canDownload} title={!canDownload ? '仅支持预览' : undefined} onClick={handleDownload}>
+        <Button variant="secondary" size="sm" className="min-h-11" disabled={downloading || !canDownload} title={!canDownload ? '仅支持预览' : undefined} onClick={handleDownload}>
           {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           {downloading ? '下载中' : '下载'}
         </Button>
@@ -527,9 +527,9 @@ export function FilePreviewGallery({
             onKeyDown={handleKeyDown}
             navigation={compact && hasMultiple ? (
               <nav aria-label="文件切换" className="mr-auto flex items-center gap-1">
-                <Button size="icon-sm" variant="ghost" onClick={goPrev} aria-label="上一张"><ChevronLeft className="size-4" /></Button>
+                <Button size="icon-md" variant="ghost" onClick={goPrev} aria-label="上一张"><ChevronLeft className="size-4" /></Button>
                 <span className="text-xs tabular-nums text-muted-foreground">{currentIndex + 1} / {files.length}</span>
-                <Button size="icon-sm" variant="ghost" onClick={goNext} aria-label="下一张"><ChevronRight className="size-4" /></Button>
+                <Button size="icon-md" variant="ghost" onClick={goNext} aria-label="下一张"><ChevronRight className="size-4" /></Button>
               </nav>
             ) : undefined}
           >
@@ -545,7 +545,7 @@ export function FilePreviewGallery({
                 <button
                   onClick={goPrev}
                   aria-label="上一张"
-                  className="absolute left-2 top-1/2 z-50 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+                  className="absolute left-2 top-1/2 z-50 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
                 >
                   <ChevronLeft className="h-5 w-5" />
                 </button>
@@ -553,7 +553,7 @@ export function FilePreviewGallery({
                 <button
                   onClick={goNext}
                   aria-label="下一张"
-                  className="absolute right-2 top-1/2 z-50 -translate-y-1/2 rounded-full bg-black/50 p-2 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
+                  className="absolute right-2 top-1/2 z-50 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
                 >
                   <ChevronRight className="h-5 w-5" />
                 </button>
@@ -695,8 +695,8 @@ function FilePreviewInline({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {canPreview && <Button size="sm" variant="ghost" onClick={onClick} aria-label={`预览 ${file.file_name}`}><Eye className="size-3.5" /><span className="hidden sm:inline">预览</span></Button>}
-          <Button size="icon-sm" variant="ghost" onClick={handleDownload} disabled={downloading || !canDownload} aria-label={`下载 ${file.file_name}`} title={canDownload ? '下载' : '仅支持预览'}>
+          {canPreview && <Button size="sm" variant="ghost" className="min-h-11" onClick={onClick} aria-label={`预览 ${file.file_name}`}><Eye className="size-3.5" /><span className="hidden sm:inline">预览</span></Button>}
+          <Button size="icon-md" variant="ghost" className="min-h-11 min-w-11" onClick={handleDownload} disabled={downloading || !canDownload} aria-label={`下载 ${file.file_name}`} title={canDownload ? '下载' : '仅支持预览'}>
             {downloading ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
           </Button>
         </div>
@@ -727,7 +727,7 @@ function FilePreviewInline({
           {canPreview && (
           <button
             onClick={onClick}
-              className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+              className="flex min-h-11 items-center gap-1.5 rounded-md bg-secondary px-3 text-sm text-foreground transition-colors hover:bg-accent"
               aria-label={`预览 ${file.file_name}`}
             >
               <Eye className="h-3.5 w-3.5" />
@@ -738,7 +738,7 @@ function FilePreviewInline({
             onClick={handleDownload}
             disabled={downloading || !canDownload}
             title={!canDownload ? '仅支持预览' : undefined}
-            className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-accent"
+            className="flex min-h-11 items-center gap-1.5 rounded-md bg-secondary px-3 text-sm text-foreground transition-colors hover:bg-accent"
             aria-label={`下载 ${file.file_name}`}
           >
             {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}

@@ -142,7 +142,7 @@ describe('PlansPage multi-output plans', () => {
     expect(planCard?.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(2)
     expect(planCard).not.toHaveTextContent('种草笔记')
     expect(planCard).not.toHaveTextContent('公众号贴图')
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑计划：多种输出' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
     expect(within(dialog).getByRole('button', { name: '种草笔记' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(dialog).getByRole('button', { name: '公众号贴图' })).toHaveAttribute('aria-pressed', 'true')
@@ -164,7 +164,10 @@ describe('PlansPage multi-output plans', () => {
     expect(screen.getByTestId('plan-card-active-plan')).toHaveTextContent('下次运行')
     expect(screen.getByTestId('plan-card-active-plan')).toHaveTextContent('每')
     expect(screen.getByTestId('plan-card-paused-plan')).toHaveTextContent('已暂停')
-    expect(within(screen.getByTestId('plan-card-active-plan')).getByRole('button', { name: '编辑' })).toHaveClass('hover:bg-muted')
+    const activeCard = within(screen.getByTestId('plan-card-active-plan'))
+    for (const name of ['编辑计划：活跃计划', '查看任务：活跃计划', '暂停计划：活跃计划', '删除计划：活跃计划']) {
+      expect(activeCard.getByRole(name.startsWith('查看') ? 'link' : 'button', { name })).toHaveClass('size-11')
+    }
   })
 
   it('shows output Agents only once and keeps edit as an unfilled icon action', async () => {
@@ -178,7 +181,7 @@ describe('PlansPage multi-output plans', () => {
     expect(projectIdentity?.querySelector('[data-slot="agent-icon"]')).not.toBeInTheDocument()
     expect(card.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(2)
 
-    const editButton = within(card).getByRole('button', { name: '编辑' })
+    const editButton = within(card).getByRole('button', { name: '编辑计划：多种输出' })
     expect(editButton).toHaveClass('hover:bg-muted')
     expect(editButton).not.toHaveClass('bg-primary')
     expect(editButton).not.toHaveClass('text-primary-foreground')
@@ -189,7 +192,7 @@ describe('PlansPage multi-output plans', () => {
     const plan = { ...mockPlans.items[0], agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑计划：多种输出' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
     fireEvent.click(within(dialog).getByText('高级设置'))
     expect(within(dialog).getByRole('img', { name: '参考图' })).toHaveAttribute('src', reference.download_url)
@@ -266,7 +269,7 @@ describe('PlansPage multi-output plans', () => {
     const plan = { ...mockPlans.items[0], agent_ids: ['seednote'], input_attachments: [attachment] }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑计划：测试计划' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
     expect(within(dialog).getByRole('button', { name: '预览 rules.txt' })).toBeInTheDocument()
     await waitFor(() => expect(within(dialog).getByRole('button', { name: '保存' })).toBeEnabled())

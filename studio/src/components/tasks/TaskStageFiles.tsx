@@ -38,7 +38,7 @@ export function TaskFileDownloads({ taskId, files }: { taskId: string; files: Ta
     return (
       <Tooltip>
         <TooltipTrigger
-          render={<Button size="icon-xs" variant="ghost" loading={downloading === scope} disabled={!!downloading} onClick={() => void download(scope)} aria-label={hasDelivery ? '下载交付成果 (ZIP)' : '下载已保留产物 (ZIP)'} />}
+          render={<Button size="icon-md" variant="ghost" loading={downloading === scope} disabled={!!downloading} onClick={() => void download(scope)} aria-label={hasDelivery ? '下载交付成果 (ZIP)' : '下载已保留产物 (ZIP)'} />}
         >
           {downloading === scope ? null : <Download className="size-3.5" aria-hidden="true" />}
         </TooltipTrigger>
@@ -49,9 +49,9 @@ export function TaskFileDownloads({ taskId, files }: { taskId: string; files: Ta
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button size="icon-xs" variant="ghost" aria-label="下载产物" title="下载产物" />}
+        render={<Button size="icon-md" variant="ghost" loading={!!downloading} disabled={!!downloading} aria-label="下载产物" title="下载产物" />}
       >
-          <Download className="size-3.5" />
+          {downloading ? null : <Download className="size-3.5" aria-hidden="true" />}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem disabled={!!downloading} onClick={() => void download('delivered')}>

@@ -180,7 +180,7 @@ export function TaskExecutionRail({
   const fileFallback = (
     <>
       {filesLoading && <p className="px-4 py-3 text-xs text-muted-foreground" role="status">正在加载产物…</p>}
-      {filesError && <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="alert">产物暂时加载失败<Button size="xs" variant="ghost" onClick={onRetryFiles}>重新加载</Button></div>}
+      {filesError && <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="alert">产物暂时加载失败<Button size="xs" variant="ghost" className="min-h-11" onClick={onRetryFiles}>重新加载</Button></div>}
       {groupedFiles.unassigned.length > 0 && <section aria-label="其他产物" className="mx-4 mt-4 border-t border-border/60 py-4 sm:ml-14">
         <p className="mb-3 flex items-center gap-2 text-sm font-medium"><FolderOpen className="size-4 text-muted-foreground" />{stages.length ? '其他产物' : '任务产物'}</p>
         {stages.length > 0 && <p className="mb-3 text-xs text-muted-foreground">这些文件暂未关联到具体环节。</p>}
@@ -245,7 +245,7 @@ export function TaskExecutionRail({
       <h3 className="text-sm font-semibold text-destructive">{failure.title}</h3>
       <p className="mt-1 text-sm">{failure.message}</p>
       <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p>
-      {onResume && <Button size="xs" variant="outline" className="mt-3" onClick={onResume}><Send className="size-3" />继续执行</Button>}
+      {onResume && <Button size="xs" variant="outline" className="mt-3 min-h-11" onClick={onResume}><Send className="size-3" />继续执行</Button>}
     </div>
   )
 
@@ -275,7 +275,7 @@ export function TaskExecutionRail({
             </p>
             {showFailureSummary && status === 'failed' && failure?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p>}
             {showFailureSummary && (status === 'failed' || status === 'cancelled') && onResume && (
-              <Button size="xs" variant="outline" className="mt-3" onClick={onResume}>
+              <Button size="xs" variant="outline" className="mt-3 min-h-11" onClick={onResume}>
                 <Send className="size-3" />
                 继续执行
               </Button>
@@ -317,24 +317,27 @@ export function TaskExecutionRail({
               </span>
               <div className="min-w-0 py-2.5">
                 <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <button
-                    type="button"
-                    aria-label={`${stage.title}，${presentation.label}`}
-                    aria-current={isCurrent ? 'step' : undefined}
-                    aria-expanded={canExpand ? isExpanded : undefined}
-                    aria-controls={canExpand ? `stage-${stage.id}-content` : undefined}
-                    disabled={!canExpand}
-                    onClick={() => {
-                      if (!canExpand) return
-                      setExpansion({ scope: expansionScope, stages: { ...manualExpansion, [stage.id]: !isExpanded } })
-                    }}
-                    className="group flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default"
-                  >
-                    <span className="min-w-0 break-words text-sm font-semibold text-foreground">{stage.title}</span>
-                    <span className={cn('shrink-0 text-xs', presentation.textClassName)}>{presentation.label}</span>
-                    {stageFiles.length > 0 && <span className="rounded bg-muted/70 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">{stageFiles.length} 个产物</span>}
-                    {canExpand && (isExpanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />)}
-                  </button>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <button
+                      type="button"
+                      aria-label={`${stage.title}，${presentation.label}`}
+                      aria-current={isCurrent ? 'step' : undefined}
+                      aria-expanded={canExpand ? isExpanded : undefined}
+                      aria-controls={canExpand ? `stage-${stage.id}-content` : undefined}
+                      disabled={!canExpand}
+                      onClick={() => {
+                        if (!canExpand) return
+                        setExpansion({ scope: expansionScope, stages: { ...manualExpansion, [stage.id]: !isExpanded } })
+                      }}
+                      className="group flex min-h-11 w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default"
+                    >
+                      <span className="min-w-0 break-words text-sm font-semibold text-foreground">{stage.title}</span>
+                      <span className={cn('shrink-0 text-xs', presentation.textClassName)}>{presentation.label}</span>
+                      {stageFiles.length > 0 && <span className="rounded bg-muted/70 px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">{stageFiles.length} 个产物</span>}
+                      {canExpand && (isExpanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />)}
+                    </button>
+                    {stage.goal && <p className="break-words text-xs leading-relaxed text-muted-foreground">{stage.goal}</p>}
+                  </div>
                   {time && <span className="hidden shrink-0 text-[11px] tabular-nums text-muted-foreground sm:inline">{time}</span>}
                   {stage.source === 'server' && (
                     <PublicationStageActions
@@ -349,7 +352,7 @@ export function TaskExecutionRail({
                     />
                   )}
                   {showFailureSummary && isTerminalRecoveryPoint && onResume && (
-                    <Button size="xs" variant="secondary" onClick={onResume}>
+                    <Button size="xs" variant="secondary" className="min-h-11" onClick={onResume}>
                       <Send className="size-3" />
                       继续执行
                     </Button>
@@ -371,7 +374,6 @@ export function TaskExecutionRail({
                       <p className="flex items-start gap-2 text-xs text-destructive"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" />{publication.last_error}</p>
                     )}
                     {stageFiles.length > 0 && <TaskStageFiles {...fileProps} files={stageFiles} />}
-                    {stage.goal && <p className="break-words text-xs leading-relaxed text-muted-foreground"><span className="font-medium text-foreground/70">环节说明：</span>{stage.goal}</p>}
                     {time && <p className="text-[11px] text-muted-foreground sm:hidden">{time}</p>}
                   </div>
                 )}
@@ -394,8 +396,8 @@ export function TaskExecutionRail({
             <DialogDescription>将当前公众号草稿提交为正式文章。提交后系统会继续检测微信的处理结果。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmPublish(false)}>取消</Button>
-            <Button loading={publish.isPending} onClick={() => publish.mutate()}>确认发布</Button>
+            <Button className="min-h-11" variant="outline" onClick={() => setConfirmPublish(false)}>取消</Button>
+            <Button className="min-h-11" loading={publish.isPending} onClick={() => publish.mutate()}>确认发布</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -415,8 +417,8 @@ function RailHeading({ onOpenLogs, taskId, files, stages }: { onOpenLogs: () => 
       <div className="flex flex-wrap items-center gap-1.5">
         <TaskFileDownloads taskId={taskId} files={files} />
         <Tooltip>
-          <TooltipTrigger render={<Button size="icon-xs" variant="ghost" onClick={onOpenLogs} aria-label="查看完整日志" />}>
-            <ScrollText className="size-3.5" />
+          <TooltipTrigger render={<Button size="icon-md" variant="ghost" onClick={onOpenLogs} aria-label="查看完整日志" />}>
+            <ScrollText className="size-4" />
           </TooltipTrigger>
           <TooltipContent>查看完整日志</TooltipContent>
         </Tooltip>
@@ -447,7 +449,7 @@ function PublicationStageActions({
   const retryAction = (label: string, onClick: () => void) => (
     <Tooltip>
       <TooltipTrigger
-        render={<Button size="icon-sm" variant="outline" loading={pending} onClick={onClick} aria-label={label} />}
+        render={<Button size="icon-md" variant="outline" loading={pending} onClick={onClick} aria-label={label} />}
       >
         {pending ? null : <RefreshCw className="size-4" aria-hidden="true" />}
       </TooltipTrigger>
@@ -458,6 +460,7 @@ function PublicationStageActions({
   const backendLink = (
     <Button
       size="xs"
+      className="min-h-11"
       variant="outline"
       nativeButton={false}
       render={<a href="https://mp.weixin.qq.com/" target="_blank" rel="noreferrer" aria-label="打开公众号后台" />}
@@ -475,7 +478,7 @@ function PublicationStageActions({
       return (
         <div className="flex shrink-0 flex-wrap gap-1.5">
           {backendLink}
-          <Button size="xs" variant="outline" loading={pending} onClick={onReconcile}>
+          <Button size="xs" variant="outline" className="min-h-11" loading={pending} onClick={onReconcile}>
             {pending ? null : <RefreshCw className="size-3" aria-hidden="true" />}
             检测状态
           </Button>
@@ -495,7 +498,7 @@ function PublicationStageActions({
   if (stage.state === 'complete') {
     if (!publication?.article_url) return backendLink
     return (
-      <Button size="xs" variant="outline" nativeButton={false} render={<a href={publication.article_url} target="_blank" rel="noreferrer" />}>
+      <Button size="xs" variant="outline" className="min-h-11" nativeButton={false} render={<a href={publication.article_url} target="_blank" rel="noreferrer" />}>
         <ExternalLink className="size-3" />打开文章
       </Button>
     )
@@ -505,7 +508,7 @@ function PublicationStageActions({
 
   const submitted = hasSubmissionEvidence(publication)
   if (stage.state === 'pending' && publication?.status === 'drafted' && !submitted) {
-    return <Button size="xs" loading={pending} onClick={onPublish}>{pending ? null : <Send className="size-3" aria-hidden="true" />}正式发布</Button>
+      return <Button size="xs" className="min-h-11" loading={pending} onClick={onPublish}>{pending ? null : <Send className="size-3" aria-hidden="true" />}正式发布</Button>
   }
   if (stage.state === 'blocked' && publication?.status === 'awaiting_manual_publish' && publication.draft_media_id) {
     return backendLink
@@ -513,7 +516,7 @@ function PublicationStageActions({
   if (stage.state === 'blocked' && publication?.status === 'unsupported' && publication.draft_media_id) {
     if (submitted) {
       return (
-        <Button size="xs" variant="outline" loading={pending} onClick={onReconcile}>
+        <Button size="xs" variant="outline" className="min-h-11" loading={pending} onClick={onReconcile}>
           {pending ? null : <RefreshCw className="size-3" aria-hidden="true" />}检测状态
         </Button>
       )
@@ -534,7 +537,7 @@ function CandidatePicker({ publication, pending, onSelect }: { publication: Wech
           type="button"
           disabled={pending}
           onClick={() => onSelect(candidate.article_id)}
-          className="min-w-0 rounded-md border border-border px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
+          className="min-h-11 min-w-0 rounded-md border border-border px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50"
         >
           <span className="block truncate text-sm font-medium text-foreground">{candidate.title || candidate.article_id}</span>
           {candidate.digest && <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">{candidate.digest}</span>}

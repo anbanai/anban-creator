@@ -204,7 +204,7 @@ function textOccurrences(container: HTMLElement, text: string) {
 }
 
 async function openTaskDetails(tab?: '概览' | '配置' | '素材' | '日志') {
-  fireEvent.click(await screen.findByRole('button', { name: '更多详情' }))
+  fireEvent.click(await screen.findByRole('button', { name: '打开任务概览' }))
   expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
   if (tab) {
     fireEvent.click(screen.getByRole('tab', { name: tab }))
@@ -307,6 +307,19 @@ describe('TaskDetailPage', () => {
       url: 'https://cdn.example.com/signed-input.png',
       expires_at: '2026-07-17T12:00:00Z',
     })
+  })
+
+  it('keeps the task title in the page heading without repeating it in the breadcrumb', async () => {
+    mockTask(taskWith({ title: '不重复显示的任务标题', status: 'completed' }))
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('heading', { level: 1, name: '不重复显示的任务标题' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '不重复显示的任务标题' })).not.toBeInTheDocument()
+    const status = screen.getByTestId('status-pill')
+    expect(status).toHaveAttribute('data-status', 'completed')
+    expect(status).toHaveTextContent('已完成')
+    expect(status.querySelector('svg')).toBeInTheDocument()
   })
 
   it('renders independent terminal outcome warnings and sanitized provider diagnostics', async () => {
@@ -481,15 +494,15 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const resultHeading = await screen.findByRole('heading', { name: '执行进展' })
-    const context = screen.getByRole('region', { name: '任务上下文' })
+    const context = screen.getByRole('region', { name: '关键事实' })
     expect(resultHeading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(context).getByText('茶小茶')).toBeInTheDocument()
-    expect(within(context).getByText('公众号文章')).toBeInTheDocument()
-    expect(within(context).getByText('清新茶感摄影 · 3:4')).toBeInTheDocument()
+    expect(within(context).getByText('清新茶感摄影')).toBeInTheDocument()
+    expect(within(context).getByText('画幅 3:4')).toBeInTheDocument()
     expect(within(context).getByText('1 项输入')).toBeInTheDocument()
-    expect(within(context).getByText('2 条 · 实时')).toBeInTheDocument()
+    expect(within(context).queryByText('茶小茶')).not.toBeInTheDocument()
+    expect(within(context).queryByText('公众号文章')).not.toBeInTheDocument()
 
-    fireEvent.click(within(context).getByRole('button', { name: '打开执行日志' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '日志' })).toHaveAttribute('aria-selected', 'true')
     const logSection = screen.getByRole('region', { name: '执行动态' })
@@ -507,8 +520,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const context = await screen.findByRole('region', { name: '任务上下文' })
-    fireEvent.click(within(context).getByRole('button', { name: '打开执行日志' }))
+    await screen.findByRole('region', { name: '关键事实' })
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     expect(screen.getByRole('button', { name: '暂停自动跟随' })).toHaveTextContent('自动跟随中')
 
     fireEvent.click(screen.getByRole('button', { name: '暂停自动跟随' }))
@@ -519,7 +532,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByRole('button', { name: '暂停自动跟随' })).toHaveTextContent('自动跟随中')
   })
 
-  it('opens Overview from the general More details command', async () => {
+  it('opens Overview from the task source fact', async () => {
     mockTask(taskWith({ status: 'completed' }))
 
     render(<TaskDetailPage />)
@@ -531,8 +544,8 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({ id: 'task-1', status: 'running', completed_at: '' }))
     const view = render(<TaskDetailPage />)
 
-    const context = await screen.findByRole('region', { name: '任务上下文' })
-    fireEvent.click(within(context).getByRole('button', { name: '打开执行日志' }))
+    await screen.findByRole('region', { name: '关键事实' })
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     expect(screen.getByRole('tab', { name: '日志' })).toHaveAttribute('aria-selected', 'true')
 
     routeState.taskId = 'task-2'
@@ -764,23 +777,22 @@ describe('TaskDetailPage', () => {
       progress_log: 'B 持久化日志',
     })
     const view = renderWithCachedTasks(taskA, taskB)
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
+    const initialLogs = await screen.findByRole('region', { name: '执行动态' })
 
     await waitFor(() => {
-      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('A 实时日志')
+      expect(initialLogs).toHaveTextContent('A 实时日志')
     })
 
     routeState.taskId = 'task-2'
     view.rerender(<TaskDetailPage />)
 
     await waitFor(() => {
-      const context = screen.getByRole('region', { name: '任务上下文' })
-      expect(context).toHaveTextContent('B 持久化日志')
-      expect(context).not.toHaveTextContent('A 实时日志')
-      expect(context).not.toHaveTextContent('A 终止后的迟到日志')
+      expect(screen.queryByRole('region', { name: '执行动态' })).not.toBeInTheDocument()
     })
     expect(streamSignals.get('task-1')).toHaveProperty('aborted', true)
 
-    fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     const logSection = await screen.findByRole('region', { name: '执行动态' })
     expect(logSection).toHaveTextContent('B 持久化日志')
     expect(logSection).not.toHaveTextContent('A 实时日志')
@@ -813,9 +825,11 @@ describe('TaskDetailPage', () => {
       completed_at: '',
     })
     const view = renderWithCachedTasks(taskA, taskB)
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
+    const initialLogs = await screen.findByRole('region', { name: '执行动态' })
 
     await waitFor(() => {
-      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('task-1 实时日志')
+      expect(initialLogs).toHaveTextContent('task-1 实时日志')
     })
 
     routeState.taskId = 'task-2'
@@ -825,12 +839,12 @@ describe('TaskDetailPage', () => {
       expect(streamSignals.get('task-1')).toHaveProperty('aborted', true)
       expect(mockStreamTaskProgress).toHaveBeenCalledWith('task-2', 'test-token', expect.anything())
     })
-    await waitFor(() => {
-      const context = screen.getByRole('region', { name: '任务上下文' })
-      expect(context).toHaveTextContent('task-2 实时日志')
-      expect(context).not.toHaveTextContent('task-1 实时日志')
-      expect(context).not.toHaveTextContent('task-1 终止后的迟到日志')
-    })
+    await waitFor(() => expect(screen.queryByRole('region', { name: '执行动态' })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
+    const nextLogs = await screen.findByRole('region', { name: '执行动态' })
+    expect(nextLogs).toHaveTextContent('task-2 实时日志')
+    expect(nextLogs).not.toHaveTextContent('task-1 实时日志')
+    expect(nextLogs).not.toHaveTextContent('task-1 终止后的迟到日志')
   })
 
   it('shows reconnect only for the active running task and clears it for terminal or pending tasks', async () => {
@@ -865,9 +879,8 @@ describe('TaskDetailPage', () => {
         await vi.advanceTimersByTimeAsync(12_001)
       })
       expect(mockStreamTaskProgress).toHaveBeenCalledTimes(4)
-      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('连接中断')
 
-      fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+      fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
       expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument()
 
       vi.useRealTimers()
@@ -911,10 +924,7 @@ describe('TaskDetailPage', () => {
 
     renderWithCachedTasks(task)
 
-    await waitFor(() => {
-      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('3 条 · 实时')
-    })
-    fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     const logSection = await screen.findByRole('region', { name: '执行动态' })
     expect(textOccurrences(logSection, '第一条持久化日志')).toBe(1)
     expect(textOccurrences(logSection, '第二条持久化日志')).toBe(1)
@@ -944,11 +954,8 @@ describe('TaskDetailPage', () => {
     renderWithCachedTasks(task)
 
     await waitFor(() => expect(mockStreamTaskProgress).toHaveBeenCalledTimes(2))
-    const context = screen.getByRole('region', { name: '任务上下文' })
-    expect(context).toHaveTextContent('2 条 · 实时')
-    expect(context).not.toHaveTextContent('连接中断')
 
-    fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     const logSection = await screen.findByRole('region', { name: '执行动态' })
     expect(textOccurrences(logSection, '第一条持久化日志')).toBe(1)
     expect(textOccurrences(logSection, '第二条持久化日志')).toBe(1)
@@ -972,7 +979,7 @@ describe('TaskDetailPage', () => {
       await Promise.resolve()
     })
     expect(mockStreamTaskProgress).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('任务完成')
+    expect(screen.getByRole('heading', { name: '执行进展' })).toBeInTheDocument()
   })
 
   it('retries unexpected clean EOF and exposes reconnect after the retry budget', async () => {
@@ -993,9 +1000,8 @@ describe('TaskDetailPage', () => {
         await vi.advanceTimersByTimeAsync(12_001)
       })
       expect(mockStreamTaskProgress).toHaveBeenCalledTimes(4)
-      expect(screen.getByRole('region', { name: '任务上下文' })).toHaveTextContent('连接中断')
 
-      fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
+      fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
       expect(screen.getByRole('button', { name: '重新连接' })).toBeInTheDocument()
     } finally {
       vi.useRealTimers()
@@ -1030,8 +1036,8 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByText('正在写作正文')).toBeInTheDocument()
     expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '阶段日志' })).not.toBeInTheDocument()
-    const context = screen.getByRole('region', { name: '任务上下文' })
-    expect(within(context).getByText('创建时项目快照')).toBeInTheDocument()
+    const context = screen.getByRole('region', { name: '关键事实' })
+    expect(within(context).queryByText('茶小茶')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '项目快照' })).not.toBeInTheDocument()
 
     await openTaskDetails('素材')
@@ -1047,8 +1053,8 @@ describe('TaskDetailPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
     expect(within(screen.getByRole('tabpanel')).getByText('创建时项目快照')).toBeInTheDocument()
-    expect(screen.getByText('明亮纪实摄影')).toBeInTheDocument()
-    expect(screen.getByText('3:2')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('明亮纪实摄影')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('3:2')).toBeInTheDocument()
   })
 
   it('keeps the lifecycle rail after completion without a percentage', async () => {
@@ -1103,9 +1109,9 @@ describe('TaskDetailPage', () => {
     await screen.findByRole('button', { name: '预览 article.html' })
     const review = await screen.findByText('内容验收')
     const files = await screen.findByText('交付成果 (1)')
-    const moreDetails = await screen.findByRole('button', { name: /更多详情/ })
+    const overview = await screen.findByRole('button', { name: '打开任务概览' })
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(files.compareDocumentPosition(moreDetails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(files.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
     expect(screen.queryByText('03-draft.md')).not.toBeInTheDocument()
@@ -1148,7 +1154,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const taskStatus = await screen.findByText('已完成', { selector: '[data-slot="badge"]' })
+    const taskStatus = await screen.findByText('已完成', { selector: '[data-testid="status-pill"] span' })
     expect(taskStatus).toBeInTheDocument()
     const filesHeading = await screen.findByText('交付成果 (1)')
     expect(filesHeading).toBeInTheDocument()
@@ -1226,6 +1232,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
+    const outcome = await screen.findByRole('alert', { name: '任务结果提醒' })
+    expect(outcome).toHaveTextContent('仍可查看 2 项产物')
     const generatedHeading = await screen.findByText('交付成果 (1)')
     const failedHeading = await screen.findByText('已保留产物 (1)')
     const generatedSection = generatedHeading.closest('section') as HTMLElement
@@ -1303,6 +1311,7 @@ describe('TaskDetailPage', () => {
     const previewOnly = await screen.findByLabelText('仅支持预览')
     expect(deliverables.compareDocumentPosition(previewOnly) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('button', { name: '下载 review.json' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '下载 review.json' })).toHaveClass('min-h-11', 'min-w-11')
     expect(screen.queryByText(/过程文件/)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /下载交付成果/ }))
@@ -1331,7 +1340,7 @@ describe('TaskDetailPage', () => {
 
     const generatedHeading = await screen.findByText('交付成果 (1)')
     const analyticsHeading = await screen.findByText('种草笔记数据')
-    const context = screen.getByRole('region', { name: '任务上下文' })
+    const context = screen.getByRole('region', { name: '关键事实' })
     expect(generatedHeading.compareDocumentPosition(analyticsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(analyticsHeading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -1599,6 +1608,7 @@ describe('TaskDetailPage', () => {
     const { unmount } = render(<TaskDetailPage />)
 
     const dataLink = await screen.findByRole('link', { name: '查看内容分析' })
+    expect(dataLink).toHaveClass('size-11')
     expect(dataLink).toHaveAttribute('href', '/content-analytics?account=ch-1&content=task%3Atask-1&platform=wechat&agent=wechat-article')
 
     unmount()
@@ -1998,7 +2008,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: /更多详情/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '打开任务概览' })).toBeInTheDocument()
     expect(screen.queryByText('项目快照')).not.toBeInTheDocument()
     expect(screen.queryByText('任务配置')).not.toBeInTheDocument()
 
@@ -2008,7 +2018,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('img', { name: '参考图' })).not.toBeInTheDocument()
     expect(screen.queryByText('参考图')).not.toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
-    expect(screen.getByText('柔光生活摄影')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('柔光生活摄影')).toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
     expect(screen.getByText('图片比例')).toBeInTheDocument()
     expect(screen.getByText('图像能力')).toBeInTheDocument()

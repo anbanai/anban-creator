@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetTrigger, SheetContent, SheetTitle, SheetClose } from '@/components/ui/sheet'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAuth } from '@/contexts/AuthContext'
-import { adminNavItems, mvpNavItems, allNavItems } from '@/lib/navigation'
+import { adminNavItems, allNavItems, visibleNavItems, workspaceNavItems } from '@/lib/navigation'
 import { commandPaletteStore, commandPaletteAccelerator } from '@/lib/command-palette'
 
 function useCollapsedState() {
@@ -27,8 +27,10 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const paletteOpen = useSyncExternalStore(commandPaletteStore.subscribe, commandPaletteStore.getSnapshot)
   const [collapsed, setCollapsed] = useCollapsedState()
+  const isAdmin = user?.is_admin === true
   const currentPage = allNavItems.find(item => item.to === pathname)?.label
     ?? (pathname.startsWith('/tasks/') ? '任务详情' : '工作空间')
+  const visibleWorkspaceNavItems = visibleNavItems(workspaceNavItems, isAdmin)
 
   // Account links and keyboard shortcuts can navigate outside the drawer's own links.
   useEffect(() => { setMobileOpen(false) }, [location])
@@ -76,11 +78,11 @@ export default function Sidebar() {
       </div>
       <nav className="min-h-0 flex-1 overflow-y-auto px-3 pb-4" aria-label="主导航">
         <div className="flex flex-col gap-1">
-          {mvpNavItems.map((item, index) => (
+          {visibleWorkspaceNavItems.map((item) => (
             <Fragment key={item.to}>
-              {[0, 4, 7].includes(index) && (compact
-                ? index > 0 && <div className="mx-2 my-2 border-t border-sidebar-border" />
-                : <p className={`px-3 pb-1.5 text-[11px] font-medium text-muted-foreground ${index > 0 ? 'pt-5' : 'pt-2'}`}>{index === 0 ? '工作空间' : index === 4 ? '管理与接入' : '内容分析'}</p>
+              {['/', '/billing', '/content-analytics'].includes(item.to) && (compact
+                ? item.to !== '/' && <div className="mx-2 my-2 border-t border-sidebar-border" />
+                : <p className={`px-3 pb-1.5 text-[11px] font-medium text-muted-foreground ${item.to === '/' ? 'pt-2' : 'pt-5'}`}>{item.to === '/' ? '工作空间' : item.to === '/billing' ? '管理与接入' : '内容分析'}</p>
               )}
               <SidebarNavLink item={item} collapsed={compact} onClick={() => setMobileOpen(false)} />
             </Fragment>

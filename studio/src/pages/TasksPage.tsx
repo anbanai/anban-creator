@@ -364,7 +364,7 @@ export default function TasksPage() {
             : '查看进度、产物与发布状态。'
         }
       >
-        <Button onClick={openCreate}>
+        <Button className="min-h-11" onClick={openCreate}>
           <Plus className="h-4 w-4" />
           新建任务
         </Button>
@@ -374,8 +374,8 @@ export default function TasksPage() {
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
           <span>正在查看此计划生成的任务</span>
           <div className="flex items-center gap-3">
-            <Link to="/plans" className="text-primary hover:underline">返回计划</Link>
-            <Button variant="ghost" size="sm" onClick={() => {
+            <Link to="/plans" className="inline-flex min-h-11 items-center text-primary hover:underline">返回计划</Link>
+            <Button variant="ghost" size="sm" className="min-h-11" onClick={() => {
               setSelectedTaskIds([])
               setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('plan_id'); return next }, { replace: true })
             }}>查看全部任务</Button>
@@ -394,7 +394,7 @@ export default function TasksPage() {
               <button
                 key={tab.value}
                 type="button"
-                className="flex min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+                className="flex min-h-11 min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
                 aria-label={`筛选${tab.label}任务`}
                 onClick={() => {
                   setStatusFilter(tab.value)
@@ -452,7 +452,7 @@ export default function TasksPage() {
                   return next
                 }, { replace: true })
               }}
-              className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                className={`min-h-11 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 statusFilter === tab.value
                   ? 'bg-card text-foreground shadow-sm'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
@@ -485,7 +485,7 @@ export default function TasksPage() {
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <p role="status">{loadedRangeLabel}{searchFilter.trim() ? ` · 匹配 ${filteredTasks.length} 个` : ''}</p>
           {(statusFilter !== 'all' || projectFilter || searchFilter) && (
-            <Button variant="ghost" size="sm" onClick={() => {
+            <Button variant="ghost" size="sm" className="min-h-11" onClick={() => {
               setStatusFilter('all'); setProjectFilter(''); setSearchFilter('')
               setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('status'); return next }, { replace: true })
             }}>清空筛选</Button>
@@ -543,7 +543,7 @@ export default function TasksPage() {
           {selectedTaskIds.length > 0 && (
             <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-lg border border-primary/30 bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Button variant="secondary" size="sm" onClick={toggleSelectCompletedOnPage} disabled={completedTasksOnPage.length === 0}>
+                <Button variant="secondary" size="sm" className="min-h-11" onClick={toggleSelectCompletedOnPage} disabled={completedTasksOnPage.length === 0}>
                   {allCompletedSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                   {allCompletedSelected ? '取消全选已完成' : '全选已完成'}
                 </Button>
@@ -555,7 +555,7 @@ export default function TasksPage() {
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setSelectedTaskIds([])} disabled={bulkAnyPending}>
+                <Button variant="ghost" size="sm" className="min-h-11" onClick={() => setSelectedTaskIds([])} disabled={bulkAnyPending}>
                   清空选择
                 </Button>
                 {/* 批量操作：每个按钮只对它能作用的子集生效（计数即实际提交数），
@@ -563,6 +563,7 @@ export default function TasksPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  className="min-h-11"
                   onClick={() => setBulkAction('cancel')}
                   disabled={selectedCancellable.length === 0 || bulkAnyPending}
                 >
@@ -572,6 +573,7 @@ export default function TasksPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  className="min-h-11"
                   onClick={() => setBulkAction('clone')}
                   disabled={selectedCloneable.length === 0 || bulkAnyPending}
                 >
@@ -581,6 +583,7 @@ export default function TasksPage() {
                 <Button
                   variant="destructive"
                   size="sm"
+                  className="min-h-11"
                   onClick={() => setBulkAction('delete')}
                   disabled={selectedDeletable.length === 0 || bulkAnyPending}
                 >
@@ -589,6 +592,7 @@ export default function TasksPage() {
                 </Button>
                 <Button
                   size="sm"
+                  className="min-h-11"
                   onClick={handleBulkDownload}
                   loading={bulkDownloadMutation.isPending}
                   disabled={selectedCompletedTasks.length === 0 || bulkAnyPending}
@@ -622,7 +626,7 @@ export default function TasksPage() {
                         e.stopPropagation()
                         toggleTaskSelection(task.id)
                       }}
-                      className={`-ml-1 flex min-h-9 min-w-9 items-center justify-center rounded-md transition-colors ${
+                      className={`-ml-1 flex min-h-11 min-w-11 items-center justify-center rounded-md transition-colors ${
                         selected ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                       }`}
                     >
@@ -645,16 +649,16 @@ export default function TasksPage() {
                         </div>
                       </div>
                     </Link>
-                    <div className="flex min-h-16 w-9 shrink-0 flex-col items-center justify-between self-stretch">
+                    <div className="flex min-h-20 w-11 shrink-0 flex-col items-center justify-between self-stretch">
                       {task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? (
                         <Link
                           to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
                           aria-label="查看内容分析"
                           title="查看内容分析"
-                          className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                          className="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                         ><BarChart3 className="size-4" /></Link>
-                      ) : <span aria-hidden="true" className="size-9" />}
-                      <div className="flex size-9 items-center justify-center" title={taskStatusLabel[task.status] || task.status}>
+                      ) : <span aria-hidden="true" className="size-11" />}
+                      <div data-testid="task-status-mark" className="flex size-11 items-center justify-center" title={taskStatusLabel[task.status] || task.status}>
                         <TaskStatusMark status={task.status} />
                         <span className="sr-only">{taskStatusLabel[task.status] || task.status}</span>
                       </div>
@@ -675,7 +679,7 @@ export default function TasksPage() {
           {isFetchingNextPage ? (
             <span className="text-sm text-muted-foreground">正在加载更多任务...</span>
           ) : hasNextPage ? (
-            <Button variant="ghost" size="sm" onClick={() => fetchNextPage()}>
+            <Button variant="ghost" size="sm" className="min-h-11" onClick={() => fetchNextPage()}>
               继续加载
             </Button>
           ) : (

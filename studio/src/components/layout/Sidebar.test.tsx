@@ -89,7 +89,7 @@ describe('Sidebar', () => {
     expect(navigation.queryByText('创作')).not.toBeInTheDocument()
     expect(navigation.queryByText('自动化')).not.toBeInTheDocument()
     expect(navigation.queryByText('经营')).not.toBeInTheDocument()
-    expect(navigation.queryByRole('link', { name: '时间轴' })).not.toBeInTheDocument()
+    expect(navigation.queryByRole('link', { name: '时间线' })).not.toBeInTheDocument()
     expect(navigation.queryByRole('link', { name: '用量' })).not.toBeInTheDocument()
   })
 
@@ -103,6 +103,7 @@ describe('Sidebar', () => {
     authState.isAdmin = true
     renderSidebar()
     expect(screen.getByRole('link', { name: '模板库' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '时间线' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '设计师' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '插件' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()

@@ -94,6 +94,11 @@ vi.mock('@/lib/api', async () => {
 })
 
 describe('ProjectsPage', () => {
+  it('does not repeat workspace navigation already available in the sidebar', async () => {
+    render(<ProjectsPage />)
+    await screen.findByRole('heading', { name: '项目' })
+    expect(screen.queryByRole('navigation', { name: '工作区导航' })).not.toBeInTheDocument()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')

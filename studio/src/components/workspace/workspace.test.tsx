@@ -1,32 +1,25 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { render } from '@/test/test-utils'
-import { MetricStrip, ProgressRing, StatusPill, WorkspaceSubnav } from './index'
+import { MetricStrip, ProgressRing, StatusPill } from './index'
 
 describe('workspace visual primitives', () => {
-  it('renders a compact subnav with an active accessible route', () => {
-    window.history.pushState({}, '', '/projects')
-    render(
-      <WorkspaceSubnav
-        items={[
-          { label: '项目', href: '/projects' },
-          { label: '计划', href: '/plans' },
-        ]}
-      />,
-    )
-
-    expect(screen.getByRole('navigation', { name: '工作区导航' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '项目' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByRole('link', { name: '计划' })).not.toHaveAttribute('aria-current')
-  })
-
   it('renders status pills with visible text and a semantic tone', () => {
     render(<StatusPill status="paused" label="已暂停" />)
 
     expect(screen.getByText('已暂停')).toBeInTheDocument()
     expect(screen.getByTestId('status-pill')).toHaveAttribute('data-tone', 'warning')
     expect(screen.getByTestId('status-pill').querySelector('svg')).toBeInTheDocument()
+  })
+
+  it('animates only running states and keeps pending distinct', () => {
+    const { rerender } = render(<StatusPill status="pending" label="待执行" />)
+    expect(screen.getByTestId('status-pill').querySelector('svg')).not.toHaveClass('animate-spin')
+    rerender(<StatusPill status="running" label="运行中" />)
+    expect(screen.getByTestId('status-pill').querySelector('svg')).toHaveClass('animate-spin')
+    rerender(<StatusPill status="cancelled" label="已取消" />)
+    expect(screen.getByTestId('status-pill').querySelector('svg')).not.toHaveClass('animate-spin')
   })
 
   it('renders metrics as a labelled definition strip', () => {
@@ -52,14 +45,5 @@ describe('workspace visual primitives', () => {
     expect(ring).toHaveAttribute('aria-valuenow', '100')
     expect(ring).toHaveAttribute('data-progress', '100')
     expect(ring).toHaveAttribute('data-motion', 'reduced-safe')
-  })
-
-  it('keeps subnav links keyboard activatable', () => {
-    window.history.pushState({}, '', '/projects')
-    render(<WorkspaceSubnav items={[{ label: '项目', href: '/projects' }]} />)
-    const link = screen.getByRole('link', { name: '项目' })
-    link.focus()
-    fireEvent.keyDown(link, { key: 'Enter' })
-    expect(link).toHaveFocus()
   })
 })

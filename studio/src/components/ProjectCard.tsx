@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, MoreHorizontal, Pause, Pencil, Play, RefreshCw, RotateCcw, UserRound } from 'lucide-react'
+import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, Pause, Play, RefreshCw, RotateCcw, SquarePen, UserRound } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
 import { ProjectMemoryDialog } from '@/components/projects/ProjectMemoryDialog'
 import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBadge'
@@ -39,7 +40,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
   const unusedTopics = stats?.unused_topics
   const completionRate = stats && stats.total_tasks > 0
     ? Math.round((stats.completed_tasks / stats.total_tasks) * 100)
-    : 0
+    : null
   const cardTone = isArchived
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
@@ -99,7 +100,13 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
       <div className="mt-auto pt-4">
         {stats && (
           <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border pt-3">
-            <ProgressRing value={completionRate} label="任务完成率" size={64} />
+            {completionRate === null ? (
+              <div className="flex size-16 items-center justify-center rounded-full border border-dashed border-border text-center text-[11px] leading-tight text-muted-foreground">
+                暂无任务
+              </div>
+            ) : (
+              <ProgressRing value={completionRate} label="任务完成率" size={64} />
+            )}
             <div className="min-w-0 space-y-2">
               <MetricStrip
                 testId="project-overview-strip"
@@ -110,8 +117,6 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
                 ]}
               />
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="项目活动">
-                <span>{stats.total_tasks} 个任务</span>
-                {stats.total_tasks > 0 && <span>{stats.completed_tasks} 个已完成</span>}
                 {stats.running_tasks > 0 && <span>{stats.running_tasks} 个运行中</span>}
                 {stats.pending_tasks > 0 && <span>{stats.pending_tasks} 个待执行</span>}
               </div>
@@ -121,12 +126,12 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
         {feedbackEnabled && (
           <div className="mt-3 border-t border-border pt-3">
             {!feedbackOpen ? (
-              <Button variant="ghost" size="xs" onClick={() => setFeedbackOpen(true)} aria-label="查看反馈闭环">
+              <Button variant="ghost" size="xs" className="min-h-11" onClick={() => setFeedbackOpen(true)} aria-label="查看反馈闭环">
                 <Database />反馈闭环<ChevronDown />
               </Button>
             ) : (
               <>
-                <Button variant="ghost" size="xs" onClick={() => setFeedbackOpen(false)} aria-expanded="true">
+                <Button variant="ghost" size="xs" className="min-h-11" onClick={() => setFeedbackOpen(false)} aria-expanded="true">
                   <Database />反馈闭环<ChevronUp />
                 </Button>
                 {feedbackQuery.isPending ? (
@@ -134,7 +139,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
                 ) : feedbackQuery.isError ? (
                   <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                     <span>反馈状态暂不可用</span>
-                    <Button variant="ghost" size="xs" onClick={() => void feedbackQuery.refetch()} aria-label="重新加载反馈状态"><RefreshCw />重试</Button>
+                    <Button variant="ghost" size="xs" className="min-h-11" onClick={() => void feedbackQuery.refetch()} aria-label="重新加载反馈状态"><RefreshCw />重试</Button>
                   </div>
                 ) : feedbackQuery.data ? (
                   <div className="space-y-2 text-xs">
@@ -158,17 +163,17 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
                       <p className="truncate text-muted-foreground" title={feedbackQuery.data.queue.latest_skip.reason}>最近跳过：{feedbackQuery.data.queue.latest_skip.reason}</p>
                     )}
                     <div className="flex flex-wrap gap-1">
-                      <Button variant="ghost" size="xs" disabled={feedbackStateMutation.isPending} onClick={() => feedbackStateMutation.mutate(!feedbackQuery.data!.feedback_paused)}>
+                      <Button variant="ghost" size="xs" className="min-h-11" disabled={feedbackStateMutation.isPending} onClick={() => feedbackStateMutation.mutate(!feedbackQuery.data!.feedback_paused)}>
                         {feedbackQuery.data.feedback_paused ? <Play /> : <Pause />}
                         {feedbackQuery.data.feedback_paused ? '恢复' : '暂停'}
                       </Button>
-                      <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('daily')} title={`下次日周期：${formatTime(feedbackQuery.data.next_runs.daily)}`}>
+                      <Button variant="ghost" size="xs" className="min-h-11" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('daily')} title={`下次日周期：${formatTime(feedbackQuery.data.next_runs.daily)}`}>
                         <RefreshCw />日
                       </Button>
-                      <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('weekly')} title={`下次周周期：${formatTime(feedbackQuery.data.next_runs.weekly)}`}>
+                      <Button variant="ghost" size="xs" className="min-h-11" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('weekly')} title={`下次周周期：${formatTime(feedbackQuery.data.next_runs.weekly)}`}>
                         <CalendarClock />周
                       </Button>
-                      <Button variant="ghost" size="xs" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('monthly')} title={`下次月周期：${formatTime(feedbackQuery.data.next_runs.monthly)}`}>
+                      <Button variant="ghost" size="xs" className="min-h-11" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('monthly')} title={`下次月周期：${formatTime(feedbackQuery.data.next_runs.monthly)}`}>
                         <CalendarClock />月
                       </Button>
                     </div>
@@ -178,63 +183,58 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
             )}
           </div>
         )}
-        <div className="mt-2 flex flex-wrap justify-end gap-1">
+        <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`项目操作：${project.name}`}>
           {onEdit && (
-            <Button variant="ghost" size="xs" onClick={() => onEdit(project)} aria-label={`编辑项目：${project.name}`}>
-              <Pencil />
-              编辑
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`编辑项目：${project.name}`} />}>
+                <SquarePen />
+              </TooltipTrigger>
+              <TooltipContent>编辑</TooltipContent>
+            </Tooltip>
           )}
           {onProfile && (
-            <Button variant="ghost" size="xs" onClick={() => onProfile(project)} aria-label={`项目画像：${project.name}`}>
-              <UserRound />
-              项目画像
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onProfile(project)} aria-label={`项目画像：${project.name}`} />}>
+                <UserRound />
+              </TooltipTrigger>
+              <TooltipContent>项目画像</TooltipContent>
+            </Tooltip>
           )}
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => setTopicPoolOpen(true)}
-            aria-label={unusedTopics === undefined
-              ? `选题池：${project.name}`
-              : `选题池：${project.name}，剩余 ${unusedTopics} 个`}
-          >
-            <Lightbulb />
-            选题池
-            {unusedTopics !== undefined && (
-              <span className="min-w-4 text-center tabular-nums text-foreground">{unusedTopics}</span>
-            )}
-          </Button>
-          <details className="relative">
-            <summary
-              aria-label={`更多项目操作：${project.name}`}
-              className="flex h-6 cursor-pointer list-none items-center gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-            >
-              <MoreHorizontal aria-hidden="true" className="size-3" />
-              <span>更多</span>
-            </summary>
-            <div className="absolute right-0 z-10 mt-1 min-w-32 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
-              {onChannelConfig && (
-                <button type="button" aria-label={`渠道配置：${project.name}`} className="flex min-h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => onChannelConfig(project)}>
-                  <Settings2 className="size-3.5" />渠道配置
-                </button>
-              )}
-              <button type="button" className="flex min-h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`}>
-                <Brain className="size-3.5" />记忆
-              </button>
-            </div>
-          </details>
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setTopicPoolOpen(true)} aria-label={unusedTopics === undefined ? `选题池：${project.name}` : `选题池：${project.name}，剩余 ${unusedTopics} 个`} />}>
+              <Lightbulb />
+            </TooltipTrigger>
+            <TooltipContent>{unusedTopics === undefined ? '选题池' : `选题池：剩余 ${unusedTopics} 个`}</TooltipContent>
+          </Tooltip>
+          {onChannelConfig && (
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onChannelConfig(project)} aria-label={`渠道配置：${project.name}`} />}>
+                <Settings2 />
+              </TooltipTrigger>
+              <TooltipContent>渠道配置</TooltipContent>
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`} />}>
+              <Brain />
+            </TooltipTrigger>
+            <TooltipContent>项目记忆</TooltipContent>
+          </Tooltip>
           {!isArchived && onArchive && (
-            <Button variant="ghost" size="xs" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档项目：${project.name}`}>
-              <Archive />
-              归档
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档项目：${project.name}`} />}>
+                <Archive />
+              </TooltipTrigger>
+              <TooltipContent>归档</TooltipContent>
+            </Tooltip>
           )}
           {isArchived && onRestore && (
-            <Button variant="ghost" size="xs" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复项目：${project.name}`}>
-              <RotateCcw />
-              恢复
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复项目：${project.name}`} />}>
+                <RotateCcw />
+              </TooltipTrigger>
+              <TooltipContent>恢复</TooltipContent>
+            </Tooltip>
           )}
         </div>
       </div>

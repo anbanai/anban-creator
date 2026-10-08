@@ -65,8 +65,10 @@ describe('ProjectCard', () => {
   it('shows only basic project activity', () => {
     render(<ProjectCard project={project()} stats={stats} />)
 
-    expect(screen.getByText('10 个任务')).toBeInTheDocument()
-    expect(screen.getByText('8 个已完成')).toBeInTheDocument()
+    expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('10')
+    expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('8')
+    expect(screen.queryByText('10 个任务')).not.toBeInTheDocument()
+    expect(screen.queryByText('8 个已完成')).not.toBeInTheDocument()
     expect(screen.queryByText('创作配置已就绪')).not.toBeInTheDocument()
     expect(screen.queryByText('还有配置可补齐')).not.toBeInTheDocument()
     expect(screen.queryByText(/成功率/)).not.toBeInTheDocument()
@@ -80,6 +82,13 @@ describe('ProjectCard', () => {
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('10')
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('8')
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('2')
+  })
+
+  it('does not show a precise completion percentage when a project has no tasks', () => {
+    render(<ProjectCard project={project()} stats={{ ...stats, total_tasks: 0, completed_tasks: 0, failed_tasks: 0 }} />)
+
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.getByText('暂无任务')).toBeInTheDocument()
   })
 
   it('shows common actions directly and opens the topic pool', async () => {
@@ -99,23 +108,34 @@ describe('ProjectCard', () => {
     expect(await screen.findByRole('dialog', { name: /选题池 - 公众号项目/ })).toBeInTheDocument()
   })
 
-  it('keeps channel setup and project memory available under low-frequency actions', () => {
+  it('lists project actions directly without a more menu and uses accessible icon targets', async () => {
     const onChannelConfig = vi.fn()
-    render(<ProjectCard project={project()} onChannelConfig={onChannelConfig} />)
+    const onEdit = vi.fn()
+    const onProfile = vi.fn()
+    render(<ProjectCard project={project()} onChannelConfig={onChannelConfig} onEdit={onEdit} onProfile={onProfile} onArchive={vi.fn()} />)
 
-    expect(screen.getByText('更多')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('更多'))
-    fireEvent.click(screen.getByRole('button', { name: '渠道配置：公众号项目' }))
+    expect(screen.queryByText('更多')).not.toBeInTheDocument()
+    const channelConfig = screen.getByRole('button', { name: '渠道配置：公众号项目' })
+    const edit = screen.getByRole('button', { name: '编辑项目：公众号项目' })
+    const profile = screen.getByRole('button', { name: '项目画像：公众号项目' })
+    const memory = screen.getByRole('button', { name: '项目记忆：公众号项目' })
+    for (const control of [channelConfig, edit, profile, memory]) expect(control).toHaveClass('size-11')
+
+    fireEvent.click(channelConfig)
     expect(onChannelConfig).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
-
-    expect(screen.getByRole('button', { name: '项目记忆：公众号项目' })).toBeInTheDocument()
+    fireEvent.click(edit)
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
+    fireEvent.click(profile)
+    expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
+    fireEvent.click(memory)
+    expect(await screen.findByRole('dialog', { name: /项目记忆/ })).toBeInTheDocument()
   })
 
   it('does not report zero remaining topics before stats are available', () => {
     render(<ProjectCard project={project()} />)
 
     const topicPoolButton = screen.getByRole('button', { name: '选题池：公众号项目' })
-    expect(topicPoolButton).toHaveTextContent('选题池')
+    expect(topicPoolButton.querySelector('svg')).toBeInTheDocument()
     expect(topicPoolButton).not.toHaveTextContent('0')
   })
 

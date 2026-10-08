@@ -136,7 +136,14 @@ function AppRoutes() {
           }
         >
           <Route index element={<LazyPage component={DashboardPage} />} />
-          <Route path="timeline" element={<LazyPage component={TimelinePage} />} />
+          <Route
+            path="timeline"
+            element={(
+              <AdminRoute>
+                <LazyPage component={TimelinePage} />
+              </AdminRoute>
+            )}
+          />
           <Route path="projects" element={<LazyPage component={ProjectsPage} />} />
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />

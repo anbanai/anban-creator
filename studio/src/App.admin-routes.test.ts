@@ -12,7 +12,7 @@ function routeDefinition(path: string): string {
 }
 
 describe('administrator routes', () => {
-  it.each(['templates', 'admin/seednote'])(
+  it.each(['timeline', 'templates', 'admin/seednote'])(
     'protects /%s with AdminRoute',
     (path) => {
       expect(routeDefinition(path)).toContain('<AdminRoute>')
