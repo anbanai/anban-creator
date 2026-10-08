@@ -9,6 +9,7 @@ import type {
   PlatformProfile,
   ProjectMemory,
   ProjectProfile,
+  ProfileAnalysisAnswers,
   ProfileDimension,
   ProfileAnalysisResponse,
   Task,
@@ -86,8 +87,8 @@ export const projectsApi = {
   }, { timeout: 120000 })),
 
   getAccountProfile: (id: string) => unwrap<ProjectProfile>(http.get(`/projects/${id}/profile`)),
-  refreshProfile: (id: string, expectedRevision: number) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/refresh`, { expected_revision: expectedRevision })),
-  retryProfile: (id: string, expectedRevision: number) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/retry`, { expected_revision: expectedRevision })),
+  refreshProfile: (id: string, expectedRevision: number, answers?: ProfileAnalysisAnswers) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/refresh`, { expected_revision: expectedRevision, ...(answers ? { answers } : {}) })),
+  retryProfile: (id: string, expectedRevision: number, answers?: ProfileAnalysisAnswers) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/retry`, { expected_revision: expectedRevision, ...(answers ? { answers } : {}) })),
   profileAnalysis: (id: string) => unwrap<ProfileAnalysisResponse>(http.get(`/projects/${id}/profile/analysis`)),
   confirmAccountProfile: (id: string, profile: ProjectProfile) => unwrap<ProjectProfile>(http.put(`/projects/${id}/profile`, { version: profile.version, profile })),
   updateProfileDimension: (id: string, dimension: string, version: number, value: ProfileDimension) => unwrap<ProjectProfile>(http.patch(`/projects/${id}/profile/dimensions/${dimension}`, { expected_revision: version, content: value.content })),

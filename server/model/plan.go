@@ -25,13 +25,17 @@ type Plan struct {
 	// ImageCapabilityKey / ImageRatio / ReferenceImageAssetID are per-plan image defaults copied to each
 	// spawned task (task-level values, when set, win). They are scheduling-adjacent
 	// "what to produce" params, not style/author/theme dimensions.
-	ImageCapabilityKey    string                                `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
-	ImageRatio            string                                `gorm:"type:varchar(10);default:''" json:"image_ratio"`
-	ReferenceImageAssetID string                                `gorm:"type:char(36);index" json:"-"`
-	ReferenceImage        *AssetView                            `gorm:"-" json:"reference_image,omitempty"`
-	SkipReferenceImage    bool                                  `gorm:"default:false" json:"skip_reference_image,omitempty"`
-	Watermark             bool                                  `gorm:"default:false" json:"watermark,omitempty"`
-	InputAttachments      datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
+	ImageCapabilityKey            string                                `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
+	ImageRatio                    string                                `gorm:"type:varchar(10);default:''" json:"image_ratio"`
+	ReferenceImageAssetID         string                                `gorm:"type:char(36);index" json:"-"`
+	ReferenceImage                *AssetView                            `gorm:"-" json:"reference_image,omitempty"`
+	PortraitReferenceImageAssetID string                                `gorm:"type:char(36);index" json:"-"`
+	PortraitReferenceImage        *AssetView                            `gorm:"-" json:"portrait_reference_image,omitempty"`
+	PortraitReferenceConfigured   bool                                  `gorm:"not null;default:false" json:"-"`
+	CoverUsePortrait              bool                                  `gorm:"not null;default:false" json:"cover_use_portrait"`
+	SkipReferenceImage            bool                                  `gorm:"default:false" json:"skip_reference_image,omitempty"`
+	Watermark                     bool                                  `gorm:"default:false" json:"watermark,omitempty"`
+	InputAttachments              datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
 
 	NextRunAt *time.Time   `gorm:"index" json:"next_run_at"`
 	CreatedAt time.Time    `json:"created_at"`

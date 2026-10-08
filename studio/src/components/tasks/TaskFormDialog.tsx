@@ -42,7 +42,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { createTaskSchema } from '@/lib/schemas'
 import { taskCreationCostPreview } from '@/lib/studio-ux'
 import { cloneTaskFormDefaults, createTaskFormDefaults, switchTaskFormDefaults, taskFormValuesToRequest, type TaskFormDefaults } from '@/lib/task-form'
-import type { CreateTaskRequest, PlatformConfig, Project, Task, TaskType } from '@/types'
+import type { CreateTaskRequest, PlatformConfig, Project, ReferenceImageSelection, Task, TaskType } from '@/types'
 import { CreationTypePicker } from './CreationTypePicker'
 import { contentTypeOptions } from '@/lib/labels'
 import { TaskComposerParameters } from './TaskComposerParameters'
@@ -115,6 +115,7 @@ export function TaskFormDialog({
   const explicitTaskTypeRef = useRef(false)
   const [montageUploading, setMontageUploading] = useState(false)
   const [montageReady, setMontageReady] = useState(false)
+  const [portraitUploading, setPortraitUploading] = useState(false)
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
@@ -342,7 +343,7 @@ export function TaskFormDialog({
 
   function requestClose() {
     if (isSubmitting) return
-    if (form.formState.isDirty || attachmentController.uploading || attachmentController.hasFailures || montageUploading) {
+    if (form.formState.isDirty || attachmentController.uploading || attachmentController.hasFailures || montageUploading || portraitUploading) {
       setShowDirtyDialog(true)
       return
     }
@@ -394,7 +395,7 @@ export function TaskFormDialog({
   }
 
   function handleSubmit(event?: BaseSyntheticEvent) {
-    if (creationBlocker || hasIncompatibleSeednoteAttachments || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && (montageUploading || !montageReady))) {
+    if (creationBlocker || hasIncompatibleSeednoteAttachments || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || (isMontageTask && (montageUploading || !montageReady))) {
       event?.preventDefault()
       return
     }
@@ -554,7 +555,7 @@ export function TaskFormDialog({
       submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
       submitting={isSubmitting}
       disabled={isSubmitting}
-      submitDisabled={Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontageTask && !montageReady)}
+      submitDisabled={Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || portraitUploading || (isMontageTask && !montageReady)}
       leadingTools={(
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           {projectControl}
@@ -774,6 +775,9 @@ export function TaskFormDialog({
                 <PortraitCoverControl
                   type={watchedType}
                   project={selectedProject}
+                  value={(form.watch('portrait_reference_image') as ReferenceImageSelection | null) ?? null}
+                  onValueChange={(value) => setFormValue('portrait_reference_image', value)}
+                  onUploadingChange={setPortraitUploading}
                   checked={coverUsePortrait}
                   coverEnabled={watchedType !== 'wechat-article' || articleWithCover}
                   onCheckedChange={(checked) => setFormValue('cover_use_portrait', checked)}
@@ -911,7 +915,7 @@ export function TaskFormDialog({
               type="submit"
               form="task-create-form"
               loading={isSubmitting}
-              disabled={isSubmitting || Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || (isMontageTask && (montageUploading || !montageReady))}
+              disabled={isSubmitting || Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || attachmentController.uploading || attachmentController.hasFailures || portraitUploading || (isMontageTask && (montageUploading || !montageReady))}
             >
               {submitLabel}
             </Button>

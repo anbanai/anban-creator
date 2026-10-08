@@ -498,6 +498,7 @@ type ContentMetadataRepository interface {
 	CreateOrUpdate(ctx context.Context, report *model.ContentMetadataReport) error
 	FindByTaskExecution(ctx context.Context, taskID, executionID string) (*model.ContentMetadataReport, error)
 	ReplaceTags(ctx context.Context, reportID string, tags []*model.ContentTagAssignment) error
+	ListTagsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*model.ContentTagAssignment, error)
 	ListVocabulary(ctx context.Context, dimension, taxonomyVersion string) ([]*model.ContentTagVocabulary, error)
 	UpsertVocabulary(ctx context.Context, vocabulary *model.ContentTagVocabulary) error
 }

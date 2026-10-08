@@ -36,6 +36,8 @@ export interface Plan {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceAssetView | null
+  portrait_reference_image?: ReferenceAssetView | null
+  cover_use_portrait?: boolean
   input_attachments?: InputAttachment[]
   watermark?: boolean
   created_at: string
@@ -53,6 +55,8 @@ export interface CreatePlanRequest {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
+  portrait_reference_image?: ReferenceImageSelection | null
+  cover_use_portrait?: boolean
   input_attachments?: InputAttachment[]
   watermark?: boolean
 }
@@ -66,6 +70,8 @@ export interface UpdatePlanRequest {
   image_ratio?: string
   skip_reference_image?: boolean
   reference_image?: ReferenceImageSelection | null
+  portrait_reference_image?: ReferenceImageSelection | null
+  cover_use_portrait?: boolean
   input_attachments?: InputAttachment[]
   watermark?: boolean
 }

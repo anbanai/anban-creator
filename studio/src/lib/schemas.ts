@@ -128,6 +128,7 @@ export const createTaskSchema = z.object({
   image_capability_key: z.string().max(50).optional(),
   skip_reference_image: z.boolean().default(false),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
+  portrait_reference_image: referenceImageSelectionSchema.nullable().optional(),
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),
@@ -233,6 +234,8 @@ export const planSchema = z.object({
   image_ratio: imageRatioSchema.default('auto'),
   skip_reference_image: z.boolean().default(false),
   reference_image: referenceImageSelectionSchema.nullable().optional(),
+  portrait_reference_image: referenceImageSelectionSchema.nullable().optional(),
+  cover_use_portrait: z.boolean().default(false),
   input_attachments: z.array(inputAttachmentSchema)
     .max(16, "最多添加 16 个附件")
     .default([]),

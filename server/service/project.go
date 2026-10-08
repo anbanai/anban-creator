@@ -231,6 +231,14 @@ func projectProfileFor(project *model.Project) model.ProjectProfile {
 	return profile
 }
 
+func projectProfileForAgentContext(project *model.Project) model.ProjectProfile {
+	profile := projectProfileFor(project)
+	if !profile.IsConfirmed() {
+		return model.NewProjectProfile()
+	}
+	return profile
+}
+
 func profileDimension(profile model.ProjectProfile, name string) model.ProfileDimension {
 	switch name {
 	case "identity":
@@ -251,7 +259,7 @@ func profileDimension(profile model.ProjectProfile, name string) model.ProfileDi
 }
 
 func (s *ProjectService) writeProfileProjection(ctx context.Context, projectID string, profile model.ProjectProfile) error {
-	if s.profileMemory == nil {
+	if s.profileMemory == nil || !profile.IsConfirmed() {
 		return nil
 	}
 	if err := s.profileMemory.EnsureProject(ctx, projectID); err != nil {
@@ -430,7 +438,11 @@ func (s *ProjectService) ApplyAgentProfileResult(ctx context.Context, userID, pr
 		next.Dimensions = dimensions
 		next.AnalysisLimits = append([]string(nil), limits...)
 		next.FollowUpQuestions = append([]string(nil), missing...)
-		next.Status = model.ProfileStatusConfirmed
+		if current.IsConfirmed() {
+			next.Status = model.ProfileStatusConfirmed
+		} else {
+			next.Status = model.ProfileStatusDraft
+		}
 		next.InitializationStatus = model.ProfileInitializationReady
 		next.LastError = ""
 		next.AnalysisTaskID = taskID
@@ -561,7 +573,9 @@ func (s *ProjectService) SetProfileAnalysisTaskID(ctx context.Context, userID, p
 	}
 	profile := projectProfileFor(project)
 	profile.AnalysisTaskID = strings.TrimSpace(taskID)
-	profile.Status = model.ProfileStatusDraft
+	if !profile.IsConfirmed() {
+		profile.Status = model.ProfileStatusDraft
+	}
 	return s.updateProfile(ctx, userID, projectID, expectedVersion, profile)
 }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -656,59 +657,11 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 			}
 		}
 	}
-	profileInitialization := h.ensureProfileInitialization(c.Context(), userID, created)
-
 	return Success(c, fiber.Map{
 		"project":                projectAPIResponse(created),
 		"recommended_templates":  recommended,
-		"profile_initialization": profileInitialization,
+		"profile_initialization": map[string]any{"status": model.ProfileInitializationNotStarted},
 	})
-}
-
-func (h *ProjectHandler) ensureProfileInitialization(ctx context.Context, userID string, project *model.Project) map[string]any {
-	result := map[string]any{"status": "not_started"}
-	if h.tasks == nil || project == nil || !profileInitializationSupported(project.Platform) {
-		return result
-	}
-	profile, err := h.service.GetProfile(ctx, userID, project.ID)
-	if err != nil {
-		return map[string]any{"status": model.ProfileInitializationFailed, "error": err.Error()}
-	}
-	if strings.TrimSpace(profile.AnalysisTaskID) != "" {
-		if existing, getErr := h.tasks.GetByID(ctx, profile.AnalysisTaskID); getErr == nil && existing.UserID == userID && existing.ProjectID == project.ID && (existing.Status == model.TaskStatusPending || existing.Status == model.TaskStatusRunning) {
-			return map[string]any{"status": profile.InitializationStatus, "task_id": existing.ID, "revision": profile.Version}
-		}
-	}
-	expectedVersion := profile.Version
-	tasks, err := h.tasks.CreateManual(ctx, service.CreateManualParams{
-		UserID: userID, ProjectID: project.ID, ExecutionProfile: "effective",
-		AgentID: model.AgentIDProfileAnalysis, Channel: model.ChannelProfileAnalysis, TaskKind: model.TaskKindProfileAnalysis,
-		Prompt:     project.ProfileURL,
-		AgentInput: profileAgentInput(project, map[string]any{}, nil),
-		Quantity:   1, ProfileAnalysisExpectedVersion: &expectedVersion,
-	})
-	if err != nil || len(tasks) == 0 {
-		message := "profile initialization task was not created"
-		if err != nil {
-			message = err.Error()
-		}
-		h.logger.Warn().Err(err).Str("project_id", project.ID).Msg("profile initialization admission failed")
-		return map[string]any{"status": model.ProfileInitializationFailed, "error": message, "revision": profile.Version}
-	}
-	profile, err = h.service.GetProfile(ctx, userID, project.ID)
-	if err != nil {
-		return map[string]any{"status": model.ProfileInitializationQueued, "task_id": tasks[0].ID, "revision": expectedVersion}
-	}
-	return map[string]any{"status": profile.InitializationStatus, "task_id": tasks[0].ID, "revision": profile.Version}
-}
-
-func profileInitializationSupported(platform string) bool {
-	switch strings.TrimSpace(platform) {
-	case model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments:
-		return true
-	default:
-		return false
-	}
 }
 
 // Get handles GET /projects/:id.
@@ -940,9 +893,11 @@ type profileAnalysisInput struct {
 
 func normalizeProfileAnalysisInput(req profileAnalysisInput) (profileAnalysisInput, error) {
 	req.ExecutionProfile = firstNonEmpty(req.ExecutionProfile, "effective")
-	if req.Answers == nil {
-		req.Answers = map[string]any{}
+	answers, err := normalizeProfileAnalysisAnswers(req.Answers)
+	if err != nil {
+		return profileAnalysisInput{}, err
 	}
+	req.Answers = answers
 	if req.Samples == nil {
 		req.Samples = []string{}
 	}
@@ -955,6 +910,151 @@ func normalizeProfileAnalysisInput(req profileAnalysisInput) (profileAnalysisInp
 		}
 	}
 	return req, nil
+}
+
+const (
+	profileAnswerMaxBytes    = 5000
+	profileAnswerMaxURL      = 2048
+	profileAnswerMaxAccounts = 7
+)
+
+var profilePlatformIDs = map[string]struct{}{
+	"xiaohongshu": {}, "douyin": {}, "bilibili": {}, "video_account": {},
+	"wechat_official_account": {}, "weibo": {}, "zhihu": {},
+}
+
+func validateProfileHomepage(value string) error {
+	if len([]byte(value)) > profileAnswerMaxURL {
+		return fmt.Errorf("profile homepage is too large")
+	}
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("profile homepage must be an absolute HTTP(S) URL")
+	}
+	return nil
+}
+
+func normalizeProfileAnalysisAnswers(answers map[string]any) (map[string]any, error) {
+	if answers == nil {
+		answers = map[string]any{}
+	}
+	sections := map[string][]string{
+		"basic":      {"project_name", "account_status"},
+		"intent":     {"goals", "direction", "differentiation"},
+		"content":    {"preferences", "formats", "tone", "audience"},
+		"boundaries": {"exclusions", "collaboration", "compliance"},
+	}
+	allowed := map[string]struct{}{"platform_accounts": {}}
+	for section := range sections {
+		allowed[section] = struct{}{}
+	}
+	for key := range answers {
+		if _, ok := allowed[key]; !ok {
+			return nil, fmt.Errorf("unexpected profile answer section %q", key)
+		}
+	}
+	normalized := make(map[string]any, len(allowed))
+	for section, fields := range sections {
+		values, err := profileAnswerSection(answers[section], section, fields)
+		if err != nil {
+			return nil, err
+		}
+		normalized[section] = values
+	}
+	accounts, err := profilePlatformAccounts(answers["platform_accounts"])
+	if err != nil {
+		return nil, err
+	}
+	normalized["platform_accounts"] = accounts
+	return normalized, nil
+}
+
+func profileAnswerSection(value any, name string, fields []string) (map[string]any, error) {
+	values := map[string]any{}
+	if value != nil {
+		var ok bool
+		values, ok = value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("profile answers.%s must be an object", name)
+		}
+	}
+	allowed := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		allowed[field] = struct{}{}
+	}
+	for field := range values {
+		if _, ok := allowed[field]; !ok {
+			return nil, fmt.Errorf("unexpected profile answer field %s.%s", name, field)
+		}
+	}
+	normalized := make(map[string]any, len(fields))
+	for _, field := range fields {
+		value, exists := values[field]
+		if !exists || value == nil {
+			normalized[field] = ""
+			continue
+		}
+		text, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("profile answers.%s.%s must be a string", name, field)
+		}
+		maxBytes := profileAnswerMaxBytes
+		if field == "project_name" || field == "account_status" || field == "account_name" || field == "platform" {
+			maxBytes = 200
+		}
+		if field == "profile_url" {
+			if err := validateProfileHomepage(text); err != nil {
+				return nil, fmt.Errorf("profile answers.%s.%s: %w", name, field, err)
+			}
+			maxBytes = profileAnswerMaxURL
+		}
+		if len([]byte(text)) > maxBytes {
+			return nil, fmt.Errorf("profile answers.%s.%s is too large", name, field)
+		}
+		if name == "basic" && field == "account_status" && text != "" && text != "new" && text != "existing" {
+			return nil, fmt.Errorf("profile answers.basic.account_status is unsupported")
+		}
+		normalized[field] = text
+	}
+	return normalized, nil
+}
+
+func profilePlatformAccounts(value any) ([]any, error) {
+	if value == nil {
+		return []any{}, nil
+	}
+	rows, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("profile answers.platform_accounts must be an array")
+	}
+	if len(rows) > profileAnswerMaxAccounts {
+		return nil, fmt.Errorf("profile answers.platform_accounts may contain at most %d accounts", profileAnswerMaxAccounts)
+	}
+	accounts := make([]any, 0, len(rows))
+	seenPlatforms := make(map[string]struct{}, len(rows))
+	for index, row := range rows {
+		fields, ok := row.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("profile answers.platform_accounts[%d] must be an object", index)
+		}
+		account, err := profileAnswerSection(fields, fmt.Sprintf("platform_accounts[%d]", index), []string{"platform", "account_name", "profile_url"})
+		if err != nil {
+			return nil, err
+		}
+		platform := strings.TrimSpace(account["platform"].(string))
+		if _, ok := profilePlatformIDs[platform]; !ok {
+			return nil, fmt.Errorf("profile answers.platform_accounts[%d].platform is unsupported", index)
+		}
+		if _, duplicate := seenPlatforms[platform]; duplicate {
+			return nil, fmt.Errorf("profile answers.platform_accounts contains duplicate platform %q", platform)
+		}
+		seenPlatforms[platform] = struct{}{}
+		accounts = append(accounts, account)
+	}
+	return accounts, nil
 }
 
 func profileAnalysisRequestFingerprint(project *model.Project, profile model.ProjectProfile, req profileAnalysisInput) (string, string, error) {
@@ -1068,6 +1168,9 @@ func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
 	if err != nil {
 		return h.respondProfileError(c, err)
 	}
+	if err := validateProfileHomepage(project.ProfileURL); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid project profile URL: "+err.Error())
+	}
 	profile := project.Profile.Data()
 	if profile.SchemaVersion == 0 {
 		profile = model.NewProjectProfile()
@@ -1117,7 +1220,6 @@ func profileAgentInput(project *model.Project, answers map[string]any, samples [
 	}
 	return map[string]any{
 		"project_id":  project.ID,
-		"platform":    project.Platform,
 		"profile_url": project.ProfileURL,
 		"answers":     answers,
 		"samples":     values,

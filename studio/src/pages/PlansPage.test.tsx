@@ -33,6 +33,8 @@ async function selectProject(dialog: HTMLElement, name: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:plan-portrait-preview')
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   window.history.pushState({}, '', '/plans')
   harness.upload.mockReset()
   vi.mocked(api.projects.platformConfigs).mockResolvedValue([
@@ -116,7 +118,7 @@ describe('PlansPage multi-output plans', () => {
     expect(JSON.parse(JSON.stringify(vi.mocked(api.plans.create).mock.calls[0][0]))).toEqual({
       project_id: 'second-project', agent_ids: ['wechat-article', 'wechat-picture'], execution_profile: 'effective',
       cron_expr: '7 12 * * 1,3,5', prompt: '每周介绍新品', image_ratio: mockProjects[0].image_ratio,
-      skip_reference_image: false, reference_image: null, input_attachments: [], watermark: false,
+      skip_reference_image: false, reference_image: null, portrait_reference_image: null, cover_use_portrait: false, input_attachments: [], watermark: false,
     })
   })
   it('disables submission after deselecting every output', async () => {
@@ -197,6 +199,27 @@ describe('PlansPage multi-output plans', () => {
     await waitFor(() => expect(within(dialog).getByRole('button', { name: '保存' })).toBeEnabled())
     fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.plans.update).toHaveBeenCalledWith(plan.id, expect.objectContaining({ reference_image: remove ? null : { asset_id: reference.asset_id } })))
+  })
+
+  it('uses a project portrait as the plan default and saves an independent portrait with its cover switch', async () => {
+    const portrait = { asset_id: '55555555-5555-4555-8555-555555555555', file_name: 'project-person.png', content_type: 'image/png', size: 10, download_url: 'https://signed.example/project-person.png', download_expires_at: '2026-10-04T10:00:00Z' }
+    vi.mocked(api.projects.list).mockResolvedValue([{ ...mockProjects[0], portrait_reference_image: portrait }])
+    harness.upload.mockResolvedValueOnce({ uploadSessionId: '77777777-7777-4777-8777-777777777777', uploadId: 'plan-portrait', key: 'uploads/pending/plan-portrait.png', publicUrl: '', previewUrl: 'https://cdn.example/plan-portrait.png', contentType: 'image/png', size: 20 })
+    render(<PlansPage />)
+    const dialog = await openCreate()
+    fireEvent.click(await within(dialog).findByRole('button', { name: '公众号文章' }))
+    await selectProject(dialog, mockProjects[0].name)
+    fireEvent.click(within(dialog).getByText('高级设置'))
+    expect(within(dialog).getByRole('img', { name: '项目人物参考' })).toHaveAttribute('src', portrait.download_url)
+    fireEvent.change(within(dialog).getByLabelText('人物参考图文件'), { target: { files: [new File(['portrait'], 'plan-person.png', { type: 'image/png' })] } })
+    await waitFor(() => expect(harness.upload).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'project_portrait_reference' })))
+    fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.plans.create).toHaveBeenCalledWith(expect.objectContaining({
+      portrait_reference_image: { upload_session_id: '77777777-7777-4777-8777-777777777777' },
+      cover_use_portrait: true,
+    })))
   })
 
   it('keeps manual schedule changes when the recommendation resolves later', async () => {

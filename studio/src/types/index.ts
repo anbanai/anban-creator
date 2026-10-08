@@ -26,6 +26,8 @@ export type {
   ProfileDimension,
   ProfileAnalysisStatus,
   ProfileAnalysisResponse,
+  ProfileInitializationStatus,
+  ProfileAnalysisAnswers,
   ProjectMemory,
   ProjectMemoryFile,
   FeedbackDashboard,

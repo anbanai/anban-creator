@@ -405,7 +405,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	}
 }
 
-func TestProjectHandlerCreateAutomaticallyQueuesFreeProfileAnalysis(t *testing.T) {
+func TestProjectHandlerCreateLeavesProfileInitializationOptional(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)
 	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
@@ -437,8 +437,8 @@ func TestProjectHandlerCreateAutomaticallyQueuesFreeProfileAnalysis(t *testing.T
 	}
 	data := decodeBody(t, resp)["data"].(map[string]any)
 	initialization := data["profile_initialization"].(map[string]any)
-	if initialization["status"] != model.ProfileInitializationQueued {
-		t.Fatalf("profile initialization = %#v, want queued", initialization)
+	if initialization["status"] != model.ProfileInitializationNotStarted {
+		t.Fatalf("profile initialization = %#v, want not_started", initialization)
 	}
 	project := data["project"].(map[string]any)
 	projectID := project["id"].(string)
@@ -446,13 +446,83 @@ func TestProjectHandlerCreateAutomaticallyQueuesFreeProfileAnalysis(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 1 || tasks[0].Type != model.TaskTypeProfileAnalysis || tasks[0].BillingPriceCredits != 0 {
-		t.Fatalf("created profile tasks = %#v, want one free profile task", tasks)
+	if len(tasks) != 0 {
+		t.Fatalf("project creation started profile tasks before opt-in: %#v", tasks)
 	}
-	h.ensureProfileInitialization(t.Context(), userID, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat})
-	tasks, err = repo.Tasks().FindByUserID(t.Context(), userID, projectID, "", 0, 10)
-	if err != nil || len(tasks) != 1 {
-		t.Fatalf("repeated initialization created duplicate tasks: count=%d err=%v", len(tasks), err)
+}
+
+func TestProfileAnalysisInputNormalizesStructuredOnboardingAnswers(t *testing.T) {
+	input, err := normalizeProfileAnalysisInput(profileAnalysisInput{Answers: map[string]any{
+		"basic": map[string]any{"project_name": "科技手记", "account_status": "new"},
+		"platform_accounts": []any{
+			map[string]any{"platform": "xiaohongshu", "account_name": "科技手记", "profile_url": "https://example.com/profile"},
+			map[string]any{"platform": "douyin", "account_name": "", "profile_url": ""},
+		},
+		"intent":     map[string]any{"goals": "建立专业影响力", "direction": "AI 工具实践", "differentiation": "工程师视角"},
+		"content":    map[string]any{"preferences": "案例拆解", "formats": "图文和短视频", "tone": "直接、克制", "audience": "独立创作者"},
+		"boundaries": map[string]any{"exclusions": "不做夸大承诺", "collaboration": "需提前确认", "compliance": "遵守平台规则"},
+	}})
+	if err != nil {
+		t.Fatalf("normalizeProfileAnalysisInput: %v", err)
+	}
+	if input.Answers["basic"] == nil || input.Answers["intent"] == nil || input.Answers["content"] == nil || input.Answers["boundaries"] == nil {
+		t.Fatalf("answers lost a structured section: %#v", input.Answers)
+	}
+	accounts, ok := input.Answers["platform_accounts"].([]any)
+	if !ok || len(accounts) != 2 {
+		t.Fatalf("platform_accounts = %#v, want both selected platform rows", input.Answers["platform_accounts"])
+	}
+	second := accounts[1].(map[string]any)
+	if second["platform"] != "douyin" || second["account_name"] != "" || second["profile_url"] != "" {
+		t.Fatalf("partially blank account row = %#v, want empty-friendly values preserved", second)
+	}
+	empty, err := normalizeProfileAnalysisInput(profileAnalysisInput{})
+	if err != nil {
+		t.Fatalf("empty onboarding answers should normalize: %v", err)
+	}
+	for _, key := range []string{"basic", "platform_accounts", "intent", "content", "boundaries"} {
+		if _, exists := empty.Answers[key]; !exists {
+			t.Fatalf("empty answers omitted required section %q: %#v", key, empty.Answers)
+		}
+	}
+	if empty.Answers["platform_accounts"].([]any) == nil {
+		t.Fatalf("empty platform accounts = %#v, want an empty array", empty.Answers["platform_accounts"])
+	}
+}
+
+func TestProfileAgentInputKeepsProjectExecutionPlatformOutOfProfileAnswers(t *testing.T) {
+	input := profileAgentInput(&model.Project{ID: "project-1", Platform: "wechat", ProfileURL: "https://legacy.example/profile"}, map[string]any{}, nil)
+	if _, exists := input["platform"]; exists {
+		t.Fatalf("profile analysis received project execution platform %q", input["platform"])
+	}
+	if input["profile_url"] != "https://legacy.example/profile" {
+		t.Fatalf("legacy profile URL = %#v, want preserved for existing projects", input["profile_url"])
+	}
+}
+
+func TestProfileAnalysisAnswersRejectUnsupportedDuplicateAndOversizedAccounts(t *testing.T) {
+	tests := []struct {
+		name    string
+		answers map[string]any
+	}{
+		{name: "unsupported platform", answers: map[string]any{"platform_accounts": []any{map[string]any{"platform": "wechat", "account_name": "", "profile_url": ""}}}},
+		{name: "duplicate platform", answers: map[string]any{"platform_accounts": []any{
+			map[string]any{"platform": "douyin", "account_name": "one", "profile_url": ""},
+			map[string]any{"platform": "douyin", "account_name": "two", "profile_url": ""},
+		}}},
+		{name: "invalid profile url", answers: map[string]any{"platform_accounts": []any{map[string]any{"platform": "video_account", "account_name": "", "profile_url": "javascript:alert(1)"}}}},
+		{name: "too many platforms", answers: map[string]any{"platform_accounts": []any{
+			map[string]any{"platform": "xiaohongshu"}, map[string]any{"platform": "douyin"}, map[string]any{"platform": "bilibili"},
+			map[string]any{"platform": "video_account"}, map[string]any{"platform": "wechat_official_account"}, map[string]any{"platform": "weibo"}, map[string]any{"platform": "zhihu"}, map[string]any{"platform": "douyin"},
+		}}},
+		{name: "answer too large", answers: map[string]any{"intent": map[string]any{"goals": strings.Repeat("x", 5001)}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := normalizeProfileAnalysisInput(profileAnalysisInput{Answers: tt.answers}); err == nil {
+				t.Fatal("normalizeProfileAnalysisInput succeeded, want validation error")
+			}
+		})
 	}
 }
 

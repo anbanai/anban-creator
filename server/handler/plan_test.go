@@ -19,6 +19,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/anbanai/anban-creator/server/storage"
 )
 
 type hookedPlanRepository struct {
@@ -835,7 +836,7 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 }
 
 func TestPlanHandlerRejectsRemovedFieldsBeforeMutation(t *testing.T) {
-	for _, field := range []string{"type", "agent_input", "entries", "agent_id", "channel", "task_kind", "image_defaults", "has_content_image", "has_tail_image", "article_with_cover", "article_with_content_images", "cover_use_portrait", "montage_input", "hypit_input"} {
+	for _, field := range []string{"type", "agent_input", "entries", "agent_id", "channel", "task_kind", "image_defaults", "has_content_image", "has_tail_image", "article_with_cover", "article_with_content_images", "montage_input", "hypit_input"} {
 		for _, method := range []string{http.MethodPost, http.MethodPut} {
 			t.Run(method+"/"+field, func(t *testing.T) {
 				logger := zerolog.New(io.Discard)
@@ -891,5 +892,116 @@ func TestPlanHandlerRequiresAgentSelection(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCreatePlanPersistsPortraitSelectionAndCoverOption(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "portrait-plan@example.com", Password: "hashed", InviteCode: "portraitplan"}); err != nil {
+		t.Fatal(err)
+	}
+	projectPortrait := cutoverAsset("plan-project-portrait", userID, service.DirectUploadPurposeProjectPortraitReference, "project.png", "image/png")
+	selectedPortrait := cutoverAsset("plan-selected-portrait", userID, service.DirectUploadPurposeProjectPortraitReference, "selected.png", "image/png")
+	for _, asset := range []*model.Asset{projectPortrait, selectedPortrait} {
+		if err := repo.Assets().Create(ctx, asset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive, PortraitReferenceImageAssetID: projectPortrait.ID}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	planSvc := newHandlerPlanService(t, repo, &logger)
+	referenceAssets := service.NewReferenceAssetService(repo, store, time.Now)
+	planSvc.SetReferenceAssetService(referenceAssets)
+	h := NewPlanHandler(planSvc, &logger)
+	h.SetStore(store)
+	h.SetReferenceAssetService(referenceAssets)
+	app := fiber.New()
+	app.Post("/plans", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+
+	resp := postJSON(t, app, "/plans", `{"project_id":"`+project.ID+`","agent_ids":["wechat-article"],"execution_profile":"effective","cron_expr":"0 9 * * *","cover_use_portrait":true,"portrait_reference_image":{"asset_id":"`+selectedPortrait.ID+`"}}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	var envelope struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := repo.Plans().FindByUserID(ctx, userID, project.ID, 0, 10)
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("plans=%d err=%v", len(plans), err)
+	}
+	var responseCover bool
+	if err := json.Unmarshal(envelope.Data["cover_use_portrait"], &responseCover); err != nil || !responseCover {
+		t.Fatalf("response cover=%v err=%v", responseCover, err)
+	}
+	var responsePortrait model.AssetView
+	if err := json.Unmarshal(envelope.Data["portrait_reference_image"], &responsePortrait); err != nil || responsePortrait.AssetID != selectedPortrait.ID {
+		t.Fatalf("response portrait=%#v err=%v", responsePortrait, err)
+	}
+}
+
+func TestUpdatePlanCanClearPortraitSelectionAndDisableCover(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "portrait-plan-update@example.com", Password: "hashed", InviteCode: "portraitplanupdate"}); err != nil {
+		t.Fatal(err)
+	}
+	portrait := cutoverAsset("plan-update-portrait", userID, service.DirectUploadPurposeProjectPortraitReference, "portrait.png", "image/png")
+	if err := repo.Assets().Create(ctx, portrait); err != nil {
+		t.Fatal(err)
+	}
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	plan := &model.Plan{
+		ID: uuid.NewString(), UserID: userID, ProjectID: project.ID,
+		ExecutionProfile: "effective", CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
+		PortraitReferenceImageAssetID: portrait.ID, PortraitReferenceConfigured: true, CoverUsePortrait: true,
+	}
+	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlanEntries().Create(ctx, &model.PlanEntry{
+		ID: uuid.NewString(), PlanID: plan.ID, AgentID: model.AgentIDArticle,
+		Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+		ExecutionProfile: "effective", Status: model.PlanEntryStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store := &projectReferenceStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	app := newPlanHandlerUpdateTestApp(t, repo, store)
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/plans/"+plan.ID, strings.NewReader(`{"execution_profile":"effective","agent_ids":["wechat-article"],"portrait_reference_image":null,"cover_use_portrait":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-User-ID", userID)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+	persisted, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.PortraitReferenceImageAssetID != "" || !persisted.PortraitReferenceConfigured || persisted.CoverUsePortrait {
+		t.Fatalf("updated portrait settings = asset %q configured %v cover %v", persisted.PortraitReferenceImageAssetID, persisted.PortraitReferenceConfigured, persisted.CoverUsePortrait)
 	}
 }

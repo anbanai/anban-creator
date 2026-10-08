@@ -65,6 +65,32 @@ func (h *PlanHandler) presentPlanReference(ctx context.Context, userID string, p
 	return nil
 }
 
+func (h *PlanHandler) presentPlanPortraitReference(ctx context.Context, userID string, plan *model.Plan) error {
+	if plan == nil {
+		return nil
+	}
+	assetID := strings.TrimSpace(plan.PortraitReferenceImageAssetID)
+	if !plan.PortraitReferenceConfigured && assetID == "" && h.repo != nil && plan.ProjectID != "" {
+		project, err := h.repo.Projects().FindByID(ctx, plan.ProjectID)
+		if err == nil && project != nil {
+			assetID = strings.TrimSpace(project.PortraitReferenceImageAssetID)
+		}
+	}
+	if assetID == "" {
+		plan.PortraitReferenceImage = nil
+		return nil
+	}
+	if h.referenceAssets == nil {
+		return service.ErrReferenceAssetUnavailable
+	}
+	view, err := h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeProjectPortraitReference})
+	if err != nil {
+		return err
+	}
+	plan.PortraitReferenceImage = view
+	return nil
+}
+
 func (h *PlanHandler) planReferenceView(ctx context.Context, userID, assetID string) (*model.AssetView, error) {
 	if assetID == "" {
 		return nil, nil
@@ -78,6 +104,9 @@ func (h *PlanHandler) planReferenceView(ctx context.Context, userID, assetID str
 func (h *PlanHandler) presentPlanReferences(ctx context.Context, userID string, plans []*model.Plan) error {
 	for _, plan := range plans {
 		if err := h.presentPlanReference(ctx, userID, plan); err != nil {
+			return err
+		}
+		if err := h.presentPlanPortraitReference(ctx, userID, plan); err != nil {
 			return err
 		}
 	}
@@ -124,31 +153,36 @@ func validAttachmentURL(url string) bool {
 // Request types.
 
 type createPlanRequest struct {
-	ProjectID          string                           `json:"project_id"`
-	AgentIDs           []string                         `json:"agent_ids"`
-	ExecutionProfile   string                           `json:"execution_profile"`
-	CronExpr           string                           `json:"cron_expr"`
-	Prompt             string                           `json:"prompt"`
-	ImageCapabilityKey string                           `json:"image_capability_key"`
-	ImageRatio         string                           `json:"image_ratio"`
-	SkipReferenceImage *bool                            `json:"skip_reference_image"`
-	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
-	Watermark          *bool                            `json:"watermark"`
-	InputAttachments   []model.EntryAttachment          `json:"input_attachments,omitempty"`
+	ProjectID              string                           `json:"project_id"`
+	AgentIDs               []string                         `json:"agent_ids"`
+	ExecutionProfile       string                           `json:"execution_profile"`
+	CronExpr               string                           `json:"cron_expr"`
+	Prompt                 string                           `json:"prompt"`
+	ImageCapabilityKey     string                           `json:"image_capability_key"`
+	ImageRatio             string                           `json:"image_ratio"`
+	SkipReferenceImage     *bool                            `json:"skip_reference_image"`
+	ReferenceImage         *service.ReferenceImageSelection `json:"reference_image"`
+	PortraitReferenceImage *service.ReferenceImageSelection `json:"portrait_reference_image"`
+	CoverUsePortrait       bool                             `json:"cover_use_portrait"`
+	Watermark              *bool                            `json:"watermark"`
+	InputAttachments       []model.EntryAttachment          `json:"input_attachments,omitempty"`
 }
 
 type updatePlanRequest struct {
-	AgentIDs           *[]string                        `json:"agent_ids"`
-	ExecutionProfile   string                           `json:"execution_profile"`
-	CronExpr           string                           `json:"cron_expr"`
-	Prompt             string                           `json:"prompt"`
-	ImageCapabilityKey *string                          `json:"image_capability_key"`
-	ImageRatio         *string                          `json:"image_ratio"`
-	SkipReferenceImage *bool                            `json:"skip_reference_image"`
-	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
-	ReferenceImageSet  bool                             `json:"-"`
-	Watermark          *bool                            `json:"watermark"`
-	InputAttachments   *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
+	AgentIDs                  *[]string                        `json:"agent_ids"`
+	ExecutionProfile          string                           `json:"execution_profile"`
+	CronExpr                  string                           `json:"cron_expr"`
+	Prompt                    string                           `json:"prompt"`
+	ImageCapabilityKey        *string                          `json:"image_capability_key"`
+	ImageRatio                *string                          `json:"image_ratio"`
+	SkipReferenceImage        *bool                            `json:"skip_reference_image"`
+	ReferenceImage            *service.ReferenceImageSelection `json:"reference_image"`
+	ReferenceImageSet         bool                             `json:"-"`
+	PortraitReferenceImage    *service.ReferenceImageSelection `json:"portrait_reference_image"`
+	PortraitReferenceImageSet bool                             `json:"-"`
+	CoverUsePortrait          *bool                            `json:"cover_use_portrait"`
+	Watermark                 *bool                            `json:"watermark"`
+	InputAttachments          *[]model.EntryAttachment         `json:"input_attachments,omitempty"`
 }
 
 func rejectPlanRemovedFields(body []byte) error {
@@ -161,7 +195,7 @@ func rejectPlanRemovedFields(body []byte) error {
 		"channel": {}, "task_kind": {}, "image_defaults": {},
 		"has_content_image": {}, "has_tail_image": {},
 		"article_with_cover": {}, "article_with_content_images": {},
-		"cover_use_portrait": {}, "montage_input": {}, "hypit_input": {},
+		"montage_input": {}, "hypit_input": {},
 	}
 	for key := range raw {
 		if _, ok := removed[strings.ToLower(strings.TrimSpace(key))]; ok {
@@ -216,6 +250,21 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 	}
+	var portraitReferenceAssetID *string
+	if hasJSONField(c.Body(), "portrait_reference_image") {
+		selected := ""
+		if req.PortraitReferenceImage != nil {
+			if h.referenceAssets == nil {
+				return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+			}
+			var err error
+			selected, err = h.referenceAssets.ResolveSelection(c.Context(), userID, *req.PortraitReferenceImage, []string{service.DirectUploadPurposeProjectPortraitReference})
+			if err != nil {
+				return respondReferenceAssetError(c, h.logger, err)
+			}
+		}
+		portraitReferenceAssetID = &selected
+	}
 
 	// Validate image_capability_key against the caller's tier.
 	if err := h.validateImageCapabilityKeyForUser(c, userID, req.ImageCapabilityKey); err != nil {
@@ -236,18 +285,20 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 	}
 	req.InputAttachments = validatedAttachments
 	plan, err := h.service.Create(c.Context(), service.CreatePlanParams{
-		UserID:                userID,
-		ProjectID:             req.ProjectID,
-		ExecutionProfile:      strings.TrimSpace(req.ExecutionProfile),
-		CronExpr:              req.CronExpr,
-		Prompt:                req.Prompt,
-		ImageCapabilityKey:    req.ImageCapabilityKey,
-		ImageRatio:            req.ImageRatio,
-		SkipReferenceImage:    req.SkipReferenceImage,
-		ReferenceImageAssetID: referenceAssetID,
-		Watermark:             req.Watermark,
-		InputAttachments:      req.InputAttachments,
-		AgentIDs:              req.AgentIDs,
+		UserID:                        userID,
+		ProjectID:                     req.ProjectID,
+		ExecutionProfile:              strings.TrimSpace(req.ExecutionProfile),
+		CronExpr:                      req.CronExpr,
+		Prompt:                        req.Prompt,
+		ImageCapabilityKey:            req.ImageCapabilityKey,
+		ImageRatio:                    req.ImageRatio,
+		SkipReferenceImage:            req.SkipReferenceImage,
+		ReferenceImageAssetID:         referenceAssetID,
+		PortraitReferenceImageAssetID: portraitReferenceAssetID,
+		CoverUsePortrait:              req.CoverUsePortrait,
+		Watermark:                     req.Watermark,
+		InputAttachments:              req.InputAttachments,
+		AgentIDs:                      req.AgentIDs,
 	})
 	if err != nil {
 		if handled, response := respondAgentProfileError(c, err); handled {
@@ -257,7 +308,7 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 			return respondReferenceAssetError(c, h.logger, err)
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create plan failed")
-		if errors.Is(err, service.ErrUnsupportedPlanPlatform) || strings.Contains(err.Error(), "image_ratio") || strings.Contains(err.Error(), "Agent ") || strings.Contains(err.Error(), "agent_id") {
+		if errors.Is(err, service.ErrUnsupportedPlanPlatform) || errors.Is(err, service.ErrCoverPortraitUnavailable) || strings.Contains(err.Error(), "image_ratio") || strings.Contains(err.Error(), "Agent ") || strings.Contains(err.Error(), "agent_id") {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, service.ErrBillingInsufficientForTask) || errors.Is(err, service.ErrBillingDebtOutstanding) {
@@ -269,6 +320,9 @@ func (h *PlanHandler) Create(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to create plan")
 	}
 	plan.ReferenceImage = referenceView
+	if err := h.presentPlanPortraitReference(c.Context(), userID, plan); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	return Success(c, planAPIResponse(plan, h.store))
 }
 
@@ -328,6 +382,9 @@ func (h *PlanHandler) GetByID(c fiber.Ctx) error {
 	if err := h.presentPlanReference(c.Context(), userID, plan); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	if err := h.presentPlanPortraitReference(c.Context(), userID, plan); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 
 	return Success(c, planAPIResponse(plan, h.store))
 }
@@ -361,6 +418,7 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusBadRequest, "at least one agent_id is required")
 	}
 	req.ReferenceImageSet = hasJSONField(c.Body(), "reference_image")
+	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
 	// Verify ownership before update.
 	existing, err := h.service.GetByID(c.Context(), id)
 	if err != nil {
@@ -392,6 +450,20 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 	if err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
+	var portraitReferenceAssetID *string
+	if req.PortraitReferenceImageSet {
+		selected := ""
+		if req.PortraitReferenceImage != nil {
+			if h.referenceAssets == nil {
+				return respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+			}
+			selected, err = h.referenceAssets.ResolveSelection(c.Context(), userID, *req.PortraitReferenceImage, []string{service.DirectUploadPurposeProjectPortraitReference})
+			if err != nil {
+				return respondReferenceAssetError(c, h.logger, err)
+			}
+		}
+		portraitReferenceAssetID = &selected
+	}
 
 	// Validate image_capability_key against the caller's tier.
 	// nil/unset ImageCapabilityKey in the request body means "leave unchanged" — no validation needed.
@@ -417,17 +489,19 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		req.InputAttachments = &validatedAttachments
 	}
 	updateParams := service.UpdatePlanParams{
-		ID:                    id,
-		ExecutionProfile:      strings.TrimSpace(req.ExecutionProfile),
-		CronExpr:              req.CronExpr,
-		Prompt:                req.Prompt,
-		ImageCapabilityKey:    req.ImageCapabilityKey,
-		ImageRatio:            req.ImageRatio,
-		SkipReferenceImage:    req.SkipReferenceImage,
-		ReferenceImageAssetID: referenceAssetID,
-		Watermark:             req.Watermark,
-		InputAttachments:      req.InputAttachments,
-		AgentIDs:              req.AgentIDs,
+		ID:                            id,
+		ExecutionProfile:              strings.TrimSpace(req.ExecutionProfile),
+		CronExpr:                      req.CronExpr,
+		Prompt:                        req.Prompt,
+		ImageCapabilityKey:            req.ImageCapabilityKey,
+		ImageRatio:                    req.ImageRatio,
+		SkipReferenceImage:            req.SkipReferenceImage,
+		ReferenceImageAssetID:         referenceAssetID,
+		PortraitReferenceImageAssetID: portraitReferenceAssetID,
+		CoverUsePortrait:              req.CoverUsePortrait,
+		Watermark:                     req.Watermark,
+		InputAttachments:              req.InputAttachments,
+		AgentIDs:                      req.AgentIDs,
 	}
 	var plan *model.Plan
 	if req.ReferenceImageSet {
@@ -476,6 +550,9 @@ func (h *PlanHandler) Update(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "failed to update plan")
 	}
 	plan.ReferenceImage = referenceView
+	if err := h.presentPlanPortraitReference(c.Context(), userID, plan); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 	return Success(c, planAPIResponse(plan, h.store))
 }
 

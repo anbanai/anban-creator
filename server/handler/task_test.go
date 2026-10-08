@@ -3360,3 +3360,66 @@ func handlerFixtureTaskKind(channel string) string {
 		return model.TaskKindContentGeneration
 	}
 }
+
+func TestCreateTaskPortraitReferenceCanReplaceOrClearProjectDefault(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: "portrait-task@example.com", Password: "hashed", InviteCode: "portraittask"}); err != nil {
+		t.Fatal(err)
+	}
+	projectPortrait := cutoverAsset("project-portrait", userID, service.DirectUploadPurposeProjectPortraitReference, "project.png", "image/png")
+	taskPortrait := cutoverAsset("task-portrait", userID, service.DirectUploadPurposeProjectPortraitReference, "task.png", "image/png")
+	for _, asset := range []*model.Asset{projectPortrait, taskPortrait} {
+		if err := repo.Assets().Create(ctx, asset); err != nil {
+			t.Fatal(err)
+		}
+	}
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive, PortraitReferenceImageAssetID: projectPortrait.ID}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := zerolog.New(io.Discard)
+	store := &referencePresentationStore{fakeStorageProvider: &fakeStorageProvider{objects: map[string]*storage.ObjectInfo{}}}
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, store, &logger, "", nil, nil)
+	referenceAssets := service.NewReferenceAssetService(repo, store, time.Now)
+	taskSvc.SetReferenceAssetService(referenceAssets)
+	h := NewTaskHandler(taskSvc, &logger)
+	h.SetReferenceAssetService(referenceAssets)
+	h.SetStore(store)
+	app := fiber.New()
+	app.Post("/tasks", func(c fiber.Ctx) error { c.Locals("user_id", userID); return h.Create(c) })
+
+	for _, test := range []struct {
+		name      string
+		selection string
+		wantID    string
+	}{
+		{name: "replace", selection: `"portrait_reference_image":{"asset_id":"` + taskPortrait.ID + `"}`, wantID: taskPortrait.ID},
+		{name: "explicit clear", selection: `"portrait_reference_image":null`, wantID: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"agent_id":"wechat-article","channel":"wechat-article","task_kind":"content_generation","execution_profile":"effective","project_id":"` + project.ID + `",` + test.selection + `}`
+			resp := postJSON(t, app, "/tasks", body)
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusOK {
+				data, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d body=%s", resp.StatusCode, data)
+			}
+			data := decodeEnvelopeRawData(t, resp)
+			var taskID string
+			if err := json.Unmarshal(data["id"], &taskID); err != nil {
+				t.Fatal(err)
+			}
+			task, err := repo.Tasks().FindByID(ctx, taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := task.ProjectSnapshot.Data().PortraitReferenceImageAssetID; got != test.wantID {
+				t.Fatalf("frozen portrait = %q, want %q", got, test.wantID)
+			}
+		})
+	}
+}

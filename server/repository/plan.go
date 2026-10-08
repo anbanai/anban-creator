@@ -85,15 +85,18 @@ func planEditableUpdates(plan *model.Plan, scheduleChanged bool) map[string]inte
 	now := time.Now()
 	plan.UpdatedAt = now
 	updates := map[string]interface{}{
-		"execution_profile":        plan.ExecutionProfile,
-		"topic_hint":               plan.Prompt,
-		"image_capability_key":     plan.ImageCapabilityKey,
-		"image_ratio":              plan.ImageRatio,
-		"reference_image_asset_id": plan.ReferenceImageAssetID,
-		"skip_reference_image":     plan.SkipReferenceImage,
-		"watermark":                plan.Watermark,
-		"input_attachments":        plan.InputAttachments,
-		"updated_at":               now,
+		"execution_profile":                 plan.ExecutionProfile,
+		"topic_hint":                        plan.Prompt,
+		"image_capability_key":              plan.ImageCapabilityKey,
+		"image_ratio":                       plan.ImageRatio,
+		"reference_image_asset_id":          plan.ReferenceImageAssetID,
+		"portrait_reference_image_asset_id": plan.PortraitReferenceImageAssetID,
+		"portrait_reference_configured":     plan.PortraitReferenceConfigured,
+		"cover_use_portrait":                plan.CoverUsePortrait,
+		"skip_reference_image":              plan.SkipReferenceImage,
+		"watermark":                         plan.Watermark,
+		"input_attachments":                 plan.InputAttachments,
+		"updated_at":                        now,
 	}
 	if scheduleChanged {
 		updates["cron_expr"] = plan.CronExpr

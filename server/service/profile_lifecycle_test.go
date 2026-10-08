@@ -158,6 +158,9 @@ func TestApplyAgentProfileResultPersistsRevisionTaskResultAndProjection(t *testi
 	if got.Version != 1 || got.InitializationStatus != model.ProfileInitializationReady || got.AnalysisTaskID != f.taskID {
 		t.Fatalf("profile metadata = version %d status %q task %q", got.Version, got.InitializationStatus, got.AnalysisTaskID)
 	}
+	if got.Status != model.ProfileStatusDraft {
+		t.Fatalf("profile status = %q, want an unconfirmed first-result draft", got.Status)
+	}
 	rows := f.revisions(t)
 	if len(rows) != 1 || rows[0].Revision != 1 || rows[0].SourceTaskID != f.taskID {
 		t.Fatalf("revisions = %#v, want one revision 1 sourced from task", rows)
@@ -173,8 +176,18 @@ func TestApplyAgentProfileResultPersistsRevisionTaskResultAndProjection(t *testi
 	if result == nil || !strings.Contains(*result, `"profile_revision":1`) {
 		t.Fatalf("task result = %v, want revision summary", result)
 	}
+	if len(f.memory.files) != 0 {
+		t.Fatalf("unconfirmed draft was projected into project memory: %#v", f.memory.files)
+	}
+	confirmed, err := f.service.ConfirmProfile(context.Background(), f.userID, f.projectID, got.Version, got)
+	if err != nil {
+		t.Fatalf("ConfirmProfile: %v", err)
+	}
+	if confirmed.Status != model.ProfileStatusConfirmed || confirmed.Version != 2 {
+		t.Fatalf("confirmed profile metadata = status %q version %d", confirmed.Status, confirmed.Version)
+	}
 	if len(f.memory.files) != 7 {
-		t.Fatalf("projected files = %d, want six dimensions and AGENTS.md", len(f.memory.files))
+		t.Fatalf("projected files = %d, want six dimensions and AGENTS.md after confirmation", len(f.memory.files))
 	}
 	if !strings.Contains(f.memory.files["AGENTS.md"], "profile/preferences.md") || !strings.Contains(f.memory.files["profile/memory.md"], "复盘经验") {
 		t.Fatalf("projection missing expected AGENTS/profile content: %#v", f.memory.files)
@@ -183,8 +196,43 @@ func TestApplyAgentProfileResultPersistsRevisionTaskResultAndProjection(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Status != model.ProfileInitializationReady || state.Revision != 1 || state.ActiveTaskID != f.taskID {
-		t.Fatalf("profile state = %+v, want ready revision 1 linked to task", state)
+	if state.Status != model.ProfileInitializationReady || state.Revision != 2 || state.ActiveTaskID != f.taskID {
+		t.Fatalf("profile state = %+v, want ready revision 2 linked to task", state)
+	}
+}
+
+func TestConfirmedProfileRemainsAvailableDuringRefreshAndRefreshReplacesIt(t *testing.T) {
+	f := setupProfileLifecycle(t)
+	firstDimensions := validProfileDimensions()
+	first, err := f.service.ApplyAgentProfileResult(context.Background(), f.userID, f.projectID, f.taskID, 0, firstDimensions, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := f.service.ConfirmProfile(context.Background(), f.userID, f.projectID, first.Version, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refreshTaskID := uuid.NewString()
+	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: refreshTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeProfileAnalysis, Status: model.TaskStatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	refreshing, err := f.service.SetProfileAnalysisTaskID(context.Background(), f.userID, f.projectID, confirmed.Version, refreshTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshing.Status != model.ProfileStatusConfirmed || refreshing.Dimensions.Identity.Content["summary"] != "账号定位" {
+		t.Fatalf("confirmed profile was hidden during refresh: status=%q dimensions=%#v", refreshing.Status, refreshing.Dimensions.Identity.Content)
+	}
+
+	updated := validProfileDimensions()
+	updated.Identity.Content["summary"] = "更新后的账号定位"
+	refreshed, err := f.service.ApplyAgentProfileResult(context.Background(), f.userID, f.projectID, refreshTaskID, refreshing.Version, updated, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Status != model.ProfileStatusConfirmed || refreshed.Dimensions.Identity.Content["summary"] != "更新后的账号定位" {
+		t.Fatalf("refresh did not replace the confirmed profile: status=%q identity=%#v", refreshed.Status, refreshed.Dimensions.Identity.Content)
 	}
 }
 

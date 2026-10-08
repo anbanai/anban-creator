@@ -117,8 +117,31 @@ func (h *TaskHandler) presentTaskReferences(ctx context.Context, userID string, 
 		if _, err := h.presentTaskReference(ctx, userID, task); err != nil {
 			return err
 		}
+		if _, err := h.presentTaskPortraitReference(ctx, userID, task); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (h *TaskHandler) presentTaskPortraitReference(ctx context.Context, userID string, task *model.Task) (*model.AssetView, error) {
+	if task == nil {
+		return nil, nil
+	}
+	assetID := strings.TrimSpace(task.ProjectSnapshot.Data().PortraitReferenceImageAssetID)
+	if assetID == "" {
+		task.PortraitReferenceImage = nil
+		return nil, nil
+	}
+	if h.referenceAssets == nil {
+		return nil, service.ErrReferenceAssetUnavailable
+	}
+	view, err := h.referenceAssets.Present(ctx, userID, assetID, []string{service.DirectUploadPurposeProjectPortraitReference})
+	if err != nil {
+		return nil, err
+	}
+	task.PortraitReferenceImage = view
+	return view, nil
 }
 
 func (h *TaskHandler) presentCloneTaskReference(ctx context.Context, userID string, task *model.Task) (*model.AssetView, error) {
@@ -155,6 +178,8 @@ type createTaskRequest struct {
 	ImageCapabilityKey string                           `json:"image_capability_key"`
 	SkipReferenceImage *bool                            `json:"skip_reference_image"`
 	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
+	PortraitReferenceImage     *service.ReferenceImageSelection `json:"portrait_reference_image"`
+	PortraitReferenceImageSet bool                             `json:"-"`
 	InputAttachments   []model.EntryAttachment          `json:"input_attachments,omitempty"`
 	AgentInput         map[string]any                   `json:"agent_input,omitempty"`
 	Watermark          *bool                            `json:"watermark"`
@@ -193,6 +218,8 @@ type cloneTaskRequest struct {
 	ImageCapabilityKey       string                           `json:"image_capability_key"`
 	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
 	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
+	PortraitReferenceImage   *service.ReferenceImageSelection `json:"portrait_reference_image"`
+	PortraitReferenceImageSet bool                            `json:"-"`
 	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments"`
 	AgentInput               *map[string]any                  `json:"agent_input"`
 	Watermark                *bool                            `json:"watermark"`
@@ -271,6 +298,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
+	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
 	userID := GetUserID(c)
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
@@ -285,6 +313,7 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 	}
 	for _, task := range tasks {
 		task.ReferenceImage = prepared.referenceView
+		task.PortraitReferenceImage = prepared.portraitReferenceView
 	}
 
 	// Montage is always a single deliverable and Studio expects one task
@@ -296,9 +325,10 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 }
 
 type preparedTaskCreation struct {
-	params        service.CreateManualParams
-	quantity      int
-	referenceView *model.AssetView
+	params                 service.CreateManualParams
+	quantity               int
+	referenceView          *model.AssetView
+	portraitReferenceView  *model.AssetView
 }
 
 type taskScopedCreationInput struct {
@@ -470,6 +500,31 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		return nil, Error(c, fiber.StatusBadRequest, "agent_id, channel, and task_kind are inconsistent")
 	}
 	projectSnapshot := model.SnapshotProject(project)
+	var portraitReferenceAssetID *string
+	if req.PortraitReferenceImageSet {
+		selected := ""
+		if req.PortraitReferenceImage != nil {
+			if h.referenceAssets == nil {
+				return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+			}
+			selected, err = h.referenceAssets.ResolveSelection(c.Context(), userID, *req.PortraitReferenceImage, []string{service.DirectUploadPurposeProjectPortraitReference})
+			if err != nil {
+				return nil, respondReferenceAssetError(c, h.logger, err)
+			}
+		}
+		portraitReferenceAssetID = &selected
+		projectSnapshot.PortraitReferenceImageAssetID = selected
+	}
+	var portraitReferenceView *model.AssetView
+	if portraitID := strings.TrimSpace(projectSnapshot.PortraitReferenceImageAssetID); portraitID != "" {
+		if h.referenceAssets == nil {
+			return nil, respondReferenceAssetError(c, h.logger, service.ErrReferenceAssetUnavailable)
+		}
+		portraitReferenceView, err = h.referenceAssets.Present(c.Context(), userID, portraitID, []string{service.DirectUploadPurposeProjectPortraitReference})
+		if err != nil {
+			return nil, respondReferenceAssetError(c, h.logger, err)
+		}
+	}
 
 	var referenceAssetID string
 	var referenceView *model.AssetView
@@ -603,8 +658,9 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		}
 	}
 	return &preparedTaskCreation{
-		quantity:      quantity,
-		referenceView: referenceView,
+		quantity:              quantity,
+		referenceView:         referenceView,
+		portraitReferenceView: portraitReferenceView,
 		params: service.CreateManualParams{
 			UserID:                   userID,
 			ProjectID:                req.ProjectID,
@@ -619,6 +675,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			ImageCapabilityKey:       req.ImageCapabilityKey,
 			SkipRefImage:             req.SkipReferenceImage,
 			ReferenceImageAssetID:    referenceAssetID,
+			PortraitReferenceImageAssetID: portraitReferenceAssetID,
 			ProjectSnapshot:          &projectSnapshot,
 			InputAttachments:         req.InputAttachments,
 			AgentInput:               req.AgentInput,
@@ -778,6 +835,9 @@ func (h *TaskHandler) GetByID(c fiber.Ctx) error {
 	}
 	h.service.RefreshTaskPublicationLifecycle(c.Context(), userID, task)
 	if _, err := h.presentTaskReference(c.Context(), userID, task); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
+	if _, err := h.presentTaskPortraitReference(c.Context(), userID, task); err != nil {
 		return respondReferenceAssetError(c, h.logger, err)
 	}
 
@@ -988,6 +1048,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			return Error(c, fiber.StatusBadRequest, "invalid request body")
 		}
 	}
+	req.PortraitReferenceImageSet = hasJSONField(c.Body(), "portrait_reference_image")
 	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
 	if req.ExecutionProfile == "" {
 		return Error(c, fiber.StatusBadRequest, "execution_profile is required")
@@ -1013,6 +1074,8 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			ImageCapabilityKey:       req.ImageCapabilityKey,
 			SkipReferenceImage:       req.SkipReferenceImage,
 			ReferenceImage:           req.ReferenceImage,
+			PortraitReferenceImage:   req.PortraitReferenceImage,
+			PortraitReferenceImageSet: req.PortraitReferenceImageSet,
 			InputAttachments:         attachments,
 			Watermark:                req.Watermark,
 			HasContentImage:          req.HasContentImage,
@@ -1045,6 +1108,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			ImageCapabilityKey:       prepared.params.ImageCapabilityKey,
 			SkipRefImage:             prepared.params.SkipRefImage,
 			ReferenceImageAssetID:    prepared.params.ReferenceImageAssetID,
+			PortraitReferenceImageAssetID: prepared.params.PortraitReferenceImageAssetID,
 			InputAttachments:         prepared.params.InputAttachments,
 			AgentInput:               prepared.params.AgentInput,
 			Watermark:                prepared.params.Watermark,
@@ -1065,6 +1129,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
 		}
 		tasks[0].ReferenceImage = prepared.referenceView
+		tasks[0].PortraitReferenceImage = prepared.portraitReferenceView
 		return Success(c, taskAPIResponse(tasks[0], h.store))
 	}
 
@@ -1111,6 +1176,9 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 		return Error(c, fiber.StatusInternalServerError, "克隆任务失败")
 	}
 	tasks[0].ReferenceImage = referenceView
+	if _, err := h.presentTaskPortraitReference(c.Context(), userID, tasks[0]); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 
 	return Success(c, taskAPIResponse(tasks[0], h.store))
 }
@@ -1213,6 +1281,9 @@ func (h *TaskHandler) Resume(c fiber.Ctx) error {
 		}
 	}
 	task.ReferenceImage = referenceView
+	if _, err := h.presentTaskPortraitReference(c.Context(), userID, task); err != nil {
+		return respondReferenceAssetError(c, h.logger, err)
+	}
 
 	return Success(c, taskAPIResponse(task, h.store))
 }

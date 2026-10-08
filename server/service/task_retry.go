@@ -24,24 +24,25 @@ type CloneTaskParams struct {
 }
 
 type CloneTaskOverrides struct {
-	ProjectID                string
-	Quantity                 int
-	Prompt                   string
-	ImageRatio               string
-	ImageCapabilityKey       string
-	SkipRefImage             *bool
-	ReferenceImageAssetID    string
-	InputAttachments         []model.EntryAttachment
-	AgentInput               map[string]any
-	Watermark                *bool
-	HasContentImage          *bool
-	HasTailImage             *bool
-	ArticleWithCover         *bool
-	ArticleWithContentImages *bool
-	CoverUsePortrait         *bool
-	Ecommerce                *model.EcommerceConfig
-	MontageInput             *model.MontageInput
-	HypitInput               *model.HypitInput
+	ProjectID                     string
+	Quantity                      int
+	Prompt                        string
+	ImageRatio                    string
+	ImageCapabilityKey            string
+	SkipRefImage                  *bool
+	ReferenceImageAssetID         string
+	PortraitReferenceImageAssetID *string
+	InputAttachments              []model.EntryAttachment
+	AgentInput                    map[string]any
+	Watermark                     *bool
+	HasContentImage               *bool
+	HasTailImage                  *bool
+	ArticleWithCover              *bool
+	ArticleWithContentImages      *bool
+	CoverUsePortrait              *bool
+	Ecommerce                     *model.EcommerceConfig
+	MontageInput                  *model.MontageInput
+	HypitInput                    *model.HypitInput
 }
 
 func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
@@ -110,32 +111,33 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			coverUsePortrait = *override.CoverUsePortrait
 		}
 		params := CreateManualParams{
-			UserID:                   src.UserID,
-			ProjectID:                override.ProjectID,
-			AgentID:                  cloneAgentID,
-			Channel:                  cloneChannel,
-			TaskKind:                 cloneTaskKind,
-			ExecutionProfile:         cloneParams.ExecutionProfile,
-			Prompt:                   override.Prompt,
-			Quantity:                 override.Quantity,
-			ImageRatio:               override.ImageRatio,
-			ImageCapabilityKey:       override.ImageCapabilityKey,
-			SkipRefImage:             override.SkipRefImage,
-			ReferenceImageAssetID:    preservedReferenceAssetID,
-			InputSourceTaskID:        inputSourceTaskID,
-			InputSourceProjectID:     inputSourceProjectID,
-			InputAttachments:         attachments,
-			AgentInput:               override.AgentInput,
-			Watermark:                override.Watermark,
-			HasContentImage:          override.HasContentImage,
-			HasTailImage:             override.HasTailImage,
-			ArticleWithCover:         override.ArticleWithCover,
-			ArticleWithContentImages: override.ArticleWithContentImages,
-			CoverUsePortrait:         coverUsePortrait,
-			Ecommerce:                override.Ecommerce,
-			MontageInput:             override.MontageInput,
-			HypitInput:               override.HypitInput,
-			MontageSourceTaskID:      src.ID,
+			UserID:                        src.UserID,
+			ProjectID:                     override.ProjectID,
+			AgentID:                       cloneAgentID,
+			Channel:                       cloneChannel,
+			TaskKind:                      cloneTaskKind,
+			ExecutionProfile:              cloneParams.ExecutionProfile,
+			Prompt:                        override.Prompt,
+			Quantity:                      override.Quantity,
+			ImageRatio:                    override.ImageRatio,
+			ImageCapabilityKey:            override.ImageCapabilityKey,
+			SkipRefImage:                  override.SkipRefImage,
+			ReferenceImageAssetID:         preservedReferenceAssetID,
+			PortraitReferenceImageAssetID: override.PortraitReferenceImageAssetID,
+			InputSourceTaskID:             inputSourceTaskID,
+			InputSourceProjectID:          inputSourceProjectID,
+			InputAttachments:              attachments,
+			AgentInput:                    override.AgentInput,
+			Watermark:                     override.Watermark,
+			HasContentImage:               override.HasContentImage,
+			HasTailImage:                  override.HasTailImage,
+			ArticleWithCover:              override.ArticleWithCover,
+			ArticleWithContentImages:      override.ArticleWithContentImages,
+			CoverUsePortrait:              coverUsePortrait,
+			Ecommerce:                     override.Ecommerce,
+			MontageInput:                  override.MontageInput,
+			HypitInput:                    override.HypitInput,
+			MontageSourceTaskID:           src.ID,
 		}
 		tasks, err := s.CreateManual(ctx, params)
 		if err != nil {

@@ -396,6 +396,9 @@ type CreateManualParams struct {
 	frozenImageCapabilitySnapshot *model.ImageCapabilitySnapshot
 	SkipRefImage                  *bool
 	ReferenceImageAssetID         string
+	// PortraitReferenceImageAssetID nil inherits the project or frozen snapshot;
+	// a pointer to an empty string explicitly clears it.
+	PortraitReferenceImageAssetID *string
 	// InputSourceTaskID is internal clone provenance. When set, bootstrap may
 	// reuse input objects from this task's exact user/project/task prefix.
 	InputSourceTaskID string
@@ -599,7 +602,14 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	taskType := taskTypeForIdentity(agentID, channel, taskKind)
 	effectiveReferenceImageAssetID := p.ReferenceImageAssetID
-	if err := s.validateTaskCreationReferences(ctx, p.UserID, effectiveReferenceImageAssetID, project, p.ProjectSnapshot); err != nil {
+	taskProjectSnapshot := model.SnapshotProject(project)
+	if p.ProjectSnapshot != nil {
+		taskProjectSnapshot = *p.ProjectSnapshot
+	}
+	if p.PortraitReferenceImageAssetID != nil {
+		taskProjectSnapshot.PortraitReferenceImageAssetID = strings.TrimSpace(*p.PortraitReferenceImageAssetID)
+	}
+	if err := s.validateTaskCreationReferences(ctx, p.UserID, effectiveReferenceImageAssetID, project, &taskProjectSnapshot); err != nil {
 		return nil, err
 	}
 
@@ -610,10 +620,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		return nil, fmt.Errorf("%w: frozen task type does not match explicit identity", ErrTaskIdentityIncompatible)
 	}
 	if p.CoverUsePortrait {
-		portraitAssetID := project.PortraitReferenceImageAssetID
-		if p.ProjectSnapshot != nil {
-			portraitAssetID = p.ProjectSnapshot.PortraitReferenceImageAssetID
-		}
+		portraitAssetID := taskProjectSnapshot.PortraitReferenceImageAssetID
 		if !model.SupportsPortraitCover(taskType) || strings.TrimSpace(portraitAssetID) == "" {
 			return nil, ErrCoverPortraitUnavailable
 		}
@@ -845,21 +852,16 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			AgentProfileSnapshot:     profileSnapshot,
 			AgentProfileFingerprint:  profileFingerprint,
 		}
-		if p.ProjectSnapshot != nil {
-			snapshot := *p.ProjectSnapshot
-			snapshot.AgentID = agentID
-			snapshot.Channel = channel
-			if strings.TrimSpace(snapshot.Platform) == "" {
-				snapshot.Platform = project.Platform
-			}
-			task.SetProjectSnapshot(snapshot)
-		} else {
-			snapshot := model.SnapshotProject(project)
-			snapshot.AgentID = agentID
-			snapshot.Channel = channel
-			s.freezeProjectChannelConfig(ctx, project.ID, channel, &snapshot)
-			task.SetProjectSnapshot(snapshot)
+		snapshot := taskProjectSnapshot
+		snapshot.AgentID = agentID
+		snapshot.Channel = channel
+		if strings.TrimSpace(snapshot.Platform) == "" {
+			snapshot.Platform = project.Platform
 		}
+		if p.ProjectSnapshot == nil {
+			s.freezeProjectChannelConfig(ctx, project.ID, channel, &snapshot)
+		}
+		task.SetProjectSnapshot(snapshot)
 		if taskUsesFrozenImageCapability(taskType) {
 			task.SetImageCapabilitySnapshot(effectiveImageCapabilitySnapshot)
 		}
@@ -1019,7 +1021,9 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			}
 		}
 		profile.AnalysisTaskID = tasks[0].ID
-		profile.Status = model.ProfileStatusDraft
+		if !profile.IsConfirmed() {
+			profile.Status = model.ProfileStatusDraft
+		}
 		profile.InitializationStatus = model.ProfileInitializationQueued
 		project.Profile = datatypes.NewJSONType(profile)
 		if err := tx.Projects().Update(ctx, project); err != nil {
@@ -1221,8 +1225,16 @@ func (s *TaskService) createFromPlanWithEntryInputs(ctx context.Context, plan *m
 		}
 	}
 	effectiveReferenceImageAssetID := plan.ReferenceImageAssetID
-	if err := s.validateTaskCreationReferences(ctx, plan.UserID, effectiveReferenceImageAssetID, project, nil); err != nil {
+	projectSnapshot := model.SnapshotProject(project)
+	if plan.PortraitReferenceConfigured || strings.TrimSpace(plan.PortraitReferenceImageAssetID) != "" {
+		projectSnapshot.PortraitReferenceImageAssetID = strings.TrimSpace(plan.PortraitReferenceImageAssetID)
+	}
+	usePortraitCover := planEntryUsesPortraitCover(plan.CoverUsePortrait, agentID, channel, taskKind)
+	if err := s.validateTaskCreationReferences(ctx, plan.UserID, effectiveReferenceImageAssetID, project, &projectSnapshot); err != nil {
 		return nil, err
+	}
+	if usePortraitCover && strings.TrimSpace(projectSnapshot.PortraitReferenceImageAssetID) == "" {
+		return nil, ErrCoverPortraitUnavailable
 	}
 	var effectiveImageCapabilitySnapshot model.ImageCapabilitySnapshot
 	if taskUsesFrozenImageCapability(taskType) {
@@ -1250,6 +1262,7 @@ func (s *TaskService) createFromPlanWithEntryInputs(ctx context.Context, plan *m
 		ImageCapabilityKey:      effectiveImageCapabilityKey,
 		ImageRatio:              effectiveImageRatio,
 		ReferenceImageAssetID:   effectiveReferenceImageAssetID,
+		CoverUsePortrait:        usePortraitCover,
 		SkipReferenceImage:      plan.SkipReferenceImage,
 		Watermark:               plan.Watermark,
 		ExecutionProfile:        profile.ID,
@@ -1268,11 +1281,10 @@ func (s *TaskService) createFromPlanWithEntryInputs(ctx context.Context, plan *m
 	}
 	task.SetInputAttachments(cloneEntryAttachments(plan.InputAttachments.Data()))
 	if project != nil {
-		snapshot := model.SnapshotProject(project)
-		snapshot.AgentID = agentID
-		snapshot.Channel = channel
-		s.freezeProjectChannelConfig(ctx, project.ID, channel, &snapshot)
-		task.SetProjectSnapshot(snapshot)
+		projectSnapshot.AgentID = agentID
+		projectSnapshot.Channel = channel
+		s.freezeProjectChannelConfig(ctx, project.ID, channel, &projectSnapshot)
+		task.SetProjectSnapshot(projectSnapshot)
 	}
 	// Try to claim a topic from the topic pool if no prompt is set.
 	if prompt == "" && s.topicPoolSvc != nil && plan.ProjectID != "" {

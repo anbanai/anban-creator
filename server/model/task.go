@@ -55,6 +55,8 @@ func (s ImageCapabilitySnapshot) ComputedDigest() (string, error) {
 
 const TaskLifecycleVersion = 1
 
+const ContentOriginHotSearch = "hot_search"
+
 const (
 	TaskLifecycleSourceAgent  = "agent"
 	TaskLifecycleSourceServer = "server"
@@ -191,11 +193,13 @@ type Task struct {
 	Status                  string                                      `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
 	Prompt                  string                                      `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
 	Title                   string                                      `gorm:"type:varchar(200)" json:"title,omitempty"`
+	ContentOrigin           string                                      `gorm:"type:varchar(40);not null;default:'';index" json:"-"`
 	ImageRatio              string                                      `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageCapabilityKey      string                                      `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
 	ImageCapabilitySnapshot datatypes.JSONType[ImageCapabilitySnapshot] `gorm:"type:json" json:"-"`
 	ReferenceImageAssetID   string                                      `gorm:"type:char(36);index" json:"-"`
 	ReferenceImage          *AssetView                                  `gorm:"-" json:"reference_image,omitempty"`
+	PortraitReferenceImage  *AssetView                                  `gorm:"-" json:"portrait_reference_image,omitempty"`
 	// InputSourceTaskID records the root task whose immutable OSS inputs a clone
 	// may reuse. It is internal ownership provenance, not a client-controlled field.
 	InputSourceTaskID string `gorm:"type:char(36);index" json:"-"`
@@ -340,6 +344,10 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 	if p == nil {
 		return ProjectSnapshot{}
 	}
+	profile := p.Profile.Data()
+	if !profile.IsConfirmed() {
+		profile = NewProjectProfile()
+	}
 	return ProjectSnapshot{
 		ProjectName:                   p.Name,
 		AgentID:                       "",
@@ -357,7 +365,7 @@ func SnapshotProject(p *Project) ProjectSnapshot {
 		EcommerceDefaults:             p.EcommerceDefaults.Data(),
 		MontageDefaults:               p.MontageDefaults.Data(),
 		HypitDefaults:                 p.HypitDefaults.Data(),
-		Profile:                       p.Profile.Data(),
+		Profile:                       profile,
 	}
 }
 

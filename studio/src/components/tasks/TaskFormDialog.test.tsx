@@ -346,6 +346,29 @@ describe('TaskFormDialog', () => {
     expect(vi.mocked(api.tasks.create).mock.calls[0][0]).toMatchObject({ cover_use_portrait: true })
   })
 
+  it('uploads and submits a task-specific portrait independently from the project default', async () => {
+    uploadToOSSMock.mockResolvedValueOnce({
+      uploadSessionId: '88888888-8888-4888-8888-888888888888', uploadId: 'task-portrait', key: 'uploads/pending/task-portrait.png',
+      publicUrl: '', previewUrl: 'https://cdn.example/task-portrait.png', contentType: 'image/png', size: 20,
+    })
+    renderDialog()
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    await openTaskParameters(dialog)
+    fireEvent.change(within(dialog).getByLabelText('人物参考图文件'), {
+      target: { files: [new File(['portrait'], 'task-portrait.png', { type: 'image/png' })] },
+    })
+    await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'project_portrait_reference' })))
+    await waitFor(() => expect(within(dialog).getByRole('img', { name: '人物参考' })).toBeInTheDocument())
+    await openTaskParameters(dialog)
+    fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
+    fireEvent.change(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), { target: { value: '按指定人物制作封面' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      portrait_reference_image: { upload_session_id: '88888888-8888-4888-8888-888888888888' },
+      cover_use_portrait: true,
+    })))
+  })
+
   it.each(['wechat', 'seednote', 'montage', 'hypit'] as const)('offers an unselected portrait cover for %s tasks', async (platform) => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, platform }])
     renderDialog()
@@ -353,6 +376,19 @@ describe('TaskFormDialog', () => {
     expect(await within(dialog).findByRole('switch', { name: '人物封面' })).not.toBeChecked()
     fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
     expect(within(dialog).getByRole('switch', { name: '人物封面' })).toBeChecked()
+  })
+
+  it('clears portrait cover usage when the selected reference is removed', async () => {
+    renderDialog({ initialProjectId: fixtures.articleProject.id })
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
+    fireEvent.click(portraitSwitch)
+    expect(portraitSwitch).toBeChecked()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '移除参考图' }))
+
+    expect(portraitSwitch).not.toBeChecked()
+    expect(portraitSwitch).toHaveAttribute('aria-disabled', 'true')
   })
 
   it.each([fixtures.seednoteProject, fixtures.montageProject])('submits the selected portrait cover for a $platform task', async (project) => {
@@ -373,7 +409,7 @@ describe('TaskFormDialog', () => {
     })))
   })
 
-  it('keeps stale portrait selection editable when cloning a task whose project portrait was removed', async () => {
+  it('keeps the cloned portrait selection when turning off its cover use', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, portrait_reference_image: null }])
     renderDialog({ mode: 'clone', sourceTask: { ...fixtures.sourceTask, article_with_cover: true, cover_use_portrait: true } })
     const dialog = await screen.findByRole('dialog', { name: '克隆任务' })
@@ -382,7 +418,12 @@ describe('TaskFormDialog', () => {
     expect(toggle).not.toHaveAttribute('aria-disabled', 'true')
     fireEvent.click(toggle)
     expect(toggle).not.toBeChecked()
-    expect(toggle).toHaveAttribute('aria-disabled', 'true')
+    expect(toggle).not.toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
+    await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('source-task', expect.objectContaining({
+      portrait_reference_image: { asset_id: '11111111-1111-4111-8111-111111111111' },
+      cover_use_portrait: false,
+    })))
   })
 
   it('shows the missing project portrait without requiring one', async () => {

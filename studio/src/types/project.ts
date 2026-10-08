@@ -120,7 +120,7 @@ export interface ProjectProfile {
   follow_up_questions: string[]
 }
 
-export type ProfileAnalysisStatus = TaskStatusLike | 'not_started'
+export type ProfileAnalysisStatus = TaskStatusLike | 'not_started' | 'queued' | 'ready'
 
 type TaskStatusLike = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -169,6 +169,22 @@ export interface CreateProjectRequest {
 
 export interface CreateProjectResponse {
   project: Project
+  profile_initialization?: {
+    status: ProfileInitializationStatus
+    task_id?: string
+    revision?: number
+    error?: string
+  }
+}
+
+export type ProfileInitializationStatus = 'not_started' | 'queued' | 'running' | 'ready' | 'failed'
+
+export interface ProfileAnalysisAnswers {
+  basic: { project_name: string; account_status: 'new' | 'existing' | '' }
+  platform_accounts: Array<{ platform: string; account_name: string; profile_url: string }>
+  intent: { goals: string; direction: string; differentiation: string }
+  content: { preferences: string; formats: string; tone: string; audience: string }
+  boundaries: { exclusions: string; collaboration: string; compliance: string }
 }
 
 export interface PlatformFieldConfig {

@@ -423,7 +423,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	// Every execution receives a read-only snapshot of the current project
 	// profile. The runtime may read these files, but persistence is owned by the
 	// Server's profile service and the dedicated MCP submission capability.
-	profile := projectProfileFor(project)
+	profile := projectProfileForAgentContext(project)
 	files = append(files, BootstrapFile{Path: "AGENTS.md", Text: ProfileAgentsMarkdown(), Mode: 0644})
 	for _, dimension := range model.ProfileDimensions() {
 		content, err := ProfileDimensionMarkdown(dimension, profileDimension(profile, dimension))

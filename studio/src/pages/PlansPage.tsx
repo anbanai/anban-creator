@@ -16,7 +16,7 @@ import {
 
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { AgentExecutionProfileID, AgentPack, Plan, CreatePlanRequest, UpdatePlanRequest } from '@/types'
+import type { AgentExecutionProfileID, AgentPack, Plan, Project, CreatePlanRequest, UpdatePlanRequest, ReferenceImageSelection } from '@/types'
 import { planSchema, type PlanFormValues, normalizeImageRatio } from '@/lib/schemas'
 import { useAgentPacks } from '@/hooks/useAgentPacks'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
@@ -24,6 +24,8 @@ import { useImageCapabilities } from '@/hooks/useImageCapabilities'
 import { parseCreationIntent } from '@/lib/command-center'
 import { cheapestAvailableExecutionProfileForTasks } from '@/lib/pricing'
 import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
+import { referenceSelectionFromValue } from '@/lib/reference-image'
+import { supportsPortraitCover } from '@/lib/portrait-cover'
 import type { ReferenceImageValue } from '@/types/asset'
 import { planStatusLabel, cronToHuman, formatDateTimeCN } from '@/lib/labels'
 
@@ -47,6 +49,7 @@ import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
 import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import SchedulePicker from '@/components/SchedulePicker'
 import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameters'
+import { PortraitCoverControl } from '@/components/tasks/PortraitCoverControl'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { StatusPill, WorkspaceSubnav } from '@/components/workspace'
@@ -103,12 +106,14 @@ function formValuesForPlan(plan: Plan): PlanFormValues {
     image_ratio: normalizeImageRatio(plan.image_ratio),
     skip_reference_image: plan.skip_reference_image ?? false,
     reference_image: plan.reference_image ?? null,
+    portrait_reference_image: plan.portrait_reference_image ?? null,
+    cover_use_portrait: plan.cover_use_portrait ?? false,
     input_attachments: plan.input_attachments ?? [],
     watermark: plan.watermark ?? false,
   }
 }
 
-function defaultValues(projectID = ''): PlanFormValues {
+function defaultValues(projectID = '', project?: Project): PlanFormValues {
   return {
     project_id: projectID,
     agent_ids: [],
@@ -119,6 +124,8 @@ function defaultValues(projectID = ''): PlanFormValues {
     image_ratio: 'auto',
     skip_reference_image: false,
     reference_image: null,
+    portrait_reference_image: project?.portrait_reference_image ? { asset_id: project.portrait_reference_image.asset_id } : null,
+    cover_use_portrait: false,
     input_attachments: [],
     watermark: false,
   }
@@ -163,6 +170,8 @@ export default function PlansPage() {
   const watchedImageCapabilityKey = useWatch({ control: form.control, name: 'image_capability_key' }) ?? ''
   const watchedImageRatio = useWatch({ control: form.control, name: 'image_ratio' }) ?? 'auto'
   const watchedSkipReference = useWatch({ control: form.control, name: 'skip_reference_image' }) ?? false
+  const watchedCoverUsePortrait = useWatch({ control: form.control, name: 'cover_use_portrait' }) ?? false
+  const watchedPortraitReference = useWatch({ control: form.control, name: 'portrait_reference_image' })
 
   const packsQuery = useAgentPacks()
   const taskPacks = useMemo(() => (packsQuery.data?.packs ?? []).filter(canUseForTask), [packsQuery.data?.packs])
@@ -282,7 +291,7 @@ export default function PlansPage() {
     setRecommendationUnavailable(false)
     scheduleManuallyChangedRef.current = false
     resetAttachments([])
-    form.reset(defaultValues(projectID))
+    form.reset(defaultValues(projectID, projectMap[projectID]))
     setModalOpen(true)
     const requestID = ++recommendationRequestRef.current
     void api.plans.scheduleRecommendation().then((recommendation) => {
@@ -314,9 +323,12 @@ export default function PlansPage() {
   }
 
   function changeProject(id: string | null) {
+    const project = id ? projectMap[id] : undefined
     form.setValue('project_id', id ?? '', { shouldDirty: true, shouldValidate: true })
     // Output selection is independent from the project context.
-    if (id) form.setValue('image_ratio', normalizeImageRatio(projectMap[id]?.image_ratio), { shouldDirty: true })
+    if (id) form.setValue('image_ratio', normalizeImageRatio(project?.image_ratio), { shouldDirty: true })
+    form.setValue('portrait_reference_image', project?.portrait_reference_image ? { asset_id: project.portrait_reference_image.asset_id } : null, { shouldDirty: true })
+    form.setValue('cover_use_portrait', false, { shouldDirty: true })
   }
 
   async function onSubmit(values: PlanFormValues) {
@@ -333,6 +345,8 @@ export default function PlansPage() {
       image_ratio: values.image_ratio,
       skip_reference_image: values.skip_reference_image,
       reference_image: values.skip_reference_image ? null : values.reference_image,
+      portrait_reference_image: referenceSelectionFromValue(values.portrait_reference_image),
+      cover_use_portrait: values.cover_use_portrait,
       input_attachments: prepared.attachments ?? [],
       watermark: values.watermark,
     }
@@ -363,6 +377,7 @@ export default function PlansPage() {
     || !selectedImageCapability || selectedImageCapability.enabled !== true || selectedImageCapability.price_available !== true
   const selectedProfileAvailable = executionProfileOptions.some((profile) => profile.id === watchedExecutionProfile && profile.available)
   const outputsAvailable = watchedAgentIDs.length > 0 && watchedAgentIDs.every((id) => outputPacks.some((pack) => pack.id === id))
+  const supportsAnyPortraitCover = watchedAgentIDs.some((id) => supportsPortraitCover(taskPacks.find((pack) => pack.id === id)?.channel || id))
   const submitDisabled = isSubmitting || !outputsAvailable || !watchedProjectID || !selectedProfileAvailable || !scheduleValid || referenceUploading || attachmentUploading || attachmentFailed || imageUnavailable
 
   function renderPlanCard(plan: Plan) {
@@ -563,6 +578,15 @@ export default function PlansPage() {
                     <div className="mt-3 space-y-4">
                       <FormField control={form.control} name="skip_reference_image" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>跳过参考图</FormLabel><FormDescription>本次计划不使用参考图。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />
                       {!watchedSkipReference ? <FormField control={form.control} name="reference_image" render={({ field }) => <FormItem><FormLabel>参考图</FormLabel><FormControl><ReferenceAssetUpload value={(field.value as ReferenceImageValue | null) ?? null} onChange={field.onChange} purpose="task_reference" onUploadingChange={setReferenceUploading} disabled={isSubmitting} /></FormControl><FormMessage /></FormItem>} /> : null}
+                      {supportsAnyPortraitCover ? <PortraitCoverControl
+                        type="seednote"
+                        project={selectedProject}
+                        value={(watchedPortraitReference as ReferenceImageSelection | null) ?? null}
+                        onValueChange={(value) => form.setValue('portrait_reference_image', value, { shouldDirty: true, shouldValidate: true })}
+                        onUploadingChange={setReferenceUploading}
+                        checked={watchedCoverUsePortrait}
+                        onCheckedChange={(checked) => form.setValue('cover_use_portrait', checked, { shouldDirty: true, shouldValidate: true })}
+                      /> : null}
                       <FormField control={form.control} name="watermark" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>水印</FormLabel><FormDescription>在支持的图片能力中启用水印。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />
                     </div>
                   </details>

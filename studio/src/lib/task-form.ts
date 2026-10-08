@@ -62,6 +62,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     image_capability_key: defaults.imageCapabilityKey,
     skip_reference_image: false,
     reference_image: null,
+    portrait_reference_image: project?.portrait_reference_image ? { asset_id: project.portrait_reference_image.asset_id } : null,
     input_attachments: [],
     agent_input: {},
     watermark: false,
@@ -93,6 +94,7 @@ export function switchTaskFormDefaults(
       image_ratio: defaultTaskImageRatio(current.type, project) as TaskFormDefaults['image_ratio'],
       image_capability_key: defaults.image_capability_key,
       cover_use_portrait: current.cover_use_portrait && Boolean(project.portrait_reference_image),
+      portrait_reference_image: project.portrait_reference_image ? { asset_id: project.portrait_reference_image.asset_id } : null,
     }
 
     if (current.type === 'ecommerce') {
@@ -125,6 +127,7 @@ export function switchTaskFormDefaults(
     quantity: current.quantity,
     skip_reference_image: current.skip_reference_image,
     reference_image: cloneValue(current.reference_image),
+    portrait_reference_image: project?.portrait_reference_image ? { asset_id: project.portrait_reference_image.asset_id } : null,
     input_attachments: cloneValue(current.input_attachments),
     watermark: current.watermark,
     hypit_input: project?.platform === 'hypit' ? initialHypitInput(current.prompt, undefined, project.hypit_defaults) : undefined,
@@ -169,6 +172,13 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     image_capability_key: task.image_capability_key ?? '',
     skip_reference_image: task.skip_reference_image ?? false,
     reference_image: task.type === 'wechat-article' && !articleUsesPortrait ? null : taskReferenceSelection(task),
+    portrait_reference_image: task.portrait_reference_image
+      ? { asset_id: task.portrait_reference_image.asset_id }
+      : task.project_snapshot?.portrait_reference_image_asset_id
+        ? { asset_id: task.project_snapshot.portrait_reference_image_asset_id }
+        : task.cover_use_portrait && articleUsesPortrait && directReference
+          ? { asset_id: directReference.asset_id }
+          : null,
     input_attachments: clonedAttachments,
     agent_input: agentInput,
     watermark: task.watermark ?? false,
@@ -218,6 +228,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
     image_capability_key: values.image_capability_key || undefined,
     skip_reference_image: values.skip_reference_image,
     ...(values.skip_reference_image ? { reference_image: null } : {}),
+    portrait_reference_image: cloneValue(values.portrait_reference_image ?? null),
     input_attachments: cloneValue(values.input_attachments),
     agent_input: cloneValue(values.agent_input),
     watermark: values.watermark,

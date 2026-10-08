@@ -158,13 +158,31 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
-	expectedRevision := int64(0)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmedProfile := model.NewProjectProfile()
+	confirmedProfile.Status = model.ProfileStatusConfirmed
+	confirmedProfile.InitializationStatus = model.ProfileInitializationReady
+	confirmedProfile.Version = 1
+	confirmedProfile.Dimensions = validProfileDimensions()
+	project.Profile = datatypes.NewJSONType(confirmedProfile)
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	expectedRevision := confirmedProfile.Version
 	input := map[string]any{
 		"project_id":  projectID,
-		"platform":    model.PlatformWechat,
 		"profile_url": "https://example.com/profile",
-		"answers":     map[string]any{},
-		"samples":     []any{},
+		"answers": map[string]any{
+			"basic":             map[string]any{"project_name": "Profile test", "account_status": "existing"},
+			"platform_accounts": []any{},
+			"intent":            map[string]any{"goals": "", "direction": "", "differentiation": ""},
+			"content":           map[string]any{"preferences": "", "formats": "", "tone": "", "audience": ""},
+			"boundaries":        map[string]any{"exclusions": "", "collaboration": "", "compliance": ""},
+		},
+		"samples": []any{},
 	}
 	params := CreateManualParams{
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
@@ -179,13 +197,17 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	if len(tasks) != 1 || tasks[0].BillingPriceCredits != 0 || tasks[0].BillingQuoteID != "" {
 		t.Fatalf("profile task billing = %#v, want free admission", tasks)
 	}
-	project, err := repo.Projects().FindByID(ctx, projectID)
+	project, err = repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	profile := projectProfileFor(project)
-	if profile.AnalysisTaskID != tasks[0].ID || profile.InitializationStatus != model.ProfileInitializationQueued {
-		t.Fatalf("profile lifecycle = %+v, want queued and linked to task", profile)
+	if profile.AnalysisTaskID != tasks[0].ID || profile.InitializationStatus != model.ProfileInitializationQueued || profile.Status != model.ProfileStatusConfirmed {
+		t.Fatalf("profile lifecycle = %+v, want queued, linked, and still confirmed during refresh", profile)
+	}
+	snapshot := tasks[0].ProjectSnapshot.Data()
+	if !snapshot.Profile.IsConfirmed() || snapshot.Profile.Dimensions.Identity.Content["summary"] != "账号定位" {
+		t.Fatalf("refresh task profile snapshot = %+v, want prior confirmed profile", snapshot.Profile)
 	}
 	if _, err := svc.CreateManual(ctx, params); !errors.Is(err, ErrProjectProfileAnalysisInProgress) {
 		t.Fatalf("duplicate profile admission error = %v, want in-progress conflict", err)

@@ -15,6 +15,7 @@ interface ReferenceAssetUploadProps {
   onChange: (value: ReferenceImageSelection | null) => void
   purpose: ReferenceUploadPurpose
   ariaLabel?: string
+  imageAlt?: string
   onUploadingChange?: (uploading: boolean) => void
   onUploadedPreview?: (previewUrl: string) => void
   disabled?: boolean
@@ -35,6 +36,7 @@ export function ReferenceAssetUpload({
   onChange,
   purpose,
   ariaLabel = '参考图文件',
+  imageAlt = '参考图',
   onUploadingChange,
   onUploadedPreview,
   disabled = false,
@@ -189,7 +191,7 @@ export function ReferenceAssetUpload({
         <div className="relative h-32 w-32">
           <img
             src={previewUrl}
-            alt="参考图"
+            alt={imageAlt}
             className="h-32 w-32 rounded-lg border object-cover"
           />
           <button

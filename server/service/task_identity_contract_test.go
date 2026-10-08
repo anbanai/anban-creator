@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -108,6 +109,64 @@ func TestPlanEntryIdentityIndependentOfProjectPlatform(t *testing.T) {
 				t.Fatal("plan was mutated with output identity")
 			}
 		})
+	}
+}
+
+func TestPlanEntryPortraitCoverAndSnapshotUseSelectedPlanAsset(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := t.Context()
+	userID := "plan-portrait-owner"
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	projectDefault := referenceAssetFixture("plan-portrait-project-default", userID, DirectUploadPurposeProjectPortraitReference)
+	selected := referenceAssetFixture("plan-portrait-selected", userID, DirectUploadPurposeProjectPortraitReference)
+	seedReferenceAsset(t, repo, projectDefault)
+	seedReferenceAsset(t, repo, selected)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.PortraitReferenceImageAssetID = projectDefault.ID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+	plan := &model.Plan{
+		ID: "plan-portrait-mixed", UserID: userID, ProjectID: projectID,
+		Prompt: "scheduled topic", ImageRatio: model.ImageRatioAuto,
+		PortraitReferenceImageAssetID: selected.ID, PortraitReferenceConfigured: true,
+		CoverUsePortrait: true,
+	}
+
+	article, err := svc.CreateFromPlanEntry(ctx, plan, &model.PlanEntry{
+		PlanID: plan.ID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle,
+		TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !article.CoverUsePortrait || article.ProjectSnapshot.Data().PortraitReferenceImageAssetID != selected.ID {
+		t.Fatalf("article portrait settings = cover %v, frozen asset %q", article.CoverUsePortrait, article.ProjectSnapshot.Data().PortraitReferenceImageAssetID)
+	}
+	legacyPlan := &model.Plan{ID: "legacy-plan-portrait", UserID: userID, ProjectID: projectID, ExecutionProfile: "effective"}
+	legacyTask, err := svc.CreateFromPlanEntry(ctx, legacyPlan, &model.PlanEntry{
+		PlanID: legacyPlan.ID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle,
+		TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyTask.CoverUsePortrait || legacyTask.ProjectSnapshot.Data().PortraitReferenceImageAssetID != projectDefault.ID {
+		t.Fatalf("legacy plan should inherit the project image without enabling it as a cover: cover %v asset %q", legacyTask.CoverUsePortrait, legacyTask.ProjectSnapshot.Data().PortraitReferenceImageAssetID)
+	}
+
+	if !planEntryUsesPortraitCover(true, model.AgentIDArticle, model.ChannelArticle, model.TaskKindContentGeneration) {
+		t.Fatal("supported entry should use the plan portrait cover")
+	}
+	if planEntryUsesPortraitCover(true, "ecommerce", model.ChannelEcommerce, model.PlatformEcommerce) {
+		t.Fatal("unsupported entry should skip the plan portrait cover")
+	}
+	if !planEntryUsesPortraitCover(true, model.AgentIDSeednote, model.ChannelSeednote, model.TaskKindContentGeneration) {
+		t.Fatal("seednote cover support should be evaluated independently")
 	}
 }
 

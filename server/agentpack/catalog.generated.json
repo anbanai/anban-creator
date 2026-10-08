@@ -608,7 +608,7 @@
     {
       "id": "profile-analysis",
       "channel": "profile-analysis",
-      "version": "2.1.3",
+      "version": "2.1.4",
       "kind": "managed",
       "display_name": "账号画像分析",
       "description": "基于用户提供的公开资料和问答生成并提交六维项目账号画像。",
@@ -659,7 +659,6 @@
           "type": "object",
           "required": [
             "project_id",
-            "platform",
             "profile_url",
             "answers",
             "samples"
@@ -669,32 +668,138 @@
             "project_id": {
               "type": "string"
             },
-            "platform": {
-              "type": "string",
-              "enum": [
-                "wechat",
-                "seednote",
-                "moments"
-              ]
-            },
             "profile_url": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional legacy project homepage; Server accepts empty or validates an absolute HTTP(S) URL."
             },
             "answers": {
               "type": "object",
+              "required": [
+                "basic",
+                "platform_accounts",
+                "intent",
+                "content",
+                "boundaries"
+              ],
               "additionalProperties": false,
               "properties": {
                 "basic": {
-                  "type": "string"
+                  "type": "object",
+                  "required": [
+                    "project_name",
+                    "account_status"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "project_name": {
+                      "type": "string"
+                    },
+                    "account_status": {
+                      "type": "string",
+                      "enum": [
+                        "",
+                        "new",
+                        "existing"
+                      ]
+                    }
+                  }
+                },
+                "platform_accounts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "platform",
+                      "account_name",
+                      "profile_url"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "platform": {
+                        "type": "string",
+                        "enum": [
+                          "xiaohongshu",
+                          "douyin",
+                          "bilibili",
+                          "video_account",
+                          "wechat_official_account",
+                          "weibo",
+                          "zhihu"
+                        ]
+                      },
+                      "account_name": {
+                        "type": "string"
+                      },
+                      "profile_url": {
+                        "type": "string",
+                        "description": "Optional; non-empty values must be absolute HTTP(S) URLs."
+                      }
+                    }
+                  }
                 },
                 "intent": {
-                  "type": "string"
+                  "type": "object",
+                  "required": [
+                    "goals",
+                    "direction",
+                    "differentiation"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "goals": {
+                      "type": "string"
+                    },
+                    "direction": {
+                      "type": "string"
+                    },
+                    "differentiation": {
+                      "type": "string"
+                    }
+                  }
                 },
                 "content": {
-                  "type": "string"
+                  "type": "object",
+                  "required": [
+                    "preferences",
+                    "formats",
+                    "tone",
+                    "audience"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "preferences": {
+                      "type": "string"
+                    },
+                    "formats": {
+                      "type": "string"
+                    },
+                    "tone": {
+                      "type": "string"
+                    },
+                    "audience": {
+                      "type": "string"
+                    }
+                  }
                 },
                 "boundaries": {
-                  "type": "string"
+                  "type": "object",
+                  "required": [
+                    "exclusions",
+                    "collaboration",
+                    "compliance"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "exclusions": {
+                      "type": "string"
+                    },
+                    "collaboration": {
+                      "type": "string"
+                    },
+                    "compliance": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             },
@@ -808,7 +913,7 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "f2bcd19cfe8b20406d25c78cb20d5c46d356ede2829a211bd919052487fe227d"
+      "digest": "d9d6252860aa456d613e1b5f5f2660f0835a02d3d90551b1bca131e8587aa82b"
     },
     {
       "id": "seednote",

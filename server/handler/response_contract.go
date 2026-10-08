@@ -169,7 +169,6 @@ func planAPIResponse(plan *model.Plan, store storage.Provider) map[string]any {
 	delete(resp, "has_tail_image")
 	delete(resp, "article_with_cover")
 	delete(resp, "article_with_content_images")
-	delete(resp, "cover_use_portrait")
 	delete(resp, "hypit_input")
 	delete(resp, "montage_input")
 	enrichOwnedObjectKeys(resp, store)

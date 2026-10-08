@@ -721,6 +721,101 @@ func TestPlanService_Update_ReferenceImageAssetID(t *testing.T) {
 	}
 }
 
+func TestPlanServicePortraitSelectionPersistsAndCanBeCleared(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := t.Context()
+	userID := "plan-portrait-service-owner"
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	projectDefault := referenceAssetFixture("plan-portrait-service-default", userID, DirectUploadPurposeProjectPortraitReference)
+	selected := referenceAssetFixture("plan-portrait-service-selected", userID, DirectUploadPurposeProjectPortraitReference)
+	seedReferenceAsset(t, repo, projectDefault)
+	seedReferenceAsset(t, repo, selected)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.PortraitReferenceImageAssetID = projectDefault.ID
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+	usePortrait := true
+	selectedID := selected.ID
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
+		AgentIDs: []string{model.AgentIDArticle}, CronExpr: "0 9 * * *",
+		PortraitReferenceImageAssetID: &selectedID, CoverUsePortrait: usePortrait,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.PortraitReferenceImageAssetID != selected.ID || !plan.PortraitReferenceConfigured || !plan.CoverUsePortrait {
+		t.Fatalf("created portrait settings = asset %q configured %v cover %v", plan.PortraitReferenceImageAssetID, plan.PortraitReferenceConfigured, plan.CoverUsePortrait)
+	}
+	persistedInitial, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistedInitial.PortraitReferenceImageAssetID != selected.ID || !persistedInitial.PortraitReferenceConfigured || !persistedInitial.CoverUsePortrait {
+		t.Fatalf("persisted created portrait settings = asset %q configured %v cover %v", persistedInitial.PortraitReferenceImageAssetID, persistedInitial.PortraitReferenceConfigured, persistedInitial.CoverUsePortrait)
+	}
+
+	clear := ""
+	disableCover := false
+	updated, err := svc.Update(ctx, UpdatePlanParams{
+		ID: plan.ID, ExecutionProfile: "effective", Prompt: plan.Prompt,
+		PortraitReferenceImageAssetID: &clear, CoverUsePortrait: &disableCover,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.PortraitReferenceImageAssetID != "" || persisted.PortraitReferenceImageAssetID != "" || !persisted.PortraitReferenceConfigured || persisted.CoverUsePortrait {
+		t.Fatalf("cleared portrait settings = returned %#v, persisted asset %q configured %v cover %v", updated, persisted.PortraitReferenceImageAssetID, persisted.PortraitReferenceConfigured, persisted.CoverUsePortrait)
+	}
+
+	_, err = svc.Update(ctx, UpdatePlanParams{
+		ID: plan.ID, ExecutionProfile: "effective", Prompt: plan.Prompt,
+		CoverUsePortrait: &usePortrait,
+	})
+	if !errors.Is(err, ErrCoverPortraitUnavailable) {
+		t.Fatalf("reenabling cover without an image error = %v, want ErrCoverPortraitUnavailable", err)
+	}
+}
+
+func TestPlanServiceRejectsUnownedOrWrongPurposePortraitAsset(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		assetUser string
+		purpose   string
+		want      error
+	}{
+		{name: "unowned", assetUser: "other-user", purpose: DirectUploadPurposeProjectPortraitReference, want: ErrReferenceAssetForbidden},
+		{name: "wrong purpose", assetUser: "plan-portrait-owner", purpose: DirectUploadPurposeTaskReference, want: ErrReferenceAssetPurposeMismatch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo := setupTestPlanService(t)
+			userID := "plan-portrait-owner"
+			projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+			asset := referenceAssetFixture("plan-portrait-invalid-"+tc.name, tc.assetUser, tc.purpose)
+			seedReferenceAsset(t, repo, asset)
+			svc.SetReferenceAssetService(NewReferenceAssetService(repo, nil, time.Now))
+			selection := asset.ID
+			_, err := svc.Create(t.Context(), CreatePlanParams{
+				UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
+				AgentIDs: []string{model.AgentIDArticle}, CronExpr: "0 9 * * *",
+				PortraitReferenceImageAssetID: &selection,
+			})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Create error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestPlanServiceUpdateIfReferenceImageAssetIDReturnsConflictWithoutWriting(t *testing.T) {
 	_, base := setupTestPlanService(t)
 	ctx := context.Background()

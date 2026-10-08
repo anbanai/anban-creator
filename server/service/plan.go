@@ -343,17 +343,19 @@ func (s *PlanService) montageStorageProviderName() string {
 // and prevents argument-order bugs on a signature that has grown past a dozen
 // positional params.
 type CreatePlanParams struct {
-	UserID                string
-	ProjectID             string
-	ExecutionProfile      string
-	CronExpr              string
-	Prompt                string
-	ImageCapabilityKey    string
-	ImageRatio            string
-	SkipReferenceImage    *bool
-	ReferenceImageAssetID string
-	Watermark             *bool
-	InputAttachments      []model.EntryAttachment
+	UserID                        string
+	ProjectID                     string
+	ExecutionProfile              string
+	CronExpr                      string
+	Prompt                        string
+	ImageCapabilityKey            string
+	ImageRatio                    string
+	SkipReferenceImage            *bool
+	ReferenceImageAssetID         string
+	PortraitReferenceImageAssetID *string
+	CoverUsePortrait              bool
+	Watermark                     *bool
+	InputAttachments              []model.EntryAttachment
 	// AgentIDs is the public plan selection. Channel and task kind are resolved
 	// from the server-owned Agent Pack Catalog.
 	AgentIDs []string
@@ -361,6 +363,25 @@ type CreatePlanParams struct {
 	// schedule. They are populated by the server from AgentIDs for public calls;
 	// migration code may provide fully resolved entries directly.
 	Entries []CreatePlanEntryParams
+}
+
+func validatePlanPortraitSelection(portraitAssetID string, enabled bool, entries []CreatePlanEntryParams) error {
+	if !enabled {
+		return nil
+	}
+	if strings.TrimSpace(portraitAssetID) == "" {
+		return ErrCoverPortraitUnavailable
+	}
+	for _, entry := range entries {
+		if planEntryUsesPortraitCover(enabled, entry.AgentID, entry.Channel, entry.TaskKind) {
+			return nil
+		}
+	}
+	return ErrCoverPortraitUnavailable
+}
+
+func planEntryUsesPortraitCover(enabled bool, agentID, channel, taskKind string) bool {
+	return enabled && model.SupportsPortraitCover(taskTypeForIdentity(agentID, channel, taskKind))
 }
 
 // Create validates the public schedule contract, resolves the project, computes
@@ -420,6 +441,21 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
 	}
+	effectivePortraitAssetID := strings.TrimSpace(project.PortraitReferenceImageAssetID)
+	if p.PortraitReferenceImageAssetID != nil {
+		effectivePortraitAssetID = strings.TrimSpace(*p.PortraitReferenceImageAssetID)
+	}
+	if effectivePortraitAssetID != "" {
+		if s.referenceAssets == nil {
+			return nil, ErrReferenceAssetUnavailable
+		}
+		if _, err := s.referenceAssets.RequireOwned(ctx, p.UserID, effectivePortraitAssetID, []string{DirectUploadPurposeProjectPortraitReference}); err != nil {
+			return nil, err
+		}
+	}
+	if err := validatePlanPortraitSelection(effectivePortraitAssetID, p.CoverUsePortrait, p.Entries); err != nil {
+		return nil, err
+	}
 	var profile AgentExecutionProfile
 	profile, err = resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
 	if err != nil {
@@ -454,19 +490,22 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	// A plan carries scheduling-adjacent "what to produce" image params.
 	// Project/account style config is snapshotted when a task is spawned.
 	plan := &model.Plan{
-		ID:                    uuid.New().String(),
-		UserID:                p.UserID,
-		ProjectID:             p.ProjectID,
-		ExecutionProfile:      strings.TrimSpace(p.ExecutionProfile),
-		CronExpr:              p.CronExpr,
-		Prompt:                p.Prompt,
-		Status:                model.PlanStatusActive,
-		NextRunAt:             nextRun,
-		ImageCapabilityKey:    effectiveImageCapabilityKey,
-		ImageRatio:            effectiveImageRatio,
-		ReferenceImageAssetID: p.ReferenceImageAssetID,
-		SkipReferenceImage:    p.SkipReferenceImage != nil && *p.SkipReferenceImage,
-		Watermark:             p.Watermark != nil && *p.Watermark,
+		ID:                            uuid.New().String(),
+		UserID:                        p.UserID,
+		ProjectID:                     p.ProjectID,
+		ExecutionProfile:              strings.TrimSpace(p.ExecutionProfile),
+		CronExpr:                      p.CronExpr,
+		Prompt:                        p.Prompt,
+		Status:                        model.PlanStatusActive,
+		NextRunAt:                     nextRun,
+		ImageCapabilityKey:            effectiveImageCapabilityKey,
+		ImageRatio:                    effectiveImageRatio,
+		ReferenceImageAssetID:         p.ReferenceImageAssetID,
+		PortraitReferenceImageAssetID: effectivePortraitAssetID,
+		PortraitReferenceConfigured:   true,
+		CoverUsePortrait:              p.CoverUsePortrait,
+		SkipReferenceImage:            p.SkipReferenceImage != nil && *p.SkipReferenceImage,
+		Watermark:                     p.Watermark != nil && *p.Watermark,
 	}
 	plan.SetInputAttachments(cloneEntryAttachments(p.InputAttachments))
 
@@ -526,7 +565,6 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 	if err != nil {
 		return nil, 0, fmt.Errorf("count plans: %w", err)
 	}
-
 	for _, plan := range plans {
 		plan.Entries, err = s.repo.PlanEntries().ListByPlanID(ctx, plan.ID)
 		if err != nil {
@@ -546,16 +584,18 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 // ID, CronExpr, and Prompt are plain strings. CronExpr=="" means "leave
 // unchanged"; an empty Prompt is a valid value meaning "no prompt".
 type UpdatePlanParams struct {
-	ID                    string
-	ExecutionProfile      string
-	CronExpr              string
-	Prompt                string
-	ImageCapabilityKey    *string
-	ImageRatio            *string
-	SkipReferenceImage    *bool
-	ReferenceImageAssetID *string
-	Watermark             *bool
-	InputAttachments      *[]model.EntryAttachment
+	ID                            string
+	ExecutionProfile              string
+	CronExpr                      string
+	Prompt                        string
+	ImageCapabilityKey            *string
+	ImageRatio                    *string
+	SkipReferenceImage            *bool
+	ReferenceImageAssetID         *string
+	PortraitReferenceImageAssetID *string
+	CoverUsePortrait              *bool
+	Watermark                     *bool
+	InputAttachments              *[]model.EntryAttachment
 	// AgentIDs replaces the complete output selection when non-nil.
 	AgentIDs *[]string
 }
@@ -657,6 +697,59 @@ func (s *PlanService) applyPlanUpdate(ctx context.Context, plan *model.Plan, p U
 			}
 		}
 		plan.ReferenceImageAssetID = *p.ReferenceImageAssetID
+	}
+	if p.PortraitReferenceImageAssetID != nil {
+		portraitID := strings.TrimSpace(*p.PortraitReferenceImageAssetID)
+		if portraitID != "" {
+			if s.referenceAssets == nil {
+				return nil, ErrReferenceAssetUnavailable
+			}
+			if _, err := s.referenceAssets.RequireOwned(ctx, plan.UserID, portraitID, []string{DirectUploadPurposeProjectPortraitReference}); err != nil {
+				return nil, err
+			}
+		}
+		plan.PortraitReferenceImageAssetID = portraitID
+		plan.PortraitReferenceConfigured = true
+	}
+	if p.CoverUsePortrait != nil {
+		plan.CoverUsePortrait = *p.CoverUsePortrait
+		if plan.CoverUsePortrait && !plan.PortraitReferenceConfigured {
+			project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
+			if err != nil {
+				return nil, fmt.Errorf("find project for portrait default: %w", err)
+			}
+			plan.PortraitReferenceImageAssetID = strings.TrimSpace(project.PortraitReferenceImageAssetID)
+			plan.PortraitReferenceConfigured = true
+		}
+	}
+	portraitIDForValidation := plan.PortraitReferenceImageAssetID
+	if plan.CoverUsePortrait && !plan.PortraitReferenceConfigured {
+		project, err := s.repo.Projects().FindByID(ctx, plan.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("find project for portrait default: %w", err)
+		}
+		portraitIDForValidation = strings.TrimSpace(project.PortraitReferenceImageAssetID)
+	}
+	var entries []CreatePlanEntryParams
+	if p.AgentIDs != nil {
+		entries, err = planEntriesFromAgentIDs(*p.AgentIDs, plan.ExecutionProfile)
+	} else {
+		var existing []*model.PlanEntry
+		existing, err = s.repo.PlanEntries().ListByPlanID(ctx, plan.ID)
+		if err == nil {
+			entries = make([]CreatePlanEntryParams, 0, len(existing))
+			for _, entry := range existing {
+				if entry != nil {
+					entries = append(entries, CreatePlanEntryParams{AgentID: entry.AgentID, Channel: entry.Channel, TaskKind: entry.TaskKind, ExecutionProfile: entry.ExecutionProfile})
+				}
+			}
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("resolve plan entries for portrait cover: %w", err)
+	}
+	if err := validatePlanPortraitSelection(portraitIDForValidation, plan.CoverUsePortrait, entries); err != nil {
+		return nil, err
 	}
 	if p.ImageRatio != nil {
 		nextRatio := strings.TrimSpace(*p.ImageRatio)
