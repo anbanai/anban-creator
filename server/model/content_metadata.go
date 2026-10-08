@@ -19,7 +19,7 @@ const (
 var ContentTagDimensions = map[string]struct{}{
 	"industry": {}, "topic": {}, "audience": {}, "intent": {}, "funnel_stage": {},
 	"format": {}, "narrative_hook": {}, "tone": {}, "value_proposition": {},
-	"media_shape": {}, "source_relation": {}, "evidence_level": {}, "visual_style": {}, "risk": {},
+	"media_shape": {}, "source_relation": {}, "evidence_level": {}, "visual_style": {}, "risk": {}, "performance": {},
 }
 
 type ContentTagDefaultVocabulary struct {
@@ -38,10 +38,11 @@ var ContentTagDefaultVocabularies = map[string][]ContentTagDefaultVocabulary{
 	"tone":              {{Value: "professional", DisplayName: "专业"}, {Value: "humorous", DisplayName: "幽默"}, {Value: "sharp", DisplayName: "犀利"}, {Value: "empathetic", DisplayName: "共情"}},
 	"value_proposition": {{Value: "cost_saving", DisplayName: "省钱"}, {Value: "efficiency", DisplayName: "效率"}, {Value: "risk_avoidance", DisplayName: "避坑"}, {Value: "emotional_value", DisplayName: "情绪价值"}},
 	"media_shape":       {{Value: "text_visual", DisplayName: "图文"}, {Value: "multimedia", DisplayName: "多媒体"}, {Value: "video", DisplayName: "视频"}, {Value: "commerce_visual", DisplayName: "电商视觉"}},
-	"source_relation":   {{Value: "original", DisplayName: "原创"}, {Value: "adapted", DisplayName: "改编"}},
+	"source_relation":   {{Value: "original", DisplayName: "原创"}, {Value: "adapted", DisplayName: "改编"}, {Value: "hot_search", DisplayName: "热搜"}},
 	"evidence_level":    {{Value: "cited_or_data_supported", DisplayName: "引用或数据支持"}, {Value: "experience_based", DisplayName: "经验支持"}},
 	"visual_style":      {{Value: "illustration", DisplayName: "插画"}, {Value: "mixed_visual", DisplayName: "混合视觉"}},
 	"risk":              {{Value: "none_detected", DisplayName: "未发现风险"}, {Value: "distribution_or_lead_risk", DisplayName: "导流风险"}},
+	"performance":       {{Value: "viral", DisplayName: "爆款", Aliases: []string{"爆款", "爆文", "爆款内容"}}},
 }
 
 type ContentMetadataReport struct {

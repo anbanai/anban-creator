@@ -10,6 +10,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -20,12 +21,129 @@ func analyticsFixture(t *testing.T) (*AnalyticsService, *gorm.DB) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = db.AutoMigrate(&model.Project{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}, &model.AnalyticsRawPayload{}, &model.AnalyticsBucket{}, &model.AnalyticsIdempotency{}); e != nil {
+	if e = db.AutoMigrate(&model.Project{}, &model.Task{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}, &model.AnalyticsRawPayload{}, &model.AnalyticsBucket{}, &model.AnalyticsIdempotency{}, &model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}); e != nil {
 		t.Fatal(e)
 	}
 	db.Create(&model.Project{ID: "p", UserID: "u", Platform: "seednote"})
 	return NewAnalyticsService(repository.New(db)), db
 }
+
+func TestAnalyticsContentsExposeLatestContentTags(t *testing.T) {
+	s, db := analyticsFixture(t)
+	count := int64(12)
+	analyticsWrite(t, s, "observation-1", "content-1", "2026-02-01", "cumulative", "batch-1", 200, &count)
+	if err := db.Create(&model.ContentMetadataReport{ID: "report-1", TaskID: "task-1", ExecutionID: "execution-1", Status: model.ContentMetadataSucceeded, TaggingStatus: model.ContentMetadataSucceeded, FeedbackStatus: model.ContentMetadataSucceeded, TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: datatypes.JSON([]byte(`{"tags":[]}`))}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AnalyticsContent{}).Where("id = ?", "content-1").Update("task_id", "task-1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ContentTagAssignment{ID: "tag-1", ReportID: "report-1", Dimension: "source_relation", CanonicalValue: "hot_search", DisplayName: "热搜", LabelStatus: model.ContentTagCanonical}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := s.Contents(context.Background(), "u", "p", AnalyticsQuery{From: "2026-02-01", To: "2026-02-28", MetricBasis: "cumulative", Granularity: "day"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].Tags) != 1 || page.Items[0].Tags[0].DisplayName != "热搜" {
+		t.Fatalf("content tags = %#v", page.Items)
+	}
+}
+
+func TestAnalyticsContentsExposeHotSearchTagFromTaskOriginWithoutMetadataReport(t *testing.T) {
+	s, db := analyticsFixture(t)
+	if err := db.Create(&model.Task{ID: "task-hot", UserID: "u", ProjectID: "p", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, ContentOrigin: model.ContentOriginHotSearch}).Error; err != nil {
+		t.Fatal(err)
+	}
+	count := int64(18)
+	analyticsWrite(t, s, "observation-hot", "content-hot", "2026-02-01", "cumulative", "batch-hot", 200, &count)
+	if err := db.Model(&model.AnalyticsContent{}).Where("id = ?", "content-hot").Update("task_id", "task-hot").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := s.Contents(context.Background(), "u", "p", AnalyticsQuery{From: "2026-02-01", To: "2026-02-28", MetricBasis: "cumulative", Granularity: "day"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].Tags) != 1 || page.Items[0].Tags[0].DisplayName != "热搜" {
+		t.Fatalf("content tags = %#v", page.Items)
+	}
+}
+
+func TestAnalyticsContentTagsReplaceLegacySourceTagForHotSearchTask(t *testing.T) {
+	s, db := analyticsFixture(t)
+	if err := db.Create(&model.Task{ID: "task-hot-legacy", UserID: "u", ProjectID: "p", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, ContentOrigin: model.ContentOriginHotSearch}).Error; err != nil {
+		t.Fatal(err)
+	}
+	count := int64(9)
+	analyticsWrite(t, s, "observation-hot-legacy", "content-hot-legacy", "2026-02-01", "cumulative", "batch-hot-legacy", 200, &count)
+	if err := db.Model(&model.AnalyticsContent{}).Where("id = ?", "content-hot-legacy").Update("task_id", "task-hot-legacy").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ContentMetadataReport{ID: "report-hot-legacy", TaskID: "task-hot-legacy", ExecutionID: "execution-hot-legacy", Status: model.ContentMetadataSucceeded, TaggingStatus: model.ContentMetadataSucceeded, FeedbackStatus: model.ContentMetadataSucceeded, TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: datatypes.JSON([]byte(`{"tags":[]}`))}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ContentTagAssignment{ID: "tag-hot-legacy", ReportID: "report-hot-legacy", Dimension: "source_relation", CanonicalValue: "adapted", DisplayName: "改编", LabelStatus: model.ContentTagCanonical}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := s.Contents(context.Background(), "u", "p", AnalyticsQuery{From: "2026-02-01", To: "2026-02-28", MetricBasis: "cumulative", Granularity: "day"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].Tags) != 1 || page.Items[0].Tags[0].DisplayName != "热搜" {
+		t.Fatalf("content tags = %#v", page.Items)
+	}
+}
+
+func TestAnalyticsDetailExposesHotSearchTagFromTaskOrigin(t *testing.T) {
+	s, db := analyticsFixture(t)
+	if err := db.Create(&model.Task{ID: "task-hot-detail", UserID: "u", ProjectID: "p", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, ContentOrigin: model.ContentOriginHotSearch}).Error; err != nil {
+		t.Fatal(err)
+	}
+	count := int64(6)
+	analyticsWrite(t, s, "observation-hot-detail", "content-hot-detail", "2026-02-01", "cumulative", "batch-hot-detail", 200, &count)
+	if err := db.Model(&model.AnalyticsContent{}).Where("id = ?", "content-hot-detail").Update("task_id", "task-hot-detail").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := s.Detail(context.Background(), "u", "p", "content-hot-detail", AnalyticsQuery{From: "2026-02-01", To: "2026-02-28", MetricBasis: "cumulative", Granularity: "day"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Content.Tags) != 1 || detail.Content.Tags[0].DisplayName != "热搜" {
+		t.Fatalf("detail tags = %#v", detail.Content.Tags)
+	}
+}
+
+func TestAnalyticsContentsKeepLastSuccessfulTagsWhenLaterMetadataRetryFails(t *testing.T) {
+	s, db := analyticsFixture(t)
+	count := int64(4)
+	analyticsWrite(t, s, "observation-retry", "content-retry", "2026-02-01", "cumulative", "batch-retry", 200, &count)
+	if err := db.Model(&model.AnalyticsContent{}).Where("id = ?", "content-retry").Update("task_id", "task-retry").Error; err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := db.Create(&model.ContentMetadataReport{ID: "report-retry-ok", TaskID: "task-retry", ExecutionID: "execution-ok", Status: model.ContentMetadataSucceeded, TaggingStatus: model.ContentMetadataSucceeded, FeedbackStatus: model.ContentMetadataSucceeded, TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: datatypes.JSON([]byte(`{"tags":[]}`)), CreatedAt: old, UpdatedAt: old}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ContentTagAssignment{ID: "tag-retry-ok", ReportID: "report-retry-ok", Dimension: "performance", CanonicalValue: "viral", DisplayName: "爆款", LabelStatus: model.ContentTagCanonical}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ContentMetadataReport{ID: "report-retry-failed", TaskID: "task-retry", ExecutionID: "execution-failed", Status: model.ContentMetadataFailed, TaggingStatus: model.ContentMetadataFailed, FeedbackStatus: model.ContentMetadataFailed, TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: datatypes.JSON([]byte(`{"tags":[]}`)), CreatedAt: time.Now(), UpdatedAt: time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := s.Contents(context.Background(), "u", "p", AnalyticsQuery{From: "2026-02-01", To: "2026-02-28", MetricBasis: "cumulative", Granularity: "day"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || len(page.Items[0].Tags) != 1 || page.Items[0].Tags[0].DisplayName != "爆款" {
+		t.Fatalf("content tags = %#v", page.Items)
+	}
+}
+
 func analyticsWrite(t *testing.T, s *AnalyticsService, id, content, date, basis, batch string, priority int, count *int64) {
 	t.Helper()
 	at, _ := time.Parse(time.RFC3339, date+"T12:00:00+08:00")

@@ -11,7 +11,7 @@ vi.mock('@/components/analytics/AnalyticsTrend', () => ({ default: () => <div>�
 vi.mock('@/components/analytics/ContentImportDialog', () => ({ default: () => null }))
 vi.mock('@/components/analytics/ContentImportHistory', () => ({ default: () => null }))
 vi.mock('@/lib/content-analytics', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/content-analytics')>(), contentAnalyticsApi: { overview: vi.fn(), contents: vi.fn(), detail: vi.fn(), dates: vi.fn(), observations: vi.fn() } }))
-const content = { id: 'canonical-1', title: '服务器内容', content_type: 'image_text', metrics: { view_count: 12 } }
+const content = { id: 'canonical-1', title: '服务器内容', content_type: 'image_text', tags: [{ dimension: 'source_relation', value: 'hot_search', display_name: '热搜' }, { dimension: 'performance', value: 'viral', display_name: '爆款' }], metrics: { view_count: 12 } }
 const summary = { revision: 4, updated_at: '', metric_basis: 'cumulative' as const, totals: { view_count: 12 }, series: [], unavailable_metrics: {} }
 beforeEach(() => {
   vi.mocked(api.projects.list).mockResolvedValue([{ id: 'notes', platform: 'seednote', name: '生活笔记' } as Project])
@@ -147,6 +147,26 @@ describe('server analytics queries', () => {
     expect(await screen.findByText('趋势')).toBeInTheDocument()
     expect(screen.queryByLabelText('统计口径')).not.toBeInTheDocument()
     expect(screen.queryByText(/当日新增|增量/)).not.toBeInTheDocument()
+  })
+  it('shows each content item tags below its title without making them interactive', async () => {
+    render(<ContentAnalyticsPage />)
+
+    const row = await screen.findByRole('row', { name: /服务器内容/ })
+    expect(row).toHaveTextContent('热搜')
+    expect(row).toHaveTextContent('爆款')
+    expect(row.querySelectorAll('[data-content-tag]')).toHaveLength(2)
+    expect(row.querySelectorAll('button')).toHaveLength(1)
+  })
+  it('shows the selected content tags below its title in detail view', async () => {
+    window.history.replaceState(null, '', '/content-analytics?account=notes&content=canonical-1')
+    render(<ContentAnalyticsPage />)
+
+    const heading = await screen.findByRole('heading', { name: '服务器内容' })
+    const detail = heading.closest('section')
+    expect(detail).toHaveTextContent('热搜')
+    expect(detail).toHaveTextContent('爆款')
+    expect(detail?.querySelectorAll('[data-content-tag]')).toHaveLength(2)
+    expect(detail?.querySelectorAll('[data-content-tag] button')).toHaveLength(0)
   })
   it('reads observation history only after explicitly opening it', async () => {
     window.history.replaceState(null, '', '/content-analytics?account=notes&content=canonical-1')

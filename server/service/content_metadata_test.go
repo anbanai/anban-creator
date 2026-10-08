@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -51,6 +52,72 @@ func TestContentMetadataServiceSubmitIsIdempotentPerExecution(t *testing.T) {
 	}
 	if feedback.Source != "hook" || feedback.ExecutionID != "exec-1" {
 		t.Fatalf("feedback provenance = %#v", feedback)
+	}
+}
+
+func TestContentMetadataServiceAddsHotSearchOriginAndKeepsViralCategorySeparate(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:content-metadata-source-tags?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Task{}, &model.TaskExecution{}, &model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	svc := NewContentMetadataService(repo, nil)
+	ctx := context.Background()
+
+	for _, task := range []*model.Task{
+		{ID: "task-hot", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, ContentOrigin: model.ContentOriginHotSearch},
+		{ID: "task-plain", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted},
+		{ID: "task-viral", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted},
+	} {
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		executionID := "exec-" + strings.TrimPrefix(task.ID, "task-")
+		if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, input := range []ContentMetadataInput{
+		{TaskID: "task-hot", ExecutionID: "exec-hot", RawMetadata: []byte(`{"tags":[{"dimension":"source_relation","value":"adapted","confidence":0.9}]}`)},
+		{TaskID: "task-plain", ExecutionID: "exec-plain", RawMetadata: []byte(`{"tags":[]}`)},
+		{TaskID: "task-viral", ExecutionID: "exec-viral", RawMetadata: []byte(`{"tags":[{"dimension":"performance","value":"爆款","confidence":0.9}]}`)},
+	} {
+		if _, err := svc.Submit(ctx, input); err != nil {
+			t.Fatalf("Submit(%s): %v", input.TaskID, err)
+		}
+	}
+
+	var hotTag model.ContentTagAssignment
+	if err := db.Joins("JOIN content_metadata_reports ON content_metadata_reports.id = content_tag_assignments.report_id").Where("content_metadata_reports.task_id = ?", "task-hot").First(&hotTag).Error; err != nil {
+		t.Fatal(err)
+	}
+	if hotTag.Dimension != "source_relation" || hotTag.CanonicalValue != "hot_search" || hotTag.DisplayName != "热搜" {
+		t.Fatalf("hot-search tag = %#v", hotTag)
+	}
+	var hotSourceTagCount int64
+	if err := db.Model(&model.ContentTagAssignment{}).Joins("JOIN content_metadata_reports ON content_metadata_reports.id = content_tag_assignments.report_id").Where("content_metadata_reports.task_id = ? AND content_tag_assignments.dimension = ?", "task-hot", "source_relation").Count(&hotSourceTagCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if hotSourceTagCount != 1 {
+		t.Fatalf("hot-search source tags = %d, want exactly one server-owned tag", hotSourceTagCount)
+	}
+	var plainTagCount int64
+	if err := db.Model(&model.ContentTagAssignment{}).Joins("JOIN content_metadata_reports ON content_metadata_reports.id = content_tag_assignments.report_id").Where("content_metadata_reports.task_id = ? AND content_tag_assignments.dimension = ?", "task-plain", "source_relation").Count(&plainTagCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if plainTagCount != 0 {
+		t.Fatalf("plain task source tags = %d, want 0", plainTagCount)
+	}
+	var viralTag model.ContentTagAssignment
+	if err := db.Joins("JOIN content_metadata_reports ON content_metadata_reports.id = content_tag_assignments.report_id").Where("content_metadata_reports.task_id = ?", "task-viral").First(&viralTag).Error; err != nil {
+		t.Fatal(err)
+	}
+	if viralTag.Dimension != "performance" || viralTag.CanonicalValue != "viral" || viralTag.DisplayName != "爆款" {
+		t.Fatalf("viral category tag = %#v", viralTag)
 	}
 }
 

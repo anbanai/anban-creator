@@ -48,8 +48,14 @@ type AnalyticsQuery struct {
 type AnalyticsMetricMap = map[string]any
 type AnalyticsContentView struct {
 	model.AnalyticsContent
-	Metrics      AnalyticsMetricMap `json:"metrics"`
-	LastStatDate string             `json:"last_stat_date,omitempty"`
+	Metrics      AnalyticsMetricMap    `json:"metrics"`
+	LastStatDate string                `json:"last_stat_date,omitempty"`
+	Tags         []AnalyticsContentTag `json:"tags,omitempty"`
+}
+type AnalyticsContentTag struct {
+	Dimension   string `json:"dimension"`
+	Value       string `json:"value"`
+	DisplayName string `json:"display_name"`
 }
 type AnalyticsOverview struct {
 	Revision    int64                `json:"revision"`
@@ -371,8 +377,18 @@ func (s *AnalyticsService) Contents(ctx context.Context, user, project string, q
 			return e
 		}
 		out.Total = n
+		taskIDs := make([]string, 0, len(rows))
 		for _, row := range rows {
-			out.Items = append(out.Items, AnalyticsContentView{AnalyticsContent: row.AnalyticsContent, Metrics: row.AnalyticsMetrics.Map(family), LastStatDate: row.LastStatDate})
+			if row.TaskID != "" {
+				taskIDs = append(taskIDs, row.TaskID)
+			}
+		}
+		tagsByTask, e := s.repo.ContentMetadata().ListTagsByTaskIDs(ctx, taskIDs)
+		if e != nil {
+			return e
+		}
+		for _, row := range rows {
+			out.Items = append(out.Items, AnalyticsContentView{AnalyticsContent: row.AnalyticsContent, Metrics: row.AnalyticsMetrics.Map(family), LastStatDate: row.LastStatDate, Tags: analyticsContentTags(tagsByTask[row.TaskID])})
 		}
 		return nil
 	})
@@ -396,10 +412,38 @@ func (s *AnalyticsService) Detail(ctx context.Context, user, project, contentID 
 		if e != nil {
 			return e
 		}
-		out.Content = AnalyticsContentView{AnalyticsContent: *c, Metrics: out.Totals}
+		tagsByTask, e := s.repo.ContentMetadata().ListTagsByTaskIDs(ctx, []string{c.TaskID})
+		if e != nil {
+			return e
+		}
+		out.Content = AnalyticsContentView{AnalyticsContent: *c, Metrics: out.Totals, Tags: analyticsContentTags(tagsByTask[c.TaskID])}
 		return nil
 	})
 	return out, e
+}
+
+func analyticsContentTags(assignments []*model.ContentTagAssignment) []AnalyticsContentTag {
+	if len(assignments) == 0 {
+		return nil
+	}
+	tags := make([]AnalyticsContentTag, 0, len(assignments))
+	seen := make(map[string]struct{}, len(assignments))
+	for _, assignment := range assignments {
+		if assignment == nil {
+			continue
+		}
+		label := assignment.DisplayName
+		if label == "" {
+			label = assignment.CanonicalValue
+		}
+		key := assignment.Dimension + "\x00" + assignment.CanonicalValue
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		tags = append(tags, AnalyticsContentTag{Dimension: assignment.Dimension, Value: assignment.CanonicalValue, DisplayName: label})
+	}
+	return tags
 }
 func (s *AnalyticsService) Observations(ctx context.Context, user, project, contentID string, q AnalyticsQuery) (AnalyticsObservationPage, error) {
 	q, e := normalizeAnalyticsQuery(q)

@@ -52,6 +52,73 @@ func (r *contentMetadataRepository) FindByTaskExecution(ctx context.Context, tas
 	return &report, nil
 }
 
+func (r *contentMetadataRepository) ListTagsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*model.ContentTagAssignment, error) {
+	result := make(map[string][]*model.ContentTagAssignment)
+	if len(taskIDs) == 0 {
+		return result, nil
+	}
+	if r.db.Migrator().HasTable((&model.ContentMetadataReport{}).TableName()) && r.db.Migrator().HasTable((&model.ContentTagAssignment{}).TableName()) {
+		var reports []model.ContentMetadataReport
+		if err := r.db.WithContext(ctx).Where("task_id IN ?", taskIDs).Order("updated_at DESC, created_at DESC, id DESC").Find(&reports).Error; err != nil {
+			return nil, err
+		}
+		latest := make(map[string]model.ContentMetadataReport, len(reports))
+		for _, report := range reports {
+			if _, exists := latest[report.TaskID]; exists {
+				continue
+			}
+			// A failed or still-pending retry must not hide the last completed
+			// tagging result from analytics readers.
+			if report.TaggingStatus == model.ContentMetadataSucceeded || (report.TaggingStatus == "" && report.Status == model.ContentMetadataSucceeded) {
+				latest[report.TaskID] = report
+			}
+		}
+		if len(latest) > 0 {
+			reportIDs := make([]string, 0, len(latest))
+			taskByReport := make(map[string]string, len(latest))
+			for taskID, report := range latest {
+				reportIDs = append(reportIDs, report.ID)
+				taskByReport[report.ID] = taskID
+			}
+			var assignments []*model.ContentTagAssignment
+			if err := r.db.WithContext(ctx).Where("report_id IN ?", reportIDs).Order("dimension ASC, display_name ASC, id ASC").Find(&assignments).Error; err != nil {
+				return nil, err
+			}
+			for _, assignment := range assignments {
+				if taskID, ok := taskByReport[assignment.ReportID]; ok {
+					result[taskID] = append(result[taskID], assignment)
+				}
+			}
+		}
+	}
+	// Content origin is a server-owned fact. Keep the derived label visible for
+	// historical content whose metadata hook ran before tagging was introduced.
+	if r.db.Migrator().HasTable((&model.Task{}).TableName()) && r.db.Migrator().HasColumn((&model.Task{}).TableName(), "content_origin") {
+		var tasks []model.Task
+		if err := r.db.WithContext(ctx).Select("id, content_origin").Where("id IN ?", taskIDs).Find(&tasks).Error; err != nil {
+			return nil, err
+		}
+		for _, task := range tasks {
+			if task.ContentOrigin != model.ContentOriginHotSearch {
+				continue
+			}
+			originTag := &model.ContentTagAssignment{
+				Dimension: "source_relation", CanonicalValue: "hot_search", DisplayName: "热搜",
+				LabelStatus: model.ContentTagCanonical, Confidence: 1, Primary: true,
+			}
+			filtered := make([]*model.ContentTagAssignment, 0, len(result[task.ID])+1)
+			filtered = append(filtered, originTag)
+			for _, tag := range result[task.ID] {
+				if tag == nil || tag.Dimension != "source_relation" {
+					filtered = append(filtered, tag)
+				}
+			}
+			result[task.ID] = filtered
+		}
+	}
+	return result, nil
+}
+
 func (r *contentMetadataRepository) ReplaceTags(ctx context.Context, reportID string, tags []*model.ContentTagAssignment) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("report_id = ?", reportID).Delete(&model.ContentTagAssignment{}).Error; err != nil {

@@ -117,6 +117,9 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 	if userID := strings.TrimSpace(input.AuthenticatedUserID); userID != "" && task.UserID != userID {
 		return nil, fmt.Errorf("task does not belong to authenticated user")
 	}
+	if writeTags && task.ContentOrigin == model.ContentOriginHotSearch {
+		payload.Tags = withServerContentOriginTag(payload.Tags)
+	}
 	report := &model.ContentMetadataReport{ID: uuid.NewString(), TaskID: input.TaskID, ExecutionID: input.ExecutionID, Status: model.ContentMetadataPending, TaggingStatus: model.ContentMetadataPending, FeedbackStatus: model.ContentMetadataPending, TaxonomyVersion: version, SourceDigest: strings.TrimSpace(input.SourceDigest), RawMetadata: datatypes.JSON(input.RawMetadata), Attempts: 1}
 	if existing, findErr := s.repo.ContentMetadata().FindByTaskExecution(ctx, input.TaskID, input.ExecutionID); findErr == nil && existing != nil {
 		report.ID = existing.ID
@@ -200,6 +203,26 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 		return nil, err
 	}
 	return report, nil
+}
+
+func withServerContentOriginTag(tags []contentMetadataTag) []contentMetadataTag {
+	const dimension = "source_relation"
+	const value = "hot_search"
+	filtered := make([]contentMetadataTag, 0, len(tags)+1)
+	for _, tag := range tags {
+		if strings.TrimSpace(tag.Dimension) == dimension {
+			continue
+		}
+		filtered = append(filtered, tag)
+	}
+	return append(filtered, contentMetadataTag{
+		Dimension:   dimension,
+		Value:       value,
+		LabelStatus: model.ContentTagCanonical,
+		Confidence:  1,
+		Primary:     true,
+		Evidence:    json.RawMessage(`{"source":"server_task_content_origin"}`),
+	})
 }
 
 func normalizeTag(ctx context.Context, repo repository.ContentMetadataRepository, tag contentMetadataTag, version string) (string, string, string, error) {
