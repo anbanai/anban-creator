@@ -410,7 +410,7 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     expect(await screen.findByRole('link', { name: '查看内容分析' })).toHaveAttribute(
       'href',
-      '/content-analytics?account=project-1&content=task%3Aapproval-task&platform=wechat',
+      '/content-analytics?account=project-1&content=task%3Aapproval-task&platform=wechat&agent=wechat-article',
     )
     expect(screen.getAllByRole('link', { name: '查看内容分析' })).toHaveLength(1)
     expect(screen.getByText('已完成文章')).toBeInTheDocument()

@@ -317,7 +317,7 @@ func analyticsUnavailable(family model.AnalyticsMetricFamily) map[string]string 
 }
 func analyticsOverviewRead(ctx context.Context, r *repository.AnalyticsRepository, p *model.Project, state *model.AnalyticsState, q AnalyticsQuery, content string, family model.AnalyticsMetricFamily) (AnalyticsOverview, error) {
 	out := AnalyticsOverview{Revision: state.Revision, UpdatedAt: state.UpdatedAt, MetricBasis: q.MetricBasis, Series: []AnalyticsMetricMap{}, UnavailableMetrics: analyticsUnavailable(family)}
-	m, n, e := r.RangeTotals(ctx, p.ID, state.ActiveGeneration, q.MetricBasis, q.From, q.To, content, content != "")
+	m, n, e := r.RangeTotals(ctx, p.ID, state.ActiveGeneration, q.MetricBasis, q.From, q.To, content, q.ContentType, content != "")
 	if e != nil {
 		return out, e
 	}
@@ -326,7 +326,7 @@ func analyticsOverviewRead(ctx context.Context, r *repository.AnalyticsRepositor
 	if content != "" {
 		out.UnavailableMetrics = map[string]string{}
 	}
-	rows, e := r.Series(ctx, p.ID, state.ActiveGeneration, q.MetricBasis, q.From, q.To, q.Granularity, content)
+	rows, e := r.Series(ctx, p.ID, state.ActiveGeneration, q.MetricBasis, q.From, q.To, q.Granularity, content, q.ContentType)
 	if e != nil {
 		return out, e
 	}
@@ -389,6 +389,9 @@ func (s *AnalyticsService) Detail(ctx context.Context, user, project, contentID 
 		if e != nil {
 			return e
 		}
+		// A content ID is canonical for detail reads. Agent/content-type is a
+		// list-level filter and must not make a valid detail link look empty.
+		q.ContentType = ""
 		out.AnalyticsOverview, e = analyticsOverviewRead(ctx, r, p, state, q, c.ID, family)
 		if e != nil {
 			return e

@@ -6,11 +6,11 @@ export type AnalyticsPlatform = 'wechat' | 'seednote'
 export type MetricBasis = 'cumulative'
 export interface AnalyticsMetric { key: string; label: string; color: string; kind: 'count' | 'rate' | 'duration'; summary: boolean; format: (value: number) => string }
 export interface AnalyticsContent { id: string; title: string; content_type: string; status?: string; url?: string; date?: string; last_stat_date?: string; metrics: Record<string, number | null> }
-export interface AnalyticsParams { platform?: AnalyticsPlatform; from: string; to: string; granularity: 'day' | 'week' | 'month'; metric_basis: MetricBasis; expected_revision?: number }
+export interface AnalyticsParams { platform?: AnalyticsPlatform; from: string; to: string; granularity: 'day' | 'week' | 'month'; metric_basis: MetricBasis; expected_revision?: number; content_type?: string }
 export interface AnalyticsOverview { revision: number; updated_at: string; metric_basis: MetricBasis; totals: Record<string, number | null>; series: AnalyticsPoint[]; coverage: { contents: number }; unavailable_metrics: Record<string, string> }
 export interface AnalyticsDetail extends Omit<AnalyticsOverview, 'coverage'> { content: AnalyticsContent }
 export interface AnalyticsPage<T> { revision: number; items: T[]; total: number; offset: number; limit: number }
-export interface AnalyticsListParams extends AnalyticsParams { search?: string; content_type?: string; sort?: string; direction?: 'asc' | 'desc'; offset?: number; limit?: number }
+export interface AnalyticsListParams extends AnalyticsParams { search?: string; sort?: string; direction?: 'asc' | 'desc'; offset?: number; limit?: number }
 export interface AnalyticsObservation { id: string; stat_date: string; source: string; metric_basis: MetricBasis; effective_at: string; received_at: string; revoked_at?: string; metrics: Record<string, number | null> }
 const metric = (key: string, label: string, kind: AnalyticsMetric['kind'] = 'count', summary = true): AnalyticsMetric => ({ key, label, kind, summary, color: 'var(--primary)', format: (value) => kind === 'rate' ? `${(value * 100).toFixed(2)}%` : kind === 'duration' ? `${value.toFixed(1)} 秒` : value.toLocaleString('zh-CN') })
 const wechatMetrics = [metric('read_users', '阅读人数'), metric('share_users', '分享人数'), metric('read_to_follow_users', '阅读后关注'), metric('delivered_users', '送达人数'), metric('read_completion_rate', '阅读完成率', 'rate', false), metric('average_read_active_time', '平均阅读时长', 'duration', false), metric('delivery_completion_rate', '送达完成率', 'rate', false), metric('collection_users', '收藏人数', 'count', false), metric('like_users', '点赞人数', 'count', false), metric('zaikan_users', '在看人数', 'count', false), metric('comment_count', '评论', 'count', false)]
@@ -29,10 +29,15 @@ export function parseTargetKey(value?: string): AnalyticsTarget | undefined {
   return { kind: kind as AnalyticsTarget['kind'], id }
 }
 /** Single source of truth for the `/content-analytics` deep-link contract: `?account=<project>&content=<target>`. */
-function contentAnalyticsHref(projectId: string, target: AnalyticsTarget, platform: AnalyticsPlatform) {
-  return `/content-analytics?${new URLSearchParams({ account: projectId, content: targetKey(target), platform })}`
+function contentAnalyticsHref(projectId: string, target: AnalyticsTarget, platform: AnalyticsPlatform, agent?: string) {
+  const params = new URLSearchParams({ account: projectId, content: targetKey(target), platform })
+  if (agent) params.set('agent', agent)
+  return `/content-analytics?${params}`
 }
-export function taskContentAnalyticsHref(projectId: string, taskId: string, channel: string) { return contentAnalyticsHref(projectId, { kind: 'task', id: taskId }, channel === 'seednote' ? 'seednote' : 'wechat') }
+export function taskContentAnalyticsHref(projectId: string, taskId: string, channel: string) {
+  const agent = channel === 'seednote' || channel === 'wechat-article' || channel === 'wechat-picture' ? channel : undefined
+  return contentAnalyticsHref(projectId, { kind: 'task', id: taskId }, channel === 'seednote' ? 'seednote' : 'wechat', agent)
+}
 // Seednote import previews also return the original Chinese genre values.
 const contentTypeLabels: Record<string, string> = { 'wechat-article': '公众号文章', 'wechat-picture': '公众号贴图', image_text: '图文', video: '视频', unknown: '类型未知', '图文': '图文', '视频': '视频' }
 export const contentTypeLabel = (type: string) => contentTypeLabels[type] ?? contentTypeLabels.unknown

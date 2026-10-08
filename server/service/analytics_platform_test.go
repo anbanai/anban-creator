@@ -26,7 +26,7 @@ func TestAnalyticsMixedNeutralProjectRequiresAndScopesPlatform(t *testing.T) {
 	} {
 		at, _ := time.Parse("2006-01-02", row.date)
 		_, err := s.Apply(ctx, AnalyticsWriteRequest{ProjectID: "p", Observations: []AnalyticsObservationInput{{
-			Content:     model.AnalyticsContent{ID: row.id, ProjectID: "p", Channel: row.channel},
+			Content:     model.AnalyticsContent{ID: row.id, ProjectID: "p", Channel: row.channel, ContentType: row.channel},
 			Observation: model.AnalyticsObservation{ID: row.id, ContentID: row.id, ProjectID: "p", StatDate: row.date, MetricBasis: "cumulative", Source: "import", EffectiveAt: at, ReceivedAt: at, AnalyticsMetrics: model.AnalyticsMetrics{CommentCount: &row.count}},
 		}}})
 		if err != nil {
@@ -85,6 +85,76 @@ func TestAnalyticsMixedNeutralProjectRequiresAndScopesPlatform(t *testing.T) {
 	q.Platform = "unknown"
 	if _, err := s.Overview(ctx, "u", "p", q); !errors.Is(err, ErrAnalyticsInvalidQuery) {
 		t.Fatalf("invalid platform: %v", err)
+	}
+}
+
+func TestAnalyticsOverviewScopesWechatAgentContentType(t *testing.T) {
+	s, _ := analyticsFixture(t)
+	ctx := context.Background()
+	for _, row := range []struct {
+		id, channel string
+		count       int64
+	}{
+		{"article", model.ChannelArticle, 3},
+		{"picture", model.ChannelWechatPicture, 5},
+	} {
+		at, _ := time.Parse("2006-01-02", "2026-02-01")
+		_, err := s.Apply(ctx, AnalyticsWriteRequest{ProjectID: "p", Observations: []AnalyticsObservationInput{{
+			Content:     model.AnalyticsContent{ID: row.id, ProjectID: "p", Channel: row.channel, ContentType: row.channel},
+			Observation: model.AnalyticsObservation{ID: row.id, ContentID: row.id, ProjectID: "p", StatDate: "2026-02-01", MetricBasis: "cumulative", Source: "import", EffectiveAt: at, ReceivedAt: at, AnalyticsMetrics: model.AnalyticsMetrics{CommentCount: &row.count}},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tc := range []struct {
+		contentType, contentID string
+		count                  int64
+	}{
+		{"wechat-article", "article", 3},
+		{"wechat-picture", "picture", 5},
+	} {
+		t.Run(tc.contentType, func(t *testing.T) {
+			q := AnalyticsQuery{Platform: "wechat", ContentType: tc.contentType, From: "2026-02-01", To: "2026-02-28", Granularity: "month", MetricBasis: "cumulative"}
+			overview, err := s.Overview(ctx, "u", "p", q)
+			if err != nil || overview.Totals["comment_count"] != tc.count || overview.Coverage.Contents != 1 || len(overview.Series) != 1 || overview.Series[0]["comment_count"] != tc.count {
+				t.Fatalf("overview: %+v %v", overview, err)
+			}
+			page, err := s.Contents(ctx, "u", "p", q)
+			if err != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != tc.contentID {
+				t.Fatalf("contents: %+v %v", page, err)
+			}
+		})
+	}
+}
+
+func TestAnalyticsDetailUsesCanonicalContentDespiteConflictingAgentFilter(t *testing.T) {
+	s, _ := analyticsFixture(t)
+	ctx := context.Background()
+	for _, row := range []struct {
+		id, channel string
+		count       int64
+	}{
+		{"article", model.ChannelArticle, 3},
+		{"picture", model.ChannelWechatPicture, 5},
+	} {
+		at, _ := time.Parse("2006-01-02", "2026-02-01")
+		_, err := s.Apply(ctx, AnalyticsWriteRequest{ProjectID: "p", Observations: []AnalyticsObservationInput{{
+			Content:     model.AnalyticsContent{ID: row.id, ProjectID: "p", Channel: row.channel, ContentType: row.channel},
+			Observation: model.AnalyticsObservation{ID: "detail-" + row.id, ContentID: row.id, ProjectID: "p", StatDate: "2026-02-01", MetricBasis: "cumulative", Source: "import", EffectiveAt: at, ReceivedAt: at, AnalyticsMetrics: model.AnalyticsMetrics{CommentCount: &row.count}},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	detail, err := s.Detail(ctx, "u", "p", "picture", AnalyticsQuery{
+		Platform: "wechat", ContentType: model.TaskTypeWechatArticle,
+		From: "2026-02-01", To: "2026-02-28", Granularity: "month", MetricBasis: "cumulative",
+	})
+	if err != nil || detail.Content.ContentType != model.TaskTypeWechatPicture || detail.Totals["comment_count"] != int64(5) {
+		t.Fatalf("conflicting detail = %+v, error %v", detail, err)
 	}
 }
 

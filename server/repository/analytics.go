@@ -278,24 +278,29 @@ func analyticsRangeCondition(from, to string) (string, []any) {
 	}
 	return "((granularity = 'month' AND bucket_start >= ? AND bucket_start < ?) OR (granularity = 'day' AND bucket_start BETWEEN ? AND ? AND (bucket_start < ? OR bucket_start >= ?)))", []any{first.Format("2006-01-02"), lastExclusive.Format("2006-01-02"), from, to, first.Format("2006-01-02"), lastExclusive.Format("2006-01-02")}
 }
-func (r *AnalyticsRepository) rangeQuery(ctx context.Context, project string, generation int64, basis, from, to, content string) *gorm.DB {
+func (r *AnalyticsRepository) rangeQuery(ctx context.Context, project string, generation int64, basis, from, to, content, contentType string) *gorm.DB {
 	condition, args := analyticsRangeCondition(from, to)
 	q := r.db.WithContext(ctx).Model(&model.AnalyticsBucket{}).Where("project_id = ? AND generation = ? AND metric_basis = ? AND content_id <> ''", project, generation, basis).Where(condition, args...)
 	if content != "" {
 		q = q.Where("content_id = ?", content)
 	}
+	if contentType != "" {
+		metadata := r.contentMetadata(ctx, project)
+		contentIDs := metadata.query.Select("c.id").Where(metadata.contentType+" = ?", contentType)
+		q = q.Where("content_id IN (?)", contentIDs)
+	}
 	return r.scopeBuckets(ctx, q, project)
 }
-func (r *AnalyticsRepository) contentRange(ctx context.Context, project string, generation int64, basis, from, to, content string) *gorm.DB {
-	q := r.rangeQuery(ctx, project, generation, basis, from, to, content)
+func (r *AnalyticsRepository) contentRange(ctx context.Context, project string, generation int64, basis, from, to, content, contentType string) *gorm.DB {
+	q := r.rangeQuery(ctx, project, generation, basis, from, to, content, contentType)
 	if basis == "cumulative" {
 		ranked := q.Select("content_id,last_stat_date," + analyticsMetricColumns("") + ", ROW_NUMBER() OVER (PARTITION BY content_id ORDER BY last_stat_date DESC) AS rn")
 		return r.db.WithContext(ctx).Table("(?) AS ranked", ranked).Select("content_id,last_stat_date," + analyticsMetricColumns("")).Where("rn = 1")
 	}
 	return q.Select("content_id,MAX(last_stat_date) AS last_stat_date," + analyticsSumColumns("")).Group("content_id")
 }
-func (r *AnalyticsRepository) RangeTotals(ctx context.Context, project string, generation int64, basis, from, to, content string, preserveRatios bool) (model.AnalyticsMetrics, int64, error) {
-	sub := r.contentRange(ctx, project, generation, basis, from, to, content)
+func (r *AnalyticsRepository) RangeTotals(ctx context.Context, project string, generation int64, basis, from, to, content, contentType string, preserveRatios bool) (model.AnalyticsMetrics, int64, error) {
+	sub := r.contentRange(ctx, project, generation, basis, from, to, content, contentType)
 	var row struct {
 		model.AnalyticsMetrics
 		Coverage int64
@@ -406,7 +411,11 @@ func (r *AnalyticsRepository) contentMetadata(ctx context.Context, project strin
 		liveTitle = "COALESCE(NULLIF(p.draft_title,''), " + liveTitle + ")"
 		liveStatus = "COALESCE(NULLIF(p.status,''), " + liveStatus + ")"
 		liveURL = "COALESCE(NULLIF(p.article_url,''), " + liveURL + ")"
-		liveType = "CASE WHEN p.id IS NOT NULL THEN " + analyticsWechatTypeSQL("p.draft_article_type") + " ELSE " + liveType + " END"
+		// Task/channel identity is canonical for a linked publication. Older
+		// publication rows default DraftArticleType to `news`, which would
+		// incorrectly turn a picture task into an article. Use the publication
+		// type only when the operational content identity is unavailable.
+		liveType = "CASE WHEN " + liveType + " = 'unknown' AND p.id IS NOT NULL THEN " + analyticsWechatTypeSQL("p.draft_article_type") + " ELSE " + liveType + " END"
 	}
 	if r.db.Migrator().HasTable("seednote_posts") {
 		q = q.Joins("LEFT JOIN seednote_posts AS sp ON sp.id = c.post_id AND sp.project_id = c.project_id")
@@ -418,7 +427,7 @@ func (r *AnalyticsRepository) contentMetadata(ctx context.Context, project strin
 }
 
 func (r *AnalyticsRepository) Contents(ctx context.Context, project string, generation int64, basis, from, to string, f AnalyticsContentFilter) ([]AnalyticsContentRow, int64, error) {
-	sub := r.contentRange(ctx, project, generation, basis, from, to, "")
+	sub := r.contentRange(ctx, project, generation, basis, from, to, "", "")
 	metadata := r.contentMetadata(ctx, project)
 	q := metadata.query.Joins("LEFT JOIN (?) AS m ON m.content_id = c.id", sub)
 	liveTitle, liveType := metadata.title, metadata.contentType
@@ -482,14 +491,25 @@ func (r *AnalyticsRepository) Dates(ctx context.Context, project string, generat
 	return dates, e
 }
 
-func (r *AnalyticsRepository) Series(ctx context.Context, project string, generation int64, basis, from, to, granularity, content string) ([]model.AnalyticsBucket, error) {
+func (r *AnalyticsRepository) Series(ctx context.Context, project string, generation int64, basis, from, to, granularity, content, contentType string) ([]model.AnalyticsBucket, error) {
 	start, _ := AnalyticsBucketBounds(from, granularity)
 	rows := []model.AnalyticsBucket{}
 	q := r.db.WithContext(ctx).Model(&model.AnalyticsBucket{}).Where("project_id = ? AND generation = ? AND metric_basis = ? AND granularity = ? AND bucket_start BETWEEN ? AND ?", project, generation, basis, granularity, start, to)
-	if content != "" || r.metricFamily == 0 {
+	if content != "" || (r.metricFamily == 0 && contentType == "") {
 		q = r.scopeBuckets(ctx, q.Where("content_id = ?", content), project)
+		if contentType != "" {
+			metadata := r.contentMetadata(ctx, project)
+			contentIDs := metadata.query.Select("c.id").Where(metadata.contentType+" = ?", contentType)
+			q = q.Where("content_id IN (?)", contentIDs)
+		}
 	} else {
-		q = r.scopeBuckets(ctx, q.Where("content_id <> ''"), project).Select("bucket_start," + analyticsSumColumns("") + ", COUNT(*) AS coverage, MAX(last_stat_date) AS last_stat_date").Group("bucket_start")
+		q = r.scopeBuckets(ctx, q.Where("content_id <> ''"), project)
+		if contentType != "" {
+			metadata := r.contentMetadata(ctx, project)
+			contentIDs := metadata.query.Select("c.id").Where(metadata.contentType+" = ?", contentType)
+			q = q.Where("content_id IN (?)", contentIDs)
+		}
+		q = q.Select("bucket_start," + analyticsSumColumns("") + ", COUNT(*) AS coverage, MAX(last_stat_date) AS last_stat_date").Group("bucket_start")
 	}
 	e := q.Order("bucket_start").Find(&rows).Error
 	if e != nil {
@@ -508,7 +528,7 @@ func (r *AnalyticsRepository) Series(ctx context.Context, project string, genera
 			if hi > to {
 				hi = to
 			}
-			m, n, e := r.RangeTotals(ctx, project, generation, basis, lo, hi, content, content != "")
+			m, n, e := r.RangeTotals(ctx, project, generation, basis, lo, hi, content, contentType, content != "")
 			if e != nil {
 				return nil, e
 			}
