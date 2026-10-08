@@ -167,13 +167,13 @@ describe('PlansPage multi-output plans', () => {
     expect(screen.getByTestId('plan-card-active-plan')).toHaveTextContent('每')
     expect(screen.getByTestId('plan-card-paused-plan')).toHaveTextContent('已暂停')
     const activeCard = within(screen.getByTestId('plan-card-active-plan'))
-    for (const name of ['编辑计划：活跃计划', '查看任务：活跃计划', '暂停计划：活跃计划', '删除计划：活跃计划']) {
+    for (const name of ['编辑计划：活跃内容', '查看任务：活跃内容', '暂停计划：活跃内容', '删除计划：活跃内容']) {
       expect(activeCard.getByRole(name.startsWith('查看') ? 'link' : 'button', { name })).toHaveClass('size-11')
     }
   })
 
   it('shows output Agents only once and keeps edit as an unfilled icon action', async () => {
-    const plan: Plan = { ...mockPlans.items[0], id: 'multi-output-plan', agent_ids: ['wechat-article', 'seednote'] }
+    const plan: Plan = { ...mockPlans.items[0], id: 'multi-output-plan', prompt: '多种输出', agent_ids: ['wechat-article', 'seednote'] }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
 
@@ -191,7 +191,7 @@ describe('PlansPage multi-output plans', () => {
 
   it.each([false, true])('shows the saved reference and submits its selection after removal=%s', async (remove) => {
     const reference = { asset_id: '44444444-4444-4444-8444-444444444444', file_name: 'cover.png', content_type: 'image/png', size: 9, download_url: 'https://signed.example/cover.png', download_expires_at: '2026-10-04T10:00:00Z' }
-    const plan = { ...mockPlans.items[0], agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
+    const plan = { ...mockPlans.items[0], prompt: '多种输出', agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '编辑计划：多种输出' }))

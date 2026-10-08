@@ -198,6 +198,19 @@ func registerUser(t *testing.T, app *fiber.App, email, password, nickname string
 	return token, userID
 }
 
+func promoteUserToAdmin(t *testing.T, repo repository.Repository, userID string) {
+	t.Helper()
+
+	user, err := repo.Users().FindByID(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("find user to promote: %v", err)
+	}
+	user.IsAdmin = true
+	if err := repo.Users().Update(context.Background(), user); err != nil {
+		t.Fatalf("promote user to admin: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // E2E Tests
 // ---------------------------------------------------------------------------
@@ -307,6 +320,7 @@ func TestE2E_FullUserFlow(t *testing.T) {
 	}
 
 	// Step 6: Timeline.
+	promoteUserToAdmin(t, repo, userID1)
 	from := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
 	to := time.Now().Add(24 * time.Hour).Format("2006-01-02")
 	tlReq := httptest.NewRequest("GET", "/api/v1/timeline?from="+from+"&to="+to, nil)
@@ -741,10 +755,10 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 
 // TestE2E_InvalidInputs tests various invalid input scenarios.
 func TestE2E_InvalidInputs(t *testing.T) {
-	app, closeFunc, _ := setupTestRouter(t)
+	app, closeFunc, repo := setupTestRouter(t)
 	defer closeFunc()
 
-	token, _ := registerUser(t, app, "input@example.com", "password123", "Input User")
+	token, userID := registerUser(t, app, "input@example.com", "password123", "Input User")
 
 	tests := []struct {
 		name       string
@@ -752,6 +766,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 		path       string
 		body       string
 		auth       bool
+		admin      bool
 		wantStatus int
 	}{
 		{
@@ -800,6 +815,7 @@ func TestE2E_InvalidInputs(t *testing.T) {
 			path:       "/api/v1/timeline",
 			body:       "",
 			auth:       true,
+			admin:      true,
 			wantStatus: fiber.StatusBadRequest,
 		},
 	}
@@ -814,6 +830,9 @@ func TestE2E_InvalidInputs(t *testing.T) {
 				req = httptest.NewRequest(tc.method, tc.path, nil)
 			}
 			if tc.auth {
+				if tc.admin {
+					promoteUserToAdmin(t, repo, userID)
+				}
 				req.Header.Set("Authorization", "Bearer "+token)
 			}
 			resp, err := app.Test(req)
@@ -828,14 +847,14 @@ func TestE2E_InvalidInputs(t *testing.T) {
 	}
 }
 
-// TestE2E_FindRunningByUserDoesNotLeak verifies that the timeline endpoint
-// does not leak running tasks from other users.
-func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
+// TestE2E_TimelineRequiresAdminAndScopesTasksByUser verifies the admin-only
+// timeline boundary and keeps its task results scoped to the authenticated user.
+func TestE2E_TimelineRequiresAdminAndScopesTasksByUser(t *testing.T) {
 	app, closeFunc, repo := setupTestRouter(t)
 	defer closeFunc()
 
 	token1, userID1 := registerUser(t, app, "runner1@example.com", "password123", "Runner One")
-	token2, _ := registerUser(t, app, "runner2@example.com", "password123", "Runner Two")
+	token2, userID2 := registerUser(t, app, "runner2@example.com", "password123", "Runner Two")
 
 	// Create a test project for user 1.
 	testProject := &model.Project{
@@ -847,6 +866,16 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	}
 	if err := repo.Projects().Create(context.Background(), testProject); err != nil {
 		t.Fatalf("create test project: %v", err)
+	}
+	otherProject := &model.Project{
+		ID:       "test-project-leak-2",
+		UserID:   userID2,
+		Platform: model.ScopeSeednote,
+		Name:     "Runner2 Seednote Project",
+		Status:   model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(context.Background(), otherProject); err != nil {
+		t.Fatalf("create second test project: %v", err)
 	}
 
 	// User 1 creates a task.
@@ -872,31 +901,45 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	taskResult := parseJSONBody(t, taskResp)
 	taskID := taskResult["data"].(map[string]interface{})["id"].(string)
 
-	// Verify that User 2's timeline does not contain User 1's task.
+	otherTaskBody, _ := json.Marshal(map[string]string{
+		"project_id":        otherProject.ID,
+		"agent_id":          model.AgentIDSeednote,
+		"channel":           model.ChannelSeednote,
+		"task_kind":         model.TaskKindContentGeneration,
+		"prompt":            "Runner2 Task",
+		"execution_profile": "effective",
+	})
+	otherTaskReq := httptest.NewRequest("POST", "/api/v1/tasks", strings.NewReader(string(otherTaskBody)))
+	otherTaskReq.Header.Set("Content-Type", "application/json")
+	otherTaskReq.Header.Set("Authorization", "Bearer "+token2)
+	otherTaskResp, err := app.Test(otherTaskReq)
+	if err != nil {
+		t.Fatalf("create second task failed: %v", err)
+	}
+	if otherTaskResp.StatusCode != fiber.StatusOK {
+		t.Fatalf("create second task returned %d", otherTaskResp.StatusCode)
+	}
+	otherTaskResult := parseJSONBody(t, otherTaskResp)
+	otherTaskID := otherTaskResult["data"].(map[string]interface{})["id"].(string)
+
+	// Regular users cannot access the timeline.
 	from := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
 	to := time.Now().Add(24 * time.Hour).Format("2006-01-02")
 
-	// User 2 checks timeline -- should NOT see User 1's task.
+	// User 2 is denied before any timeline data is returned.
 	tlReq := httptest.NewRequest("GET", "/api/v1/timeline?from="+from+"&to="+to, nil)
 	tlReq.Header.Set("Authorization", "Bearer "+token2)
 	tlResp, err := app.Test(tlReq)
 	if err != nil {
 		t.Fatalf("timeline request failed: %v", err)
 	}
-	if tlResp.StatusCode != fiber.StatusOK {
-		t.Fatalf("timeline returned %d", tlResp.StatusCode)
+	if tlResp.StatusCode != fiber.StatusForbidden {
+		result := parseJSONBody(t, tlResp)
+		t.Fatalf("regular user timeline returned %d, want %d: %s", tlResp.StatusCode, fiber.StatusForbidden, result["msg"])
 	}
 
-	tlResult := parseJSONBody(t, tlResp)
-	tlItems := tlResult["data"].(map[string]interface{})["items"].([]interface{})
-	for _, item := range tlItems {
-		itemMap := item.(map[string]interface{})
-		if itemMap["id"].(string) == taskID {
-			t.Error("user2 should not see user1's task in timeline (information leak)")
-		}
-	}
-
-	// User 1 should see their own task in timeline.
+	// An administrator still sees only the tasks owned by their account.
+	promoteUserToAdmin(t, repo, userID1)
 	tlReq1 := httptest.NewRequest("GET", "/api/v1/timeline?from="+from+"&to="+to, nil)
 	tlReq1.Header.Set("Authorization", "Bearer "+token1)
 	tlResp1, err := app.Test(tlReq1)
@@ -910,14 +953,20 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	tlResult1 := parseJSONBody(t, tlResp1)
 	tlItems1 := tlResult1["data"].(map[string]interface{})["items"].([]interface{})
 	found := false
+	foreignFound := false
 	for _, item := range tlItems1 {
 		itemMap := item.(map[string]interface{})
 		if itemMap["id"].(string) == taskID {
 			found = true
-			break
+		}
+		if itemMap["id"].(string) == otherTaskID {
+			foreignFound = true
 		}
 	}
 	if !found {
 		t.Error("user1 should see their own task in timeline")
+	}
+	if foreignFound {
+		t.Error("administrator timeline should not include another user's task")
 	}
 }
