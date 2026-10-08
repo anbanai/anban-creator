@@ -32,12 +32,12 @@ layout:
   card_padding: "18px 14px"
   section_gap: "40px"
   paragraph_margin: "0 0 16px"
-  border_radius: "12px"
-  card_background_color: "#ffffff"
-  card_background_image: "radial-gradient(circle at 1px 1px, rgba(107, 155, 122, 0.08) 1px, transparent 0)" # 清新点状纹理
+  border_radius: "0"
+  card_background_color: "transparent"
+  card_background_image: ""
   card_background_size: "20px 20px"
-  card_border: "1px solid rgba(107, 155, 122, 0.1)"
-  card_box_shadow: "0 8px 24px rgba(74, 128, 88, 0.08), 0 0 12px rgba(107, 155, 122, 0.2)" # 清新阴影
+  card_border: "none"
+  card_box_shadow: "none"
 
 # 元素样式
 modules:

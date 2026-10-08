@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anbanai/anban-creator/server/resources"
 	"github.com/rs/zerolog"
 )
 
@@ -96,6 +97,32 @@ func TestRender_BasicMarkdown_InlinesThemeColors(t *testing.T) {
 	// H2 carries the theme icon span.
 	if !strings.Contains(html, "▶") {
 		t.Error("H2 icon ▶ missing")
+	}
+}
+
+func TestRender_SpringFreshThemeOmitsCardFrame(t *testing.T) {
+	log := zerolog.Nop()
+	cvt := NewConverterWithThemes(&log, resources.Manager().GetAllRaw(resources.CategoryTheme))
+	res := cvt.Convert(&ConvertRequest{Markdown: "# 标题\n\n正文。", Theme: "spring-fresh"})
+	if !res.Success {
+		t.Fatalf("render failed: %s", res.Error)
+	}
+
+	for _, want := range []string{
+		"background-color:transparent",
+		"border-radius:0",
+		"border:none",
+		"box-shadow:none",
+	} {
+		if !strings.Contains(res.HTML, want) {
+			t.Errorf("HTML missing configured spring-fresh style %q: %s", want, res.HTML)
+		}
+	}
+	if strings.Contains(res.HTML, "background-image:") {
+		t.Errorf("HTML should not contain a card background image: %s", res.HTML)
+	}
+	if !strings.Contains(res.HTML, "padding:18px 14px") {
+		t.Error("HTML should retain content padding after removing the card frame")
 	}
 }
 
