@@ -377,7 +377,7 @@ export default function PlansPage() {
               <div className="min-w-0 flex-1">
                 <h2 className="truncate text-sm font-semibold text-foreground">{plan.prompt || plan.title || '定时创作计划'}</h2>
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  {project ? <ProjectIdentity project={project} compact /> : <span>未命名项目</span>}
+                  {project ? <ProjectIdentity project={project} compact showAgents={false} /> : <span>未命名项目</span>}
                   <span aria-hidden="true">·</span>
                   <span>{outputIDs.length} 种输出</span>
                 </div>
@@ -405,7 +405,7 @@ export default function PlansPage() {
             <div className="flex flex-wrap items-center justify-end gap-1.5">
               <Tooltip>
                 <TooltipTrigger
-                  render={<Button data-primary-action type="button" size="icon-sm" aria-label="编辑" onClick={() => openEdit(plan)} />}
+                  render={<Button type="button" variant="ghost" size="icon-sm" aria-label="编辑" onClick={() => openEdit(plan)} />}
                 >
                   <SquarePen className="size-4" />
                 </TooltipTrigger>

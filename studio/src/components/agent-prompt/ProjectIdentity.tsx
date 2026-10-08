@@ -32,6 +32,7 @@ export interface ProjectIdentitySnapshot {
 interface ProjectIdentityProps {
   project: ProjectIdentityProject
   compact?: boolean
+  showAgents?: boolean
   className?: string
 }
 
@@ -114,6 +115,7 @@ export function resolveProjectIdentity({
 export function ProjectIdentity({
   project,
   compact = false,
+  showAgents = true,
   className,
 }: ProjectIdentityProps) {
   const description = project.description || project.positioning || project.instructions
@@ -126,7 +128,7 @@ export function ProjectIdentity({
     .filter((id, index, all) => id && all.indexOf(id) === index)
   const identityLabel = [
     project.name,
-    agentIds.map(agentDisplayName).join('、'),
+    showAgents ? agentIds.map(agentDisplayName).join('、') : '',
     ...keywords,
     description,
   ].filter(Boolean).join('，')
@@ -163,7 +165,7 @@ export function ProjectIdentity({
       <span className={cn('flex min-w-0 flex-1', compact ? 'items-center' : 'flex-col gap-0.5')}>
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
-          <AgentIconStack agentIds={agentIds} compact={compact} maxVisible={compact ? 3 : 5} className="shrink-0" />
+          {showAgents ? <AgentIconStack agentIds={agentIds} compact={compact} maxVisible={compact ? 3 : 5} className="shrink-0" /> : null}
         </span>
         {!compact && keywordTags.length ? (
           <span data-slot="project-identity-keywords" aria-label="关键词" className="flex min-w-0 flex-wrap items-center gap-1 pt-0.5">

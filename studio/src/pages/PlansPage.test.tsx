@@ -137,9 +137,9 @@ describe('PlansPage multi-output plans', () => {
     await screen.findByText('多种输出')
     const planCard = document.querySelector('[data-plan-id="plan-1"]')
     expect(planCard).toBeInTheDocument()
-    expect(planCard?.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
     expect(planCard?.querySelector('[data-agent-id="seednote"]')).toBeInTheDocument()
     expect(planCard?.querySelector('[data-agent-id="wechat-picture"]')).toBeInTheDocument()
+    expect(planCard?.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(2)
     expect(planCard).not.toHaveTextContent('种草笔记')
     expect(planCard).not.toHaveTextContent('公众号贴图')
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
@@ -164,8 +164,26 @@ describe('PlansPage multi-output plans', () => {
     expect(screen.getByTestId('plan-card-active-plan')).toHaveTextContent('下次运行')
     expect(screen.getByTestId('plan-card-active-plan')).toHaveTextContent('每')
     expect(screen.getByTestId('plan-card-paused-plan')).toHaveTextContent('已暂停')
-    expect(screen.getByTestId('plan-card-active-plan').querySelector('[data-primary-action]')).toBeInTheDocument()
+    expect(within(screen.getByTestId('plan-card-active-plan')).getByRole('button', { name: '编辑' })).toHaveClass('hover:bg-muted')
   })
+
+  it('shows output Agents only once and keeps edit as an unfilled icon action', async () => {
+    const plan: Plan = { ...mockPlans.items[0], id: 'multi-output-plan', agent_ids: ['wechat-article', 'seednote'] }
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
+    render(<PlansPage />)
+
+    const card = await screen.findByTestId('plan-card-multi-output-plan')
+    const projectIdentity = card.querySelector('[data-slot="project-identity"]')
+    expect(projectIdentity).toBeInTheDocument()
+    expect(projectIdentity?.querySelector('[data-slot="agent-icon"]')).not.toBeInTheDocument()
+    expect(card.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(2)
+
+    const editButton = within(card).getByRole('button', { name: '编辑' })
+    expect(editButton).toHaveClass('hover:bg-muted')
+    expect(editButton).not.toHaveClass('bg-primary')
+    expect(editButton).not.toHaveClass('text-primary-foreground')
+  })
+
   it.each([false, true])('shows the saved reference and submits its selection after removal=%s', async (remove) => {
     const reference = { asset_id: '44444444-4444-4444-8444-444444444444', file_name: 'cover.png', content_type: 'image/png', size: 9, download_url: 'https://signed.example/cover.png', download_expires_at: '2026-10-04T10:00:00Z' }
     const plan = { ...mockPlans.items[0], agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
