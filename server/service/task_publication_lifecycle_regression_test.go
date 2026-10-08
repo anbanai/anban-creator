@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -367,6 +368,78 @@ func TestFinalizePicturePublicationDeliversCanonicalPackageToWechat(t *testing.T
 	article := api.addRequests[0].Articles[0]
 	if article.ArticleType != "newspic" || article.Title != "图片消息" || article.Content != "图下注释" || article.ImageInfo == nil || len(article.ImageInfo.ImageList) != 1 || article.ImageInfo.ImageList[0].ImageMediaID != "image-media-1" {
 		t.Fatalf("newspic request=%#v", article)
+	}
+}
+
+func TestFinalizePicturePublicationUploadsGeneratedImagesAndLeavesWechatDraft(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	task.Type = model.TaskTypeWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	task.SetAgentInput(map[string]any{"picture_image_count": 2})
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	store := svc.store.(*fakeTaskStorage)
+	imageBodies := map[string][]byte{
+		"cover-bytes": {0x89, 'P', 'N', 'G'},
+		"image-bytes": {0x89, 'P', 'N', 'G', 1},
+	}
+	coverKey, imageKey := "tasks/picture/cover.png", "tasks/picture/image_01.png"
+	store.files[coverKey], store.files[imageKey] = imageBodies["cover-bytes"], imageBodies["image-bytes"]
+	api := &fakeWechatPublicationAPI{
+		draftListResponse: &appwechat.DraftBatchGetResponse{},
+		addResponse:       &appwechat.DraftAddResponse{MediaID: "picture-draft-1"},
+	}
+	logger := zerolog.New(io.Discard)
+	publicationSvc := NewWechatPublicationService(repo, func(*model.Project) (WechatPublicationAPI, error) { return api, nil }, &logger)
+	var uploads []string
+	publicationSvc.SetMaterialUploader(func(_ context.Context, _ *model.Project, data []byte, filename string) (*appwechat.UploadMaterialResult, error) {
+		if filename == "cover.png" && string(data) != string(imageBodies["cover-bytes"]) {
+			t.Fatalf("cover upload bytes = %v", data)
+		}
+		if filename == "image_01.png" && string(data) != string(imageBodies["image-bytes"]) {
+			t.Fatalf("content upload bytes = %v", data)
+		}
+		uploads = append(uploads, filename)
+		return &appwechat.UploadMaterialResult{MediaID: "media-" + filename, WechatURL: "https://mmbiz.example/" + filename}, nil
+	})
+	svc.SetWechatPublicationService(publicationSvc)
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", picturePublicationPackageWithImages(t, []string{"output/image_01.png"}))
+	for _, file := range []*model.TaskFile{
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleCover, FilePath: "output/cover.png", FileName: "cover.png", MimeType: "image/png", FileSize: 4, OSSKey: coverKey, StorageProvider: store.Name()},
+		{ID: uuid.NewString(), TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleImage, FilePath: "output/image_01.png", FileName: "image_01.png", MimeType: "image/png", FileSize: 5, OSSKey: imageKey, StorageProvider: store.Name()},
+	} {
+		if err := repo.TaskFiles().Create(ctx, file); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result publicationDeliveryResult
+	if err := json.Unmarshal(evidence, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != model.TaskExecutionDraftDeliverySucceeded || !result.Attempted || result.Code != "" {
+		t.Fatalf("status=%q evidence=%s", status, evidence)
+	}
+	if got := strings.Join(uploads, ","); got != "cover.png,image_01.png" {
+		t.Fatalf("material uploads = %q", got)
+	}
+	if api.addCalls != 1 || api.submitCalls != 0 {
+		t.Fatalf("draft_add calls=%d formal publish calls=%d, want 1 and 0", api.addCalls, api.submitCalls)
+	}
+	article := api.addRequests[0].Articles[0]
+	if article.ArticleType != "newspic" || article.ImageInfo == nil || len(article.ImageInfo.ImageList) != 2 ||
+		article.ImageInfo.ImageList[0].ImageMediaID != "media-cover.png" || article.ImageInfo.ImageList[1].ImageMediaID != "media-image_01.png" {
+		t.Fatalf("newspic request = %#v", article)
+	}
+	publication, err := repo.WechatPublications().FindByTaskID(ctx, task.ID)
+	if err != nil || publication.DraftMediaID != "picture-draft-1" || publication.Status != model.WechatPublicationStatusDrafted {
+		t.Fatalf("stored publication = %#v, err=%v", publication, err)
 	}
 }
 

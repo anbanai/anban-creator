@@ -696,6 +696,32 @@ func TestCreateDraftAcceptsWechatPictureTask(t *testing.T) {
 	}
 }
 
+func TestCreateDraftKeepsWechatPictureInDraftBox(t *testing.T) {
+	f := newPublicationFixture(t)
+	if err := f.db.Model(&model.Task{}).Where("id = ?", f.taskID).Updates(map[string]any{
+		"type": model.TaskTypeWechatPicture, "channel": model.ChannelWechatPicture,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "picture-draft-1"}
+	request := appwechat.DraftAddRequest{Articles: []appwechat.DraftArticle{{
+		ArticleType: "newspic", Title: "图片消息", Content: "图下注释",
+		ImageInfo: &appwechat.DraftImageInfo{ImageList: []appwechat.DraftImage{{ImageMediaID: "image-1"}}},
+	}}}
+
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if publication.Status != model.WechatPublicationStatusDrafted || publication.DraftMediaID != "picture-draft-1" {
+		t.Fatalf("publication = %#v, want a saved newspic draft", publication)
+	}
+	if f.api.addCalls != 1 || f.api.submitCalls != 0 {
+		t.Fatalf("draft_add calls=%d formal publish calls=%d, want 1 and 0", f.api.addCalls, f.api.submitCalls)
+	}
+}
+
 func TestCreateDraftAcceptsRegisteredHTTPWechatImage(t *testing.T) {
 	f := newPublicationFixture(t)
 	const imageURL = "http://mmbiz.qpic.cn/current-image.png"

@@ -202,7 +202,9 @@ export function getApiErrorCode(err: unknown): number | undefined {
 /** Whether a request failed because the addressed resource does not exist. */
 export function isApiNotFoundError(err: unknown): boolean {
   const status = (err as { response?: { status?: unknown } } | null)?.response?.status
-  return status === 404
+  // Some gateways preserve the API envelope but drop the HTTP status. The
+  // resource code is stable across that translation, so accept either signal.
+  return status === 404 || getApiErrorCode(err) === 40400
 }
 
 function isNetworkError(err: unknown): boolean {

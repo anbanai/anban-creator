@@ -1395,7 +1395,10 @@ func (s *WechatPublicationService) finishConcurrentDraftRecovery(ctx context.Con
 }
 
 func (s *WechatPublicationService) autoPublishDraft(ctx context.Context, userID, taskID string, publication *model.WechatPublication) (*model.WechatPublication, error) {
-	if publication.Status != model.WechatPublicationStatusDrafted {
+	// Picture messages are delivered to the WeChat draft box; formal publish is
+	// a separate action because draft/add does not make the new draft visible
+	// to the listing endpoint synchronously.
+	if publication.Status != model.WechatPublicationStatusDrafted || publication.DraftArticleType == "newspic" {
 		return publication, nil
 	}
 	published, err := s.Publish(ctx, userID, taskID)

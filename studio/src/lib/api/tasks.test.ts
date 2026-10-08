@@ -121,6 +121,15 @@ describe('tasksApi', () => {
     expect(get).toHaveBeenCalledWith('/tasks/task-1/wechat-publication')
   })
 
+  it('reads a gateway-translated missing WeChat publication as an empty state', async () => {
+    const get = vi.spyOn(clientHttp, 'get').mockRejectedValue({
+      response: { status: 200, data: { code: 40400, msg: 'WeChat publication not found' } },
+    })
+
+    await expect(tasksApi.getWechatPublication('task-1')).resolves.toBeNull()
+    expect(get).toHaveBeenCalledWith('/tasks/task-1/wechat-publication')
+  })
+
   it('still surfaces non-not-found WeChat publication failures', async () => {
     vi.spyOn(clientHttp, 'get').mockRejectedValue({
       response: { status: 500, data: { code: 50000, msg: 'WeChat publication action failed' } },
