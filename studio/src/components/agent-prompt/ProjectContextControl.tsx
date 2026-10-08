@@ -159,7 +159,7 @@ function SelectProjectContext({
               disabled={isDisabled}
               className={cn(
                 'min-w-0 justify-between font-normal',
-                compact ? 'w-auto max-w-full' : 'w-full',
+                compact ? 'w-auto max-w-full min-h-11' : 'w-full',
                 compact ? 'h-8' : selected?.kind === 'project' ? 'h-auto min-h-14 py-2' : undefined,
                 compact && 'px-1.5 shadow-none hover:bg-muted/70',
               )}
@@ -203,7 +203,7 @@ function SelectProjectContext({
                           .filter(Boolean)
                           .join(' · ')
                         : item.name}
-                      className="min-h-10 rounded-lg border border-transparent px-2 py-1 pr-9 aria-selected:border-border/70 aria-selected:bg-accent/70"
+                      className="min-h-11 rounded-lg border border-transparent px-2 py-1 pr-9 aria-selected:border-border/70 aria-selected:bg-accent/70"
                     >
                       {item.kind === 'project' ? (
                         <ProjectIdentity project={item} />

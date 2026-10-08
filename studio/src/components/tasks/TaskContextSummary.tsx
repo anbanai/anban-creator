@@ -1,25 +1,15 @@
 import { useId } from 'react'
 import {
-  ChevronRight,
   ClipboardList,
   Paperclip,
-  ScrollText,
   SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react'
 import type { TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import { contentTypeDisplayName } from '@/lib/labels'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskFile } from '@/types'
-import { ProjectIdentity, resolveProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
 
 export interface TaskContextSummaryProps {
   compact?: boolean
@@ -28,9 +18,6 @@ export interface TaskContextSummaryProps {
   task: Task
   project?: Project
   files: TaskFile[]
-  logs: string[]
-  latestStageUpdate: string | null
-  sseError: string | null
   onOpenTab: (tab: TaskDetailsTab) => void
 }
 
@@ -47,20 +34,6 @@ interface SummaryItemProps {
   neutral?: boolean
   onClick: () => void
   value: string
-  identity?: ProjectIdentityProject | null
-}
-
-const MARKDOWN_PREFIX = /^(?:[#>*_~`+-]+\s*)+/
-
-function latestNormalizedLogLine(logs: string[]) {
-  for (let logIndex = logs.length - 1; logIndex >= 0; logIndex -= 1) {
-    const lines = logs[logIndex].split(/\r?\n/)
-    for (let lineIndex = lines.length - 1; lineIndex >= 0; lineIndex -= 1) {
-      const normalized = lines[lineIndex].trim().replace(MARKDOWN_PREFIX, '').trim()
-      if (normalized) return Array.from(normalized).slice(0, 80).join('')
-    }
-  }
-  return ''
 }
 
 function SummaryItem({
@@ -76,7 +49,6 @@ function SummaryItem({
   neutral = false,
   onClick,
   value,
-  identity,
 }: SummaryItemProps) {
   return (
     <Button
@@ -85,14 +57,14 @@ function SummaryItem({
       aria-label={actionLabel}
       aria-describedby={descriptionId}
       className={cn(
-        'min-w-0 flex-col items-start justify-start gap-1.5 overflow-hidden rounded-none px-3 py-2 text-left',
+        'min-h-11 min-w-0 flex-col items-start justify-start gap-1.5 overflow-hidden rounded-none px-3 py-2 text-left',
         compact ? 'h-auto' : 'h-24',
         layout === 'sidebar'
-          ? index < 3 && 'border-b border-b-border'
+          ? index < 2 && 'border-b border-b-border'
           : cn(
               index === 0 && 'border-r border-b border-r-border border-b-border lg:border-b-0',
               index === 1 && 'border-b border-b-border lg:border-r lg:border-r-border lg:border-b-0',
-              index === 2 && 'border-r border-r-border',
+              index === 2 && 'border-r border-r-border lg:border-r-0',
             ),
       )}
       onClick={onClick}
@@ -103,7 +75,7 @@ function SummaryItem({
       </span>
       <span id={descriptionId} className="flex w-full min-w-0 flex-col items-start gap-1">
         <span className="w-full truncate text-sm font-medium text-foreground" title={value}>
-          {identity ? <ProjectIdentity project={identity} compact className="max-w-full" /> : value}
+          {value}
         </span>
         <span
           className={cn(
@@ -125,12 +97,6 @@ function SummaryItem({
   )
 }
 
-function taskLogState(task: Task, sseError: string | null) {
-  if (task.status === 'running') return sseError ? '连接中断' : '实时'
-  if (task.status === 'pending') return '等待执行'
-  return '已结束'
-}
-
 export function TaskContextSummary({
   compact = false,
   layout = 'grid',
@@ -138,48 +104,30 @@ export function TaskContextSummary({
   task,
   project,
   files,
-  logs,
-  latestStageUpdate,
-  sseError,
   onOpenTab,
 }: TaskContextSummaryProps) {
   const descriptionIdPrefix = useId()
   const snapshot = task.project_snapshot
   const hasSnapshot = Boolean(snapshot?.platform)
-  const projectName = hasSnapshot ? snapshot?.project_name || '—' : project?.name || '—'
-  const projectIdentity = project || snapshot?.project_name || snapshot?.platform
-    ? resolveProjectIdentity({
-      project,
-      snapshot,
-      projectId: task.project_id,
-      fallbackPlatform: task.type,
-      fallbackName: projectName,
-    })
-    : null
   const visualStyle = hasSnapshot
     ? snapshot?.visual_style
     : task.overrides?.visual_style || project?.visual_style
   const imageRatio = task.image_ratio || (hasSnapshot ? snapshot?.image_ratio : project?.image_ratio)
-  const configurationDetail = [visualStyle, imageRatio].filter(Boolean).join(' · ') || '未设置'
+  const configurationDetail = imageRatio ? `画幅 ${imageRatio}` : '未指定画幅'
   const attachmentCount = task.input_attachments?.length ?? 0
   const hasReferenceSummary = files.some((file) => file.file_name === 'reference-usage-summary.json')
-  const stageUpdate = latestStageUpdate?.trim()
-  const logDetail = task.status === 'running' && stageUpdate
-    ? stageUpdate
-    : latestNormalizedLogLine(logs) || '暂无日志'
-  const logState = taskLogState(task, sseError)
 
   return (
-    <Card role="region" aria-label="任务上下文" size="sm" className={compact ? 'gap-2 border-0 bg-transparent shadow-none ring-0' : undefined}>
+    <Card role="region" aria-label="关键事实" size="sm" className={compact ? 'gap-2 border-0 bg-transparent shadow-none ring-0' : undefined}>
       {(!compact || layout === 'sidebar') && <CardHeader className={cn('border-b border-border', compact && 'px-3 pb-3')}>
         <CardTitle>
-          <h2>任务上下文</h2>
+          <h2>关键事实</h2>
         </CardTitle>
       </CardHeader>}
       <CardContent className="p-0">
         <div
           data-testid="task-context-grid"
-          className={cn('grid gap-0', layout === 'sidebar' ? 'grid-cols-1' : 'grid-cols-2 lg:grid-cols-4')}
+          className={cn('grid gap-0', layout === 'sidebar' ? 'grid-cols-1' : 'grid-cols-2 lg:grid-cols-3')}
         >
           <SummaryItem
             compact={compact}
@@ -188,10 +136,9 @@ export function TaskContextSummary({
             descriptionId={`${descriptionIdPrefix}-overview`}
             icon={ClipboardList}
             index={0}
-            label="任务概览"
-            value={projectName}
-            identity={projectIdentity}
-            detail={task.plan_id ? '计划任务' : '手动创建'}
+            label="任务来源"
+            value={task.plan_id ? '计划任务' : '手动创建'}
+            detail="创建方式"
             detailSuffix={showBillingDetail ? `累计扣费 ${(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分` : undefined}
             onClick={() => onOpenTab('overview')}
           />
@@ -202,10 +149,10 @@ export function TaskContextSummary({
             descriptionId={`${descriptionIdPrefix}-configuration`}
             icon={SlidersHorizontal}
             index={1}
-            label="创作配置"
-            value={contentTypeDisplayName(task.type)}
+            label="生成设置"
+            value={visualStyle || '未设置风格'}
             detail={configurationDetail}
-            neutral={configurationDetail === '未设置'}
+            neutral={!visualStyle && !imageRatio}
             onClick={() => onOpenTab('configuration')}
           />
           <SummaryItem
@@ -220,26 +167,8 @@ export function TaskContextSummary({
             detail={hasReferenceSummary ? '已生成使用结论' : '仅任务输入'}
             onClick={() => onOpenTab('materials')}
           />
-          <SummaryItem
-            compact={compact}
-            layout={layout}
-            actionLabel="打开执行日志"
-            descriptionId={`${descriptionIdPrefix}-logs`}
-            icon={ScrollText}
-            index={3}
-            label="执行日志"
-            value={`${logs.length} 条 · ${logState}`}
-            detail={logDetail}
-            onClick={() => onOpenTab('logs')}
-          />
         </div>
       </CardContent>
-      <CardFooter className={cn('justify-end', compact && 'border-0 bg-transparent px-0 pt-0')}>
-        <Button type="button" variant="ghost" size="xs" onClick={() => onOpenTab('overview')}>
-          更多详情
-          <ChevronRight data-icon="inline-end" />
-        </Button>
-      </CardFooter>
     </Card>
   )
 }

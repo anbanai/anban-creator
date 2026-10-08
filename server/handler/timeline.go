@@ -81,6 +81,10 @@ func (h *TimelineHandler) GetTimeline(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
+	user, _ := c.Locals("user").(*model.User)
+	if user == nil || !user.IsAdmin {
+		return Forbidden(c, "administrator access required")
+	}
 
 	fromStr := c.Query("from")
 	toStr := c.Query("to")

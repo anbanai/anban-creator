@@ -50,6 +50,9 @@ describe('TaskExecutionRail', () => {
     const props = { taskId: 'task-1', status: 'running' as const, onOpenLogs: vi.fn(), files }
     const { rerender } = render(<TaskExecutionRail {...props} lifecycle={lifecycle} />)
     const research = screen.getByRole('button', { name: '研究素材，已完成' })
+    expect(screen.getByText('确认事实与角度')).toBeVisible()
+    expect(research).toHaveClass('min-h-11')
+    expect(screen.getByRole('button', { name: '查看完整日志' })).toHaveClass('size-11')
     expect(within(research.closest('li')!).getByRole('button', { name: '预览 research.md' })).toBeVisible()
     fireEvent.click(research)
     expect(screen.queryByRole('button', { name: '预览 research.md' })).not.toBeInTheDocument()
@@ -86,6 +89,8 @@ describe('TaskExecutionRail', () => {
   it('expands the active stage, folds completed work, and marks the current step', () => {
     render(<TaskExecutionRail taskId="task-1" status="running" lifecycle={lifecycle} onOpenLogs={vi.fn()} />)
 
+    expect(screen.getByRole('button', { name: '研究素材，已完成' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('确认事实与角度')).toBeVisible()
     expect(screen.getByText('正在收束文章结构')).toBeVisible()
     expect(screen.getByText('形成完整初稿')).toBeVisible()
     expect(screen.queryByText('事实已经核验')).not.toBeInTheDocument()
@@ -257,6 +262,7 @@ describe('TaskExecutionRail', () => {
     }} onOpenLogs={vi.fn()} />)
 
     const retry = screen.getByRole('button', { name: '重试创建草稿' })
+    expect(retry).toHaveClass('size-11')
     expect(retry.querySelectorAll('svg')).toHaveLength(1)
     expect(retry).not.toHaveTextContent('重试创建草稿')
 

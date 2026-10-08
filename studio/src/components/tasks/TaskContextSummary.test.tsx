@@ -64,9 +64,6 @@ function renderSummary(overrides: Partial<ComponentProps<typeof TaskContextSumma
     task: snapshotTask,
     project: currentProject,
     files: [],
-    logs: [],
-    latestStageUpdate: null,
-    sseError: null,
     onOpenTab: vi.fn(),
     ...overrides,
   }
@@ -82,14 +79,16 @@ describe('TaskContextSummary', () => {
   it('renders authoritative snapshot context instead of changed project values', () => {
     renderSummary()
 
-    expect(screen.getByRole('region', { name: '任务上下文' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '任务上下文', level: 2 })).toBeInTheDocument()
-    expect(screen.getByText('茶小茶')).toBeInTheDocument()
-    expect(screen.getByText('公众号文章')).toBeInTheDocument()
-    expect(screen.getByText('清新茶感摄影 · 3:4')).toBeInTheDocument()
+    const facts = screen.getByRole('region', { name: '关键事实' })
+    expect(screen.getByRole('heading', { name: '关键事实', level: 2 })).toBeInTheDocument()
+    expect(screen.getByText('手动创建')).toBeInTheDocument()
+    expect(screen.getByText('清新茶感摄影')).toBeInTheDocument()
+    expect(screen.getByText('画幅 3:4')).toBeInTheDocument()
     expect(screen.getByText('累计扣费 6,800 积分')).toBeInTheDocument()
-    expect(screen.queryByText('后来修改的项目')).not.toBeInTheDocument()
-    expect(screen.queryByText('后来修改的视觉 · 1:1')).not.toBeInTheDocument()
+    expect(facts).not.toHaveTextContent('茶小茶')
+    expect(facts).not.toHaveTextContent('公众号文章')
+    expect(facts).not.toHaveTextContent('后来修改的项目')
+    expect(facts).not.toHaveTextContent('后来修改的视觉')
   })
 
   it('summarizes task inputs and reference usage conclusion from file metadata', () => {
@@ -105,28 +104,15 @@ describe('TaskContextSummary', () => {
     expect(screen.getByText('已生成使用结论')).toBeInTheDocument()
   })
 
-  it('prioritizes the current progress description for a running task', () => {
-    renderSummary({
-      task: { ...snapshotTask, status: 'running' },
-      logs: ['## 已完成大纲', '- 正在生成配图'],
-      latestStageUpdate: '正在润色正文',
-    })
-
-    expect(screen.getByText('2 条 · 实时')).toBeInTheDocument()
-    expect(screen.getByText('正在润色正文')).toBeInTheDocument()
-    expect(screen.queryByText('正在生成配图')).not.toBeInTheDocument()
-  })
-
-  it('uses grouped mobile and desktop grid geometry for all summary actions', () => {
+  it('uses grouped mobile and desktop grid geometry for key facts', () => {
     renderSummary()
 
     const grid = screen.getByTestId('task-context-grid')
     const overview = screen.getByRole('button', { name: '打开任务概览' })
     const configuration = screen.getByRole('button', { name: '打开创作配置' })
     const materials = screen.getByRole('button', { name: '打开参考素材' })
-    const logs = screen.getByRole('button', { name: '打开执行日志' })
 
-    expect(grid).toHaveClass('grid-cols-2', 'gap-0', 'lg:grid-cols-4')
+    expect(grid).toHaveClass('grid-cols-2', 'gap-0', 'lg:grid-cols-3')
     expect(grid.parentElement).toHaveAttribute('data-slot', 'card-content')
     expect(grid.parentElement).toHaveClass('p-0')
 
@@ -149,12 +135,7 @@ describe('TaskContextSummary', () => {
     expect(configuration).not.toHaveClass('border-r')
     expect(materials).toHaveClass('rounded-none', 'border-r', 'border-r-border')
     expect(materials).not.toHaveClass('border-b')
-    expect(materials).not.toHaveClass('lg:border-b-0')
-    expect(logs).toHaveClass('rounded-none')
-    expect(logs).not.toHaveClass('border-r')
-    expect(logs).not.toHaveClass('border-b')
-    expect(logs).not.toHaveClass('lg:border-r')
-    expect(logs).not.toHaveClass('lg:border-b-0')
+    expect(materials).toHaveClass('lg:border-r-0')
   })
 
   it('renders context actions as a vertical sidebar with row separators', () => {
@@ -165,33 +146,29 @@ describe('TaskContextSummary', () => {
       screen.getByRole('button', { name: '打开任务概览' }),
       screen.getByRole('button', { name: '打开创作配置' }),
       screen.getByRole('button', { name: '打开参考素材' }),
-      screen.getByRole('button', { name: '打开执行日志' }),
     ]
 
-    expect(screen.getByRole('heading', { name: '任务上下文', level: 2 })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '关键事实', level: 2 })).toBeInTheDocument()
     expect(grid).toHaveClass('grid-cols-1')
-    actions.slice(0, 3).forEach((action) => {
+    actions.slice(0, 2).forEach((action) => {
       expect(action).toHaveClass('border-b', 'border-b-border')
       expect(action).not.toHaveClass('border-r')
     })
-    expect(actions[3]).not.toHaveClass('border-b', 'border-r')
+    expect(actions[2]).not.toHaveClass('border-b', 'border-r')
   })
 
-  it('exposes visible overview and log summaries as accessible descriptions', () => {
-    renderSummary({
-      task: { ...snapshotTask, status: 'running' },
-      logs: ['## 已完成大纲', '- 最新日志状态'],
-    })
+  it('exposes visible facts as accessible descriptions without repeating task identity', () => {
+    renderSummary()
 
     const actions = [
       screen.getByRole('button', { name: '打开任务概览' }),
       screen.getByRole('button', { name: '打开创作配置' }),
       screen.getByRole('button', { name: '打开参考素材' }),
-      screen.getByRole('button', { name: '打开执行日志' }),
     ]
 
-    expect(actions[0]).toHaveAccessibleDescription(/茶小茶.*手动创建.*累计扣费 6,800 积分/)
-    expect(actions[3]).toHaveAccessibleDescription(/2 条 · 实时.*最新日志状态/)
+    expect(actions[0]).toHaveAccessibleDescription(/手动创建.*创建方式.*累计扣费 6,800 积分/)
+    expect(actions[1]).toHaveAccessibleDescription(/清新茶感摄影.*画幅 3:4/)
+    expect(actions[2]).toHaveAccessibleDescription(/0 项输入.*仅任务输入/)
 
     const descriptionIds = actions.map((action) => action.getAttribute('aria-describedby'))
     expect(descriptionIds.every(Boolean)).toBe(true)
@@ -201,22 +178,18 @@ describe('TaskContextSummary', () => {
     }
   })
 
-  it('opens the matching details tab from every summary action', () => {
+  it('opens the matching key fact details tabs', () => {
     const onOpenTab = vi.fn()
     renderSummary({ onOpenTab })
 
     fireEvent.click(screen.getByRole('button', { name: '打开任务概览' }))
     fireEvent.click(screen.getByRole('button', { name: '打开创作配置' }))
     fireEvent.click(screen.getByRole('button', { name: '打开参考素材' }))
-    fireEvent.click(screen.getByRole('button', { name: '打开执行日志' }))
-    fireEvent.click(screen.getByRole('button', { name: '更多详情' }))
 
     expect(onOpenTab.mock.calls.map(([tab]) => tab)).toEqual([
       'overview',
       'configuration',
       'materials',
-      'logs',
-      'overview',
     ])
   })
 
@@ -235,56 +208,14 @@ describe('TaskContextSummary', () => {
         image_ratio: '',
       },
       files: [],
-      logs: [],
     })
 
-    expect(screen.getByText('当前项目')).toBeInTheDocument()
-    expect(screen.getByText('公众号文章')).toBeInTheDocument()
-    expect(screen.getByText('未设置')).toBeInTheDocument()
+    expect(screen.queryByText('当前项目')).not.toBeInTheDocument()
+    expect(screen.queryByText('公众号文章')).not.toBeInTheDocument()
+    expect(screen.getByText('未设置风格')).toBeInTheDocument()
+    expect(screen.getByText('未指定画幅')).toBeInTheDocument()
     expect(screen.getByText('0 项输入')).toBeInTheDocument()
     expect(screen.getByText('仅任务输入')).toBeInTheDocument()
-    expect(screen.getByText('0 条 · 已结束')).toBeInTheDocument()
-    expect(screen.getByText('暂无日志')).toBeInTheDocument()
-  })
-
-  it('shows a running connection error with the latest normalized non-empty log line', () => {
-    renderSummary({
-      task: { ...snapshotTask, status: 'running' },
-      logs: ['## 第一条日志', '   ', '  - 最新日志状态  '],
-      sseError: '网络连接已中断',
-    })
-
-    expect(screen.getByText('3 条 · 连接中断')).toBeInTheDocument()
-    expect(screen.getByText('最新日志状态')).toBeInTheDocument()
-  })
-
-  it('limits normalized log fallback text to 80 characters', () => {
-    const longLog = `## ${'长'.repeat(90)}`
-    renderSummary({ logs: [longLog] })
-
-    expect(screen.getByText('长'.repeat(80))).toBeInTheDocument()
-    expect(screen.queryByText('长'.repeat(81))).not.toBeInTheDocument()
-  })
-
-  it('shows that a pending task is waiting to execute', () => {
-    renderSummary({ task: { ...snapshotTask, status: 'pending' } })
-
-    expect(screen.getByText('0 条 · 等待执行')).toBeInTheDocument()
-  })
-
-  it.each([
-    ['pending', '等待执行'],
-    ['completed', '已结束'],
-    ['failed', '已结束'],
-    ['cancelled', '已结束'],
-  ] as const)('keeps %s lifecycle truth when an SSE error is stale', (status, expectedState) => {
-    renderSummary({
-      task: { ...snapshotTask, status },
-      sseError: '已失效的连接错误',
-    })
-
-    expect(screen.getByText(`0 条 · ${expectedState}`)).toBeInTheDocument()
-    expect(screen.queryByText('0 条 · 连接中断')).not.toBeInTheDocument()
   })
 
   it('does not request file lists, content, previews, or downloads', () => {

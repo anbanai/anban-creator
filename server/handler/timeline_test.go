@@ -79,6 +79,7 @@ func TestTimelineIncludesDerivedProjectAgentIDs(t *testing.T) {
 	app := fiber.New()
 	app.Get("/timeline", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
+		c.Locals("user", &model.User{ID: userID, IsAdmin: true})
 		return handler.GetTimeline(c)
 	})
 	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/timeline?from=2026-04-01&to=2026-04-30", nil))
@@ -156,6 +157,7 @@ func TestTimelineIncludesLifecycleForRunningTaskOutsideSelectedDateRange(t *test
 	app := fiber.New()
 	app.Get("/timeline", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
+		c.Locals("user", &model.User{ID: userID, IsAdmin: true})
 		return handler.GetTimeline(c)
 	})
 	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/timeline?from=2026-04-01&to=2026-04-30", nil))
@@ -179,6 +181,25 @@ func TestTimelineIncludesLifecycleForRunningTaskOutsideSelectedDateRange(t *test
 	}
 	if got := envelope.Data.Items[0].CurrentStage; got.Title != "撰写内容" || got.State != model.TaskLifecycleStateActive {
 		t.Fatalf("current stage = %#v", got)
+	}
+}
+
+func TestTimelineRequiresAdministrator(t *testing.T) {
+	repo, logger := setupTimelineHandler(t)
+	userID := "timeline-regular-user"
+	app := fiber.New()
+	app.Get("/timeline", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		c.Locals("user", &model.User{ID: userID})
+		return NewTimelineHandler(repo, logger).GetTimeline(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/timeline?from=2026-04-01&to=2026-04-30", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusForbidden)
 	}
 }
 

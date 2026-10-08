@@ -40,12 +40,14 @@ describe('useKeyboardShortcuts', () => {
     removeSpy.mockRestore()
   })
 
-  it('only enables the settings shortcut for administrators', () => {
+  it('only enables administrator shortcuts for administrators', () => {
     const regular = renderHook(() => useKeyboardShortcuts(vi.fn(), { isAdmin: false }))
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }))
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l' }))
     })
     expect(navigate).not.toHaveBeenCalled()
     regular.unmount()
@@ -54,7 +56,10 @@ describe('useKeyboardShortcuts', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }))
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l' }))
     })
     expect(navigate).toHaveBeenCalledWith('/settings')
+    expect(navigate).toHaveBeenCalledWith('/timeline')
   })
 })

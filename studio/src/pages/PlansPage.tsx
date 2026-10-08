@@ -52,7 +52,7 @@ import { TaskComposerParameters } from '@/components/tasks/TaskComposerParameter
 import { PortraitCoverControl } from '@/components/tasks/PortraitCoverControl'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
-import { StatusPill, WorkspaceSubnav } from '@/components/workspace'
+import { StatusPill } from '@/components/workspace'
 
 const DEFAULT_CRON = '0 9 * * 1,3,5'
 const PLAN_ATTACHMENT_POLICY = { ...GENERAL_AGENT_ATTACHMENT_POLICY, maxCount: 16 }
@@ -420,7 +420,7 @@ export default function PlansPage() {
             <div className="flex flex-wrap items-center justify-end gap-1.5">
               <Tooltip>
                 <TooltipTrigger
-                  render={<Button type="button" variant="ghost" size="icon-sm" aria-label="编辑" onClick={() => openEdit(plan)} />}
+                  render={<Button type="button" variant="ghost" size="icon-md" aria-label={`编辑计划：${plan.title || plan.prompt || '定时创作计划'}`} onClick={() => openEdit(plan)} />}
                 >
                   <SquarePen className="size-4" />
                 </TooltipTrigger>
@@ -428,18 +428,33 @@ export default function PlansPage() {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger
-                  render={<Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} aria-label="查看任务" className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })} />}
+                  render={<Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} aria-label={`查看任务：${plan.title || plan.prompt || '定时创作计划'}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} />}
                 >
                   <ListTodo className="size-4" />
                 </TooltipTrigger>
                 <TooltipContent>查看任务</TooltipContent>
               </Tooltip>
               {plan.status === 'active' ? (
-                <Button type="button" variant="ghost" size="sm" onClick={() => void pauseMutation.mutateAsync(plan.id)}><Pause className="size-3.5" />暂停</Button>
+                <Tooltip>
+                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`暂停计划：${plan.title || plan.prompt || '定时创作计划'}`} onClick={() => void pauseMutation.mutateAsync(plan.id)} />}>
+                    <Pause className="size-4" />
+                  </TooltipTrigger>
+                  <TooltipContent>暂停计划</TooltipContent>
+                </Tooltip>
               ) : plan.status === 'paused' ? (
-                <Button type="button" variant="ghost" size="sm" onClick={() => void resumeMutation.mutateAsync(plan.id)}><Play className="size-3.5" />恢复</Button>
+                <Tooltip>
+                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`恢复计划：${plan.title || plan.prompt || '定时创作计划'}`} onClick={() => void resumeMutation.mutateAsync(plan.id)} />}>
+                    <Play className="size-4" />
+                  </TooltipTrigger>
+                  <TooltipContent>恢复计划</TooltipContent>
+                </Tooltip>
               ) : null}
-              <Button type="button" variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteTarget(plan.id)}><Trash2 className="size-3.5" />删除</Button>
+              <Tooltip>
+                <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`删除计划：${plan.title || plan.prompt || '定时创作计划'}`} onClick={() => setDeleteTarget(plan.id)} />}>
+                  <Trash2 className="size-4" />
+                </TooltipTrigger>
+                <TooltipContent>删除计划</TooltipContent>
+              </Tooltip>
             </div>
             <StatusPill status={plan.status} label={statusLabel} />
           </div>
@@ -465,17 +480,8 @@ export default function PlansPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="计划" description="一次排期可同时生成多种输出，每种输出独立执行。">
-        <Button onClick={openCreate}><Plus className="h-4 w-4" />新建计划</Button>
+        <Button className="min-h-11" onClick={openCreate}><Plus className="h-4 w-4" />新建计划</Button>
       </PageHeader>
-
-      <WorkspaceSubnav
-        items={[
-          { label: '项目', href: '/projects' },
-          { label: '计划', href: '/plans' },
-          { label: '任务', href: '/tasks' },
-          { label: '时间线', href: '/timeline' },
-        ]}
-      />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <ProjectContextControl
@@ -489,7 +495,7 @@ export default function PlansPage() {
           ariaLabel="筛选项目"
           compact
         />
-        <Input value={searchFilter} onChange={(event) => setSearchFilter(event.target.value)} placeholder="搜索计划" className="w-full sm:w-64" />
+        <Input value={searchFilter} onChange={(event) => setSearchFilter(event.target.value)} placeholder="搜索计划" className="min-h-11 w-full sm:w-64" />
       </div>
 
       {isError ? <QueryErrorState onRetry={() => void refetch()} /> : isLoading ? (
@@ -501,7 +507,7 @@ export default function PlansPage() {
           {renderPlanGroup('运行中的计划', activePlans, '运行中的计划')}
           {renderPlanGroup('已暂停的计划', pausedPlans, '已暂停的计划')}
           {renderPlanGroup('已完成的计划', completedPlans, '已完成的计划')}
-          {totalPages > 1 ? <div className="flex items-center justify-between pt-2 text-sm text-muted-foreground"><span>第 {page} / {totalPages} 页</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</Button><Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>下一页</Button></div></div> : null}
+          {totalPages > 1 ? <div className="flex items-center justify-between pt-2 text-sm text-muted-foreground"><span>第 {page} / {totalPages} 页</span><div className="flex gap-2"><Button variant="outline" size="sm" className="min-h-11" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</Button><Button variant="outline" size="sm" className="min-h-11" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>下一页</Button></div></div> : null}
         </div>
       )}
 

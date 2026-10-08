@@ -5,6 +5,7 @@ import {
   adminNavItems,
   allNavItems,
   mvpNavItems,
+  workspaceNavItems,
   visibleNavItems,
 } from './navigation'
 
@@ -24,6 +25,19 @@ describe('navigation IA', () => {
     expect(mvpNavItems[0]?.icon).toBe(Sparkles)
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/timeline')
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/usage')
+    expect(workspaceNavItems.map((item) => item.to)).toEqual([
+      '/',
+      '/projects',
+      '/tasks',
+      '/plans',
+      '/timeline',
+      '/billing',
+      '/plugins',
+      '/settings',
+      '/content-analytics',
+      '/trends',
+    ])
+    expect(workspaceNavItems.find((item) => item.to === '/timeline')?.adminOnly).toBe(true)
   })
 
   it('defines administrator navigation in approved order', () => {
@@ -40,6 +54,7 @@ describe('navigation IA', () => {
       '/projects',
       '/tasks',
       '/plans',
+      '/timeline',
       '/billing',
       '/plugins',
       '/settings',
@@ -50,7 +65,7 @@ describe('navigation IA', () => {
     ])
     expect(visibleNavItems(allNavItems, false)).toEqual(mvpNavItems)
     expect(visibleNavItems(allNavItems, true)).toEqual([
-      ...mvpNavItems,
+      ...workspaceNavItems,
       ...adminNavItems,
     ])
   })

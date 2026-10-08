@@ -123,7 +123,7 @@ function CopyValue({ value }: { value: string }) {
     <Button
       type="button"
       variant="ghost"
-      size="icon-xs"
+      size="icon-md"
       aria-label={copied ? '已复制' : '复制'}
       onClick={() => {
         void navigator.clipboard.writeText(value).then(() => {

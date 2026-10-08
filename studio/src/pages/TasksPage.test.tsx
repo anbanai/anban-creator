@@ -321,6 +321,7 @@ describe('TasksPage URL-driven recovery filters', () => {
   it('separates task selection from the link and clears hidden selections', async () => {
     renderTasksPage()
     const select = await screen.findByRole('button', { name: '选择任务' })
+    expect(select).toHaveClass('min-h-11', 'min-w-11')
     expect(select.closest('a')).toBeNull()
     fireEvent.click(select)
     fireEvent.change(screen.getByPlaceholderText('搜索已加载任务...'), { target: { value: '找不到' } })
@@ -408,13 +409,17 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    expect(await screen.findByRole('link', { name: '查看内容分析' })).toHaveAttribute(
+    const analyticsLink = await screen.findByRole('link', { name: '查看内容分析' })
+    expect(analyticsLink).toHaveClass('size-11')
+    expect(analyticsLink).toHaveAttribute(
       'href',
       '/content-analytics?account=project-1&content=task%3Aapproval-task&platform=wechat&agent=wechat-article',
     )
     expect(screen.getAllByRole('link', { name: '查看内容分析' })).toHaveLength(1)
     expect(screen.getByText('已完成文章')).toBeInTheDocument()
     expect(screen.getByText('失败文章')).toBeInTheDocument()
+    expect(screen.getAllByTestId('task-status-mark')).toHaveLength(2)
+    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('size-11')
   })
 
   it('shows the task total including image operation charges', async () => {

@@ -119,7 +119,7 @@ describe('TaskDetailsSheet', () => {
     render(<TaskDetailsSheet {...createSheetProps({ selectedTab: 'logs' })} />)
 
     expect(screen.getByText('夏日选题')).toBeInTheDocument()
-    expect(screen.getByText('创建时项目名称')).toBeInTheDocument()
+    expect(screen.queryByText('创建时项目名称')).not.toBeInTheDocument()
     expect(screen.getByText('已完成')).toBeInTheDocument()
   })
 
@@ -131,15 +131,15 @@ describe('TaskDetailsSheet', () => {
     expect(screen.getByRole('heading', { name: '任务详情' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('手动创建')).toBeInTheDocument()
-    expect(within(screen.getByRole('tabpanel')).getByText('创建时项目名称')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).queryByText('创建时项目名称')).not.toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: '积分明细' })).getAllByText('6,000 积分')).toHaveLength(2)
   })
 
-  it('groups Overview into timing, project, and billing surfaces', () => {
+  it('groups Overview into timing, billing, and technical surfaces without duplicate project identity', () => {
     render(<ControlledTaskDetailsSheet {...createSheetProps()} />)
 
     expect(screen.getByRole('region', { name: '任务时间与来源' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '项目' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '项目' })).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: '积分明细' })).toBeInTheDocument()
   })
 
@@ -325,7 +325,7 @@ describe('TaskDetailsSheet', () => {
       />,
     )
 
-    expect(within(screen.getByRole('tabpanel')).getByText('旧任务当前项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).queryByText('旧任务当前项目')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
     expect(within(screen.getByRole('tabpanel')).getByText('旧任务当前项目')).toBeInTheDocument()
     expect(screen.getByText('旧任务视觉风格')).toBeInTheDocument()
@@ -365,7 +365,7 @@ describe('TaskDetailsSheet', () => {
       />,
     )
 
-    expect(within(screen.getByRole('tabpanel')).getByText('空快照当前项目')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).queryByText('空快照当前项目')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
     expect(within(screen.getByRole('tabpanel')).getByText('空快照当前项目')).toBeInTheDocument()
     expect(screen.getByText('旧任务覆盖视觉')).toBeInTheDocument()

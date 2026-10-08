@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ArrowLeft, BarChart3, Ban, CheckCircle2, FileCheck2, Loader2, MessageSquare, RefreshCw, Send, Trash2, XCircle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
@@ -15,7 +15,7 @@ import type { InputAttachment, Task, TaskLifecycle } from '@/types'
 import { streamTaskProgress, type SSEEvent } from '@/lib/sse'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button, buttonVariants } from '@/components/common/button'
-import { Badge } from '@/components/ui/badge'
+import { StatusPill } from '@/components/workspace'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
@@ -31,7 +31,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { taskFailurePresentation, taskStatusLabel, platformDisplayName, statusBadgeVariant } from '@/lib/labels'
+import { taskFailurePresentation, taskStatusLabel, platformDisplayName } from '@/lib/labels'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
@@ -133,7 +133,7 @@ function ResumeTaskDialog({
           autoFocus
         />
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={resumeMutation.isPending} onClick={onClose}>取消</Button>
+          <Button type="button" variant="outline" className="min-h-11" disabled={resumeMutation.isPending} onClick={onClose}>取消</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -192,6 +192,9 @@ function TaskOutcomeNotice({
   failure,
   canResume,
   deliveredCount,
+  retainedCount,
+  filesLoading,
+  filesError,
   onResume,
   onOpenMaterials,
 }: {
@@ -199,6 +202,9 @@ function TaskOutcomeNotice({
   failure: ReturnType<typeof taskFailurePresentation>
   canResume: boolean
   deliveredCount: number
+  retainedCount: number
+  filesLoading: boolean
+  filesError: boolean
   onResume?: () => void
   onOpenMaterials: () => void
 }) {
@@ -211,9 +217,15 @@ function TaskOutcomeNotice({
             <h2 className="text-sm font-semibold text-destructive">{failure?.title || '执行失败'}</h2>
             <p className="mt-1 break-words text-sm text-foreground/85">{failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。'}</p>
             {failure?.recovery ? <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p> : null}
+            <p className="mt-1 text-xs text-muted-foreground" aria-live="polite">
+              {filesLoading ? '正在检查产物状态…'
+                : filesError ? '产物状态暂时无法获取'
+                  : deliveredCount + retainedCount > 0 ? `仍可查看 ${deliveredCount + retainedCount} 项产物`
+                    : '没有可查看的保留产物'}
+            </p>
           </div>
         </div>
-        {canResume && onResume ? <Button size="sm" onClick={onResume}><Send className="size-3.5" />继续执行</Button> : null}
+        {canResume && onResume ? <Button size="sm" className="min-h-11" onClick={onResume}><Send className="size-3.5" />继续执行</Button> : null}
       </section>
     )
   }
@@ -225,7 +237,7 @@ function TaskOutcomeNotice({
           <XCircle className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <p className="text-sm text-foreground">执行已停止，可从已有上下文继续。</p>
         </div>
-        {canResume && onResume ? <Button size="sm" onClick={onResume}><Send className="size-3.5" />继续执行</Button> : null}
+        {canResume && onResume ? <Button size="sm" className="min-h-11" onClick={onResume}><Send className="size-3.5" />继续执行</Button> : null}
       </section>
     )
   }
@@ -237,7 +249,7 @@ function TaskOutcomeNotice({
           <CheckCircle2 className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />
           <p className="text-sm text-foreground">任务已完成，交付成果已保存。</p>
         </div>
-        <Button size="sm" variant="outline" onClick={onOpenMaterials}><FileCheck2 className="size-3.5" />查看交付成果</Button>
+        <Button size="sm" variant="outline" className="min-h-11" onClick={onOpenMaterials}><FileCheck2 className="size-3.5" />查看交付成果</Button>
       </div>
     )
   }
@@ -346,7 +358,6 @@ export default function TaskDetailPage() {
   const displayLifecycle = liveLifecycle && liveLifecycle.revision > persistedLifecycleRevision
     ? liveLifecycle
     : task?.lifecycle
-  const currentLifecycleUpdate = displayLifecycle?.stages?.find((stage) => stage.state === 'active' || stage.state === 'blocked' || stage.state === 'failed')?.latest_update ?? null
   const streamLifecycle = task ? shouldStreamTaskLifecycle(task) : false
   const cancelMutation = useMutation({
     mutationFn: (taskId: string) => api.tasks.cancel(taskId),
@@ -573,7 +584,7 @@ export default function TaskDetailPage() {
       <div className="space-y-4">
         <button
           onClick={() => navigate('/tasks')}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          className="flex min-h-11 items-center gap-1 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <ArrowLeft className="h-4 w-4" />
           返回任务列表
@@ -587,7 +598,7 @@ export default function TaskDetailPage() {
     return (
       <div className="text-center py-16">
         <p className="text-muted-foreground">任务未找到</p>
-        <Button variant="ghost" className="mt-3" onClick={() => navigate('/tasks')}>
+        <Button variant="ghost" className="mt-3 min-h-11" onClick={() => navigate('/tasks')}>
           返回任务列表
         </Button>
       </div>
@@ -645,10 +656,6 @@ export default function TaskDetailPage() {
               <BreadcrumbItem>
                 <BreadcrumbLink render={<Link to="/tasks" />}>任务</BreadcrumbLink>
               </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden sm:list-item" />
-              <BreadcrumbItem className="hidden sm:inline-flex">
-              <BreadcrumbPage>{task.title || task.prompt || `${taskAgentLabel}任务`}</BreadcrumbPage>
-              </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
           <div className="flex flex-wrap items-center gap-3">
@@ -659,14 +666,12 @@ export default function TaskDetailPage() {
             <h1 className="min-w-0 max-w-4xl text-xl font-bold leading-tight text-foreground">
               {task.title || task.prompt || `${taskAgentLabel}任务`}
             </h1>
-            <Badge variant={statusBadgeVariant(task.status)}>
-              {taskStatusLabel[task.status] || task.status}
-            </Badge>
+            <StatusPill status={task.status} label={taskStatusLabel[task.status] || task.status} />
             {project && (
               <button
                 type="button"
                 onClick={() => setShowProjectDialog(true)}
-                className="rounded-md bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                className="inline-flex min-h-11 items-center rounded-md bg-card px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 <span className="max-w-[min(18rem,42vw)] truncate text-xs text-muted-foreground">{project.name}</span>
               </button>
@@ -681,7 +686,7 @@ export default function TaskDetailPage() {
                   <Link
                     to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
                     aria-label="查看内容分析"
-                    className={buttonVariants({ variant: 'outline', size: 'icon-sm' })}
+                    className={buttonVariants({ variant: 'outline', size: 'icon-md' })}
                   />
                 }
               >
@@ -697,7 +702,7 @@ export default function TaskDetailPage() {
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon-sm"
+                    size="icon-md"
                     aria-label="人工评价"
                     aria-pressed={showFeedback}
                     onClick={() => setShowFeedback(true)}
@@ -713,6 +718,7 @@ export default function TaskDetailPage() {
             <Button
               variant="destructive"
               size="sm"
+              className="min-h-11"
               loading={cancelMutation.isPending}
               onClick={() => setShowCancelDialog(true)}
             >
@@ -721,7 +727,7 @@ export default function TaskDetailPage() {
             </Button>
           )}
           {canClone ? (
-            <Button variant="outline" size="sm" onClick={openCloneDialog}>
+            <Button variant="outline" size="sm" className="min-h-11" onClick={openCloneDialog}>
               <RefreshCw className="h-4 w-4" />
               {task.type === 'hypit' ? '再次改编' : '克隆任务'}
             </Button>
@@ -730,7 +736,7 @@ export default function TaskDetailPage() {
             <Button
               variant="outline"
               size="sm"
-              className="text-destructive hover:bg-destructive/5 hover:text-destructive"
+              className="min-h-11 text-destructive hover:bg-destructive/5 hover:text-destructive"
               onClick={() => setShowDeleteDialog(true)}
             >
               <Trash2 className="h-4 w-4" />
@@ -745,7 +751,10 @@ export default function TaskDetailPage() {
           task={task}
           failure={taskFailurePresentation(task)}
           canResume={canResume}
-          deliveredCount={deliveredFiles.length}
+          deliveredCount={deliverableFiles.length}
+          retainedCount={files?.filter((file) => file.state === 'retained').length ?? 0}
+          filesLoading={filesLoading}
+          filesError={filesError}
           onResume={() => setShowResumeDialog(true)}
           onOpenMaterials={() => openTaskDetails('materials')}
         />
@@ -788,13 +797,9 @@ export default function TaskDetailPage() {
           <TaskContextSummary
             compact
             layout="sidebar"
-            showBillingDetail={false}
             task={task}
             project={project}
             files={deliveredFiles}
-            logs={displayLogs}
-            latestStageUpdate={currentLifecycleUpdate}
-            sseError={currentSseError}
             onOpenTab={openTaskDetails}
           />
         </aside>

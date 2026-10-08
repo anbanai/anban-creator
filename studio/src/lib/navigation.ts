@@ -3,6 +3,7 @@ import {
   Sparkles,
   Rss,
   CalendarRange,
+  CalendarDays,
   ListChecks,
   Settings,
   Coins,
@@ -33,13 +34,19 @@ export const mvpNavItems: NavItem[] = [
   { to: '/trends', label: '热点雷达', icon: Flame },
 ]
 
+export const workspaceNavItems: NavItem[] = [
+  ...mvpNavItems.slice(0, 4),
+  { to: '/timeline', label: '时间线', icon: CalendarDays, adminOnly: true },
+  ...mvpNavItems.slice(4),
+]
+
 export const adminNavItems: NavItem[] = [
   { to: '/templates', label: '模板库', icon: LayoutGrid, adminOnly: true },
   { to: '/admin/seednote', label: '种草笔记账号', icon: KeyRound, adminOnly: true },
 ]
 
 export const allNavItems: NavItem[] = [
-  ...mvpNavItems,
+  ...workspaceNavItems,
   ...adminNavItems,
 ]
 

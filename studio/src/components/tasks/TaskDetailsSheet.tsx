@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   CalendarClock,
   Copy,
-  FolderKanban,
   Images,
   Pause,
   Play,
@@ -39,7 +38,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatFullDateTimeCN, progressStageLabel, providerDiagnosticLabels, statusBadgeVariant, taskFailurePresentation, taskStatusLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskBillingChargeDetail, TaskFile } from '@/types'
-import { ProjectIdentity, resolveProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 
 export type TaskDetailsTab = 'overview' | 'configuration' | 'materials' | 'logs'
 
@@ -62,7 +60,6 @@ export interface TaskDetailsSheetProps {
 
 interface TaskOverviewDetailsProps {
   task: Task
-  project?: Project
 }
 
 interface TaskLogDetailsProps {
@@ -212,21 +209,7 @@ function TaskTechnicalDetails({ task }: { task: Task }) {
 
 function TaskOverviewDetails({
   task,
-  project,
 }: TaskOverviewDetailsProps) {
-  const hasSnapshot = Boolean(task.project_snapshot?.platform)
-  const projectName = hasSnapshot
-    ? task.project_snapshot?.project_name || '—'
-    : project?.name || '—'
-  const projectIdentity = project || task.project_snapshot?.project_name || task.project_snapshot?.platform
-    ? resolveProjectIdentity({
-      project,
-      snapshot: task.project_snapshot,
-      projectId: task.project_id,
-      fallbackPlatform: task.type,
-      fallbackName: projectName,
-    })
-    : null
   const timingRows: Array<[string, ReactNode]> = [
     ['创建时间', formatFullDateTimeCN(task.created_at)],
     ['开始时间', formatFullDateTimeCN(task.started_at)],
@@ -249,11 +232,6 @@ function TaskOverviewDetails({
         icon={CalendarClock}
       >
         <DetailRows rows={timingRows} />
-      </TaskDetailsSection>
-      <TaskDetailsSection label="项目" title="项目" icon={FolderKanban}>
-        <DetailRows rows={[
-          ['项目', projectIdentity ? <ProjectIdentity project={projectIdentity} compact /> : projectName],
-        ]} />
       </TaskDetailsSection>
       <TaskBillingDetails task={task} />
       <TaskTechnicalDetails task={task} />
@@ -325,24 +303,26 @@ function TaskLogDetails({
           <Button
             size="xs"
             variant="ghost"
+            className="min-h-11 min-w-11"
             aria-pressed={autoScrollLogs}
             aria-label={autoScrollLogs ? '暂停自动跟随' : '开启自动跟随'}
             onClick={onToggleAutoScroll}
           >
             {autoScrollLogs
-              ? <Pause data-icon="inline-start" />
-              : <Play data-icon="inline-start" />}
-            {autoScrollLogs ? '自动跟随中' : '跟随已暂停'}
+              ? <Pause aria-hidden="true" />
+              : <Play aria-hidden="true" />}
+            <span className="sr-only">{autoScrollLogs ? '自动跟随中' : '跟随已暂停'}</span>
           </Button>
           <Button
             size="xs"
             variant="ghost"
+            className="min-h-11 min-w-11"
             aria-label="复制日志"
             disabled={logs.length === 0}
             onClick={onCopyLogs}
           >
-            <Copy data-icon="inline-start" />
-            复制
+            <Copy aria-hidden="true" />
+            <span className="sr-only">复制</span>
           </Button>
         </div>
       </div>
@@ -356,11 +336,11 @@ function TaskLogDetails({
             <Button
               size="xs"
               variant="ghost"
-              className="shrink-0 self-start sm:self-auto"
+              className="min-h-11 min-w-11 shrink-0 self-start sm:self-auto"
               onClick={onReconnectLogs}
             >
-              <RefreshCw data-icon="inline-start" />
-              重新连接
+              <RefreshCw aria-hidden="true" />
+              <span className="sr-only">重新连接</span>
             </Button>
           </AlertDescription>
         </Alert>
@@ -394,19 +374,6 @@ function TaskLogDetails({
 export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
   const logMarkdown = props.logs.join('  \n')
   const hasLogs = props.logs.length > 0
-  const hasSnapshot = Boolean(props.task.project_snapshot?.platform)
-  const projectName = hasSnapshot
-    ? props.task.project_snapshot?.project_name || '未设置项目'
-    : props.project?.name || '未设置项目'
-  const projectIdentity = props.project || props.task.project_snapshot?.project_name || props.task.project_snapshot?.platform
-    ? resolveProjectIdentity({
-      project: props.project,
-      snapshot: props.task.project_snapshot,
-      projectId: props.task.project_id,
-      fallbackPlatform: props.task.type,
-      fallbackName: projectName,
-    })
-    : null
   const taskTitle = props.task.title || props.task.topic || props.task.prompt
 
   return (
@@ -424,9 +391,6 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
             <Badge variant={statusBadgeVariant(props.task.status)}>
               {taskStatusLabel[props.task.status] || props.task.status}
             </Badge>
-            <span className="min-w-0 truncate" title={projectName}>
-              {projectIdentity ? <ProjectIdentity project={projectIdentity} compact className="max-w-full" /> : projectName}
-            </span>
           </div>
         </SheetHeader>
         <Tabs
@@ -440,34 +404,31 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
           >
             <TabsTrigger
               value="overview"
-              className="data-active:text-primary data-active:after:bg-primary"
+              className="min-h-11 data-active:text-primary data-active:after:bg-primary"
             >
               概览
             </TabsTrigger>
             <TabsTrigger
               value="configuration"
-              className="data-active:text-primary data-active:after:bg-primary"
+              className="min-h-11 data-active:text-primary data-active:after:bg-primary"
             >
               配置
             </TabsTrigger>
             <TabsTrigger
               value="materials"
-              className="data-active:text-primary data-active:after:bg-primary"
+              className="min-h-11 data-active:text-primary data-active:after:bg-primary"
             >
               素材
             </TabsTrigger>
             <TabsTrigger
               value="logs"
-              className="data-active:text-primary data-active:after:bg-primary"
+              className="min-h-11 data-active:text-primary data-active:after:bg-primary"
             >
               日志
             </TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="min-h-0 overflow-y-auto p-4">
-            <TaskOverviewDetails
-              task={props.task}
-              project={props.project}
-            />
+            <TaskOverviewDetails task={props.task} />
           </TabsContent>
           <TabsContent value="configuration" className="min-h-0 overflow-y-auto p-4">
             {props.selectedTab === 'configuration' ? (

@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Calendar, RefreshCw } from 'lucide-react'
+import { Calendar, Loader2, Pause, Play, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import PageHeader from '@/components/layout/PageHeader'
@@ -21,28 +22,26 @@ import {
   formatMonthCN,
   formatTimeCN,
   getWeekRange,
-  getBadgeVariant,
 } from '@/lib/labels'
 import { platformBadgeClassName, renderPlatformIcon } from '@/lib/PlatformIcon'
 import { lifecycleStageStateLabel } from '@/lib/task-lifecycle'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/common/button'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/Select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
+import { StatusPill } from '@/components/workspace'
 import EmptyState from '@/components/EmptyState'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { CalendarRangePicker } from '@/components/CalendarRangePicker'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
+import { getApiErrorMessage } from '@/lib/http-client'
 
 // --- Helpers ---
 
 function getDefaultRange(): { from: string; to: string } {
   return getWeekRange(new Date())
-}
-
-function statusBadge(status: string, type: string) {
-  return getBadgeVariant(status, type as 'task' | 'plan')
 }
 
 const getItemDate = (item: TimelineItem) => {
@@ -116,6 +115,25 @@ export default function TimelinePage() {
 
   const items = data?.items ?? []
 
+  const pauseMutation = useMutation({
+    mutationFn: (planId: string) => api.plans.pause(planId),
+    onSuccess: () => {
+      toast.success('计划已暂停')
+      void queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
+      void refetch()
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error, '暂停计划失败')),
+  })
+  const resumeMutation = useMutation({
+    mutationFn: (planId: string) => api.plans.resume(planId),
+    onSuccess: () => {
+      toast.success('计划已恢复')
+      void queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
+      void refetch()
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error, '恢复计划失败')),
+  })
+
   // Sort items
   const sortedItems = useMemo(() => {
     const sorted = [...items]
@@ -177,8 +195,8 @@ export default function TimelinePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="时间轴" description="你的内容排期日历。">
-        <Button variant="secondary" size="sm" onClick={() => refetch()}>
+      <PageHeader title="时间线" description="按日期查看计划与任务的排期和执行结果。">
+        <Button variant="secondary" size="sm" className="min-h-11" onClick={() => refetch()}>
           <RefreshCw className="h-3.5 w-3.5" />
           刷新
         </Button>
@@ -191,7 +209,7 @@ export default function TimelinePage() {
           <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
             <PopoverTrigger
               render={
-                <Button variant="outline" size="sm" className="gap-1.5 min-w-[140px]">
+                <Button variant="outline" size="sm" className="min-h-11 gap-1.5 min-w-[140px]">
                   <Calendar className="size-3.5" />
                   {dateRangeLabel}
                 </Button>
@@ -216,7 +234,7 @@ export default function TimelinePage() {
 
           {/* Item Type Filter */}
           <Select value={itemType} onValueChange={(v) => updateFilter('item_type', v ?? '')}>
-            <SelectTrigger aria-label="条目类型" size="sm" className="min-w-[100px]">
+            <SelectTrigger aria-label="条目类型" size="sm" className="min-h-11 min-w-[100px]">
               <SelectValue>{timelineItemTypeOptions.find((option) => option.value === itemType)?.label ?? '全部类型'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -228,7 +246,7 @@ export default function TimelinePage() {
 
           {/* Content Type Filter */}
           <Select value={contentType} onValueChange={(v) => updateFilter('content_type', v ?? '')}>
-            <SelectTrigger aria-label="内容类型" size="sm" className="min-w-[110px]">
+            <SelectTrigger aria-label="内容类型" size="sm" className="min-h-11 min-w-[110px]">
               <SelectValue>{contentTypeFilterOptions.find((option) => option.value === contentType)?.label ?? '全部内容'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -240,7 +258,7 @@ export default function TimelinePage() {
 
           {/* Status Filter */}
           <Select value={status} onValueChange={(v) => updateFilter('status', v ?? '')}>
-            <SelectTrigger aria-label="状态" size="sm" className="min-w-[100px]">
+            <SelectTrigger aria-label="状态" size="sm" className="min-h-11 min-w-[100px]">
               <SelectValue>{timelineStatusOptions.find((option) => option.value === status)?.label ?? '全部状态'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -260,7 +278,7 @@ export default function TimelinePage() {
 
           {/* Sort */}
           <Select value={sort} onValueChange={(v) => updateFilter('sort', v ?? '')}>
-            <SelectTrigger aria-label="排序方式" size="sm" className="min-w-[100px]">
+            <SelectTrigger aria-label="排序方式" size="sm" className="min-h-11 min-w-[100px]">
               <SelectValue>{timelineSortOptions.find((option) => option.value === sort)?.label ?? '日期 ↓'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -275,6 +293,7 @@ export default function TimelinePage() {
             <Button
               variant="ghost"
               size="xs"
+              className="min-h-11"
               onClick={() => {
                 setSearchParams({})
               }}
@@ -349,15 +368,19 @@ export default function TimelinePage() {
                         const linkTo = item.type === 'plan'
                           ? `/plans?highlight=${item.id}`
                           : `/tasks/${item.id}`
+                        const itemStatusLabel = item.type === 'plan'
+                          ? (planStatusLabel[item.status as PlanStatus] || item.status)
+                          : (taskStatusLabel[item.status as TaskStatus] || item.status)
+                        const planActionLabel = item.title || item.project_name || '定时创作计划'
 
                         return (
                           <div
                             key={`${item.type}-${item.id}`}
                             className="group rounded-lg border border-border bg-card px-4 py-3 transition-colors duration-150 hover:border-primary/30"
                           >
-                            <Link to={linkTo} className="block">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0 flex-1">
+                            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-3">
+                              <Link to={linkTo} className="block min-w-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+                                <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-1.5">
                                     <span className="text-xs text-muted-foreground">
                                       {formatTimeCN(getItemDate(item))}
@@ -394,46 +417,31 @@ export default function TimelinePage() {
                                     <p className="mt-1 truncate text-xs text-red-400">{item.error}</p>
                                   )}
                                 </div>
-                                <Badge variant={statusBadge(item.status, item.type)}>
-                                  {item.type === 'plan'
-                                    ? (planStatusLabel[item.status as PlanStatus] || item.status)
-                                    : (taskStatusLabel[item.status as TaskStatus] || item.status)}
-                                </Badge>
+                              </Link>
+                              <div className="flex min-w-11 flex-col items-end justify-between gap-2">
+                                {item.type === 'plan' ? (
+                                  <div className="flex items-center justify-end">
+                                    {item.status === 'active' && (
+                                      <Tooltip>
+                                        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label={`暂停计划：${planActionLabel}`} disabled={pauseMutation.isPending || resumeMutation.isPending} onClick={() => pauseMutation.mutate(item.id)} />}>
+                                          {pauseMutation.isPending && pauseMutation.variables === item.id ? <Loader2 className="size-4 animate-spin" /> : <Pause className="size-4" />}
+                                        </TooltipTrigger>
+                                        <TooltipContent>暂停计划</TooltipContent>
+                                      </Tooltip>
+                                    )}
+                                    {item.status === 'paused' && (
+                                      <Tooltip>
+                                        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label={`恢复计划：${planActionLabel}`} disabled={pauseMutation.isPending || resumeMutation.isPending} onClick={() => resumeMutation.mutate(item.id)} />}>
+                                          {resumeMutation.isPending && resumeMutation.variables === item.id ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+                                        </TooltipTrigger>
+                                        <TooltipContent>恢复计划</TooltipContent>
+                                      </Tooltip>
+                                    )}
+                                  </div>
+                                ) : <span aria-hidden="true" className="size-11" />}
+                                <StatusPill status={item.status} label={itemStatusLabel} />
                               </div>
-                            </Link>
-
-                            {item.type === 'plan' && (
-                              <div className="mt-2 flex items-center gap-2">
-                                {item.status === 'active' && (
-                                  <button
-                                    className="text-xs text-primary hover:text-primary/80"
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      api.plans.pause(item.id).then(() => {
-                                        queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
-                                        refetch()
-                                      })
-                                    }}
-                                  >
-                                    暂停
-                                  </button>
-                                )}
-                                {item.status === 'paused' && (
-                                  <button
-                                    className="text-xs text-emerald-400 hover:text-emerald-300"
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      api.plans.resume(item.id).then(() => {
-                                        queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
-                                        refetch()
-                                      })
-                                    }}
-                                  >
-                                    恢复
-                                  </button>
-                                )}
-                              </div>
-                            )}
+                            </div>
                           </div>
                         )
                       })}

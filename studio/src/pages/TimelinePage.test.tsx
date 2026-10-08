@@ -1,10 +1,53 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/test-utils'
 import TimelinePage from './TimelinePage'
 import { api } from '@/lib/api'
 
+const toastError = vi.hoisted(() => vi.fn())
+vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }))
+
 describe('TimelinePage filters', () => {
+  it('uses the same page heading pattern as other workspace pages', () => {
+    render(<TimelinePage />)
+    expect(screen.getByRole('heading', { level: 1, name: '时间线' })).toBeInTheDocument()
+  })
+
+  it('uses a shared status pill and 44px icon action for schedule controls', async () => {
+    vi.spyOn(api.timeline, 'get').mockResolvedValueOnce({
+      items: [{
+        id: 'active-plan', type: 'plan', content_type: 'seednote', title: '每周选题', status: 'active',
+        project_id: 'project-1', project_name: '种草账号', agent_ids: ['seednote'],
+        scheduled_at: '2026-10-09T09:00:00Z', created_at: '2026-10-08T09:00:00Z', completed_at: '',
+      }],
+    })
+    render(<TimelinePage />)
+
+    await screen.findByText('每周选题')
+    expect(screen.getByTestId('status-pill')).toHaveAttribute('data-status', 'active')
+    expect(screen.getByRole('button', { name: '暂停计划：每周选题' })).toHaveClass('size-11')
+    expect(screen.queryByRole('button', { name: '暂停' })).not.toBeInTheDocument()
+  })
+
+  it('disables a schedule action while pending and reports a failed update', async () => {
+    vi.spyOn(api.timeline, 'get').mockResolvedValueOnce({
+      items: [{
+        id: 'active-plan', type: 'plan', content_type: 'seednote', title: '每周选题', status: 'active',
+        project_id: 'project-1', project_name: '种草账号', agent_ids: ['seednote'],
+        scheduled_at: '2026-10-09T09:00:00Z', created_at: '2026-10-08T09:00:00Z', completed_at: '',
+      }],
+    })
+    let rejectPause!: (error: Error) => void
+    vi.spyOn(api.plans, 'pause').mockReturnValueOnce(new Promise((_, reject) => { rejectPause = reject }))
+    render(<TimelinePage />)
+
+    const pause = await screen.findByRole('button', { name: '暂停计划：每周选题' })
+    fireEvent.click(pause)
+    await waitFor(() => expect(pause).toBeDisabled())
+    rejectPause(new Error('pause failed'))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('pause failed'))
+  })
+
   it('renders every derived project Agent icon in a timeline item', async () => {
     const timeline = vi.spyOn(api.timeline, 'get').mockResolvedValueOnce({
       items: [{

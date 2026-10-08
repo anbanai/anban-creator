@@ -39,6 +39,13 @@ function fileWith(overrides: Partial<TaskFile>): TaskFile {
 }
 
 describe('FilePreviewGallery', () => {
+  it.each([false, true])('keeps preview and download targets at least 44px (compact: %s)', (compact) => {
+    render(<FilePreviewGallery files={[fileWith({})]} taskId="task-1" compact={compact} />)
+
+    expect(screen.getByRole('button', { name: '预览 article.html' })).toHaveClass('min-h-11')
+    expect(screen.getByRole('button', { name: '下载 article.html' })).toHaveClass(compact ? 'size-11' : 'min-h-11')
+  })
+
   it('preserves arrow keys for video controls and editable preview details', async () => {
     const files = [
       fileWith({ id: 'video', file_name: 'final.mp4', mime_type: 'video/mp4', preview_url: 'https://assets.example.com/final.mp4' }),
