@@ -732,6 +732,17 @@ func main() {
 		if repo != nil {
 			contentRenderSvc = service.NewContentRenderService(repo, log)
 		}
+		var searchSvc *service.SearchService
+		if cfg.Search.Enabled {
+			var searchProvider service.SearchProvider
+			switch strings.TrimSpace(cfg.Search.Provider) {
+			case "doubao":
+				searchProvider = service.NewDoubaoSearchProvider(cfg.Search.Doubao)
+			}
+			if searchProvider != nil {
+				searchSvc = service.NewSearchService(&cfg.Search, searchProvider, fixedBilling.Catalog, fixedBilling.Wallet, fixedBilling.Cost, repo.SearchOperations(), log)
+			}
+		}
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
 			TaskSvc:                taskSvc,
@@ -760,6 +771,7 @@ func main() {
 				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.VideoUnderstanding.Model,
 			}, log),
+			SearchSvc: searchSvc,
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)

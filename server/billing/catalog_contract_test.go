@@ -412,6 +412,7 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 	want := map[string]skuSnapshot{
 		"image.standard":     {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 300, route: "image_generation.capabilities.standard", delivery: "persisted_image"},
 		"image.professional": {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.capabilities.professional", delivery: "persisted_image"},
+		"mcp.search_web":     {operation: "mcp.search_web", chargePolicy: "standalone_operation", priceCredits: 0, route: "search.web", delivery: "search_results"},
 	}
 	taskTypes := []struct {
 		id, operation, delivery string

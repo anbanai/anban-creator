@@ -350,6 +350,41 @@ func validateProviderCostEvidence(event BillingProviderCostEvent) error {
 		} else if event.UsageAt != nil {
 			return fmt.Errorf("unreconciled token evidence usage_at is missing")
 		}
+	case "search_request":
+		if event.EventKind != BillingProviderCostEventKindBase || event.Status != BillingProviderCostStatusUnreconciled || event.Source != BillingProviderCostSourceProviderResponse {
+			return fmt.Errorf("search request evidence requires an unreconciled provider-response base event")
+		}
+		var evidence struct {
+			Kind                 string         `json:"kind"`
+			Query                string         `json:"query"`
+			ResultCount          int            `json:"result_count"`
+			SearchCount          int            `json:"search_request_count"`
+			RequestIDSource      string         `json:"request_id_source"`
+			Outcome              string         `json:"outcome"`
+			OperationFingerprint string         `json:"operation_fingerprint"`
+			Usage                map[string]any `json:"usage"`
+			ProviderMetadata     map[string]any `json:"provider_metadata"`
+		}
+		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
+			return fmt.Errorf("invalid search request provider cost evidence: %w", err)
+		}
+		if evidence.Kind != "search_request" || strings.TrimSpace(evidence.Query) == "" || evidence.ResultCount < 0 || evidence.SearchCount < 1 {
+			return fmt.Errorf("search request evidence requires query, positive request count, and nonnegative result count")
+		}
+		if evidence.RequestIDSource != "provider" && evidence.RequestIDSource != "search_attempt" {
+			return fmt.Errorf("search request evidence requires a provider or search-attempt request ID source")
+		}
+		if evidence.Outcome != "" && evidence.Outcome != "completed" && evidence.Outcome != "provider_error" {
+			return fmt.Errorf("search request evidence has unsupported outcome %q", evidence.Outcome)
+		}
+		if evidence.OperationFingerprint != "" {
+			if len(evidence.OperationFingerprint) != 64 {
+				return fmt.Errorf("search request operation fingerprint must be a SHA-256 digest")
+			}
+			if _, err := hex.DecodeString(evidence.OperationFingerprint); err != nil {
+				return fmt.Errorf("search request operation fingerprint must be hexadecimal")
+			}
+		}
 	case "invoice_adjustment":
 		if event.EventKind != BillingProviderCostEventKindAdjustment {
 			return fmt.Errorf("invoice adjustment evidence requires an adjustment provider cost event")

@@ -421,6 +421,41 @@ func TestProviderCostRecordOutputPixelsUsesRequestIdentityWithoutExecutionStatus
 	}
 }
 
+func TestProviderCostRecordSearchRequestIsUnreconciledAndIdempotent(t *testing.T) {
+	fixture := newProviderCostFixture(t)
+	req := RecordSearchRequestCost{
+		TaskID: "task-search", Provider: "volcengine_ark", Model: "doubao-seed-2-1-pro-260628",
+		ProviderRequestID: "search-request-1", Query: "anban search", ResultCount: 2,
+		Usage:            map[string]any{"tool_usage": map[string]any{"web_search_requests": 1}},
+		ProviderMetadata: map[string]any{"max_results": 2},
+	}
+	first, err := fixture.service.RecordSearchRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RecordSearchRequest: %v", err)
+	}
+	if first.Status != model.BillingProviderCostStatusUnreconciled || first.CostMicroCNY != 0 || first.ProviderRequestID != req.ProviderRequestID {
+		t.Fatalf("search cost event = %#v", first)
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal(first.UsageEvidence, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence["kind"] != "search_request" || evidence["query"] != req.Query || evidence["result_count"] != float64(2) || evidence["search_request_count"] != float64(1) {
+		t.Fatalf("search evidence = %#v", evidence)
+	}
+	if evidence["provider_metadata"].(map[string]any)["max_results"] != float64(2) {
+		t.Fatalf("search provider metadata = %#v", evidence["provider_metadata"])
+	}
+	replayed, err := fixture.service.RecordSearchRequest(context.Background(), req)
+	if err != nil || replayed.ID != first.ID {
+		t.Fatalf("search replay = %#v, %v", replayed, err)
+	}
+	req.ResultCount = 3
+	if _, err := fixture.service.RecordSearchRequest(context.Background(), req); !errors.Is(err, repository.ErrProviderCostConflict) {
+		t.Fatalf("search drift error = %v, want conflict", err)
+	}
+}
+
 func TestProviderCostRecordTokenUsageIsIdempotentAndRejectsDrift(t *testing.T) {
 	fixture := newProviderCostFixture(t)
 	req := RecordTokenCostRequest{

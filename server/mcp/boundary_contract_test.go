@@ -57,6 +57,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"createDraftHandler":                      "svcs.WechatPublicationSvc.CreateDraftInteractive",
 	"renderTemplateHandler":                   "svcs.ContentRenderSvc.RenderTemplate",
 	"scoreArticleHandler":                     "svcs.ArticleScoreSvc.Score",
+	"searchWebHandler":                        "svcs.SearchSvc.Search",
 	"searchSeednoteFeedsHandler":              "svcs.SeednoteCapabilitySvc.SearchFeeds",
 	"submitProfileResultHandler":              "svcs.ProjectSvc.ApplyAgentProfileResult",
 	"taskCancelHandler":                       "svcs.TaskSvc.CancelForUser",

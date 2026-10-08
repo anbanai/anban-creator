@@ -398,6 +398,7 @@ var executionToolScopes = map[string]executionToolScope{
 	"search_seednote_feeds":     {},
 	"get_seednote_feed_detail":  {},
 	"get_seednote_user_profile": {},
+	"search_web":                {},
 }
 
 func validateExecutionToolScope(toolName string, arguments map[string]any, projectID, taskID, executionID string) error {

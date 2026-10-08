@@ -55,6 +55,8 @@ func (s ImageCapabilitySnapshot) ComputedDigest() (string, error) {
 
 const TaskLifecycleVersion = 1
 
+const ContentOriginHotSearch = "hot_search"
+
 const (
 	TaskLifecycleSourceAgent  = "agent"
 	TaskLifecycleSourceServer = "server"
@@ -191,6 +193,7 @@ type Task struct {
 	Status                  string                                      `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
 	Prompt                  string                                      `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
 	Title                   string                                      `gorm:"type:varchar(200)" json:"title,omitempty"`
+	ContentOrigin           string                                      `gorm:"type:varchar(40);not null;default:'';index" json:"-"`
 	ImageRatio              string                                      `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageCapabilityKey      string                                      `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
 	ImageCapabilitySnapshot datatypes.JSONType[ImageCapabilitySnapshot] `gorm:"type:json" json:"-"`

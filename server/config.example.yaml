@@ -22,6 +22,19 @@ trends:
   ttl: 10m
   timeout: 8s
 
+search:
+  enabled: ${ANBAN_SEARCH_ENABLED:-false}
+  provider: "${ANBAN_SEARCH_PROVIDER:-doubao}"
+  fallback:
+    enabled: false
+  doubao:
+    base_url: "${ANBAN_DOUBAO_SEARCH_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}"
+    api_key: "${ANBAN_DOUBAO_SEARCH_API_KEY:-}"
+    model: "${ANBAN_DOUBAO_SEARCH_MODEL:-doubao-seed-2-1-pro-260628}"
+    timeout: 30s
+    max_results: 10
+    max_keyword: 2
+
 jwt:
   secret_key: "${ANBAN_JWT_SECRET_KEY}"
   access_expiry: "24h"

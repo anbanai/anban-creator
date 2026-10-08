@@ -61,6 +61,7 @@ type Services struct {
 	TaskImageSvc           TaskImageGenerator
 	TaskImageOperationsSvc TaskImageOperations
 	TaskVideoOperationsSvc TaskVideoAnalyzer
+	SearchSvc              *service.SearchService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -77,6 +78,7 @@ func RegisterTools(server *mcp.Server) {
 	registerSeednoteTools(server)
 	registerTopicPoolTools(server)
 	registerTrendTools(server)
+	registerSearchTools(server)
 	registerProgressTools(server)
 	registerAgentFeedbackTools(server)
 	registerProfileTools(server)
