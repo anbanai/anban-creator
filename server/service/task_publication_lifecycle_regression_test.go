@@ -199,21 +199,28 @@ func picturePublicationPackageWithImages(t *testing.T, imagePaths []string) []by
 	return body
 }
 
-func TestFinalizePicturePublicationRequiresExactRequestedImageCount(t *testing.T) {
+func TestFinalizePicturePublicationRespectsRequestedImageCountMode(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		requested  int
+		input      map[string]any
 		imagePaths []string
+		wantStatus string
+		wantCode   string
 	}{
-		{name: "insufficient", requested: 2, imagePaths: []string{}},
-		{name: "exceeded", requested: 1, imagePaths: []string{"output/image_01.png"}},
+		{name: "legacy task stays exact", input: map[string]any{"picture_image_count": 2}, imagePaths: []string{}, wantStatus: model.TaskExecutionDraftDeliveryBlocked, wantCode: "image_count_mismatch"},
+		{name: "fixed count rejects fewer images", input: map[string]any{"picture_image_count": 2, "picture_image_count_mode": "exact"}, imagePaths: []string{}, wantStatus: model.TaskExecutionDraftDeliveryBlocked, wantCode: "image_count_mismatch"},
+		{name: "smart count accepts fewer images", input: map[string]any{"picture_image_count": 5, "picture_image_count_mode": "up_to"}, imagePaths: []string{}, wantStatus: model.TaskExecutionDraftDeliveryBlocked, wantCode: "publication_service_unavailable"},
+		{name: "smart count rejects more images", input: map[string]any{"picture_image_count": 1, "picture_image_count_mode": "up_to"}, imagePaths: []string{"output/image_01.png"}, wantStatus: model.TaskExecutionDraftDeliveryBlocked, wantCode: "image_count_mismatch"},
+		{name: "missing input accepts five total images", input: map[string]any{}, imagePaths: []string{"output/image_01.png", "output/image_02.png", "output/image_03.png", "output/image_04.png"}, wantStatus: model.TaskExecutionDraftDeliveryBlocked, wantCode: "publication_service_unavailable"},
+		{name: "missing input rejects more than five total images", input: map[string]any{}, imagePaths: []string{"output/image_01.png", "output/image_02.png", "output/image_03.png", "output/image_04.png", "output/image_05.png"}, wantStatus: model.TaskExecutionDraftDeliveryBlocked, wantCode: "image_count_mismatch"},
+		{name: "unknown mode is invalid", input: map[string]any{"picture_image_count": 5, "picture_image_count_mode": "flexible"}, imagePaths: []string{}, wantStatus: model.TaskExecutionDraftDeliveryFailed, wantCode: "image_count_invalid"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			svc, repo, task, execution := setupCloudCompletionTest(t, false)
 			task.Type = model.TaskTypeWechatPicture
 			task.Channel = model.ChannelWechatPicture
-			task.SetAgentInput(map[string]any{"picture_image_count": tc.requested})
+			task.SetAgentInput(tc.input)
 			addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", picturePublicationPackageWithImages(t, tc.imagePaths))
 
 			status, evidence, err := svc.finalizePicturePublication(ctx, task, execution)
@@ -224,7 +231,7 @@ func TestFinalizePicturePublicationRequiresExactRequestedImageCount(t *testing.T
 			if err := json.Unmarshal(evidence, &result); err != nil {
 				t.Fatal(err)
 			}
-			if status != model.TaskExecutionDraftDeliveryBlocked || result.Code != "image_count_mismatch" || result.Attempted {
+			if status != tc.wantStatus || result.Code != tc.wantCode || result.Attempted {
 				t.Fatalf("status=%q evidence=%s", status, evidence)
 			}
 		})

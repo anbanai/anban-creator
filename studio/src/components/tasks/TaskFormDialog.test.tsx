@@ -1280,4 +1280,25 @@ describe('task creation type selection', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'wechat-picture', agent_id: 'wechat-picture', prompt: '新品介绍' })))
   })
+
+  it('defaults WeChat picture creation to five smart images and supports a fixed count', async () => {
+    useAgentPacksMock.mockReturnValue({ data: mockAgentPackCatalog })
+    const catalog = await api.billing.catalog()
+    vi.mocked(api.billing.catalog).mockResolvedValue({ ...catalog, skus: [...catalog.skus, { id: 'task.wechat_picture.effective', operation: 'task.wechat_picture', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'picture_artifacts_verified' }] })
+    renderDialog({ initialType: 'wechat-picture' })
+    const dialog = await screen.findByRole('dialog', { name: '新建任务' })
+    const mode = await within(dialog).findByRole('group', { name: '图片数量模式' })
+
+    expect(within(mode).getByRole('button', { name: '智能张数' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(dialog).getByRole('spinbutton', { name: '图片数量上限（含封面）' })).toHaveValue(5)
+    fireEvent.click(within(mode).getByRole('button', { name: '固定张数' }))
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Agent prompt' }), { target: { value: '新品介绍' } })
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: '创建' })).toBeEnabled())
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'wechat-picture',
+      agent_input: { picture_image_count: 5, picture_image_count_mode: 'exact', picture_publish_draft: true },
+    })))
+  })
 })

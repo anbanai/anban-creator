@@ -53,6 +53,14 @@ const picturePack: AgentPack = {
   ],
 };
 
+const adaptivePicturePack: AgentPack = {
+  ...picturePack,
+  artifacts: [
+    { role: "cover", path: "output/cover.png", required: true },
+    { role: "image", path: "output/image_*.png", required: false },
+  ],
+};
+
 async function workspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "anban-progress-artifacts-"));
   roots.push(root);
@@ -180,5 +188,12 @@ describe("artifact validation", () => {
       reason: "missing_artifacts",
       missing: ["output/image_*.png"],
     });
+  });
+
+  test("allows an adaptive picture package to contain only its cover", async () => {
+    const root = await workspace();
+    await writeFile(join(root, "output", "cover.png"), "cover image");
+
+    expect(await validateFinalArtifacts(adaptivePicturePack, root)).toEqual({ ok: true });
   });
 });

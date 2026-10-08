@@ -69,6 +69,53 @@ describe('task form mapping', () => {
     expect(taskFormValuesToRequest(defaults).agent_input).toEqual({})
   })
 
+  it('defaults WeChat picture tasks to a five-image smart maximum', () => {
+    const values = {
+      ...createTaskFormDefaults(project({ platform: 'wechat' })),
+      type: 'wechat-picture' as const,
+      execution_profile: 'balanced' as const,
+    }
+
+    expect(taskFormValuesToRequest(values).agent_input).toEqual({
+      picture_image_count: 5,
+      picture_image_count_mode: 'up_to',
+      picture_publish_draft: true,
+    })
+  })
+
+  it('preserves an explicitly selected exact WeChat picture count', () => {
+    const values = {
+      ...createTaskFormDefaults(project({ platform: 'wechat' })),
+      type: 'wechat-picture' as const,
+      execution_profile: 'balanced' as const,
+      agent_input: { picture_image_count: 8, picture_image_count_mode: 'exact' },
+    }
+
+    expect(taskFormValuesToRequest(values).agent_input).toEqual({
+      picture_image_count: 8,
+      picture_image_count_mode: 'exact',
+      picture_publish_draft: true,
+    })
+  })
+
+  it('keeps legacy WeChat picture clones on exact-count behavior', () => {
+    const defaults = cloneTaskFormDefaults(task({ type: 'wechat-picture', agent_input: { picture_image_count: 6 } }))
+
+    expect(defaults.agent_input).toMatchObject({ picture_image_count: 6, picture_image_count_mode: 'exact' })
+    expect(taskFormValuesToRequest(defaults).agent_input).toMatchObject({ picture_image_count: 6, picture_image_count_mode: 'exact' })
+  })
+
+  it('normalizes unsupported WeChat picture count modes to the visible smart mode', () => {
+    const values = {
+      ...createTaskFormDefaults(project({ platform: 'wechat' })),
+      type: 'wechat-picture' as const,
+      execution_profile: 'balanced' as const,
+      agent_input: { picture_image_count: 5, picture_image_count_mode: 'flexible' },
+    }
+
+    expect(taskFormValuesToRequest(values).agent_input).toMatchObject({ picture_image_count_mode: 'up_to' })
+  })
+
   it('keeps viral_analysis when selecting a seednote project', () => {
     const seednoteProject = project({ id: 'seednote-project', platform: 'seednote' })
     const current = {

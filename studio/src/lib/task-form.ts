@@ -138,6 +138,10 @@ function taskReferenceSelection(task: Task): ReferenceImageSelection | null {
 
 export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
   const ecommerce = task.ecommerce
+  const agentInput = cloneValue(task.agent_input ?? {})
+  if (task.type === 'wechat-picture' && agentInput.picture_image_count != null && agentInput.picture_image_count_mode == null) {
+    agentInput.picture_image_count_mode = 'exact'
+  }
   const directReference = task.reference_image
   const articleUsesPortrait = task.type === 'wechat-article'
     && task.article_with_cover !== false
@@ -166,7 +170,7 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     skip_reference_image: task.skip_reference_image ?? false,
     reference_image: task.type === 'wechat-article' && !articleUsesPortrait ? null : taskReferenceSelection(task),
     input_attachments: clonedAttachments,
-    agent_input: cloneValue(task.agent_input ?? {}),
+    agent_input: agentInput,
     watermark: task.watermark ?? false,
     has_content_image: task.has_content_image ?? true,
     has_tail_image: task.has_tail_image ?? false,
@@ -231,7 +235,7 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
         }
       : {}),
     ...(values.type === 'wechat-picture'
-      ? { agent_input: { ...cloneValue(values.agent_input), picture_image_count: Number((values.agent_input as Record<string, unknown>)?.picture_image_count ?? 6), picture_publish_draft: (values.agent_input as Record<string, unknown>)?.picture_publish_draft !== false } }
+      ? { agent_input: { ...cloneValue(values.agent_input), picture_image_count: Number((values.agent_input as Record<string, unknown>)?.picture_image_count ?? 5), picture_image_count_mode: (values.agent_input as Record<string, unknown>)?.picture_image_count_mode === 'exact' ? 'exact' : 'up_to', picture_publish_draft: (values.agent_input as Record<string, unknown>)?.picture_publish_draft !== false } }
       : {}),
     ...(values.type === 'ecommerce'
       ? {

@@ -25,6 +25,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Textarea } from '@/components/ui/textarea'
 import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
@@ -191,7 +192,8 @@ export function TaskFormDialog({
   const coverUsePortrait = useWatch({ control: form.control, name: 'cover_use_portrait' }) ?? false
   const watchedSelectedModules = useWatch({ control: form.control, name: 'selected_modules' })
   const watchedAgentInput = useWatch({ control: form.control, name: 'agent_input' }) ?? {}
-  const pictureImageCount = Number((watchedAgentInput as Record<string, unknown>).picture_image_count ?? 6)
+  const pictureImageCount = Number((watchedAgentInput as Record<string, unknown>).picture_image_count ?? 5)
+  const pictureImageCountMode = (watchedAgentInput as Record<string, unknown>).picture_image_count_mode === 'exact' ? 'exact' : 'up_to'
   const picturePublishDraft = (watchedAgentInput as Record<string, unknown>).picture_publish_draft !== false
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage' || watchedType === 'hypit'
@@ -734,14 +736,38 @@ export function TaskFormDialog({
                         <p className="mt-0.5 text-xs text-muted-foreground">首图作为封面，默认使用竖版移动阅读比例。</p>
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <label className="text-sm">图片数量
+                    <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)]">
+                      <div className="space-y-1.5">
+                        <p className="text-sm">数量模式</p>
+                        <ToggleGroup
+                          aria-label="图片数量模式"
+                          value={[pictureImageCountMode]}
+                          onValueChange={(values) => {
+                            const next = values[0]
+                            if (next === 'up_to' || next === 'exact') {
+                              setFormValue('agent_input', { ...watchedAgentInput, picture_image_count_mode: next })
+                            }
+                          }}
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                        >
+                          <ToggleGroupItem value="up_to" className="min-w-0 flex-1">智能张数</ToggleGroupItem>
+                          <ToggleGroupItem value="exact" className="min-w-0 flex-1">固定张数</ToggleGroupItem>
+                        </ToggleGroup>
+                      </div>
+                      <label className="text-sm">{pictureImageCountMode === 'up_to' ? '图片数量上限（含封面）' : '图片总数（含封面）'}
                         <Input className="mt-1" type="number" min={1} max={20} value={pictureImageCount} onChange={(event) => setFormValue('agent_input', { ...watchedAgentInput, picture_image_count: Math.max(1, Math.min(20, Number(event.target.value) || 1)) })} />
                       </label>
                       <label className="flex items-center justify-between gap-3 text-sm">创建公众号草稿
                         <Switch checked={picturePublishDraft} onCheckedChange={(checked) => setFormValue('agent_input', { ...watchedAgentInput, picture_publish_draft: checked })} />
                       </label>
                     </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {pictureImageCountMode === 'up_to'
+                        ? `默认最多 ${pictureImageCount} 张（含封面）；按独立信息点取舍，不足时少生成，不为凑数重复内容。`
+                        : '固定张数仍逐页审核；若内容无法支撑所选数量而不重复，交付会被阻断。'}
+                    </p>
                   </div>
                 ) : null}
 

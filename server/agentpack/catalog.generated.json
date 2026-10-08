@@ -1256,7 +1256,7 @@
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -1339,7 +1339,7 @@
           "role": "image",
           "path": "output/image_*.png",
           "mime_type": "image/png",
-          "required": true
+          "required": false
         },
         {
           "role": "publish_package",
@@ -1385,7 +1385,7 @@
       "ui": {
         "renderer": "custom:wechat-picture"
       },
-      "digest": "14a8d1726f534d9a7d43485985a490e1a4c64af5580ef7e0131e15759af08f9f"
+      "digest": "8d51d94eb183f1c24a2fb90b761e890f2f4777f170960efb2b3552f8a9401d90"
     },
     {
       "id": "whiteboard-animation",

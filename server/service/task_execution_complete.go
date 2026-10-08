@@ -1016,16 +1016,29 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 		seenPaths[path] = struct{}{}
 		paths = append(paths, path)
 	}
-	if input := task.AgentInput.Data(); input != nil {
-		if raw, ok := input["picture_image_count"]; ok {
-			requested, valid := pictureImageCount(raw)
-			if !valid {
+	input := task.AgentInput.Data()
+	requested, mode := 5, "up_to"
+	rawCount, hasCount := input["picture_image_count"]
+	rawMode, hasMode := input["picture_image_count_mode"]
+	if hasMode && !hasCount {
+		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_invalid", false, "retry_visuals"), nil
+	}
+	if hasCount {
+		var valid bool
+		requested, valid = pictureImageCount(rawCount)
+		if !valid {
+			return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_invalid", false, "retry_visuals"), nil
+		}
+		mode = "exact"
+		if hasMode {
+			mode, valid = rawMode.(string)
+			if !valid || (mode != "exact" && mode != "up_to") {
 				return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_invalid", false, "retry_visuals"), nil
 			}
-			if len(paths) != requested {
-				return block("image_count_mismatch", "retry_visuals")
-			}
 		}
+	}
+	if (mode == "exact" && len(paths) != requested) || (mode == "up_to" && len(paths) > requested) {
+		return block("image_count_mismatch", "retry_visuals")
 	}
 	if len(paths) < 1 || len(paths) > 20 {
 		return model.TaskExecutionDraftDeliveryFailed, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryFailed, "image_count_invalid", false, "retry_visuals"), nil
