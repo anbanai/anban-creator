@@ -209,3 +209,10 @@ skus:
     price_credits: 500
     route: "image_generation.capabilities.professional"
     delivery: "persisted_image"
+
+  - id: "mcp.search_web"
+    operation: "mcp.search_web"
+    charge_policy: "standalone_operation"
+    price_credits: 0
+    route: "search.web"
+    delivery: "search_results"

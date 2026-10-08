@@ -53,6 +53,7 @@ type Repository interface {
 	IlinkBindings() IlinkBindingRepository
 	IlinkNotifications() IlinkNotificationRepository
 	Billing() BillingRepository
+	SearchOperations() SearchOperationRepository
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Close() error
 }
@@ -503,6 +504,13 @@ type ContentMetadataRepository interface {
 	UpsertVocabulary(ctx context.Context, vocabulary *model.ContentTagVocabulary) error
 }
 
+type SearchOperationRepository interface {
+	FindByFingerprint(ctx context.Context, fingerprint string) (*model.SearchOperation, error)
+	Claim(ctx context.Context, candidate *model.SearchOperation, now time.Time, lease time.Duration) (*model.SearchOperation, bool, error)
+	MarkSucceeded(ctx context.Context, id, attemptID, providerRequestID string, response []byte, now time.Time) error
+	MarkFailed(ctx context.Context, id, attemptID, errorCode string, now time.Time) error
+}
+
 // -----------------------------------------------------------------------------
 // Implementation
 // -----------------------------------------------------------------------------
@@ -550,6 +558,7 @@ type repository struct {
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
 	billing                 BillingRepository
+	searchOperations        SearchOperationRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -592,6 +601,7 @@ func New(db *gorm.DB) Repository {
 	ilinkBindings := newIlinkBindingRepository(db)
 	ilinkNotifications := newIlinkNotificationRepository(db)
 	billing := newBillingRepository(db)
+	searchOperations := newSearchOperationRepository(db)
 
 	return &repository{
 		db:                      db,
@@ -636,6 +646,7 @@ func New(db *gorm.DB) Repository {
 		ilinkBindings:           ilinkBindings,
 		ilinkNotifications:      ilinkNotifications,
 		billing:                 billing,
+		searchOperations:        searchOperations,
 	}
 }
 
@@ -701,7 +712,8 @@ func (r *repository) IlinkBindings() IlinkBindingRepository {
 func (r *repository) IlinkNotifications() IlinkNotificationRepository {
 	return r.ilinkNotifications
 }
-func (r *repository) Billing() BillingRepository { return r.billing }
+func (r *repository) Billing() BillingRepository                  { return r.billing }
+func (r *repository) SearchOperations() SearchOperationRepository { return r.searchOperations }
 
 // WithTx executes fn inside a database transaction. If fn returns an error the
 // transaction is rolled back; otherwise it is committed. The txRepo passed to fn
@@ -769,6 +781,7 @@ type txRepository struct {
 	ilinkBindings           IlinkBindingRepository
 	ilinkNotifications      IlinkNotificationRepository
 	billing                 BillingRepository
+	searchOperations        SearchOperationRepository
 }
 
 func newTxRepository(tx *gorm.DB) *txRepository {
@@ -815,6 +828,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		ilinkBindings:           newIlinkBindingRepository(tx),
 		ilinkNotifications:      newIlinkNotificationRepository(tx),
 		billing:                 newTxBillingRepository(tx),
+		searchOperations:        newSearchOperationRepository(tx),
 	}
 }
 
@@ -882,7 +896,8 @@ func (r *txRepository) IlinkBindings() IlinkBindingRepository {
 func (r *txRepository) IlinkNotifications() IlinkNotificationRepository {
 	return r.ilinkNotifications
 }
-func (r *txRepository) Billing() BillingRepository { return r.billing }
+func (r *txRepository) Billing() BillingRepository                  { return r.billing }
+func (r *txRepository) SearchOperations() SearchOperationRepository { return r.searchOperations }
 
 func (r *txRepository) WithTx(ctx context.Context, fn func(Repository) error) error {
 	// Already in a transaction -- use a savepoint.

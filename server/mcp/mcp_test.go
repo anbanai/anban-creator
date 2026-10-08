@@ -325,8 +325,12 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid scope did not reach MCP dispatch: %d: %s", rec.Code, rec.Body.String())
 	}
-	if authorizer.calls != 3 {
-		t.Fatalf("current-execution authorizer calls = %d, want 3", authorizer.calls)
+	search := callMCPToolForScopeTest(handler, token, sessionID, "search_web", `{"query":"anban"}`)
+	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), "provider_unavailable") {
+		t.Fatalf("search_web scope did not reach MCP dispatch: %d: %s", search.Code, search.Body.String())
+	}
+	if authorizer.calls != 4 {
+		t.Fatalf("current-execution authorizer calls = %d, want 4", authorizer.calls)
 	}
 }
 
@@ -520,7 +524,7 @@ func TestMCPHandlerToolsList(t *testing.T) {
 			}
 		}
 	}
-	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "create_draft", "analyze_video"} {
+	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "create_draft", "analyze_video", "search_web"} {
 		if !toolNames[expected] {
 			t.Errorf("expected tool %q not found in tools/list response", expected)
 		}

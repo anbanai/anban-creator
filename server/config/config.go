@@ -48,11 +48,34 @@ type Config struct {
 	Worldtree          WorldtreeConfig                 `yaml:"worldtree"`
 	Ilink              IlinkConfig                     `yaml:"ilink"`
 	Trends             TrendsConfig                    `yaml:"trends"`
+	Search             SearchConfig                    `yaml:"search"`
 }
 
 type TrendsConfig struct {
 	TTL     time.Duration `yaml:"ttl"`
 	Timeout time.Duration `yaml:"timeout"`
+}
+
+// SearchConfig controls Server-owned web search providers. Credentials are
+// intentionally kept in server configuration and are never exposed to Agents.
+type SearchConfig struct {
+	Enabled  bool                 `yaml:"enabled"`
+	Provider string               `yaml:"provider"`
+	Doubao   SearchDoubaoConfig   `yaml:"doubao"`
+	Fallback SearchFallbackConfig `yaml:"fallback"`
+}
+
+type SearchFallbackConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+type SearchDoubaoConfig struct {
+	BaseURL    string        `yaml:"base_url"`
+	APIKey     string        `yaml:"api_key"`
+	Model      string        `yaml:"model"`
+	Timeout    time.Duration `yaml:"timeout"`
+	MaxResults int           `yaml:"max_results"`
+	MaxKeyword int           `yaml:"max_keyword"`
 }
 
 func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceConfig) []string {
@@ -931,6 +954,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"worldtree":       true,
 		"ilink":           true,
 		"trends":          true,
+		"search":          true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -993,6 +1017,15 @@ func expandEnvVars(data []byte) []byte {
 
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
+	if c.Search.Doubao.Timeout == 0 {
+		c.Search.Doubao.Timeout = 30 * time.Second
+	}
+	if c.Search.Doubao.MaxResults == 0 {
+		c.Search.Doubao.MaxResults = 10
+	}
+	if c.Search.Doubao.MaxKeyword == 0 {
+		c.Search.Doubao.MaxKeyword = 2
+	}
 	if c.Claude.RuntimeImages == nil {
 		c.Claude.RuntimeImages = RuntimeImages{}
 	}
@@ -1549,6 +1582,37 @@ func (c *Config) Validate() error {
 	}
 	if c.Trends.Timeout <= 0 {
 		errs = append(errs, "trends.timeout must be positive")
+	}
+	if c.Search.Fallback.Enabled {
+		errs = append(errs, "search.fallback.enabled is not supported; automatic provider fallback is disabled")
+	}
+	if c.Search.Enabled {
+		if strings.TrimSpace(c.Search.Provider) == "" {
+			errs = append(errs, "search.provider is required when search.enabled is true")
+		}
+		switch strings.TrimSpace(c.Search.Provider) {
+		case "doubao":
+			if strings.TrimSpace(c.Search.Doubao.BaseURL) == "" {
+				errs = append(errs, "search.doubao.base_url is required when search is enabled")
+			}
+			if strings.TrimSpace(c.Search.Doubao.APIKey) == "" {
+				errs = append(errs, "search.doubao.api_key is required when search is enabled")
+			}
+			if strings.TrimSpace(c.Search.Doubao.Model) == "" {
+				errs = append(errs, "search.doubao.model is required when search is enabled")
+			}
+			if c.Search.Doubao.Timeout <= 0 {
+				errs = append(errs, "search.doubao.timeout must be positive when search is enabled")
+			}
+			if c.Search.Doubao.MaxResults <= 0 {
+				errs = append(errs, "search.doubao.max_results must be positive when search is enabled")
+			}
+			if c.Search.Doubao.MaxKeyword <= 0 {
+				errs = append(errs, "search.doubao.max_keyword must be positive when search is enabled")
+			}
+		default:
+			errs = append(errs, fmt.Sprintf("search.provider %q is unsupported", c.Search.Provider))
+		}
 	}
 	if err := c.Claude.Validate(); err != nil {
 		errs = append(errs, err.Error())
