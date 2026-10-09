@@ -20,7 +20,7 @@ func registerSearchTools(server *mcp.Server) {
 				"query":           map[string]any{"type": "string", "minLength": 1, "maxLength": 100},
 				"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
 				"time_range":      map[string]any{"type": "string"},
-				"domains":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20},
+				"sites":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20},
 				"block_hosts":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 5},
 				"need_content":    map[string]any{"type": "boolean"},
 				"need_url":        map[string]any{"type": "boolean"},
@@ -53,7 +53,9 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	if _, providerOverride := args["provider"]; providerOverride {
 		return errorResult(`{"code":"provider_selection_forbidden","message":"search provider is controlled by Server configuration"}`), nil
 	}
-	limit := 10
+	// A zero limit means "use the Server-configured provider default". Keeping
+	// that decision inside SearchService preserves the MCP one-capability boundary.
+	limit := 0
 	if rawLimit, present := args["limit"]; present {
 		value, ok := rawLimit.(float64)
 		if !ok || value != float64(int(value)) || value < 1 || value > 50 {
@@ -73,13 +75,13 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	if err != nil {
 		return errorResult(`{"code":"invalid_request","message":"query_rewrite must be boolean"}`), nil
 	}
-	authInfoLevel, err := optionalIntArg(args, "auth_info_level")
+	authInfoLevel, authInfoLevelSet, err := optionalIntArg(args, "auth_info_level")
 	if err != nil || (authInfoLevel != 0 && authInfoLevel != 1) {
 		return errorResult(`{"code":"invalid_request","message":"auth_info_level must be 0 or 1"}`), nil
 	}
-	domains, err := parseSearchStringArray(args, "domains")
+	domains, err := parseSearchStringArray(args, "sites")
 	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"domains must be a string array of non-empty strings"}`), nil
+		return errorResult(`{"code":"invalid_request","message":"sites must be a string array of non-empty strings"}`), nil
 	}
 	blockHosts, err := parseSearchStringArray(args, "block_hosts")
 	if err != nil {
@@ -88,7 +90,7 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	if svcs == nil || svcs.SearchSvc == nil {
 		return errorResult(`{"code":"provider_unavailable","message":"search provider is not configured"}`), nil
 	}
-	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, TimeRange: stringArg(args, "time_range"), Domains: domains, BlockHosts: blockHosts, NeedContent: needContent, NeedURL: needURL, AuthInfoLevel: authInfoLevel, ContentFormats: stringArg(args, "content_formats"), Industry: stringArg(args, "industry"), QueryRewrite: queryRewrite}})
+	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, TimeRange: stringArg(args, "time_range"), Domains: domains, BlockHosts: blockHosts, NeedContent: needContent, NeedURL: needURL, AuthInfoLevel: authInfoLevel, AuthInfoLevelSet: authInfoLevelSet, ContentFormats: stringArg(args, "content_formats"), Industry: stringArg(args, "industry"), QueryRewrite: queryRewrite}})
 	if err != nil {
 		code := "search_failed"
 		if errors.Is(err, service.ErrSearchProviderUnavailable) {
@@ -138,16 +140,16 @@ func optionalBoolArg(args map[string]any, key string) (*bool, error) {
 	return &value, nil
 }
 
-func optionalIntArg(args map[string]any, key string) (int, error) {
+func optionalIntArg(args map[string]any, key string) (int, bool, error) {
 	raw, ok := args[key]
 	if !ok {
-		return 0, nil
+		return 0, false, nil
 	}
 	value, ok := raw.(float64)
 	if !ok || value != float64(int(value)) {
-		return 0, errors.New("integer argument required")
+		return 0, true, errors.New("integer argument required")
 	}
-	return int(value), nil
+	return int(value), true, nil
 }
 
 func searchErrorJSON(code, message string) string {

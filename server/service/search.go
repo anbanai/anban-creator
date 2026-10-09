@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,17 +28,18 @@ var ErrSearchOperationInProgress = errors.New("search operation is already in pr
 func IsSearchProviderUnavailable(err error) bool { return errors.Is(err, ErrSearchProviderUnavailable) }
 
 type SearchRequest struct {
-	Query          string
-	Limit          int
-	TimeRange      string
-	Domains        []string
-	BlockHosts     []string
-	NeedContent    *bool
-	NeedURL        *bool
-	AuthInfoLevel  int
-	ContentFormats string
-	Industry       string
-	QueryRewrite   *bool
+	Query            string
+	Limit            int
+	TimeRange        string
+	Domains          []string
+	BlockHosts       []string
+	NeedContent      *bool
+	NeedURL          *bool
+	AuthInfoLevel    int
+	AuthInfoLevelSet bool
+	ContentFormats   string
+	Industry         string
+	QueryRewrite     *bool
 }
 
 type SearchResultItem struct {
@@ -119,7 +121,7 @@ func (p *DoubaoSearchProvider) ValidateRequest(req SearchRequest) error {
 		return fmt.Errorf("limit must be between 1 and %d", p.maxWebResults)
 	}
 	if p.edition == "global" {
-		if req.TimeRange != "" || len(req.Domains) > 0 || len(req.BlockHosts) > 0 || req.NeedContent != nil || req.NeedURL != nil || req.AuthInfoLevel != 0 || req.ContentFormats != "" || req.Industry != "" || req.QueryRewrite != nil {
+		if req.TimeRange != "" || len(req.Domains) > 0 || len(req.BlockHosts) > 0 || req.NeedContent != nil || req.NeedURL != nil || req.AuthInfoLevelSet || req.AuthInfoLevel != 0 || req.ContentFormats != "" || req.Industry != "" || req.QueryRewrite != nil {
 			return errors.New("the selected Global search edition does not support Custom filters")
 		}
 	}
@@ -188,7 +190,7 @@ func (p *DoubaoSearchProvider) Search(ctx context.Context, req SearchRequest) (*
 		if len(req.BlockHosts) > 0 {
 			filter["BlockHosts"] = strings.Join(normalizeStrings(req.BlockHosts), "|")
 		}
-		if req.AuthInfoLevel != 0 {
+		if req.AuthInfoLevelSet || req.AuthInfoLevel != 0 {
 			filter["AuthInfoLevel"] = req.AuthInfoLevel
 		}
 		if req.TimeRange != "" {
@@ -562,7 +564,7 @@ func searchProviderCostFilters(req SearchRequest) map[string]any {
 	if req.NeedURL != nil {
 		filters["need_url"] = *req.NeedURL
 	}
-	if req.AuthInfoLevel != 0 {
+	if req.AuthInfoLevelSet || req.AuthInfoLevel != 0 {
 		filters["auth_info_level"] = req.AuthInfoLevel
 	}
 	if value := strings.TrimSpace(req.ContentFormats); value != "" {
@@ -578,38 +580,35 @@ func searchProviderCostFilters(req SearchRequest) map[string]any {
 }
 
 func searchFingerprint(req SearchOperationRequest) string {
-	domains := make([]string, 0, len(req.Request.Domains))
-	for _, domain := range req.Request.Domains {
-		if normalized := strings.TrimSpace(domain); normalized != "" {
-			domains = append(domains, normalized)
-		}
-	}
-	blockHosts := make([]string, 0, len(req.Request.BlockHosts))
-	for _, host := range req.Request.BlockHosts {
-		if normalized := strings.TrimSpace(host); normalized != "" {
-			blockHosts = append(blockHosts, normalized)
-		}
-	}
+	domains := normalizedFingerprintStrings(req.Request.Domains)
+	blockHosts := normalizedFingerprintStrings(req.Request.BlockHosts)
 	payload, _ := json.Marshal(struct {
-		Version       int      `json:"version"`
-		UserID        string   `json:"user_id"`
-		ProjectID     string   `json:"project_id"`
-		TaskID        string   `json:"task_id"`
-		ExecutionID   string   `json:"execution_id"`
-		Query         string   `json:"query"`
-		Limit         int      `json:"limit"`
-		TimeRange     string   `json:"time_range"`
-		Domains       []string `json:"domains"`
-		BlockHosts    []string `json:"block_hosts"`
-		NeedContent   *bool    `json:"need_content,omitempty"`
-		NeedURL       *bool    `json:"need_url,omitempty"`
-		AuthInfoLevel int      `json:"auth_info_level"`
-		ContentFormat string   `json:"content_formats"`
-		Industry      string   `json:"industry"`
-		QueryRewrite  *bool    `json:"query_rewrite,omitempty"`
-	}{1, strings.TrimSpace(req.UserID), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ExecutionID), strings.TrimSpace(req.Request.Query), req.Request.Limit, strings.TrimSpace(req.Request.TimeRange), domains, blockHosts, req.Request.NeedContent, req.Request.NeedURL, req.Request.AuthInfoLevel, strings.TrimSpace(req.Request.ContentFormats), strings.TrimSpace(req.Request.Industry), req.Request.QueryRewrite})
+		Version          int      `json:"version"`
+		UserID           string   `json:"user_id"`
+		ProjectID        string   `json:"project_id"`
+		TaskID           string   `json:"task_id"`
+		ExecutionID      string   `json:"execution_id"`
+		Query            string   `json:"query"`
+		Limit            int      `json:"limit"`
+		TimeRange        string   `json:"time_range"`
+		Domains          []string `json:"domains"`
+		BlockHosts       []string `json:"block_hosts"`
+		NeedContent      *bool    `json:"need_content,omitempty"`
+		NeedURL          *bool    `json:"need_url,omitempty"`
+		AuthInfoLevel    int      `json:"auth_info_level"`
+		AuthInfoLevelSet bool     `json:"auth_info_level_set"`
+		ContentFormat    string   `json:"content_formats"`
+		Industry         string   `json:"industry"`
+		QueryRewrite     *bool    `json:"query_rewrite,omitempty"`
+	}{1, strings.TrimSpace(req.UserID), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ExecutionID), strings.TrimSpace(req.Request.Query), req.Request.Limit, strings.TrimSpace(req.Request.TimeRange), domains, blockHosts, req.Request.NeedContent, req.Request.NeedURL, req.Request.AuthInfoLevel, req.Request.AuthInfoLevelSet, strings.TrimSpace(req.Request.ContentFormats), strings.TrimSpace(req.Request.Industry), req.Request.QueryRewrite})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
+}
+
+func normalizedFingerprintStrings(values []string) []string {
+	values = normalizeStrings(values)
+	sort.Strings(values)
+	return values
 }
 
 func (s *BillingCatalogService) CatalogID() string {
