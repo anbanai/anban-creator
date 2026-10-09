@@ -51,3 +51,28 @@ createRoot(document.getElementById('root')!).render(<PortraitOnboardingPreview /
 浏览器检查确认当前内置浏览器暴露该接口、按钮与提示正常显示；未替用户启动麦克风，真实语音识别成功仍待用户试说验证。自动化测试使用模拟识别事件，覆盖转写追加与修正、不自动发送、权限失败、前缀接口、不支持、卸载释放及停止超时。
 
 接口依据：[SpeechRecognition](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition)、[stop](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition/stop)。
+
+## 修复：内置浏览器识别服务连接失败
+
+用户实际试用返回 `network` 错误。接口存在并不代表浏览器供应商的识别服务可用，该错误不能单独证明用户电脑断网。
+
+本机预览改用浏览器 `MediaRecorder` 录音，然后交给本机已安装的 Whisper 离线转写。当前电脑已有程序和 `base.pt`，不安装额外依赖、不下载模型、不转发外部服务；一次仅处理一段，CPU 两线程，按请求启动 Python，完成后退出。UI 最多录制 55 秒，处理过程中释放麦克风、禁止发送，结果可修改后手动发送；失败保留原有文字，无静默远端回退。
+
+### 开发环境启动
+
+只对 Windows 本机预览启用，不接入正式 Server 和生产配置。在 `studio` 下设置 `ANBAN_PREVIEW_WHISPER_ROOT` 为现有 WhisperLocal 安装目录，然后运行：
+
+```powershell
+$env:ANBAN_PREVIEW_WHISPER_ROOT = Join-Path $env:LOCALAPPDATA 'WhisperLocal'
+bun run dev -- --config preview.voice.config.ts
+```
+
+`preview.voice.config.ts` 固定监听 `127.0.0.1:5174`；普通开发/生产构建不加载转写插件。页面探测本地能力后选择本机转写，未启用时仍保留浏览器识别能力；已进行中的浏览器录音不会因探测完成而失去停止入口。
+
+转写端点仅接受本机 peer、精确 Host、同源 Origin 和自定义请求头，拒绝跨站 POST/预检；只收有限大小音频（8 MiB），解码时限制时长（60 秒），进程超时 120 秒。请求专属临时目录位于忽略目录 `studio/tmp/voice-input`，结果返回后删除。不会记录音频/转写到业务数据库或修改任何画像。
+
+### 实测与边界
+
+已用之前的合成中文测试音频验证 Python 解码/模型转写，以及页面实际使用的 HTTP 端点。返回：“這是語音轉寫測試。我們正在研究微信和抖音的官方教程。”一次端点调用约 6 秒，临时目录随后为空；这是一次短音频测量，不保证所有音频同样耗时或同等准确，当前模型可能输出繁体字。
+
+浏览器已显示“本机离线转写”。未替用户录制现场声音；麦克风权限和真实说话仍需用户亲自试用。前端测试覆盖仅点击录音、停止后释放麦克风、取消权限请求、失败保留文字、卸载取消和迟到结果；本地服务测试覆盖同源与本机限制。正式上线需要另行设计受鉴权、限额、计费及存储政策管理的语音服务，不能把本机预览接口当成生产 API。

@@ -48,7 +48,18 @@ export default function PortraitOnboardingPreview() {
   const [creating, setCreating] = useState(false)
   const [resetPrompt, setResetPrompt] = useState(false)
   const [epoch, setEpoch] = useState(0)
+  const [localVoice, setLocalVoice] = useState(false)
   const nextRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (window.location.hostname !== '127.0.0.1' || window.location.port !== '5174') return
+    const controller = new AbortController()
+    void fetch('/__local-preview/dictation', { signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(result => { if (!controller.signal.aborted && result?.available === true) setLocalVoice(true) })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     if (messages.length === 1) return
@@ -109,7 +120,7 @@ export default function PortraitOnboardingPreview() {
       <p>给{corrected ? '没太多时间打理花的上班族' : '担心把花养不活的新手'}，写一篇像邻居聊天一样的小红书图文。先解答困惑，再给出能照着做的建议。</p>
       <p>这是创作交接示例。正式接入后，将带入已确认的画像与本篇要求，进入创作流程；本预览到此结束，没有创建任务、生成正文或发布内容。</p>
       <button className="portrait-primary" onClick={() => setCreating(false)}><ArrowLeft size={15} />回到对话，继续调整</button>
-    </section> : <PortraitConversation key={epoch} messages={messages} draft={draft}
+    </section> : <PortraitConversation key={epoch} messages={messages} draft={draft} localVoice={localVoice}
       name={step ? '小林 · 社区花店主' : undefined}
       creationIdea={step >= sampleTurns.length ? '第一篇：刚买回家的花，为什么没几天就蔫了？' : undefined}
       summary={step ? (corrected ? '陪忙碌的上班族，把一点花香带回家。' : step >= 2 ? '像邻居一样，陪你把第一盆花养好。' : '从社区花店出发，分享让新手安心的养花经验。') : undefined}
