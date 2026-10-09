@@ -22,7 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { agentDisplayName } from '@/components/agent-prompt/AgentIconStack'
-import { platformBgColor, platformIcon, platformIconColor } from '@/lib/PlatformIcon'
+import { platformIcon, platformIconColor } from '@/lib/PlatformIcon'
 import type { Project } from '@/types'
 
 function rememberKey(userId?: string) { return `content-analytics:account:${userId || 'anonymous'}` }
@@ -82,7 +82,7 @@ function AnalyticsAgentSwitcher({ agentIDs, selectedAgent, onSelect }: { agentID
                   aria-label={`选择${label}`}
                   aria-pressed={selected}
                   onClick={() => onSelect(agentID)}
-                  className={`flex size-11 items-center justify-center rounded-lg border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${selected ? 'border-primary bg-primary/10 text-primary shadow-sm' : `border-border/70 ${platformBgColor[agentID] ?? 'bg-muted/60'} ${platformIconColor[agentID] ?? 'text-muted-foreground'} hover:border-primary/50`}`}
+                  className={`flex size-11 items-center justify-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${selected ? 'text-primary' : `${platformIconColor[agentID] ?? 'text-muted-foreground'} hover:text-primary`}`}
                 />
               }
             >
@@ -224,8 +224,8 @@ export default function ContentAnalyticsPage() {
   function sortBy(key: string) { update({ sort: key, direction: sort === key && direction === 'desc' ? 'asc' : 'desc', page: undefined }) }
 
   return <div className="space-y-5">
-    <PageHeader title="内容分析" description="把每一篇内容的表现，变成下一次创作的线索。"><div className="flex gap-1"><Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon" disabled={!project || !agentIDs.length} aria-label="查看导入记录" onClick={() => setHistoryOpen(true)} />}><History /></TooltipTrigger><TooltipContent>查看导入记录</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<Button size="icon" disabled={!project || !agentIDs.length} aria-label="导入分析数据" onClick={() => setImportOpen(true)} />}><Upload /></TooltipTrigger><TooltipContent>导入分析数据</TooltipContent></Tooltip></div></PageHeader>
-    <div className="flex flex-wrap items-center justify-between gap-3"><ProjectContextControl mode="select" projects={projects} value={project?.id ?? null} onValueChange={id => { if (id) changeAccount(id) }} loading={projectsQuery.isPending} disabled={!projectsQuery.isPending && !projects.length} compact ariaLabel="筛选项目" placeholder="选择项目" />{project && agentIDs.length > 0 && <AnalyticsAgentSwitcher agentIDs={agentIDs} selectedAgent={selectedAgent} onSelect={changeAgent} />}</div>
+    <PageHeader title="内容分析" description="把每一篇内容的表现，变成下一次创作的线索。"><div className="flex gap-1"><Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon" disabled={!project || !agentIDs.length} aria-label="查看导入记录" onClick={() => setHistoryOpen(true)} />}><History /></TooltipTrigger><TooltipContent>查看导入记录</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon" disabled={!project || !agentIDs.length} aria-label="导入分析数据" onClick={() => setImportOpen(true)} />}><Upload /></TooltipTrigger><TooltipContent>导入分析数据</TooltipContent></Tooltip></div></PageHeader>
+    <div className="flex flex-wrap items-center justify-between gap-3"><ProjectContextControl mode="select" projects={projects} value={project?.id ?? null} onValueChange={id => { if (id) changeAccount(id) }} loading={projectsQuery.isPending} disabled={!projectsQuery.isPending && !projects.length} compact showAgents={false} ariaLabel="筛选项目" placeholder="选择项目" />{project && agentIDs.length > 0 && <AnalyticsAgentSwitcher agentIDs={agentIDs} selectedAgent={selectedAgent} onSelect={changeAgent} />}</div>
     {projectsQuery.isPending && <p role="status" className="flex items-center gap-2 py-16 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />正在读取账号…</p>}
     {error && <Alert variant="destructive"><AlertCircle /><AlertTitle>数据加载失败</AlertTitle><AlertDescription>{error.message}<Button variant="outline" size="sm" onClick={() => { void projectsQuery.refetch(); void refresh() }}>重试</Button></AlertDescription></Alert>}
     {!projectsQuery.isPending && !projects.length && !error && <div className="rounded-xl border bg-card py-20 text-center text-sm text-muted-foreground"><p>还没有项目，请先创建项目，再选择分析平台。</p><Link to="/projects" className="mt-4 inline-block font-medium text-primary underline underline-offset-4">前往创建项目</Link></div>}
