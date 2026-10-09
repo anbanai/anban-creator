@@ -153,7 +153,7 @@ func validCustomTimeRange(v string) bool {
 			return true
 		}
 	}
-	if len(v) != 21 || v[10:12] != ".." {
+	if len(v) != 22 || v[10:12] != ".." {
 		return false
 	}
 	_, err1 := time.Parse("2006-01-02", v[:10])
@@ -285,8 +285,8 @@ func isJSONNull(value json.RawMessage) bool {
 
 func normalizeCustomResponse(env doubaoSearchEnvelope, query string, limit int) (SearchResponse, error) {
 	var raw struct {
-		ResultCount int `json:"ResultCount"`
-		WebResults  []struct {
+		ResultCount *int `json:"ResultCount"`
+		WebResults  *[]struct {
 			ID          string  `json:"Id"`
 			Title       string  `json:"Title"`
 			URL         string  `json:"Url"`
@@ -303,8 +303,11 @@ func normalizeCustomResponse(env doubaoSearchEnvelope, query string, limit int) 
 	if err := json.Unmarshal(env.Result, &raw); err != nil {
 		return SearchResponse{}, err
 	}
-	items := make([]SearchResultItem, 0, len(raw.WebResults))
-	for _, item := range raw.WebResults {
+	if raw.ResultCount == nil || raw.WebResults == nil || *raw.ResultCount < 0 {
+		return SearchResponse{}, errors.New("custom search result is missing required fields")
+	}
+	items := make([]SearchResultItem, 0, len(*raw.WebResults))
+	for _, item := range *raw.WebResults {
 		snippet := item.Summary
 		if snippet == "" {
 			snippet = item.Snippet
@@ -314,14 +317,14 @@ func normalizeCustomResponse(env doubaoSearchEnvelope, query string, limit int) 
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	return SearchResponse{Provider: "doubao_custom", ProviderRequestID: env.ResponseMetadata.RequestID, Query: query, TotalCount: raw.ResultCount, Results: items, FetchedAt: time.Now().UTC(), ProviderMetadata: map[string]any{"edition": "custom", "time_cost_ms": raw.TimeCost, "log_id": raw.LogID}}, nil
+	return SearchResponse{Provider: "doubao_custom", ProviderRequestID: env.ResponseMetadata.RequestID, Query: query, TotalCount: *raw.ResultCount, Results: items, FetchedAt: time.Now().UTC(), ProviderMetadata: map[string]any{"edition": "custom", "time_cost_ms": raw.TimeCost, "log_id": raw.LogID}}, nil
 }
 func normalizeGlobalResponse(env doubaoSearchEnvelope, query string, limit int) (SearchResponse, error) {
 	var raw struct {
-		ErrorCode     int    `json:"ErrorCode"`
+		ErrorCode     *int   `json:"ErrorCode"`
 		ErrorMsg      string `json:"ErrorMsg"`
-		TotalDocCount int    `json:"TotalDocCount"`
-		Documents     []struct {
+		TotalDocCount *int   `json:"TotalDocCount"`
+		Documents     *[]struct {
 			Rank    int    `json:"Rank"`
 			URL     string `json:"Url"`
 			Title   string `json:"Title"`
@@ -342,11 +345,11 @@ func normalizeGlobalResponse(env doubaoSearchEnvelope, query string, limit int) 
 	if err := json.Unmarshal(env.Result, &raw); err != nil {
 		return SearchResponse{}, err
 	}
-	if raw.ErrorCode != 0 {
+	if raw.ErrorCode == nil || raw.TotalDocCount == nil || raw.Documents == nil || *raw.ErrorCode != 0 || *raw.TotalDocCount < 0 {
 		return SearchResponse{}, errors.New("global search returned an error")
 	}
-	items := make([]SearchResultItem, 0, len(raw.Documents))
-	for _, doc := range raw.Documents {
+	items := make([]SearchResultItem, 0, len(*raw.Documents))
+	for _, doc := range *raw.Documents {
 		var parts []string
 		for _, snip := range doc.Snippet {
 			if snip.Type == "text" && strings.TrimSpace(snip.Text) != "" {
@@ -358,7 +361,7 @@ func normalizeGlobalResponse(env doubaoSearchEnvelope, query string, limit int) 
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	return SearchResponse{Provider: "doubao_global", ProviderRequestID: env.ResponseMetadata.RequestID, Query: query, TotalCount: raw.TotalDocCount, Results: items, FetchedAt: time.Now().UTC(), ProviderMetadata: map[string]any{"edition": "global"}}, nil
+	return SearchResponse{Provider: "doubao_global", ProviderRequestID: env.ResponseMetadata.RequestID, Query: query, TotalCount: *raw.TotalDocCount, Results: items, FetchedAt: time.Now().UTC(), ProviderMetadata: map[string]any{"edition": "global"}}, nil
 }
 func domainOf(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
@@ -514,7 +517,10 @@ func (s *SearchService) recordSearchProviderCost(ctx context.Context, operation 
 	providerRequestID := ""
 	resultCount := 0
 	var usage map[string]any
-	providerMetadata := make(map[string]any)
+	providerMetadata := map[string]any{
+		"search_type": "web",
+		"filters":     searchProviderCostFilters(operation.Request),
+	}
 	if result != nil {
 		if strings.TrimSpace(result.Provider) != "" {
 			providerName = result.Provider
@@ -537,6 +543,38 @@ func (s *SearchService) recordSearchProviderCost(ctx context.Context, operation 
 	if costErr != nil && s.logger != nil {
 		s.logger.Error().Err(costErr).Str("operation", "mcp.search_web").Msg("failed to record search provider cost; preserving operation outcome")
 	}
+}
+
+func searchProviderCostFilters(req SearchRequest) map[string]any {
+	filters := make(map[string]any)
+	if value := strings.TrimSpace(req.TimeRange); value != "" {
+		filters["time_range"] = value
+	}
+	if values := normalizeStrings(req.Domains); len(values) > 0 {
+		filters["sites"] = values
+	}
+	if values := normalizeStrings(req.BlockHosts); len(values) > 0 {
+		filters["block_hosts"] = values
+	}
+	if req.NeedContent != nil {
+		filters["need_content"] = *req.NeedContent
+	}
+	if req.NeedURL != nil {
+		filters["need_url"] = *req.NeedURL
+	}
+	if req.AuthInfoLevel != 0 {
+		filters["auth_info_level"] = req.AuthInfoLevel
+	}
+	if value := strings.TrimSpace(req.ContentFormats); value != "" {
+		filters["content_formats"] = value
+	}
+	if value := strings.TrimSpace(req.Industry); value != "" {
+		filters["industry"] = value
+	}
+	if req.QueryRewrite != nil {
+		filters["query_rewrite"] = *req.QueryRewrite
+	}
+	return filters
 }
 
 func searchFingerprint(req SearchOperationRequest) string {

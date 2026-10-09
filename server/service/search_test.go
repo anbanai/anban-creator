@@ -163,6 +163,13 @@ func TestDoubaoGlobalSearchRejectsCustomOnlyFilters(t *testing.T) {
 	}
 }
 
+func TestDoubaoCustomSearchAcceptsExplicitDateRange(t *testing.T) {
+	provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: "https://example.com/search_api/web_search", APIKey: "secret", Timeout: time.Second})
+	if err := provider.ValidateRequest(SearchRequest{Query: "q", TimeRange: "2026-09-01..2026-10-01"}); err != nil {
+		t.Fatalf("ValidateRequest() rejected a valid date range: %v", err)
+	}
+}
+
 func TestDoubaoGlobalSearchRejectsProviderResultError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -179,17 +186,21 @@ func TestDoubaoGlobalSearchRejectsProviderResultError(t *testing.T) {
 }
 
 func TestDoubaoSearchProviderRejectsMalformedResultPayloads(t *testing.T) {
-	for _, edition := range []string{"custom", "global"} {
-		t.Run(edition, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, edition, result string
+	}{
+		{name: "custom malformed scalar", edition: "custom", result: `"not-an-object"`},
+		{name: "custom missing fields", edition: "custom", result: `{}`},
+		{name: "global malformed scalar", edition: "global", result: `"not-an-object"`},
+		{name: "global missing fields", edition: "global", result: `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"ResponseMetadata": map[string]any{"RequestId": "malformed"},
-					"Result":           "not-an-object",
-				})
+				_, _ = w.Write([]byte(`{"ResponseMetadata":{"RequestId":"malformed"},"Result":` + tc.result + `}`))
 			}))
 			defer server.Close()
 			var provider *DoubaoSearchProvider
-			if edition == "custom" {
+			if tc.edition == "custom" {
 				provider = NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
 			} else {
 				provider = NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
@@ -199,6 +210,48 @@ func TestDoubaoSearchProviderRejectsMalformedResultPayloads(t *testing.T) {
 				t.Fatalf("error = %v, want provider_unavailable", err)
 			}
 		})
+	}
+}
+
+func TestDoubaoSearchProviderAcceptsExplicitEmptyResults(t *testing.T) {
+	for _, tc := range []struct {
+		name, edition, result string
+	}{
+		{name: "custom", edition: "custom", result: `{"ResultCount":0,"WebResults":[]}`},
+		{name: "global", edition: "global", result: `{"ErrorCode":0,"TotalDocCount":0,"Documents":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"ResponseMetadata":{"RequestId":"empty"},"Result":` + tc.result + `}`))
+			}))
+			defer server.Close()
+			var provider *DoubaoSearchProvider
+			if tc.edition == "custom" {
+				provider = NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+			} else {
+				provider = NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+			}
+			result, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+			if err != nil || result == nil || len(result.Results) != 0 {
+				t.Fatalf("Search() = %#v, %v; want a valid empty response", result, err)
+			}
+		})
+	}
+}
+
+func TestSearchProviderCostFiltersPreserveSearchConstraints(t *testing.T) {
+	needContent := true
+	rewrite := false
+	filters := searchProviderCostFilters(SearchRequest{
+		TimeRange: "OneWeek", Domains: []string{" example.com ", "example.com"}, BlockHosts: []string{"ads.example.com"},
+		NeedContent: &needContent, AuthInfoLevel: 1, ContentFormats: "markdown", Industry: "finance", QueryRewrite: &rewrite,
+	})
+	if filters["time_range"] != "OneWeek" || filters["auth_info_level"] != 1 || filters["content_formats"] != "markdown" || filters["industry"] != "finance" || filters["need_content"] != true || filters["query_rewrite"] != false {
+		t.Fatalf("filters = %#v", filters)
+	}
+	sites, ok := filters["sites"].([]string)
+	if !ok || len(sites) != 1 || sites[0] != "example.com" {
+		t.Fatalf("sites = %#v", filters["sites"])
 	}
 }
 

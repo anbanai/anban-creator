@@ -77,10 +77,18 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	if err != nil || (authInfoLevel != 0 && authInfoLevel != 1) {
 		return errorResult(`{"code":"invalid_request","message":"auth_info_level must be 0 or 1"}`), nil
 	}
+	domains, err := parseSearchStringArray(args, "domains")
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"domains must be a non-empty string array"}`), nil
+	}
+	blockHosts, err := parseSearchStringArray(args, "block_hosts")
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"block_hosts must be a non-empty string array"}`), nil
+	}
 	if svcs == nil || svcs.SearchSvc == nil {
 		return errorResult(`{"code":"provider_unavailable","message":"search provider is not configured"}`), nil
 	}
-	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, TimeRange: stringArg(args, "time_range"), Domains: parseStringArray(args, "domains"), BlockHosts: parseStringArray(args, "block_hosts"), NeedContent: needContent, NeedURL: needURL, AuthInfoLevel: authInfoLevel, ContentFormats: stringArg(args, "content_formats"), Industry: stringArg(args, "industry"), QueryRewrite: queryRewrite}})
+	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, TimeRange: stringArg(args, "time_range"), Domains: domains, BlockHosts: blockHosts, NeedContent: needContent, NeedURL: needURL, AuthInfoLevel: authInfoLevel, ContentFormats: stringArg(args, "content_formats"), Industry: stringArg(args, "industry"), QueryRewrite: queryRewrite}})
 	if err != nil {
 		code := "search_failed"
 		if errors.Is(err, service.ErrSearchProviderUnavailable) {
@@ -89,6 +97,33 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult(searchErrorJSON(code, err.Error())), nil
 	}
 	return textResult(result)
+}
+
+func parseSearchStringArray(args map[string]any, key string) ([]string, error) {
+	raw, present := args[key]
+	if !present {
+		return nil, nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		if values, ok := raw.([]string); ok {
+			items = make([]any, len(values))
+			for i, item := range values {
+				items[i] = item
+			}
+		} else {
+			return nil, errors.New("string array required")
+		}
+	}
+	result := make([]string, len(items))
+	for i, item := range items {
+		value, ok := item.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return nil, errors.New("non-empty string array required")
+		}
+		result[i] = strings.TrimSpace(value)
+	}
+	return result, nil
 }
 
 func optionalBoolArg(args map[string]any, key string) (*bool, error) {

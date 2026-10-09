@@ -65,6 +65,9 @@ func TestSearchWebHandlerRejectsProviderOverrideAndInvalidInput(t *testing.T) {
 		{name: "empty query", args: map[string]any{"query": "  "}, want: "invalid_request"},
 		{name: "fractional limit", args: map[string]any{"query": "q", "limit": 1.5}, want: "invalid_request"},
 		{name: "large limit", args: map[string]any{"query": "q", "limit": 51}, want: "invalid_request"},
+		{name: "domains scalar", args: map[string]any{"query": "q", "domains": "example.com"}, want: "invalid_request"},
+		{name: "domains non-string item", args: map[string]any{"query": "q", "domains": []any{"example.com", 1}}, want: "invalid_request"},
+		{name: "block hosts non-string item", args: map[string]any{"query": "q", "block_hosts": []any{false}}, want: "invalid_request"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -74,6 +77,20 @@ func TestSearchWebHandlerRejectsProviderOverrideAndInvalidInput(t *testing.T) {
 			}
 			if result == nil || !result.IsError || !strings.Contains(toolResultText(result), tt.want) {
 				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestParseSearchStringArrayRejectsInvalidShapes(t *testing.T) {
+	for name, args := range map[string]map[string]any{
+		"scalar":       {"domains": "example.com"},
+		"non-string":   {"domains": []any{"example.com", 1}},
+		"empty-string": {"domains": []any{"  "}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseSearchStringArray(args, "domains"); err == nil {
+				t.Fatal("parseSearchStringArray accepted invalid input")
 			}
 		})
 	}
