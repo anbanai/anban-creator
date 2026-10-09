@@ -86,13 +86,14 @@ describe('server analytics queries', () => {
 
     const switcher = await screen.findByRole('group', { name: '选择分析 Agent' })
     for (const button of Array.from(switcher.querySelectorAll('button'))) {
-      expect(button).not.toHaveClass('border-primary', 'border-border/70')
+      expect(button.className).not.toMatch(/(?:^|\s)border(?:-|\s|$)/)
       expect(button.className).not.toMatch(/\bbg-/)
       expect(button.className).not.toMatch(/\bshadow(?:-|$)/)
     }
     for (const label of ['查看导入记录', '导入分析数据']) {
       const button = screen.getByRole('button', { name: label })
       expect(button).toHaveClass('hover:bg-muted')
+      expect(button).toHaveClass('border-transparent')
       expect(button.className).not.toMatch(/\bbg-primary(?:-|$)/)
     }
   })
