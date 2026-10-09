@@ -6,17 +6,18 @@ import (
 	"time"
 )
 
-func TestSearchConfigValidationRequiresEnabledProviderCredentials(t *testing.T) {
-	cfg := Config{Trends: TrendsConfig{TTL: time.Minute, Timeout: time.Second}, Search: SearchConfig{Enabled: true, Provider: "doubao"}}
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("enabled search with missing credentials was accepted")
-	}
-	message := err.Error()
-	for _, field := range []string{"search.doubao.base_url", "search.doubao.api_key", "search.doubao.model"} {
-		if !strings.Contains(message, field) {
-			t.Fatalf("validation error %q missing %s", message, field)
-		}
+func TestSearchConfigValidationRequiresSelectedEditionCredentials(t *testing.T) {
+	for _, edition := range []string{"custom", "global"} {
+		t.Run(edition, func(t *testing.T) {
+			cfg := Config{Trends: TrendsConfig{TTL: time.Minute, Timeout: time.Second}, Search: SearchConfig{Enabled: true, Provider: edition}}
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), "search."+edition+".api_key") {
+				t.Fatalf("validation error = %v, want selected edition credentials", err)
+			}
+			if strings.Contains(err.Error(), ".model") {
+				t.Fatalf("search API must not require a model: %v", err)
+			}
+		})
 	}
 }
 
@@ -38,5 +39,16 @@ func TestSearchConfigValidationAllowsDisabledSearchWithoutCredentials(t *testing
 	cfg := Config{Trends: TrendsConfig{TTL: time.Minute, Timeout: time.Second}, Search: SearchConfig{Enabled: false}}
 	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "search.") {
 		t.Fatalf("disabled search produced search validation error: %v", err)
+	}
+}
+
+func TestSearchConfigDefaultsEditionSpecificEndpoints(t *testing.T) {
+	cfg := Config{}
+	cfg.applyDefaults()
+	if cfg.Search.Custom.Endpoint != "https://open.feedcoopapi.com/search_api/web_search" {
+		t.Fatalf("custom endpoint = %q", cfg.Search.Custom.Endpoint)
+	}
+	if cfg.Search.Global.Endpoint != "https://open.feedcoopapi.com/search_api/global_search" {
+		t.Fatalf("global endpoint = %q", cfg.Search.Global.Endpoint)
 	}
 }

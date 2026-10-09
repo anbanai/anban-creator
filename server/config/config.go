@@ -60,8 +60,9 @@ type TrendsConfig struct {
 // intentionally kept in server configuration and are never exposed to Agents.
 type SearchConfig struct {
 	Enabled  bool                 `yaml:"enabled"`
-	Provider string               `yaml:"provider"`
-	Doubao   SearchDoubaoConfig   `yaml:"doubao"`
+	Provider string               `yaml:"provider"` // custom or global
+	Custom   SearchDoubaoConfig   `yaml:"custom"`
+	Global   SearchDoubaoConfig   `yaml:"global"`
 	Fallback SearchFallbackConfig `yaml:"fallback"`
 }
 
@@ -70,12 +71,10 @@ type SearchFallbackConfig struct {
 }
 
 type SearchDoubaoConfig struct {
-	BaseURL    string        `yaml:"base_url"`
-	APIKey     string        `yaml:"api_key"`
-	Model      string        `yaml:"model"`
-	Timeout    time.Duration `yaml:"timeout"`
-	MaxResults int           `yaml:"max_results"`
-	MaxKeyword int           `yaml:"max_keyword"`
+	Endpoint      string        `yaml:"endpoint"`
+	APIKey        string        `yaml:"api_key"`
+	Timeout       time.Duration `yaml:"timeout"`
+	MaxWebResults int           `yaml:"max_web_results"`
 }
 
 func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceConfig) []string {
@@ -1017,15 +1016,19 @@ func expandEnvVars(data []byte) []byte {
 
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
-	if c.Search.Doubao.Timeout == 0 {
-		c.Search.Doubao.Timeout = 30 * time.Second
+	applySearchDefaults := func(cfg *SearchDoubaoConfig, endpoint string) {
+		if cfg.Endpoint == "" {
+			cfg.Endpoint = endpoint
+		}
+		if cfg.Timeout == 0 {
+			cfg.Timeout = 30 * time.Second
+		}
+		if cfg.MaxWebResults == 0 {
+			cfg.MaxWebResults = 10
+		}
 	}
-	if c.Search.Doubao.MaxResults == 0 {
-		c.Search.Doubao.MaxResults = 10
-	}
-	if c.Search.Doubao.MaxKeyword == 0 {
-		c.Search.Doubao.MaxKeyword = 2
-	}
+	applySearchDefaults(&c.Search.Custom, "https://open.feedcoopapi.com/search_api/web_search")
+	applySearchDefaults(&c.Search.Global, "https://open.feedcoopapi.com/search_api/global_search")
 	if c.Claude.RuntimeImages == nil {
 		c.Claude.RuntimeImages = RuntimeImages{}
 	}
@@ -1590,28 +1593,33 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Search.Provider) == "" {
 			errs = append(errs, "search.provider is required when search.enabled is true")
 		}
+		var selected *SearchDoubaoConfig
 		switch strings.TrimSpace(c.Search.Provider) {
-		case "doubao":
-			if strings.TrimSpace(c.Search.Doubao.BaseURL) == "" {
-				errs = append(errs, "search.doubao.base_url is required when search is enabled")
-			}
-			if strings.TrimSpace(c.Search.Doubao.APIKey) == "" {
-				errs = append(errs, "search.doubao.api_key is required when search is enabled")
-			}
-			if strings.TrimSpace(c.Search.Doubao.Model) == "" {
-				errs = append(errs, "search.doubao.model is required when search is enabled")
-			}
-			if c.Search.Doubao.Timeout <= 0 {
-				errs = append(errs, "search.doubao.timeout must be positive when search is enabled")
-			}
-			if c.Search.Doubao.MaxResults <= 0 {
-				errs = append(errs, "search.doubao.max_results must be positive when search is enabled")
-			}
-			if c.Search.Doubao.MaxKeyword <= 0 {
-				errs = append(errs, "search.doubao.max_keyword must be positive when search is enabled")
-			}
+		case "custom":
+			selected = &c.Search.Custom
+		case "global":
+			selected = &c.Search.Global
 		default:
 			errs = append(errs, fmt.Sprintf("search.provider %q is unsupported", c.Search.Provider))
+		}
+		if selected != nil {
+			prefix := "search." + strings.TrimSpace(c.Search.Provider)
+			if strings.TrimSpace(selected.Endpoint) == "" {
+				errs = append(errs, prefix+".endpoint is required when search is enabled")
+			}
+			if strings.TrimSpace(selected.APIKey) == "" {
+				errs = append(errs, prefix+".api_key is required when search is enabled")
+			}
+			if selected.Timeout <= 0 {
+				errs = append(errs, prefix+".timeout must be positive when search is enabled")
+			}
+			maxResults := 50
+			if strings.TrimSpace(c.Search.Provider) == "global" {
+				maxResults = 20
+			}
+			if selected.MaxWebResults <= 0 || selected.MaxWebResults > maxResults {
+				errs = append(errs, fmt.Sprintf("%s.max_web_results must be between 1 and %d when search is enabled", prefix, maxResults))
+			}
 		}
 	}
 	if err := c.Claude.Validate(); err != nil {

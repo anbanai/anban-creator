@@ -98,7 +98,7 @@ func (BillingProviderCostEvent) TableName() string { return "billing_provider_co
 func (e BillingProviderCostEvent) Validate() error {
 	required := map[string]string{
 		"id": e.ID, "provider": e.Provider,
-		"model": e.Model, "catalog_id": e.CatalogID, "idempotency_scope": e.IdempotencyScope,
+		"catalog_id": e.CatalogID, "idempotency_scope": e.IdempotencyScope,
 		"idempotency_key": e.IdempotencyKey,
 	}
 	for field, value := range required {
@@ -117,6 +117,14 @@ func (e BillingProviderCostEvent) Validate() error {
 	}
 	if err := validateProviderCostEvidence(e); err != nil {
 		return err
+	}
+	if strings.TrimSpace(e.Model) == "" {
+		var kind struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(e.UsageEvidence, &kind); err != nil || kind.Kind != "search_request" {
+			return fmt.Errorf("provider cost model is required except for search request evidence")
+		}
 	}
 	switch e.EventKind {
 	case BillingProviderCostEventKindBase:

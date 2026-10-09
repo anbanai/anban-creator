@@ -64,7 +64,7 @@ func TestSearchWebHandlerRejectsProviderOverrideAndInvalidInput(t *testing.T) {
 		{name: "provider override", args: map[string]any{"query": "q", "provider": "other"}, want: "provider_selection_forbidden"},
 		{name: "empty query", args: map[string]any{"query": "  "}, want: "invalid_request"},
 		{name: "fractional limit", args: map[string]any{"query": "q", "limit": 1.5}, want: "invalid_request"},
-		{name: "large limit", args: map[string]any{"query": "q", "limit": 21}, want: "invalid_request"},
+		{name: "large limit", args: map[string]any{"query": "q", "limit": 51}, want: "invalid_request"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
