@@ -15,7 +15,6 @@
 - The Server exclusively owns provider, endpoint, and credentials; Agents cannot select a provider or call the external API.
 - Both Doubao Search APIs use `Authorization: Bearer <API_KEY>` and have no model field.
 - Custom web result count is capped at 50 and Global web result count at 20, following the official API limits.
-- Search errors never trigger an automatic provider fallback.
 - Each search capability uses the existing execution identity, idempotency, quote, charge, and provider-cost workflows.
 - Never log or return API keys or raw authorization headers.
 - MCP handlers validate and invoke one capability; they do not compose billing or provider workflows.

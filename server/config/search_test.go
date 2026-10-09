@@ -28,13 +28,6 @@ func TestSearchConfigValidationRejectsUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestSearchConfigRejectsUnsupportedAutomaticFallback(t *testing.T) {
-	cfg := Config{Search: SearchConfig{Fallback: SearchFallbackConfig{Enabled: true}}}
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "search.fallback.enabled is not supported") {
-		t.Fatalf("enabled fallback error = %v", err)
-	}
-}
-
 func TestSearchConfigValidationAllowsDisabledSearchWithoutCredentials(t *testing.T) {
 	cfg := Config{Trends: TrendsConfig{TTL: time.Minute, Timeout: time.Second}, Search: SearchConfig{Enabled: false}}
 	if err := cfg.Validate(); err != nil && strings.Contains(err.Error(), "search.") {

@@ -25,8 +25,6 @@ trends:
 search:
   enabled: ${ANBAN_SEARCH_ENABLED:-false}
   provider: "${ANBAN_SEARCH_PROVIDER:-custom}"
-  fallback:
-    enabled: false
   custom:
     endpoint: "${ANBAN_DOUBAO_CUSTOM_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/web_search}"
     api_key: "${ANBAN_DOUBAO_CUSTOM_SEARCH_API_KEY:-}"

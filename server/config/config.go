@@ -59,15 +59,10 @@ type TrendsConfig struct {
 // SearchConfig controls Server-owned web search providers. Credentials are
 // intentionally kept in server configuration and are never exposed to Agents.
 type SearchConfig struct {
-	Enabled  bool                 `yaml:"enabled"`
-	Provider string               `yaml:"provider"` // custom or global
-	Custom   SearchDoubaoConfig   `yaml:"custom"`
-	Global   SearchDoubaoConfig   `yaml:"global"`
-	Fallback SearchFallbackConfig `yaml:"fallback"`
-}
-
-type SearchFallbackConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled  bool               `yaml:"enabled"`
+	Provider string             `yaml:"provider"` // custom or global
+	Custom   SearchDoubaoConfig `yaml:"custom"`
+	Global   SearchDoubaoConfig `yaml:"global"`
 }
 
 type SearchDoubaoConfig struct {
@@ -1585,9 +1580,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Trends.Timeout <= 0 {
 		errs = append(errs, "trends.timeout must be positive")
-	}
-	if c.Search.Fallback.Enabled {
-		errs = append(errs, "search.fallback.enabled is not supported; automatic provider fallback is disabled")
 	}
 	if c.Search.Enabled {
 		if strings.TrimSpace(c.Search.Provider) == "" {
