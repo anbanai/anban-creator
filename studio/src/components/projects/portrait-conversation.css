@@ -56,6 +56,7 @@
 .portrait-fact > span { color: #928c7d; }.portrait-fact p { margin: 0; overflow-wrap: anywhere; }.portrait-fact small { color: #98a08e; font-size: 9px; }.portrait-unknown { color: #bbb6a9; }
 .portrait-sheet-footer { border-top: 1px solid #efede5; padding-top: 16px; }
 .portrait-creation-idea { border-top: 1px solid #efede5; padding: 10px 0 14px; font-size: 11px; line-height: 1.8; }.portrait-creation-idea span { color: #928c7d; }.portrait-creation-idea p { margin: 4px 0 0; }
+.portrait-evidence { margin-top: 4px; color: #8a8577; font-size: 10px; }.portrait-evidence summary { cursor: pointer; }.portrait-evidence blockquote { border-left: 2px solid #d6d0c0; padding-left: 8px; margin: 6px 0; }
 .portrait-sheet-footer p { display: flex; align-items: center; gap: 6px; color: #99917f; font-size: 10px; line-height: 1.8; margin: 0; }
 .portrait-sheet-footer small { display: block; color: #9a6a43; font-size: 11px; margin-top: 10px; }
 .portrait-primary { border: 0; border-radius: 11px; background: #a9502e; color: #fff; width: 100%; padding: 13px 18px; margin-top: 14px; display: flex; justify-content: center; align-items: center; gap: 12px; font-size: 13px !important; }

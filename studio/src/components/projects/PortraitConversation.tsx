@@ -10,7 +10,7 @@ export const portraitFacets = [
 ] as const
 
 export type PortraitFacetKey = typeof portraitFacets[number][0]
-export type PortraitDraft = Partial<Record<PortraitFacetKey, { text: string; source: string }>>
+export type PortraitDraft = Partial<Record<PortraitFacetKey, { text: string; source: string; evidence?: string[] }>>
 export type PortraitMessage = { id: string; role: 'user' | 'assistant'; text: string; update?: string }
 
 interface PortraitConversationProps {
@@ -129,13 +129,15 @@ export function PortraitConversation({
         </span>)}
       </div>
       <div className="portrait-story" aria-live="polite">
-        <h2>{name || '还没认识的你'}</h2>
-        <p>{summary || '此刻是一张白纸。你的经历、想法和坚持，会慢慢成为这里的轮廓。'}</p>
+        <h2>{name || (count ? '逐渐清晰的你' : '还没认识的你')}</h2>
+        <p>{summary || (count ? '这是从你的表达中逐步整理的画像。看看哪里需要补充或纠正。' : '此刻是一张白纸。你的经历、想法和坚持，会慢慢成为这里的轮廓。')}</p>
       </div>
       <div className="portrait-facts">
         {portraitFacets.map(([key, label]) => <div key={key} className={`portrait-fact ${draft[key] ? 'collected' : ''}`}>
           <span>{label}</span>
-          <div>{draft[key] ? <><p>{draft[key].text}</p><small>{draft[key].source}</small></> : <p className="portrait-unknown">聊到时，再慢慢补充</p>}</div>
+          <div>{draft[key] ? <><p>{draft[key].text}</p><small>{draft[key].source}</small>
+            {!!draft[key].evidence?.length && <details className="portrait-evidence"><summary>依据</summary>{draft[key].evidence.map((quote, i) => <blockquote key={i}>{quote}</blockquote>)}</details>}
+          </> : <p className="portrait-unknown">聊到时，再慢慢补充</p>}</div>
         </div>)}
       </div>
       {creationIdea && <div className="portrait-creation-idea"><span>这次想创作</span><p>{creationIdea}</p></div>}
