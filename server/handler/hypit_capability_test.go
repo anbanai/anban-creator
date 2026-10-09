@@ -40,13 +40,13 @@ func TestHypitCapabilitiesDisabledAndNoSecrets(t *testing.T) {
 
 func TestHypitSourceCapabilitiesHTTPAuthorizesOwner(t *testing.T) {
 	repo := repository.New(setupTaskHandlerTestDB(t))
-	cfg := config.HypitConfig{Enabled: true, RuntimeProfile: map[string]any{"format": "hypit.runtime-local@1", "endpoints": map[string]any{"local": map[string]any{"use": "@hypit/provider-media-local"}}}}
+	cfg := config.HypitConfig{Enabled: true, RuntimeProfile: map[string]any{"format": "hypit.runtime-local@1", "endpoints": map[string]any{"local": map[string]any{"use": "@hypit/media-local"}}}}
 	cfg.ApplyDefaults()
 	cfg.Limits.MaxDurationSeconds = 60
 	logger := zerolog.Nop()
 	tasks := newHandlerTaskService(t, repo, nil, nil, &logger, "", nil, nil)
 	tasks.SetHypitConfig(cfg)
-	source := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.TaskKindContentGeneration, ID: "source", UserID: "owner", Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(`{"profile":{"format":"hypit.runtime-local@1","endpoints":{"local":{"use":"@hypit/provider-media-local"}}},"limits":{"max_duration_seconds":180,"timeout_minutes":7}}`)}
+	source := &model.Task{AgentID: model.AgentIDHypit, Channel: model.ChannelHypit, TaskKind: model.TaskKindContentGeneration, ID: "source", UserID: "owner", Type: model.PlatformHypit, HypitRuntimeSnapshot: datatypes.JSON(`{"profile":{"format":"hypit.runtime-local@1","endpoints":{"local":{"use":"@hypit/media-local"}}},"limits":{"max_duration_seconds":180,"timeout_minutes":7}}`)}
 	if err := repo.Tasks().Create(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
