@@ -60,6 +60,9 @@ image set in `release/agent-runtime-manifest.json`. Use
 `scripts/render-ack-server-deployment.sh --manifest release/agent-runtime-manifest.json`
 to inject that set into the ACK template. The render step rejects mutable tags,
 missing images, a different Server digest, or a missing Catalog digest.
+The release workflow publishes images to GHCR, so configure the repository
+variable `ACK_IMAGE_PULL_SECRET` with a Kubernetes image pull secret that can
+read those GHCR packages before creating a release.
 
 ## Quick Start
 

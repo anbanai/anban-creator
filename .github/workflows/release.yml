@@ -445,7 +445,7 @@ jobs:
       - name: Render ACK Server Deployment from release manifest
         env:
           ACK_NAMESPACE: ${{ vars.ACK_NAMESPACE || 'anbanai-prod' }}
-          ACK_IMAGE_PULL_SECRET: ${{ vars.ACK_IMAGE_PULL_SECRET || 'anban-acr-pull' }}
+          ACK_IMAGE_PULL_SECRET: ${{ vars.ACK_IMAGE_PULL_SECRET }}
           ACK_MICRO_SERVICE_NAME: ${{ vars.ACK_MICRO_SERVICE_NAME || 'creator-api' }}
           ACK_CONFIGMAP_NAME: ${{ vars.ACK_CONFIGMAP_NAME || 'creator-api-config' }}
           ACK_LOG_STORE: ${{ vars.ACK_LOG_STORE || 'creator-server' }}
@@ -459,6 +459,7 @@ jobs:
           ACK_VERSION_SWITCH: ${{ steps.version.outputs.RELEASE_TAG }}
         run: |
           set -euo pipefail
+          : "${ACK_IMAGE_PULL_SECRET:?Configure vars.ACK_IMAGE_PULL_SECRET with a Kubernetes pull secret authorized for ghcr.io}"
           mkdir -p release/ack
           export namespace="$ACK_NAMESPACE"
           export imagePullSecret="$ACK_IMAGE_PULL_SECRET"
