@@ -33,10 +33,10 @@ describe('server analytics queries', () => {
   })
 
   it('switches analytics data with the project Agent icons', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'shared', platform: '', name: '通用项目', agent_ids: ['seednote', 'wechat-article'] } as Project])
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'shared', platform: '', name: '通用创作项目', agent_ids: ['seednote', 'wechat-article'] } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=shared&platform=seednote')
     render(<ContentAnalyticsPage />)
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选项目' })).toHaveTextContent('通用项目'))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选创作项目' })).toHaveTextContent('通用创作项目'))
     await waitFor(() => expect(contentAnalyticsApi.overview).toHaveBeenCalledWith('shared', expect.objectContaining({ platform: 'seednote' }), expect.any(AbortSignal)))
     fireEvent.click(screen.getByRole('button', { name: '选择公众号文章' }))
     await waitFor(() => expect(contentAnalyticsApi.overview).toHaveBeenLastCalledWith('shared', expect.objectContaining({ platform: 'wechat', content_type: 'wechat-article' }), expect.any(AbortSignal)))
@@ -71,7 +71,7 @@ describe('server analytics queries', () => {
     window.history.replaceState(null, '', '/content-analytics?account=matrix')
     render(<ContentAnalyticsPage />)
 
-    const projectSelector = await screen.findByRole('combobox', { name: '筛选项目' })
+    const projectSelector = await screen.findByRole('combobox', { name: '筛选创作项目' })
     await waitFor(() => expect(projectSelector).toHaveTextContent('内容矩阵'))
     expect(projectSelector.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(0)
     expect(screen.getByRole('group', { name: '选择分析 Agent' }).querySelectorAll('button')).toHaveLength(3)
@@ -104,12 +104,12 @@ describe('server analytics queries', () => {
     } as Project])
     vi.mocked(contentAnalyticsApi.detail).mockResolvedValue({
       ...summary,
-      content: { ...content, id: 'task:picture-1', title: '贴图任务', content_type: 'wechat-picture', metrics: { read_users: 8 } },
+      content: { ...content, id: 'task:picture-1', title: '贴图作品', content_type: 'wechat-picture', metrics: { read_users: 8 } },
     })
     window.history.replaceState(null, '', '/content-analytics?account=matrix&content=task%3Apicture-1&platform=wechat')
     render(<ContentAnalyticsPage />)
 
-    expect(await screen.findByRole('heading', { name: '贴图任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '贴图作品' })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('button', { name: '选择公众号贴图' })).toHaveAttribute('aria-pressed', 'true'))
     expect(vi.mocked(contentAnalyticsApi.detail).mock.calls.every(([, , request]) => request.content_type === undefined)).toBe(true)
   })
@@ -120,12 +120,12 @@ describe('server analytics queries', () => {
     } as Project])
     vi.mocked(contentAnalyticsApi.detail).mockResolvedValue({
       ...summary,
-      content: { ...content, id: 'task:picture-2', title: '贴图任务', content_type: 'wechat-picture', metrics: { read_users: 8 } },
+      content: { ...content, id: 'task:picture-2', title: '贴图作品', content_type: 'wechat-picture', metrics: { read_users: 8 } },
     })
     window.history.replaceState(null, '', '/content-analytics?account=matrix&content=task%3Apicture-2&platform=wechat&agent=wechat-article')
     render(<ContentAnalyticsPage />)
 
-    expect(await screen.findByRole('heading', { name: '贴图任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '贴图作品' })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('button', { name: '选择公众号贴图' })).toHaveAttribute('aria-pressed', 'true'))
     expect(vi.mocked(contentAnalyticsApi.detail).mock.calls.every(([, , request]) => request.content_type === undefined)).toBe(true)
     expect(window.location.search).toContain('agent=wechat-picture')
@@ -152,13 +152,13 @@ describe('server analytics queries', () => {
 
   it('does not invent analytics Agents for projects that only use unsupported Agents', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'video', platform: 'montage', name: '视频项目', agent_ids: ['montage', 'hypit'],
+      id: 'video', platform: 'montage', name: '视频创作项目', agent_ids: ['montage', 'hypit'],
     } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=video')
     render(<ContentAnalyticsPage />)
 
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选项目' })).toHaveTextContent('视频项目'))
-    expect(await screen.findByText('该项目没有可用的内容分析 Agent。')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选创作项目' })).toHaveTextContent('视频创作项目'))
+    expect(await screen.findByText('该创作项目没有可用的内容分析 Agent。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /选择公众号|选择种草笔记/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导入分析数据' })).toBeDisabled()
     expect(contentAnalyticsApi.overview).not.toHaveBeenCalled()
@@ -167,7 +167,7 @@ describe('server analytics queries', () => {
   it('uses the shared compact project selector and removes redundant date controls', async () => {
     render(<ContentAnalyticsPage />)
 
-    const projectSelector = await screen.findByRole('combobox', { name: '筛选项目' })
+    const projectSelector = await screen.findByRole('combobox', { name: '筛选创作项目' })
     await waitFor(() => expect(projectSelector).toHaveTextContent('生活笔记'))
     expect(projectSelector).not.toHaveClass('border-border')
     expect(projectSelector.querySelector('[data-slot="avatar"]')).toBeInTheDocument()

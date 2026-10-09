@@ -52,7 +52,7 @@ function stableIdentityIndex(value: string) {
 
 export function projectPlatformLabel(platform?: string) {
   if (!platform) return null
-  return platformLabels[platform] ?? contentTypeLabel[platform] ?? '通用项目'
+  return platformLabels[platform] ?? contentTypeLabel[platform] ?? '通用创作项目'
 }
 
 const defaultProjectAgentIDs: Record<string, readonly string[]> = {
@@ -76,7 +76,7 @@ export function resolveProjectIdentity({
   snapshot,
   projectId,
   fallbackPlatform,
-  fallbackName = '未设置项目',
+  fallbackName = '未设置创作项目',
 }: {
   project?: ProjectIdentityProject
   snapshot?: ProjectIdentitySnapshot

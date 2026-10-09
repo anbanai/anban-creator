@@ -191,8 +191,8 @@ describe('ReferenceUsageSummary', () => {
       />,
     )
 
-    expect(await screen.findByText('参考使用摘要无法解析，以下仅展示计划快照。')).toBeInTheDocument()
-    expect(screen.getByText('计划快照')).toBeInTheDocument()
+    expect(await screen.findByText('参考使用摘要无法解析，以下仅展示排期快照。')).toBeInTheDocument()
+    expect(screen.getByText('排期快照')).toBeInTheDocument()
     expect(screen.getByText('plan-product.png')).toBeInTheDocument()
     expect(screen.getByText('优先识别新版包装')).toBeInTheDocument()
     expect(screen.getByText('输入快照不代表 AI 实际使用结论')).toBeInTheDocument()
@@ -282,7 +282,7 @@ describe('ReferenceUsageSummary', () => {
       />,
     )
 
-    expect(screen.getByText('未生成素材使用结论，仅展示任务输入。')).toBeInTheDocument()
+    expect(screen.getByText('未生成素材使用结论，仅展示作品输入。')).toBeInTheDocument()
     expect(screen.getByText('product-front.png')).toBeInTheDocument()
     expect(screen.getByText('https://cdn.test/product-front.png')).toBeInTheDocument()
     expect(screen.getByText('保留瓶身标签')).toBeInTheDocument()
@@ -325,7 +325,7 @@ describe('ReferenceUsageSummary', () => {
       />,
     )
 
-    expect(await screen.findByText('素材使用结论无法解析，仅展示任务输入。')).toBeInTheDocument()
+    expect(await screen.findByText('素材使用结论无法解析，仅展示作品输入。')).toBeInTheDocument()
     expect(screen.getByText('plan-product.png')).toBeInTheDocument()
     expect(screen.getByText('https://cdn.test/plan-product.png')).toBeInTheDocument()
     expect(screen.getByText('优先识别新版包装')).toBeInTheDocument()

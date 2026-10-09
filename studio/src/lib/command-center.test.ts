@@ -14,7 +14,7 @@ function task(overrides: Partial<Task>): Task {
   return {
     id: 'task-1',
     type: 'seednote',
-    title: '任务',
+    title: '作品',
     prompt: '写一篇内容',
     status: 'completed',
     plan_id: null,
@@ -97,7 +97,7 @@ describe('command center rules', () => {
     const signals = buildCommandCenterSignals({
       now: new Date('2026-07-06T02:00:00.000Z'),
       tasks: [
-        task({ id: 'failed', status: 'failed', title: '失败任务', error_message: '执行失败' }),
+        task({ id: 'failed', status: 'failed', title: '失败作品', error_message: '执行失败' }),
       ],
       plans: [],
       projects: [project()],
@@ -192,7 +192,7 @@ describe('command center rules', () => {
     expect(signals.readiness.publishingReady).toBe(true)
     expect(signals.readiness.checks.projects.status).toBe('ready')
     expect(signals.readiness.checks.apiKeys.status).toBe('unknown')
-    expect(signals.readiness.checks.publishing.description).toBe('1 个项目已配置公众号发布流程')
+    expect(signals.readiness.checks.publishing.description).toBe('1 个创作项目已配置公众号发布流程')
   })
 
   it('places setup review before generic creation when platform keys are not ready', () => {
@@ -210,7 +210,7 @@ describe('command center rules', () => {
       'connect-settings',
       'create-task',
     ])
-    expect(actions[0].description).toBe('确认平台密钥和接入状态后再创建任务')
+    expect(actions[0].description).toBe('确认平台密钥和接入状态后再创建作品')
     expect(actions[0].description).not.toContain('模型配置')
   })
 

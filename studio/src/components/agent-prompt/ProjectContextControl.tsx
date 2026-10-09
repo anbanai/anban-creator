@@ -88,7 +88,7 @@ function projectGroups(
 ): ProjectContextGroup[] {
   const result: ProjectContextGroup[] = []
   if (allowNoProject) result.push({ value: '上下文', items: [noProjectItem] })
-  if (projects.length) result.push({ value: '项目', items: projects.map((project) => ({ ...project, kind: 'project' })) })
+  if (projects.length) result.push({ value: '创作项目', items: projects.map((project) => ({ ...project, kind: 'project' })) })
   return result
 }
 
@@ -97,13 +97,13 @@ function SelectProjectContext({
   value,
   onValueChange,
   allowNoProject = false,
-  noProjectLabel = '不使用项目',
+  noProjectLabel = '不使用创作项目',
   createProjectHref,
   loading = false,
   disabled = false,
-  placeholder = '选择项目...',
+  placeholder = '选择创作项目...',
   compact = false,
-  ariaLabel = '项目上下文',
+  ariaLabel = '创作项目上下文',
   showAgents = true,
 }: ProjectContextSelectProps) {
   const noProjectItem = useMemo<NoProjectItem>(() => ({
@@ -173,7 +173,7 @@ function SelectProjectContext({
             {loading ? (
               <span className="flex items-center gap-1.5">
                 <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
-                加载项目...
+                加载创作项目...
               </span>
             ) : selected?.kind === 'project' ? (
               <ProjectIdentity
@@ -185,8 +185,8 @@ function SelectProjectContext({
           </span>
         </ComboboxTrigger>
         <ComboboxContent className="w-[min(36rem,calc(100vw-2rem))] min-w-0">
-          <ComboboxInput showTrigger={false} placeholder="搜索项目..." />
-          <ComboboxEmpty className="min-h-20 items-center">没有可用项目</ComboboxEmpty>
+          <ComboboxInput showTrigger={false} placeholder="搜索创作项目..." />
+          <ComboboxEmpty className="min-h-20 items-center">没有可用创作项目</ComboboxEmpty>
           <ComboboxList className="grid grid-cols-1 px-2 pb-2 pt-1 sm:grid-cols-2 sm:gap-x-2 sm:gap-y-1">
             {(group: ProjectContextGroup) => (
               <ComboboxGroup
@@ -229,14 +229,14 @@ function SelectProjectContext({
                 )}
               >
                 <PlusIcon data-icon="inline-start" />
-                新建项目
+                新建创作项目
               </Link>
             </>
           ) : null}
         </ComboboxContent>
       </Combobox>
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-        {loading ? '正在加载项目' : ''}
+        {loading ? '正在加载创作项目' : ''}
       </span>
     </div>
   )
@@ -258,7 +258,7 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
             compact={props.compact}
             showAgents={props.showAgents}
           />
-        ) : props.noProjectLabel ?? '未关联项目'}
+        ) : props.noProjectLabel ?? '未关联创作项目'}
       </div>
     )
   }

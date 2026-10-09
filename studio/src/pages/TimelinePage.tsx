@@ -118,20 +118,20 @@ export default function TimelinePage() {
   const pauseMutation = useMutation({
     mutationFn: (planId: string) => api.plans.pause(planId),
     onSuccess: () => {
-      toast.success('计划已暂停')
+      toast.success('排期已暂停')
       void queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
       void refetch()
     },
-    onError: (error) => toast.error(getApiErrorMessage(error, '暂停计划失败')),
+    onError: (error) => toast.error(getApiErrorMessage(error, '暂停排期失败')),
   })
   const resumeMutation = useMutation({
     mutationFn: (planId: string) => api.plans.resume(planId),
     onSuccess: () => {
-      toast.success('计划已恢复')
+      toast.success('排期已恢复')
       void queryClient.invalidateQueries({ queryKey: queryKeys.plans.all })
       void refetch()
     },
-    onError: (error) => toast.error(getApiErrorMessage(error, '恢复计划失败')),
+    onError: (error) => toast.error(getApiErrorMessage(error, '恢复排期失败')),
   })
 
   // Sort items
@@ -195,7 +195,7 @@ export default function TimelinePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="时间线" description="按日期查看计划与任务的排期和执行结果。">
+      <PageHeader title="时间线" description="按日期查看排期与作品的执行情况。">
         <Button variant="secondary" size="sm" className="min-h-11" onClick={() => refetch()}>
           <RefreshCw className="h-3.5 w-3.5" />
           刷新
@@ -339,9 +339,9 @@ export default function TimelinePage() {
         <EmptyState
           icon={Calendar}
           title="没有排期内容"
-          description="创建计划或任务后，这里会按时间线展示你的创作排期。"
-          action={{ label: '新建任务', onClick: () => navigate('/tasks?create=true') }}
-          secondaryAction={{ label: '新建计划', onClick: () => navigate('/plans') }}
+          description="创建排期或作品后，这里会按时间线展示执行情况。"
+          action={{ label: '新建作品', onClick: () => navigate('/tasks?create=true') }}
+          secondaryAction={{ label: '新建排期', onClick: () => navigate('/plans') }}
         />
       ) : (
         <div className="space-y-8">
@@ -371,7 +371,7 @@ export default function TimelinePage() {
                         const itemStatusLabel = item.type === 'plan'
                           ? (planStatusLabel[item.status as PlanStatus] || item.status)
                           : (taskStatusLabel[item.status as TaskStatus] || item.status)
-                        const planActionLabel = item.title || item.project_name || '定时创作计划'
+                        const planActionLabel = item.title || item.project_name || '定时排期'
 
                         return (
                           <div
@@ -423,18 +423,18 @@ export default function TimelinePage() {
                                   <div className="flex items-center justify-end">
                                     {item.status === 'active' && (
                                       <Tooltip>
-                                        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label={`暂停计划：${planActionLabel}`} disabled={pauseMutation.isPending || resumeMutation.isPending} onClick={() => pauseMutation.mutate(item.id)} />}>
+                                        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label={`暂停排期：${planActionLabel}`} disabled={pauseMutation.isPending || resumeMutation.isPending} onClick={() => pauseMutation.mutate(item.id)} />}>
                                           {pauseMutation.isPending && pauseMutation.variables === item.id ? <Loader2 className="size-4 animate-spin" /> : <Pause className="size-4" />}
                                         </TooltipTrigger>
-                                        <TooltipContent>暂停计划</TooltipContent>
+                                        <TooltipContent>暂停排期</TooltipContent>
                                       </Tooltip>
                                     )}
                                     {item.status === 'paused' && (
                                       <Tooltip>
-                                        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label={`恢复计划：${planActionLabel}`} disabled={pauseMutation.isPending || resumeMutation.isPending} onClick={() => resumeMutation.mutate(item.id)} />}>
+                                        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label={`恢复排期：${planActionLabel}`} disabled={pauseMutation.isPending || resumeMutation.isPending} onClick={() => resumeMutation.mutate(item.id)} />}>
                                           {resumeMutation.isPending && resumeMutation.variables === item.id ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
                                         </TooltipTrigger>
-                                        <TooltipContent>恢复计划</TooltipContent>
+                                        <TooltipContent>恢复排期</TooltipContent>
                                       </Tooltip>
                                     )}
                                   </div>
@@ -458,7 +458,7 @@ export default function TimelinePage() {
       {hasRunningItems && (
         <div className="fixed bottom-4 left-4 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground shadow-lg">
           <span className="h-2 w-2 animate-pulse-dot rounded-full bg-primary" />
-          自动刷新中（运行中的任务）
+          自动刷新中（运行中的作品）
         </div>
       )}
     </div>

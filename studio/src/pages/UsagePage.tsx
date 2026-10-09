@@ -42,7 +42,7 @@ export default function UsagePage() {
   if (isError) {
     return (
       <div className="space-y-6">
-        <PageHeader title="任务用量" description="查看各类创作任务数量。" />
+        <PageHeader title="作品用量" description="查看各类作品数量。" />
         <QueryErrorState onRetry={() => refetch()} />
       </div>
     )
@@ -53,7 +53,7 @@ export default function UsagePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="任务用量" description="查看各类创作任务数量。">
+      <PageHeader title="作品用量" description="查看各类作品数量。">
         <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
           {dateRangeOptions.map(({ value, label }) => (
             <button
@@ -71,7 +71,7 @@ export default function UsagePage() {
 
       {isLoading ? <StatsCardSkeleton /> : (
         <div className="max-w-sm">
-          <StatsCard title="任务数" value={stats.total_tasks.toLocaleString()} description="按创建时间统计" />
+          <StatsCard title="作品数" value={stats.total_tasks.toLocaleString()} description="按创建时间统计" />
         </div>
       )}
 
@@ -82,7 +82,7 @@ export default function UsagePage() {
         {isLoading ? (
           <div className="p-4 text-sm text-muted-foreground">加载中...</div>
         ) : byType.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">当前时间范围内暂无任务</div>
+          <div className="p-8 text-center text-sm text-muted-foreground">当前时间范围内暂无作品</div>
         ) : (
           <div className="divide-y divide-border">
             {byType.map(([type, entry]) => (

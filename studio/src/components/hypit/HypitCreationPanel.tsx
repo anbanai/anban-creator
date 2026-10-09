@@ -40,7 +40,7 @@ export function HypitCreationPanel({ form, defaults = false, remix = false, sour
       <FormField control={form.control} name={`${root}.preferences.aspect_ratio`} render={({ field }) => <FormItem><FormLabel>视频比例</FormLabel><select aria-label="复刻视频比例" className="h-9 rounded border bg-background px-2" {...field} value={field.value ?? 'source'}><option value="source">跟随参考视频</option> {['9:16', '16:9', '1:1'].map(v => <option key={v}>{v}</option>)}</select><FormDescription>跟随参考视频会沿用源比例；指定比例会按新构图重新排版画面。</FormDescription><FormMessage /></FormItem>} />
       <FormField control={form.control} name={`${root}.preferences.language`} render={({ field }) => <FormItem><FormLabel>语言</FormLabel><Input aria-label="语言" {...field} value={field.value ?? ''} placeholder="跟随参考视频" /><FormDescription>指定成片字幕与配音的语言；留空跟随参考视频。</FormDescription><FormMessage /></FormItem>} />
     </div>
-    {defaults && <FormField control={form.control} name={`${root}.asset_guidance`} render={({ field }) => <FormItem><FormLabel>素材使用说明</FormLabel><Textarea aria-label="素材使用说明" {...field} value={field.value ?? ''} /><FormDescription>该项目的长期素材规则，例如必须保留的镜头或禁用内容。</FormDescription><FormMessage /></FormItem>} />}
+    {defaults && <FormField control={form.control} name={`${root}.asset_guidance`} render={({ field }) => <FormItem><FormLabel>素材使用说明</FormLabel><Textarea aria-label="素材使用说明" {...field} value={field.value ?? ''} /><FormDescription>该创作项目的长期素材规则，例如必须保留的镜头或禁用内容。</FormDescription><FormMessage /></FormItem>} />}
     {validation && <p role="alert" className="text-sm text-destructive">{validation}</p>}
   </section>
 }

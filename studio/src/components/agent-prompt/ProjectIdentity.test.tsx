@@ -37,7 +37,7 @@ describe('ProjectIdentity', () => {
   })
 
   it('uses the platform default Agent until a project has durable Agent activity', () => {
-    render(<ProjectIdentity compact project={{ id: 'fresh', name: '新种草项目', platform: 'seednote' }} />)
+    render(<ProjectIdentity compact project={{ id: 'fresh', name: '新种草创作项目', platform: 'seednote' }} />)
 
     expect(document.querySelector('[data-agent-id="seednote"]')).toBeInTheDocument()
     expect(screen.queryByText('尚未关联 Agent')).not.toBeInTheDocument()

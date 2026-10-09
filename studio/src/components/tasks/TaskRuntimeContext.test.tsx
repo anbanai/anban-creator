@@ -21,7 +21,7 @@ const task = {
       status: 'conflict',
       label: '春日生活号',
       snapshot_id: 'snapshot-safe-id',
-      summary: '轻松生活方式 · 任务已冻结',
+      summary: '轻松生活方式 · 作品已冻结',
       changed_since_snapshot: true,
     },
     execution: {
@@ -59,7 +59,7 @@ describe('TaskRuntimeContext', () => {
     expect(screen.getByText('7 / 8 个')).toBeInTheDocument()
     expect(screen.getAllByText('点击查看详情')).toHaveLength(2)
     expect(screen.getByText('模型和 MCP 正常')).toBeInTheDocument()
-    expect(screen.getByText('项目已更新，任务仍使用冻结版本')).toBeInTheDocument()
+    expect(screen.getByText('创作项目已更新，作品仍使用冻结版本')).toBeInTheDocument()
   })
 
   it('opens a detail sheet with safe technical identifiers only', () => {

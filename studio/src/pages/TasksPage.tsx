@@ -106,7 +106,7 @@ export default function TasksPage() {
     if (projects.length > 0) return
 
     setModalOpen(false)
-    toast.error('请先创建一个项目，再开始新建任务。')
+    toast.error('请先创建一个创作项目，再开始新建作品。')
     navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
   }, [projects.length, projectsLoading, modalOpen, navigate, createIntent.type, createIntent.intent])
 
@@ -230,7 +230,7 @@ export default function TasksPage() {
   // summary. Each operates only on the subset it can act on; on success we toast
   // the succeeded/skipped counts, invalidate the list, and clear the selection.
   const toastBulk = (verb: string, res: { succeeded: number; skipped: number }) =>
-    toast.success(`已${verb} ${res.succeeded} 个任务${res.skipped ? `，跳过 ${res.skipped} 个` : ''}`)
+    toast.success(`已${verb} ${res.succeeded} 个作品${res.skipped ? `，跳过 ${res.skipped} 个` : ''}`)
   const onBulkDone = (res: { succeeded: number; skipped: number }) => {
     setSelectedTaskIds([])
     setBulkAction(null)
@@ -278,7 +278,7 @@ export default function TasksPage() {
       return
     }
     if (projects.length === 0) {
-      toast.error('请先创建一个项目，再开始新建任务。')
+      toast.error('请先创建一个创作项目，再开始新建作品。')
       navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
       return
     }
@@ -304,7 +304,7 @@ export default function TasksPage() {
   function handleBulkDownload() {
     const taskIds = selectedCompletedTasks.map((task) => task.id)
     if (taskIds.length === 0) {
-      toast.error('请选择已完成的任务')
+      toast.error('请选择已完成的作品')
       return
     }
     bulkDownloadMutation.mutate(taskIds)
@@ -325,16 +325,16 @@ export default function TasksPage() {
 
   const bulkActionCopy: Record<string, { title: string; desc: string }> = {
     cancel: {
-      title: '批量取消任务？',
+      title: '批量取消作品？',
       desc: `已选 ${selectedTasks.length} 个，其中 ${selectedCancellable.length} 个可取消，其余将跳过。未消耗的部分将退还积分，此操作不可撤销。`,
     },
     clone: {
-      title: '批量克隆任务？',
-      desc: `已选 ${selectedTasks.length} 个，其中 ${selectedCloneable.length} 个可克隆，其余将跳过。克隆会按新任务重新计费，原任务保留。`,
+      title: '批量克隆作品？',
+      desc: `已选 ${selectedTasks.length} 个，其中 ${selectedCloneable.length} 个可克隆，其余将跳过。克隆会按新作品重新计费，原作品保留。`,
     },
     delete: {
-      title: '批量删除任务？',
-      desc: `已选 ${selectedTasks.length} 个，其中 ${selectedDeletable.length} 个可删除，其余将跳过。将永久删除任务及其产出文件，不可恢复。`,
+      title: '批量删除作品？',
+      desc: `已选 ${selectedTasks.length} 个，其中 ${selectedDeletable.length} 个可删除，其余将跳过。将永久删除作品及其产出文件，不可恢复。`,
     },
   }
 
@@ -357,37 +357,37 @@ export default function TasksPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="任务"
+        title="作品"
         description={
           queueStats.active > 0
-            ? <>已加载：{queueStats.active} 个任务等待或执行中</>
+            ? <>已加载：{queueStats.active} 个作品等待或执行中</>
             : '查看进度、产物与发布状态。'
         }
       >
         <Button className="min-h-11" onClick={openCreate}>
           <Plus className="h-4 w-4" />
-          新建任务
+          新建作品
         </Button>
       </PageHeader>
 
       {planFilter ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
-          <span>正在查看此计划生成的任务</span>
+          <span>正在查看此排期生成的作品</span>
           <div className="flex items-center gap-3">
-            <Link to="/plans" className="inline-flex min-h-11 items-center text-primary hover:underline">返回计划</Link>
+            <Link to="/plans" className="inline-flex min-h-11 items-center text-primary hover:underline">返回排期</Link>
             <Button variant="ghost" size="sm" className="min-h-11" onClick={() => {
               setSelectedTaskIds([])
               setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('plan_id'); return next }, { replace: true })
-            }}>查看全部任务</Button>
+            }}>查看全部作品</Button>
           </div>
         </div>
       ) : null}
 
       {!isLoading && !isError && (
-        <section aria-label="任务状态概览" className="overflow-hidden rounded-lg border border-border bg-card">
+        <section aria-label="作品状态概览" className="overflow-hidden rounded-lg border border-border bg-card">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border/70 px-3 py-2.5">
-            <h2 className="text-sm font-semibold text-foreground">任务状态</h2>
-            <p className="text-xs text-muted-foreground">状态数量按当前已加载任务统计</p>
+            <h2 className="text-sm font-semibold text-foreground">作品状态</h2>
+            <p className="text-xs text-muted-foreground">状态数量按当前已加载作品统计</p>
           </div>
           <div className="grid grid-cols-2 divide-x divide-y divide-border/70 sm:grid-cols-5 sm:divide-y-0">
             {statusTabs.filter((tab) => tab.value !== 'all').map((tab) => (
@@ -395,7 +395,7 @@ export default function TasksPage() {
                 key={tab.value}
                 type="button"
                 className="flex min-h-11 min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
-                aria-label={`筛选${tab.label}任务`}
+                aria-label={`筛选${tab.label}作品`}
                 onClick={() => {
                   setStatusFilter(tab.value)
                   setSearchParams((current) => {
@@ -416,20 +416,20 @@ export default function TasksPage() {
       )}
 
       {queueStats.failed > 0 && (
-        <div role="alert" aria-label="失败任务提醒" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm">
+        <div role="alert" aria-label="失败作品提醒" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm">
           <div className="flex min-w-0 items-start gap-2.5">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <div className="min-w-0">
-              <p className="font-medium text-foreground">需要处理 · {queueStats.failed} 个失败任务</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">进入详情查看失败原因，并继续执行或克隆任务。</p>
+              <p className="font-medium text-foreground">需要处理 · {queueStats.failed} 个失败作品</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">进入详情查看失败原因，并继续执行或克隆作品。</p>
             </div>
           </div>
           <Link
             to={`/tasks?${failedTaskParams}`}
-            aria-label={`查看失败任务，${queueStats.failed} 个失败任务`}
+            aria-label={`查看失败作品，${queueStats.failed} 个失败作品`}
             className="shrink-0 text-sm font-medium text-destructive hover:underline"
           >
-            查看失败任务
+            查看失败作品
           </Link>
         </div>
       )}
@@ -437,7 +437,7 @@ export default function TasksPage() {
       {/* Filters apply to the task queue; text search covers tasks loaded so far. */}
       <div className="flex flex-wrap items-center gap-3">
         {/* Status filter tabs */}
-        <div className="flex max-w-full flex-wrap gap-1 rounded-lg bg-muted p-1" role="group" aria-label="任务状态">
+        <div className="flex max-w-full flex-wrap gap-1 rounded-lg bg-muted p-1" role="group" aria-label="作品状态">
           {statusTabs.map((tab) => (
             <button
               key={tab.value}
@@ -476,7 +476,7 @@ export default function TasksPage() {
           <SearchInput
             value={searchFilter}
             onChange={setSearchFilter}
-            placeholder="搜索已加载任务..."
+            placeholder="搜索已加载作品..."
           />
         </div>
       </div>
@@ -517,23 +517,23 @@ export default function TasksPage() {
       ) : filteredTasks.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
-          title={planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all' ? '此计划还没有生成任务' : searchFilter.trim() || projectFilter ? '未找到匹配的任务' : statusFilter === 'all' ? '还没有任务' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的任务`}
+          title={planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all' ? '此排期还没有生成作品' : searchFilter.trim() || projectFilter ? '未找到匹配的作品' : statusFilter === 'all' ? '还没有作品' : `没有${taskStatusLabel[statusFilter as TaskStatus]}的作品`}
           description={
             planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all'
-              ? '计划会按排期自动创建任务，可返回计划检查排期与启用状态。'
+              ? '系统会按排期自动创建作品，可返回排期检查时间与启用状态。'
               : searchFilter.trim() || projectFilter
-              ? '试试其他关键词、清空筛选，或继续向下滚动加载任务。搜索仅匹配已加载任务。'
+              ? '试试其他关键词、清空筛选，或继续向下滚动加载作品。搜索仅匹配已加载作品。'
               : statusFilter === 'all'
               ? projects.length === 0
-                ? '先创建一个项目，再开始生成内容。'
-                : '创建任务开始生成内容。'
-              : '尝试其他筛选条件或创建新任务。'
+                ? '先创建一个创作项目，再开始生成内容。'
+                : '创建作品开始生成内容。'
+              : '尝试其他筛选条件或创建新作品。'
           }
           action={
             !planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all'
               ? projects.length === 0
-                ? { label: '去创建项目', onClick: () => navigate('/projects') }
-                : { label: '新建任务', onClick: openCreate }
+                ? { label: '去创建创作项目', onClick: () => navigate('/projects') }
+                : { label: '新建作品', onClick: openCreate }
               : undefined
           }
         />
@@ -551,7 +551,7 @@ export default function TasksPage() {
                   已选 {selectedTaskIds.length} 个，{selectedCompletedTasks.length} 个可下载
                 </span>
                 {selectedTaskIds.length > selectedCompletedTasks.length && (
-                  <span className="text-xs text-muted-foreground">仅打包已完成任务</span>
+                  <span className="text-xs text-muted-foreground">仅打包已完成作品</span>
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -619,7 +619,7 @@ export default function TasksPage() {
                   <div className="flex items-start gap-3">
                     <button
                       type="button"
-                      aria-label={selected ? '取消选择任务' : '选择任务'}
+                      aria-label={selected ? '取消选择作品' : '选择作品'}
                       aria-pressed={selected}
                       onClick={(e) => {
                         e.preventDefault()
@@ -638,10 +638,10 @@ export default function TasksPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type) + ' 任务'}</h3>
+                          <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type)}</h3>
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
-                          {project ? <span className="max-w-[min(16rem,42vw)] truncate text-muted-foreground">{project.name}</span> : <span>未设置项目</span>}
+                          {project ? <span className="max-w-[min(16rem,42vw)] truncate text-muted-foreground">{project.name}</span> : <span>未设置创作项目</span>}
                           <span className={actionSignal.tone === 'risk' ? 'font-medium text-destructive' : 'font-medium text-foreground'}>{stage.title}</span>
                           {actionSignal.tone === 'risk' && <span>{actionSignal.hint}</span>}
                           <span aria-label={`最近活动：${formatDateTimeCN(activityAt)}`}>最近活动：{formatDateTimeCN(activityAt)}</span>
@@ -677,13 +677,13 @@ export default function TasksPage() {
       {!isLoading && !isError && (filteredTasks.length > 0 || hasNextPage || isFetchingNextPage) && (
         <div ref={loadMoreRef} className="flex min-h-12 items-center justify-center pt-3" aria-live="polite">
           {isFetchingNextPage ? (
-            <span className="text-sm text-muted-foreground">正在加载更多任务...</span>
+            <span className="text-sm text-muted-foreground">正在加载更多作品...</span>
           ) : hasNextPage ? (
             <Button variant="ghost" size="sm" className="min-h-11" onClick={() => fetchNextPage()}>
               继续加载
             </Button>
           ) : (
-            <span className="text-xs text-muted-foreground">已加载全部任务</span>
+            <span className="text-xs text-muted-foreground">已加载全部作品</span>
           )}
         </div>
       )}
@@ -724,7 +724,7 @@ export default function TasksPage() {
               />
               <p className="text-sm text-muted-foreground" aria-live="polite">
                 {bulkCloneTotal === undefined
-                  ? '暂时无法获取所选配置的任务价格'
+                  ? '暂时无法获取所选配置的创作价格'
                   : `预计总计 ${bulkCloneTotal.toLocaleString()} 积分`}
               </p>
             </section>
@@ -736,7 +736,7 @@ export default function TasksPage() {
               disabled={bulkAnyPending || (bulkAction === 'clone' && (!bulkExecutionProfile || bulkCloneTotal === undefined))}
               onClick={confirmBulkAction}
             >
-              确认{bulkAction === 'delete' ? '删除' : bulkAction === 'cancel' ? '取消任务' : bulkAction === 'clone' ? '克隆' : ''}
+              确认{bulkAction === 'delete' ? '删除' : bulkAction === 'cancel' ? '取消作品' : bulkAction === 'clone' ? '克隆' : ''}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

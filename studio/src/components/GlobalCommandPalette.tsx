@@ -22,9 +22,9 @@ import { useAuth } from '@/contexts/AuthContext'
 
 const shortcutMap: Record<string, string> = {
   '首页': 'g d',
-  '项目': 'g c',
-  '计划': 'g p',
-  '任务': 'g t',
+  '创作项目': 'g c',
+  '排期': 'g p',
+  '作品': 'g t',
   '时间线': 'g l',
   '钱包': 'g $',
   '设置': 'g s',
@@ -120,8 +120,8 @@ export default function GlobalCommandPalette() {
   }, [])
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title="行动面板" description="搜索命令、任务或下一步动作">
-      <CommandInput placeholder="搜索动作、任务、页面..." />
+    <CommandDialog open={open} onOpenChange={setOpen} title="行动面板" description="搜索命令、作品或下一步动作">
+      <CommandInput placeholder="搜索动作、作品、页面..." />
       <CommandList>
         <CommandEmpty>没有找到匹配项</CommandEmpty>
 
@@ -138,7 +138,7 @@ export default function GlobalCommandPalette() {
           {nextActions.length === 0 && (
             <CommandItem onSelect={() => handleSelect(() => navigate(createTaskHref({ type: defaultProject?.platform === 'wechat' ? 'wechat-article' : defaultProject?.platform || undefined, projectId: defaultProject?.id, intent: 'new' })))}>
               <Plus className="mr-2 h-4 w-4" />
-              新建创作任务
+              新建作品
             </CommandItem>
           )}
         </CommandGroup>
@@ -156,11 +156,11 @@ export default function GlobalCommandPalette() {
           </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => navigate('/plans?create=true&type=wechat-article&intent=schedule'))}>
             <ListChecks className="mr-2 h-4 w-4" />
-            创建自动计划
+            创建自动排期
           </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => navigate(projectsReturnHref({ type: 'seednote', intent: 'new' })))}>
             <FolderPlus className="mr-2 h-4 w-4" />
-            新建项目
+            新建创作项目
           </CommandItem>
         </CommandGroup>
 
@@ -170,7 +170,7 @@ export default function GlobalCommandPalette() {
           {failedTasks.map((task) => (
             <CommandItem key={task.id} onSelect={() => handleSelect(() => navigate(`/tasks/${task.id}`))}>
               <AlertTriangle className="mr-2 h-4 w-4" />
-              {task.title || task.prompt || '失败任务'}
+              {task.title || task.prompt || '失败作品'}
             </CommandItem>
           ))}
           <CommandItem onSelect={() => handleSelect(() => navigate('/tasks?status=failed'))}>

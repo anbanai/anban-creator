@@ -132,12 +132,12 @@ export function TaskContextSummary({
           <SummaryItem
             compact={compact}
             layout={layout}
-            actionLabel="打开任务概览"
+            actionLabel="打开作品概览"
             descriptionId={`${descriptionIdPrefix}-overview`}
             icon={ClipboardList}
             index={0}
-            label="任务来源"
-            value={task.plan_id ? '计划任务' : '手动创建'}
+            label="作品来源"
+            value={task.plan_id ? '排期生成' : '手动创建'}
             detail="创建方式"
             detailSuffix={showBillingDetail ? `累计扣费 ${(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分` : undefined}
             onClick={() => onOpenTab('overview')}
@@ -164,7 +164,7 @@ export function TaskContextSummary({
             index={2}
             label="参考素材"
             value={`${attachmentCount} 项输入`}
-            detail={hasReferenceSummary ? '已生成使用结论' : '仅任务输入'}
+            detail={hasReferenceSummary ? '已生成使用结论' : '仅作品输入'}
             onClick={() => onOpenTab('materials')}
           />
         </div>

@@ -218,7 +218,7 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       if (sessionID !== formSessionRef.current) return
-      toast.success(created.project.image_analysis ? '项目已创建，正在后台识别视觉风格' : '项目创建成功')
+      toast.success(created.project.image_analysis ? '创作项目已创建，正在后台识别视觉风格' : '创作项目创建成功')
       pendingProfileGuideRef.current = created.project
       resetModal(true)
       profileGuideTimerRef.current = setTimeout(() => {
@@ -229,7 +229,7 @@ export default function ProjectsPage() {
       }, 120)
     },
     onError: (err, { sessionID }) => {
-      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建项目失败，请重试'))
+      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建创作项目失败，请重试'))
     },
   })
 
@@ -272,7 +272,7 @@ export default function ProjectsPage() {
       setProfileGuideAnalysisTaskID(result.task.id)
       queryClient.setQueryData(['project-profile', profileProject?.id], result.profile)
       queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
-      toast.success('画像任务已加入队列')
+      toast.success('画像分析已加入队列')
     },
     onError: (err) => {
       if (getApiErrorMessage(err, '').includes('profile_revision_conflict')) {
@@ -363,7 +363,7 @@ export default function ProjectsPage() {
       setProfileDraft(profile)
       queryClient.setQueryData(['project-profile', profileProject?.id], profile)
       queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
-      toast.success('项目画像已确认，可用于后续创作')
+      toast.success('创作项目画像已确认，可用于后续创作')
     },
     onError: (error) => toast.error(getApiErrorMessage(error, '画像确认失败，请重试')),
   })
@@ -377,35 +377,35 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       if (sessionID !== formSessionRef.current) return
-      toast.success('项目更新成功')
+      toast.success('创作项目更新成功')
       finishProjectSave()
     },
     onError: (err, { sessionID }) => {
-      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '更新项目失败，请重试'))
+      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '更新创作项目失败，请重试'))
     },
   })
 
   const archiveMutation = useMutation({
     mutationFn: (id: string) => api.projects.archive(id),
     onSuccess: () => {
-      toast.success('项目已归档')
+      toast.success('创作项目已归档')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: () => {
-      toast.error('归档项目失败，请重试')
+      toast.error('归档创作项目失败，请重试')
     },
   })
 
   const restoreMutation = useMutation({
     mutationFn: (id: string) => api.projects.restore(id),
     onSuccess: () => {
-      toast.success('项目已恢复')
+      toast.success('创作项目已恢复')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: () => {
-      toast.error('恢复项目失败，请重试')
+      toast.error('恢复创作项目失败，请重试')
     },
   })
 
@@ -523,19 +523,19 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，可用于不同类型的任务。">
+      <PageHeader title="创作项目" description="管理品牌与创作方向、素材和风格，可用于不同类型的作品。">
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />
-          新建项目
+          新建创作项目
         </Button>
       </PageHeader>
 
       <MetricStrip
-        label="项目概览"
+        label="创作项目概览"
         metrics={[
-          { label: '项目', value: projectOverview.projects },
-          { label: '任务', value: projectOverview.tasks, detail: projectOverview.running ? `${projectOverview.running} 个运行中` : undefined },
-          { label: '完成率', value: projectOverview.completion, detail: projectOverview.completed ? `${projectOverview.completed} 个已完成` : '暂无任务' },
+          { label: '创作项目', value: projectOverview.projects },
+          { label: '作品', value: projectOverview.tasks, detail: projectOverview.running ? `${projectOverview.running} 个运行中` : undefined },
+          { label: '完成率', value: projectOverview.completion, detail: projectOverview.completed ? `${projectOverview.completed} 个已完成` : '暂无作品' },
         ]}
       />
 
@@ -546,7 +546,7 @@ export default function ProjectsPage() {
           variant="outline"
           size="sm"
           spacing={0}
-          aria-label="项目状态"
+          aria-label="创作项目状态"
         >
           {statusTabs.map((tab) => (
             <ToggleGroupItem key={tab.value} value={tab.value}>
@@ -558,7 +558,7 @@ export default function ProjectsPage() {
         <SearchInput
           value={searchFilter}
           onChange={setSearchFilter}
-          placeholder="搜索项目"
+          placeholder="搜索创作项目"
           className="w-full sm:w-64"
         />
       </div>
@@ -587,9 +587,9 @@ export default function ProjectsPage() {
       ) : filteredProjects.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有项目' : statusFilter === 'active' ? '没有活跃的项目' : '没有已归档的项目') : '未找到匹配的项目'}
-          description={!visibleProjects.length ? '创建项目后即可开始创作。' : '换个关键词试试'}
-          action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '新建项目', onClick: openCreate } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
+          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有创作项目' : statusFilter === 'active' ? '没有活跃的创作项目' : '没有已归档的创作项目') : '未找到匹配的创作项目'}
+          description={!visibleProjects.length ? '创建创作项目后即可开始创作。' : '换个关键词试试'}
+          action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '新建创作项目', onClick: openCreate } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
@@ -614,13 +614,13 @@ export default function ProjectsPage() {
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editingProject ? '编辑项目' : '新建项目'}</DialogTitle>
+            <DialogTitle>{editingProject ? '编辑创作项目' : '新建创作项目'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
             <form id="project-form" onSubmit={handleProjectSubmit} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
-                  <FormLabel className="shrink-0 w-20 text-right">项目名称</FormLabel>
+                  <FormLabel className="shrink-0 w-20 text-right">创作项目名称</FormLabel>
                   <FormControl>
                     <Input className="flex-1 min-w-0" placeholder="例如 我的科技博客" {...field} />
                   </FormControl>
@@ -631,8 +631,8 @@ export default function ProjectsPage() {
               <FormField control={form.control} name="instructions" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center gap-1">
-                    <FormLabel className="w-auto">项目定位</FormLabel>
-                    <FieldHint>每次创作都会参考这些要求，保持项目定位与表达风格一致。</FieldHint>
+                    <FormLabel className="w-auto">创作项目定位</FormLabel>
+                    <FieldHint>每次创作都会参考这些要求，保持创作项目定位与表达风格一致。</FieldHint>
                   </div>
                   <FormControl>
                     <Textarea
@@ -640,7 +640,7 @@ export default function ProjectsPage() {
                       {...field}
                     />
                   </FormControl>
-                  <FormDescription>写清受众、领域和语气；定位会作为长期约束注入每一次创作，任务里可再补充单次要求。</FormDescription>
+                  <FormDescription>写清受众、领域和语气；定位会作为长期约束注入每一次创作，作品里可再补充单次要求。</FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -694,10 +694,10 @@ export default function ProjectsPage() {
               )} />
 
               <div className="flex items-center gap-3 rounded-md border border-border p-3">
-                {editingProject?.portrait_reference_image ? <img src={editingProject.portrait_reference_image.download_url} alt="项目默认人物参考" className="h-12 w-12 shrink-0 rounded-md border object-cover" /> : null}
+                {editingProject?.portrait_reference_image ? <img src={editingProject.portrait_reference_image.download_url} alt="创作项目默认人物参考" className="h-12 w-12 shrink-0 rounded-md border object-cover" /> : null}
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-foreground">人物参考</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">人物参考图保留为任务和计划的默认值，可在任务或计划中单独更换。</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">人物参考图保留为作品和排期的默认值，可在作品或排期中单独更换。</p>
                   {editingProject?.portrait_reference_image ? <p className="mt-1 truncate text-xs text-muted-foreground">当前默认：{editingProject.portrait_reference_image.file_name}</p> : null}
                 </div>
               </div>
@@ -715,7 +715,7 @@ export default function ProjectsPage() {
       <Dialog open={profileModalOpen} onOpenChange={(open) => { if (!open) closeProfile() }}>
         <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
           <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
-            <DialogTitle>{profileWizardMode ? '项目画像引导' : '项目画像'}</DialogTitle>
+            <DialogTitle>{profileWizardMode ? '创作项目画像引导' : '创作项目画像'}</DialogTitle>
           </DialogHeader>
           {profileWizardMode && profileWizardStep < 4 ? (
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
@@ -725,8 +725,8 @@ export default function ProjectsPage() {
               </div>
               {profileWizardStep === 0 ? (
                 <div className="space-y-5">
-                  <label className="block space-y-1.5 text-sm font-medium">项目名称
-                    <Input aria-label="画像项目名称" value={profileAnswers.basic.project_name} onChange={(event) => setProfileAnswers((current) => ({ ...current, basic: { ...current.basic, project_name: event.target.value } }))} />
+                  <label className="block space-y-1.5 text-sm font-medium">创作项目名称
+                    <Input aria-label="画像创作项目名称" value={profileAnswers.basic.project_name} onChange={(event) => setProfileAnswers((current) => ({ ...current, basic: { ...current.basic, project_name: event.target.value } }))} />
                   </label>
                   <fieldset className="space-y-2">
                     <legend className="text-sm font-medium">运营状态</legend>
@@ -791,7 +791,7 @@ export default function ProjectsPage() {
             </div>
           ) : (
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-              {!profileWizardMode && profileQuery.isPending ? <p className="text-sm text-muted-foreground" role="status">正在加载项目画像…</p> : null}
+              {!profileWizardMode && profileQuery.isPending ? <p className="text-sm text-muted-foreground" role="status">正在加载创作项目画像…</p> : null}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
                 <div>
                   <p className="text-sm font-medium">初始化状态：{profileDraft?.initialization_status ?? 'not_started'}</p>
@@ -799,9 +799,9 @@ export default function ProjectsPage() {
                 </div>
                 {!profileWizardMode && profileDraft?.status === 'confirmed' ? <Button variant="outline" size="sm" loading={profileAnalysisMutation.isPending} disabled={profileAnalysisRunning} onClick={() => profileAnalysisMutation.mutate({ retry: profileAnalysisFailed })}>更新画像</Button> : null}
               </div>
-              {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像任务已加入队列，完成后会显示可确认的结果。</p>}
-              {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像任务失败，已确认的画像保持不变，可以重试。</p>}
-              {!profileWizardMode && !profileDraft?.analysis_task_id && profileDraft?.status !== 'confirmed' ? <p className="text-sm text-muted-foreground">尚未初始化项目画像。可以稍后从这里开始，也可以直接创建任务或计划。</p> : null}
+              {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像分析已加入队列，完成后会显示可确认的结果。</p>}
+              {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像分析失败，已确认的画像保持不变，可以重试。</p>}
+              {!profileWizardMode && !profileDraft?.analysis_task_id && profileDraft?.status !== 'confirmed' ? <p className="text-sm text-muted-foreground">尚未初始化创作项目画像。可以稍后从这里开始，也可以直接创建作品或排期。</p> : null}
               {profileWizardMode && profileAnalysisFailed ? <Button variant="outline" disabled={profileAnalysisMutation.isPending} loading={profileAnalysisMutation.isPending} onClick={() => startProfileAnalysis(true)}>重试画像分析</Button> : null}
               {profileResultReady && profileDraft ? (
                 <>
@@ -840,7 +840,7 @@ export default function ProjectsPage() {
                       </div>
                     ))}
                     {profileDraft.follow_up_questions.length > 0 && <div className="text-sm text-muted-foreground">待确认问题：{profileDraft.follow_up_questions.join('；')}</div>}
-                    {profileNeedsConfirmation ? <p className="text-sm text-amber-700">这是画像草稿，确认后才会用于后续任务。</p> : null}
+                    {profileNeedsConfirmation ? <p className="text-sm text-amber-700">这是画像草稿，确认后才会用于后续作品。</p> : null}
                     {profileGuideRefreshApplied ? <p className="text-sm text-green-700" role="status">画像已更新并自动应用。</p> : null}
                   </div>
                 </>

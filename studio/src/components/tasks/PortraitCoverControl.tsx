@@ -33,14 +33,14 @@ export function PortraitCoverControl({ type, project, value, onValueChange, onUp
         <UserRound className="mt-1 h-5 w-5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-foreground">人物参考</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{hasPortrait ? isProjectDefault ? '勾选后使用项目人物与标题设计封面' : '此任务单独使用所选人物参考' : projectPortrait ? '此任务不使用人物参考' : '项目尚未设置人物参考图'}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{hasPortrait ? isProjectDefault ? '勾选后使用创作项目人物与标题设计封面' : '此作品单独使用所选人物参考' : projectPortrait ? '此作品不使用人物参考' : '创作项目尚未设置人物参考图'}</p>
           <div className="mt-2">
             <ReferenceAssetUpload
               value={displayValue}
               onChange={handleValueChange}
               purpose="project_portrait_reference"
               ariaLabel="人物参考图文件"
-              imageAlt={isProjectDefault ? '项目人物参考' : '人物参考'}
+              imageAlt={isProjectDefault ? '创作项目人物参考' : '人物参考'}
               onUploadingChange={onUploadingChange}
             />
           </div>

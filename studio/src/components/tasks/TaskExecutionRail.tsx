@@ -182,7 +182,7 @@ export function TaskExecutionRail({
       {filesLoading && <p className="px-4 py-3 text-xs text-muted-foreground" role="status">正在加载产物…</p>}
       {filesError && <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="alert">产物暂时加载失败<Button size="xs" variant="ghost" className="min-h-11" onClick={onRetryFiles}>重新加载</Button></div>}
       {groupedFiles.unassigned.length > 0 && <section aria-label="其他产物" className="mx-4 mt-4 border-t border-border/60 py-4 sm:ml-14">
-        <p className="mb-3 flex items-center gap-2 text-sm font-medium"><FolderOpen className="size-4 text-muted-foreground" />{stages.length ? '其他产物' : '任务产物'}</p>
+        <p className="mb-3 flex items-center gap-2 text-sm font-medium"><FolderOpen className="size-4 text-muted-foreground" />{stages.length ? '其他产物' : '创作产物'}</p>
         {stages.length > 0 && <p className="mb-3 text-xs text-muted-foreground">这些文件暂未关联到具体环节。</p>}
         <TaskStageFiles {...fileProps} files={groupedFiles.unassigned} />
       </section>}
@@ -253,12 +253,12 @@ export function TaskExecutionRail({
     const emptyState = status === 'running'
       ? { title: '正在制定执行计划', description: 'Agent 声明阶段后会在这里持续更新', icon: CircleDashed, iconClassName: 'border-primary/30 bg-primary/10 text-primary' }
       : status === 'failed'
-        ? { title: failure?.title || '任务未完成', description: showFailureSummary ? failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。' : '失败详情已在上方显示。', icon: XCircle, iconClassName: 'border-destructive/30 bg-destructive/10 text-destructive' }
+        ? { title: failure?.title || '作品未完成', description: showFailureSummary ? failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。' : '失败详情已在上方显示。', icon: XCircle, iconClassName: 'border-destructive/30 bg-destructive/10 text-destructive' }
         : status === 'cancelled'
-          ? { title: '执行已停止', description: '任务已取消，可从已有上下文继续。', icon: Ban, iconClassName: 'border-border bg-muted text-muted-foreground' }
+          ? { title: '执行已停止', description: '作品已取消，可从已有上下文继续。', icon: Ban, iconClassName: 'border-border bg-muted text-muted-foreground' }
           : status === 'completed'
-            ? { title: '任务已完成', description: '执行结果已经保存', icon: Check, iconClassName: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' }
-            : { title: '等待任务开始', description: '启动后会在这里显示执行阶段', icon: Clock3, iconClassName: 'border-border bg-background text-muted-foreground' }
+            ? { title: '作品已完成', description: '执行结果已经保存', icon: Check, iconClassName: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' }
+            : { title: '等待作品开始', description: '启动后会在这里显示执行阶段', icon: Clock3, iconClassName: 'border-border bg-background text-muted-foreground' }
     const EmptyStateIcon = emptyState.icon
     return (
       <section className="rounded-xl border border-border/70 bg-card py-4" aria-labelledby="task-execution-heading">
@@ -271,7 +271,7 @@ export function TaskExecutionRail({
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-foreground">{emptyState.title}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {showFailureSummary || status !== 'failed' ? emptyState.description : '任务未完成，详情见上方结果提醒。'}
+              {showFailureSummary || status !== 'failed' ? emptyState.description : '作品未完成，详情见上方结果提醒。'}
             </p>
             {showFailureSummary && status === 'failed' && failure?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p>}
             {showFailureSummary && (status === 'failed' || status === 'cancelled') && onResume && (
@@ -293,7 +293,7 @@ export function TaskExecutionRail({
       <div className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
       {heading}
       {infrastructureError}
-      <ol className="mx-4 mt-5 sm:mx-5" aria-label="任务执行阶段">
+      <ol className="mx-4 mt-5 sm:mx-5" aria-label="执行阶段">
         {stages.map((stage, index) => {
           const unconfirmed = infrastructureFailure && stage.source === 'agent' && (stage.state === 'active' || stage.state === 'pending')
           const presentation = unconfirmed

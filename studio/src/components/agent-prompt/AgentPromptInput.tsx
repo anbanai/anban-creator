@@ -312,7 +312,7 @@ export function AgentPromptInput({
   leadingTools,
   trailingTools,
   status,
-  placeholder = '输入任务要求…',
+  placeholder = '输入作品要求…',
   submitLabel = 'Submit',
   submitIcon: SubmitIcon = ArrowUpIcon,
   submitMode = 'inline',

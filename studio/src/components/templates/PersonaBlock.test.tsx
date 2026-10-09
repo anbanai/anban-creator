@@ -102,7 +102,7 @@ describe('PersonaBlock', () => {
       <PersonaBlock author="小安" onAuthor={() => {}} writer="dan-koe" onWriter={() => {}} />,
     )
 
-    expect(screen.getByText('会写进公众号草稿的作者位；已创建的任务不随这里的修改变化。')).toBeInTheDocument()
+    expect(screen.getByText('会写进公众号草稿的作者位；已创建的作品不随这里的修改变化。')).toBeInTheDocument()
     expect(screen.getByText(/决定内容的行文语气、结构习惯和用词偏好/)).toBeInTheDocument()
   })
 })

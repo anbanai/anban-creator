@@ -115,12 +115,12 @@ export default function SettingsPage() {
       <SettingsGroupTitle
         id="execution-settings"
         title="执行环境"
-        description="任务在云端执行，关闭浏览器后仍会继续。"
+        description="创作在云端执行，关闭浏览器后仍会继续。"
       />
       <Card>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            创建任务后，可在「任务」中查看进度、下载文件并处理发布。
+            创建作品后，可在「作品」中查看进度、下载文件并处理发布。
           </p>
         </CardContent>
       </Card>
@@ -183,7 +183,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">最大并发数</p>
-              <p className="text-sm text-foreground">{user?.max_concurrent_limit ?? 2} 个任务</p>
+              <p className="text-sm text-foreground">{user?.max_concurrent_limit ?? 2} 个作品</p>
             </div>
           </div>
           <div>

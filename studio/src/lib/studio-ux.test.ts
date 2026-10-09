@@ -14,7 +14,7 @@ function project(overrides: Partial<Project> = {}): Project {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'wechat',
-    name: '公众号项目',
+    name: '公众号创作项目',
     avatar_url: '',
     profile_url: '',
     keywords: '',
@@ -36,7 +36,7 @@ function task(overrides: Partial<Task> = {}): Task {
   return {
     id: 'task-1',
     type: 'wechat-article',
-    title: '任务',
+    title: '作品',
     prompt: '写文章',
     status: 'completed',
     plan_id: null,
@@ -61,8 +61,8 @@ describe('studio business UX helpers', () => {
       }),
     ).toMatchObject({
       id: 'no-project',
-      message: '先创建一个项目，再开始创作。',
-      actionLabel: '创建项目',
+      message: '先创建一个创作项目，再开始创作。',
+      actionLabel: '创建创作项目',
       actionHref: '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
       blocking: true,
     })
@@ -142,16 +142,16 @@ describe('studio business UX helpers', () => {
 
   it('labels the primary task action signal', () => {
     expect(taskActionSignal(task({ status: 'failed', error_message: '模型超时' }))).toMatchObject({
-      label: '任务失败',
+      label: '作品失败',
       tone: 'risk',
     })
     expect(taskActionSignal(task({ status: 'failed' }))).toMatchObject({
-      label: '任务失败',
+      label: '作品失败',
       hint: '未返回失败详情',
       tone: 'risk',
     })
     expect(taskActionSignal(task({ status: 'completed' }))).toMatchObject({
-      label: '任务已完成',
+      label: '作品已完成',
       hint: '已完成',
       tone: 'success',
     })

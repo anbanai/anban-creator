@@ -75,10 +75,10 @@ export default function IlinkBindingSection() {
     setSavingProject(true)
     try {
       await api.ilink.setDefaultProject(projectId)
-      toast.success('默认项目已更新')
+      toast.success('默认创作项目已更新')
       queryClient.invalidateQueries({ queryKey: ['ilink-status'] })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '设置默认项目失败')
+      toast.error(err instanceof Error ? err.message : '设置默认创作项目失败')
     } finally {
       setSavingProject(false)
     }
@@ -105,7 +105,7 @@ export default function IlinkBindingSection() {
               )}
             </h2>
             <p className="text-xs text-muted-foreground">
-              添加平台微信助手后，可直接发消息创建任务，并及时接收任务成功或失败提醒。
+              添加平台微信助手后，可直接发消息创建作品，并及时接收作品成功或失败提醒。
             </p>
           </div>
           <Button aria-label="刷新微信绑定状态" variant="secondary" size="sm" onClick={() => refetch()} disabled={isFetching}>
@@ -123,8 +123,8 @@ export default function IlinkBindingSection() {
           <>
             {bindCode ? <BindCodePanel bindCode={bindCode.bind_code} onCopy={handleCopy} /> : null}
             <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">默认项目</p>
-              <p className="text-xs text-muted-foreground">通过微信创建任务时使用此项目。</p>
+              <p className="text-xs font-medium text-foreground">默认创作项目</p>
+              <p className="text-xs text-muted-foreground">通过微信创建作品时使用此创作项目。</p>
               <DefaultProjectSelect
                 value={status?.default_project_id ?? ''}
                 disabled={savingProject}
@@ -195,7 +195,7 @@ function DefaultProjectSelect({
   return (
     <NativeSelect value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
       <NativeSelectOption value="" disabled>
-        {isLoading ? '加载中...' : '选择默认项目'}
+        {isLoading ? '加载中...' : '选择默认创作项目'}
       </NativeSelectOption>
       {projects?.map((p) => (
         <NativeSelectOption key={p.id} value={p.id}>

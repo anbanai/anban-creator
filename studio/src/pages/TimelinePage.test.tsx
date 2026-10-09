@@ -25,7 +25,7 @@ describe('TimelinePage filters', () => {
 
     await screen.findByText('每周选题')
     expect(screen.getByTestId('status-pill')).toHaveAttribute('data-status', 'active')
-    expect(screen.getByRole('button', { name: '暂停计划：每周选题' })).toHaveClass('size-11')
+    expect(screen.getByRole('button', { name: '暂停排期：每周选题' })).toHaveClass('size-11')
     expect(screen.queryByRole('button', { name: '暂停' })).not.toBeInTheDocument()
   })
 
@@ -41,7 +41,7 @@ describe('TimelinePage filters', () => {
     vi.spyOn(api.plans, 'pause').mockReturnValueOnce(new Promise((_, reject) => { rejectPause = reject }))
     render(<TimelinePage />)
 
-    const pause = await screen.findByRole('button', { name: '暂停计划：每周选题' })
+    const pause = await screen.findByRole('button', { name: '暂停排期：每周选题' })
     fireEvent.click(pause)
     await waitFor(() => expect(pause).toBeDisabled())
     rejectPause(new Error('pause failed'))
@@ -54,10 +54,10 @@ describe('TimelinePage filters', () => {
         id: 'multi-agent-task',
         type: 'task',
         content_type: 'montage',
-        title: '多 Agent 任务',
+        title: '多 Agent 作品',
         status: 'pending',
         project_id: 'multi-agent-project',
-        project_name: '多 Agent 项目',
+        project_name: '多 Agent 创作项目',
         platform: 'wechat',
         agent_ids: ['montage', 'seednote', 'hypit'],
         scheduled_at: '2026-09-24T09:00:00Z',
@@ -66,7 +66,7 @@ describe('TimelinePage filters', () => {
       }],
     })
     render(<TimelinePage />)
-    await screen.findByText('多 Agent 任务')
+    await screen.findByText('多 Agent 作品')
     expect(document.querySelector('[data-agent-id="montage"]')).toBeInTheDocument()
     expect(document.querySelector('[data-agent-id="seednote"]')).toBeInTheDocument()
     expect(document.querySelector('[data-agent-id="hypit"]')).toBeInTheDocument()

@@ -159,7 +159,7 @@ export function PersonaBlock({
           placeholder="例如：李雷、某某实验室"
           maxLength={100}
         />
-        <p className="text-[0.8rem] text-muted-foreground">会写进公众号草稿的作者位；已创建的任务不随这里的修改变化。</p>
+        <p className="text-[0.8rem] text-muted-foreground">会写进公众号草稿的作者位；已创建的作品不随这里的修改变化。</p>
       </section>
 
       <section className="space-y-2 rounded-lg border border-input p-3">

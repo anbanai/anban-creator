@@ -68,12 +68,12 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
         <DialogHeader className="shrink-0 gap-1 border-b bg-background px-5 py-4 pr-24 sm:px-6 sm:pr-24">
           <div className="flex min-w-0 items-center gap-2">
             <Brain className="size-4 shrink-0 text-primary" />
-            <DialogTitle className="truncate text-lg">项目记忆</DialogTitle>
+            <DialogTitle className="truncate text-lg">创作项目记忆</DialogTitle>
           </div>
           <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             {project ? <ProjectIdentity project={project} compact /> : <span className="break-words font-medium text-foreground/80">{projectName}</span>}
             <span aria-hidden="true">·</span>
-            <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的项目上下文'}</span>
+            <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的创作项目上下文'}</span>
           </DialogDescription>
           <Button
             variant="outline"
@@ -85,7 +85,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
           >
             <RefreshCw className={query.isFetching ? 'animate-spin' : ''} />
           </Button>
-          <DialogClose render={<Button variant="ghost" size="icon-sm" className="absolute right-3 top-3" aria-label="关闭项目记忆" />}>
+          <DialogClose render={<Button variant="ghost" size="icon-sm" className="absolute right-3 top-3" aria-label="关闭创作项目记忆" />}>
             <X />
           </DialogClose>
         </DialogHeader>
@@ -94,14 +94,14 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
           <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground"><Loader2 className="mr-2 size-4 animate-spin" />正在读取记忆</div>
         ) : query.isError ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="text-sm font-medium">无法读取项目记忆</p>
+            <p className="text-sm font-medium">无法读取创作项目记忆</p>
             <Button variant="outline" size="sm" onClick={() => void query.refetch()}><RefreshCw />重试</Button>
           </div>
         ) : query.data?.status === 'empty' || files.length === 0 ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
             <Brain className="size-8" />
-            <p className="text-sm font-medium text-foreground">还没有项目记忆</p>
-            <p className="max-w-sm text-xs">完成一次创作后，项目会在这里积累可复用的上下文。</p>
+            <p className="text-sm font-medium text-foreground">还没有创作项目记忆</p>
+            <p className="max-w-sm text-xs">完成一次创作后，创作项目会在这里积累可复用的上下文。</p>
           </div>
         ) : (
           <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">

@@ -10,7 +10,7 @@ const currentProject: Project = {
   id: 'project-1',
   user_id: 'user-1',
   platform: 'seednote',
-  name: '后来修改的项目',
+  name: '后来修改的创作项目',
   avatar_url: '',
   profile_url: '',
   keywords: '',
@@ -87,7 +87,7 @@ describe('TaskContextSummary', () => {
     expect(screen.getByText('累计扣费 6,800 积分')).toBeInTheDocument()
     expect(facts).not.toHaveTextContent('茶小茶')
     expect(facts).not.toHaveTextContent('公众号文章')
-    expect(facts).not.toHaveTextContent('后来修改的项目')
+    expect(facts).not.toHaveTextContent('后来修改的创作项目')
     expect(facts).not.toHaveTextContent('后来修改的视觉')
   })
 
@@ -108,7 +108,7 @@ describe('TaskContextSummary', () => {
     renderSummary()
 
     const grid = screen.getByTestId('task-context-grid')
-    const overview = screen.getByRole('button', { name: '打开任务概览' })
+    const overview = screen.getByRole('button', { name: '打开作品概览' })
     const configuration = screen.getByRole('button', { name: '打开创作配置' })
     const materials = screen.getByRole('button', { name: '打开参考素材' })
 
@@ -143,7 +143,7 @@ describe('TaskContextSummary', () => {
 
     const grid = screen.getByTestId('task-context-grid')
     const actions = [
-      screen.getByRole('button', { name: '打开任务概览' }),
+      screen.getByRole('button', { name: '打开作品概览' }),
       screen.getByRole('button', { name: '打开创作配置' }),
       screen.getByRole('button', { name: '打开参考素材' }),
     ]
@@ -161,14 +161,14 @@ describe('TaskContextSummary', () => {
     renderSummary()
 
     const actions = [
-      screen.getByRole('button', { name: '打开任务概览' }),
+      screen.getByRole('button', { name: '打开作品概览' }),
       screen.getByRole('button', { name: '打开创作配置' }),
       screen.getByRole('button', { name: '打开参考素材' }),
     ]
 
     expect(actions[0]).toHaveAccessibleDescription(/手动创建.*创建方式.*累计扣费 6,800 积分/)
     expect(actions[1]).toHaveAccessibleDescription(/清新茶感摄影.*画幅 3:4/)
-    expect(actions[2]).toHaveAccessibleDescription(/0 项输入.*仅任务输入/)
+    expect(actions[2]).toHaveAccessibleDescription(/0 项输入.*仅作品输入/)
 
     const descriptionIds = actions.map((action) => action.getAttribute('aria-describedby'))
     expect(descriptionIds.every(Boolean)).toBe(true)
@@ -182,7 +182,7 @@ describe('TaskContextSummary', () => {
     const onOpenTab = vi.fn()
     renderSummary({ onOpenTab })
 
-    fireEvent.click(screen.getByRole('button', { name: '打开任务概览' }))
+    fireEvent.click(screen.getByRole('button', { name: '打开作品概览' }))
     fireEvent.click(screen.getByRole('button', { name: '打开创作配置' }))
     fireEvent.click(screen.getByRole('button', { name: '打开参考素材' }))
 
@@ -203,19 +203,19 @@ describe('TaskContextSummary', () => {
       },
       project: {
         ...currentProject,
-        name: '当前项目',
+        name: '当前创作项目',
         visual_style: '',
         image_ratio: '',
       },
       files: [],
     })
 
-    expect(screen.queryByText('当前项目')).not.toBeInTheDocument()
+    expect(screen.queryByText('当前创作项目')).not.toBeInTheDocument()
     expect(screen.queryByText('公众号文章')).not.toBeInTheDocument()
     expect(screen.getByText('未设置风格')).toBeInTheDocument()
     expect(screen.getByText('未指定画幅')).toBeInTheDocument()
     expect(screen.getByText('0 项输入')).toBeInTheDocument()
-    expect(screen.getByText('仅任务输入')).toBeInTheDocument()
+    expect(screen.getByText('仅作品输入')).toBeInTheDocument()
   })
 
   it('does not request file lists, content, previews, or downloads', () => {

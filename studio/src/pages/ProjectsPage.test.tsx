@@ -17,7 +17,7 @@ const projectWithReference: Project = {
   id: 'ch-1',
   user_id: '1',
   platform: 'wechat',
-  name: '测试项目',
+  name: '测试创作项目',
   avatar_url: '',
   profile_url: 'https://mp.weixin.qq.com/test',
   instructions: '测试定位',
@@ -178,7 +178,7 @@ describe('ProjectsPage', () => {
 
   it('does not repeat workspace navigation already available in the sidebar', async () => {
     render(<ProjectsPage />)
-    await screen.findByRole('heading', { name: '项目' })
+    await screen.findByRole('heading', { name: '创作项目' })
     expect(screen.queryByRole('navigation', { name: '工作区导航' })).not.toBeInTheDocument()
   })
 
@@ -190,11 +190,11 @@ describe('ProjectsPage', () => {
   it('requires a nonblank project name before creating a shared project', async () => {
     window.history.pushState({}, '', '/projects?create=true')
     render(<ProjectsPage />)
-    await screen.findByRole('dialog', { name: '新建项目' })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
     fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '   ' } })
     if (!screen.getByPlaceholderText<HTMLInputElement>('例如 我的科技博客').value) fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '测试品牌' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    expect(await screen.findByText('请输入项目名称')).toBeInTheDocument()
+    expect(await screen.findByText('请输入创作项目名称')).toBeInTheDocument()
     expect(api.projects.create).not.toHaveBeenCalled()
   })
 
@@ -202,15 +202,15 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.create).mockResolvedValueOnce({ project: { ...projectWithReference, id: 'shared-project' } })
     window.history.pushState({}, '', `/projects?create=true&type=${type}&intent=new`)
     render(<ProjectsPage />)
-    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    const dialog = await screen.findByRole('dialog', { name: '新建创作项目' })
     expect(within(dialog).queryByText('平台', { exact: true })).not.toBeInTheDocument()
     expect(within(dialog).queryByText('头像', { exact: true })).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('微信 AppID')).not.toBeInTheDocument()
-    fireEvent.change(within(dialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '共享品牌项目' } })
+    fireEvent.change(within(dialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '共享品牌创作项目' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
     await waitFor(() => expect(api.projects.create).toHaveBeenCalledTimes(1))
     const payload = vi.mocked(api.projects.create).mock.calls[0][0]
-    expect(payload.name).toBe('共享品牌项目')
+    expect(payload.name).toBe('共享品牌创作项目')
     for (const key of ['platform', 'avatar_url', 'agent_config', 'wechat_app_id', 'wechat_secret', 'hypit_defaults', 'montage_defaults', 'ecommerce_defaults']) {
       expect(payload).not.toHaveProperty(key)
     }
@@ -235,7 +235,7 @@ describe('ProjectsPage', () => {
 
     render(<ProjectsPage />)
 
-    await screen.findByRole('dialog', { name: '新建项目' })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
     fireEvent.change(screen.getByLabelText('参考图文件'), {
       target: { files: [new File(['reference'], 'reference.png', { type: 'image/png' })] },
     })
@@ -249,7 +249,7 @@ describe('ProjectsPage', () => {
       upload_session_id: '11111111-1111-4111-8111-111111111111',
     })
     expect(payload).not.toHaveProperty('reference_image_url')
-    expect(successMock).toHaveBeenCalledWith('项目已创建，正在后台识别视觉风格')
+    expect(successMock).toHaveBeenCalledWith('创作项目已创建，正在后台识别视觉风格')
   })
 
   it('only polls the project list while an image analysis is active', async () => {
@@ -286,7 +286,7 @@ describe('ProjectsPage', () => {
 
     render(<ProjectsPage />)
 
-    await screen.findByRole('dialog', { name: '新建项目' })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
     fireEvent.change(screen.getByLabelText('参考图文件'), {
       target: { files: [new File(['reference'], 'reference.png', { type: 'image/png' })] },
     })
@@ -296,7 +296,7 @@ describe('ProjectsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() => expect(errorMock).toHaveBeenCalledWith('上传会话已过期，请重新上传参考图'))
-    expect(screen.getByRole('dialog', { name: '新建项目' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '新建创作项目' })).toBeInTheDocument()
     expect(preview).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建' })).toBeEnabled()
   })
@@ -316,43 +316,43 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.list).mockResolvedValue([project])
     vi.mocked(api.projects.update).mockResolvedValue(project)
     render(<ProjectsPage />)
-    await clickProjectAction('测试项目', '编辑项目')
-    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    await clickProjectAction('测试创作项目', '编辑创作项目')
+    const dialog = await screen.findByRole('dialog', { name: '编辑创作项目' })
     expect(within(dialog).queryByLabelText('人物参考图文件')).not.toBeInTheDocument()
-    expect(within(dialog).getByText(/人物参考图保留为任务和计划的默认值/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/人物参考图保留为作品和排期的默认值/)).toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: '更新' }))
     await waitFor(() => expect(api.projects.update).toHaveBeenCalled())
     expect(vi.mocked(api.projects.update).mock.calls[0][1]).not.toHaveProperty('portrait_reference_image')
   })
 
   it('offers the optional profile guide after quick creation and lets the user skip it', async () => {
-    const createdProject: Project = { ...projectWithReference, id: 'created-project', platform: '', name: '快速创建项目' }
+    const createdProject: Project = { ...projectWithReference, id: 'created-project', platform: '', name: '快速创建创作项目' }
     vi.mocked(api.projects.create).mockResolvedValueOnce({ project: createdProject, profile_initialization: { status: 'not_started' } })
     vi.mocked(api.projects.list).mockResolvedValueOnce([projectWithReference]).mockResolvedValueOnce([projectWithReference, createdProject])
     window.history.pushState({}, '', '/projects?create=true')
     render(<ProjectsPage />)
-    await screen.findByRole('dialog', { name: '新建项目' })
-    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '快速创建项目' } })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
+    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '快速创建创作项目' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({ name: '快速创建项目' })))
-    await waitFor(() => expect(successMock).toHaveBeenCalledWith('项目创建成功'))
-    const guide = await screen.findByRole('dialog', { name: '项目画像引导' })
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({ name: '快速创建创作项目' })))
+    await waitFor(() => expect(successMock).toHaveBeenCalledWith('创作项目创建成功'))
+    const guide = await screen.findByRole('dialog', { name: '创作项目画像引导' })
     expect(within(guide).getByRole('heading', { name: '基础信息' })).toBeInTheDocument()
     fireEvent.click(within(guide).getByRole('button', { name: '暂时跳过' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '项目画像引导' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '创作项目画像引导' })).not.toBeInTheDocument())
     expect(api.projects.refreshProfile).not.toHaveBeenCalled()
-    expect(screen.getByText('快速创建项目')).toBeInTheDocument()
+    expect(screen.getByText('快速创建创作项目')).toBeInTheDocument()
   })
 
   it('shows the portrait guide before returning to task creation from a project shortcut', async () => {
     vi.mocked(api.projects.create).mockResolvedValueOnce({ project: { ...projectWithReference, id: 'return-project', platform: '' }, profile_initialization: { status: 'not_started' } })
     window.history.pushState({}, '', '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new')
     render(<ProjectsPage />)
-    await screen.findByRole('dialog', { name: '新建项目' })
-    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '从任务入口创建' } })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
+    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '从作品入口创建' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
-    const guide = await screen.findByRole('dialog', { name: '项目画像引导' })
+    const guide = await screen.findByRole('dialog', { name: '创作项目画像引导' })
     fireEvent.click(within(guide).getByRole('button', { name: '暂时跳过' }))
 
     await waitFor(() => expect(window.location.pathname).toBe('/tasks'))
@@ -360,7 +360,7 @@ describe('ProjectsPage', () => {
   })
 
   it('submits the four-step account guide as structured profile answers', async () => {
-    const project: Project = { ...projectWithReference, id: 'created-project', platform: '', name: '引导项目' }
+    const project: Project = { ...projectWithReference, id: 'created-project', platform: '', name: '引导创作项目' }
     vi.mocked(api.projects.create).mockResolvedValueOnce({ project, profile_initialization: { status: 'not_started' } })
     const queuedProfile = { schema_version: 1, status: 'draft' as const, initialization_status: 'queued' as const, version: 1, analysis_task_id: 'profile-task', dimensions: {}, analysis_limits: [], follow_up_questions: [] }
     vi.mocked(api.projects.refreshProfile).mockResolvedValueOnce({ task: { id: 'profile-task', status: 'pending' } as never, profile: queuedProfile as never })
@@ -369,10 +369,10 @@ describe('ProjectsPage', () => {
     window.history.pushState({}, '', '/projects?create=true')
     render(<ProjectsPage />)
 
-    await screen.findByRole('dialog', { name: '新建项目' })
-    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '引导项目' } })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
+    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '引导创作项目' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    const guide = await screen.findByRole('dialog', { name: '项目画像引导' })
+    const guide = await screen.findByRole('dialog', { name: '创作项目画像引导' })
     fireEvent.click(within(guide).getByRole('checkbox', { name: '小红书' }))
     fireEvent.click(within(guide).getByRole('radio', { name: '已有账号' }))
     fireEvent.click(within(guide).getByRole('button', { name: '下一步' }))
@@ -389,17 +389,17 @@ describe('ProjectsPage', () => {
     fireEvent.click(within(guide).getByRole('button', { name: '开始生成画像' }))
 
     await waitFor(() => expect(api.projects.refreshProfile).toHaveBeenCalledWith('created-project', 1, expect.objectContaining({
-      basic: { project_name: '引导项目', account_status: 'existing' },
+      basic: { project_name: '引导创作项目', account_status: 'existing' },
       platform_accounts: [{ platform: 'xiaohongshu', account_name: '小红书品牌号', profile_url: 'https://www.xiaohongshu.com/user/profile/test' }],
       intent: { goals: '建立品牌认知', direction: '设计方法', differentiation: '' },
       content: { preferences: '具体、有案例', formats: '', tone: '', audience: '独立设计师' },
       boundaries: { exclusions: '', collaboration: '', compliance: '不做夸大承诺' },
     })))
-    expect(within(guide).getByText(/画像任务已加入队列/)).toBeInTheDocument()
+    expect(within(guide).getByText(/画像分析已加入队列/)).toBeInTheDocument()
   })
 
   it('allows an unknown account status and submits it as empty', async () => {
-    const project: Project = { ...projectWithReference, id: 'unknown-status-project', platform: '', name: '状态未知项目' }
+    const project: Project = { ...projectWithReference, id: 'unknown-status-project', platform: '', name: '状态未知创作项目' }
     vi.mocked(api.projects.create).mockResolvedValueOnce({ project, profile_initialization: { status: 'not_started' } })
     const queuedProfile = { ...profileFixture('draft', 'queued'), analysis_task_id: 'unknown-status-task' }
     vi.mocked(api.projects.refreshProfile).mockResolvedValueOnce({ task: { id: 'unknown-status-task', status: 'pending' } as never, profile: queuedProfile as never })
@@ -408,10 +408,10 @@ describe('ProjectsPage', () => {
     window.history.pushState({}, '', '/projects?create=true')
     render(<ProjectsPage />)
 
-    await screen.findByRole('dialog', { name: '新建项目' })
-    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '状态未知项目' } })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
+    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '状态未知创作项目' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    const guide = await screen.findByRole('dialog', { name: '项目画像引导' })
+    const guide = await screen.findByRole('dialog', { name: '创作项目画像引导' })
     expect(within(guide).getByRole('radio', { name: '全新起号' })).not.toBeChecked()
     expect(within(guide).getByRole('radio', { name: '已有账号' })).not.toBeChecked()
     fireEvent.click(within(guide).getByRole('button', { name: '下一步' }))
@@ -420,7 +420,7 @@ describe('ProjectsPage', () => {
     fireEvent.click(within(guide).getByRole('button', { name: '开始生成画像' }))
 
     await waitFor(() => expect(api.projects.refreshProfile).toHaveBeenCalledWith('unknown-status-project', 0, expect.objectContaining({
-      basic: { project_name: '状态未知项目', account_status: '' },
+      basic: { project_name: '状态未知创作项目', account_status: '' },
     })))
   })
 
@@ -438,20 +438,20 @@ describe('ProjectsPage', () => {
     })
     render(<ProjectsPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '项目画像：测试项目' }))
-    const profileDialog = await screen.findByRole('dialog', { name: '项目画像' })
+    fireEvent.click(await screen.findByRole('button', { name: '创作项目画像：测试创作项目' }))
+    const profileDialog = await screen.findByRole('dialog', { name: '创作项目画像' })
     fireEvent.click(await within(profileDialog).findByRole('button', { name: '编辑引导并更新画像' }))
-    const guide = await screen.findByRole('dialog', { name: '项目画像引导' })
+    const guide = await screen.findByRole('dialog', { name: '创作项目画像引导' })
     for (let step = 0; step < 3; step += 1) fireEvent.click(within(guide).getByRole('button', { name: '下一步' }))
     fireEvent.click(within(guide).getByRole('button', { name: '开始生成画像' }))
 
-    expect(await within(guide).findByText('画像任务失败，已确认的画像保持不变，可以重试。')).toBeInTheDocument()
+    expect(await within(guide).findByText('画像分析失败，已确认的画像保持不变，可以重试。')).toBeInTheDocument()
     expect(within(guide).queryByText('画像已更新并自动应用。')).not.toBeInTheDocument()
     expect(within(guide).getByRole('button', { name: '重试画像分析' })).toBeEnabled()
   })
 
   it('keeps the first completed profile editable as a draft until the user confirms it', async () => {
-    const project: Project = { ...projectWithReference, id: 'draft-project', platform: '', name: '待确认项目' }
+    const project: Project = { ...projectWithReference, id: 'draft-project', platform: '', name: '待确认创作项目' }
     const draft = profileFixture('draft', 'ready')
     draft.analysis_task_id = 'draft-task'
     draft.dimensions.identity.content = { name: '旧定位' }
@@ -463,10 +463,10 @@ describe('ProjectsPage', () => {
     window.history.pushState({}, '', '/projects?create=true')
     render(<ProjectsPage />)
 
-    await screen.findByRole('dialog', { name: '新建项目' })
-    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '待确认项目' } })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
+    fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '待确认创作项目' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    const guide = await screen.findByRole('dialog', { name: '项目画像引导' })
+    const guide = await screen.findByRole('dialog', { name: '创作项目画像引导' })
     for (let step = 0; step < 3; step += 1) fireEvent.click(within(guide).getByRole('button', { name: '下一步' }))
     fireEvent.click(within(guide).getByRole('button', { name: '开始生成画像' }))
     const identity = await within(guide).findByLabelText('定位画像内容')
@@ -494,7 +494,7 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
 
-    await clickProjectAction('测试项目', '编辑项目')
+    await clickProjectAction('测试创作项目', '编辑创作项目')
     expect(await screen.findByRole('img', { name: '参考图' })).toHaveAttribute(
       'src',
       'https://signed.example/project-reference.png',
@@ -511,7 +511,7 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
 
-    await clickProjectAction('测试项目', '编辑项目')
+    await clickProjectAction('测试创作项目', '编辑创作项目')
     fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
     fireEvent.click(screen.getByRole('button', { name: '更新' }))
 
@@ -525,7 +525,7 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
 
-    await clickProjectAction('测试项目', '编辑项目')
+    await clickProjectAction('测试创作项目', '编辑创作项目')
     fireEvent.click(await screen.findByRole('button', { name: '移除参考图' }))
     fireEvent.change(screen.getByLabelText('参考图文件'), {
       target: { files: [new File(['replacement'], 'replacement.png', { type: 'image/png' })] },
@@ -560,7 +560,7 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.get).mockReturnValue(new Promise((resolve) => { resolveGet = resolve }))
     render(<ProjectsPage />)
 
-    await clickProjectAction('测试项目', '编辑项目')
+    await clickProjectAction('测试创作项目', '编辑创作项目')
     const style = screen.getByPlaceholderText(/可手动描述封面与配图风格/)
     expect(style).toBeDisabled()
     resolveGet({
@@ -593,8 +593,8 @@ describe('ProjectsPage', () => {
   it('edits legacy projects without resubmitting platform or account settings', async () => {
     vi.mocked(api.projects.update).mockResolvedValueOnce(projectWithReference)
     render(<ProjectsPage />)
-    await clickProjectAction('测试项目', '编辑项目')
-    const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    await clickProjectAction('测试创作项目', '编辑创作项目')
+    const dialog = await screen.findByRole('dialog', { name: '编辑创作项目' })
     expect(within(dialog).queryByText('平台', { exact: true })).not.toBeInTheDocument()
     expect(within(dialog).queryByText('头像', { exact: true })).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('微信 AppID')).not.toBeInTheDocument()
@@ -605,7 +605,7 @@ describe('ProjectsPage', () => {
   })
 
   it.each(['create failure', 'create success', 'update success'])('ignores a stale %s after another editor opens', async (outcome) => {
-    const secondProject = { ...projectWithReference, id: 'second-project', name: '第二项目' }
+    const secondProject = { ...projectWithReference, id: 'second-project', name: '第二创作项目' }
     vi.mocked(api.projects.list).mockResolvedValue([projectWithReference, secondProject])
     vi.mocked(api.projects.update).mockResolvedValue(secondProject)
     let resolveWrite!: () => void
@@ -621,17 +621,17 @@ describe('ProjectsPage', () => {
       }))
     }
     render(<ProjectsPage />)
-    if (outcome.startsWith('create')) fireEvent.click(await screen.findByRole('button', { name: '新建项目' }))
-    else await clickProjectAction('测试项目', '编辑项目')
-    const originalDialog = await screen.findByRole('dialog', { name: outcome.startsWith('create') ? '新建项目' : '编辑项目' })
+    if (outcome.startsWith('create')) fireEvent.click(await screen.findByRole('button', { name: '新建创作项目' }))
+    else await clickProjectAction('测试创作项目', '编辑创作项目')
+    const originalDialog = await screen.findByRole('dialog', { name: outcome.startsWith('create') ? '新建创作项目' : '编辑创作项目' })
     fireEvent.change(within(originalDialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '第一个编辑会话' } })
     fireEvent.click(within(originalDialog).getByRole('button', { name: outcome.startsWith('create') ? '创建' : '更新' }))
     await waitFor(() => expect(outcome.startsWith('create') ? api.projects.create : api.projects.update).toHaveBeenCalledTimes(1))
     fireEvent.click(within(originalDialog).getByRole('button', { name: '取消' }))
     const confirmation = await screen.findByRole('alertdialog')
     fireEvent.click(within(confirmation).getByRole('button', { name: '放弃' }))
-    await clickProjectAction('第二项目', '编辑项目')
-    const currentDialog = await screen.findByRole('dialog', { name: '编辑项目' })
+    await clickProjectAction('第二创作项目', '编辑创作项目')
+    const currentDialog = await screen.findByRole('dialog', { name: '编辑创作项目' })
     fireEvent.change(within(currentDialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '第二个编辑会话' } })
     await act(async () => {
       if (outcome === 'create failure') rejectWrite(new Error('late failure'))
@@ -647,10 +647,10 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.create).mockResolvedValueOnce({ project: { ...projectWithReference, platform: '', id: 'shared-project' } })
     window.history.pushState({}, '', '/projects?create=true&type=wechat-picture&intent=new&return_to=/tasks')
     render(<ProjectsPage />)
-    await screen.findByRole('dialog', { name: '新建项目' })
+    await screen.findByRole('dialog', { name: '新建创作项目' })
     if (!screen.getByPlaceholderText<HTMLInputElement>('例如 我的科技博客').value) fireEvent.change(screen.getByPlaceholderText('例如 我的科技博客'), { target: { value: '测试品牌' } })
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
-    const guide = await screen.findByRole('dialog', { name: '项目画像引导' })
+    const guide = await screen.findByRole('dialog', { name: '创作项目画像引导' })
     fireEvent.click(within(guide).getByRole('button', { name: '暂时跳过' }))
     await waitFor(() => expect(window.location.pathname).toBe('/tasks'))
     const params = new URLSearchParams(window.location.search)

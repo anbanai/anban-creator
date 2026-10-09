@@ -37,7 +37,7 @@ const fixtures = vi.hoisted(() => {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'wechat',
-    name: '公众号项目',
+    name: '公众号创作项目',
     avatar_url: '',
     profile_url: '',
     keywords: '',
@@ -56,7 +56,7 @@ const fixtures = vi.hoisted(() => {
     id: 'failed-task',
     type: 'wechat-article',
     title: '失败文章',
-    prompt: '失败任务',
+    prompt: '失败作品',
     status: 'failed',
     error_message: '模型超时',
     plan_id: null,
@@ -71,7 +71,7 @@ const fixtures = vi.hoisted(() => {
     id: 'approval-task',
     type: 'wechat-article',
     title: '已完成文章',
-    prompt: '文章任务',
+    prompt: '文章作品',
     status: 'completed',
     plan_id: null,
     project_id: project.id,
@@ -199,23 +199,23 @@ function renderTasksPage(initialPath = '/tasks') {
 describe('TasksPage unified prompt composer', () => {
   it('renders the shared composer with project context in the create dialog', async () => {
     renderTasksPage()
-    fireEvent.click(await screen.findByRole('button', { name: '新建任务' }))
+    fireEvent.click(await screen.findByRole('button', { name: '新建作品' }))
     const dialog = await screen.findByRole('dialog')
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '项目：未选择' })).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: '创建任务' })).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '创作项目：未选择' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '创建作品' })).not.toBeInTheDocument()
     expect(within(dialog).getAllByRole('button', { name: '创建' })).toHaveLength(1)
     expect(document.querySelectorAll('form form')).toHaveLength(0)
   })
 
   it('uses the composer prompt as the Montage brief', async () => {
-    const montageProject = { ...fixtures.project, id: 'montage-project', platform: 'montage', name: '剪辑项目' } as Project
+    const montageProject = { ...fixtures.project, id: 'montage-project', platform: 'montage', name: '剪辑创作项目' } as Project
     vi.mocked(api.projects.list).mockResolvedValue([montageProject])
     vi.mocked(api.billing.wallet).mockResolvedValue({ paid: 100000, promotional: 0, debt: 0, balance: 100000 })
     vi.mocked(api.tasks.create).mockResolvedValue({ ...fixtures.failedTask, id: 'montage-task', type: 'montage', project_id: montageProject.id } as Task)
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
-    await screen.findByRole('dialog', { name: '新建任务' })
+    await screen.findByRole('dialog', { name: '新建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '将访谈素材剪成 30 秒竖版短片' },
     })
@@ -238,8 +238,8 @@ describe('TasksPage unified prompt composer', () => {
     } as Task)
     renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
-    await screen.findByRole('dialog', { name: '新建任务' })
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号项目'))
+    await screen.findByRole('dialog', { name: '新建作品' })
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号创作项目'))
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     expect(await screen.findByText('created task detail')).toBeInTheDocument()
@@ -256,7 +256,7 @@ describe('TasksPage unified prompt composer', () => {
     }))
     renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
-    await screen.findByRole('dialog', { name: '新建任务' })
+    await screen.findByRole('dialog', { name: '新建作品' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['brief'], 'brief.pdf', { type: 'application/pdf' })] },
     })
@@ -282,7 +282,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     await waitFor(() => expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ plan_id: 'plan-1' })))
     fireEvent.click(await screen.findByRole('button', { name: '继续加载' }))
     await waitFor(() => expect(api.tasks.listBefore).toHaveBeenCalledWith(expect.objectContaining({ plan_id: 'plan-1' })))
-    fireEvent.click(screen.getByRole('button', { name: '查看全部任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看全部作品' }))
     await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ plan_id: undefined })))
   })
 
@@ -290,20 +290,20 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.tasks.list).mockResolvedValue({ items: [fixtures.failedTask as Task], total: 100 })
     renderTasksPage()
     await screen.findByText('失败文章')
-    fireEvent.change(screen.getByPlaceholderText('搜索已加载任务...'), { target: { value: '不存在的内容' } })
-    expect(await screen.findByText('未找到匹配的任务')).toBeInTheDocument()
-    expect(screen.queryByText('还没有任务')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('搜索已加载作品...'), { target: { value: '不存在的内容' } })
+    expect(await screen.findByText('未找到匹配的作品')).toBeInTheDocument()
+    expect(screen.queryByText('还没有作品')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '清空筛选' }))
     expect(await screen.findByText('失败文章')).toBeInTheDocument()
   })
 
   it('keeps the plan context when opening failed tasks', async () => {
     renderTasksPage('/tasks?plan_id=plan-1')
-    fireEvent.click(await screen.findByRole('link', { name: /失败任务/ }))
+    fireEvent.click(await screen.findByRole('link', { name: /失败作品/ }))
     await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({
       plan_id: 'plan-1', status: 'failed',
     })))
-    expect(screen.getByText('正在查看此计划生成的任务')).toBeInTheDocument()
+    expect(screen.getByText('正在查看此排期生成的作品')).toBeInTheDocument()
   })
 
   it('loads the next task batch from the scroll fallback control', async () => {
@@ -320,13 +320,13 @@ describe('TasksPage URL-driven recovery filters', () => {
 
   it('separates task selection from the link and clears hidden selections', async () => {
     renderTasksPage()
-    const select = await screen.findByRole('button', { name: '选择任务' })
+    const select = await screen.findByRole('button', { name: '选择作品' })
     expect(select).toHaveClass('min-h-11', 'min-w-11')
     expect(select.closest('a')).toBeNull()
     fireEvent.click(select)
-    fireEvent.change(screen.getByPlaceholderText('搜索已加载任务...'), { target: { value: '找不到' } })
+    fireEvent.change(screen.getByPlaceholderText('搜索已加载作品...'), { target: { value: '找不到' } })
     fireEvent.click(await screen.findByRole('button', { name: '清空筛选' }))
-    expect(await screen.findByRole('button', { name: '选择任务' })).toHaveAttribute('aria-pressed', 'false')
+    expect(await screen.findByRole('button', { name: '选择作品' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('syncs recovery queue links into the task status filter', async () => {
@@ -336,7 +336,7 @@ describe('TasksPage URL-driven recovery filters', () => {
       expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }))
     })
 
-    fireEvent.click(await screen.findByRole('link', { name: /失败任务/ }))
+    fireEvent.click(await screen.findByRole('link', { name: /失败作品/ }))
 
     await waitFor(() => {
       expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }))
@@ -370,7 +370,7 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    const summary = await screen.findByRole('region', { name: '任务状态概览' })
+    const summary = await screen.findByRole('region', { name: '作品状态概览' })
     expect(summary).toHaveTextContent('待执行 1')
     expect(summary).toHaveTextContent('运行中 1')
     expect(summary).toHaveTextContent('已完成 1')
@@ -395,8 +395,8 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    expect(await screen.findByRole('alert', { name: '失败任务提醒' })).toHaveTextContent('1 个失败任务')
-    expect(screen.getAllByRole('link', { name: /1 个失败任务/ })).toHaveLength(1)
+    expect(await screen.findByRole('alert', { name: '失败作品提醒' })).toHaveTextContent('1 个失败作品')
+    expect(screen.getAllByRole('link', { name: /1 个失败作品/ })).toHaveLength(1)
     expect(screen.getByText('撰写正文')).toBeInTheDocument()
     expect(screen.getByText('最近活动：7/6 09:02')).toBeInTheDocument()
   })
@@ -438,8 +438,8 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
-    expect(await screen.findByText(/固定任务价：6,000 × 1 =/)).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByText(/固定创作价：6,000 × 1 =/)).toBeInTheDocument()
     expect(screen.getByText(/余额：7,000 →/)).toBeInTheDocument()
     expect(screen.getByText('1,000')).toBeInTheDocument()
     expect(screen.queryByText(/运行预留/)).not.toBeInTheDocument()
@@ -458,10 +458,10 @@ describe('TasksPage URL-driven recovery filters', () => {
     fireEvent.click(await screen.findByRole('button', { name: '性价比，全部用户' }))
     await waitFor(() => expect(parametersControl).toHaveAccessibleName(expect.stringContaining('性价比')))
 
-    expect(await screen.findByText('固定任务价暂不可用')).toBeInTheDocument()
+    expect(await screen.findByText('固定创作价暂不可用')).toBeInTheDocument()
     expect(screen.getByText('固定价格目录暂不可用，请稍后重试。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建' })).toBeDisabled()
-    expect(screen.queryByText(/固定任务价：0/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/固定创作价：0/)).not.toBeInTheDocument()
     expect(api.tasks.create).not.toHaveBeenCalled()
   })
 
@@ -470,13 +470,13 @@ describe('TasksPage URL-driven recovery filters', () => {
       ...fixtures.project,
       id: 'project-ecommerce',
       platform: 'ecommerce',
-      name: '电商项目',
+      name: '电商创作项目',
     } as Project])
 
     renderTasksPage('/tasks?create=true&type=ecommerce&project_id=project-ecommerce&intent=new')
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
-    expect(await screen.findByText(/固定任务价：3,000 × 1 =/)).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByText(/固定创作价：3,000 × 1 =/)).toBeInTheDocument()
     expect(screen.queryByText(/模块套餐预估/)).not.toBeInTheDocument()
     expect(screen.getByText(/成功交付的图片、视频等增值操作/)).toBeInTheDocument()
   })
@@ -513,9 +513,9 @@ describe('TasksPage bulk clone execution profile', () => {
 
   async function openBulkCloneDialog() {
     renderTasksPage()
-    fireEvent.click(await screen.findByRole('button', { name: '选择任务' }))
+    fireEvent.click(await screen.findByRole('button', { name: '选择作品' }))
     fireEvent.click(screen.getByRole('button', { name: '克隆 (1)' }))
-    return screen.findByRole('alertdialog', { name: '批量克隆任务？' })
+    return screen.findByRole('alertdialog', { name: '批量克隆作品？' })
   }
 
   it('defaults to the cheapest available server profile and submits it', async () => {
@@ -541,7 +541,7 @@ describe('TasksPage bulk clone execution profile', () => {
     const dialog = await openBulkCloneDialog()
 
     expect(within(dialog).getByRole('button', { name: '确认克隆' })).toBeDisabled()
-    expect(within(dialog).getByText('暂时无法获取所选配置的任务价格')).toBeInTheDocument()
+    expect(within(dialog).getByText('暂时无法获取所选配置的创作价格')).toBeInTheDocument()
   })
 
   it('keeps an explicit profile selection visible when its SKU is missing', async () => {
@@ -559,7 +559,7 @@ describe('TasksPage bulk clone execution profile', () => {
 
     await waitFor(() => expect(balanced).toHaveAttribute('aria-pressed', 'true'))
     expect(within(dialog).getByRole('button', { name: '确认克隆' })).toBeDisabled()
-    expect(within(dialog).getByText('暂时无法获取所选配置的任务价格')).toBeInTheDocument()
+    expect(within(dialog).getByText('暂时无法获取所选配置的创作价格')).toBeInTheDocument()
   })
 })
 
@@ -569,7 +569,7 @@ describe('TasksPage Seednote reference materials', () => {
     ...fixtures.project,
     id: 'project-seednote',
     platform: 'seednote',
-    name: '种草项目',
+    name: '种草创作项目',
     image_ratio: '3:4',
   } as Project
 
@@ -577,7 +577,7 @@ describe('TasksPage Seednote reference materials', () => {
     ...fixtures.project,
     id: 'project-ecommerce',
     platform: 'ecommerce',
-    name: '电商项目',
+    name: '电商创作项目',
   } as Project
 
   beforeEach(() => {
@@ -608,7 +608,7 @@ describe('TasksPage Seednote reference materials', () => {
 
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
     await screen.findByRole('button', { name: '预览 product.png' })
@@ -638,7 +638,7 @@ describe('TasksPage Seednote reference materials', () => {
 
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
-    await screen.findByRole('dialog', { name: '新建任务' })
+    await screen.findByRole('dialog', { name: '新建作品' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['reference'], 'task-reference.png', { type: 'image/png' })] },
     })
@@ -685,11 +685,11 @@ describe('TasksPage Seednote reference materials', () => {
       size: 9,
     })
     vi.mocked(api.tasks.create).mockRejectedValueOnce({
-      response: { data: { msg: '任务参考图会话已过期，请重新上传' } },
+      response: { data: { msg: '参考图会话已过期，请重新上传' } },
     })
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
-    await screen.findByRole('dialog', { name: '新建任务' })
+    await screen.findByRole('dialog', { name: '新建作品' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['reference'], 'expired-task.png', { type: 'image/png' })] },
     })
@@ -697,8 +697,8 @@ describe('TasksPage Seednote reference materials', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '创建' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
-    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('任务参考图会话已过期，请重新上传'))
-    expect(screen.getByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    await waitFor(() => expect(errorMock).toHaveBeenCalledWith('参考图会话已过期，请重新上传'))
+    expect(screen.getByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
     expect(preview).toBeInTheDocument()
     const payload = vi.mocked(api.tasks.create).mock.calls[0][0]
     expect(payload.input_attachments).toEqual([expect.objectContaining({
@@ -718,7 +718,7 @@ describe('TasksPage Seednote reference materials', () => {
     uploadToOSSMock.mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve }))
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['pending'], 'pending.png', { type: 'image/png' })] },
     })
@@ -750,7 +750,7 @@ describe('TasksPage Seednote reference materials', () => {
 
     renderTasksPage(`/tasks?create=true&type=ecommerce&project_id=${ecommerceProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
     expect(await screen.findByText('添加产品图')).toBeInTheDocument()
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
   })
@@ -761,7 +761,7 @@ describe('TasksPage Montage creation', () => {
     ...fixtures.project,
     id: 'project-montage',
     platform: 'montage',
-    name: '视频生成项目',
+    name: '视频生成创作项目',
     montage_defaults: {
       default_pipeline: 'cinematic',
       preferences: {
@@ -795,7 +795,7 @@ describe('TasksPage Montage creation', () => {
   it('inherits project defaults and submits the complete Montage input', async () => {
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
     expect(await screen.findByRole('radio', { name: /电影感制作/ })).toBeChecked()
     expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(45)
     fireEvent.click(screen.getByRole('button', { name: /更多创作要求/ }))
@@ -848,7 +848,7 @@ describe('TasksPage Montage creation', () => {
   it('blocks Montage creation while source assets are uploading', async () => {
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
     await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
 
     act(() => {
@@ -862,7 +862,7 @@ describe('TasksPage Montage creation', () => {
     vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('image capabilities unavailable'))
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '不依赖图像能力的 Montage 视频' },
     })

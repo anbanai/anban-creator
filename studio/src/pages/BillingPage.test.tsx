@@ -44,7 +44,7 @@ describe('BillingPage', () => {
     expect(screen.getByText('8,000')).toBeInTheDocument()
     expect(screen.getByText('1,000')).toBeInTheDocument()
     expect(screen.getAllByText('2,500').length).toBeGreaterThan(0)
-    expect(screen.getByText(/补齐前不能创建新任务/)).toBeInTheDocument()
+    expect(screen.getByText(/补齐前不能创建新作品/)).toBeInTheDocument()
   })
 
   it('explains offline top-up without bonus credits', async () => {
@@ -159,7 +159,7 @@ describe('BillingPage', () => {
     expect(screen.getByText('增值操作费')).toBeInTheDocument()
     expect(screen.getByText('固定价格 300 · 现金积分 -300')).toBeInTheDocument()
     expect(screen.getByText('操作 analysis:paid-content')).toBeInTheDocument()
-    expect(screen.getByText('任务固定费')).toBeInTheDocument()
+    expect(screen.getByText('创作固定费')).toBeInTheDocument()
     expect(screen.getByText('专业增强生成费转欠费')).toBeInTheDocument()
     expect(screen.getByText('补缴专业增强欠费')).toBeInTheDocument()
     expect(screen.getByText('固定价格 500 · 现金积分 -500')).toBeInTheDocument()

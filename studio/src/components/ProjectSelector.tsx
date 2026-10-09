@@ -24,9 +24,9 @@ export function ProjectSelector({ value, onChange, platform, excludePlatforms = 
       projects={visibleProjects}
       value={value || null}
       allowNoProject
-      noProjectLabel="全部项目"
+      noProjectLabel="全部创作项目"
       compact
-      ariaLabel="筛选项目"
+      ariaLabel="筛选创作项目"
       loading={isLoading}
       disabled={disabled}
       onValueChange={(id, project) => {

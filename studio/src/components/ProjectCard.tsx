@@ -102,21 +102,21 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
           <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border pt-3">
             {completionRate === null ? (
               <div className="flex size-16 items-center justify-center rounded-full border border-dashed border-border text-center text-[11px] leading-tight text-muted-foreground">
-                暂无任务
+                暂无作品
               </div>
             ) : (
-              <ProgressRing value={completionRate} label="任务完成率" size={64} />
+              <ProgressRing value={completionRate} label="作品完成率" size={64} />
             )}
             <div className="min-w-0 space-y-2">
               <MetricStrip
                 testId="project-overview-strip"
                 metrics={[
-                  { label: '任务', value: stats.total_tasks },
+                  { label: '作品', value: stats.total_tasks },
                   { label: '已完成', value: stats.completed_tasks },
                   { label: '失败', value: stats.failed_tasks },
                 ]}
               />
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="项目活动">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="创作项目活动">
                 {stats.running_tasks > 0 && <span>{stats.running_tasks} 个运行中</span>}
                 {stats.pending_tasks > 0 && <span>{stats.pending_tasks} 个待执行</span>}
               </div>
@@ -183,10 +183,10 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
             )}
           </div>
         )}
-        <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`项目操作：${project.name}`}>
+        <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`创作项目操作：${project.name}`}>
           {onEdit && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`编辑项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`编辑创作项目：${project.name}`} />}>
                 <SquarePen />
               </TooltipTrigger>
               <TooltipContent>编辑</TooltipContent>
@@ -194,10 +194,10 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
           )}
           {onProfile && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onProfile(project)} aria-label={`项目画像：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onProfile(project)} aria-label={`创作项目画像：${project.name}`} />}>
                 <UserRound />
               </TooltipTrigger>
-              <TooltipContent>项目画像</TooltipContent>
+              <TooltipContent>创作项目画像</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
@@ -215,14 +215,14 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
             </Tooltip>
           )}
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`} />}>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`创作项目记忆：${project.name}`} />}>
               <Brain />
             </TooltipTrigger>
-            <TooltipContent>项目记忆</TooltipContent>
+            <TooltipContent>创作项目记忆</TooltipContent>
           </Tooltip>
           {!isArchived && onArchive && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档创作项目：${project.name}`} />}>
                 <Archive />
               </TooltipTrigger>
               <TooltipContent>归档</TooltipContent>
@@ -230,7 +230,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
           )}
           {isArchived && onRestore && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复创作项目：${project.name}`} />}>
                 <RotateCcw />
               </TooltipTrigger>
               <TooltipContent>恢复</TooltipContent>

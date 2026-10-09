@@ -147,9 +147,9 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
         </>
       ) : null}
       <section aria-labelledby="task-project-snapshot" className="flex flex-col gap-3">
-        <h3 id="task-project-snapshot" className="text-sm font-semibold">项目快照</h3>
+        <h3 id="task-project-snapshot" className="text-sm font-semibold">创作项目快照</h3>
         <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-          <Detail label="项目" value={projectIdentity ? <ProjectIdentity project={projectIdentity} compact /> : projectName} />
+          <Detail label="创作项目" value={projectIdentity ? <ProjectIdentity project={projectIdentity} compact /> : projectName} />
           <Detail label="内容类型" value={contentTypeDisplayName(task.type)} />
           <Detail label="视觉风格" value={visualStyle} wide />
           <Detail label={ratioLabel} value={task.type === 'hypit' ? task.hypit_input?.preferences?.aspect_ratio || '跟随参考视频' : imageRatio} />
@@ -166,7 +166,7 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
         <section className="space-y-3">
           <h3 className="text-sm font-semibold">视频复刻要求</h3>
           <dl className="grid gap-3">
-            <Detail label="来源任务" value={task.input_source_task_id || '全新复刻'} />
+            <Detail label="来源作品" value={task.input_source_task_id || '全新复刻'} />
             <Detail label="复刻要求" value={task.hypit_input?.brief || task.prompt} />
             <Detail label="主参考视频" value={task.hypit_input?.reference?.file_name || task.hypit_input?.reference?.url || task.hypit_input?.reference?.task_file_id || '沿用原工程'} />
             <Detail label="补充素材（可选）" value={task.hypit_input?.source_assets?.map(asset => asset.file_name || asset.url || asset.task_file_id || '素材').join('、') || '未添加'} />

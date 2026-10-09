@@ -44,7 +44,7 @@ const mockReferenceUsageSummary = vi.hoisted(() => vi.fn(({ task }: {
   }
   return (
     <div>
-      <p>未生成素材使用结论，仅展示任务输入。</p>
+      <p>未生成素材使用结论，仅展示作品输入。</p>
       {task.input_attachments?.map((attachment) => (
         <p key={attachment.file_name}>{attachment.file_name}</p>
       ))}
@@ -204,8 +204,8 @@ function textOccurrences(container: HTMLElement, text: string) {
 }
 
 async function openTaskDetails(tab?: '概览' | '配置' | '素材' | '日志') {
-  fireEvent.click(await screen.findByRole('button', { name: '打开任务概览' }))
-  expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('button', { name: '打开作品概览' }))
+  expect(await screen.findByRole('heading', { name: '作品详情' })).toBeInTheDocument()
   if (tab) {
     fireEvent.click(screen.getByRole('tab', { name: tab }))
   }
@@ -224,13 +224,13 @@ function deferred<T>() {
 
 async function openResumeDialog() {
   fireEvent.click(await screen.findByRole('button', { name: '继续执行' }))
-  const title = await screen.findByRole('heading', { name: '继续执行此任务' })
+  const title = await screen.findByRole('heading', { name: '继续执行此作品' })
   return title.closest('[data-slot="dialog-content"]') as HTMLElement
 }
 
 async function openCloneDialog() {
-  fireEvent.click(await screen.findByRole('button', { name: '克隆任务' }))
-  const title = await screen.findByRole('heading', { name: '克隆任务' })
+  fireEvent.click(await screen.findByRole('button', { name: '克隆作品' }))
+  const title = await screen.findByRole('heading', { name: '克隆作品' })
   return title.closest('[data-slot="dialog-content"]') as HTMLElement
 }
 
@@ -310,12 +310,12 @@ describe('TaskDetailPage', () => {
   })
 
   it('keeps the task title in the page heading without repeating it in the breadcrumb', async () => {
-    mockTask(taskWith({ title: '不重复显示的任务标题', status: 'completed' }))
+    mockTask(taskWith({ title: '不重复显示的作品标题', status: 'completed' }))
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('heading', { level: 1, name: '不重复显示的任务标题' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: '不重复显示的任务标题' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: '不重复显示的作品标题' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '不重复显示的作品标题' })).not.toBeInTheDocument()
     const status = screen.getByTestId('status-pill')
     expect(status).toHaveAttribute('data-status', 'completed')
     expect(status).toHaveTextContent('已完成')
@@ -395,9 +395,9 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('任务已完成，交付成果已保存。')).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '任务状态摘要' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '任务关键指标' })).not.toBeInTheDocument()
+    expect(await screen.findByText('作品已完成，交付成果已保存。')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '作品状态摘要' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '作品关键指标' })).not.toBeInTheDocument()
     expect(screen.queryByText('模型和 MCP 正常')).not.toBeInTheDocument()
     expect(screen.queryByText('6,800 积分')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看内容分析' })).toBeInTheDocument()
@@ -408,11 +408,11 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const outcome = await screen.findByRole('alert', { name: '任务结果提醒' })
+    const outcome = await screen.findByRole('alert', { name: '作品结果提醒' })
     expect(outcome).toHaveTextContent('执行失败')
     expect(outcome).toHaveTextContent('模型超时')
     expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
-    expect(screen.queryByRole('button', { name: '克隆任务' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '克隆作品' })).toBeInTheDocument()
   })
 
   it('shows the active lifecycle stage without percentage or tool noise', async () => {
@@ -438,10 +438,10 @@ describe('TaskDetailPage', () => {
     expect(within(progressSection).queryByText(/%/)).not.toBeInTheDocument()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '任务结果' })).not.toBeInTheDocument()
-    expect(screen.queryByText('任务配置')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '作品结果' })).not.toBeInTheDocument()
+    expect(screen.queryByText('作品配置')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '执行动态' })).not.toBeInTheDocument()
-    expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
+    expect(screen.queryByText('未生成素材使用结论，仅展示作品输入。')).not.toBeInTheDocument()
   })
 
   it('shows the frozen task profile without exposing provider or model details', async () => {
@@ -503,7 +503,7 @@ describe('TaskDetailPage', () => {
     expect(within(context).queryByText('公众号文章')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
-    expect(await screen.findByRole('heading', { name: '任务详情' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '作品详情' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '日志' })).toHaveAttribute('aria-selected', 'true')
     const logSection = screen.getByRole('region', { name: '执行动态' })
     expect(within(logSection).getByRole('heading', { name: '执行动态' })).toBeInTheDocument()
@@ -551,45 +551,45 @@ describe('TaskDetailPage', () => {
     routeState.taskId = 'task-2'
     vi.mocked(api.tasks.get).mockResolvedValue(taskWith({
       id: 'task-2',
-      title: '第二个任务',
+      title: '第二个作品',
       status: 'running',
       completed_at: '',
     }))
     view.rerender(<TaskDetailPage />)
 
     await waitFor(() => expect(api.tasks.get).toHaveBeenCalledWith('task-2'))
-    await waitFor(() => expect(screen.queryByRole('heading', { name: '任务详情' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '作品详情' })).not.toBeInTheDocument())
     await openTaskDetails()
   })
 
   it('discards task A resume input before task B can submit it after a route switch', async () => {
     const taskA = taskWith({
       id: 'task-1',
-      title: '失败任务 A',
+      title: '失败作品 A',
       status: 'failed',
     })
     const taskB = taskWith({
       id: 'task-2',
-      title: '失败任务 B',
+      title: '失败作品 B',
       status: 'failed',
     })
     const view = renderWithCachedTasks(taskA, taskB)
 
     const taskADialog = await openResumeDialog()
-    fireEvent.change(within(taskADialog).getByLabelText('继续任务要求'), {
-      target: { value: '只属于任务 A 的补充要求' },
+    fireEvent.change(within(taskADialog).getByLabelText('继续作品要求'), {
+      target: { value: '只属于作品 A 的补充要求' },
     })
 
     routeState.taskId = 'task-2'
     view.rerender(<TaskDetailPage />)
 
-    expect(await screen.findAllByText('失败任务 B')).not.toHaveLength(0)
+    expect(await screen.findAllByText('失败作品 B')).not.toHaveLength(0)
     await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: '继续执行此作品' })).not.toBeInTheDocument()
     })
 
     const taskBDialog = await openResumeDialog()
-    expect(within(taskBDialog).getByLabelText('继续任务要求')).toHaveValue('')
+    expect(within(taskBDialog).getByLabelText('继续作品要求')).toHaveValue('')
     const submitButton = within(taskBDialog).getByLabelText('提交并继续')
     expect(submitButton).toBeDisabled()
     fireEvent.click(submitButton)
@@ -599,34 +599,34 @@ describe('TaskDetailPage', () => {
   it('closes task A clone form when the route switches to task B', async () => {
     const taskA = taskWith({
       id: 'task-1',
-      title: '已完成任务 A',
-      prompt: '任务 A 的原始要求',
+      title: '已完成作品 A',
+      prompt: '作品 A 的原始要求',
       status: 'completed',
     })
     const taskB = taskWith({
       id: 'task-2',
-      title: '已完成任务 B',
-      prompt: '任务 B 的原始要求',
+      title: '已完成作品 B',
+      prompt: '作品 B 的原始要求',
       status: 'completed',
     })
     const view = renderWithCachedTasks(taskA, taskB)
 
     const taskADialog = await openCloneDialog()
     await waitFor(() => {
-      expect(within(taskADialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('任务 A 的原始要求')
+      expect(within(taskADialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('作品 A 的原始要求')
     })
 
     routeState.taskId = 'task-2'
     view.rerender(<TaskDetailPage />)
 
-    expect(await screen.findAllByText('已完成任务 B')).not.toHaveLength(0)
+    expect(await screen.findAllByText('已完成作品 B')).not.toHaveLength(0)
     await waitFor(() => {
-      expect(screen.queryByRole('heading', { name: '克隆任务' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: '克隆作品' })).not.toBeInTheDocument()
     })
 
     const taskBDialog = await openCloneDialog()
     await waitFor(() => {
-      expect(within(taskBDialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('任务 B 的原始要求')
+      expect(within(taskBDialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('作品 B 的原始要求')
     })
     expect(api.tasks.clone).not.toHaveBeenCalled()
   })
@@ -634,13 +634,13 @@ describe('TaskDetailPage', () => {
   it('ignores a late clone success after navigating away from its source task', async () => {
     const taskA = taskWith({
       id: 'task-1',
-      title: '已完成任务 A',
+      title: '已完成作品 A',
       status: 'completed',
       project_id: 'ch-1',
     })
     const taskB = taskWith({
       id: 'task-2',
-      title: '已完成任务 B',
+      title: '已完成作品 B',
       status: 'completed',
       project_id: 'ch-1',
     })
@@ -650,14 +650,14 @@ describe('TaskDetailPage', () => {
     const invalidateQueries = vi.spyOn(view.queryClient, 'invalidateQueries')
 
     const dialog = await openCloneDialog()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：测试项目' })).toHaveTextContent('测试项目'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '创作项目：测试创作项目' })).toHaveTextContent('测试创作项目'))
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
 
     routeState.taskId = 'task-2'
     view.rerender(<TaskDetailPage />)
-    expect(await screen.findAllByText('已完成任务 B')).not.toHaveLength(0)
-    await waitFor(() => expect(screen.queryByRole('heading', { name: '克隆任务' })).not.toBeInTheDocument())
+    expect(await screen.findAllByText('已完成作品 B')).not.toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '克隆作品' })).not.toBeInTheDocument())
 
     await act(async () => {
       request.resolve(taskWith({ id: 'late-clone', status: 'pending' }))
@@ -670,21 +670,21 @@ describe('TaskDetailPage', () => {
   })
 
   it('ignores a late clone error after navigating away from its source task', async () => {
-    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed', project_id: 'ch-1' })
-    const taskB = taskWith({ id: 'task-2', title: '已完成任务 B', status: 'completed', project_id: 'ch-1' })
+    const taskA = taskWith({ id: 'task-1', title: '已完成作品 A', status: 'completed', project_id: 'ch-1' })
+    const taskB = taskWith({ id: 'task-2', title: '已完成作品 B', status: 'completed', project_id: 'ch-1' })
     const request = deferred<Task>()
     vi.mocked(api.tasks.clone).mockReturnValue(request.promise)
     const view = renderWithCachedTasks(taskA, taskB)
 
     const dialog = await openCloneDialog()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：测试项目' })).toHaveTextContent('测试项目'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '创作项目：测试创作项目' })).toHaveTextContent('测试创作项目'))
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledTimes(1))
 
     routeState.taskId = 'task-2'
     view.rerender(<TaskDetailPage />)
-    expect(await screen.findAllByText('已完成任务 B')).not.toHaveLength(0)
-    await waitFor(() => expect(screen.queryByRole('heading', { name: '克隆任务' })).not.toBeInTheDocument())
+    expect(await screen.findAllByText('已完成作品 B')).not.toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '克隆作品' })).not.toBeInTheDocument())
 
     await act(async () => {
       request.reject(new Error('task A clone failed'))
@@ -695,24 +695,24 @@ describe('TaskDetailPage', () => {
   })
 
   it('ignores a late resume error after navigating away from its source task', async () => {
-    const taskA = taskWith({ id: 'task-1', title: '失败任务 A', status: 'failed' })
-    const taskB = taskWith({ id: 'task-2', title: '失败任务 B', status: 'failed' })
+    const taskA = taskWith({ id: 'task-1', title: '失败作品 A', status: 'failed' })
+    const taskB = taskWith({ id: 'task-2', title: '失败作品 B', status: 'failed' })
     const request = deferred<Task>()
     vi.mocked(api.tasks.resume).mockReturnValue(request.promise)
     const view = renderWithCachedTasks(taskA, taskB)
 
     const dialog = await openResumeDialog()
-    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), { target: { value: '继续任务 A' } })
+    fireEvent.change(within(dialog).getByLabelText('继续作品要求'), { target: { value: '继续作品 A' } })
     fireEvent.click(within(dialog).getByLabelText('提交并继续'))
     await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledWith('task-1', {
-      prompt: '继续任务 A',
+      prompt: '继续作品 A',
       input_attachments: [],
     }))
 
     routeState.taskId = 'task-2'
     view.rerender(<TaskDetailPage />)
-    expect(await screen.findAllByText('失败任务 B')).not.toHaveLength(0)
-    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+    expect(await screen.findAllByText('失败作品 B')).not.toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此作品' })).not.toBeInTheDocument())
 
     await act(async () => {
       request.reject(new Error('task A resume failed'))
@@ -723,8 +723,8 @@ describe('TaskDetailPage', () => {
   })
 
   it('does not navigate or abort the active task when an earlier delete settles late', async () => {
-    const taskA = taskWith({ id: 'task-1', title: '已完成任务 A', status: 'completed' })
-    const taskB = taskWith({ id: 'task-2', title: '运行中任务 B', status: 'running' })
+    const taskA = taskWith({ id: 'task-1', title: '已完成作品 A', status: 'completed' })
+    const taskB = taskWith({ id: 'task-2', title: '运行中作品 B', status: 'running' })
     const deleteRequest = deferred<void>()
     const streamSignals = new Map<string, AbortSignal>()
     vi.mocked(api.tasks.delete).mockReturnValue(deleteRequest.promise)
@@ -735,13 +735,13 @@ describe('TaskDetailPage', () => {
     })
     const view = renderWithCachedTasks(taskA, taskB)
 
-    fireEvent.click(await screen.findByRole('button', { name: '删除任务' }))
+    fireEvent.click(await screen.findByRole('button', { name: '删除作品' }))
     fireEvent.click(await screen.findByRole('button', { name: '确定删除' }))
     await waitFor(() => expect(api.tasks.delete).toHaveBeenCalledWith('task-1'))
 
     routeState.taskId = 'task-2'
     view.rerender(<TaskDetailPage />)
-    expect(await screen.findByRole('heading', { name: '运行中任务 B' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '运行中作品 B' })).toBeInTheDocument()
     await waitFor(() => expect(streamSignals.get('task-2')).toBeDefined())
 
     await act(async () => {
@@ -750,7 +750,7 @@ describe('TaskDetailPage', () => {
     })
 
     expect(mockNavigate).not.toHaveBeenCalledWith('/tasks')
-    expect(toastSuccessMock).not.toHaveBeenCalledWith('任务已删除')
+    expect(toastSuccessMock).not.toHaveBeenCalledWith('作品已删除')
     expect(streamSignals.get('task-2')).toHaveProperty('aborted', false)
   })
 
@@ -772,7 +772,7 @@ describe('TaskDetailPage', () => {
     })
     const taskB = taskWith({
       id: 'task-2',
-      title: '已完成任务 B',
+      title: '已完成作品 B',
       status: 'completed',
       progress_log: 'B 持久化日志',
     })
@@ -819,7 +819,7 @@ describe('TaskDetailPage', () => {
     })
     const taskB = taskWith({
       id: 'task-2',
-      title: '运行任务 B',
+      title: '运行作品 B',
       status: 'running',
       progress_log: 'task-2 持久化日志',
       completed_at: '',
@@ -861,13 +861,13 @@ describe('TaskDetailPage', () => {
       })
       const taskB = taskWith({
         id: 'task-2',
-        title: '已完成任务 B',
+        title: '已完成作品 B',
         status: 'completed',
         progress_log: 'B 终态日志',
       })
       const taskC = taskWith({
         id: 'task-3',
-        title: '等待任务 C',
+        title: '等待作品 C',
         status: 'pending',
         progress_log: 'C 等待日志',
         completed_at: '',
@@ -886,7 +886,7 @@ describe('TaskDetailPage', () => {
       vi.useRealTimers()
       routeState.taskId = 'task-2'
       view.rerender(<TaskDetailPage />)
-      await waitFor(() => expect(screen.queryByRole('heading', { name: '任务详情' })).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.queryByRole('heading', { name: '作品详情' })).not.toBeInTheDocument())
       await openTaskDetails()
       expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('tab', { name: '日志' }))
@@ -895,7 +895,7 @@ describe('TaskDetailPage', () => {
 
       routeState.taskId = 'task-3'
       view.rerender(<TaskDetailPage />)
-      await waitFor(() => expect(screen.queryByRole('heading', { name: '任务详情' })).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.queryByRole('heading', { name: '作品详情' })).not.toBeInTheDocument())
       await openTaskDetails()
       expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument()
       fireEvent.click(screen.getByRole('tab', { name: '日志' }))
@@ -1020,7 +1020,7 @@ describe('TaskDetailPage', () => {
       },
       input_attachments: [{ type: 'image', file_name: 'brief-reference.png' }],
       project_snapshot: {
-        project_name: '创建时项目快照',
+        project_name: '创建时创作项目快照',
         platform: 'wechat',
         visual_style: '明亮纪实摄影',
         image_ratio: '3:2',
@@ -1034,14 +1034,14 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByText('正在写作正文')).toBeInTheDocument()
-    expect(screen.queryByText('未生成素材使用结论，仅展示任务输入。')).not.toBeInTheDocument()
+    expect(screen.queryByText('未生成素材使用结论，仅展示作品输入。')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '阶段日志' })).not.toBeInTheDocument()
     const context = screen.getByRole('region', { name: '关键事实' })
     expect(within(context).queryByText('茶小茶')).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '项目快照' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '创作项目快照' })).not.toBeInTheDocument()
 
     await openTaskDetails('素材')
-    expect(screen.getByText('未生成素材使用结论，仅展示任务输入。')).toBeInTheDocument()
+    expect(screen.getByText('未生成素材使用结论，仅展示作品输入。')).toBeInTheDocument()
     expect(screen.getByText('brief-reference.png')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: '日志' }))
@@ -1052,7 +1052,7 @@ describe('TaskDetailPage', () => {
     })
 
     fireEvent.click(screen.getByRole('tab', { name: '配置' }))
-    expect(within(screen.getByRole('tabpanel')).getByText('创建时项目快照')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('创建时创作项目快照')).toBeInTheDocument()
     expect(within(screen.getByRole('tabpanel')).getByText('明亮纪实摄影')).toBeInTheDocument()
     expect(within(screen.getByRole('tabpanel')).getByText('3:2')).toBeInTheDocument()
   })
@@ -1060,7 +1060,7 @@ describe('TaskDetailPage', () => {
   it('keeps the lifecycle rail after completion without a percentage', async () => {
     mockTask(taskWith({
       status: 'completed',
-      progress_log: '任务完成',
+      progress_log: '作品完成',
     }))
 
     render(<TaskDetailPage />)
@@ -1068,7 +1068,7 @@ describe('TaskDetailPage', () => {
     await screen.findByRole('button', { name: '完成创作，已完成' })
     expect(screen.getByRole('heading', { name: '执行进展' })).toBeInTheDocument()
     expect(screen.queryByText(/100%/)).not.toBeInTheDocument()
-    expect(screen.queryByText('任务执行成功')).not.toBeInTheDocument()
+    expect(screen.queryByText('作品执行成功')).not.toBeInTheDocument()
     expect(screen.queryByText('结果生成后将在这里显示')).not.toBeInTheDocument()
   })
 
@@ -1109,7 +1109,7 @@ describe('TaskDetailPage', () => {
     await screen.findByRole('button', { name: '预览 article.html' })
     const review = await screen.findByText('内容验收')
     const files = await screen.findByText('交付成果 (1)')
-    const overview = await screen.findByRole('button', { name: '打开任务概览' })
+    const overview = await screen.findByRole('button', { name: '打开作品概览' })
     expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(files.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
@@ -1232,7 +1232,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const outcome = await screen.findByRole('alert', { name: '任务结果提醒' })
+    const outcome = await screen.findByRole('alert', { name: '作品结果提醒' })
     expect(outcome).toHaveTextContent('仍可查看 2 项产物')
     const generatedHeading = await screen.findByText('交付成果 (1)')
     const failedHeading = await screen.findByText('已保留产物 (1)')
@@ -1448,7 +1448,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    await screen.findByRole('heading', { name: '测试任务' })
+    await screen.findByRole('heading', { name: '测试作品' })
     expect(api.tasks.getWechatPublication).not.toHaveBeenCalled()
 
     resolveProject(mockProjectDetail)
@@ -1502,7 +1502,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '克隆任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '克隆作品' })).toBeInTheDocument()
     expect(api.projects.list).not.toHaveBeenCalled()
     expect(api.billing.wallet).not.toHaveBeenCalled()
     expect(api.billing.catalog).not.toHaveBeenCalled()
@@ -1520,7 +1520,7 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({
       id: 'task-1',
       status: 'completed',
-      prompt: '原始任务要求',
+      prompt: '原始作品要求',
       project_id: 'ch-1',
       image_ratio: '16:9',
       image_capability_key: 'source-capability',
@@ -1530,20 +1530,20 @@ describe('TaskDetailPage', () => {
 
     const dialog = await openCloneDialog()
     expect(api.tasks.clone).not.toHaveBeenCalled()
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '项目：测试项目' })).toHaveTextContent('测试项目'))
-    expect(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('原始任务要求')
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: '创作项目：测试创作项目' })).toHaveTextContent('测试创作项目'))
+    expect(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')).toHaveValue('原始作品要求')
     expect(within(dialog).queryByText('数量', { exact: true })).not.toBeInTheDocument()
     expect(await within(dialog).findByRole('button', {
-      name: /^创作参数：.*16:9 源图像.*任务数量 1/,
+      name: /^创作参数：.*16:9 源图像.*作品数量 1/,
     })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '继续执行此作品' })).not.toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '克隆' }))
 
     await waitFor(() => expect(api.tasks.clone).toHaveBeenCalledWith('task-1', expect.objectContaining({
       project_id: 'ch-1',
       quantity: 1,
-      prompt: '原始任务要求',
+      prompt: '原始作品要求',
       image_ratio: '16:9',
       image_capability_key: 'source-capability',
     })))
@@ -1557,9 +1557,9 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     fireEvent.click(await screen.findByRole('button', { name: '继续执行' }))
-    const dialog = await screen.findByRole('dialog', { name: '继续执行此任务' })
-    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
-    expect(screen.queryByRole('dialog', { name: '克隆任务' })).not.toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '继续执行此作品' })
+    expect(within(dialog).getByLabelText('继续作品要求')).toHaveValue('')
+    expect(screen.queryByRole('dialog', { name: '克隆作品' })).not.toBeInTheDocument()
     expect(api.tasks.clone).not.toHaveBeenCalled()
   })
 
@@ -1568,12 +1568,12 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    await screen.findByRole('button', { name: '克隆任务' })
+    await screen.findByRole('button', { name: '克隆作品' })
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆任务' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '删除任务' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
   })
 
   it('keeps task feedback behind a completed-task icon and lazy-loads it on open', async () => {
@@ -1582,7 +1582,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const feedbackButton = await screen.findByRole('button', { name: '人工评价' })
-    expect(screen.queryByText('评价只对当前任务生效')).not.toBeInTheDocument()
+    expect(screen.queryByText('评价只对当前作品生效')).not.toBeInTheDocument()
     expect(api.feedback.getTask).not.toHaveBeenCalled()
 
     fireEvent.click(feedbackButton)
@@ -1622,7 +1622,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '克隆任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '克隆作品' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '查看内容分析' })).not.toBeInTheDocument()
   })
 
@@ -1662,8 +1662,8 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const dialog = await openResumeDialog()
-    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
-    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), {
+    expect(within(dialog).getByLabelText('继续作品要求')).toHaveValue('')
+    fireEvent.change(within(dialog).getByLabelText('继续作品要求'), {
       target: { value: '请基于现有草稿继续修改' },
     })
     const file = new File(['notes'], 'notes.md', { type: 'text/markdown' })
@@ -1684,7 +1684,7 @@ describe('TaskDetailPage', () => {
     fireEvent.click(within(dialog).getByLabelText('提交并继续'))
 
     await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledTimes(1))
-    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('请基于现有草稿继续修改')
+    expect(within(dialog).getByLabelText('继续作品要求')).toHaveValue('请基于现有草稿继续修改')
     expect(within(dialog).getByRole('button', { name: '预览 notes.md' })).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByLabelText('提交并继续'))
@@ -1702,10 +1702,10 @@ describe('TaskDetailPage', () => {
       }],
     })
     expect(mockNavigate).not.toHaveBeenCalledWith('/tasks/task-clone')
-    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此作品' })).not.toBeInTheDocument())
 
     const reopened = await openResumeDialog()
-    expect(within(reopened).getByLabelText('继续任务要求')).toHaveValue('')
+    expect(within(reopened).getByLabelText('继续作品要求')).toHaveValue('')
     expect(within(reopened).queryByText('notes.md')).not.toBeInTheDocument()
   })
 
@@ -1718,7 +1718,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     const dialog = await openResumeDialog()
-    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), {
+    fireEvent.change(within(dialog).getByLabelText('继续作品要求'), {
       target: { value: 'continue' },
     })
     fireEvent.click(within(dialog).getByLabelText('提交并继续'))
@@ -1743,10 +1743,10 @@ describe('TaskDetailPage', () => {
 
     const reopenTrigger = await screen.findByRole('button', { name: '继续执行' })
     fireEvent.click(reopenTrigger)
-    const title = await screen.findByRole('heading', { name: '继续执行此任务' })
+    const title = await screen.findByRole('heading', { name: '继续执行此作品' })
     const dialog = title.closest('[data-slot="dialog-content"]') as HTMLElement
-    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), {
-      target: { value: '继续完成当前任务' },
+    fireEvent.change(within(dialog).getByLabelText('继续作品要求'), {
+      target: { value: '继续完成当前作品' },
     })
     fireEvent.click(within(dialog).getByLabelText('提交并继续'))
     await waitFor(() => expect(api.tasks.resume).toHaveBeenCalledTimes(1))
@@ -1767,7 +1767,7 @@ describe('TaskDetailPage', () => {
     fireEvent.click(overlay as HTMLElement)
     fireEvent.click(reopenTrigger)
 
-    expect(screen.getAllByRole('heading', { name: '继续执行此任务' })).toHaveLength(1)
+    expect(screen.getAllByRole('heading', { name: '继续执行此作品' })).toHaveLength(1)
     expect(api.tasks.resume).toHaveBeenCalledTimes(1)
     expect(toastSuccessMock).not.toHaveBeenCalled()
 
@@ -1776,7 +1776,7 @@ describe('TaskDetailPage', () => {
       await request.promise
     })
 
-    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此作品' })).not.toBeInTheDocument())
     expect(api.tasks.resume).toHaveBeenCalledTimes(1)
     expect(toastSuccessMock).toHaveBeenCalledTimes(1)
   })
@@ -1790,22 +1790,22 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     let dialog = await openResumeDialog()
-    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), { target: { value: '取消这次输入' } })
+    fireEvent.change(within(dialog).getByLabelText('继续作品要求'), { target: { value: '取消这次输入' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
 
     dialog = await openResumeDialog()
-    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
-    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), { target: { value: '关闭这次输入' } })
+    expect(within(dialog).getByLabelText('继续作品要求')).toHaveValue('')
+    fireEvent.change(within(dialog).getByLabelText('继续作品要求'), { target: { value: '关闭这次输入' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
 
     dialog = await openResumeDialog()
-    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
-    fireEvent.change(within(dialog).getByLabelText('继续任务要求'), { target: { value: 'Escape 这次输入' } })
+    expect(within(dialog).getByLabelText('继续作品要求')).toHaveValue('')
+    fireEvent.change(within(dialog).getByLabelText('继续作品要求'), { target: { value: 'Escape 这次输入' } })
     fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此任务' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '继续执行此作品' })).not.toBeInTheDocument())
 
     dialog = await openResumeDialog()
-    expect(within(dialog).getByLabelText('继续任务要求')).toHaveValue('')
+    expect(within(dialog).getByLabelText('继续作品要求')).toHaveValue('')
     const first = new File(['first'], 'first.md', { type: 'text/markdown' })
     const second = new File(['second'], 'second.md', { type: 'text/markdown' })
     fireEvent.change(within(dialog).getByLabelText('选择附件文件'), {
@@ -1870,12 +1870,12 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '取消任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '取消作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '克隆任务' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '删除任务' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '克隆作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
     expect(api.projects.list).not.toHaveBeenCalled()
     expect(api.billing.wallet).not.toHaveBeenCalled()
     expect(api.billing.catalog).not.toHaveBeenCalled()
@@ -1890,10 +1890,10 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆任务' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '删除任务' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '完成创作，已取消' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /重新执行/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /再试一次/ })).not.toBeInTheDocument()
@@ -1908,15 +1908,15 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆任务' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '删除任务' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '更多任务操作' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
     expect(screen.getByText('执行失败')).toBeInTheDocument()
     expect(screen.getByText('模型超时')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
-    expect(screen.queryByRole('button', { name: /返回任务列表/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /检查项目配置/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /返回作品列表/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /检查创作项目配置/ })).not.toBeInTheDocument()
   })
 
   it('shows a localized recoverable execution identity failure and preserves operator diagnostics', async () => {
@@ -1995,7 +1995,7 @@ describe('TaskDetailPage', () => {
         },
       ],
       project_snapshot: {
-        project_name: '快照项目',
+        project_name: '快照创作项目',
         platform: 'wechat',
         visual_style: '柔光生活摄影',
         image_ratio: '16:9',
@@ -2008,13 +2008,13 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '打开任务概览' })).toBeInTheDocument()
-    expect(screen.queryByText('项目快照')).not.toBeInTheDocument()
-    expect(screen.queryByText('任务配置')).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '打开作品概览' })).toBeInTheDocument()
+    expect(screen.queryByText('创作项目快照')).not.toBeInTheDocument()
+    expect(screen.queryByText('作品配置')).not.toBeInTheDocument()
 
     await openTaskDetails('配置')
-    expect(screen.getByText('项目快照')).toBeInTheDocument()
-    expect(within(screen.getByRole('tabpanel')).getByText('快照项目')).toBeInTheDocument()
+    expect(screen.getByText('创作项目快照')).toBeInTheDocument()
+    expect(within(screen.getByRole('tabpanel')).getByText('快照创作项目')).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: '参考图' })).not.toBeInTheDocument()
     expect(screen.queryByText('参考图')).not.toBeInTheDocument()
     expect(screen.getByText('视觉风格')).toBeInTheDocument()
@@ -2031,7 +2031,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('积分明细')).toBeInTheDocument()
     expect(screen.getByText('累计扣费')).toBeInTheDocument()
     expect(screen.getByText('7,300 积分')).toBeInTheDocument()
-    expect(screen.getByText('任务固定费')).toBeInTheDocument()
+    expect(screen.getByText('创作固定费')).toBeInTheDocument()
     expect(screen.getAllByText('标准图像生成费')).toHaveLength(2)
     expect(screen.getByText('增值操作费')).toBeInTheDocument()
     expect(screen.getByText('6,000 积分')).toBeInTheDocument()
@@ -2047,12 +2047,12 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const projectButton = await screen.findByRole('button', { name: /测试项目/ })
+    const projectButton = await screen.findByRole('button', { name: /测试创作项目/ })
     fireEvent.click(projectButton)
 
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('heading', { name: '项目信息' })).toBeInTheDocument()
-    expect(within(dialog).getByText('测试项目')).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: '创作项目信息' })).toBeInTheDocument()
+    expect(within(dialog).getByText('测试创作项目')).toBeInTheDocument()
     expect(within(dialog).getByText('https://mp.weixin.qq.com/test')).toBeInTheDocument()
     expect(mockNavigate).not.toHaveBeenCalledWith('/projects')
   })
@@ -2080,7 +2080,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /\u6d4b试项目/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /\u6d4b试创作项目/ }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('视频比例')).toBeInTheDocument()
     expect(within(dialog).queryByText('图片比例')).not.toBeInTheDocument()
@@ -2110,7 +2110,7 @@ describe('TaskDetailPage', () => {
     const agentIcon = (await screen.findAllByRole('img', { name: '视频复刻' }))[0]
     expect(agentIcon.querySelector('[data-platform-icon="hypit"]')).toBeInTheDocument()
     expect(agentIcon.querySelector('[data-platform-symbol="replicate"]')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('视频复刻任务')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('视频复刻作品')
     expect(screen.queryByText('hypit')).not.toBeInTheDocument()
     expect(screen.queryByText('montage')).not.toBeInTheDocument()
   })

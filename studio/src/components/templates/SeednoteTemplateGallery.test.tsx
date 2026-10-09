@@ -60,7 +60,7 @@ describe('SeednoteTemplateGallery', () => {
     vi.clearAllMocks()
   })
 
-  it('只为种草笔记项目加载公开模板并展示固定分类', async () => {
+  it('只为种草笔记创作项目加载公开模板并展示固定分类', async () => {
     vi.mocked(api.templates.list).mockResolvedValue({ items: templates, total: templates.length })
 
     renderGallery()
@@ -101,7 +101,7 @@ describe('SeednoteTemplateGallery', () => {
     expect(onApply).toHaveBeenCalledWith(templates[0].prompt, templates[0])
   })
 
-  it('非种草笔记项目不显示也不请求模板', () => {
+  it('非种草笔记创作项目不显示也不请求模板', () => {
     renderGallery({ platform: 'wechat' })
 
     expect(screen.queryByText('参考模板')).not.toBeInTheDocument()

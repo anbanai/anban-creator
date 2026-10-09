@@ -159,7 +159,7 @@ export function MontageCreationPanel({
           {(sourceError || assetsError) && (
             <p role="alert" className="text-xs text-destructive">{sourceError || assetsError}</p>
           )}
-                <FormDescription>可上传文件，也可以引用其他任务的产物链接。</FormDescription>
+                <FormDescription>可上传文件，也可以引用其他作品的产物链接。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />

@@ -70,7 +70,7 @@ describe('ProjectSelector', () => {
   it('shows a compact selected trigger and complete project identities in the popup', async () => {
     render(<ProjectSelector value="article-1" onChange={vi.fn()} />)
 
-    const trigger = await screen.findByRole('combobox', { name: '筛选项目' })
+    const trigger = await screen.findByRole('combobox', { name: '筛选创作项目' })
     await waitFor(() => expect(trigger).toHaveTextContent('Morning Brief'))
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
     expect(trigger.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
@@ -87,14 +87,14 @@ describe('ProjectSelector', () => {
     const onChange = vi.fn()
     render(<ProjectSelector value="" onChange={onChange} />)
 
-    const trigger = await screen.findByRole('combobox', { name: '筛选项目' })
-    await waitFor(() => expect(trigger).toHaveTextContent('全部项目'))
+    const trigger = await screen.findByRole('combobox', { name: '筛选创作项目' })
+    await waitFor(() => expect(trigger).toHaveTextContent('全部创作项目'))
     fireEvent.click(trigger)
     fireEvent.click(await screen.findByRole('option', { name: /Garden Notes/ }))
     expect(onChange).toHaveBeenCalledWith('seednote-1', 'seednote')
 
     fireEvent.click(trigger)
-    fireEvent.click(await screen.findByRole('option', { name: '全部项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: '全部创作项目' }))
     expect(onChange).toHaveBeenLastCalledWith('', '')
   })
 
@@ -108,7 +108,7 @@ describe('ProjectSelector', () => {
       />,
     )
 
-    const trigger = await screen.findByRole('combobox', { name: '筛选项目' })
+    const trigger = await screen.findByRole('combobox', { name: '筛选创作项目' })
     await waitFor(() => {
       expect(api.projects.list).toHaveBeenCalledWith({ status: 'active', platform: 'wechat' })
     })

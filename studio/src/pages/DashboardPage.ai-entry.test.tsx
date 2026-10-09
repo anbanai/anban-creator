@@ -35,7 +35,7 @@ const {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'wechat',
-    name: '公众号项目',
+    name: '公众号创作项目',
     description: '品牌公众号数据',
     avatar_url: '',
     profile_url: '',
@@ -58,7 +58,7 @@ const {
       ...articleProject,
       id: 'project-2',
       platform: 'seednote',
-      name: '种草项目',
+      name: '种草创作项目',
       description: '种草笔记内容',
       image_ratio: '3:4',
     } as const,
@@ -66,7 +66,7 @@ const {
       ...articleProject,
       id: 'project-4',
       platform: 'moments',
-      name: '朋友圈项目',
+      name: '朋友圈创作项目',
       description: '朋友圈内容',
       image_ratio: '1:1',
     } as const,
@@ -74,7 +74,7 @@ const {
       ...articleProject,
       id: 'project-3',
       platform: 'ecommerce',
-      name: '电商项目',
+      name: '电商创作项目',
       description: '电商图片内容',
       image_ratio: '4:3',
     } as const,
@@ -82,7 +82,7 @@ const {
       ...articleProject,
       id: 'project-5',
       platform: 'montage',
-      name: '短片项目',
+      name: '短片创作项目',
       description: '视频生成短片内容',
       image_ratio: '9:16',
       montage_defaults: {
@@ -97,7 +97,7 @@ const {
         display_name: '性价比',
         provider: 'deepseek',
         model_name: 'deepseek-flash',
-        description: '适合日常创作和批量任务',
+        description: '适合日常创作和批量作品',
         min_tier: 'free',
         available: true,
       },
@@ -189,7 +189,7 @@ vi.mock('@/lib/api', async () => {
       aiEntry: {
         submit: vi.fn().mockResolvedValue({
           status: 'created',
-          message: '已创建任务',
+          message: '已创建作品',
           tasks: [createdTask],
         }),
       },
@@ -275,7 +275,7 @@ describe('DashboardPage AI entry', () => {
     uploadToOSSMock.mockClear()
     vi.mocked(api.aiEntry.submit).mockReset().mockResolvedValue({
       status: 'created',
-      message: '已创建任务',
+      message: '已创建作品',
       tasks: [{ ...createdTask }],
     })
     vi.mocked(api.projects.list).mockReset().mockResolvedValue([{ ...articleProject }])
@@ -306,11 +306,11 @@ describe('DashboardPage AI entry', () => {
     const composer = document.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
     const parametersControl = await getParametersTrigger(composer!)
-    const projectControl = await within(composer!).findByRole('combobox', { name: '项目：公众号项目' })
+    const projectControl = await within(composer!).findByRole('combobox', { name: '创作项目：公众号创作项目' })
     expect(projectControl.compareDocumentPosition(parametersControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(composer!).queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
     expect(within(composer!).queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
-    expect(within(composer!).queryByRole('button', { name: '任务数量：1' })).not.toBeInTheDocument()
+    expect(within(composer!).queryByRole('button', { name: '作品数量：1' })).not.toBeInTheDocument()
     expect(projectControl.closest('[data-slot="project-context-control"]')).toHaveAttribute('data-compact', 'true')
     expect(screen.queryByRole('group', { name: 'Agent 执行配置' })).not.toBeInTheDocument()
     expect(screen.queryByText('执行配置')).not.toBeInTheDocument()
@@ -318,7 +318,7 @@ describe('DashboardPage AI entry', () => {
 
     const parameters = await openParameters(composer!)
     fireEvent.click(within(parameters).getByRole('button', { name: /^平衡型，Pro 版及以上/ }))
-    fireEvent.click(within(parameters).getByRole('button', { name: '增加任务数量' }))
+    fireEvent.click(within(parameters).getByRole('button', { name: '增加作品数量' }))
     fireEvent.click(within(parameters).getByRole('button', { name: '3:4' }))
     fireEvent.click(within(parameters).getByText('Professional'))
     await closeParameters()
@@ -326,7 +326,7 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇新品介绍' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
       agent_id: 'wechat-article',
@@ -346,16 +346,16 @@ describe('DashboardPage AI entry', () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...montageProject }])
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('combobox', { name: '项目：短片项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '创作项目：短片创作项目' })).toBeInTheDocument()
     const parameters = await openParameters()
     expect(within(parameters).getByText('视频比例')).toBeInTheDocument()
 	  expect(within(parameters).getByRole('button', { name: '9:16' })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(parameters).getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
+    expect(within(parameters).getByLabelText('作品数量：1，当前能力上限')).toHaveTextContent('作品数量 1 · 当前能力上限')
     await closeParameters()
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '做一条新品发布短片' },
     })
-    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    const submit = screen.getByRole('button', { name: '发送创建作品' })
     await waitFor(() => expect(submit).toBeEnabled())
     fireEvent.click(submit)
 
@@ -390,8 +390,8 @@ describe('DashboardPage AI entry', () => {
     }))
     render(<DashboardPage />)
 
-    const projectControl = await screen.findByRole('combobox', { name: '项目：公众号项目' })
-    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    const projectControl = await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' })
+    const submit = screen.getByRole('button', { name: '发送创建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '按平台默认比例创作' },
     })
@@ -407,11 +407,11 @@ describe('DashboardPage AI entry', () => {
     })
 
     await waitFor(() => expect(projectControl).toBeEnabled())
-    expect(projectControl).toHaveTextContent('公众号项目')
+    expect(projectControl).toHaveTextContent('公众号创作项目')
     await expectParameterSummary('16:9', 'Standard')
 
     fireEvent.click(projectControl)
-    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草创作项目/ }))
     await expectParameterSummary('3:4', 'Standard')
     fireEvent.click(submit)
 
@@ -429,8 +429,8 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByText('加载失败')).toBeInTheDocument()
-    const projectControl = screen.getByRole('combobox', { name: '项目：公众号项目' })
-    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    const projectControl = screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })
+    const submit = screen.getByRole('button', { name: '发送创建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '按平台默认比例创作' },
     })
@@ -443,7 +443,7 @@ describe('DashboardPage AI entry', () => {
 
     await waitFor(() => expect(api.projects.platformConfigs).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(projectControl).toBeEnabled())
-    expect(projectControl).toHaveTextContent('公众号项目')
+    expect(projectControl).toHaveTextContent('公众号创作项目')
     await expectParameterSummary('16:9', 'Standard')
   })
 
@@ -455,7 +455,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     await waitFor(async () => expect(await getParametersTrigger()).toBeEnabled())
-    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    const submit = screen.getByRole('button', { name: '发送创建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '等待 API Key 状态' },
     })
@@ -476,7 +476,7 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByText('加载失败')).toBeInTheDocument()
-    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    const submit = screen.getByRole('button', { name: '发送创建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '恢复 API Key 后创建' },
     })
@@ -504,10 +504,10 @@ describe('DashboardPage AI entry', () => {
       render(<DashboardPage />)
 
       expect(await screen.findByText('加载失败')).toBeInTheDocument()
-      const submit = screen.getByRole('button', { name: '发送创建任务' })
+      const submit = screen.getByRole('button', { name: '发送创建作品' })
       const affectedControl = await getParametersTrigger()
       fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
-        target: { value: '恢复后创建任务' },
+        target: { value: '恢复后创建作品' },
       })
 
       expect(affectedControl).toBeEnabled()
@@ -550,14 +550,14 @@ describe('DashboardPage AI entry', () => {
     await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(api.billing.catalog).toHaveBeenCalledTimes(2))
     expect(await getParametersTrigger()).toBeEnabled()
-    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送创建作品' })).toBeDisabled()
     expect(screen.getByText('加载失败')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
 
     await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(3))
     await waitFor(async () => expect(await getParametersTrigger()).toBeEnabled())
-    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建作品' })).toBeEnabled())
   })
 
   it('blocks cached projects after their recovery refetch fails', async () => {
@@ -573,9 +573,9 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByText('加载失败')).toBeInTheDocument()
-    const submit = screen.getByRole('button', { name: '发送创建任务' })
+    const submit = screen.getByRole('button', { name: '发送创建作品' })
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
-      target: { value: '项目缓存失效时不可提交' },
+      target: { value: '创作项目缓存失效时不可提交' },
     })
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
 
@@ -592,9 +592,9 @@ describe('DashboardPage AI entry', () => {
   })
 
   it.each([
-    '创建任务失败：image capability "professional" requires enterprise tier',
-    '创建任务失败：unknown image capability key "professional"',
-    '创建任务失败：图片能力 “professional” 未授权。',
+    '创建作品失败：image capability "professional" requires enterprise tier',
+    '创建作品失败：unknown image capability key "professional"',
+    '创建作品失败：图片能力 “professional” 未授权。',
   ])('retains composer input and requires reselection after an image capability rejection: %s', async (message) => {
     const file = new File(['reference'], 'keep-reference.png', { type: 'image/png' })
     vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
@@ -610,27 +610,27 @@ describe('DashboardPage AI entry', () => {
     fireEvent.click(within(parameters).getByText('Professional'))
     await closeParameters()
     fireEvent.change(prompt, { target: { value: '保留这段 Prompt 和附件' } })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     expect(await screen.findByText(/请重新选择图片能力/)).toBeInTheDocument()
     expect(prompt).toHaveValue('保留这段 Prompt 和附件')
     expect(screen.getByRole('button', { name: `预览 ${file.name}` })).toBeInTheDocument()
     await waitFor(() => expect(api.imageCapabilities.list).toHaveBeenCalledTimes(2))
-    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送创建作品' })).toBeDisabled()
     await expectParameterSummary('16:9')
 
     const recoveredParameters = await openParameters()
     fireEvent.click(within(recoveredParameters).getByText('Standard'))
     await closeParameters()
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建作品' })).toBeEnabled())
     expect(api.aiEntry.submit).toHaveBeenCalledTimes(1)
   })
 
   it.each([
-    '创建任务失败：图片能力服务暂不可用。',
-    '创建任务失败：image capability provider is disabled',
-    '创建任务失败：image capability runtime is unauthorized',
+    '创建作品失败：图片能力服务暂不可用。',
+    '创建作品失败：image capability provider is disabled',
+    '创建作品失败：image capability runtime is unauthorized',
   ])('keeps the selected capability retryable for an operational failure: %s', async (message) => {
     vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({ status: 'error', message })
     render(<DashboardPage />)
@@ -640,14 +640,14 @@ describe('DashboardPage AI entry', () => {
     fireEvent.click(within(retryParameters).getByText('Professional'))
     await closeParameters()
     fireEvent.change(prompt, { target: { value: '服务恢复后直接重试' } })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     expect(await screen.findByText(message)).toBeInTheDocument()
     expect(screen.queryByText(/请重新选择图片能力/)).not.toBeInTheDocument()
     expect(prompt).toHaveValue('服务恢复后直接重试')
     await expectParameterSummary('16:9', 'Professional')
     expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '发送创建作品' })).toBeEnabled()
   })
 
   it('does not force image capability reselection for unrelated AI Entry errors', async () => {
@@ -659,12 +659,12 @@ describe('DashboardPage AI entry', () => {
 
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     fireEvent.change(prompt, { target: { value: '普通错误仍可重试' } })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     expect(await screen.findByText('AI 入口服务繁忙，请稍后重试。')).toBeInTheDocument()
     expect(prompt).toHaveValue('普通错误仍可重试')
     expect(api.imageCapabilities.list).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '发送创建作品' })).toBeEnabled()
   })
 
   it('disables submission when the selected profile has no SKU after the project changes', async () => {
@@ -684,10 +684,10 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(screen.getByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
     })
-    fireEvent.click(screen.getByRole('combobox', { name: '项目：公众号项目' }))
-    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
+    fireEvent.click(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草创作项目/ }))
 
-    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送创建作品' })).toBeDisabled()
     expect(api.aiEntry.submit).not.toHaveBeenCalled()
   })
 
@@ -697,15 +697,15 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
-    const projectControl = await screen.findByRole('combobox', { name: '项目：未选择' })
+    const projectControl = await screen.findByRole('combobox', { name: '创作项目：未选择' })
     expect(projectControl).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /创建第一个项目/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /创建第一个创作项目/ })).not.toBeInTheDocument()
     fireEvent.click(projectControl)
-    expect(await screen.findByRole('link', { name: '创建项目' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: '创建创作项目' })).toHaveAttribute(
       'href',
       '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
     )
-    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送创建作品' })).toBeDisabled()
   })
 
   it('shows an operator-owned error when the server internal model is unavailable', async () => {
@@ -719,7 +719,7 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇新品介绍' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     expect(await screen.findByText('AI 入口意图解析模型暂不可用，请联系管理员。')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '补充配置' })).not.toBeInTheDocument()
@@ -737,24 +737,24 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号项目')
+    expect(screen.queryByRole('region', { name: '首页创作项目选择' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号创作项目')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
-    expect(screen.getByRole('combobox', { name: '项目：公众号项目' })).toHaveTextContent('公众号')
-    expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /管理项目配置/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号')
+    expect(screen.queryByRole('link', { name: /新建作品/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /管理创作项目配置/ })).not.toBeInTheDocument()
     expect(screen.queryByText('今日创作态势')).not.toBeInTheDocument()
     expect(screen.queryByText('接入状态')).not.toBeInTheDocument()
     expect(screen.queryByText('下一步')).not.toBeInTheDocument()
-    expect(screen.queryByText('最近任务')).not.toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByText('还没有任务')).not.toBeInTheDocument())
+    expect(screen.queryByText('最近作品')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('还没有作品')).not.toBeInTheDocument())
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files } })
     await waitFor(() => expect(uploadToOSSMock).toHaveBeenCalledTimes(5))
     expect(screen.getByLabelText('选择附件文件')).toBeDisabled()
     await screen.findByRole('button', { name: '预览 product.png' })
     fireEvent.change(prompt, { target: { value: '帮我写一篇新品发布公众号文章' } })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith({
       agent_id: 'wechat-article',
@@ -781,7 +781,7 @@ describe('DashboardPage AI entry', () => {
   it('exposes the selected project identity in the composer control name', async () => {
     render(<DashboardPage />)
 
-    expect(await screen.findByRole('combobox', { name: '项目：公众号项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' })).toBeInTheDocument()
   })
 
   it('keeps supported task quantities and project image defaults while clamping single-task projects', async () => {
@@ -794,14 +794,14 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     const selectProject = async (name: RegExp) => {
-      fireEvent.click(await screen.findByRole('combobox', { name: /^项目：/ }))
+      fireEvent.click(await screen.findByRole('combobox', { name: /^创作项目：/ }))
       fireEvent.click(await screen.findByRole('option', { name }))
     }
 
     await expectParameterSummary('16:9', 'Standard')
     const quantityParameters = await openParameters()
     fireEvent.click(within(quantityParameters).getByText('Professional'))
-    const increment = within(quantityParameters).getByRole('button', { name: '增加任务数量' })
+    const increment = within(quantityParameters).getByRole('button', { name: '增加作品数量' })
     fireEvent.click(increment)
     fireEvent.click(increment)
     fireEvent.click(increment)
@@ -809,23 +809,23 @@ describe('DashboardPage AI entry', () => {
     expect(increment).toBeDisabled()
     await closeParameters()
 
-    await selectProject(/种草项目/)
-    await expectParameterSummary('任务数量 5', '3:4', 'Professional')
+    await selectProject(/种草创作项目/)
+    await expectParameterSummary('作品数量 5', '3:4', 'Professional')
 
-    await selectProject(/朋友圈项目/)
-    await expectParameterSummary('任务数量 5', '1:1', 'Professional')
+    await selectProject(/朋友圈创作项目/)
+    await expectParameterSummary('作品数量 5', '1:1', 'Professional')
 
-    await selectProject(/电商项目/)
-    await expectParameterSummary('任务数量 1', '4:3', 'Professional')
+    await selectProject(/电商创作项目/)
+    await expectParameterSummary('作品数量 1', '4:3', 'Professional')
     const ecommerceParameters = await openParameters()
-    expect(within(ecommerceParameters).getByLabelText('任务数量：1，当前能力上限')).toHaveTextContent('任务数量 1 · 当前能力上限')
-    expect(within(ecommerceParameters).queryByRole('button', { name: '增加任务数量' })).not.toBeInTheDocument()
+    expect(within(ecommerceParameters).getByLabelText('作品数量：1，当前能力上限')).toHaveTextContent('作品数量 1 · 当前能力上限')
+    expect(within(ecommerceParameters).queryByRole('button', { name: '增加作品数量' })).not.toBeInTheDocument()
   })
 
   it('routes multiple created tasks to the task list and shows the server message', async () => {
     vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
       status: 'created',
-      message: '已创建 2 个任务',
+      message: '已创建 2 个作品',
       tasks: [
         { ...createdTask },
         { ...createdTask, id: 'task-ai-2' },
@@ -836,16 +836,16 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '创建两篇文章' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/tasks'))
-    expect(toastSuccessMock).toHaveBeenCalledWith('已创建 2 个任务')
+    expect(toastSuccessMock).toHaveBeenCalledWith('已创建 2 个作品')
   })
 
   it.each(['empty', 'missing'] as const)('handles a %s created task collection without crashing', async (variant) => {
     vi.mocked(api.aiEntry.submit).mockResolvedValueOnce({
       status: 'created',
-      message: '没有创建任何任务',
+      message: '没有创建任何作品',
       ...(variant === 'empty' ? { tasks: [] } : {}),
     })
     render(<DashboardPage />)
@@ -853,9 +853,9 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '创建文章' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
-    expect(await screen.findByText('没有创建任何任务')).toBeInTheDocument()
+    expect(await screen.findByText('没有创建任何作品')).toBeInTheDocument()
     expect(navigateMock).not.toHaveBeenCalled()
   })
 
@@ -866,13 +866,13 @@ describe('DashboardPage AI entry', () => {
 
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     fireEvent.change(prompt, { target: { value: '写一篇新品介绍' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建任务' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送创建作品' })).toBeEnabled())
 
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['image'], 'pending.png', { type: 'image/png' })] },
     })
 
-    expect(screen.getByRole('button', { name: '发送创建任务' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送创建作品' })).toBeDisabled()
     await act(async () => {
       resolveUpload({ uploadId: 'pending', key: 'uploads/pending/pending.png', publicUrl: '', contentType: 'image/png', size: 5 })
       await Promise.resolve()
@@ -888,18 +888,18 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '首页项目选择' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '首页创作项目选择' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /新建作品/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
 
-    fireEvent.click(await screen.findByRole('combobox', { name: '项目：公众号项目' }))
-    fireEvent.click(await screen.findByRole('option', { name: /种草项目/ }))
-    expect(screen.getByRole('combobox', { name: '项目：种草项目' })).toHaveTextContent('种草项目')
+    fireEvent.click(await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' }))
+    fireEvent.click(await screen.findByRole('option', { name: /种草创作项目/ }))
+    expect(screen.getByRole('combobox', { name: '创作项目：种草创作项目' })).toHaveTextContent('种草创作项目')
 
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '写一篇种草笔记' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     await waitFor(() => expect(api.aiEntry.submit).toHaveBeenCalledWith(expect.objectContaining({
       project_id: 'project-2',
@@ -907,11 +907,11 @@ describe('DashboardPage AI entry', () => {
     })))
   })
 
-  it('选择种草笔记项目后用模板覆盖 Prompt 并保留附件', async () => {
+  it('选择种草笔记创作项目后用模板覆盖 Prompt 并保留附件', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ ...seednoteProject }])
     render(<DashboardPage />)
 
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '项目：种草项目' })).toHaveTextContent('种草项目'))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '创作项目：种草创作项目' })).toHaveTextContent('种草创作项目'))
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     fireEvent.change(prompt, { target: { value: '已有需求' } })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
@@ -933,10 +933,10 @@ describe('DashboardPage AI entry', () => {
     render(<DashboardPage />)
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
-    expect(await screen.findByRole('combobox', { name: '项目：电商项目' })).toHaveTextContent('电商项目')
-    expect(screen.queryByRole('link', { name: /新建创作任务/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /安排自动计划/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /管理项目配置/ })).not.toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '创作项目：电商创作项目' })).toHaveTextContent('电商创作项目')
+    expect(screen.queryByRole('link', { name: /新建作品/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /管理创作项目配置/ })).not.toBeInTheDocument()
   })
 
   it('shows needs-configuration errors without navigating', async () => {
@@ -950,7 +950,7 @@ describe('DashboardPage AI entry', () => {
     fireEvent.change(await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...'), {
       target: { value: '做一套保温杯主图' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '发送创建任务' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送创建作品' }))
 
     expect(await screen.findByText('请先上传产品图')).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: '补充配置' })).toHaveAttribute('href', '/tasks?create=true&type=ecommerce&project_id=project-1&intent=new')

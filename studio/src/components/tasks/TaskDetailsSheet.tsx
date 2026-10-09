@@ -123,7 +123,7 @@ function DetailRows({ rows }: { rows: Array<[string, ReactNode]> }) {
 function taskChargeLabel(detail: TaskBillingChargeDetail) {
   const sku = detail.sku_id?.toLowerCase() ?? ''
   let label = '增值操作费'
-  if (detail.charge_kind === 'task' || detail.policy === 'task_admission' || detail.resource_type === 'task') label = '任务固定费'
+  if (detail.charge_kind === 'task' || detail.policy === 'task_admission' || detail.resource_type === 'task') label = '创作固定费'
   else if (sku === 'image.standard') label = '标准图像生成费'
   else if (sku === 'image.professional') label = '专业增强生成费'
   else if (sku.includes('image') || detail.resource_type === 'image') label = '图片生成费'
@@ -192,7 +192,7 @@ function TaskTechnicalDetails({ task }: { task: Task }) {
   const rows: Array<[string, ReactNode]> = [
     ...(executionId ? [['执行 ID', executionId] as [string, ReactNode]] : []),
     ...(task.execution_profile ? [['运行配置', task.execution_profile] as [string, ReactNode]] : []),
-    ...(snapshotId ? [['任务快照', snapshotId] as [string, ReactNode]] : []),
+    ...(snapshotId ? [['配置快照', snapshotId] as [string, ReactNode]] : []),
     ...(runtime?.connectivity.summary ? [['连接状态', runtime.connectivity.summary] as [string, ReactNode]] : []),
     ...(runtime?.connectivity.diagnostic_code ? [['诊断代码', runtime.connectivity.diagnostic_code] as [string, ReactNode]] : []),
   ]
@@ -202,7 +202,7 @@ function TaskTechnicalDetails({ task }: { task: Task }) {
   return (
     <TaskDetailsSection label="技术信息" title="技术信息" icon={TerminalSquare}>
       <DetailRows rows={rows} />
-      <p className="mt-3 text-xs text-muted-foreground">仅用于排查任务问题，不影响任务内容。</p>
+      <p className="mt-3 text-xs text-muted-foreground">仅用于排查作品问题，不影响作品内容。</p>
     </TaskDetailsSection>
   )
 }
@@ -214,7 +214,7 @@ function TaskOverviewDetails({
     ['创建时间', formatFullDateTimeCN(task.created_at)],
     ['开始时间', formatFullDateTimeCN(task.started_at)],
     ['完成时间', formatFullDateTimeCN(task.completed_at)],
-    ['来源', task.plan_id ? '计划任务' : '手动创建'],
+    ['来源', task.plan_id ? '排期生成' : '手动创建'],
   ]
   const failure = taskFailurePresentation(task)
   const providerDiagnostic = task.outcome?.diagnostic
@@ -227,8 +227,8 @@ function TaskOverviewDetails({
   return (
     <div className="flex flex-col gap-4">
       <TaskDetailsSection
-        label="任务时间与来源"
-        title="任务时间与来源"
+        label="作品时间与来源"
+        title="作品时间与来源"
         icon={CalendarClock}
       >
         <DetailRows rows={timingRows} />
@@ -266,7 +266,7 @@ function CompactMaterialError() {
     <Alert>
       <AlertTriangle />
       <AlertTitle>参考素材摘要暂时无法显示</AlertTitle>
-      <AlertDescription>任务状态与生成文件不受影响，可稍后重试。</AlertDescription>
+      <AlertDescription>作品状态与生成文件不受影响，可稍后重试。</AlertDescription>
     </Alert>
   )
 }
@@ -383,7 +383,7 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
         className="gap-0 overflow-hidden p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl"
       >
         <SheetHeader className="shrink-0 border-b border-border px-4 py-3 pr-12">
-          <SheetTitle>任务详情</SheetTitle>
+          <SheetTitle>作品详情</SheetTitle>
           <SheetDescription className="truncate text-xs" title={taskTitle}>
             {taskTitle}
           </SheetDescription>
@@ -441,7 +441,7 @@ export function TaskDetailsSheet(props: TaskDetailsSheetProps) {
             <TaskDetailsSection label="参考素材详情" title="参考素材" icon={Images}>
               {props.task.reference_image ? (
                 <div className="mb-4 space-y-2">
-                  <p className="text-xs text-muted-foreground">任务参考图</p>
+                  <p className="text-xs text-muted-foreground">参考图</p>
                   <img
                     src={props.task.reference_image.download_url}
                     alt="参考图"

@@ -76,7 +76,7 @@ function ResumeTaskDialog({
     ),
     onSuccess: (_data, { initiatingTaskId }) => {
       if (!shouldHandleResult(initiatingTaskId)) return
-      toast.success('已提交，任务将结合已有上下文继续执行')
+      toast.success('已提交，作品将结合已有上下文继续执行')
       onSuccess()
     },
     onError: (err, { initiatingTaskId }) => {
@@ -105,9 +105,9 @@ function ResumeTaskDialog({
     >
       <DialogContent className="sm:max-w-2xl" closeButtonDisabled={resumeMutation.isPending}>
         <DialogHeader>
-          <DialogTitle>继续执行此任务</DialogTitle>
+          <DialogTitle>继续执行此作品</DialogTitle>
           <DialogDescription>
-            提供补充指令和文件后，任务会结合已有上下文继续执行。
+            提供补充指令和文件后，作品会结合已有上下文继续执行。
           </DialogDescription>
         </DialogHeader>
         <AgentPromptInput
@@ -125,7 +125,7 @@ function ResumeTaskDialog({
           attachmentController={attachmentController}
           attachmentPolicy={RESUME_ATTACHMENT_POLICY}
           placeholder="说明希望 AI 接着做什么，并可添加补充资料或修改意见..."
-          ariaLabel="继续任务要求"
+          ariaLabel="继续作品要求"
           submitLabel="提交并继续"
           submitting={resumeMutation.isPending}
           submitDisabled={!hasInput}
@@ -210,7 +210,7 @@ function TaskOutcomeNotice({
 }) {
   if (task.status === 'failed') {
     return (
-      <section role="alert" aria-label="任务结果提醒" className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+      <section role="alert" aria-label="作品结果提醒" className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 gap-2.5">
           <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
           <div className="min-w-0">
@@ -232,7 +232,7 @@ function TaskOutcomeNotice({
 
   if (task.status === 'cancelled') {
     return (
-      <section aria-label="任务结果提醒" className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <section aria-label="作品结果提醒" className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2.5">
           <XCircle className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <p className="text-sm text-foreground">执行已停止，可从已有上下文继续。</p>
@@ -247,7 +247,7 @@ function TaskOutcomeNotice({
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200/70 bg-emerald-50/60 px-4 py-2.5 dark:border-emerald-900/60 dark:bg-emerald-950/20">
         <div className="flex min-w-0 items-center gap-2.5">
           <CheckCircle2 className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />
-          <p className="text-sm text-foreground">任务已完成，交付成果已保存。</p>
+          <p className="text-sm text-foreground">作品已完成，交付成果已保存。</p>
         </div>
         <Button size="sm" variant="outline" className="min-h-11" onClick={onOpenMaterials}><FileCheck2 className="size-3.5" />查看交付成果</Button>
       </div>
@@ -363,14 +363,14 @@ export default function TaskDetailPage() {
     mutationFn: (taskId: string) => api.tasks.cancel(taskId),
     onSuccess: (_data, taskId) => {
       if (!isTaskActive(taskId)) return
-      toast.success('任务已取消')
+      toast.success('作品已取消')
       abortRef.current?.abort()
       abortRef.current = null
       setShowCancelDialog(false)
     },
     onError: (err, taskId) => {
       if (!isTaskActive(taskId)) return
-      toast.error(getApiErrorMessage(err, '取消任务失败，请稍后重试'))
+      toast.error(getApiErrorMessage(err, '取消作品失败，请稍后重试'))
     },
     onSettled: (_data, _error, taskId) => Promise.all([
       queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
@@ -382,7 +382,7 @@ export default function TaskDetailPage() {
     mutationFn: (taskId: string) => api.tasks.delete(taskId),
     onSuccess: (_data, taskId) => {
       if (!isTaskActive(taskId)) return
-      toast.success('任务已删除')
+      toast.success('作品已删除')
       abortRef.current?.abort()
       abortRef.current = null
       setShowDeleteDialog(false)
@@ -443,9 +443,9 @@ export default function TaskDetailPage() {
       case 'cancelled': {
         queryClient.invalidateQueries({ queryKey: ['task', taskId] })
         queryClient.invalidateQueries({ queryKey: ['task-files', taskId] })
-        const statusText = event.event === 'completed' ? '任务完成'
-          : event.event === 'failed' ? '任务失败'
-            : event.event === 'cancelled' ? '任务取消' : '任务完成'
+        const statusText = event.event === 'completed' ? '作品完成'
+          : event.event === 'failed' ? '作品失败'
+            : event.event === 'cancelled' ? '作品取消' : '作品完成'
         setSseLogs((prev) => appendLog(prev, `--- ${statusText} ---`))
         break
       }
@@ -497,7 +497,7 @@ export default function TaskDetailPage() {
         if (controller.signal.aborted || activeSseTaskRef.current !== taskId) return
         if (err instanceof DOMException && err.name === 'AbortError') return
         if (retries >= 3) {
-          setSseError('连接断开，正在刷新任务状态...')
+          setSseError('连接断开，正在刷新作品状态...')
           queryClient.invalidateQueries({ queryKey: ['task', taskId] })
           return
         }
@@ -587,7 +587,7 @@ export default function TaskDetailPage() {
           className="flex min-h-11 items-center gap-1 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <ArrowLeft className="h-4 w-4" />
-          返回任务列表
+          返回作品列表
         </button>
         <QueryErrorState onRetry={() => refetch()} />
       </div>
@@ -597,9 +597,9 @@ export default function TaskDetailPage() {
   if (!task) {
     return (
       <div className="text-center py-16">
-        <p className="text-muted-foreground">任务未找到</p>
+        <p className="text-muted-foreground">作品未找到</p>
         <Button variant="ghost" className="mt-3 min-h-11" onClick={() => navigate('/tasks')}>
-          返回任务列表
+          返回作品列表
         </Button>
       </div>
     )
@@ -608,7 +608,7 @@ export default function TaskDetailPage() {
   const canCancel = task.status === 'pending' || task.status === 'running'
   const canClone = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
   const canResume = task.status === 'failed' || task.status === 'cancelled'
-  // 内容分析 only covers 公众号/种草笔记 账号，montage 等任务没有对应的数据看板。
+  // 内容分析 only covers 公众号/种草笔记 账号，montage 等作品没有对应的数据看板。
   const canViewContentAnalytics = task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote')
   const currentTask = task
   const snapshot = task.project_snapshot
@@ -643,9 +643,9 @@ export default function TaskDetailPage() {
     <div className="space-y-6">
       {/* Screen reader live region for status changes */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {task.status === 'completed' && '任务已完成'}
-        {task?.status === 'failed' && (hasPreservedDelivery ? '续跑失败，历史交付已保留' : '任务失败')}
-        {task?.status === 'cancelled' && '任务已取消'}
+        {task.status === 'completed' && '作品已完成'}
+        {task?.status === 'failed' && (hasPreservedDelivery ? '续跑失败，历史交付已保留' : '作品失败')}
+        {task?.status === 'cancelled' && '作品已取消'}
       </div>
 
       {/* Header */}
@@ -654,7 +654,7 @@ export default function TaskDetailPage() {
           <Breadcrumb className="mb-2">
             <BreadcrumbList>
               <BreadcrumbItem>
-                <BreadcrumbLink render={<Link to="/tasks" />}>任务</BreadcrumbLink>
+                <BreadcrumbLink render={<Link to="/tasks" />}>作品</BreadcrumbLink>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
@@ -664,7 +664,7 @@ export default function TaskDetailPage() {
               <span className="sr-only">{taskAgentLabel}</span>
             </div>
             <h1 className="min-w-0 max-w-4xl text-xl font-bold leading-tight text-foreground">
-              {task.title || task.prompt || `${taskAgentLabel}任务`}
+              {task.title || task.prompt || `${taskAgentLabel}作品`}
             </h1>
             <StatusPill status={task.status} label={taskStatusLabel[task.status] || task.status} />
             {project && (
@@ -723,13 +723,13 @@ export default function TaskDetailPage() {
               onClick={() => setShowCancelDialog(true)}
             >
               {cancelMutation.isPending ? null : <Ban className="h-4 w-4" aria-hidden="true" />}
-              取消任务
+              取消作品
             </Button>
           )}
           {canClone ? (
             <Button variant="outline" size="sm" className="min-h-11" onClick={openCloneDialog}>
               <RefreshCw className="h-4 w-4" />
-              {task.type === 'hypit' ? '再次改编' : '克隆任务'}
+              {task.type === 'hypit' ? '再次改编' : '克隆作品'}
             </Button>
           ) : null}
           {canClone ? (
@@ -740,7 +740,7 @@ export default function TaskDetailPage() {
               onClick={() => setShowDeleteDialog(true)}
             >
               <Trash2 className="h-4 w-4" />
-              删除任务
+              删除作品
             </Button>
           ) : null}
         </div>
@@ -793,7 +793,7 @@ export default function TaskDetailPage() {
           )}
         </div>
 
-        <aside className="min-w-0" aria-label="任务辅助信息">
+        <aside className="min-w-0" aria-label="作品辅助信息">
           <TaskContextSummary
             compact
             layout="sidebar"
@@ -858,7 +858,7 @@ export default function TaskDetailPage() {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>人工评价</DialogTitle>
-              <DialogDescription>请为本次任务产出评分，帮助我们持续改进。</DialogDescription>
+              <DialogDescription>请为本次作品产出评分，帮助我们持续改进。</DialogDescription>
             </DialogHeader>
             <TaskFeedbackCard taskId={task.id} enabled={showFeedback} showHeader={false} />
           </DialogContent>
@@ -869,15 +869,15 @@ export default function TaskDetailPage() {
         <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>
           <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
-              <DialogTitle>项目信息</DialogTitle>
+              <DialogTitle>创作项目信息</DialogTitle>
               <DialogDescription>
-                当前任务关联项目的实时配置，用于对照本次任务继承的项目参数。
+                展示当前作品关联的创作项目实时配置，用于对照本次继承的参数。
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-[70vh] overflow-y-auto pr-1">
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">项目身份</p>
+                  <p className="text-xs text-muted-foreground">创作项目身份</p>
                   <ProjectIdentity project={project} className="mt-1" />
                 </div>
                 <div>
@@ -958,9 +958,9 @@ export default function TaskDetailPage() {
       <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确定取消此任务？</AlertDialogTitle>
+            <AlertDialogTitle>确定取消此作品？</AlertDialogTitle>
             <AlertDialogDescription>
-              取消后会立即停止尚未完成的执行步骤。用户主动取消不撤销已确认的任务固定价；已成功交付的增值操作也会保留对应费用。此操作不可撤销。
+              取消后会立即停止尚未完成的执行步骤。用户主动取消不撤销已确认的作品固定价；已成功交付的增值操作也会保留对应费用。此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -977,9 +977,9 @@ export default function TaskDetailPage() {
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确定删除此任务？</AlertDialogTitle>
+            <AlertDialogTitle>确定删除此作品？</AlertDialogTitle>
             <AlertDialogDescription>
-              删除后任务及所有关联文件将被永久移除，此操作不可撤销。
+              删除后作品及所有关联文件将被永久移除，此操作不可撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

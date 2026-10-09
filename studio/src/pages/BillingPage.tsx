@@ -36,7 +36,7 @@ function chargeItemName(entry: BillingTransaction) {
   if (sku === 'image.standard') return '标准图像生成费'
   if (sku === 'image.professional') return '专业增强生成费'
   if (sku.includes('image') || entry.charge_resource_type === 'image') return '图片生成费'
-  if (entry.charge_kind === 'task' || entry.charge_policy === 'task_admission') return '任务固定费'
+  if (entry.charge_kind === 'task' || entry.charge_policy === 'task_admission') return '创作固定费'
   if (entry.charge_kind === 'operation') return '增值操作费'
   return fallbackEventLabels[entry.event_kind]
 }
@@ -58,12 +58,12 @@ function entryAssociation(entry: BillingTransaction) {
   if (entry.event_kind === 'debt_repayment' && entry.resource_id) {
     return {
       primary: `本次充值 ${entry.resource_id}`,
-      secondary: taskID ? `原任务 ${taskID}${entry.tool_call_id ? ` · ${entry.tool_call_id}` : ''}` : entry.sku_id,
+      secondary: taskID ? `原作品 ${taskID}${entry.tool_call_id ? ` · ${entry.tool_call_id}` : ''}` : entry.sku_id,
     }
   }
   if (taskID) {
     return {
-      primary: `任务 ${taskID}`,
+      primary: `作品 ${taskID}`,
       secondary: entry.tool_call_id ? `操作 ${entry.tool_call_id}` : entry.charge_resource_id ? `${entry.charge_resource_type || '资源'} ${entry.charge_resource_id}` : undefined,
     }
   }
@@ -136,7 +136,7 @@ export default function BillingPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="钱包" description="固定价格在任务或增值操作开始前确定。">
+      <PageHeader title="钱包" description="固定价格在作品或增值操作开始前确定。">
         <Button size="sm" onClick={() => setRechargeOpen(true)}>
           <CreditCard data-icon="inline-start" />
           充值
@@ -161,7 +161,7 @@ export default function BillingPage() {
       {(wallet?.debt ?? 0) > 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
           <p className="font-medium text-foreground">当前欠费 {(wallet?.debt ?? 0).toLocaleString()} 积分</p>
-          <p className="mt-1 text-xs text-muted-foreground">已接受的任务仍可完成。充值会优先补齐欠费，补齐前不能创建新任务或发起独立增值操作。</p>
+          <p className="mt-1 text-xs text-muted-foreground">已接受的作品仍可完成。充值会优先补齐欠费，补齐前不能创建新作品或发起独立增值操作。</p>
         </div>
       )}
 
@@ -200,7 +200,7 @@ export default function BillingPage() {
             <ReceiptText className="size-4 text-muted-foreground" />
             钱包流水
           </CardTitle>
-          <CardDescription className="text-xs">任务固定费和每次增值操作费均按实际扣款单独列出。</CardDescription>
+          <CardDescription className="text-xs">创作固定费和每次增值操作费均按实际扣款单独列出。</CardDescription>
         </CardHeader>
         {transactionsQuery.isError ? (
           <QueryErrorState onRetry={() => transactionsQuery.refetch()} />
@@ -221,10 +221,10 @@ export default function BillingPage() {
             <Table>
                 <TableHeader>
                   <TableRow className="text-xs text-muted-foreground hover:bg-transparent">
-                    <TableHead className="px-4">计费项目</TableHead>
+                    <TableHead className="px-4">计费创作项目</TableHead>
                     <TableHead className="px-4">钱包影响</TableHead>
                     <TableHead className="min-w-80 px-4">金额说明</TableHead>
-                    <TableHead className="min-w-72 px-4">关联任务 / 操作</TableHead>
+                    <TableHead className="min-w-72 px-4">关联作品 / 操作</TableHead>
                     <TableHead className="px-4">时间</TableHead>
                   </TableRow>
                 </TableHeader>

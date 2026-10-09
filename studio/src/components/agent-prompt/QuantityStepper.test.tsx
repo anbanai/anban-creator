@@ -9,7 +9,7 @@ describe('QuantityStepper', () => {
     const onChange = vi.fn()
     render(
       <QuantityStepper
-        label="任务数量"
+        label="作品数量"
         value={2}
         min={1}
         max={5}
@@ -17,9 +17,9 @@ describe('QuantityStepper', () => {
       />,
     )
 
-    expect(screen.getByLabelText('任务数量：2')).toHaveTextContent('2')
-    fireEvent.click(screen.getByRole('button', { name: '增加任务数量' }))
-    fireEvent.click(screen.getByRole('button', { name: '减少任务数量' }))
+    expect(screen.getByLabelText('作品数量：2')).toHaveTextContent('2')
+    fireEvent.click(screen.getByRole('button', { name: '增加作品数量' }))
+    fireEvent.click(screen.getByRole('button', { name: '减少作品数量' }))
 
     expect(onChange).toHaveBeenNthCalledWith(1, 3)
     expect(onChange).toHaveBeenNthCalledWith(2, 1)
@@ -28,18 +28,18 @@ describe('QuantityStepper', () => {
   it('disables boundary actions and never reports an out-of-range value', () => {
     const onChange = vi.fn()
     const { rerender } = render(
-      <QuantityStepper label="任务数量" value={1} min={1} max={5} onChange={onChange} />,
+      <QuantityStepper label="作品数量" value={1} min={1} max={5} onChange={onChange} />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '减少任务数量' }))
-    expect(screen.getByRole('button', { name: '减少任务数量' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '减少作品数量' }))
+    expect(screen.getByRole('button', { name: '减少作品数量' })).toBeDisabled()
     expect(onChange).not.toHaveBeenCalled()
 
     rerender(
-      <QuantityStepper label="任务数量" value={5} min={1} max={5} onChange={onChange} />,
+      <QuantityStepper label="作品数量" value={5} min={1} max={5} onChange={onChange} />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '增加任务数量' }))
-    expect(screen.getByRole('button', { name: '增加任务数量' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '增加作品数量' }))
+    expect(screen.getByRole('button', { name: '增加作品数量' })).toBeDisabled()
     expect(onChange).not.toHaveBeenCalled()
   })
 
@@ -47,7 +47,7 @@ describe('QuantityStepper', () => {
     const onChange = vi.fn()
     render(
       <QuantityStepper
-        label="任务数量"
+        label="作品数量"
         value={2}
         min={1}
         max={5}
@@ -56,8 +56,8 @@ describe('QuantityStepper', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '增加任务数量' }))
-    fireEvent.click(screen.getByRole('button', { name: '减少任务数量' }))
+    fireEvent.click(screen.getByRole('button', { name: '增加作品数量' }))
+    fireEvent.click(screen.getByRole('button', { name: '减少作品数量' }))
     for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled()
     expect(onChange).not.toHaveBeenCalled()
   })
