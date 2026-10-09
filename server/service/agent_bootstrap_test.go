@@ -20,6 +20,7 @@ import (
 	"gorm.io/gorm"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/config"
 	"github.com/anbanai/anban-creator/server/model"
@@ -763,7 +764,7 @@ func TestBootstrapAcceptsGenericDockerWorkloadIdentity(t *testing.T) {
 	if first.ExecutionToken == "" || first.ExecutionID != executionID || first.TaskID != taskID || first.ProjectID != projectID || first.AgentFlag != "anban:seednote" || first.AgentMemoryDirectory != ".claude/agent-memory" || first.ResumeSessionID != resumeSessionID || first.ResumeContextPath != resumeContextPath || first.MaxTurns != 12 {
 		t.Fatalf("response = %#v", first)
 	}
-	if first.AgentPackID != "seednote" || first.AgentPackVersion != profiledExecution.AgentPackVersion || first.AgentPackVersion == "" || first.AgentPackDigest != profiledExecution.AgentPackDigest || len(first.AgentPackDigest) != 64 || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
+	if first.AgentPackID != "seednote" || first.AgentPackVersion != profiledExecution.AgentPackVersion || first.AgentPackVersion == "" || first.AgentPackDigest != profiledExecution.AgentPackDigest || len(first.AgentPackDigest) != 64 || first.AgentPackCatalogDigest != agentpack.CatalogDigest() || first.RuntimeAdapter != "standard" || first.RuntimeProfile != "seednote" {
 		t.Fatalf("response Agent Pack identity = %#v", first)
 	}
 	if first.ExecutionProfile.Envs["ANTHROPIC_AUTH_TOKEN"] != "test-token" || first.ExecutionProfile.Envs["ANTHROPIC_BASE_URL"] != "https://anthropic.example.com" || first.ExecutionProfile.Envs["ANTHROPIC_MODEL"] != "claude-test" || len(first.ExecutionProfile.Envs) != 7 {

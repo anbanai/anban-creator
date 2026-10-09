@@ -1,8 +1,8 @@
 package agentpack
 
 import (
-	_ "embed"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"sync"
@@ -18,9 +18,8 @@ var (
 	digest         string
 )
 
-// CatalogDigest is the immutable SHA-256 identity of the exact generated
-// Catalog bytes embedded in the Server binary. The runtime compares this
-// value with the Catalog bytes copied into its image.
+// CatalogDigest returns the SHA-256 identity of the exact generated Catalog
+// bytes embedded in this Server binary.
 func CatalogDigest() string {
 	digestOnce.Do(func() {
 		sum := sha256.Sum256(embeddedCatalogJSON)

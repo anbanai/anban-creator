@@ -17,7 +17,7 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
-export const AGENT_RUNTIME_CONTRACT_VERSION = 5;
+export const AGENT_RUNTIME_CONTRACT_VERSION = 6;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "execution_id", "task_id", "task_type", "agent_id", "channel", "task_kind", "project_id", "prompt",
@@ -198,10 +198,15 @@ export async function readWorkloadToken(path: string): Promise<string> {
   return token;
 }
 
-export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse> {
+export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal, catalogPath = DEFAULT_AGENT_PACK_CATALOG_PATH): Promise<ResolvedBootstrapResponse> {
+  const localCatalog = await readAgentPackCatalogWithDigest(catalogPath);
   const response = await fetch(`${config.serverURL}/api/v1/agent/bootstrap`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION) },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION),
+      "X-Anban-Agent-Pack-Catalog-Digest": localCatalog.digest,
+    },
     signal,
     redirect: "error",
   });
@@ -216,7 +221,6 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
   if (envelope.code !== 0 || !envelope.data) throw new Error("bootstrap request rejected");
   try {
     const data = validateBootstrapResponse(config.executionID, envelope.data);
-    const localCatalog = await readAgentPackCatalogWithDigest();
     validateAgentPackCatalogDigest(data, localCatalog.digest);
     const pack = validateAgentPackCatalog(data, localCatalog.catalog);
     return { ...data, resolved_agent_pack: pack };
