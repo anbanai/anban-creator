@@ -3,9 +3,9 @@
   "dataRoot": "/tmp/.hypit-build",
   "credentials": {"env": {"use": "@hypit/credential-store-env"}},
   "endpoints": {
-    "media.local": {"use": "@hypit/provider-media-local"},
-    "hyperframes.local": {
-      "use": "@hypit/provider-hyperframes-local",
+    "media.local": {"use": "@hypit/media-local"},
+    "html.local": {
+      "use": "@hypit/provider-html-local",
       "config": {"workers": 2, "defaultConcurrency": 1, "browserGpu": "software"}
     }
   },

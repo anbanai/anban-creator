@@ -14,7 +14,7 @@ import (
 )
 
 func hypitTestConfig() config.HypitConfig {
-	c := config.HypitConfig{Enabled: true, RuntimeProfile: map[string]any{"format": "hypit.runtime-local@1", "credentials": map[string]any{"env": map[string]any{"use": "@hypit/credential-store-env"}}, "endpoints": map[string]any{"local": map[string]any{"use": "@hypit/provider-media-local"}}}, Env: map[string]string{"HYPIT_PROVIDER_TOKEN": "private-secret"}}
+	c := config.HypitConfig{Enabled: true, RuntimeProfile: map[string]any{"format": "hypit.runtime-local@1", "credentials": map[string]any{"env": map[string]any{"use": "@hypit/credential-store-env"}}, "endpoints": map[string]any{"local": map[string]any{"use": "@hypit/media-local"}}}, Env: map[string]string{"HYPIT_PROVIDER_TOKEN": "private-secret"}}
 	c.ApplyDefaults()
 	return c
 }

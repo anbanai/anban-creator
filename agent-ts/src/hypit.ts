@@ -788,7 +788,7 @@ export async function prepareHypitToolHome(
   if (!homeInfo.isDirectory() || homeInfo.isSymbolicLink())
     throw new Error("tool home must be a real directory");
   const cachePaths = [
-    ".cache/hyperframes",
+    ".cache/hypit",
     ".cache/node",
     ".cache/pnpm",
     ".local/state/hypit",

@@ -54,7 +54,7 @@ Agent 的创作规则只修改 `harness/packs/hypit/agent.claude.md`，随后 `m
 
 1. **发布物**：发布相互匹配的 Server、Studio 和独立 Agent 镜像。将 `ANBAN_AGENT_IMAGE_HYPIT` / `claude.runtime_images.hypit` 设为已推送的 registry digest，保存本次源码 SHA、Pack 版本和镜像清单；保留历史镜像供恢复和再次改编。
 2. **数据库和调度**：备份数据库，验证 Server 启动时的增量迁移，确认 `projects.hypit_defaults`、`tasks.hypit_input`、`tasks.hypit_runtime_snapshot`、`plans.hypit_input` 及既有执行、交付、计费表完整。确认 `task.hypit` 三档 1600 / 2000 / 6000 积分 SKU、管理员测试余额、Redis 和计划调度可用。
-3. **账户和配置**：保持 `hypit.enabled: false`，准备原生 `hypit.runtime-local@1` Profile、`media.local`、软件渲染与两个 Worker 的 `hyperframes.local`，以及所需生成、转录 Provider 的 endpoints / bindings 和环境凭据引用。准备 Claude 执行账户、execution-token secret、Agent 可访问的 Server / MCP 地址及 TLS CA。能力接口的 `configured` 只表示配置齐备，账户实际能力、余额和硬配额须另外验证；不得把 Provider 密钥写入工程或日志。
+3. **账户和配置**：保持 `hypit.enabled: false`，准备原生 `hypit.runtime-local@1` Profile、`media.local`、软件渲染与两个 Worker 的 `html.local`，以及所需生成、转录 Provider 的 endpoints / bindings 和环境凭据引用。准备 Claude 执行账户、execution-token secret、Agent 可访问的 Server / MCP 地址及 TLS CA。能力接口的 `configured` 只表示配置齐备，账户实际能力、余额和硬配额须另外验证；不得把 Provider 密钥写入工程或日志。
 4. **执行资源**：每任务 Linux amd64、4 CPU、8 GiB 内存和 20 GiB 持久工作空间；任务卷必须允许执行。完整归档校验会临时展开工程并保存媒体快照，`/tmp` 另需至少 10 GiB 可写磁盘临时空间，不能使用受 8 GiB 内存限制的内存型 tmpfs 承载最大工程；Docker 需预留容器可写层磁盘，Kubernetes 需预留磁盘型 emptyDir / 节点 ephemeral-storage。Docker 部署配置 socket、宿主组和网络；Kubernetes 配置 ServiceAccount / RBAC、PVC、镜像拉取 Secret、CA 和节点资源。验证取消、Worker 退出、精确冻结超时及卷丢失时的失败行为。
 5. **存储和传输**：配置 OSS 直传、STS / RAM、浏览器 CORS、对象读取及签名权限，持久保存工程和交付文件。实际验证 256 MiB 素材、512 MiB 成片、2 GiB 工程的上传和下载。Runner 优先使用内部 Server 地址；若经过公开 ingress 或 Studio 代理，必须为授权 artifact 路径单独配置请求大小、30 分钟传输时限和关闭请求缓冲。现有 Studio nginx 全局上限为 `25m`，不能直接承载大工程；不要无限放宽其他 API。
 6. **真实验收**：内部管理员启用后，完成上传参考、链接参考、定时任务、中断恢复、再次改编五类真实任务。保存任务 ID、镜像 digest、脱敏配置摘要、成片和质量报告；验证完整解码并人工检查音画，确认未修改素材复用、未知付费请求不重复提交。工程须在新任务通过官方 check / plan。实际生成费用按原生请求回执和 Provider 账单独立对账，目前没有统一实际金额汇总。
@@ -125,11 +125,39 @@ commit。v0.2.17 的 TokenDance Provider 仍要求 MiniMax 查询响应包含
 
 本次只完成本地升级验证；未部署或启用业务，真实 Provider 任务的端到端验收仍未完成。
 
+## Hypit v0.3.0 架构升级（2026-10-09）
+
+构建默认源码升级到 Hypit `v0.3.0`，固定 commit 为
+`ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1`。Dockerfile、Make 默认值和本地
+smoke 校验使用同一个不可变 commit。该版本为破坏性架构变更，与 v0.2.x 不兼容：
+
+- 渲染 Provider 从 `@hypit/provider-hyperframes-local`（endpoint
+  `hyperframes.local`）迁移为 `@hypit/provider-html-local`（endpoint
+  `html.local`）；推荐浏览器版本键从
+  `packages/provider-hyperframes-local/package.json` 的
+  `hypit.renderBrowser.version` 改为 `packages/provider-html-local/package.json`
+  的 `hypit.htmlBrowser.version`。
+- 浏览器缓存目录从 `~/.cache/hyperframes/chrome` 改为
+  `~/.cache/hypit/html-rasterizer/chrome`；ManagedProgram 安装日志位于其下的
+  `.hypit-html-browser-program/install.log`。
+- 媒体 Provider 从 `@hypit/provider-media-local` 变为 `@hypit/media-local`。
+- `hypit media prepare-fetch` 移除，下载器准备改为 `hypit download prepare`。
+- Run 标记从 `@hypit/run-markup@1` 改为 `@hypit/markup/run@1`。
+- 未变：Profile 格式 `hypit.runtime-local@1`、宿主状态根 `~/.local/state/hypit`、
+  CLI 命令 `check` / `plan` / `build` / `builds` / `get` 及 `builds --json` 的
+  `.builds[].id`。
+- 兼容性：历史任务冻结快照中的旧 endpoint / `use` 名（`hyperframes.local`、
+  `@hypit/provider-media-local`、`@hypit/provider-hyperframes-local`）在 v0.3.0
+  镜像上无法激活，再次改编前须按当前 Profile 重新解析；无法重新解析的旧任务保持
+  关闭或改用上一 digest 镜像回滚。
+
+本次只完成本地升级验证；未部署或启用业务，真实 Provider 任务的端到端验收仍未完成。
+
 ## 供应商错误诊断分类
 
 托管 Runner 不把第三方 Provider 的原始错误文本作为公共错误协议。它先按结构化 HTTP 状态和受限文本模式，将失败归入固定类别：`provider_content_policy`、`provider_authentication`、`provider_rate_limited`、`provider_timeout`、`provider_unavailable`、`provider_invalid_request`、`provider_protocol_error` 或 `provider_unknown`。未知错误降级为 `provider_unknown`；原始响应、凭据、URL 和未登记的供应商代码不会进入任务结果。
 
-协议错误覆盖响应缺字段、类型错误、Schema / JSON 解析失败和协议不匹配。当前 Hypit v0.2.17 的 MiniMax/TokenDance `TOKENDANCE_ERROR: TokenDance task must be an object` 会归类为 `provider_protocol_error`，安全细节代码为 `tokendance_task_shape_invalid`。这表示网关响应与 Hypit Provider 契约不一致，不表示用户项目内容本身有问题。v0.2.17 同时改进了网络层错误原因，未改变该 MiniMax 查询响应契约。
+协议错误覆盖响应缺字段、类型错误、Schema / JSON 解析失败和协议不匹配。Hypit v0.2.17 引入、v0.3.0 仍保留的 MiniMax/TokenDance `TOKENDANCE_ERROR: TokenDance task must be an object` 会归类为 `provider_protocol_error`，安全细节代码为 `tokendance_task_shape_invalid`。这表示网关响应与 Hypit Provider 契约不一致，不表示用户项目内容本身有问题。v0.2.17 同时改进了网络层错误原因，未改变该 MiniMax 查询响应契约。
 
 Hypit 对超时、协议错误和未知远端错误保留官方 Results，并从 `inspect_results` 恢复；鉴权错误从 `review_configuration` 恢复；无效请求从 `repair_project` 恢复。限流和暂时不可用错误可以在确认远端状态后重试，但不会绕过 Server 的幂等和扣费状态。新增 Provider 时只应增加内部匹配规则、固定白名单细节和对应测试，不应透传供应商原文。
 
