@@ -25,6 +25,7 @@ func run(args []string) error {
 		pluginRoot := flags.String("plugin-root", "harness", "canonical plugin root")
 		id := flags.String("id", "", "kebab-case Pack ID")
 		kind := flags.String("kind", agentpack.KindManaged, "plugin or managed")
+		channel := flags.String("channel", "", "managed output channel")
 		taskType := flags.String("task-type", "", "managed task type")
 		profile := flags.String("runtime-profile", "", "managed runtime profile")
 		adapter := flags.String("adapter", agentpack.AdapterStandard, "managed runtime adapter")
@@ -32,7 +33,7 @@ func run(args []string) error {
 			return err
 		}
 		return agentpack.Scaffold(*pluginRoot, agentpack.ScaffoldOptions{
-			ID: *id, Kind: *kind, TaskType: *taskType, RuntimeProfile: *profile, Adapter: *adapter,
+			ID: *id, Kind: *kind, Channel: *channel, TaskType: *taskType, RuntimeProfile: *profile, Adapter: *adapter,
 		})
 	case "generate", "check":
 		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)

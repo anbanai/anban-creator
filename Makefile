@@ -88,7 +88,7 @@ humanizer-update:
 
 # Scaffold, generate, and verify the canonical Agent Pack catalog. Pass
 # scaffold flags through ARGS, for example:
-#   make agent-pack-new ARGS="-id my-agent -kind managed -task-type my-agent -runtime-profile wechat"
+#   make agent-pack-new ARGS="-id my-agent -kind managed -channel wechat-article -task-type content_generation -runtime-profile my-agent"
 agent-pack-new:
 	@go -C server run ./cmd/agent-pack new -plugin-root ../harness $(ARGS)
 

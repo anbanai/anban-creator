@@ -71,7 +71,7 @@ and setup docs must reference bare MCP tool names such as `generate_image`;
 host-specific tool-name prefixes are a runtime concern and belong only in
 system-level config or tests.
 
-- **Language**: Go 1.27.0 (Server), TypeScript (Agent + Studio)
+- **Language**: Go 1.27.1 (Server), TypeScript (Agent + Studio)
 - **Logging**: Zerolog for Go components; never mix with zap
 - **WeChat SDK**: silenceper/wechat/v2
 
@@ -106,7 +106,7 @@ The Go module root is `server/`. Use `make server-build` or `cd server && go bui
 ### Go Tests
 
 ```bash
-make test                     # Run all Go tests (go -C server test -v ./...)
+make test                     # Run all Go and Agent tests
 cd server && go test -v ./app/config       # Run specific package tests
 cd server && go test -v -run TestConfig_Validate ./app/config  # Run specific test
 make coverage                 # Tests with coverage report
@@ -139,7 +139,7 @@ make agent-build
 ### Docker Infrastructure
 
 ```bash
-make docker-up                # Build all Agent profiles, then start Compose services
+make docker-up                # Build one-shot Agent runtimes, then start Compose infrastructure services
 make docker-down              # Stop all containers
 make docker-logs              # Follow container logs
 ```
@@ -258,7 +258,7 @@ Vite dev server proxies `/api` → `localhost:8080` and `/ws` → `ws://localhos
 
 ### Server API Routes
 
-All routes are registered in `server/router/router.go`. Everything under `/api/v1` except `auth/*` (public) and `agent/*` (API-key auth) requires JWT auth.
+All routes are registered in `server/router/router.go`. Everything under `/api/v1` except `auth/*` (public) and `agent/*` (execution-token auth) requires JWT auth.
 
 - `GET /health` — Health check (MySQL + Redis status)
 - `GET /ws`, `GET /ws/login` — WebSocket for real-time updates / QR login
@@ -442,7 +442,7 @@ Scaffold from the repository root:
 
 ```bash
 make agent-pack-new ARGS="-id <kebab-id> -kind plugin"
-make agent-pack-new ARGS="-id <kebab-id> -kind managed -task-type <task-type> -runtime-profile wechat"
+make agent-pack-new ARGS="-id <kebab-id> -kind managed -channel <channel> -task-type <task-kind> -runtime-profile <pack-id>"
 ```
 
 The command creates `harness/packs/<id>/agent-pack.yaml`, `agent.claude.md`, and `agent.codex.toml`. Treat these as canonical sources; never edit generated `harness/agents/<name>.md` or `.toml` directly. Put reusable, host-neutral workflow knowledge under `harness/skills/` and reference Skill IDs from `agent.skills`.
@@ -453,8 +453,8 @@ Keep `agent-pack.yaml` declarative and narrow:
 
 - `id`, `version`, `kind`, `display_name`, `description`: stable Pack identity and presentation.
 - `agent`: native source files, Skill dependencies, Agent name, and native-host `max_turns`.
-- `bindings.project_platforms` / `bindings.task_types`: explicit links to existing business identifiers. A plugin-only Pack has no managed bindings.
-- `runtime.profile`: the dependency image class. Reuse `wechat`, `seednote`, or `montage` unless the scenario has genuinely different system dependencies.
+- `channel` and `bindings.task_kinds`: the managed output channel and explicit links to existing task kinds. A plugin-only Pack has no managed bindings.
+- `runtime.profile`: the dependency image class and, for shipped managed Packs, the Pack ID used to select its image. Add a new profile only when the scenario has genuinely different system dependencies.
 - `runtime.adapter`: use `standard` by default. Use `openmontage` only when execution requires the OpenMontage workspace contract; do not create an adapter for ordinary workflow differences.
 - `runtime.max_turns`: the managed Server execution default. Keep it separate from `agent.max_turns`, because native interactive Agents and one-shot managed jobs have different operational budgets. `claude.max_turns` remains an optional operator override keyed by task type or Pack ID.
 - `surfaces`: any subset of `plugin`, `project`, `task`, and `plan`. The list must match implemented Server and Studio capabilities; for example, do not advertise `plan` when plan creation rejects that task type.
@@ -508,7 +508,7 @@ Before completing a new scenario, verify every applicable item:
 ## Notes
 
 - CLI uses zerolog logging — all components use zerolog, never mix with zap
-- Docker Compose provides MySQL 8.0 + Redis 7 + agent + server containers
+- Docker Compose provides MySQL, Redis, sidecar, and Server containers; one-shot Agent runtimes are launched on demand by the Server.
 - Server binary is `bin/anban-creator-server`
 - **Never modify base UI components in `studio/src/components/ui/`**. These are managed shadcn/ui primitives. If a base component update breaks business logic, fix the business component only — never patch the primitive.
 - `AGENTS.md` is the canonical guidance source for all coding assistants.
