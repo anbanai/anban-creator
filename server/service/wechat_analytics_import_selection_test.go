@@ -55,6 +55,30 @@ func wechatSelectionRow(title, link string) []string {
 	return []string{"公众号后台", title, "20260911", "10", "1", "0", "100", "1", "0.5", link}
 }
 
+func TestWechatAnalyticsTruncatedTitlePreviewAndImport(t *testing.T) {
+	ctx := context.Background()
+	f, svc, req := newWechatSelectionImport(t, [][]string{wechatSelectionRow("保温杯泡茶到底行不行？评茶师：问题从来不", "")})
+	f.publication.DraftTitle = "保温杯泡茶到底行不行？评茶师：问题从来不在杯子"
+	if err := f.repo.WechatPublications().Update(ctx, f.publication); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := svc.Preview(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Rows) != 1 || preview.Rows[0].Target == nil || preview.Rows[0].Target.ID != f.taskID || preview.Rows[0].MatchStatus != model.WechatAnalyticsImportRowMatched {
+		t.Fatalf("truncated export preview = %+v", preview)
+	}
+	req.Selections = []AnalyticsSelection{{SourceRow: preview.Rows[0].SourceRow, Target: *preview.Rows[0].Target}}
+	if _, err := svc.Import(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := svc.Snapshots(ctx, f.userID, f.projectID, f.taskID)
+	if err != nil || len(snapshots) != 1 || snapshots[0].ReadUsers == nil || *snapshots[0].ReadUsers != 10 {
+		t.Fatalf("truncated export metrics = %+v, err = %v", snapshots, err)
+	}
+}
+
 func TestWechatPictureImportMatchesPictureAndKeepsItSelectable(t *testing.T) {
 	ctx := context.Background()
 	row := wechatSelectionRow("文章", "")

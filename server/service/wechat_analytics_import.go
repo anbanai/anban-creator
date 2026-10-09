@@ -302,7 +302,7 @@ func previewWechatCandidateRow(row ParsedWechatAnalyticsRow, candidates []Analyt
 			}
 		}
 	}
-	match, ambiguous := matchAnalyticsCandidate(row.Title, row.PublishedDate, row.ArticleURL, matching)
+	match, ambiguous := matchWechatAnalyticsCandidate(row.Title, row.PublishedDate, row.ArticleURL, matching)
 	if match != nil {
 		preview.Target = &match.Target
 		preview.TargetTitle = match.Title

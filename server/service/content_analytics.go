@@ -278,6 +278,14 @@ func resolveAnalyticsSelections(selections []AnalyticsSelection, candidates []An
 
 // Conflicting nonempty public identities are never rescued by a title match.
 func matchAnalyticsCandidate(title string, date *time.Time, link string, candidates []AnalyticsCandidate) (*AnalyticsCandidate, bool) {
+	return matchAnalyticsCandidateWithTitlePrefix(title, date, link, candidates, false)
+}
+
+func matchWechatAnalyticsCandidate(title string, date *time.Time, link string, candidates []AnalyticsCandidate) (*AnalyticsCandidate, bool) {
+	return matchAnalyticsCandidateWithTitlePrefix(title, date, link, candidates, true)
+}
+
+func matchAnalyticsCandidateWithTitlePrefix(title string, date *time.Time, link string, candidates []AnalyticsCandidate, allowTitlePrefix bool) (*AnalyticsCandidate, bool) {
 	link = analyticsPublicIdentity(link)
 	title = normalizeWechatAnalyticsTitle(title)
 	unique := func(matches []AnalyticsCandidate) (*AnalyticsCandidate, bool) {
@@ -310,6 +318,9 @@ func matchAnalyticsCandidate(title string, date *time.Time, link string, candida
 			same = same || normalizeWechatAnalyticsTitle(alias) == title
 		}
 		if !same || title == "" {
+			if !allowTitlePrefix {
+				continue
+			}
 			if title == "" || len([]rune(title)) < minWechatAnalyticsTitlePrefixRunes {
 				continue
 			}

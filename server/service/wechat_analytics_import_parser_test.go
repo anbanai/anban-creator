@@ -175,6 +175,56 @@ func TestMatchWechatAnalyticsDoesNotUseShortOrAmbiguousPrefixes(t *testing.T) {
 	}
 }
 
+func TestGenericAnalyticsMatchingDoesNotUseWechatTitlePrefix(t *testing.T) {
+	date := time.Date(2026, 10, 2, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	candidate := AnalyticsCandidate{Target: AnalyticsTarget{"seednote_post", "full"}, Title: "秋茶一年里茶香最盛的七天：寒露前三天，后三天", matchDate: &date}
+	if match, ambiguous := matchAnalyticsCandidate("秋茶一年里茶香最盛的七天：寒露前三天，后", &date, "", []AnalyticsCandidate{candidate}); match != nil || ambiguous {
+		t.Fatalf("generic matcher used WeChat-only prefix fallback: match=%+v ambiguous=%v", match, ambiguous)
+	}
+}
+
+func TestWechatAnalyticsPrefixMatchingKeepsIdentityAndDatePrecedence(t *testing.T) {
+	date := time.Date(2026, 10, 2, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	prefix := "保温杯泡茶到底行不行？评茶师：问题从来不"
+	full := AnalyticsCandidate{Target: AnalyticsTarget{"task", "full"}, Title: prefix + "在杯子", matchDate: &date}
+	unknownDate := full
+	unknownDate.Target.ID, unknownDate.matchDate = "unknown", nil
+	conflictingURL := full
+	conflictingURL.URL = "https://mp.weixin.qq.com/s/other"
+	conflictingHistory := full
+	conflictingHistory.conflictingIdentity = true
+	exact := full
+	exact.Title, exact.Target.ID = prefix, "exact"
+	alias := full
+	alias.Title, alias.titles = "新标题", []string{full.Title}
+	for _, tc := range []struct {
+		name       string
+		date       *time.Time
+		link       string
+		candidates []AnalyticsCandidate
+		wantID     string
+	}{
+		{name: "published date outranks unknown date", date: &date, candidates: []AnalyticsCandidate{unknownDate, full}, wantID: "full"},
+		{name: "unique task without published date", date: &date, candidates: []AnalyticsCandidate{unknownDate}, wantID: "unknown"},
+		{name: "unique prefix without row date", candidates: []AnalyticsCandidate{full}, wantID: "full"},
+		{name: "conflicting URL", date: &date, link: "https://mp.weixin.qq.com/s/export", candidates: []AnalyticsCandidate{conflictingURL}},
+		{name: "conflicting historical identities", date: &date, candidates: []AnalyticsCandidate{conflictingHistory}},
+		{name: "exact title outranks prefix", date: &date, candidates: []AnalyticsCandidate{full, exact}, wantID: "exact"},
+		{name: "historical title prefix", date: &date, candidates: []AnalyticsCandidate{alias}, wantID: "full"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			match, ambiguous := matchWechatAnalyticsCandidate(prefix, tc.date, tc.link, tc.candidates)
+			gotID := ""
+			if match != nil {
+				gotID = match.Target.ID
+			}
+			if gotID != tc.wantID || ambiguous {
+				t.Fatalf("match=%+v ambiguous=%v, want ID %q", match, ambiguous, tc.wantID)
+			}
+		})
+	}
+}
+
 func TestParseWechatAnalyticsRateAndMissingValues(t *testing.T) {
 	row := parseWechatAnalyticsRow(2, []string{"来源", "标题", "2026-09-11", "", "", "", "", "40.5%", "", ""}, func() map[string]int {
 		m := make(map[string]int, len(wechatAnalyticsHeaders))
