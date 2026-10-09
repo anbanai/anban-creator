@@ -80,6 +80,29 @@ func (r *taskRepository) FindByUserID(ctx context.Context, userID string, projec
 	return tasks, nil
 }
 
+func (r *taskRepository) FindLatestByPlanIDs(ctx context.Context, userID string, planIDs []string) ([]*model.Task, error) {
+	if len(planIDs) == 0 {
+		return []*model.Task{}, nil
+	}
+
+	latestByPlan := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Model(&model.Task{})).
+		Select("plan_id, MAX(created_at) AS created_at").
+		Where("user_id = ? AND plan_id IN ?", userID, planIDs).
+		Group("plan_id")
+
+	var tasks []*model.Task
+	err := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
+		Joins("JOIN (?) AS latest ON tasks.plan_id = latest.plan_id AND tasks.created_at = latest.created_at", latestByPlan).
+		Where("tasks.user_id = ?", userID).
+		Order("tasks.plan_id ASC").
+		Order("tasks.id DESC").
+		Find(&tasks).Error
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
 func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error) {
 	var tasks []*model.Task
 	q := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, status)).Order("created_at DESC").Order("id DESC")

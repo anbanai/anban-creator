@@ -109,6 +109,66 @@ func TestCreatePlanRejectsMissingExecutionProfile(t *testing.T) {
 	}
 }
 
+func TestListPlansIncludesLatestGeneratedTaskOutcome(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	userID, projectID, planID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	seedPlanHandlerUser(t, repo, userID)
+	if err := repo.Projects().Create(t.Context(), &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Plans().Create(t.Context(), &model.Plan{ID: planID, UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Status: model.PlanStatusActive, CronExpr: "0 9 * * *"}); err != nil {
+		t.Fatal(err)
+	}
+	older := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
+	newer := older.Add(24 * time.Hour)
+	for _, task := range []*model.Task{
+		{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, PlanID: &planID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted, Title: "前一次创作", ExecutionProfile: "effective", CreatedAt: older},
+		{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, PlanID: &planID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed, Title: "最近一次创作", ExecutionProfile: "effective", CreatedAt: newer},
+	} {
+		if err := repo.Tasks().Create(t.Context(), task); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	logger := zerolog.New(io.Discard)
+	handler := NewPlanHandler(newHandlerPlanService(t, repo, &logger), &logger)
+	app := fiber.New()
+	app.Get("/plans", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return handler.List(c)
+	})
+	response, err := app.Test(httptest.NewRequest(http.MethodGet, "/plans", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, fiber.StatusOK)
+	}
+	var envelope struct {
+		Data struct {
+			Items []struct {
+				LatestTask *struct {
+					ID     string `json:"id"`
+					Title  string `json:"title"`
+					Status string `json:"status"`
+				} `json:"latest_task"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Items) != 1 || envelope.Data.Items[0].LatestTask == nil {
+		t.Fatalf("plan response omitted latest task: %#v", envelope.Data.Items)
+	}
+	latest := envelope.Data.Items[0].LatestTask
+	if latest.Title != "最近一次创作" || latest.Status != model.TaskStatusFailed {
+		t.Fatalf("latest task = %#v", latest)
+	}
+}
+
 func TestCreatePlanRejectsAgentInputWhenPackHasNoSchema(t *testing.T) {
 	db := setupTaskHandlerTestDB(t)
 	repo := repository.New(db)

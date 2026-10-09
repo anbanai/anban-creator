@@ -18,6 +18,7 @@ type aiEntrySubmitBody struct {
 	Channel            string                  `json:"channel"`
 	TaskKind           string                  `json:"task_kind"`
 	ProjectID          string                  `json:"project_id"`
+	ContentOrigin      string                  `json:"content_origin,omitempty"`
 	ExecutionProfile   string                  `json:"execution_profile"`
 	Text               string                  `json:"text"`
 	Attachments        []model.EntryAttachment `json:"attachments,omitempty"`
@@ -63,6 +64,7 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 		Channel:            strings.TrimSpace(body.Channel),
 		TaskKind:           strings.TrimSpace(body.TaskKind),
 		ProjectID:          strings.TrimSpace(body.ProjectID),
+		ContentOrigin:      strings.TrimSpace(body.ContentOrigin),
 		ExecutionProfile:   strings.TrimSpace(body.ExecutionProfile),
 		Text:               strings.TrimSpace(body.Text),
 		Attachments:        body.Attachments,
@@ -72,6 +74,9 @@ func (h *AIEntryHandler) Submit(c fiber.Ctx) error {
 	}
 	if req.ProjectID == "" {
 		return Error(c, fiber.StatusBadRequest, "project_id is required")
+	}
+	if req.ContentOrigin != "" && req.ContentOrigin != model.ContentOriginHotSearch {
+		return Error(c, fiber.StatusBadRequest, "unsupported content_origin")
 	}
 	if req.ExecutionProfile == "" {
 		return Error(c, fiber.StatusBadRequest, "execution_profile is required")

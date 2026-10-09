@@ -192,18 +192,17 @@ func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	return nil
 }
 
-// writeProjectCLAUDEMD writes a project's positioning into a fixed CLAUDE.md
-// template in the workspace root. Claude Code loads CLAUDE.md from the cwd as
-// project memory, so all skills/sub-agents in the session receive the same
-// positioning Studio displays. It is a no-op when the project is nil or blank.
-func writeProjectCLAUDEMD(workDir string, project *model.Project) error {
+// writeProjectAgentsMD writes a project's positioning into the canonical
+// AGENTS.md workspace instructions file. It is a no-op when the project is nil
+// or blank.
+func writeProjectAgentsMD(workDir string, project *model.Project) error {
 	if project == nil || strings.TrimSpace(project.Instructions) == "" {
 		return nil
 	}
-	path := filepath.Join(workDir, "CLAUDE.md")
-	content := "# CLAUDE.md\n\n## 项目定位\n\n" + strings.TrimSpace(project.Instructions)
+	path := filepath.Join(workDir, "AGENTS.md")
+	content := "# AGENTS.md\n\n## 项目定位\n\n" + strings.TrimSpace(project.Instructions)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write CLAUDE.md: %w", err)
+		return fmt.Errorf("write AGENTS.md: %w", err)
 	}
 	return nil
 }

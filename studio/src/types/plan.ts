@@ -43,6 +43,13 @@ export interface Plan {
   created_at: string
   updated_at: string
   entries?: PlanEntry[]
+  latest_task?: {
+    id: string
+    title?: string
+    prompt?: string
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+    created_at: string
+  } | null
 }
 
 export interface CreatePlanRequest {

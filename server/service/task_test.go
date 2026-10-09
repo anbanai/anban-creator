@@ -1123,6 +1123,7 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		UserID:             userID,
 		ProjectID:          projectID,
 		Status:             model.TaskStatusCompleted,
+		ContentOrigin:      model.ContentOriginHotSearch,
 		Prompt:             "finished topic",
 		ImageRatio:         "16:9",
 		ImageCapabilityKey: "standard",
@@ -1154,6 +1155,9 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 	if clone.Prompt != src.Prompt || clone.ImageRatio != src.ImageRatio {
 		t.Fatalf("clone config = prompt %q ratio %q, want source config", clone.Prompt, clone.ImageRatio)
+	}
+	if clone.ContentOrigin != model.ContentOriginHotSearch {
+		t.Fatalf("clone content origin = %q, want %q", clone.ContentOrigin, model.ContentOriginHotSearch)
 	}
 	if clone.ExecutionProfile != src.ExecutionProfile || clone.AgentProfileSnapshot.ProfileID != src.ExecutionProfile {
 		t.Fatalf("clone profile = %q snapshot=%#v, want source profile %q", clone.ExecutionProfile, clone.AgentProfileSnapshot, src.ExecutionProfile)

@@ -81,7 +81,7 @@ func ValidateMontageInlineBootstrapBudget(input *model.MontageInput, project *mo
 		totalBytes += int64(len(raw))
 	}
 	if trimmed := strings.TrimSpace(instructions); trimmed != "" {
-		totalBytes += int64(len([]byte("# CLAUDE.md\n\n## 项目定位\n\n" + trimmed)))
+		totalBytes += int64(len([]byte("# AGENTS.md\n\n## 项目定位\n\n" + trimmed)))
 	}
 	if totalBytes > montageBootstrapInlineReserveBytes {
 		return fmt.Errorf("%w: inline 视频生成 bootstrap metadata exceeds %d bytes", ErrMontageInput, montageBootstrapInlineReserveBytes)

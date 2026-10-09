@@ -45,6 +45,7 @@ export default function DashboardPage() {
 
   const composerRef = useRef<HTMLDivElement>(null)
   const [prompt, setPrompt] = useState('')
+  const [contentOrigin, setContentOrigin] = useState<'hot_search' | ''>('')
   const [attachments, setAttachments] = useState<PromptAttachment[]>([])
   const [entryError, setEntryError] = useState<EntryError | null>(null)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
@@ -53,15 +54,16 @@ export default function DashboardPage() {
   const [imageRatio, setImageRatio] = useState<ImageRatio>('auto')
   const [imageCapabilityKey, setImageCapabilityKey] = useState('')
   const [imageCapabilityReselectionRequired, setImageCapabilityReselectionRequired] = useState(false)
-  const trendState = location.state as { project_id?: string; trend_title?: string; trend_url?: string } | null
+  const trendState = location.state as { project_id?: string; trend_title?: string; trend_url?: string; content_origin?: 'hot_search' } | null
 
   useEffect(() => {
     if (!trendState?.trend_title) return
     const source = trendState.trend_url ? `\n来源：${trendState.trend_url}` : ''
     setPrompt(`围绕当前热点「${trendState.trend_title}」：先判断它是否适合我的账号赛道；若合适，给出 2-3 个差异化的二创角度，并把最推荐的一条写成可直接发布的文案初稿。${source}`)
+    setContentOrigin(trendState.content_origin === 'hot_search' ? 'hot_search' : '')
     if (trendState.project_id) setSelectedProjectId(trendState.project_id)
     navigate(location.pathname + location.search, { replace: true, state: null })
-  }, [location.pathname, location.search, navigate, trendState?.project_id, trendState?.trend_title, trendState?.trend_url])
+  }, [location.pathname, location.search, navigate, trendState?.content_origin, trendState?.project_id, trendState?.trend_title, trendState?.trend_url])
   const attachmentController = usePromptAttachments({
     adapter: { mode: 'direct', purpose: 'ai_entry_attachment' },
     policy: GENERAL_AGENT_ATTACHMENT_POLICY,
@@ -198,6 +200,7 @@ export default function DashboardPage() {
       if (result.status === 'created' && createdTasks.length > 0) {
         setEntryError(null)
         setPrompt('')
+        setContentOrigin('')
         attachmentController.clear()
         await queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all })
         if (createdTasks.length === 1) {
@@ -271,6 +274,7 @@ export default function DashboardPage() {
       ...aiEntryIdentity,
       project_id: selectedProject.id,
       text,
+      ...(contentOrigin ? { content_origin: contentOrigin } : {}),
       execution_profile: executionProfile as AgentExecutionProfileID,
       quantity,
       attachments: attachmentController.toInputAttachments(),
@@ -397,7 +401,7 @@ export default function DashboardPage() {
             <div><p className="text-sm font-medium">今日热点</p><p className="mt-1 text-xs text-muted-foreground">微博、抖音各 3 条 · {dashboardTrendsQuery.data?.items.some((item) => item.stale) ? '部分数据已过期' : '自动保持新鲜'}</p></div>
             <Link to="/trends" className="text-xs font-medium text-primary hover:underline">查看热点雷达</Link>
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">{(dashboardTrendsQuery.data?.items || []).map((group) => <div key={group.platform}><p className="mb-1 text-xs font-medium text-muted-foreground">{group.label}{group.stale ? ' · stale' : ''}</p>{group.items.map((item) => <button key={item.title} type="button" className="block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => navigate('/', { state: { project_id: selectedProjectId, trend_title: item.title, trend_url: item.url } })}>{item.rank}. {item.title}</button>)}</div>)}</div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">{(dashboardTrendsQuery.data?.items || []).map((group) => <div key={group.platform}><p className="mb-1 text-xs font-medium text-muted-foreground">{group.label}{group.stale ? ' · stale' : ''}</p>{group.items.map((item) => <button key={item.title} type="button" className="block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => navigate('/', { state: { project_id: selectedProjectId, trend_title: item.title, trend_url: item.url, content_origin: 'hot_search' } })}>{item.rank}. {item.title}</button>)}</div>)}</div>
         </section>
 
         {!prompt.trim() && (

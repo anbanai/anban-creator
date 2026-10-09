@@ -149,6 +149,7 @@ func TestAIEntryHandlerSubmitPassesExplicitParametersAndReturnsCreatedTasks(t *t
 	body := `{
 			"channel":"studio",
 			"project_id":"project-1",
+			"content_origin":"hot_search",
 			"execution_profile":"effective",
 			"text":"帮我写文章",
 			"quantity":2,
@@ -173,6 +174,9 @@ func TestAIEntryHandlerSubmitPassesExplicitParametersAndReturnsCreatedTasks(t *t
 	}
 	if submitter.req.UserID != userID || submitter.req.ProjectID != "project-1" || submitter.req.Text != "帮我写文章" {
 		t.Fatalf("submitted req = %#v", submitter.req)
+	}
+	if submitter.req.ContentOrigin != model.ContentOriginHotSearch {
+		t.Fatalf("content origin = %q, want %q", submitter.req.ContentOrigin, model.ContentOriginHotSearch)
 	}
 	if submitter.req.Quantity != 2 || submitter.req.ImageRatio != "3:4" || submitter.req.ImageCapabilityKey != "professional" {
 		t.Fatalf("explicit parameters = quantity %d, ratio %q, capability %q", submitter.req.Quantity, submitter.req.ImageRatio, submitter.req.ImageCapabilityKey)

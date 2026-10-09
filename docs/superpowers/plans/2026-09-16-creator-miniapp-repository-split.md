@@ -140,7 +140,7 @@ Expected: visibility is `PRIVATE`, default branch is `main`, the checkout is cle
 - Modify: `server/agent/connection_guide_contract_test.go`
 - Modify: `.dockerignore`
 - Modify: `README.md`
-- Modify: `CLAUDE.md`
+- Modify: `AGENTS.md`
 
 **Interfaces:**
 - Consumes: published private Miniapp repository
@@ -176,7 +176,7 @@ Keep the Studio cases, scanner, and table-driven unit tests. The migrated `scrip
 
 - `.dockerignore`: remove `/miniapp/` and change its nearby comment to "Frontend and desktop sources".
 - `README.md`: replace the `miniapp/` layout row with a private companion-repository link; clarify deployment wording.
-- `CLAUDE.md`: point the Miniapp client surface to `https://github.com/anbanai/creator-miniapp` and remove Miniapp from the monorepo language summary.
+- `AGENTS.md`: point the Miniapp client surface to `https://github.com/anbanai/creator-miniapp` and remove Miniapp from the monorepo language summary.
 
 - [ ] **Step 5: Run focused and full verification**
 
@@ -195,7 +195,7 @@ Expected: all commands pass.
 rg -n --hidden -S 'miniapp/' --glob '!docs/superpowers/**' --glob '!.git/**' .
 git ls-files miniapp
 git status --short
-git add .dockerignore README.md CLAUDE.md server/agent/connection_guide_contract_test.go
+git add .dockerignore README.md AGENTS.md server/agent/connection_guide_contract_test.go
 git commit -m "chore: move miniapp to standalone repository"
 ```
 

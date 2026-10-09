@@ -28,6 +28,7 @@ type AIEntrySubmitRequest struct {
 	Channel            string                  `json:"channel"`
 	TaskKind           string                  `json:"task_kind"`
 	ProjectID          string                  `json:"project_id"`
+	ContentOrigin      string                  `json:"content_origin,omitempty"`
 	ExecutionProfile   string                  `json:"execution_profile"`
 	Text               string                  `json:"text"`
 	Attachments        []model.EntryAttachment `json:"attachments,omitempty"`
@@ -112,6 +113,10 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 	req.TaskKind = strings.TrimSpace(req.TaskKind)
 	req.ExecutionProfile = strings.TrimSpace(req.ExecutionProfile)
 	req.Text = strings.TrimSpace(req.Text)
+	req.ContentOrigin = strings.TrimSpace(req.ContentOrigin)
+	if req.ContentOrigin != "" && req.ContentOrigin != model.ContentOriginHotSearch {
+		return aiEntryError("创建任务失败：unsupported content_origin"), nil
+	}
 	if req.UserID == "" {
 		return aiEntryError("用户未登录。"), nil
 	}
@@ -192,6 +197,7 @@ func (s *AIEntryService) Submit(ctx context.Context, req AIEntrySubmitRequest) (
 		AgentID:            req.AgentID,
 		Channel:            req.Channel,
 		TaskKind:           req.TaskKind,
+		ContentOrigin:      req.ContentOrigin,
 		ExecutionProfile:   req.ExecutionProfile,
 		Prompt:             prompt,
 		Quantity:           quantity,

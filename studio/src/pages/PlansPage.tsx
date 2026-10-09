@@ -27,7 +27,7 @@ import { prepareReusableInputAttachments } from '@/lib/input-attachment-submit'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { supportsPortraitCover } from '@/lib/portrait-cover'
 import type { ReferenceImageValue } from '@/types/asset'
-import { planStatusLabel, cronToHuman, formatDateTimeCN } from '@/lib/labels'
+import { planStatusLabel, taskStatusLabel, cronToHuman, formatDateTimeCN } from '@/lib/labels'
 
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
@@ -382,16 +382,16 @@ export default function PlansPage() {
 
   function renderPlanCard(plan: Plan) {
     const project = projectMap[plan.project_id]
+    const planLabel = plan.title || plan.prompt || '定时创作计划'
     const outputIDs = plan.agent_ids ?? plan.entries?.map((entry) => entry.agent_id) ?? []
     const statusLabel = planStatusLabel[plan.status] ?? plan.status
-    const displayTitle = plan.prompt || plan.title || '定时创作计划'
     return (
       <article key={plan.id} className="rounded-xl border border-border bg-card p-4 shadow-xs" data-plan-id={plan.id} data-testid={`plan-card-${plan.id}`}>
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
           <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-start gap-2">
               <div className="min-w-0 flex-1">
-                <h2 className="truncate text-sm font-semibold text-foreground">{displayTitle}</h2>
+                <h2 className="truncate text-sm font-semibold text-foreground">{plan.prompt || plan.title || '定时创作计划'}</h2>
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                   {project ? <ProjectIdentity project={project} compact showAgents={false} /> : <span>未命名项目</span>}
                   <span aria-hidden="true">·</span>
@@ -416,12 +416,24 @@ export default function PlansPage() {
                 </div>
               </div>
             </div>
+            <div role="region" aria-label="最近任务结果" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border pt-3 text-xs">
+              <span className="shrink-0 text-muted-foreground">最近任务</span>
+              {plan.latest_task ? (
+                <>
+                  <StatusPill status={plan.latest_task.status} label={taskStatusLabel[plan.latest_task.status] || plan.latest_task.status} />
+                  <Link to={`/tasks/${encodeURIComponent(plan.latest_task.id)}`} className="min-w-0 flex-1 truncate font-medium text-foreground hover:underline">
+                    {plan.latest_task.title || plan.latest_task.prompt || '查看任务'}
+                  </Link>
+                  <time dateTime={plan.latest_task.created_at} className="text-muted-foreground">{formatDateTimeCN(plan.latest_task.created_at)}</time>
+                </>
+              ) : <span className="text-muted-foreground">尚无生成任务</span>}
+            </div>
           </div>
           <div className="flex min-h-16 min-w-36 flex-col items-end justify-between gap-3">
             <div className="flex flex-wrap items-center justify-end gap-1.5">
               <Tooltip>
                 <TooltipTrigger
-                  render={<Button type="button" variant="ghost" size="icon-md" aria-label={`编辑计划：${displayTitle}`} onClick={() => openEdit(plan)} />}
+                  render={<Button type="button" variant="ghost" size="icon-md" aria-label={`编辑计划：${planLabel}`} onClick={() => openEdit(plan)} />}
                 >
                   <SquarePen className="size-4" />
                 </TooltipTrigger>
@@ -429,7 +441,7 @@ export default function PlansPage() {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger
-                  render={<Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} aria-label={`查看任务：${displayTitle}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} />}
+                  render={<Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} aria-label={`查看任务：${planLabel}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} />}
                 >
                   <ListTodo className="size-4" />
                 </TooltipTrigger>
@@ -437,21 +449,21 @@ export default function PlansPage() {
               </Tooltip>
               {plan.status === 'active' ? (
                 <Tooltip>
-                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`暂停计划：${displayTitle}`} onClick={() => void pauseMutation.mutateAsync(plan.id)} />}>
+                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`暂停计划：${planLabel}`} onClick={() => void pauseMutation.mutateAsync(plan.id)} />}>
                     <Pause className="size-4" />
                   </TooltipTrigger>
                   <TooltipContent>暂停计划</TooltipContent>
                 </Tooltip>
               ) : plan.status === 'paused' ? (
                 <Tooltip>
-                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`恢复计划：${displayTitle}`} onClick={() => void resumeMutation.mutateAsync(plan.id)} />}>
+                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`恢复计划：${planLabel}`} onClick={() => void resumeMutation.mutateAsync(plan.id)} />}>
                     <Play className="size-4" />
                   </TooltipTrigger>
                   <TooltipContent>恢复计划</TooltipContent>
                 </Tooltip>
               ) : null}
               <Tooltip>
-                <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`删除计划：${displayTitle}`} onClick={() => setDeleteTarget(plan.id)} />}>
+                <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`删除计划：${planLabel}`} onClick={() => setDeleteTarget(plan.id)} />}>
                   <Trash2 className="size-4" />
                 </TooltipTrigger>
                 <TooltipContent>删除计划</TooltipContent>

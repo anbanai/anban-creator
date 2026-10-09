@@ -16,6 +16,7 @@ export interface AIEntrySubmitRequest {
   task_kind?: string
   channel: 'studio' | 'ilink' | string
   project_id: string
+  content_origin?: 'hot_search'
   text: string
   attachments?: AIEntryAttachment[]
   execution_profile: AgentExecutionProfileID

@@ -74,7 +74,7 @@ export default function TrendsPage() {
   const groups = useMemo(() => trendsQuery.data?.items || [], [trendsQuery.data?.items])
 
   function useContent(item: TrendPlatformResult["items"][number]) {
-    navigate("/", { state: { project_id: projectId || undefined, trend_title: item.title, trend_url: item.url } })
+    navigate("/", { state: { project_id: projectId || undefined, trend_title: item.title, trend_url: item.url, content_origin: "hot_search" } })
   }
 
   return <div className="mx-auto w-full max-w-6xl space-y-6 pb-10">

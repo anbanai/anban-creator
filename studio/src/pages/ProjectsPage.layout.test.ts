@@ -17,6 +17,7 @@ describe('ProjectsPage layout contracts', () => {
     expect(cardSource).not.toContain('成功率')
     expect(pageSource).not.toContain('createTaskHref')
     expect(pageSource).not.toContain('deleteMutation')
+    expect(pageSource).toContain('grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3')
   })
 
 })

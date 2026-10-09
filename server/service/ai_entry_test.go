@@ -114,9 +114,10 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	entrySvc := NewAIEntryService(repo, taskSvc, llm, nil, AIEntryModelConfig{}, &logger)
 
 	result, err := entrySvc.Submit(ctx, AIEntrySubmitRequest{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
-		UserID:    userID,
-		ProjectID: projectID,
-		Text:      "帮我写一篇新品发布公众号文章",
+		UserID:        userID,
+		ProjectID:     projectID,
+		Text:          "帮我写一篇新品发布公众号文章",
+		ContentOrigin: model.ContentOriginHotSearch,
 		Attachments: []model.EntryAttachment{{
 			Type:        "image",
 			URL:         "https://cdn.example.com/ref.png",
@@ -137,6 +138,9 @@ func TestAIEntryServiceSubmitCreatesArticleTaskWithAttachments(t *testing.T) {
 	}
 	if found.Prompt != "写一篇新品发布公众号文章" {
 		t.Fatalf("task prompt = %q", found.Prompt)
+	}
+	if found.ContentOrigin != model.ContentOriginHotSearch {
+		t.Fatalf("task content origin = %q, want %q", found.ContentOrigin, model.ContentOriginHotSearch)
 	}
 	if found.ReferenceImageAssetID != "" {
 		t.Fatalf("URL-only attachment became a task reference: asset=%q", found.ReferenceImageAssetID)

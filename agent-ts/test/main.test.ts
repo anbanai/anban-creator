@@ -103,6 +103,7 @@ const bootstrapData: ResolvedBootstrapResponse = {
   agent_pack_id: "wechat-article",
   agent_pack_version: "1.0.0",
   agent_pack_digest: "0".repeat(64),
+  agent_pack_catalog_digest: "0".repeat(64),
   runtime_profile: "wechat",
   runtime_adapter: "standard",
   project_id: "project-1",

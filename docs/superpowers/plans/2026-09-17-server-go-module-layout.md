@@ -334,7 +334,7 @@ Expected: PASS.
 
 **Files:**
 - Modify: `AGENTS.md`
-- Modify: `CLAUDE.md`
+- Modify: `AGENTS.md`
 - Modify: `README.md`
 - Modify: comments in `server/model/project.go`, `server/config/config.go`, `server/service/image.go`, `server/agent/config_builder.go`, `server/resolver/resolve.go`, and `server/resources/themes/*.yaml` that name the old root App layout
 - Modify: `server/go.mod`
@@ -371,7 +371,7 @@ Run:
 
 ```bash
 rg -n 'github\.com/anbanai/anban-creator/app/' server
-rg -n '(^|[^[:alnum:]_.-])app/' AGENTS.md CLAUDE.md README.md server --glob '!server/app/**'
+rg -n '(^|[^[:alnum:]_.-])app/' AGENTS.md README.md server --glob '!server/app/**'
 ```
 
 Expected: the first search returns no matches; the second returns only

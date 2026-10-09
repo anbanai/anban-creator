@@ -10,7 +10,7 @@ import (
 func TestValidateSeednoteArtifactsFromTaskFiles(t *testing.T) {
 	task := &model.Task{Type: model.PlatformSeednote, HasContentImage: true}
 	files := []*model.TaskFile{
-		{FileName: "CLAUDE.md", FilePath: "CLAUDE.md"},
+		{FileName: "AGENTS.md", FilePath: "AGENTS.md"},
 		{FileName: "cover.png", FilePath: "output/seednote/title/cover.png"},
 		{FileName: "image_01.png", FilePath: "output/seednote/title/image_01.png"},
 	}

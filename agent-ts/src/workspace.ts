@@ -61,10 +61,10 @@ async function prepareMontageWorkspace(workspace: string): Promise<void> {
     await mergeWritableEntry(source, join(runtime, name));
     await rm(source, { recursive: true, force: true });
   }
-  const instructions = join(workspace, "CLAUDE.md");
+  const instructions = join(workspace, "AGENTS.md");
   try {
     const source = await readFile(instructions, "utf8");
-    const target = join(runtime, "CLAUDE.md");
+    const target = join(runtime, "AGENTS.md");
     let existing = "";
     try { existing = await readFile(target, "utf8"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const section = `\n\n# Anban Project Instructions\n\n${source}`;

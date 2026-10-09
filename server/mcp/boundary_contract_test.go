@@ -1265,7 +1265,7 @@ func isProtocolServiceHelper(path string) bool {
 }
 
 func TestRepositoryInstructionsDefineMCPAsCapabilityTransport(t *testing.T) {
-	for _, path := range []string{"../../CLAUDE.md", "../../AGENTS.md"} {
+	for _, path := range []string{"../../AGENTS.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

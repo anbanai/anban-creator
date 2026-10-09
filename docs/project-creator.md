@@ -279,7 +279,7 @@ commit_project_creator_draft
 - 写入幂等记录；
 - 返回已创建项目。
 
-Runtime、Agent 和日志都不能修改 `AGENTS.md`、`CLAUDE.md`、正式项目 profile、项目 memory 或活动生成上下文。
+Runtime、Agent 和日志都不能修改 `AGENTS.md`、正式项目 profile、项目 memory 或活动生成上下文。
 
 ## Agent Pack
 

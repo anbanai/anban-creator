@@ -16,6 +16,7 @@ describe('aiEntryApi', () => {
     const request = {
       channel: 'studio',
       project_id: 'project-1',
+      content_origin: 'hot_search' as const,
       execution_profile: 'effective' as const,
       text: '写两篇文章',
       quantity: 2,

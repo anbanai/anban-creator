@@ -402,7 +402,7 @@ colors:
 // (blocks + inline) and asserts the renderer escapes it to inert literal text —
 // never emitting a live <script>/<style>/<iframe>/<form>/<input> tag. Raw HTML
 // in source markdown must not survive into the WeChat HTML surface
-// (CLAUDE.md constraint #1).
+// (AGENTS.md constraint #1).
 func TestRender_RawHTML_EscapedNotPassedThrough(t *testing.T) {
 	cvt := newTestConverter(t)
 	md := "# T\n\n" +

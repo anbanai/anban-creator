@@ -6,7 +6,7 @@
 // it parses the Markdown with goldmark and emits WeChat-safe HTML with fully
 // inline CSS driven entirely by the structured Theme spec.
 //
-// Design rules (see CLAUDE.md constraint #1 — WeChat HTML):
+// Design rules (see AGENTS.md constraint #1 — WeChat HTML):
 //   - Safe tags only: section, p, span, strong, em, a, h1-h6, ul, ol, li,
 //     blockquote, pre, code, table, img, br, hr. No script/iframe/form/input/style.
 //   - All CSS is inline (style="..."). No <style> blocks, no external resources.
@@ -163,7 +163,7 @@ func (r *detRenderer) renderBlock(node ast.Node, sb *strings.Builder) {
 		sb.WriteString("\n")
 	case *ast.HTMLBlock:
 		// Raw HTML is NOT passed through. The renderer owns the HTML surface and
-		// must emit only WeChat-safe tags (CLAUDE.md constraint #1), so an HTML
+		// must emit only WeChat-safe tags (AGENTS.md constraint #1), so an HTML
 		// block in the source (<script>/<style>/<iframe>/…) is escaped to visible
 		// literal text: content preserved, but inert — never executed, never
 		// dropped silently.

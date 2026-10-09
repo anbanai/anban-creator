@@ -33,8 +33,6 @@ async function selectProject(dialog: HTMLElement, name: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:plan-portrait-preview')
-  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   window.history.pushState({}, '', '/plans')
   harness.upload.mockReset()
   vi.mocked(api.projects.platformConfigs).mockResolvedValue([
@@ -51,6 +49,12 @@ beforeEach(() => {
   vi.mocked(api.imageCapabilities.list).mockResolvedValue({ tier: 'pro', default_capability: 'standard', items: [{ key: 'standard', display_name: '标准图像', price_available: true, enabled: true }] })
 })
 describe('PlansPage multi-output plans', () => {
+  it('does not repeat workspace navigation already available in the sidebar', async () => {
+    render(<PlansPage />)
+    await screen.findByRole('heading', { name: '计划' })
+    expect(screen.queryByRole('navigation', { name: '工作区导航' })).not.toBeInTheDocument()
+  })
+
   it('only offers shared valid ratios and normalizes project defaults for multiple outputs', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ ...mockProjects[0], image_ratio: '16:9' }])
     render(<PlansPage />)
@@ -144,7 +148,7 @@ describe('PlansPage multi-output plans', () => {
     expect(planCard?.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(2)
     expect(planCard).not.toHaveTextContent('种草笔记')
     expect(planCard).not.toHaveTextContent('公众号贴图')
-    fireEvent.click(screen.getByRole('button', { name: '编辑计划：多种输出' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑计划：测试计划' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
     expect(within(dialog).getByRole('button', { name: '种草笔记' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(dialog).getByRole('button', { name: '公众号贴图' })).toHaveAttribute('aria-pressed', 'true')
@@ -167,13 +171,35 @@ describe('PlansPage multi-output plans', () => {
     expect(screen.getByTestId('plan-card-active-plan')).toHaveTextContent('每')
     expect(screen.getByTestId('plan-card-paused-plan')).toHaveTextContent('已暂停')
     const activeCard = within(screen.getByTestId('plan-card-active-plan'))
-    for (const name of ['编辑计划：活跃内容', '查看任务：活跃内容', '暂停计划：活跃内容', '删除计划：活跃内容']) {
-      expect(activeCard.getByRole(name.startsWith('查看') ? 'link' : 'button', { name })).toHaveClass('size-11')
-    }
+    const edit = activeCard.getByRole('button', { name: '编辑计划：活跃计划' })
+    const tasks = activeCard.getByRole('link', { name: '查看任务：活跃计划' })
+    const pause = activeCard.getByRole('button', { name: '暂停计划：活跃计划' })
+    const remove = activeCard.getByRole('button', { name: '删除计划：活跃计划' })
+    expect(edit).toHaveClass('size-11', 'hover:bg-muted')
+    expect(tasks).toHaveClass('size-11')
+    expect(pause).toHaveClass('size-11')
+    expect(remove).toHaveClass('size-11')
+    expect(activeCard.queryByText('更多')).not.toBeInTheDocument()
+  })
+
+  it('shows the most recent generated task outcome on each plan', async () => {
+    const plan = {
+      ...mockPlans.items[0],
+      id: 'plan-with-latest-task',
+      latest_task: { id: 'latest-failed-task', title: '上次内容创作', status: 'failed', created_at: '2026-10-07T09:00:00Z' },
+    } as Plan
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
+    render(<PlansPage />)
+
+    const card = await screen.findByTestId('plan-card-plan-with-latest-task')
+    const latestResult = within(card).getByRole('region', { name: '最近任务结果' })
+    expect(latestResult).toHaveTextContent('上次内容创作')
+    expect(latestResult.querySelector('[data-testid="status-pill"]')).toHaveAttribute('data-status', 'failed')
+    expect(within(latestResult).getByRole('link', { name: '上次内容创作' })).toHaveAttribute('href', '/tasks/latest-failed-task')
   })
 
   it('shows output Agents only once and keeps edit as an unfilled icon action', async () => {
-    const plan: Plan = { ...mockPlans.items[0], id: 'multi-output-plan', prompt: '多种输出', agent_ids: ['wechat-article', 'seednote'] }
+    const plan: Plan = { ...mockPlans.items[0], id: 'multi-output-plan', agent_ids: ['wechat-article', 'seednote'] }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
 
@@ -183,7 +209,7 @@ describe('PlansPage multi-output plans', () => {
     expect(projectIdentity?.querySelector('[data-slot="agent-icon"]')).not.toBeInTheDocument()
     expect(card.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(2)
 
-    const editButton = within(card).getByRole('button', { name: '编辑计划：多种输出' })
+    const editButton = within(card).getByRole('button', { name: '编辑计划：测试计划' })
     expect(editButton).toHaveClass('hover:bg-muted')
     expect(editButton).not.toHaveClass('bg-primary')
     expect(editButton).not.toHaveClass('text-primary-foreground')
@@ -191,10 +217,10 @@ describe('PlansPage multi-output plans', () => {
 
   it.each([false, true])('shows the saved reference and submits its selection after removal=%s', async (remove) => {
     const reference = { asset_id: '44444444-4444-4444-8444-444444444444', file_name: 'cover.png', content_type: 'image/png', size: 9, download_url: 'https://signed.example/cover.png', download_expires_at: '2026-10-04T10:00:00Z' }
-    const plan = { ...mockPlans.items[0], prompt: '多种输出', agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
+    const plan = { ...mockPlans.items[0], agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
-    fireEvent.click(await screen.findByRole('button', { name: '编辑计划：多种输出' }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑计划：测试计划' }))
     const dialog = await screen.findByRole('dialog', { name: '编辑计划' })
     fireEvent.click(within(dialog).getByText('高级设置'))
     expect(within(dialog).getByRole('img', { name: '参考图' })).toHaveAttribute('src', reference.download_url)

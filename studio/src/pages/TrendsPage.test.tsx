@@ -3,9 +3,15 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { render } from '@/test/test-utils'
 import TrendsPage from './TrendsPage'
 
-const { listMock, refreshMock } = vi.hoisted(() => ({
+const { listMock, refreshMock, navigateMock } = vi.hoisted(() => ({
   listMock: vi.fn(),
   refreshMock: vi.fn(),
+  navigateMock: vi.fn(),
+}))
+
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-router-dom')>(),
+  useNavigate: () => navigateMock,
 }))
 
 vi.mock('@/lib/api', () => ({
@@ -31,7 +37,7 @@ function trendResult() {
         label: '微博',
         stale: false,
         fetched_at: '2026-09-30T08:00:00.000Z',
-        items: [{ title: '热点标题', hot: '1.1985944e+07', url: '', rank: 1 }],
+        items: [{ title: '热点标题', hot: '1.1985944e+07', url: 'https://example.com/trend', rank: 1 }],
       },
       {
         platform: 'douyin',
@@ -85,5 +91,21 @@ describe('TrendsPage', () => {
     await screen.findByText('热点标题')
     expect(screen.getByText('热度 11,985,944')).toBeInTheDocument()
     expect(screen.queryByText(/TTL|stale|数据有效期内/)).not.toBeInTheDocument()
+  })
+
+  it('marks content started from a hot trend as hot-search origin', async () => {
+    render(<TrendsPage />)
+
+    await screen.findByText('热点标题')
+    fireEvent.click(screen.getAllByRole('button', { name: '做内容' })[0])
+
+    expect(navigateMock).toHaveBeenCalledWith('/', {
+      state: {
+        project_id: undefined,
+        trend_title: '热点标题',
+        trend_url: 'https://example.com/trend',
+        content_origin: 'hot_search',
+      },
+    })
   })
 })

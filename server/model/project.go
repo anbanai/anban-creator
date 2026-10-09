@@ -47,7 +47,7 @@ type Project struct {
 	Positioning string `gorm:"type:text" json:"positioning,omitempty"`
 	Keywords    string `gorm:"type:text" json:"keywords"` // 关键词
 	// Instructions is the canonical project positioning. It is also rendered into
-	// the task workspace CLAUDE.md under "## 项目定位" so agents receive the same
+	// the task workspace AGENTS.md under "## 项目定位" so agents receive the same
 	// project context that Studio displays.
 	Instructions string `gorm:"type:text" json:"instructions,omitempty"`
 	// InstructionsSet marks whether an update request explicitly included

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"gorm.io/datatypes"
 )
 
 func TestMontageDefaultsSurviveProjectSnapshotRoundTrip(t *testing.T) {
@@ -62,5 +64,26 @@ func TestProjectSnapshotDerivesPlatformFromCanonicalChannel(t *testing.T) {
 	restored := ProjectFromSnapshot(&Project{Platform: PlatformSeednote}, snapshot)
 	if restored.Platform != PlatformWechat {
 		t.Fatalf("platform = %q, want %q", restored.Platform, PlatformWechat)
+	}
+}
+
+func TestProjectSnapshotExcludesUnconfirmedProfileButKeepsConfirmedProfile(t *testing.T) {
+	draft := NewProjectProfile()
+	draft.Dimensions.Identity.Content["private_draft"] = "waiting for confirmation"
+	project := &Project{ID: "project-1", Name: "Profile snapshot", Profile: datatypes.NewJSONType(draft)}
+
+	snapshot := SnapshotProject(project)
+	if snapshot.Profile.IsConfirmed() || snapshot.Profile.Dimensions.Identity.Content["private_draft"] != nil {
+		t.Fatalf("unconfirmed profile entered task snapshot: %+v", snapshot.Profile)
+	}
+
+	confirmed := draft
+	confirmed.Status = ProfileStatusConfirmed
+	confirmed.Version = 1
+	confirmed.Dimensions.Identity.Content["confirmed"] = "usable context"
+	project.Profile = datatypes.NewJSONType(confirmed)
+	snapshot = SnapshotProject(project)
+	if !snapshot.Profile.IsConfirmed() || snapshot.Profile.Dimensions.Identity.Content["confirmed"] != "usable context" {
+		t.Fatalf("confirmed profile was not frozen into task snapshot: %+v", snapshot.Profile)
 	}
 }

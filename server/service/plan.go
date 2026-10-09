@@ -565,10 +565,31 @@ func (s *PlanService) List(ctx context.Context, userID string, offset, limit int
 	if err != nil {
 		return nil, 0, fmt.Errorf("count plans: %w", err)
 	}
+	planIDs := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		planIDs = append(planIDs, plan.ID)
+	}
+	latestTasks, err := s.repo.Tasks().FindLatestByPlanIDs(ctx, userID, planIDs)
+	if err != nil {
+		return nil, 0, fmt.Errorf("find latest plan tasks: %w", err)
+	}
+	latestByPlan := make(map[string]*model.Task, len(latestTasks))
+	for _, task := range latestTasks {
+		if task.PlanID == nil {
+			continue
+		}
+		if _, exists := latestByPlan[*task.PlanID]; !exists {
+			latestByPlan[*task.PlanID] = task
+		}
+	}
+
 	for _, plan := range plans {
 		plan.Entries, err = s.repo.PlanEntries().ListByPlanID(ctx, plan.ID)
 		if err != nil {
 			return nil, 0, fmt.Errorf("list plan entries: %w", err)
+		}
+		if task := latestByPlan[plan.ID]; task != nil {
+			plan.LatestTask = &model.PlanTaskSummary{ID: task.ID, Title: task.Title, Prompt: task.Prompt, Status: task.Status, CreatedAt: task.CreatedAt}
 		}
 	}
 	return plans, total, nil

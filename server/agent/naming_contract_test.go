@@ -21,7 +21,7 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 	assertOnlyMCPServerKey(t, filepath.Join(root, "harness", ".mcp.json"), "creator")
 
 	for _, path := range []string{
-		filepath.Join(root, "CLAUDE.md"),
+		filepath.Join(root, "AGENTS.md"),
 		filepath.Join(root, "harness", "README.md"),
 		filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-article"),
 		filepath.Join(root, "deploy/docker/Dockerfile.server"),
@@ -38,10 +38,11 @@ func TestAnbanCreatorNamingContract(t *testing.T) {
 		assertFileNotContains(t, path, "ab"+"c:")
 		assertFileNotContains(t, path, "案"+"板")
 	}
-	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "plugin@marketplace")
-	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban@anbanai")
-	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "The MCP server key is `creator`")
-	assertFileContains(t, filepath.Join(root, "CLAUDE.md"), "anban:<agent>")
+	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "plugin@marketplace")
+	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "anban@anbanai")
+	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "The MCP server key is `creator`")
+	assertFileContains(t, filepath.Join(root, "AGENTS.md"), "anban:<agent>")
+	assertFileNotExists(t, filepath.Join(root, "CLAUDE.md"))
 	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "claude plugin install --scope user anban@anbanai")
 	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "/anban:anban-setup")
 	assertFileContains(t, filepath.Join(root, "harness", "README.md"), "/anban:wechat-article")
@@ -391,7 +392,7 @@ func businessLayerMCPDocs(t *testing.T, root string) []string {
 		}
 	}
 
-	addFile("CLAUDE.md")
+	addFile("AGENTS.md")
 	addFile(filepath.Join("harness", "README.md"))
 	addFile(filepath.Join("harness", "docs", "plugin-development.md"))
 	addTree(filepath.Join("harness", "agents"))

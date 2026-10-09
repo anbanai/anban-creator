@@ -383,6 +383,7 @@ type CreateManualParams struct {
 	Channel           string
 	TaskKind          string
 	RequestedTaskType string
+	ContentOrigin     string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
 	FrozenTaskType       string
@@ -572,6 +573,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	if p.ProjectID == "" {
 		return nil, fmt.Errorf("project_id is required")
+	}
+	p.ContentOrigin = strings.TrimSpace(p.ContentOrigin)
+	if p.ContentOrigin != "" && p.ContentOrigin != model.ContentOriginHotSearch {
+		return nil, fmt.Errorf("unsupported content_origin %q", p.ContentOrigin)
 	}
 
 	// Clamp quantity to 1-5.
@@ -836,6 +841,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Type:                     taskType,
 			Status:                   model.TaskStatusPending,
 			Prompt:                   taskPrompt,
+			ContentOrigin:            p.ContentOrigin,
 			ImageRatio:               effectiveImageRatio,
 			ImageCapabilityKey:       effectiveImageCapabilityKey,
 			ReferenceImageAssetID:    effectiveReferenceImageAssetID,

@@ -697,7 +697,7 @@ skill-creator 引入的 `assets/` 明确区分：
 │   ├── intelligent-prompt-generator/  # 人像专家
 │   ├── design-master/           # 设计专家
 │   └── ...                      # 其他领域专家
-└── CLAUDE.md                     # Skill 路由指南
+└── AGENTS.md                     # Skill 路由指南
 ```
 
 | 特点 | 说明 |

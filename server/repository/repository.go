@@ -129,6 +129,7 @@ type TaskRepository interface {
 	FindByID(ctx context.Context, id string) (*model.Task, error)
 	FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
+	FindLatestByPlanIDs(ctx context.Context, userID string, planIDs []string) ([]*model.Task, error)
 	FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindByUserIDBefore(ctx context.Context, userID string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error)
 	FindByUserIDAndStatusBefore(ctx context.Context, userID, status string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error)

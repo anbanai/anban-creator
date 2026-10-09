@@ -37,16 +37,25 @@ type Plan struct {
 	Watermark                     bool                                  `gorm:"default:false" json:"watermark,omitempty"`
 	InputAttachments              datatypes.JSONType[[]EntryAttachment] `gorm:"type:json" json:"input_attachments"`
 
-	NextRunAt *time.Time   `gorm:"index" json:"next_run_at"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
-	Entries   []*PlanEntry `gorm:"-" json:"entries,omitempty"`
+	NextRunAt  *time.Time       `gorm:"index" json:"next_run_at"`
+	CreatedAt  time.Time        `json:"created_at"`
+	UpdatedAt  time.Time        `json:"updated_at"`
+	Entries    []*PlanEntry     `gorm:"-" json:"entries,omitempty"`
+	LatestTask *PlanTaskSummary `gorm:"-" json:"latest_task,omitempty"`
 	// RuntimeIdentity is populated only while a PlanEntry is being admitted.
 	// It is deliberately not persisted: the durable identity belongs to the
 	// entry, while Plan keeps shared schedule data.
 	AgentID  string `gorm:"-" json:"-"`
 	Channel  string `gorm:"-" json:"-"`
 	TaskKind string `gorm:"-" json:"-"`
+}
+
+type PlanTaskSummary struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title,omitempty"`
+	Prompt    string    `json:"prompt,omitempty"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // TableName returns the database table name for Plan.
