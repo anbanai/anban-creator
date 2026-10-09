@@ -22,6 +22,8 @@ jobs:
           cache-dependency-path: server/go.sum
       - name: Download dependencies
         run: go -C server mod download
+      - name: Check generated Agent Pack Catalog
+        run: make agent-pack-check
       - name: Build static Go binaries
         env:
           CGO_ENABLED: "0"

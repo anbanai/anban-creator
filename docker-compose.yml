@@ -114,6 +114,8 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.server
+      args:
+        ANBAN_AGENT_PACK_CATALOG_DIGEST: ${ANBAN_AGENT_PACK_CATALOG_DIGEST:?ANBAN_AGENT_PACK_CATALOG_DIGEST is required}
     image: anban-creator-server:latest
     container_name: anban-creator-server
     restart: unless-stopped
@@ -149,6 +151,7 @@ services:
       ANBAN_ZHIPU_API_KEY: "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}"
       MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}"
       ANBAN_AGENT_EXECUTOR: "docker"
+      ANBAN_AGENT_PACK_CATALOG_DIGEST: "${ANBAN_AGENT_PACK_CATALOG_DIGEST:?ANBAN_AGENT_PACK_CATALOG_DIGEST is required}"
       ANBAN_CLAUDE_AGENT_SERVER_URL: "http://server:8080"
       ANBAN_AGENT_EXECUTION_TOKEN_SECRET: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}"
       ANBAN_AGENT_IMAGE_WECHAT_ARTICLE: "creator-agent-wechat-article:latest"

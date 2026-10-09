@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/apimachinery/pkg/util/validation"
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
@@ -558,6 +559,17 @@ func TestBuildKubernetesJobUsesPersistedRuntimeImage(t *testing.T) {
 	if job.Spec.Template.Spec.InitContainers[0].Image != execution.RuntimeImage ||
 		job.Spec.Template.Spec.Containers[0].Image != execution.RuntimeImage {
 		t.Fatalf("job did not use persisted runtime image: init=%q main=%q", job.Spec.Template.Spec.InitContainers[0].Image, job.Spec.Template.Spec.Containers[0].Image)
+	}
+}
+
+func TestBuildKubernetesJobCatalogDigestLabelFitsKubernetes(t *testing.T) {
+	job := buildKubernetesJob(testJobConfig(), testExecution(), testTask())
+	value := job.Labels[kubernetesCatalogDigestLabel]
+	if errs := validation.IsValidLabelValue(value); len(errs) != 0 {
+		t.Fatalf("Catalog digest label %q is invalid: %v", value, errs)
+	}
+	if len(value) >= 64 {
+		t.Fatalf("Catalog digest label must be bounded for Kubernetes labels, got %d characters", len(value))
 	}
 }
 

@@ -67,9 +67,7 @@ const validResponse = (): BootstrapResponse => {
 describe("validateBootstrapResponse", () => {
   test("rejects a runtime Catalog whose bytes do not match the Server digest", () => {
     const response = validateBootstrapResponse("execution-1", validResponse());
-    expect(() => validateAgentPackCatalogDigest(response, "c".repeat(64))).toThrow(
-      "Catalog digest does not match runtime image",
-    );
+    expect(() => validateAgentPackCatalogDigest(response, "c".repeat(64))).toThrow("Catalog digest does not match runtime image");
   });
   test("rejects a response with a missing execution ID", () => {
     const response = validResponse() as Record<string, unknown>;
@@ -98,8 +96,9 @@ describe("validateBootstrapResponse", () => {
         workloadTokenFile: "/token",
         allowHTTPServer: false,
       };
-      await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
-      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("5");
+      await expect(bootstrap(config, "workload-token", undefined, new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname)).rejects.toThrow("HTTP 503");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("6");
+      expect(request?.headers.get("X-Anban-Agent-Pack-Catalog-Digest")).toMatch(/^[0-9a-f]{64}$/);
       expect(request?.body).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
@@ -121,7 +120,7 @@ describe("validateBootstrapResponse", () => {
         workloadTokenFile: "/token",
         allowHTTPServer: false,
       };
-      await expect(bootstrap(config, "workload-token")).rejects.toThrow(
+      await expect(bootstrap(config, "workload-token", undefined, new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname)).rejects.toThrow(
         "bootstrap returned HTTP 426: agent_runtime_upgrade_required: agent runtime contract upgrade required",
       );
     } finally {

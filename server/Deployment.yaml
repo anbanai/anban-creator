@@ -25,6 +25,9 @@ metadata:
   labels:
     app: ${micro_service_name}
     version: ${version_switch}
+    anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest_short}
+  annotations:
+    anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest}
 spec:
   replicas: ${replicas_count}
   selector:
@@ -35,6 +38,7 @@ spec:
       labels:
         app: ${micro_service_name}
         version: ${version_switch}
+        anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest_short}
     spec:
       serviceAccountName: creator-server
       initContainers:
@@ -79,6 +83,8 @@ spec:
               value: http://sidecar-ilink:18070
             - name: ANBAN_AGENT_EXECUTOR
               value: kubernetes
+            - name: ANBAN_AGENT_PACK_CATALOG_DIGEST
+              value: ${agent_pack_catalog_digest}
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL
               value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443
             - name: ANBAN_SERVER_TLS_CERT_FILE

@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 
 	serveragent "github.com/anbanai/anban-creator/server/agent"
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/service"
@@ -160,6 +161,18 @@ func (h *AgentHandler) Bootstrap(c fiber.Ctx) error {
 				Msg("agent bootstrap rejected: runtime contract mismatch")
 		}
 		return ErrorWithCode(c, fiber.StatusUpgradeRequired, "agent_runtime_upgrade_required", "agent runtime contract upgrade required")
+	}
+	receivedCatalogDigest := strings.TrimSpace(c.Get("X-Anban-Agent-Pack-Catalog-Digest"))
+	expectedCatalogDigest := agentpack.CatalogDigest()
+	if receivedCatalogDigest != expectedCatalogDigest {
+		c.Set("X-Anban-Agent-Pack-Catalog-Digest-Expected", expectedCatalogDigest)
+		if h.logger != nil {
+			h.logger.Warn().
+				Str("received_catalog_digest", receivedCatalogDigest).
+				Str("expected_catalog_digest", expectedCatalogDigest).
+				Msg("agent bootstrap rejected: Agent Pack Catalog mismatch")
+		}
+		return ErrorWithCode(c, fiber.StatusUpgradeRequired, "agent_pack_catalog_mismatch", "agent runtime Catalog does not match Server Catalog")
 	}
 	if len(c.Body()) != 0 {
 		return Error(c, fiber.StatusBadRequest, "bootstrap request body must be empty")
@@ -355,7 +368,7 @@ func (r *agentCompleteRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-const agentRuntimeContractVersion = 5
+const agentRuntimeContractVersion = 6
 
 // ProgressPlan handles POST /api/v1/agent/progress-plan.
 func (h *AgentHandler) ProgressPlan(c fiber.Ctx) error {

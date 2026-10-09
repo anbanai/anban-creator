@@ -799,6 +799,54 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	}
 }
 
+func TestCatalogDigestIsEnforcedAtImageBuildBoundary(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{
+		"Dockerfile.agent-ecommerce",
+		"Dockerfile.agent-feedback-analysis",
+		"Dockerfile.agent-hypit",
+		"Dockerfile.agent-moments",
+		"Dockerfile.agent-montage",
+		"Dockerfile.agent-profile-analysis",
+		"Dockerfile.agent-seednote",
+		"Dockerfile.agent-wechat-article",
+		"Dockerfile.agent-wechat-picture",
+		"Dockerfile.agent-whiteboard-animation",
+	} {
+		body := readTextFile(t, filepath.Join(root, "deploy/docker", name))
+		for _, want := range []string{
+			"ARG ANBAN_AGENT_PACK_CATALOG_DIGEST",
+			"LABEL org.anban.agent.pack.catalog-digest=\"$ANBAN_AGENT_PACK_CATALOG_DIGEST\"",
+			"sha256sum /anbanai/agent-pack-catalog.json",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("deploy/docker/%s missing Catalog digest build check %q", name, want)
+			}
+		}
+	}
+
+	server := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.server"))
+	for _, want := range []string{
+		"ARG ANBAN_AGENT_PACK_CATALOG_DIGEST",
+		"LABEL org.anban.agent.pack.catalog-digest=\"$ANBAN_AGENT_PACK_CATALOG_DIGEST\"",
+		"sha256sum agentpack/catalog.generated.json",
+	} {
+		if !strings.Contains(server, want) {
+			t.Fatalf("deploy/docker/Dockerfile.server missing Catalog digest build check %q", want)
+		}
+	}
+
+	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
+	for _, want := range []string{
+		"ANBAN_AGENT_PACK_CATALOG_DIGEST: ${ANBAN_AGENT_PACK_CATALOG_DIGEST:?ANBAN_AGENT_PACK_CATALOG_DIGEST is required}",
+		"ANBAN_AGENT_PACK_CATALOG_DIGEST: \"${ANBAN_AGENT_PACK_CATALOG_DIGEST:?ANBAN_AGENT_PACK_CATALOG_DIGEST is required}\"",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("docker-compose.yml missing Catalog digest contract %q", want)
+		}
+	}
+}
+
 func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	root := repositoryRoot(t)
 	got := trackedDockerfiles(t, root)
@@ -975,12 +1023,12 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-ecommerce-agent-image:",
 		"docker-wechat-article-agent-image:",
 		"docker-wechat-picture-agent-image:",
-		"docker build -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-montage",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-montage",
 		"--build-arg OPENMONTAGE_REPO=\"$(OPENMONTAGE_SOURCE_REPO)\"",
 		"--build-arg OPENMONTAGE_REF=\"$(OPENMONTAGE_SOURCE_REF)\"",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
