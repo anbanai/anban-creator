@@ -113,6 +113,38 @@ func TestAgentExecutionProfileSchemaReadiness(t *testing.T) {
 	}
 }
 
+func TestWechatAccountAnalyticsSchemaReadiness(t *testing.T) {
+	openDB := func(t *testing.T) *gorm.DB {
+		t.Helper()
+		db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return db
+	}
+
+	fresh := openDB(t)
+	if err := requireWechatAccountAnalyticsSchema(fresh); err != nil {
+		t.Fatalf("fresh database readiness: %v", err)
+	}
+
+	legacy := openDB(t)
+	if err := legacy.Exec("CREATE TABLE wechat_account_analytics_batches (id text primary key)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := requireWechatAccountAnalyticsSchema(legacy); err == nil || !strings.Contains(err.Error(), "20261009_wechat_account_analytics.sql") {
+		t.Fatalf("partial schema readiness = %v, want migration instruction", err)
+	}
+
+	ready := openDB(t)
+	if err := model.AutoMigrate(ready); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireWechatAccountAnalyticsSchema(ready); err != nil {
+		t.Fatalf("current schema readiness: %v", err)
+	}
+}
+
 func TestTaskBillingSchemaReadiness(t *testing.T) {
 	legacy, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -304,10 +336,11 @@ func TestMainFailsFastWhenModelMigrationFails(t *testing.T) {
 	readiness := strings.Index(section, "requireAgentExecutionProfileSchema(mysqlDB)")
 	deliveryReadiness := strings.Index(section, "requireTaskDeliverySchema(mysqlDB)")
 	publicationReadiness := strings.Index(section, "requireServerOwnedArticlePublicationSchema(mysqlDB)")
+	accountAnalyticsReadiness := strings.Index(section, "requireWechatAccountAnalyticsSchema(mysqlDB)")
 	autoMigrate := strings.Index(section, "migrateModels(mysqlDB, model.AutoMigrate)")
-	if readiness < 0 || deliveryReadiness < 0 || publicationReadiness < 0 || autoMigrate < 0 ||
-		readiness >= autoMigrate || deliveryReadiness >= autoMigrate || publicationReadiness >= autoMigrate {
-		t.Fatalf("schema readiness must run before AutoMigrate: profile=%d delivery=%d publication=%d auto_migrate=%d", readiness, deliveryReadiness, publicationReadiness, autoMigrate)
+	if readiness < 0 || deliveryReadiness < 0 || publicationReadiness < 0 || accountAnalyticsReadiness < 0 || autoMigrate < 0 ||
+		readiness >= autoMigrate || deliveryReadiness >= autoMigrate || publicationReadiness >= autoMigrate || accountAnalyticsReadiness >= autoMigrate {
+		t.Fatalf("schema readiness must run before AutoMigrate: profile=%d delivery=%d publication=%d account_analytics=%d auto_migrate=%d", readiness, deliveryReadiness, publicationReadiness, accountAnalyticsReadiness, autoMigrate)
 	}
 	if !strings.Contains(section, "migrateModels(mysqlDB, model.AutoMigrate)") {
 		t.Fatal("main.go must route model migration through the tested startup helper")
