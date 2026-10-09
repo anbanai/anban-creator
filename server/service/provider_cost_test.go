@@ -424,7 +424,7 @@ func TestProviderCostRecordOutputPixelsUsesRequestIdentityWithoutExecutionStatus
 func TestProviderCostRecordSearchRequestIsUnreconciledAndIdempotent(t *testing.T) {
 	fixture := newProviderCostFixture(t)
 	req := RecordSearchRequestCost{
-		TaskID: "task-search", Provider: "volcengine_ark", Model: "doubao-seed-2-1-pro-260628",
+		TaskID: "task-search", Provider: "doubao_custom",
 		ProviderRequestID: "search-request-1", Query: "anban search", ResultCount: 2,
 		Usage:            map[string]any{"tool_usage": map[string]any{"web_search_requests": 1}},
 		ProviderMetadata: map[string]any{"max_results": 2},

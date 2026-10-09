@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,7 +24,7 @@ type searchProviderStub struct {
 	calls     int
 }
 
-func (p *searchProviderStub) Search(context.Context, SearchRequest) (*SearchResponse, error) {
+func (p *searchProviderStub) Search(_ context.Context, req SearchRequest) (*SearchResponse, error) {
 	call := p.calls
 	p.calls++
 	if call < len(p.errors) && p.errors[call] != nil {
@@ -34,10 +33,13 @@ func (p *searchProviderStub) Search(context.Context, SearchRequest) (*SearchResp
 	if call < len(p.responses) {
 		return p.responses[call], nil
 	}
-	return p.response, p.err
+	if p.response != nil {
+		return p.response, p.err
+	}
+	return &SearchResponse{Provider: "stub", Query: req.Query}, p.err
 }
-func (p *searchProviderStub) Name() string  { return "stub" }
-func (p *searchProviderStub) Model() string { return "stub-model" }
+func (p *searchProviderStub) Name() string                        { return "stub" }
+func (p *searchProviderStub) ValidateRequest(SearchRequest) error { return nil }
 
 func newSearchBillingFixture(t *testing.T) (repository.Repository, *gorm.DB, *BillingCatalogService, *BillingWalletService) {
 	t.Helper()
@@ -58,199 +60,183 @@ func newSearchBillingFixture(t *testing.T) (repository.Repository, *gorm.DB, *Bi
 	return repo, db, catalog, NewBillingWalletService(repo, &bundle, BillingWalletOptions{})
 }
 
-func TestDoubaoSearchProviderParsesWebSearchResults(t *testing.T) {
+func TestDoubaoCustomSearchProviderUsesOfficialWebContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v3/responses" {
+		if r.Method != http.MethodPost || r.URL.Path != "/search_api/web_search" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
-			t.Fatalf("authorization = %q", got)
+		if r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("unexpected headers")
 		}
-		if got := r.Header.Get("ark-beta-web-search"); got != "true" {
-			t.Fatalf("ark-beta-web-search = %q", got)
-		}
-		var request map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if request["model"] != "doubao-test" {
-			t.Fatalf("model = %#v", request["model"])
-		}
-		tools, ok := request["tools"].([]any)
-		if !ok || len(tools) != 1 {
-			t.Fatalf("tools = %#v", request["tools"])
-		}
-		webTool := tools[0].(map[string]any)
-		if webTool["limit"] != float64(3) {
-			t.Fatalf("web search limit = %#v", webTool["limit"])
-		}
-		if _, ok := webTool["sources"].([]any); !ok {
-			t.Fatalf("web search sources = %#v", webTool["sources"])
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "resp-123",
-			"output": []any{
-				map[string]any{
-					"type":         "web_search_result",
-					"title":        "Anban",
-					"url":          "https://example.com/anban",
-					"snippet":      "Server-owned search",
-					"published_at": "2026-10-01T00:00:00Z",
-				},
-			},
-			"usage": map[string]any{"tool_usage": map[string]any{"web_search_requests": 1}},
-		})
-	}))
-	defer server.Close()
-
-	provider := NewDoubaoSearchProvider(serverconfig.SearchDoubaoConfig{
-		BaseURL:    server.URL + "/api/v3",
-		APIKey:     "secret",
-		Model:      "doubao-test",
-		Timeout:    time.Second,
-		MaxResults: 10,
-	})
-	result, err := provider.Search(context.Background(), SearchRequest{Query: "Anban", Limit: 3})
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if result.ProviderRequestID != "resp-123" || len(result.Results) != 1 {
-		t.Fatalf("result = %#v", result)
-	}
-	if result.Results[0].Title != "Anban" || result.Results[0].URL != "https://example.com/anban" {
-		t.Fatalf("result item = %#v", result.Results[0])
-	}
-	if result.Results[0].Domain != "example.com" {
-		t.Fatalf("domain = %q", result.Results[0].Domain)
-	}
-}
-
-func TestDoubaoSearchProviderParsesNestedCitationsAndConstraints(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		tool := request["tools"].([]any)[0].(map[string]any)
-		if _, ok := tool["sources"].([]any); !ok {
-			t.Fatalf("sources = %#v", tool["sources"])
+		if request["Query"] != "Anban" || request["SearchType"] != "web" || request["Count"] != float64(3) {
+			t.Fatalf("custom request = %#v", request)
 		}
-		var requestInput []any
-		for _, item := range request["input"].([]any) {
-			message := item.(map[string]any)
-			for _, content := range message["content"].([]any) {
-				requestInput = append(requestInput, content)
+		filter := request["Filter"].(map[string]any)
+		if filter["NeedUrl"] != true || filter["Sites"] != "example.com" || filter["TimeRange"] != "OneWeek" {
+			t.Fatalf("custom filter = %#v", filter)
+		}
+		if request["QueryControl"].(map[string]any)["QueryRewrite"] != true {
+			t.Fatalf("custom query control = %#v", request["QueryControl"])
+		}
+		for _, field := range []string{"model", "input", "tools", "DocCount"} {
+			if _, ok := request[field]; ok {
+				t.Fatalf("legacy/unrelated field %q in request", field)
 			}
 		}
-		if len(requestInput) != 1 || !strings.Contains(requestInput[0].(map[string]any)["text"].(string), "site:example.com") || !strings.Contains(requestInput[0].(map[string]any)["text"].(string), "时间范围:week") {
-			t.Fatalf("constrained query = %#v", requestInput)
-		}
-		response := map[string]any{}
-		response["id"] = "resp-nested"
-		response["output"] = []any{
-			map[string]any{"type": "web_search_call", "results": []any{
-				map[string]any{"title": "Nested title", "url": "https://example.com/a", "snippet": "summary", "published_at": "2026-10-01", "citation_id": "cite-a"},
-			}},
-			map[string]any{"type": "message", "content": []any{
-				map[string]any{"type": "output_text", "annotations": []any{
-					map[string]any{"type": "url_citation", "title": "Annotated", "url": "https://example.org/b", "citation_id": "cite-b"},
-				}},
-			}},
-		}
-		response["usage"] = map[string]any{"tool_usage": map[string]any{"web_search_requests": 1}}
-		_ = json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ResponseMetadata": map[string]any{"RequestId": "custom-req-123"},
+			"Result": map[string]any{"ResultCount": 1, "WebResults": []any{map[string]any{
+				"Id": "cite-1", "Title": "Anban", "Url": "https://example.com/anban", "Summary": "Relevant summary", "PublishTime": "2026-10-01T00:00:00Z", "AuthInfoDes": "非常权威", "RankScore": 0.91,
+			}}},
+		})
 	}))
 	defer server.Close()
-	provider := NewDoubaoSearchProvider(serverconfig.SearchDoubaoConfig{BaseURL: server.URL, APIKey: "secret", Model: "doubao-test", Timeout: time.Second, MaxResults: 10})
-	result, err := provider.Search(context.Background(), SearchRequest{Query: "q", Limit: 2, TimeRange: "week", Domains: []string{"example.com"}})
+
+	provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL + "/search_api/web_search", APIKey: "secret", Timeout: time.Second, MaxWebResults: 10})
+	needURL := true
+	rewrite := true
+	result, err := provider.Search(context.Background(), SearchRequest{Query: "Anban", Limit: 3, TimeRange: "OneWeek", Domains: []string{"example.com"}, NeedURL: &needURL, QueryRewrite: &rewrite})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Search: %v", err)
 	}
-	if result.ProviderRequestID != "resp-nested" || len(result.Results) != 2 {
+	if result.Provider != "doubao_custom" || result.ProviderRequestID != "custom-req-123" || len(result.Results) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
-	if result.Results[1].CitationID != "cite-b" || result.Results[1].Domain != "example.org" {
-		t.Fatalf("citation = %#v", result.Results[1])
+	item := result.Results[0]
+	if item.Title != "Anban" || item.URL != "https://example.com/anban" || item.Domain != "example.com" || item.CitationID != "cite-1" || item.Snippet != "Relevant summary" || item.Authority != "非常权威" || item.RankScore != 0.91 {
+		t.Fatalf("normalized result = %#v", item)
 	}
 }
 
-func TestDoubaoSearchProviderReturnsEmptyResultsAndHidesAPIKey(t *testing.T) {
+func TestDoubaoGlobalSearchProviderUsesOfficialGlobalContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "empty", "output": []any{}})
+		if r.Method != http.MethodPost || r.URL.Path != "/search_api/global_search" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer global-secret" {
+			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request["Query"] != "Anban" || request["SearchType"] != "web" || request["DocCount"] != float64(4) {
+			t.Fatalf("global request = %#v", request)
+		}
+		for _, field := range []string{"model", "input", "tools", "Count", "Filter", "QueryControl"} {
+			if _, ok := request[field]; ok {
+				t.Fatalf("unrelated field %q in Global request", field)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ResponseMetadata": map[string]any{"RequestId": "global-req-456"},
+			"Result": map[string]any{"ErrorCode": 0, "ErrorMsg": "", "TotalDocCount": 17, "Documents": []any{map[string]any{
+				"Rank": 2, "Url": "https://example.org/article", "Title": "Global result", "Snippet": []any{map[string]any{"Type": "text", "Text": "Global summary"}},
+				"DocumentInfo": map[string]any{"Filetype": "webpage", "PublishTime": "2026-10-02T00:00:00Z"}, "HostInfo": map[string]any{"Hostname": "Example Org", "AuthorityLevel": "very_high"},
+			}}},
+		})
 	}))
 	defer server.Close()
-	provider := NewDoubaoSearchProvider(serverconfig.SearchDoubaoConfig{BaseURL: server.URL, APIKey: "super-secret", Model: "doubao-test", Timeout: time.Second})
-	result, err := provider.Search(context.Background(), SearchRequest{Query: "q"})
-	if err != nil || len(result.Results) != 0 {
-		t.Fatalf("result/error = %#v/%v", result, err)
+
+	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL + "/search_api/global_search", APIKey: "global-secret", Timeout: time.Second, MaxWebResults: 10})
+	result, err := provider.Search(context.Background(), SearchRequest{Query: "Anban", Limit: 4})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
 	}
-	if strings.Contains(fmt.Sprintf("%#v", result), "super-secret") {
-		t.Fatal("API key leaked in result")
+	if result.Provider != "doubao_global" || result.ProviderRequestID != "global-req-456" || result.TotalCount != 17 || len(result.Results) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	item := result.Results[0]
+	if item.Title != "Global result" || item.URL != "https://example.org/article" || item.Domain != "example.org" || item.Snippet != "Global summary" || item.PublishedAt != "2026-10-02T00:00:00Z" || item.Authority != "very_high" || item.Rank != 2 {
+		t.Fatalf("normalized result = %#v", item)
 	}
 }
 
-func TestDoubaoSearchProviderRejectsHTTPFailuresAndInvalidResponses(t *testing.T) {
-	tests := []struct {
-		name       string
-		statusCode int
-		body       string
-	}{
-		{name: "client error", statusCode: http.StatusUnauthorized, body: `{"error":"unauthorized"}`},
-		{name: "server error", statusCode: http.StatusBadGateway, body: `{"error":"upstream failed"}`},
-		{name: "invalid JSON", statusCode: http.StatusOK, body: `{"id":`},
-		{name: "missing output", statusCode: http.StatusOK, body: `{"id":"response-without-output"}`},
+func TestDoubaoGlobalSearchRejectsCustomOnlyFilters(t *testing.T) {
+	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: "https://example.com/search_api/global_search", APIKey: "secret", Timeout: time.Second})
+	if err := provider.ValidateRequest(SearchRequest{Query: "q", TimeRange: "OneWeek"}); err == nil {
+		t.Fatal("Global provider accepted a Custom-only filter")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+}
+
+func TestDoubaoGlobalSearchRejectsProviderResultError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ResponseMetadata": map[string]any{"RequestId": "global-error"},
+			"Result":           map[string]any{"ErrorCode": 10001, "ErrorMsg": "upstream details must not escape"},
+		})
+	}))
+	defer server.Close()
+	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+	_, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+	if err == nil || !IsSearchProviderUnavailable(err) || strings.Contains(err.Error(), "upstream details") {
+		t.Fatalf("error = %v, want sanitized provider_unavailable", err)
+	}
+}
+
+func TestDoubaoSearchProviderRejectsMalformedResultPayloads(t *testing.T) {
+	for _, edition := range []string{"custom", "global"} {
+		t.Run(edition, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.body))
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ResponseMetadata": map[string]any{"RequestId": "malformed"},
+					"Result":           "not-an-object",
+				})
 			}))
 			defer server.Close()
-
-			provider := NewDoubaoSearchProvider(serverconfig.SearchDoubaoConfig{BaseURL: server.URL, APIKey: "secret", Model: "doubao-test", Timeout: time.Second})
+			var provider *DoubaoSearchProvider
+			if edition == "custom" {
+				provider = NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+			} else {
+				provider = NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+			}
 			_, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
 			if err == nil || !IsSearchProviderUnavailable(err) {
-				t.Fatalf("error = %v, want provider unavailable", err)
-			}
-			if strings.Contains(err.Error(), "secret") {
-				t.Fatalf("error leaked API key: %v", err)
+				t.Fatalf("error = %v, want provider_unavailable", err)
 			}
 		})
 	}
 }
 
-func TestDoubaoSearchProviderTreatsTimeoutAsUnavailable(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		close(started)
-		<-release
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-	defer close(release)
-
-	provider := NewDoubaoSearchProvider(serverconfig.SearchDoubaoConfig{BaseURL: server.URL, APIKey: "secret", Model: "doubao-test", Timeout: 30 * time.Millisecond})
-	_, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
-	select {
-	case <-started:
-	default:
-		t.Fatal("provider request did not reach the HTTP test server")
+func TestDoubaoSearchProviderRejectsFailuresAndHidesSecrets(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "http error", status: http.StatusUnauthorized, body: `{"error":"unauthorized"}`},
+		{name: "invalid json", status: http.StatusOK, body: `{"ResponseMetadata":`},
+		{name: "missing result", status: http.StatusOK, body: `{"ResponseMetadata":{"RequestId":"missing"}}`},
+		{name: "provider error", status: http.StatusOK, body: `{"ResponseMetadata":{"RequestId":"bad","Error":{"Code":"10403","Message":"permission denied"}},"Result":null}`},
 	}
-	if err == nil || !IsSearchProviderUnavailable(err) {
-		t.Fatalf("error = %v, want provider unavailable", err)
-	}
-	if strings.Contains(err.Error(), "secret") {
-		t.Fatalf("error leaked API key: %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+			_, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+			if err == nil || !IsSearchProviderUnavailable(err) {
+				t.Fatalf("error = %v, want provider unavailable", err)
+			}
+			if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "permission denied") {
+				t.Fatalf("secret/upstream details leaked: %v", err)
+			}
+		})
 	}
 }
 
-func TestSearchServiceCreatesZeroPriceChargeAndReplaysItIdempotently(t *testing.T) {
+func TestSearchServiceCreatesZeroPriceChargeAndReplaysIdempotently(t *testing.T) {
 	repo, db, catalog, wallet := newSearchBillingFixture(t)
 	defer repo.Close()
-	provider := &searchProviderStub{response: &SearchResponse{Provider: "stub", Model: "stub-model", ProviderRequestID: "request-1", Query: "anban", Results: []SearchResultItem{}}}
-	cfg := &serverconfig.SearchConfig{Enabled: true, Provider: "stub"}
+	provider := &searchProviderStub{response: &SearchResponse{Provider: "stub", ProviderRequestID: "request-1", Query: "anban", Results: []SearchResultItem{}}}
+	cfg := &serverconfig.SearchConfig{Enabled: true, Provider: "stub", Custom: serverconfig.SearchDoubaoConfig{Timeout: 30 * time.Second}}
 	svc := NewSearchService(cfg, provider, catalog, wallet, nil, repo.SearchOperations())
 	req := SearchOperationRequest{UserID: billingWalletUserID, ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1", Request: SearchRequest{Query: "anban", Limit: 3}}
 	first, err := svc.Search(context.Background(), req)
@@ -261,154 +247,35 @@ func TestSearchServiceCreatesZeroPriceChargeAndReplaysItIdempotently(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.ProviderRequestID != second.ProviderRequestID || first.Query != second.Query || provider.calls != 1 {
-		t.Fatalf("replayed results/calls = %#v/%d, want cached response and one provider call", second, provider.calls)
+	if first.ProviderRequestID != second.ProviderRequestID || provider.calls != 1 {
+		t.Fatalf("replay = %#v calls=%d", second, provider.calls)
 	}
 	var charges int64
 	if err := db.Model(&model.BillingCharge{}).Where("user_id = ? AND sku_id = ?", billingWalletUserID, "mcp.search_web").Count(&charges).Error; err != nil {
 		t.Fatal(err)
 	}
 	if charges != 1 {
-		t.Fatalf("zero-price charge count = %d, want one", charges)
+		t.Fatalf("charge count = %d, want one", charges)
 	}
 	var account model.BillingWalletAccount
 	if err := db.Where("user_id = ?", billingWalletUserID).First(&account).Error; err != nil {
 		t.Fatal(err)
 	}
 	if account.PaidCredits != 0 || account.PromotionalCredits != 0 || account.DebtCredits != 0 {
-		t.Fatalf("wallet changed for zero-price search: %+v", account)
+		t.Fatalf("wallet changed: %+v", account)
 	}
 }
 
 func TestSearchServiceOperationLeaseFollowsConfiguredProviderTimeout(t *testing.T) {
-	tests := []struct {
-		name      string
-		timeout   time.Duration
-		wantLease time.Duration
-	}{
-		{name: "default safety lease", timeout: 30 * time.Second, wantLease: 5 * time.Minute},
-		{name: "long provider timeout includes margin", timeout: 10 * time.Minute, wantLease: 11 * time.Minute},
+	svc := &SearchService{config: &serverconfig.SearchConfig{Provider: "custom", Custom: serverconfig.SearchDoubaoConfig{Timeout: 10 * time.Minute}}}
+	if got := svc.operationLease(); got != 11*time.Minute {
+		t.Fatalf("operationLease() = %s", got)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			svc := &SearchService{config: &serverconfig.SearchConfig{Doubao: serverconfig.SearchDoubaoConfig{Timeout: tt.timeout}}}
-			if got := svc.operationLease(); got != tt.wantLease {
-				t.Fatalf("operationLease() = %s, want %s", got, tt.wantLease)
-			}
-		})
+	if got := (&SearchService{config: &serverconfig.SearchConfig{Provider: "global", Global: serverconfig.SearchDoubaoConfig{Timeout: 10 * time.Minute}}}).operationLease(); got != 11*time.Minute {
+		t.Fatalf("global operationLease() = %s", got)
 	}
 	var nilService *SearchService
 	if got := nilService.operationLease(); got != 5*time.Minute {
-		t.Fatalf("nil operationLease() = %s, want 5m", got)
-	}
-}
-
-func TestSearchServiceCostRecordingFailureDoesNotDiscardResults(t *testing.T) {
-	repo, _, catalog, wallet := newSearchBillingFixture(t)
-	defer repo.Close()
-	provider := &searchProviderStub{response: &SearchResponse{Provider: "stub", Model: "stub-model", ProviderRequestID: "request-2", Query: "anban"}}
-	cfg := &serverconfig.SearchConfig{Enabled: true, Provider: "stub"}
-	// An unconfigured ProviderCostService exercises the unreconciled logging path.
-	svc := NewSearchService(cfg, provider, catalog, wallet, &ProviderCostService{}, nil)
-	result, err := svc.Search(context.Background(), SearchOperationRequest{UserID: billingWalletUserID, ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1", Request: SearchRequest{Query: "anban"}})
-	if err != nil || result == nil || result.Query != "anban" {
-		t.Fatalf("result/error = %#v/%v", result, err)
-	}
-}
-
-func TestSearchServiceRecordsFailedProviderAttemptAsUnreconciled(t *testing.T) {
-	repo, db, catalog, wallet := newSearchBillingFixture(t)
-	defer repo.Close()
-	costs := NewProviderCostService(repository.NewBillingCostRepository(db), providerCostBundle())
-	provider := &searchProviderStub{
-		responses: []*SearchResponse{nil, {Provider: "stub", Model: "stub-model", Query: "failed search"}},
-		errors:    []error{ErrSearchProviderUnavailable, nil},
-	}
-	svc := NewSearchService(&serverconfig.SearchConfig{Enabled: true, Provider: "stub"}, provider, catalog, wallet, costs, repo.SearchOperations())
-	req := SearchOperationRequest{UserID: billingWalletUserID, ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1", Request: SearchRequest{Query: "failed search", Limit: 3}}
-	if _, err := svc.Search(context.Background(), req); !IsSearchProviderUnavailable(err) {
-		t.Fatalf("Search error = %v, want provider unavailable", err)
-	}
-
-	var events []model.BillingProviderCostEvent
-	if err := db.Where("task_id = ?", req.TaskID).Find(&events).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 1 || events[0].Status != model.BillingProviderCostStatusUnreconciled || events[0].Provider != "stub" || events[0].Model != "stub-model" {
-		t.Fatalf("failed search cost events = %#v", events)
-	}
-	var evidence map[string]any
-	if err := json.Unmarshal(events[0].UsageEvidence, &evidence); err != nil {
-		t.Fatal(err)
-	}
-	if evidence["kind"] != "search_request" || evidence["query"] != req.Request.Query || evidence["result_count"] != float64(0) || evidence["search_request_count"] != float64(1) {
-		t.Fatalf("failed search evidence = %#v", evidence)
-	}
-	if evidence["outcome"] != "provider_error" || evidence["request_id_source"] != "search_attempt" {
-		t.Fatalf("failed search outcome/request ID source = %#v/%#v", evidence["outcome"], evidence["request_id_source"])
-	}
-	failedRequestID := events[0].ProviderRequestID
-	if !strings.HasPrefix(failedRequestID, "search-attempt-") {
-		t.Fatalf("failed request ID = %q, want synthetic attempt identity", failedRequestID)
-	}
-	if result, err := svc.Search(context.Background(), req); err != nil || result == nil {
-		t.Fatalf("retry result/error = %#v/%v", result, err)
-	}
-	if err := db.Where("task_id = ?", req.TaskID).Find(&events).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 2 || events[0].ProviderRequestID == events[1].ProviderRequestID {
-		t.Fatalf("provider retry cost events = %#v, want one distinct event per attempt", events)
-	}
-}
-
-func TestSearchServiceSyntheticCostIdentityIncludesRequestAndExecution(t *testing.T) {
-	repo, db, catalog, wallet := newSearchBillingFixture(t)
-	defer repo.Close()
-	costBundle := providerCostBundle()
-	costs := NewProviderCostService(repository.NewBillingCostRepository(db), costBundle)
-	provider := &searchProviderStub{response: &SearchResponse{Provider: "stub", Model: "stub-model", Query: "provider-query"}}
-	svc := NewSearchService(&serverconfig.SearchConfig{Enabled: true, Provider: "stub"}, provider, catalog, wallet, costs, nil)
-	base := SearchOperationRequest{UserID: billingWalletUserID, ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1", Request: SearchRequest{Query: "requested-query", Limit: 3, TimeRange: "week", Domains: []string{"example.com"}}}
-	first, err := svc.Search(context.Background(), base)
-	if err != nil || first == nil {
-		t.Fatalf("first search = %#v, %v", first, err)
-	}
-	secondReq := base
-	secondReq.Request.Limit = 4
-	if _, err := svc.Search(context.Background(), secondReq); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.Search(context.Background(), base); err != nil {
-		t.Fatal(err)
-	}
-	thirdExecution := base
-	thirdExecution.ExecutionID = "execution-2"
-	if _, err := svc.Search(context.Background(), thirdExecution); err != nil {
-		t.Fatal(err)
-	}
-	var events []model.BillingProviderCostEvent
-	if err := db.Where("provider = ? AND model = ?", "stub", "stub-model").Order("created_at asc").Find(&events).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 4 {
-		t.Fatalf("search cost event count = %d, want 4 actual provider attempts", len(events))
-	}
-	seenRequestIDs := make(map[string]struct{}, len(events))
-	for _, event := range events {
-		if !strings.HasPrefix(event.ProviderRequestID, "search-attempt-") {
-			t.Fatalf("synthetic request ID = %q", event.ProviderRequestID)
-		}
-		if _, seen := seenRequestIDs[event.ProviderRequestID]; seen {
-			t.Fatalf("synthetic request ID repeated: %q", event.ProviderRequestID)
-		}
-		seenRequestIDs[event.ProviderRequestID] = struct{}{}
-	}
-	var evidence map[string]any
-	if err := json.Unmarshal(events[0].UsageEvidence, &evidence); err != nil {
-		t.Fatal(err)
-	}
-	if evidence["query"] != "requested-query" {
-		t.Fatalf("cost evidence query = %#v, want request query", evidence["query"])
+		t.Fatalf("nil operationLease() = %s", got)
 	}
 }

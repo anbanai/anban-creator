@@ -24,16 +24,19 @@ trends:
 
 search:
   enabled: ${ANBAN_SEARCH_ENABLED:-false}
-  provider: "${ANBAN_SEARCH_PROVIDER:-doubao}"
+  provider: "${ANBAN_SEARCH_PROVIDER:-custom}"
   fallback:
     enabled: false
-  doubao:
-    base_url: "${ANBAN_DOUBAO_SEARCH_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}"
-    api_key: "${ANBAN_DOUBAO_SEARCH_API_KEY:-}"
-    model: "${ANBAN_DOUBAO_SEARCH_MODEL:-doubao-seed-2-1-pro-260628}"
+  custom:
+    endpoint: "${ANBAN_DOUBAO_CUSTOM_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/web_search}"
+    api_key: "${ANBAN_DOUBAO_CUSTOM_SEARCH_API_KEY:-}"
     timeout: 30s
-    max_results: 10
-    max_keyword: 2
+    max_web_results: 10
+  global:
+    endpoint: "${ANBAN_DOUBAO_GLOBAL_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/global_search}"
+    api_key: "${ANBAN_DOUBAO_GLOBAL_SEARCH_API_KEY:-}"
+    timeout: 30s
+    max_web_results: 10
 
 jwt:
   secret_key: "${ANBAN_JWT_SECRET_KEY}"

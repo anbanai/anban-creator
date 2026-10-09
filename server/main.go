@@ -736,8 +736,10 @@ func main() {
 		if cfg.Search.Enabled {
 			var searchProvider service.SearchProvider
 			switch strings.TrimSpace(cfg.Search.Provider) {
-			case "doubao":
-				searchProvider = service.NewDoubaoSearchProvider(cfg.Search.Doubao)
+			case "custom":
+				searchProvider = service.NewDoubaoCustomSearchProvider(cfg.Search.Custom)
+			case "global":
+				searchProvider = service.NewDoubaoGlobalSearchProvider(cfg.Search.Global)
 			}
 			if searchProvider != nil {
 				searchSvc = service.NewSearchService(&cfg.Search, searchProvider, fixedBilling.Catalog, fixedBilling.Wallet, fixedBilling.Cost, repo.SearchOperations(), log)

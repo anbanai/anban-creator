@@ -108,6 +108,26 @@ func TestProviderCostEventSupportsUnreconciledTokenEvidenceWithoutTask(t *testin
 	}
 }
 
+func TestProviderCostEventAllowsEmptyModelForSearchEvidence(t *testing.T) {
+	baseIdentity, err := ProviderCostBaseIdentityKey(BillingProviderCostIdentityProviderRequest, "", "doubao_custom", "", "search-request-1")
+	if err != nil {
+		t.Fatalf("ProviderCostBaseIdentityKey: %v", err)
+	}
+	event := BillingProviderCostEvent{
+		ID: "search-cost-1", EventKind: BillingProviderCostEventKindBase,
+		IdentityKind: BillingProviderCostIdentityProviderRequest, ProviderRequestID: "search-request-1",
+		Provider: "doubao_custom", CatalogID: "cost-v1",
+		IdempotencyScope: "provider_cost_base/doubao_custom", IdempotencyKey: "search-request-1",
+		BaseIdentityKey: &baseIdentity, RequestFingerprint: "c63d4dd2bc0bfc97cc4f58cf109f0f9cbde560e75fd3a4fdda4a6086863717ee",
+		Source: BillingProviderCostSourceProviderResponse, Status: BillingProviderCostStatusUnreconciled,
+		UsageEvidence:       []byte(`{"kind":"search_request","query":"anban","result_count":1,"search_request_count":1,"request_id_source":"provider"}`),
+		CalculationSnapshot: []byte(`{"version":1,"reason_code":"missing_provider_usage"}`),
+	}
+	if err := event.Validate(); err != nil {
+		t.Fatalf("valid search event without model: %v", err)
+	}
+}
+
 func TestProviderCostBaseIdentityHashDoesNotHaveDelimiterCollisions(t *testing.T) {
 	first, err := ProviderCostBaseIdentityKey(BillingProviderCostIdentityExecutionModel, "a/b", "c", "d", "")
 	if err != nil {

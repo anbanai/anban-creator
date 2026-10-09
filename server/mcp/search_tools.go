@@ -17,10 +17,17 @@ func registerSearchTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{
-				"query":      map[string]any{"type": "string", "minLength": 1},
-				"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
-				"time_range": map[string]any{"type": "string"},
-				"domains":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 10},
+				"query":           map[string]any{"type": "string", "minLength": 1},
+				"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
+				"time_range":      map[string]any{"type": "string"},
+				"domains":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20},
+				"block_hosts":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 5},
+				"need_content":    map[string]any{"type": "boolean"},
+				"need_url":        map[string]any{"type": "boolean"},
+				"auth_info_level": map[string]any{"type": "integer", "minimum": 0, "maximum": 1},
+				"content_formats": map[string]any{"type": "string", "enum": []any{"text", "markdown"}},
+				"industry":        map[string]any{"type": "string", "enum": []any{"finance", "game", "health", "gov"}},
+				"query_rewrite":   map[string]any{"type": "boolean"},
 			},
 			"required": []any{"query"},
 		},
@@ -49,15 +56,31 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	limit := 10
 	if rawLimit, present := args["limit"]; present {
 		value, ok := rawLimit.(float64)
-		if !ok || value != float64(int(value)) || value < 1 || value > 20 {
-			return errorResult(`{"code":"invalid_request","message":"limit must be an integer between 1 and 20"}`), nil
+		if !ok || value != float64(int(value)) || value < 1 || value > 50 {
+			return errorResult(`{"code":"invalid_request","message":"limit must be an integer between 1 and 50"}`), nil
 		}
 		limit = int(value)
+	}
+	needContent, err := optionalBoolArg(args, "need_content")
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"need_content must be boolean"}`), nil
+	}
+	needURL, err := optionalBoolArg(args, "need_url")
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"need_url must be boolean"}`), nil
+	}
+	queryRewrite, err := optionalBoolArg(args, "query_rewrite")
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"query_rewrite must be boolean"}`), nil
+	}
+	authInfoLevel, err := optionalIntArg(args, "auth_info_level")
+	if err != nil || (authInfoLevel != 0 && authInfoLevel != 1) {
+		return errorResult(`{"code":"invalid_request","message":"auth_info_level must be 0 or 1"}`), nil
 	}
 	if svcs == nil || svcs.SearchSvc == nil {
 		return errorResult(`{"code":"provider_unavailable","message":"search provider is not configured"}`), nil
 	}
-	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, TimeRange: stringArg(args, "time_range"), Domains: parseStringArray(args, "domains")}})
+	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, TimeRange: stringArg(args, "time_range"), Domains: parseStringArray(args, "domains"), BlockHosts: parseStringArray(args, "block_hosts"), NeedContent: needContent, NeedURL: needURL, AuthInfoLevel: authInfoLevel, ContentFormats: stringArg(args, "content_formats"), Industry: stringArg(args, "industry"), QueryRewrite: queryRewrite}})
 	if err != nil {
 		code := "search_failed"
 		if errors.Is(err, service.ErrSearchProviderUnavailable) {
@@ -66,6 +89,30 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult(searchErrorJSON(code, err.Error())), nil
 	}
 	return textResult(result)
+}
+
+func optionalBoolArg(args map[string]any, key string) (*bool, error) {
+	raw, ok := args[key]
+	if !ok {
+		return nil, nil
+	}
+	value, ok := raw.(bool)
+	if !ok {
+		return nil, errors.New("boolean argument required")
+	}
+	return &value, nil
+}
+
+func optionalIntArg(args map[string]any, key string) (int, error) {
+	raw, ok := args[key]
+	if !ok {
+		return 0, nil
+	}
+	value, ok := raw.(float64)
+	if !ok || value != float64(int(value)) {
+		return 0, errors.New("integer argument required")
+	}
+	return int(value), nil
 }
 
 func searchErrorJSON(code, message string) string {
