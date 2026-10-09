@@ -6,7 +6,6 @@ import { ZodError } from 'zod'
 import { portraitChatRequest, validatePortraitCandidate, type PortraitChatMessage } from '../src/lib/portrait-chat-contract'
 
 const endpoint = '/__local-preview/portrait-chat'
-const host = '127.0.0.1:5174'
 const maxInputBytes = 180_000
 export const portraitSystemPrompt = `你是案板的 IP 定位访谈助手。与用户自然聊天，把语音转写或打字中的业务信息整理成可纠正的画像候选。
 每轮用简明中文回应，最多追问一个最有价值的问题。不要按六个维度机械逐项问，不要要求填写术语或表格；已经说过的信息不要再问。语音转写可能有错，名字、业务和数值不确定时追问，不擅自纠正成另一人或品牌。
@@ -36,7 +35,8 @@ export function validateProviderConfig(value: unknown): PortraitProviderConfig {
   return { apiKey: config.apiKey.trim(), baseUrl: url.href.replace(/\/$/, ''), model: config.model }
 }
 
-export function acceptsPortraitRequest(req: Pick<IncomingMessage, 'method' | 'headers'> & { socket: { remoteAddress?: string } }): boolean {
+export function acceptsPortraitRequest(req: Pick<IncomingMessage, 'method' | 'headers'> & { socket: { remoteAddress?: string } }, port: 5174 | 5175 = 5174): boolean {
+  const host = `127.0.0.1:${port}`
   if (!['127.0.0.1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '') || req.headers.host !== host) return false
   return req.method === 'GET' || (req.method === 'POST' && req.headers.origin === `http://${host}` && req.headers['x-anban-portrait-chat'] === '1')
 }
@@ -92,7 +92,7 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body))
 }
 
-export function portraitChat(): Plugin {
+export function portraitChat(port: 5174 | 5175 = 5174): Plugin {
   let busy = false
   return { name: 'local-preview-portrait-chat', apply: 'serve', configureServer(server) {
     const configPath = process.env.ANBAN_PREVIEW_PROVIDER_FILE ?? path.resolve(server.config.root, '../../.secrets/deepseek-onboarding.json')
@@ -108,7 +108,7 @@ export function portraitChat(): Plugin {
     }
     server.middlewares.use(async (req, res, next) => {
       if (req.url !== endpoint) { next(); return }
-      if (!acceptsPortraitRequest(req)) { json(res, 403, { error: '仅允许本机预览页面调用。' }); return }
+      if (!acceptsPortraitRequest(req, port)) { json(res, 403, { error: '仅允许本机预览页面调用。' }); return }
       if (req.method === 'GET') {
         try { const config = await loadConfig(); json(res, 200, { configured: true, provider: 'DeepSeek', model: config.model }) }
         catch (error) { json(res, 200, { configured: false, provider: 'DeepSeek', error: error instanceof PortraitServiceError ? error.message : 'API 配置不可用。' }) }

@@ -66,3 +66,10 @@
 @media (max-width: 960px) { .portrait-workspace { gap: 24px; padding: 0 20px 24px; grid-template-columns: minmax(0, 1.1fr) minmax(270px, 1fr); }.portrait-sheet { padding: 16px; }.portrait-chat-heading h1 { font-size: 23px; } }
 @media (max-width: 620px) { .portrait-preview-nav { padding: 18px 20px; }.portrait-preview-nav strong span { display: none; }.portrait-workspace { display: flex; flex-direction: column; }.portrait-chat { height: 70dvh; min-height: 510px; position: static; }.portrait-chat-heading { padding-top: 12px; padding-bottom: 18px; }.portrait-sheet { width: 100%; }.portrait-next { margin: 12px 20px 30px; padding: 24px; }.portrait-preview-bar { padding: 8px 18px; font-size: 10px; } }
 @media (prefers-reduced-motion: reduce) { .portrait-preview * { transition: none !important; } }
+.portrait-online { margin: 24px 0; padding: 24px; border: 1px solid #dfd9ce; border-radius: 18px; background: #fffdf8; }
+.portrait-online > p { margin: 12px 0; font-size: 14px; line-height: 1.7; }
+.portrait-online select { padding: 8px 12px; margin-left: 8px; max-width: 100%; border: 1px solid #d8d0c3; border-radius: 8px; background: white; }
+.portrait-online a:not(.portrait-primary) { color: #9b512f; text-decoration: underline; text-underline-offset: 3px; }
+.portrait-online button:not(.portrait-primary) { margin-left: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.portrait-online button:disabled { opacity: .5; cursor: not-allowed; }
+.portrait-online .portrait-primary { display: inline-flex; margin: 8px 0; text-decoration: none; }

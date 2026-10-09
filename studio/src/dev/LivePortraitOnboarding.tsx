@@ -1,18 +1,29 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { PortraitConversation, portraitFacets, type PortraitDraft, type PortraitMessage } from '@/components/projects/PortraitConversation'
-import { canConfirmPortrait, portraitChatRequest, validatePortraitCandidate, type PortraitCandidate, type PortraitChatMessage } from '@/lib/portrait-chat-contract'
+import { canConfirmPortrait, portraitChatRequest, portraitConversationSchema, validatePortraitCandidate, type PortraitCandidate, type PortraitChatMessage } from '@/lib/portrait-chat-contract'
+
+const OnlinePortraitDelivery = lazy(()=>import('./OnlinePortraitDelivery'))
 
 const welcome: PortraitMessage = { id: 'welcome', role: 'assistant', text: '你好，很高兴认识你。你平时在做什么？最近为什么想开始做内容？\n\n打字或用语音说都可以。从你最想聊的地方开始。' }
 type Connection = { configured: boolean; model?: string; error?: string }
 
-export default function LivePortraitOnboarding({ initialConversation }: { initialConversation?: PortraitChatMessage[] } = {}) {
-  // Optional local-preview recovery input. Never trust a recovered portrait or
-  // confirmation; restore text only and wait for the user to send it for analysis.
+export default function LivePortraitOnboarding({ initialConversation, initialSession, onlineDelivery = false }: {
+  initialConversation?: PortraitChatMessage[]
+  initialSession?: { messages: PortraitChatMessage[]; candidate: PortraitCandidate }
+  onlineDelivery?: boolean
+} = {}) {
+  // Recovery inputs are local only: text is re-analysed, or a full candidate is
+  // validated against its source quotes. Neither path restores confirmation.
   const [recovered] = useState(() => initialConversation ? portraitChatRequest.parse({ messages: initialConversation }).messages : null)
-  const [messages, setMessages] = useState<PortraitMessage[]>(recovered?.slice(0, -1) ?? [welcome])
+  const [session] = useState(()=>{
+    if(!initialSession) return null
+    const restored = portraitConversationSchema.parse(initialSession.messages)
+    return {messages:restored,candidate:validatePortraitCandidate(initialSession.candidate,restored)}
+  })
+  const [messages, setMessages] = useState<PortraitMessage[]>(session?.messages ?? recovered?.slice(0, -1) ?? [welcome])
   const [recoveredInput, setRecoveredInput] = useState(recovered ? recovered[recovered.length - 1].text : '')
-  const [candidate, setCandidate] = useState<PortraitCandidate | null>(null)
+  const [candidate, setCandidate] = useState<PortraitCandidate | null>(session?.candidate ?? null)
   const [connection, setConnection] = useState<Connection>({ configured: false })
   const [checking, setChecking] = useState(false)
   const [localVoice, setLocalVoice] = useState(false)
@@ -22,7 +33,7 @@ export default function LivePortraitOnboarding({ initialConversation }: { initia
   const [creating, setCreating] = useState(false)
   const [resetPrompt, setResetPrompt] = useState(false)
   const [epoch, setEpoch] = useState(0)
-  const revision = useRef(Math.max(0, ...(recovered ?? []).map(message => Number(/^[ua]-(\d+)$/.exec(message.id)?.[1] ?? 0))))
+  const revision = useRef(Math.max(0, ...(session?.messages ?? recovered ?? []).map(message => Number(/^[ua]-(\d+)$/.exec(message.id)?.[1] ?? 0))))
   const generation = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
   const statusRequest = useRef<AbortController | null>(null)
@@ -116,7 +127,7 @@ export default function LivePortraitOnboarding({ initialConversation }: { initia
   const ready = canConfirmPortrait(candidate)
 
   return <div className="portrait-preview">
-    <div className="portrait-preview-bar"><span>真实对话 · {connection.configured ? `DeepSeek${connection.model ? ` / ${connection.model}` : ''}` : '等待 API 配置'}</span><span>发送后的文字和本次对话由 DeepSeek 理解；画像仅在本次预览中保存</span></div>
+    <div className="portrait-preview-bar"><span>真实对话 · {connection.configured ? `DeepSeek${connection.model ? ` / ${connection.model}` : ''}` : '等待 API 配置'}</span><span>{onlineDelivery ? '本机新界面 · 连接线上账号 · 确认后可保存项目并生成作品' : '发送后的文字和本次对话由 DeepSeek 理解；画像仅在本次预览中保存'}</span></div>
     <nav className="portrait-preview-nav" aria-label="预览导航"><strong>案板 <span>让好内容，从认识你开始</span></strong><button onClick={() => setResetPrompt(true)}>从空白重新开始</button></nav>
     {!connection.configured && <div className="portrait-reset" role="status"><span>{checking ? '正在检查本机 API 配置…' : connection.error || '填写本机 DeepSeek 配置后，即可开始真实对话。'}</span><button disabled={checking || busy} onClick={() => void refreshConfiguration()}>检查 API 配置</button></div>}
     {resetPrompt && <div className="portrait-reset" role="alert"><span>重新开始会清空本次对话、画像和未发送文字。</span><button onClick={() => setResetPrompt(false)}>继续当前对话</button><button onClick={reset}>清空并重新开始</button></div>}
@@ -125,7 +136,8 @@ export default function LivePortraitOnboarding({ initialConversation }: { initia
       <h2>{candidate?.creationIdea?.text || '一起选择第一篇的选题'}</h2>
       <p>{candidate?.summary}</p>
       <p>面向：{candidate?.facets.audience?.text}<br />发布平台：{candidate?.facets.platforms?.text}</p>
-      <p>这份简报来自刚才的真实对话。本机预览已完成画像整理；作品生成和正式项目保存尚未接入，没有创建或发布作品。</p>
+      {onlineDelivery && candidate ? <Suspense fallback={<p>正在连接交付流程…</p>}><OnlinePortraitDelivery candidate={candidate} messages={messages} /></Suspense>
+        : <p>这份简报来自刚才的真实对话。本机预览已完成画像整理；作品生成和正式项目保存尚未接入，没有创建或发布作品。</p>}
       <button className="portrait-primary" onClick={() => setCreating(false)}><ArrowLeft size={15} />回到对话继续调整</button>
     </section> : <PortraitConversation key={epoch} messages={messages} draft={draft} name={candidate?.name ?? undefined} summary={candidate?.summary ?? undefined}
       creationIdea={candidate?.creationIdea?.text} localVoice={localVoice} initialInput={recoveredInput} busy={busy} error={error} ready={ready} confirmed={confirmed}

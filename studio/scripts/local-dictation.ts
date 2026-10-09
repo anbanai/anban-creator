@@ -8,10 +8,10 @@ import type { Plugin } from 'vite'
 const run = promisify(execFile)
 const endpoint = '/__local-preview/dictation'
 const maxBytes = 8 * 1024 * 1024
-const host = '127.0.0.1:5174'
-const origin = `http://${host}`
 
-export function acceptsLocalVoice(req: Pick<IncomingMessage, 'method' | 'headers'> & { socket: { remoteAddress?: string } }): boolean {
+export function acceptsLocalVoice(req: Pick<IncomingMessage, 'method' | 'headers'> & { socket: { remoteAddress?: string } }, port: 5174 | 5175 = 5174): boolean {
+  const host = `127.0.0.1:${port}`
+  const origin = `http://${host}`
   const peer = req.socket.remoteAddress
   if (peer !== '127.0.0.1' && peer !== '::ffff:127.0.0.1') return false
   if (req.headers.host !== host) return false
@@ -24,7 +24,7 @@ function json(res: ServerResponse, code: number, body: unknown) {
   res.end(JSON.stringify(body))
 }
 
-export function localDictation(): Plugin {
+export function localDictation(port: 5174 | 5175 = 5174): Plugin {
   let busy = false
   return {
     name: 'local-preview-dictation',
@@ -37,7 +37,7 @@ export function localDictation(): Plugin {
       const scratch = path.resolve(server.config.root, 'tmp', 'voice-input')
       server.middlewares.use(async (req, res, next) => {
         if (req.url !== endpoint) { next(); return }
-        if (!acceptsLocalVoice(req)) { json(res, 403, { error: '仅允许本机预览页面调用。' }); return }
+        if (!acceptsLocalVoice(req, port)) { json(res, 403, { error: '仅允许本机预览页面调用。' }); return }
         if (!runtime || !python || !model) { json(res, 503, { error: '本机转写环境尚未启用。' }); return }
         try { await Promise.all([access(python), access(model), access(script), access(path.join(runtime, 'bin', 'ffmpeg.exe'))]) } catch {
           json(res, 503, { error: '缺少本机转写程序或已下载模型。' }); return
