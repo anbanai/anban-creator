@@ -32,6 +32,7 @@ import EmptyState from '@/components/EmptyState'
 import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
+import { ProfileDimensionCard } from '@/components/projects/ProfileDimensionCard'
 import { useAuth } from '@/contexts/AuthContext'
 import { MetricStrip } from '@/components/workspace'
 
@@ -46,11 +47,11 @@ const profilePlatforms = [
   { id: 'zhihu', label: '知乎' },
 ] as const
 
-function emptyProfileAnswers(projectName = ''): ProfileAnalysisAnswers {
+function emptyProfileAnswers(projectName = '', introduction = ''): ProfileAnalysisAnswers {
   return {
     basic: { project_name: projectName, account_status: '' },
     platform_accounts: [],
-    intent: { goals: '', direction: '', differentiation: '' },
+    intent: { goals: '', direction: introduction, differentiation: '' },
     content: { preferences: '', formats: '', tone: '', audience: '' },
     boundaries: { exclusions: '', collaboration: '', compliance: '' },
   }
@@ -118,6 +119,12 @@ export default function ProjectsPage() {
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [profileWizardMode, setProfileWizardMode] = useState(false)
   const [profileWizardStep, setProfileWizardStep] = useState(0)
+  const [profileDetailedGuide, setProfileDetailedGuide] = useState(false)
+  const [showProfileDirtyDialog, setShowProfileDirtyDialog] = useState(false)
+  const [profileConflict, setProfileConflict] = useState(false)
+  const profileDirtyDimensions = useRef(new Set<string>())
+  const profileBaseline = useRef<ProjectProfile | null>(null)
+  const profileAnswersBaseline = useRef(JSON.stringify(emptyProfileAnswers()))
   const [profileGuideAnalysisTaskID, setProfileGuideAnalysisTaskID] = useState<string | null>(null)
   const [profileGuideIsRefresh, setProfileGuideIsRefresh] = useState(false)
   const [profileAnswers, setProfileAnswers] = useState<ProfileAnalysisAnswers>(() => emptyProfileAnswers())
@@ -240,6 +247,12 @@ export default function ProjectsPage() {
   })
   useEffect(() => {
     if (!profileQuery.data) return
+    if (profileBaseline.current && profileQuery.data.version < profileBaseline.current.version) return
+    if (profileDirtyDimensions.current.size) {
+      if (profileBaseline.current?.version !== profileQuery.data.version) setProfileConflict(true)
+      return
+    }
+    profileBaseline.current = profileQuery.data
     setProfileDraft(profileQuery.data)
     setProfileDraftText(Object.fromEntries(Object.entries(profileQuery.data.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
     setProfileJsonErrors({})
@@ -256,6 +269,12 @@ export default function ProjectsPage() {
   useEffect(() => {
     const result = profileAnalysisQuery.data
     if (!result) return
+    if (profileBaseline.current && result.profile.version < profileBaseline.current.version) return
+    if (profileDirtyDimensions.current.size) {
+      if (profileBaseline.current?.version !== result.profile.version) setProfileConflict(true)
+      return
+    }
+    profileBaseline.current = result.profile
     setProfileDraft(result.profile)
     setProfileDraftText(Object.fromEntries(Object.entries(result.profile.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
     setProfileJsonErrors({})
@@ -268,6 +287,7 @@ export default function ProjectsPage() {
         : api.projects.refreshProfile(profileProject!.id, version, answers)
     },
     onSuccess: (result) => {
+      profileAnswersBaseline.current = JSON.stringify(profileAnswers)
       setProfileDraft(result.profile)
       setProfileGuideAnalysisTaskID(result.task.id)
       queryClient.setQueryData(['project-profile', profileProject?.id], result.profile)
@@ -283,6 +303,11 @@ export default function ProjectsPage() {
   })
 
   function resetProfileFlow() {
+    profileDirtyDimensions.current.clear()
+    profileBaseline.current = null
+    setProfileConflict(false)
+    setShowProfileDirtyDialog(false)
+    setProfileDetailedGuide(false)
     setProfileDraft(null)
     setProfileDraftText({})
     setProfileJsonErrors({})
@@ -294,13 +319,20 @@ export default function ProjectsPage() {
   function openProfile(project: Project) {
     resetProfileFlow()
     setProfileWizardMode(false)
-    setProfileAnswers(emptyProfileAnswers(project.name))
+    const answers = emptyProfileAnswers(project.name, project.instructions || project.positioning || '')
+    setProfileAnswers(answers)
+    profileAnswersBaseline.current = JSON.stringify(answers)
     setProfileProject(project)
     setProfileModalOpen(true)
     void queryClient.invalidateQueries({ queryKey: ['project-profile', project.id] })
   }
 
-  function closeProfile() {
+  function closeProfile(discard = false) {
+    if (profileAnalysisMutation.isPending || profileDimensionMutation.isPending || profileConfirmMutation.isPending) return
+    if (!discard && (profileDirtyDimensions.current.size || (profileWizardMode && JSON.stringify(profileAnswers) !== profileAnswersBaseline.current))) {
+      setShowProfileDirtyDialog(true)
+      return
+    }
     const returnHref = createdProjectReturnHrefRef.current
     createdProjectReturnHrefRef.current = null
     setProfileModalOpen(false)
@@ -314,7 +346,9 @@ export default function ProjectsPage() {
     resetProfileFlow()
     setProfileWizardMode(true)
     setProfileGuideIsRefresh(isRefresh)
-    setProfileAnswers(emptyProfileAnswers(project.name))
+    const answers = emptyProfileAnswers(project.name, project.instructions || project.positioning || '')
+    setProfileAnswers(answers)
+    profileAnswersBaseline.current = JSON.stringify(answers)
     setProfileProject(project)
     setProfileModalOpen(true)
     void queryClient.invalidateQueries({ queryKey: ['project-profile', project.id] })
@@ -343,15 +377,26 @@ export default function ProjectsPage() {
 
   const profileDimensionMutation = useMutation({
     mutationFn: ({ name, dimension }: { name: string; dimension: ProjectProfile['dimensions'][keyof ProjectProfile['dimensions']] }) => api.projects.updateProfileDimension(profileProject!.id, name, profileDraft!.version, dimension),
-    onSuccess: (profile) => {
-      setProfileDraft(profile)
+    onSuccess: (profile, { name }) => {
+      profileDirtyDimensions.current.delete(name)
+      profileBaseline.current = profile
+      setProfileDraft((current) => {
+        const dimensions = { ...profile.dimensions }
+        for (const key of profileDirtyDimensions.current) {
+          const dimension = key as keyof ProjectProfile['dimensions']
+          if (current) dimensions[dimension] = current.dimensions[dimension]
+        }
+        return { ...profile, dimensions }
+      })
+      setProfileDraftText((current) => ({ ...current, [name]: JSON.stringify(profile.dimensions[name as keyof ProjectProfile['dimensions']].content, null, 2) }))
       queryClient.setQueryData(['project-profile', profileProject?.id], profile)
       queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
       toast.success('画像文件已保存')
     },
     onError: (err) => {
       if (getApiErrorMessage(err, '').includes('profile_revision_conflict')) {
-        toast.error('画像版本冲突，正在重新加载当前内容')
+        setProfileConflict(true)
+        toast.error('资料已有新版本，你的修改仍保留在这里。请复制需要保留的文字，关闭后重新打开再核对。')
         queryClient.invalidateQueries({ queryKey: ['project-profile', profileProject?.id] })
       } else toast.error(getApiErrorMessage(err, '画像保存失败'))
     },
@@ -360,13 +405,41 @@ export default function ProjectsPage() {
   const profileConfirmMutation = useMutation({
     mutationFn: () => api.projects.confirmAccountProfile(profileProject!.id, profileDraft!),
     onSuccess: (profile) => {
+      profileDirtyDimensions.current.clear()
+      profileBaseline.current = profile
       setProfileDraft(profile)
       queryClient.setQueryData(['project-profile', profileProject?.id], profile)
       queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
       toast.success('项目画像已确认，可用于后续创作')
     },
-    onError: (error) => toast.error(getApiErrorMessage(error, '画像确认失败，请重试')),
+    onError: (error) => {
+      if (getApiErrorMessage(error, '').includes('profile_revision_conflict')) setProfileConflict(true)
+      toast.error(getApiErrorMessage(error, '画像确认失败，请重试'))
+    },
   })
+
+  const profileHasUnsavedChanges = profileDirtyDimensions.current.size > 0
+    || (profileWizardMode && JSON.stringify(profileAnswers) !== profileAnswersBaseline.current)
+  useEffect(() => {
+    if (!profileModalOpen || !profileHasUnsavedChanges) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [profileModalOpen, profileHasUnsavedChanges])
+
+  function editProfileDimension(key: string, text: string) {
+    profileDirtyDimensions.current.add(key)
+    setProfileDraftText((current) => ({ ...current, [key]: text }))
+    try {
+      const content: unknown = JSON.parse(text)
+      if (!content || Array.isArray(content) || typeof content !== 'object') throw new Error('object required')
+      setProfileJsonErrors((current) => { const next = { ...current }; delete next[key]; return next })
+      const name = key as keyof ProjectProfile['dimensions']
+      setProfileDraft((current) => current ? { ...current, dimensions: { ...current.dimensions, [key]: { ...current.dimensions[name], content } } } : current)
+    } catch {
+      setProfileJsonErrors((current) => ({ ...current, [key]: '高级编辑内容不是有效的 JSON 对象，请修正后再保存。' }))
+    }
+  }
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<CreateProjectRequest>; sessionID: number }) => {
@@ -509,6 +582,8 @@ export default function ProjectsPage() {
     ?? (profileInitializationStatus === 'queued' ? 'pending' : profileInitializationStatus === 'ready' ? 'completed' : profileInitializationStatus ?? 'not_started')
   const profileAnalysisRunning = profileAnalysisStatus === 'queued' || profileAnalysisStatus === 'pending' || profileAnalysisStatus === 'running' || profileAnalysisMutation.isPending
   const profileAnalysisFailed = profileAnalysisStatus === 'failed' || profileAnalysisStatus === 'cancelled' || profileAnalysisMutation.isError
+  const profileBusy = profileAnalysisMutation.isPending || profileDimensionMutation.isPending || profileConfirmMutation.isPending
+  const profileStatusLabel: Record<string, string> = { not_started: '尚未整理', queued: '等待整理', pending: '等待整理', running: '正在整理', ready: '已整理', completed: '已整理', failed: '整理失败', cancelled: '已取消' }
   const profileResultReady = profileDraft?.status === 'confirmed'
     || profileDraft?.initialization_status === 'ready'
     || profileAnalysisStatus === 'completed'
@@ -713,16 +788,23 @@ export default function ProjectsPage() {
       </Dialog>
 
       <Dialog open={profileModalOpen} onOpenChange={(open) => { if (!open) closeProfile() }}>
-        <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
-          <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
+        <DialogContent closeButtonDisabled={profileBusy} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+          <DialogHeader className="shrink-0 border-b border-border py-3 pl-4 pr-12">
             <DialogTitle>{profileWizardMode ? '项目画像引导' : '项目画像'}</DialogTitle>
           </DialogHeader>
           {profileWizardMode && profileWizardStep < 4 ? (
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+              {!profileDetailedGuide ? <div className="space-y-4">
+                <div className="space-y-1"><h3 className="text-base font-semibold">先说说你想做什么</h3><p className="text-sm text-muted-foreground">不用先想清所有问题。说说你的业务、希望谁来看、这次想写什么，AI 会根据已有信息整理资料，交给你核对。</p></div>
+                <Textarea aria-label="介绍业务与创作想法" value={profileAnswers.intent.direction} onChange={(event) => setProfileAnswers((current) => ({ ...current, intent: { ...current.intent, direction: event.target.value } }))} placeholder="例如：我们卖白茶，想给刚开始喝茶的人写实用的公众号文章。希望说得容易懂，不夸大健康功效。" className="min-h-44" />
+                <Button variant="ghost" onClick={() => setProfileDetailedGuide(true)}>补充账号、读者和偏好</Button>
+                <p className="text-xs text-muted-foreground">{profileGuideIsRefresh ? '提交后会重新分析并更新已确认的资料。' : '提交后会运行一次资料分析；你确认整理结果后，才会用于后续创作。'}</p>
+              </div> : <>
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold">{['基础信息', '社媒链接', '运营意图', '偏好与红线'][profileWizardStep]}</h3>
                 <span className="text-xs text-muted-foreground">第 {profileWizardStep + 1} / 4 步</span>
               </div>
+              <Button variant="ghost" size="sm" onClick={() => setProfileDetailedGuide(false)}>返回简述（保留已填信息）</Button>
               {profileWizardStep === 0 ? (
                 <div className="space-y-5">
                   <label className="block space-y-1.5 text-sm font-medium">项目名称
@@ -788,16 +870,17 @@ export default function ProjectsPage() {
                   <p className="text-xs text-muted-foreground sm:col-span-2">信息可以留空，画像会根据已有内容生成。</p>
                 </div>
               ) : null}
+              </>}
             </div>
           ) : (
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
               {!profileWizardMode && profileQuery.isPending ? <p className="text-sm text-muted-foreground" role="status">正在加载项目画像…</p> : null}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
                 <div>
-                  <p className="text-sm font-medium">初始化状态：{profileDraft?.initialization_status ?? 'not_started'}</p>
+                  <p className="text-sm font-medium">{profileStatusLabel[profileAnalysisStatus] ?? '状态待确认'}{profileDraft?.status === 'confirmed' ? ' · 已确认的资料可用于创作' : ''}</p>
                   {profileDraft?.last_error && <p className="text-xs text-destructive" role="alert">{profileDraft.last_error}</p>}
                 </div>
-                {!profileWizardMode && profileDraft?.status === 'confirmed' ? <Button variant="outline" size="sm" loading={profileAnalysisMutation.isPending} disabled={profileAnalysisRunning} onClick={() => profileAnalysisMutation.mutate({ retry: profileAnalysisFailed })}>更新画像</Button> : null}
+                {!profileWizardMode && profileDraft?.status === 'confirmed' ? <Button variant="outline" size="sm" loading={profileAnalysisMutation.isPending} disabled={profileAnalysisRunning || profileBusy || profileHasUnsavedChanges || profileConflict} onClick={() => profileAnalysisMutation.mutate({ retry: profileAnalysisFailed })}>更新画像</Button> : null}
               </div>
               {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像任务已加入队列，完成后会显示可确认的结果。</p>}
               {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像任务失败，已确认的画像保持不变，可以重试。</p>}
@@ -805,39 +888,15 @@ export default function ProjectsPage() {
               {profileWizardMode && profileAnalysisFailed ? <Button variant="outline" disabled={profileAnalysisMutation.isPending} loading={profileAnalysisMutation.isPending} onClick={() => startProfileAnalysis(true)}>重试画像分析</Button> : null}
               {profileResultReady && profileDraft ? (
                 <>
-                  <table className="w-full text-left text-xs"><thead><tr className="border-b"><th className="py-2 pr-3">画像维度</th><th className="py-2">用途</th></tr></thead><tbody>
-                    {Object.entries(profileDimensionLabels).map(([key, label]) => <tr key={key} className="border-b"><td className="py-2 pr-3 font-mono">profile/{key}.md</td><td className="py-2">{label}</td></tr>)}
-                  </tbody></table>
+                  <div className="space-y-1"><h2 className="text-base font-semibold">我理解的业务与读者</h2><p className="text-sm text-muted-foreground">看看有没有理解错的地方。带有“推断待确认”的内容还需要你核对，缺少的信息可以稍后补充。</p></div>
+                  {profileConflict && <p role="alert" className="text-sm text-destructive">资料已有新版本，暂不能覆盖保存。你的修改还在：请先复制要保留的文字，关闭后重新打开并核对最新资料。</p>}
+                  {profileDraft.analysis_limits.length > 0 && <div className="rounded-md bg-muted/30 p-3 text-sm"><p className="font-medium">这次整理的局限</p><ul className="mt-1 list-disc space-y-1 pl-5">{profileDraft.analysis_limits.map((limit, index) => <li key={index}>{limit}</li>)}</ul></div>}
                   <div className="space-y-3">
                     {Object.entries(profileDraft.dimensions).map(([key, dimension]) => (
-                      <div key={key} className="space-y-2 rounded-md border p-3">
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">{profileDimensionLabels[key] || key}</span>
-                          <span className="text-xs text-muted-foreground">{dimension.sources.join('、') || '[待补充]'}</span>
-                        </div>
-                        <Textarea
-                          aria-label={`${profileDimensionLabels[key] || key}画像内容`}
-                          value={profileDraftText[key] ?? JSON.stringify(dimension.content, null, 2)}
-                          onChange={(event) => {
-                            const text = event.target.value
-                            setProfileDraftText((current) => ({ ...current, [key]: text }))
-                            try {
-                              const content = JSON.parse(text) as Record<string, unknown>
-                              if (!content || Array.isArray(content) || typeof content !== 'object') throw new Error('object required')
-                              setProfileJsonErrors((current) => {
-                                const next = { ...current }
-                                delete next[key]
-                                return next
-                              })
-                              setProfileDraft((current) => current ? { ...current, dimensions: { ...current.dimensions, [key]: { ...dimension, content } } } : current)
-                            } catch { setProfileJsonErrors((current) => ({ ...current, [key]: `${profileDimensionLabels[key] || key} 的内容必须是有效 JSON 对象` })) }
-                          }}
-                          className="min-h-[76px] font-mono text-xs"
-                        />
-                        {profileJsonErrors[key] ? <p className="text-sm text-destructive" role="alert">{profileJsonErrors[key]}</p> : null}
-                        {profileDraft.status === 'confirmed' ? <Button size="sm" variant="secondary" disabled={Boolean(profileJsonErrors[key]) || profileDimensionMutation.isPending || profileAnalysisRunning} onClick={() => profileDimensionMutation.mutate({ name: key, dimension })}>保存此维度</Button> : null}
-                        {dimension.missing_fields.length > 0 && <p className="mt-1 text-xs text-amber-600">待补充：{dimension.missing_fields.join('、')}</p>}
-                      </div>
+                      <ProfileDimensionCard key={key} label={profileDimensionLabels[key] || key} dimension={dimension}
+                        text={profileDraftText[key] ?? JSON.stringify(dimension.content, null, 2)} error={profileJsonErrors[key]}
+                        disabled={profileBusy || profileAnalysisRunning} onTextChange={(text) => editProfileDimension(key, text)}
+                        onSave={profileDraft.status === 'confirmed' && !profileConflict ? () => profileDimensionMutation.mutate({ name: key, dimension }) : undefined} />
                     ))}
                     {profileDraft.follow_up_questions.length > 0 && <div className="text-sm text-muted-foreground">待确认问题：{profileDraft.follow_up_questions.join('；')}</div>}
                     {profileNeedsConfirmation ? <p className="text-sm text-amber-700">这是画像草稿，确认后才会用于后续任务。</p> : null}
@@ -845,22 +904,35 @@ export default function ProjectsPage() {
                   </div>
                 </>
               ) : null}
-              {!profileWizardMode && profileDraft?.status === 'confirmed' ? <Button variant="outline" onClick={() => beginProfileGuide(profileProject!, true)}>编辑引导并更新画像</Button> : null}
+              {!profileWizardMode && profileDraft?.status === 'confirmed' ? <Button variant="outline" disabled={profileBusy || profileAnalysisRunning || profileHasUnsavedChanges || profileConflict} onClick={() => beginProfileGuide(profileProject!, true)}>编辑引导并更新画像</Button> : null}
             </div>
           )}
-          <DialogFooter className="shrink-0 border-t border-border px-4 py-3">
+          <DialogFooter className="mx-0 mb-0 shrink-0 border-t border-border px-4 py-3">
             {profileWizardMode && profileWizardStep < 4 ? <>
-              <Button variant="outline" onClick={closeProfile}>暂时跳过</Button>
-              {profileWizardStep > 0 ? <Button variant="secondary" onClick={() => setProfileWizardStep((step) => step - 1)}>上一步</Button> : null}
-              {profileWizardStep < 3 ? <Button onClick={() => setProfileWizardStep((step) => step + 1)}>下一步</Button> : <Button loading={profileAnalysisMutation.isPending} disabled={profileAnalysisMutation.isPending || profileQuery.isPending} onClick={() => startProfileAnalysis()}>开始生成画像</Button>}
+              <Button variant="outline" onClick={() => closeProfile()}>暂时跳过</Button>
+              {!profileDetailedGuide ? <Button loading={profileAnalysisMutation.isPending} disabled={profileAnalysisMutation.isPending || profileQuery.isPending || !profileAnswers.intent.direction.trim()} onClick={() => startProfileAnalysis()}>整理我的创作资料</Button> : <>
+                {profileWizardStep > 0 ? <Button variant="secondary" onClick={() => setProfileWizardStep((step) => step - 1)}>上一步</Button> : null}
+                {profileWizardStep < 3 ? <Button onClick={() => setProfileWizardStep((step) => step + 1)}>下一步</Button> : <Button loading={profileAnalysisMutation.isPending} disabled={profileAnalysisMutation.isPending || profileQuery.isPending} onClick={() => startProfileAnalysis()}>开始生成画像</Button>}
+              </>}
             </> : <>
-              <Button variant="secondary" onClick={() => closeProfile()}>关闭</Button>
-              {profileNeedsConfirmation ? <Button loading={profileConfirmMutation.isPending} disabled={Object.keys(profileJsonErrors).length > 0 || profileConfirmMutation.isPending} onClick={() => profileConfirmMutation.mutate()}>确认并应用画像</Button> : null}
-              {!profileWizardMode && (!profileDraft || profileDraft.status !== 'confirmed') ? <Button onClick={() => { setProfileWizardMode(true); setProfileWizardStep(0) }}>开始画像引导</Button> : null}
+              <Button variant="secondary" disabled={profileBusy} onClick={() => closeProfile()}>关闭</Button>
+              {profileNeedsConfirmation ? <Button loading={profileConfirmMutation.isPending} disabled={Object.keys(profileJsonErrors).length > 0 || profileBusy || profileConflict || profileAnalysisRunning} onClick={() => profileConfirmMutation.mutate()}>确认并应用画像</Button> : null}
+              {profileDraft?.status === 'confirmed' ? <Button disabled={profileBusy || profileHasUnsavedChanges || profileConflict || profileAnalysisRunning} onClick={() => {
+                createdProjectReturnHrefRef.current ??= projectCreatedReturnHref({ projectId: profileProject!.id })
+                closeProfile()
+              }}>开始创作</Button> : null}
+              {!profileWizardMode && (!profileDraft || profileDraft.status !== 'confirmed') ? <Button disabled={profileBusy || profileHasUnsavedChanges || profileConflict || profileAnalysisRunning} onClick={() => { setProfileWizardMode(true); setProfileWizardStep(0) }}>开始画像引导</Button> : null}
             </>}
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={showProfileDirtyDialog} onOpenChange={setShowProfileDirtyDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>还有未保存的资料</AlertDialogTitle><AlertDialogDescription>关闭会丢弃本次未提交的介绍或修改，已保存的资料不受影响。可以先继续编辑。</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>继续编辑</AlertDialogCancel><AlertDialogAction onClick={() => closeProfile(true)}>放弃本次修改</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {channelProject && (
         <ProjectChannelConfigDialog
