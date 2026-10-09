@@ -40,6 +40,8 @@ type AnalyticsCandidate struct {
 
 type ContentAnalyticsService struct{ repo repository.Repository }
 
+const minWechatAnalyticsTitlePrefixRunes = 8
+
 func NewContentAnalyticsService(repo repository.Repository) *ContentAnalyticsService {
 	return &ContentAnalyticsService{repo: repo}
 }
@@ -295,7 +297,7 @@ func matchAnalyticsCandidate(title string, date *time.Time, link string, candida
 			return unique(matches)
 		}
 	}
-	var titled, dated []AnalyticsCandidate
+	var titled, dated, prefixed, prefixedDated []AnalyticsCandidate
 	for _, c := range candidates {
 		if c.conflictingIdentity {
 			continue
@@ -308,6 +310,27 @@ func matchAnalyticsCandidate(title string, date *time.Time, link string, candida
 			same = same || normalizeWechatAnalyticsTitle(alias) == title
 		}
 		if !same || title == "" {
+			if title == "" || len([]rune(title)) < minWechatAnalyticsTitlePrefixRunes {
+				continue
+			}
+			if date != nil && c.matchDate != nil && c.matchDate.In(date.Location()).Format("2006-01-02") != date.Format("2006-01-02") {
+				continue
+			}
+			prefix := func(value string) bool {
+				value = normalizeWechatAnalyticsTitle(value)
+				return strings.HasPrefix(value, title) && value != title
+			}
+			prefixMatch := prefix(c.Title)
+			for _, alias := range c.titles {
+				prefixMatch = prefixMatch || prefix(alias)
+			}
+			if !prefixMatch {
+				continue
+			}
+			prefixed = append(prefixed, c)
+			if date != nil && c.matchDate != nil && c.matchDate.In(date.Location()).Format("2006-01-02") == date.Format("2006-01-02") {
+				prefixedDated = append(prefixedDated, c)
+			}
 			continue
 		}
 		if date != nil && c.matchDate != nil && c.matchDate.In(date.Location()).Format("2006-01-02") != date.Format("2006-01-02") {
@@ -321,7 +344,13 @@ func matchAnalyticsCandidate(title string, date *time.Time, link string, candida
 	if len(dated) > 0 {
 		return unique(dated)
 	}
-	return unique(titled)
+	if len(titled) > 0 {
+		return unique(titled)
+	}
+	if len(prefixedDated) > 0 {
+		return unique(prefixedDated)
+	}
+	return unique(prefixed)
 }
 
 func analyticsPublicIdentity(value string) string {

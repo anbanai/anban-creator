@@ -139,6 +139,42 @@ func TestWechatPictureAnalyticsPreviewDoesNotFallBackToArticle(t *testing.T) {
 	}
 }
 
+func TestMatchWechatAnalyticsTruncatedTitleWhenPrefixIsUnique(t *testing.T) {
+	date := time.Date(2026, 10, 2, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	candidate := AnalyticsCandidate{Target: AnalyticsTarget{"task", "full"}, Title: "保温杯泡茶到底行不行？评茶师：问题从来不在杯子", matchDate: &date}
+	preview := previewWechatCandidateRow(ParsedWechatAnalyticsRow{Title: "保温杯泡茶到底行不行？评茶师：问题从来不", PublishedDate: &date}, []AnalyticsCandidate{candidate})
+	if preview.Target == nil || preview.Target.ID != "full" || preview.MatchStatus != model.WechatAnalyticsImportRowMatched {
+		t.Fatalf("truncated title preview = %+v", preview)
+	}
+}
+
+func TestMatchWechatAnalyticsDoesNotUseShortOrAmbiguousPrefixes(t *testing.T) {
+	date := time.Date(2026, 10, 2, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	tests := []struct {
+		name       string
+		rowTitle   string
+		candidates []AnalyticsCandidate
+	}{
+		{name: "short prefix", rowTitle: "茶", candidates: []AnalyticsCandidate{{Target: AnalyticsTarget{"task", "one"}, Title: "茶叶冲泡方法", matchDate: &date}}},
+		{name: "ambiguous prefix", rowTitle: "秋茶一年里茶香最盛的七天：寒露前三天，后", candidates: []AnalyticsCandidate{
+			{Target: AnalyticsTarget{"task", "one"}, Title: "秋茶一年里茶香最盛的七天：寒露前三天，后三天", matchDate: &date},
+			{Target: AnalyticsTarget{"task", "two"}, Title: "秋茶一年里茶香最盛的七天：寒露前三天，后四天", matchDate: &date},
+		}},
+		{name: "date mismatch", rowTitle: "保温杯泡茶到底行不行？评茶师：问题从来不", candidates: []AnalyticsCandidate{{Target: AnalyticsTarget{"task", "other-day"}, Title: "保温杯泡茶到底行不行？评茶师：问题从来不在杯子", matchDate: ptrTime(date.AddDate(0, 0, -1))}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			preview := previewWechatCandidateRow(ParsedWechatAnalyticsRow{Title: tt.rowTitle, PublishedDate: &date}, tt.candidates)
+			if preview.Target != nil {
+				t.Fatalf("unsafe prefix match = %+v", preview)
+			}
+			if tt.name == "ambiguous prefix" && preview.MatchStatus != model.WechatAnalyticsImportRowNeedsReview {
+				t.Fatalf("ambiguous prefix status = %q", preview.MatchStatus)
+			}
+		})
+	}
+}
+
 func TestParseWechatAnalyticsRateAndMissingValues(t *testing.T) {
 	row := parseWechatAnalyticsRow(2, []string{"来源", "标题", "2026-09-11", "", "", "", "", "40.5%", "", ""}, func() map[string]int {
 		m := make(map[string]int, len(wechatAnalyticsHeaders))
