@@ -40,6 +40,7 @@ interface ProjectContextSelectProps {
   placeholder?: string
   compact?: boolean
   ariaLabel?: string
+  showAgents?: boolean
 }
 
 interface ProjectContextReadonlyProps {
@@ -47,6 +48,7 @@ interface ProjectContextReadonlyProps {
   project: ProjectContextProject | null
   noProjectLabel?: string
   compact?: boolean
+  showAgents?: boolean
 }
 
 interface ProjectContextHiddenProps {
@@ -102,6 +104,7 @@ function SelectProjectContext({
   placeholder = '选择项目...',
   compact = false,
   ariaLabel = '项目上下文',
+  showAgents = true,
 }: ProjectContextSelectProps) {
   const noProjectItem = useMemo<NoProjectItem>(() => ({
     kind: 'none',
@@ -176,6 +179,7 @@ function SelectProjectContext({
               <ProjectIdentity
                 project={selected}
                 compact={compact}
+                showAgents={showAgents}
               />
             ) : selected?.name ?? placeholder}
           </span>
@@ -206,7 +210,7 @@ function SelectProjectContext({
                       className="min-h-11 rounded-lg border border-transparent px-2 py-1 pr-9 aria-selected:border-border/70 aria-selected:bg-accent/70"
                     >
                       {item.kind === 'project' ? (
-                        <ProjectIdentity project={item} />
+                        <ProjectIdentity project={item} showAgents={showAgents} />
                       ) : item.name}
                     </ComboboxItem>
                   )}
@@ -252,6 +256,7 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
           <ProjectIdentity
             project={props.project}
             compact={props.compact}
+            showAgents={props.showAgents}
           />
         ) : props.noProjectLabel ?? '未关联项目'}
       </div>

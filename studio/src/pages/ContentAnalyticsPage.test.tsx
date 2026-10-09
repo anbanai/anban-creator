@@ -64,6 +64,39 @@ describe('server analytics queries', () => {
     await waitFor(() => expect(contentAnalyticsApi.contents).toHaveBeenLastCalledWith('matrix', expect.objectContaining({ content_type: 'wechat-picture' }), expect.any(AbortSignal)))
   })
 
+  it('keeps Agent icons only in the analytics switcher', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{
+      id: 'matrix', platform: 'wechat', name: '内容矩阵', agent_ids: ['wechat-article', 'seednote', 'wechat-picture'],
+    } as Project])
+    window.history.replaceState(null, '', '/content-analytics?account=matrix')
+    render(<ContentAnalyticsPage />)
+
+    const projectSelector = await screen.findByRole('combobox', { name: '筛选项目' })
+    await waitFor(() => expect(projectSelector).toHaveTextContent('内容矩阵'))
+    expect(projectSelector.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(0)
+    expect(screen.getByRole('group', { name: '选择分析 Agent' }).querySelectorAll('button')).toHaveLength(3)
+  })
+
+  it('uses borderless backgroundless controls for analytics actions', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{
+      id: 'matrix', platform: 'wechat', name: '内容矩阵', agent_ids: ['wechat-article', 'seednote'],
+    } as Project])
+    window.history.replaceState(null, '', '/content-analytics?account=matrix')
+    render(<ContentAnalyticsPage />)
+
+    const switcher = await screen.findByRole('group', { name: '选择分析 Agent' })
+    for (const button of Array.from(switcher.querySelectorAll('button'))) {
+      expect(button).not.toHaveClass('border-primary', 'border-border/70')
+      expect(button.className).not.toMatch(/\bbg-/)
+      expect(button.className).not.toMatch(/\bshadow(?:-|$)/)
+    }
+    for (const label of ['查看导入记录', '导入分析数据']) {
+      const button = screen.getByRole('button', { name: label })
+      expect(button).toHaveClass('hover:bg-muted')
+      expect(button.className).not.toMatch(/\bbg-primary(?:-|$)/)
+    }
+  })
+
   it('resolves a legacy picture deep link before applying an Agent filter', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{
       id: 'matrix', platform: 'wechat', name: '内容矩阵', agent_ids: ['wechat-article', 'wechat-picture'],
