@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ArrowRight, Check, MessageCircle, Sparkles, UserRound } from 'lucide-react'
+import { ArrowUp, ArrowRight, Check, MessageCircle, Mic, Square, Sparkles, UserRound } from 'lucide-react'
+import { useBrowserDictation } from '@/hooks/useBrowserDictation'
 import './portrait-conversation.css'
 
 export const portraitFacets = [
@@ -40,6 +41,7 @@ export function PortraitConversation({
   const messagesRef = useRef<HTMLDivElement>(null)
   const count = portraitFacets.filter(([key]) => draft[key]).length
   const locked = busy || sending
+  const voice = useBrowserDictation(setInput)
 
   useEffect(() => {
     const list = messagesRef.current
@@ -47,15 +49,15 @@ export function PortraitConversation({
   }, [messages, busy])
 
   useEffect(() => {
-    if (!input.trim()) return
+    if (!input.trim() && !voice.active) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [input])
+  }, [input, voice.active])
 
   async function send() {
     const text = input.trim()
-    if (!text || busy || sendingRef.current) return
+    if (!text || busy || sendingRef.current || voice.active) return
     sendingRef.current = true
     setSending(true)
     setSendError('')
@@ -87,17 +89,27 @@ export function PortraitConversation({
         {locked && <p className="portrait-thinking" role="status">正在整理你刚刚说的内容…</p>}
       </div>
       <div className="portrait-compose">
-        {suggestion && <button className="portrait-example" disabled={locked} onClick={() => { setInput(suggestion); inputRef.current?.focus() }}>试用示例回答 <ArrowRight size={13} /></button>}
+        {suggestion && <button className="portrait-example" disabled={locked || voice.active} onClick={() => { setInput(suggestion); inputRef.current?.focus() }}>试用示例回答 <ArrowRight size={13} /></button>}
         <form onSubmit={event => { event.preventDefault(); void send() }}>
           <textarea ref={inputRef} aria-label="给案板发消息" placeholder="像聊天一样说就好，也可以随时纠正我的理解…"
-            value={input} disabled={locked} onChange={event => setInput(event.target.value)} rows={3}
+            value={input} disabled={locked} readOnly={voice.active} onChange={event => setInput(event.target.value)} rows={3}
             onKeyDown={event => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                 event.preventDefault(); void send()
               }
             }} />
-          <div className="portrait-compose-bottom"><span>Enter 发送 · Shift + Enter 换行</span><button className="portrait-send" aria-label="发送消息" disabled={locked || !input.trim()} type="submit"><ArrowUp size={19} /></button></div>
+          <div className="portrait-compose-bottom"><span>Enter 发送 · Shift + Enter 换行</span><div className="portrait-compose-actions">
+            <button type="button" className={`portrait-voice ${voice.active ? 'is-listening' : ''}`} aria-label={voice.active ? '停止语音输入' : '开始语音输入'} aria-pressed={voice.active}
+              disabled={(!voice.active && locked) || voice.state === 'stopping'} title={voice.supported ? '浏览器中文语音输入' : '此浏览器不支持，点击查看替代方法'}
+              onClick={() => { if (voice.active) voice.stop(); else { voice.start(input); if (!voice.supported) inputRef.current?.focus() } }}>
+              {voice.active ? <Square size={14} /> : <Mic size={17} />}{voice.active ? '结束录音' : '语音输入'}
+            </button>
+            <button className="portrait-send" aria-label="发送消息" disabled={locked || voice.active || !input.trim()} type="submit"><ArrowUp size={19} /></button>
+          </div></div>
         </form>
+        <p className="portrait-voice-notice" role="status">{voice.active
+          ? voice.state === 'starting' ? '正在启动，请允许麦克风权限…' : voice.state === 'stopping' ? '正在结束识别…' : '正在听你说话…结束录音后可以修改文字，不会自动发送。'
+          : voice.notice || (voice.supported ? '语音由浏览器识别，可能联网处理；文字不会自动发送。' : '当前浏览器不支持网页语音识别，可使用系统或输入法的语音输入。')}</p>
         {(error || sendError) && <p className="portrait-error" role="alert">{error || sendError}</p>}
       </div>
     </section>
@@ -124,7 +136,7 @@ export function PortraitConversation({
       {creationIdea && <div className="portrait-creation-idea"><span>这次想创作</span><p>{creationIdea}</p></div>}
       <footer className="portrait-sheet-footer">
         <p><MessageCircle size={14} />{confirmed ? '想调整？继续聊，画像也会跟着更新。' : ready ? '看看这是不是你。有哪里不对，直接告诉我。' : '不用一次说完，也不用把每个维度填满。'}</p>
-        {ready && <button className="portrait-primary" disabled={locked || !!input.trim()} onClick={confirmed ? onCreate : onConfirm}>
+        {ready && <button className="portrait-primary" disabled={locked || voice.active || !!input.trim()} onClick={confirmed ? onCreate : onConfirm}>
           {confirmed ? '开始创作第一篇' : '这就是我，确认画像'}<ArrowRight size={16} />
         </button>}
         {ready && !!input.trim() && <small>先发送或清空正在输入的话，再继续。</small>}

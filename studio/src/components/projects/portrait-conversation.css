@@ -30,6 +30,11 @@
 .portrait-compose-bottom { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .portrait-compose-bottom span { color: #a3a094; font-size: 10px; }
 .portrait-send { display: grid; place-items: center; width: 33px; height: 33px; border: 0; border-radius: 50%; background: #a9502e; color: #fff; }
+.portrait-compose-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.portrait-voice { display: flex; gap: 5px; align-items: center; min-height: 34px; border: 1px solid #ded5c9; border-radius: 18px; background: #faf8f3; color: #985334; padding: 6px 10px; font-size: 12px !important; }
+.portrait-voice.is-listening { background: #fff0e9; color: #ac341e; border-color: #d99074; }
+.portrait-voice-notice { color: #867965; font-size: 11px; line-height: 1.7; padding: 7px 2px 0; margin: 0; }
+@media (max-width: 960px) { .portrait-compose-bottom { flex-wrap: wrap; }.portrait-compose-actions { margin-left: auto; } }
 .portrait-example { border: 1px solid #dbd5c8; border-radius: 20px; background: transparent; color: #827563; font-size: 11px !important; padding: 6px 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
 .portrait-error { color: #a63220; font-size: 12px; padding-top: 8px; }
 .portrait-sheet { background: #fffefa; border: 1px solid #e5e2d7; border-radius: 22px; padding: 24px 28px; align-self: start; box-shadow: 0 12px 30px #4d442306; }
