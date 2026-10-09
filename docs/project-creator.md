@@ -1,162 +1,329 @@
-# Project Creator 交互方案
+# Project Creator 交互式项目创建
 
-## 结论
+## 方案结论
 
-采用临时 DSH Runtime + TypeScript Bridge + Go Server 控制面 + Studio 原生聊天 UI。
-
-DSH 的“创造模式”应作为交互语义参考：用户从“新建 Agent 会话”入口选择 Agent，选择会话模式后进入空白聊天，不使用 `/init`。Studio 复用 DSH 的模式选择、问题卡片、确认卡片和状态反馈语义，但不直接嵌入完整 DSH Web Host、Cordis 或 DSH UI Runtime。
-
-`profile-analysis-interactive` 不作为最终名称。新增 Agent 使用：
+新增交互 Agent：
 
 - 内部 id：`project-creator`
-- 展示名称：`Project Creator`
-- 现有 `profile-analysis` 保持零交互，不做行为改变
+- 展示名：`Project Creator`
+- `profile-analysis` 保留为现有零交互托管 Agent，不改行为。
+- 不使用 `/init`。
+- 不显示“新会话”按钮，也不要求用户确认一次“开始新会话”。
+- 用户选择 Agent 后，Studio 自动创建临时会话并启动 Agent。
+- 临时会话只存在于当前创建页面；Runtime 退出、页面刷新、关闭或超时后，会话和未提交草稿全部丢失。
 
-## 核心架构
+参考 DSH 的 UX 结构和交互协议，但不直接嵌入完整 DSH Web Shell。Anban Studio 使用自己的 React 组件适配 DSH 的模式选择器、聊天、问题卡和消息状态。
 
-- **Studio**
-  - 在创建项目入口提供“新建 Agent 会话”。
-  - Agent 选择器提供 Project Creator。
-  - 原生实现聊天记录、AskUserQuestion 问题卡、自由文本输入、确认卡和运行状态。
-  - 使用 SSE 接收事件，使用 REST 提交消息和答案。
+## UX
 
-- **Go Server**
-  - 创建临时交互 Session，绑定当前用户和权限。
-  - 保存内存中的 Session ownership、lease、状态和 Bridge 连接，不保存可恢复会话。
-  - 提供 Project Creator 专用 MCP capability。
-  - 在用户确认后，以一个事务同时创建项目、画像草稿和画像 revision。
-  - 不复用绑定 `task_id` 的 `submit_profile_result`。
+### 入口与路由
 
-- **TypeScript DSH Bridge**
-  - 启动并监管单个 Project Creator DSH Runtime。
-  - 将 Anban 默认模型路由映射到 DSH provider/model adapter。
-  - 转发 prompt、消息、AskUserQuestion answer 和关闭命令。
-  - 将 DSH 原始事件转换为语义化的 `message`、`question.open`、`question.settled` 和 `status` 事件。
+- 新增通用聊天工作区，例如 `/chat`。
+- 项目页的“创建项目”入口跳转到：
+  `/chat?agent=project-creator&intent=create-project`
+- 通用聊天入口默认没有活动 Agent；用户在顶部模式选择器中选择 `Project Creator` 后立即启动临时会话。
+- `/projects/create` 可作为面向项目创建的语义别名，最终渲染同一聊天工作区。
+- 现有表单保留为次级入口：“使用表单创建”，用于故障兜底和已有用户习惯。
 
-- **DSH Runtime**
-  - 执行 Project Creator Agent。
-  - 使用 AskUserQuestion 动态收集信息。
-  - 仅使用受限的 Project Creator MCP capability。
-  - 不直接访问数据库、项目画像文件或 Server 私有状态。
+### 页面结构
 
-## Protocol 与生命周期
+桌面端：
 
-DSH SDK 增加面向交互 Agent 的通用 answer 通道：
+- Studio 原有导航保持不变。
+- 聊天区域顶部显示：
+  - 当前工作区或项目上下文；
+  - DSH 风格的 Agent 模式选择器；
+  - 当前 Agent 名称、图标和运行状态。
+- 中间为消息流，限制最大阅读宽度。
+- 底部为固定输入框。
+- 右侧显示六维画像收集进度。
+
+移动端：
+
+- Agent 选择器保持在顶部；
+- 六维进度改为可横向滚动的紧凑状态条；
+- 输入框固定在底部；
+- 问题卡和确认卡使用全宽布局。
+
+### Agent 模式选择器
+
+模式选择器行为：
+
+1. 初始没有活动 Agent 时，显示可用 Agent 列表。
+2. 选择 `Project Creator` 后，自动创建临时 Runtime Session。
+3. 不出现“新会话”按钮。
+4. 会话开始后，当前 Agent 名称保留在顶部。
+5. 会话已经产生用户输入后，不允许静默切换 Agent；切换需要明确提示会丢弃当前临时草稿。
+6. Agent 列表来自 Server 返回的能力注册表，浏览器不能提交任意 profile、插件路径或 MCP 配置。
+
+### 首次启动
+
+选择 `Project Creator` 后：
+
+1. Studio 调用创建临时会话接口。
+2. Server 启动一个专属 TypeScript Bridge 子进程。
+3. Bridge 启动 DSH Runtime 并绑定 `project-creator` preset。
+4. Runtime 通过受控的 `session/start` 事件触发第一轮 Agent 行为。
+5. Agent 自动发出欢迎语和第一组结构化问题。
+
+`session/start` 是 Runtime 控制事件，不是伪造的用户消息，不显示 `/init`，也不会把隐藏提示词写入聊天记录。
+
+### 对话交互
+
+聊天区支持：
+
+- 普通文本消息；
+- Agent Markdown 回复；
+- DSH 风格 `AskUserQuestion` 问题卡；
+- 单选、多选、自定义文本；
+- Agent 思考、等待回答、错误和完成状态。
+
+问题卡规则：
+
+- 一次显示一个待回答的问题批次；
+- 问题卡未提交前，普通输入框禁用，避免并行回答造成顺序冲突；
+- 用户提交后，卡片变为已回答状态；
+- Agent 可根据回答动态追加问题，不使用固定四步表单；
+- 用户可以通过“继续修改”回到普通对话，让 Agent重新调整已收集内容。
+
+### 六维进度
+
+进度栏展示以下六个维度：
+
+- 定位 `identity`
+- 风格 `style`
+- 受众 `audience`
+- 平台 `platforms`
+- 偏好与红线 `preferences`
+- 记忆 `memory`
+
+每个维度只有状态，不对应固定步骤：
+
+- 未开始；
+- 已收集；
+- 待确认；
+- 已确认。
+
+进度由 Agent 提交的结构化草稿驱动，Server 只负责校验，不决定 Agent 的提问顺序。
+
+### 最终确认卡
+
+Agent 收集足够信息后提交临时草稿，Studio显示确认卡：
+
+- 项目名称；
+- 项目定位与平台；
+- 六维画像摘要；
+- 缺失字段和推断字段；
+- “确认创建项目”；
+- “继续修改”。
+
+未通过 Server Schema 校验时，不显示可用的创建按钮。
+
+用户点击确认后：
+
+1. Studio 提交确认凭据和幂等键；
+2. Server 在事务中创建项目；
+3. 写入六维画像草稿和 profile revision；
+4. profile 状态保持 `draft`，不能因为创建项目而自动变成 `confirmed`；
+5. 会话关闭；
+6. 跳转项目详情页或画像确认页。
+
+### 离开、刷新和失败
+
+- 离开页面且项目未提交时，显示：
+  “当前项目草稿尚未保存，离开后将丢失。”
+- 浏览器 `beforeunload` 只做尽力提醒，不承诺恢复。
+- 刷新后创建新临时会话，不恢复旧对话。
+- Runtime 断开、超时或 Server 重启后，显示明确错误状态。
+- 用户可点击“重新开始创建”，该操作直接创建新临时会话，不展示“新会话”术语。
+- 创建提交失败时保留确认卡，允许重试。
+- Server 成功提交后，重复请求必须返回同一项目结果，不能重复创建。
+
+## 技术架构
+
+### Server
+
+新增交互会话服务，负责：
+
+- 用户鉴权；
+- Session 所有权；
+- Runtime lease 和超时；
+- Agent 能力校验；
+- SSE 事件转发；
+- 问题回答转发；
+- 临时草稿校验；
+- 最终项目创建和幂等提交。
+
+建议接口：
 
 ```text
-session/answer
-{
-  sessionId,
-  callId,
-  answer
-}
-```
-
-同时向 Bridge 输出语义化问题事件；Studio 不解析 DSH 原始 Session Event。现有 `initialize`、`session/prompt` 和进程级 `shutdown` 保持兼容。Project Creator 的 runtime profile 由 Server/Bridge 的受信任 allowlist 选择，不接受浏览器传入的任意 runtime 或插件路径。
-
-Studio 对 Server 暴露：
-
-```text
+GET    /api/v1/interactive/agents
 POST   /api/v1/interactive/sessions
 GET    /api/v1/interactive/sessions/:id/events
 POST   /api/v1/interactive/sessions/:id/messages
 POST   /api/v1/interactive/sessions/:id/questions/:callId/answers
+POST   /api/v1/interactive/sessions/:id/commit
 DELETE /api/v1/interactive/sessions/:id
 ```
 
-Session 状态至少包括：
+创建会话请求至少包含：
 
-```text
-starting
-ready
-running
-waiting_user
-committing
-completed
-failed
-expired
-closed
+```json
+{
+  "agent_id": "project-creator",
+  "intent": "create-project"
+}
 ```
 
-Session 只存在于当前 Server 和 Runtime 内存中。页面刷新、关闭、Runtime 崩溃或 lease 超时后不支持恢复，也不产生新的项目。已经成功提交的项目创建事务不受 Runtime 后续退出影响。
+提交请求至少包含：
 
-## Project Creator 流程
-
-1. 用户进入项目创建入口。
-2. 点击“新建 Agent 会话”，选择 Project Creator。
-3. Server 创建 ephemeral Session，尚未创建项目。
-4. Bridge 启动 Project Creator Runtime。
-5. Agent 使用 AskUserQuestion 动态收集项目元数据和六个画像维度。
-6. Agent 生成项目摘要和六维画像草稿。
-7. Agent 使用问题卡请求最终确认。
-8. 用户确认后，Agent 调用受限的 `commit_project_creator_draft` capability。
-9. Server 校验：
-   - Session 属于当前用户；
-   - Agent profile 为 `project-creator`；
-   - 确认问题 callId 已被用户明确确认；
-   - 项目字段和六维画像符合现有模型 Schema；
-   - payload 大小、平台和权限合法。
-10. Server 在单个事务中：
-    - 创建项目；
-    - 写入六维 profile draft；
-    - 创建 profile revision；
-    - 设置 profile initialization 为 ready；
-    - 保持 profile status 为 draft。
-11. Studio 跳转项目详情或画像确认页。
-12. 后续 confirmed 状态仍由现有用户确认流程负责。
-
-Runtime 不创建临时项目，也不直接修改 `AGENTS.md`、画像文件、项目 profile 或生成上下文。Server 完成数据库持久化后再按现有机制更新投影文件。
-
-## AskUserQuestion 策略
-
-AskUserQuestion 按 Agent capability 区分，禁止全局开启：
-
-- `profile-analysis` 和现有托管 Agent：继续禁止。
-- `project-creator`：允许 AskUserQuestion，允许回答桥接。
-- 未来交互 Agent：必须在 Agent Pack/profile manifest 中显式声明 `interactive: true` 和允许的交互 capability。
-- 子 Agent 不允许直接向用户提问；问题只能由 live root Agent 发起。
-- Server 只接受当前 Session、当前 root Agent 和当前 callId 的回答。
-
-这种策略保留现有零交互托管任务的自动化边界，同时允许交互 Agent 使用同一套通用协议。
-
-## Review 结论与约束
-
-已修正以下风险：
-
-- 不再使用 `/init` 作为入口。
-- 不把 DSH 的 Creator mode 误解为命令；它是新会话模式选择器。
-- 不创建临时项目来满足旧的 `project_id` 要求。
-- 不让 Project Creator 复用任务级 `submit_profile_result`。
-- 不把 DSH Web UI 组件直接复制到 Studio。
-- 不把 Go 胶水层当作完整实现；AskUserQuestion 的 live Agent answer 必须由 DSH Bridge 处理。
-- 不把 transient conversation 当作持久化证据。
-- 不全局解除 `AskUserQuestion` 禁止。
-- 不让浏览器选择任意 DSH profile、插件或 MCP capability。
-- 不假设 DSH 只能使用 Claude-compatible provider；模型路由必须经过 Server 配置的 adapter 映射。
-
-## 验证方案
-
-- DSH protocol：验证 answer callId、完整问题集合、重复回答、非法回答和 Runtime 关闭。
-- Bridge：验证问题事件转换、用户答案转发、Runtime 崩溃和超时清理。
-- Go Server：验证 ownership、lease、权限、确认 token、事务回滚、重复 commit 幂等性。
-- Studio：验证 Agent 选择器、聊天流、问题卡、确认卡、断开状态和无恢复行为。
-- 集成测试：
-  - 未确认即关闭：不创建项目。
-  - 确认成功：只创建一个项目，并保存六维 draft revision。
-  - commit 中途失败：项目和 profile 不产生半成品。
-  - `profile-analysis` 仍拒绝 AskUserQuestion。
-  - Project Creator Runtime 消失后 Session 终止，但已完成的事务保持 durable。
-
-设计文档应写入：
-
-```text
-docs/superpowers/specs/2026-10-09-project-creator-interactive-design.md
+```json
+{
+  "confirmation_token": "...",
+  "idempotency_key": "...",
+  "project": {},
+  "profile": {}
+}
 ```
 
-实现计划随后写入：
+`user_id`、Session owner、Agent profile 和 MCP 权限全部由 Server 侧推导，不能信任浏览器字段。
+
+### TypeScript Bridge
+
+Bridge 使用 DSH SDK，并按会话启动一个临时子进程：
+
+- Go Server 管理生命周期；
+- Bridge 使用 DSH SDK 启动 DSH Runtime；
+- 一个 Project Creator Session 对应一个独立 Runtime；
+- Bridge 退出后，不保留 Agent 或对话状态；
+- 不新增持久化 Agent 服务；
+- Bridge 将 DSH 的原始 Session Event 转换成 Anban 稳定事件。
+
+建议事件类型：
 
 ```text
-docs/superpowers/plans/2026-10-09-project-creator-interactive.md
+session.ready
+session.status
+assistant.message
+question.opened
+question.answered
+draft.updated
+draft.ready
+session.expired
+session.error
+session.closed
 ```
 
-当前仍处于 Plan Mode，按照当前执行约束本轮不能修改仓库文件；上述内容是已完成 review 的决策完备方案，下一步执行阶段首先落盘设计文档。
+多副本部署首期要求同一临时 Session 的请求和 SSE 连接落到同一 Server 实例；Server 重启会使所有临时会话失效，不做恢复迁移。
+
+### DSH SDK 扩展
+
+当前 DSH SDK 只有 `initialize`、`session/prompt`、`shutdown`，无法从外部回答 `AskUserQuestion`。需要在 `deepseek-harness` 增加：
+
+```text
+session/start
+session/prompt
+session/answer
+shutdown
+```
+
+`session/answer` 必须：
+
+- 校验 Session 所属的 live root Agent；
+- 校验 `callId` 属于当前未回答问题；
+- 校验每个问题恰好回答一次；
+- 拒绝子 Agent、过期问题和重复回答；
+- 复用 DSH `userQuestions.answer()` 的现有语义；
+- 保留 DSH 的结构化问题 Schema。
+
+### AskUserQuestion 权限
+
+禁止策略按 Agent 能力区分：
+
+- 现有 `profile-analysis`、article、seednote 等托管 Agent：继续禁止 `AskUserQuestion`；
+- `project-creator`：显式声明允许 `AskUserQuestion`；
+- 未来交互 Agent：必须在 Agent Pack manifest 中声明交互能力后才能启用；
+- 子 Agent：禁止直接向用户提问；
+- Server 只允许注册表中的 Agent 使用交互能力；
+- `agent-ts/src/runner.ts` 的现有全局禁止逻辑不直接放开，Project Creator 使用独立 interactive runner 配置。
+
+### 临时草稿与 MCP 边界
+
+新增 Project Creator 专用的原子能力：
+
+```text
+stage_project_creator_draft
+```
+
+它只做：
+
+- 校验完整的项目字段和六维画像；
+- 替换当前 Session 的临时草稿；
+- 递增临时 draft revision；
+- 发布 `draft.updated` 或 `draft.ready` 事件。
+
+它不创建数据库项目，也不修改正式 profile。
+
+最终提交由 Server 业务服务完成，可命名为：
+
+```text
+commit_project_creator_draft
+```
+
+提交事务负责：
+
+- 创建项目；
+- 创建 `ProjectProfileRevision`；
+- 写入项目 profile；
+- 设置 profile 为 `draft`；
+- 写入幂等记录；
+- 返回已创建项目。
+
+Runtime、Agent 和日志都不能修改 `AGENTS.md`、`CLAUDE.md`、正式项目 profile、项目 memory 或活动生成上下文。
+
+## Agent Pack
+
+新增 `harness/packs/project-creator/`：
+
+- `agent-pack.yaml`
+- `agent.claude.md`
+- `agent.codex.toml`
+- 必要的结构化草稿 Schema
+- `interaction.user_questions: true`
+- 只允许 Project Creator 所需 MCP capability
+- 禁止发布、写入正式项目 profile 和调用其他工作流
+
+同时清理所有旧的 `profile-analysis-interactive` 引用。若该 id 尚不存在，则直接创建 `project-creator`，不要把现有批处理 `profile-analysis` 改名。
+
+任何 `harness/` Agent、Pack 或 manifest 变更，都要：
+
+- 运行 `make agent-pack-generate`；
+- 运行 `make agent-pack-check`；
+- 同步递增 `harness/.claude-plugin/plugin.json` 和 `harness/.codex-plugin/plugin.json`；
+- 保证 Pack、Claude Agent、Codex Agent 和生成 catalog 一致。
+
+## 实施顺序
+
+1. 先写入并评审设计文档和本实现计划。
+2. 在 DSH 中增加 `session/start`、`session/answer` 协议及测试。
+3. 创建 Project Creator Agent Pack 和能力注册表。
+4. 实现 Go 交互会话服务、SSE、lease、草稿校验和最终事务提交。
+5. 实现 TypeScript Bridge 和 DSH Runtime 生命周期管理。
+6. 在 Studio 增加通用聊天工作区、Agent 选择器、问题卡、六维进度和确认卡。
+7. 保留现有项目表单作为次级入口。
+8. 完成单元测试、协议测试、API 测试和 Studio 交互测试。
+9. 最后再启用配置开关和灰度入口。
+
+## 验收标准
+
+- 用户从项目页点击创建后，不需要点击“新会话”即可看到 Project Creator 对话。
+- 通用聊天入口可以通过 DSH 风格模式选择器选择 Project Creator。
+- 不出现 `/init`。
+- Agent 可以连续提出结构化问题，用户可以用选项或文本回答。
+- 六维进度随草稿更新，不强制固定步骤。
+- 未确认前数据库中不存在项目。
+- 确认后只创建一个项目，重复请求返回同一结果。
+- Runtime 消失后临时会话和草稿不可恢复。
+- 现有托管 Agent 仍禁止 `AskUserQuestion`。
+- Project Creator 只能使用白名单 capability。
+- Studio、Go、Agent Runner、DSH SDK 和 Agent Pack 测试全部通过。
