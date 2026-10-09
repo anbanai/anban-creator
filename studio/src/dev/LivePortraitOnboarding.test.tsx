@@ -84,4 +84,31 @@ describe('live model-backed portrait onboarding', () => {
     expect(screen.queryByText('上班族')).not.toBeInTheDocument()
     expect(screen.getByRole('textbox')).toHaveValue('')
   })
+  it('can recover local conversation text without auto-sending, confirming or reusing stale portrait data', async () => {
+    render(<LivePortraitOnboarding initialConversation={[
+      { id: 'u-1', role: 'user', text: intro },
+      { id: 'a-1', role: 'assistant', text: '还有什么补充？' },
+      { id: 'u-2', role: 'user', text: '再补充一点' },
+    ]} />)
+    await screen.findByText(/DeepSeek \/ deepseek-flash/)
+    expect(screen.getByRole('textbox')).toHaveValue('再补充一点')
+    expect(screen.getByText(intro)).toBeInTheDocument()
+    expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
+    expect(screen.getByText('还没认识的你')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue(''))
+    const request = fetcher.mock.calls.find(([, options]) => options?.method === 'POST')
+    const sent = JSON.parse(request![1].body).messages
+    expect(new Set(sent.map((m: {id:string}) => m.id)).size).toBe(sent.length)
+    expect(sent.at(-1).text).toBe('再补充一点')
+    expect(screen.getByRole('button', {name:'这就是我，确认画像'})).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', {name:'这就是我，确认画像'}))
+    fireEvent.click(screen.getByRole('button', {name:'开始创作第一篇'}))
+    fireEvent.click(screen.getByRole('button', {name:'回到对话继续调整'}))
+    expect(screen.getByRole('textbox')).toHaveValue('')
+    fireEvent.click(screen.getByRole('button', { name: '从空白重新开始' }))
+    fireEvent.click(screen.getByRole('button', { name: '清空并重新开始' }))
+    expect(screen.getByRole('textbox')).toHaveValue('')
+    expect(screen.queryByText(intro)).not.toBeInTheDocument()
+  })
 })

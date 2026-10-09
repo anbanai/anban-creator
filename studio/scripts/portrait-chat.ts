@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin } from 'vite'
+import { ZodError } from 'zod'
 import { portraitChatRequest, validatePortraitCandidate, type PortraitChatMessage } from '../src/lib/portrait-chat-contract'
 
 const endpoint = '/__local-preview/portrait-chat'
@@ -13,6 +14,7 @@ export const portraitSystemPrompt = `你是案板的 IP 定位访谈助手。与
 输出严格 JSON，结构如下（所有字段都必须有；未知保持 null）：
 {"reply":"你的自然回复和最多一个追问","name":null,"summary":null,"facets":{"identity":null,"audience":null,"style":null,"platforms":null,"preferences":null,"experience":null},"creationIdea":null}
 每个非空 facet 或 creationIdea 的结构是 {"text":"简洁归纳，通常不超过100字","certainty":"stated 或 inferred","evidence":[{"messageId":"用户消息的原始id","quote":"从该用户消息原样连续摘取的一小段文字"}]}。
+同一字段可以综合多轮用户回答，按需列出多条依据，不限于四条；只保留支撑当前结论所需的引用，避免重复。每条 quote 最多300字，每个字段最多60条依据，text 最多500字；reply 最多1800字，name 最多80字，summary 最多300字。
 identity=真实身份、业务、价值与目标；audience=服务对象及需求；style=说话方式；platforms=内容平台；preferences=偏好和边界；experience=有证据的个人或业务经历。creationIdea=本次具体作品意向或选题，单独存放，不混入长期记忆；仅说想做自媒体或宣传产品属于长期目标，不能直接当作具体作品意向。你只收到文字，不声称已经听过音频或验证了语音识别准确率。
 每轮返回完整的当前画像，保留仍有效信息；用户明确纠正或撤回旧信息时替换或清空它，不能把相矛盾的旧新说法混在一起。没有用户依据的字段保持 null，不能套用示例、行业常识或自己的建议。
 用户直接说过的信息用 stated；合理但尚未确认的归纳或假设用 inferred。每个非空字段必须引用真实 USER 消息的 id 和原文片段，不能引用 assistant 的建议充当事实。引用必须逐字匹配（含简繁体），不要概括引用；如果只是用户说“对”，要同时引用原有用户背景，未明确的具体事实仍不可补造。
@@ -65,13 +67,22 @@ export async function analyzePortrait(config: PortraitProviderConfig, messages: 
     if (size > 160_000) { await reader.cancel(); throw new PortraitServiceError(502, '模型返回过长，未修改画像。请用较短内容重试。') }
     chunks.push(value)
   }
+  let value: unknown
   try {
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'))
     const choice = payload.choices?.[0]
-    if (choice?.finish_reason !== 'stop' || typeof choice.message?.content !== 'string') throw new Error('incomplete')
-    return validatePortraitCandidate(JSON.parse(choice.message.content), messages)
-  } catch {
-    throw new PortraitServiceError(502, '模型返回的画像不完整或缺少有效依据，未修改现有画像。请重试。')
+    if (choice?.finish_reason !== 'stop' || typeof choice.message?.content !== 'string') throw new PortraitServiceError(502, '模型回复未完整生成，未修改现有画像。文字已保留，请重试。')
+    value = JSON.parse(choice.message.content)
+  } catch (error) {
+    if (error instanceof PortraitServiceError) throw error
+    throw new PortraitServiceError(502, '模型回复格式有误，未修改现有画像。文字已保留，请重试。')
+  }
+  try {
+    return validatePortraitCandidate(value, messages)
+  } catch (error) {
+    // Only fixed, local categories reach the UI; never forward raw provider data.
+    if (error instanceof ZodError) throw new PortraitServiceError(502, '模型返回的画像字段格式或长度不符合要求，未修改现有画像。文字已保留，请重试。')
+    throw new PortraitServiceError(502, '画像中的部分信息未能对应到你的原话，未修改现有画像。文字已保留，请重试。')
   }
 }
 

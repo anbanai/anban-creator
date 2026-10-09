@@ -25,6 +25,7 @@ interface PortraitConversationProps {
   ready: boolean
   confirmed: boolean
   localVoice?: boolean
+  initialInput?: string
   onSend: (text: string) => Promise<void>
   onConfirm: () => void
   onCreate: () => void
@@ -33,9 +34,9 @@ interface PortraitConversationProps {
 /** Presentation only. The caller owns conversation transport, revisions and persistence. */
 export function PortraitConversation({
   messages, draft, name, summary, creationIdea, suggestion, busy = false, error,
-  ready, confirmed, localVoice: preferLocalVoice = false, onSend, onConfirm, onCreate,
+  ready, confirmed, localVoice: preferLocalVoice = false, initialInput = '', onSend, onConfirm, onCreate,
 }: PortraitConversationProps) {
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(initialInput)
   const [sendError, setSendError] = useState('')
   const [sending, setSending] = useState(false)
   const sendingRef = useRef(false)

@@ -27,6 +27,16 @@ describe('portrait parsing and provider boundary', () => {
     expect(portraitChatRequest.safeParse({ messages: [{ ...messages[0], role: 'system' }] }).success).toBe(false)
     expect(portraitChatRequest.safeParse({ messages: [{ ...messages[0], text: '长'.repeat(6001) }] }).success).toBe(false)
   })
+  it('accepts a creation brief supported by more than four conversation turns, but still checks every quote', async () => {
+    const inputs = ['周末家庭插花', '选花难、搭配不好看', '图文', '引导预约到店', '课程还在筹备', '微信公众号']
+    const history = inputs.map((text, i) => ({ id: `u-${i + 2}`, role: 'user' as const, text }))
+    const combined = { ...candidate, creationIdea: { text: '公众号图文讲周末插花的选花与搭配，结尾引导预约到店；课程仍在筹备。', certainty: 'stated' as const, evidence: history.map(m => ({messageId:m.id,quote:m.text})) } }
+    const conversation = [...messages, ...history]
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(combined) } }] })))
+    expect((await analyzePortrait(config, conversation, signal, fetcher)).creationIdea?.evidence).toHaveLength(6)
+    combined.creationIdea.evidence[5].quote = '从未说过的平台'
+    await expect(analyzePortrait(config, conversation, signal, fetcher)).rejects.toThrow('未能对应到你的原话')
+  })
   it('keeps keys server-side and disallows redirects to unofficial API hosts or plaintext', () => {
     expect(validateProviderConfig(config).model).toBe('deepseek-flash')
     for (const baseUrl of ['http://api.deepseek.com', 'https://external.example', 'https://api.deepseek.com@external.example', 'https://api.deepseek.com/?key=secret', 'https://api.deepseek.com:8443']) {

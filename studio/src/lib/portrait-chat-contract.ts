@@ -16,7 +16,9 @@ export type PortraitChatMessage = z.infer<typeof message>
 const fact = z.object({
   text: z.string().trim().min(1).max(500),
   certainty: z.enum(['stated', 'inferred']),
-  evidence: z.array(z.object({ messageId: z.string().min(1).max(64), quote: z.string().trim().min(1).max(300) }).strict()).min(1).max(4),
+  // A brief can combine facts collected across many turns (topic, format,
+  // pain point, CTA, platform...). Bound by the conversation budget, not four facts.
+  evidence: z.array(z.object({ messageId: z.string().min(1).max(64), quote: z.string().trim().min(1).max(300) }).strict()).min(1).max(60),
 }).strict()
 export const portraitCandidateSchema = z.object({
   reply: z.string().trim().min(1).max(1800),

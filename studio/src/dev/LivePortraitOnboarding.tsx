@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { PortraitConversation, portraitFacets, type PortraitDraft, type PortraitMessage } from '@/components/projects/PortraitConversation'
-import { canConfirmPortrait, validatePortraitCandidate, type PortraitCandidate, type PortraitChatMessage } from '@/lib/portrait-chat-contract'
+import { canConfirmPortrait, portraitChatRequest, validatePortraitCandidate, type PortraitCandidate, type PortraitChatMessage } from '@/lib/portrait-chat-contract'
 
 const welcome: PortraitMessage = { id: 'welcome', role: 'assistant', text: '你好，很高兴认识你。你平时在做什么？最近为什么想开始做内容？\n\n打字或用语音说都可以。从你最想聊的地方开始。' }
 type Connection = { configured: boolean; model?: string; error?: string }
 
-export default function LivePortraitOnboarding() {
-  const [messages, setMessages] = useState<PortraitMessage[]>([welcome])
+export default function LivePortraitOnboarding({ initialConversation }: { initialConversation?: PortraitChatMessage[] } = {}) {
+  // Optional local-preview recovery input. Never trust a recovered portrait or
+  // confirmation; restore text only and wait for the user to send it for analysis.
+  const [recovered] = useState(() => initialConversation ? portraitChatRequest.parse({ messages: initialConversation }).messages : null)
+  const [messages, setMessages] = useState<PortraitMessage[]>(recovered?.slice(0, -1) ?? [welcome])
+  const [recoveredInput, setRecoveredInput] = useState(recovered ? recovered[recovered.length - 1].text : '')
   const [candidate, setCandidate] = useState<PortraitCandidate | null>(null)
   const [connection, setConnection] = useState<Connection>({ configured: false })
   const [checking, setChecking] = useState(false)
@@ -18,7 +22,7 @@ export default function LivePortraitOnboarding() {
   const [creating, setCreating] = useState(false)
   const [resetPrompt, setResetPrompt] = useState(false)
   const [epoch, setEpoch] = useState(0)
-  const revision = useRef(0)
+  const revision = useRef(Math.max(0, ...(recovered ?? []).map(message => Number(/^[ua]-(\d+)$/.exec(message.id)?.[1] ?? 0))))
   const generation = useRef(0)
   const activeRequest = useRef<AbortController | null>(null)
   const statusRequest = useRef<AbortController | null>(null)
@@ -76,11 +80,14 @@ export default function LivePortraitOnboarding() {
       })
       const result = await response.json()
       if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : '模型暂时不可用，请重试。')
-      const next = validatePortraitCandidate(result.candidate, conversation)
+      let next: PortraitCandidate
+      try { next = validatePortraitCandidate(result.candidate, conversation) }
+      catch { throw new Error('返回的画像未通过核对，原有文字和画像已保留，请重试。') }
       if (generation.current !== requestGeneration || controller.signal.aborted) throw new Error('cancelled')
       const changed = portraitFacets.filter(([key]) => (candidate?.facets[key]?.text ?? null) !== (next.facets[key]?.text ?? null)).map(([, label]) => label)
       revision.current++
       setCandidate(next)
+      setRecoveredInput('')
       setMessages([...conversation, { id: `a-${revision.current}`, role: 'assistant', text: next.reply, update: changed.length ? `已更新：${changed.join('、')}` : undefined }])
       setConnection(previous => ({ ...previous, configured: true }))
     } catch (problem) {
@@ -97,6 +104,7 @@ export default function LivePortraitOnboarding() {
     activeRequest.current?.abort(); activeRequest.current = null
     revision.current = 0
     setMessages([welcome]); setCandidate(null); setConfirmed(false); setBusy(false)
+    setRecoveredInput('')
     setError(''); setCreating(false); setResetPrompt(false); setEpoch(value => value + 1)
   }
 
@@ -120,7 +128,7 @@ export default function LivePortraitOnboarding() {
       <p>这份简报来自刚才的真实对话。本机预览已完成画像整理；作品生成和正式项目保存尚未接入，没有创建或发布作品。</p>
       <button className="portrait-primary" onClick={() => setCreating(false)}><ArrowLeft size={15} />回到对话继续调整</button>
     </section> : <PortraitConversation key={epoch} messages={messages} draft={draft} name={candidate?.name ?? undefined} summary={candidate?.summary ?? undefined}
-      creationIdea={candidate?.creationIdea?.text} localVoice={localVoice} busy={busy} error={error} ready={ready} confirmed={confirmed}
+      creationIdea={candidate?.creationIdea?.text} localVoice={localVoice} initialInput={recoveredInput} busy={busy} error={error} ready={ready} confirmed={confirmed}
       onSend={send} onConfirm={() => { if (ready && !busy) setConfirmed(true) }} onCreate={() => { if (ready && confirmed && !busy) setCreating(true) }} />}
   </div>
 }
