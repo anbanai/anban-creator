@@ -17,7 +17,7 @@ func registerSearchTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{
-				"query":           map[string]any{"type": "string", "minLength": 1},
+				"query":           map[string]any{"type": "string", "minLength": 1, "maxLength": 100},
 				"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
 				"time_range":      map[string]any{"type": "string"},
 				"domains":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20},
@@ -79,11 +79,11 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	}
 	domains, err := parseSearchStringArray(args, "domains")
 	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"domains must be a non-empty string array"}`), nil
+		return errorResult(`{"code":"invalid_request","message":"domains must be a string array of non-empty strings"}`), nil
 	}
 	blockHosts, err := parseSearchStringArray(args, "block_hosts")
 	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"block_hosts must be a non-empty string array"}`), nil
+		return errorResult(`{"code":"invalid_request","message":"block_hosts must be a string array of non-empty strings"}`), nil
 	}
 	if svcs == nil || svcs.SearchSvc == nil {
 		return errorResult(`{"code":"provider_unavailable","message":"search provider is not configured"}`), nil
