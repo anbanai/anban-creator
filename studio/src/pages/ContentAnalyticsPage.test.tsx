@@ -182,6 +182,11 @@ describe('server analytics queries', () => {
     expect(screen.queryByLabelText('统计口径')).not.toBeInTheDocument()
     expect(screen.queryByText(/当日新增|增量/)).not.toBeInTheDocument()
   })
+  it('persists the official Seednote view in the URL', async () => {
+    render(<ContentAnalyticsPage />)
+    fireEvent.click(await screen.findByRole('tab', { name: '互动数据' }))
+    await waitFor(() => expect(window.location.search).toContain('view=interaction'))
+  })
   it('shows each content item tags below its title without making them interactive', async () => {
     render(<ContentAnalyticsPage />)
 
@@ -227,6 +232,15 @@ describe('server analytics queries', () => {
     expect(contentAnalyticsApi.overview).not.toHaveBeenCalled()
     expect(contentAnalyticsApi.contents).not.toHaveBeenCalled()
     expect(contentAnalyticsApi.observations).not.toHaveBeenCalled()
+  })
+  it('keeps a Seednote single-content deep link on the detail trend', async () => {
+    window.history.replaceState(null, '', '/content-analytics?account=notes&content=canonical-1&platform=seednote')
+    render(<ContentAnalyticsPage />)
+    expect(await screen.findByRole('heading', { name: '服务器内容' })).toBeInTheDocument()
+    expect(screen.getByText('趋势')).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '观看数据' })).not.toBeInTheDocument()
+    expect(contentAnalyticsApi.overview).not.toHaveBeenCalled()
+    expect(contentAnalyticsApi.detail).toHaveBeenCalledWith('notes', 'canonical-1', expect.objectContaining({ platform: 'seednote' }), expect.any(AbortSignal))
   })
   it('paginates on the server and keeps overview cached when selecting a row', async () => {
     render(<ContentAnalyticsPage />)
