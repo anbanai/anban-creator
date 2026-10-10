@@ -8,9 +8,11 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ProfileContentFields } from '@/components/projects/ProfileContentFields'
 import { ProfileAccountFields } from '@/components/projects/ProfileAccountFields'
+import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import type { CreateProjectRequest, ProfileDimension, Project, ProjectProfile, ProjectProfileSetup } from '@/types'
+import { referenceSelectionFromValue } from '@/lib/reference-image'
+import type { CreateProjectRequest, ProfileDimension, Project, ProjectProfile, ProjectProfileSetup, ReferenceImageValue } from '@/types'
 import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { profileLabAgents as agents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
 import { queryKeys } from '@/lib/query-keys'
@@ -103,6 +105,10 @@ function ProfileLabPage() {
   const [name, setName] = useState('')
   const [keywords, setKeywords] = useState('')
   const [instructions, setInstructions] = useState('')
+  const [visualStyle, setVisualStyle] = useState('')
+  const [referenceImage, setReferenceImage] = useState<ReferenceImageValue | null>(null)
+  const [referenceImageDirty, setReferenceImageDirty] = useState(false)
+  const [referenceUploading, setReferenceUploading] = useState(false)
   const [selectedAgents, setSelectedAgents] = useState<string[]>([])
   const [setup, setSetup] = useState<ProjectProfileSetup>(defaultSetup)
   const [skipAnalysis, setSkipAnalysis] = useState(false)
@@ -123,12 +129,19 @@ function ProfileLabPage() {
   currentLocationRef.current = currentLocationKey
   const creationViewKey = useRef(currentLocationKey)
 
-  useEffect(() => () => { mountedRef.current = false }, [])
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   useEffect(() => {
     setName('')
     setKeywords('')
     setInstructions('')
+    setVisualStyle('')
+    setReferenceImage(null)
+    setReferenceImageDirty(false)
+    setReferenceUploading(false)
     setSelectedAgents([])
     setSetup(defaultSetup)
     setSkipAnalysis(false)
@@ -175,6 +188,9 @@ function ProfileLabPage() {
     setName(project.name ?? '')
     setKeywords(project.keywords ?? '')
     setInstructions(project.instructions ?? project.positioning ?? '')
+    setVisualStyle(project.visual_style ?? '')
+    setReferenceImage(project.reference_image ?? null)
+    setReferenceImageDirty(false)
     setSelectedAgents(projectAgentIDs(project))
     setSetup(setupFromProject(project))
     setHydratedProjectID(project.id)
@@ -316,8 +332,11 @@ function ProfileLabPage() {
       name: name.trim(),
       keywords: keywords.trim(),
       instructions: instructions.trim(),
+      visual_style: visualStyle.trim(),
       profile_setup: profileSetup,
     }
+    const selectedReferenceImage = referenceSelectionFromValue(referenceImage)
+    if (!isEditing || referenceImageDirty) payload.reference_image = selectedReferenceImage
     const originalAgents = project ? projectAgentIDs(project) : []
     const capabilitiesChanged = !project || selectedAgents.length !== originalAgents.length || selectedAgents.some((id) => !originalAgents.includes(id))
     if (capabilitiesChanged) {
@@ -438,6 +457,20 @@ function ProfileLabPage() {
               <label className="space-y-1.5 text-sm"><span>账号状态</span><select aria-label="账号状态" value={setup.account_status} onChange={(event) => setSetup((current) => ({ ...current, account_status: event.target.value as ProjectProfileSetup['account_status'] }))} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="new">筹备中 / 暂无账号</option><option value="existing">已有账号</option></select></label>
               <label className="space-y-1.5 text-sm sm:col-span-2"><span>项目定位</span><Textarea aria-label="项目定位" value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="这项内容希望长期服务什么方向？" rows={2} /></label>
               <ProfileAccountFields accounts={setup.platform_accounts} onChange={(accounts) => setSetup((current) => ({ ...current, platform_accounts: accounts }))} />
+              <section aria-label="视觉参考与风格" className="space-y-2 sm:col-span-2">
+                <h3 className="text-sm font-medium">视觉参考与风格</h3>
+                <div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
+                  <ReferenceAssetUpload
+                    value={referenceImage}
+                    onChange={(value) => { setReferenceImage(value); setReferenceImageDirty(true) }}
+                    purpose="project_reference"
+                    ariaLabel="项目参考图文件"
+                    onUploadingChange={setReferenceUploading}
+                  />
+                  <label className="space-y-1.5 text-sm"><span>视觉风格描述</span><Textarea aria-label="视觉风格描述" value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} placeholder="例如：自然光、低饱和、留白充足" rows={4} maxLength={4000} /></label>
+                </div>
+                <p className="text-xs text-muted-foreground">可上传参考图并补充视觉特点，供项目内的创作任务使用。</p>
+              </section>
               <label className="space-y-1.5 text-sm sm:col-span-2"><span>内容样本</span><Textarea aria-label="内容样本" value={setup.samples.join('\n')} onChange={(event) => setSetup((current) => ({ ...current, samples: event.target.value.split('\n') }))} placeholder="每行一个公开链接、标题或内容片段，选填" rows={3} /></label>
             </div>
           </section>
@@ -480,7 +513,7 @@ function ProfileLabPage() {
             {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Button type="button" variant="ghost" nativeButton={false} render={<Link to="/projects" />}><ArrowLeft />返回项目</Button>
-              <Button type="submit" disabled={createMutation.isPending || saveProjectMutation.isPending || analysisMutation.isPending}>
+              <Button type="submit" disabled={createMutation.isPending || saveProjectMutation.isPending || analysisMutation.isPending || referenceUploading}>
                 {(createMutation.isPending || saveProjectMutation.isPending) ? <LoaderCircle className="animate-spin" /> : <Check />}
                 {isEditing ? '保存设置' : '创建项目'}
               </Button>

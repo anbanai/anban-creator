@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { Route, Routes } from 'react-router-dom'
@@ -5,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ProfileLabPage from './ProfileLabPage'
 import { api } from '@/lib/api'
 import { createTestQueryClient, render } from '@/test/test-utils'
-import type { Project, ProjectProfile } from '@/types'
+import type { Project, ProjectProfile, ProjectProfileSetup } from '@/types'
 
 const { successMock, errorMock } = vi.hoisted(() => ({ successMock: vi.fn(), errorMock: vi.fn() }))
 
@@ -38,6 +39,11 @@ const profile: ProjectProfile = {
 }
 
 vi.mock('sonner', () => ({ toast: { success: successMock, error: errorMock } }))
+vi.mock('@/components/projects/ReferenceAssetUpload', () => ({
+  ReferenceAssetUpload: ({ ariaLabel, onChange }: { ariaLabel?: string; onChange: (value: { upload_session_id: string } | null) => void }) => (
+    <button type="button" aria-label={ariaLabel ?? '参考图文件'} onClick={() => onChange({ upload_session_id: '11111111-1111-4111-8111-111111111111' })}>上传参考图</button>
+  ),
+}))
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
   return {
@@ -64,7 +70,7 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-function renderRoute(path: string, queryClient?: QueryClient) {
+function renderRoute(path: string, queryClient?: QueryClient, strictMode = false) {
   window.history.pushState({}, '', path)
   const routes = (
     <Routes>
@@ -72,7 +78,8 @@ function renderRoute(path: string, queryClient?: QueryClient) {
       <Route path="/projects/:projectId/profile-lab" element={<ProfileLabPage />} />
     </Routes>
   )
-  return render(queryClient ? <QueryClientProvider client={queryClient}>{routes}</QueryClientProvider> : routes)
+  const content = queryClient ? <QueryClientProvider client={queryClient}>{routes}</QueryClientProvider> : routes
+  return render(strictMode ? <StrictMode>{content}</StrictMode> : content)
 }
 
 describe('ProfileLabPage', () => {
@@ -125,6 +132,49 @@ describe('ProfileLabPage', () => {
     expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
       profile_setup: expect.objectContaining({ analyze: false }),
     }))
+  })
+
+  it('navigates to the new project under React Strict Mode after creation succeeds', async () => {
+    vi.mocked(api.projects.getAccountProfile).mockResolvedValueOnce({ ...profile, initialization_status: 'queued' })
+    renderRoute('/projects/new', undefined, true)
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: 'Strict Mode 项目' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+
+    await waitFor(() => expect(window.location.pathname).toBe('/projects/created-1/profile-lab'))
+    expect(await screen.findByText('分析中')).toBeInTheDocument()
+  })
+
+  it('includes visual style and an uploaded project reference in the creation request', async () => {
+    renderRoute('/projects/new')
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '视觉项目' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
+    fireEvent.change(screen.getByLabelText('视觉风格描述'), { target: { value: '自然光、低饱和' } })
+    fireEvent.click(screen.getByRole('button', { name: '项目参考图文件' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
+      visual_style: '自然光、低饱和',
+      reference_image: { upload_session_id: '11111111-1111-4111-8111-111111111111' },
+    })))
+  })
+
+  it('retains a legacy homepage URL returned in the migrated project setup when saving', async () => {
+    const legacySetup: ProjectProfileSetup = {
+      ...project.profile_setup!,
+      account_status: 'existing',
+      platform_accounts: [{ platform: 'wechat', profile_url: 'https://mp.weixin.qq.com/s/legacy', source: '[用户确认]' }],
+    }
+    vi.mocked(api.projects.get).mockResolvedValueOnce({ project: { ...project, profile_setup: legacySetup }, stats })
+    renderRoute('/projects/project-1/profile-lab')
+    await screen.findByRole('heading', { name: '云端手记' })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(api.projects.update).toHaveBeenCalledWith('project-1', expect.objectContaining({
+      profile_setup: expect.objectContaining({
+        platform_accounts: [expect.objectContaining({ platform: 'wechat', profile_url: 'https://mp.weixin.qq.com/s/legacy' })],
+      }),
+    })))
   })
 
   it('edits profile values as readable fields and shows provenance instead of JSON', async () => {

@@ -24,6 +24,33 @@ func TestDecorateProfileDraftWithServerMetadata(t *testing.T) {
 	}
 }
 
+func TestProjectAPIResponsePreservesLegacyProfileURLInSetup(t *testing.T) {
+	project := &model.Project{
+		ID: "project-1", Platform: model.PlatformWechat, Name: "旧版公众号项目",
+		ProfileURL: "https://mp.weixin.qq.com/s/example",
+	}
+
+	response := projectAPIResponse(project)
+	if _, exists := response["profile_url"]; exists {
+		t.Fatal("legacy profile_url must stay out of the top-level project response")
+	}
+	encoded, err := json.Marshal(response["profile_setup"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var setup model.ProjectProfileSetup
+	if err := json.Unmarshal(encoded, &setup); err != nil {
+		t.Fatal(err)
+	}
+	if setup.AccountStatus != "existing" || len(setup.PlatformAccounts) != 1 {
+		t.Fatalf("legacy setup = %#v, want one migrated account", setup)
+	}
+	account := setup.PlatformAccounts[0]
+	if account.Platform != model.PlatformWechat || account.ProfileURL != project.ProfileURL || account.Source != model.ProfileSourceUserConfirmed {
+		t.Fatalf("legacy account = %#v, want preserved user-provided URL", account)
+	}
+}
+
 func TestProfileAgentInputIncludesSetupAndConfirmedProfileProvenance(t *testing.T) {
 	profile := model.NewProjectProfile()
 	profile.Status = model.ProfileStatusConfirmed

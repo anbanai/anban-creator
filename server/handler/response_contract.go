@@ -70,12 +70,33 @@ func projectAPIResponse(project *model.Project) map[string]any {
 	}
 	resp := modelAPIMap(project)
 	resp["platform"] = project.Platform
+	if project.ProfileSetup == nil {
+		if profileSetup := legacyProjectProfileSetup(project); profileSetup != nil {
+			resp["profile_setup"] = profileSetup
+		}
+	}
 	if project.AgentIDs == nil {
 		resp["agent_ids"] = []string{}
 	}
 	delete(resp, "profile_url")
 	delete(resp, "config")
 	return resp
+}
+
+func legacyProjectProfileSetup(project *model.Project) *model.ProjectProfileSetup {
+	if project == nil || strings.TrimSpace(project.ProfileURL) == "" {
+		return nil
+	}
+	platform := strings.TrimSpace(project.Platform)
+	if platform != model.PlatformWechat && platform != model.PlatformSeednote {
+		return nil
+	}
+	setup := model.NewProjectProfileSetup()
+	setup.AccountStatus = "existing"
+	setup.PlatformAccounts = []model.ProjectProfileAccount{{
+		Platform: platform, ProfileURL: strings.TrimSpace(project.ProfileURL), Source: model.ProfileSourceUserConfirmed,
+	}}
+	return &setup
 }
 
 // taskAPIPrivateFields are task fields that exist for Server-side execution,
