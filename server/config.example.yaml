@@ -7,6 +7,23 @@ server:
 logging:
   level: info
 
+# Optional portrait interview. No browser/provider secrets or DB migration.
+# All requests require login; the platform pays provider costs within Redis quotas.
+# Omitting this entire section reuses the existing official DeepSeek effective
+# execution profile. An explicit section (including enabled:false) overrides reuse.
+onboarding:
+  enabled: ${ANBAN_ONBOARDING_ENABLED:-false}
+  daily_user_limit: ${ANBAN_ONBOARDING_DAILY_USER_LIMIT:-60}
+  daily_global_limit: ${ANBAN_ONBOARDING_DAILY_GLOBAL_LIMIT:-1000}
+  chat:
+    base_url: "${ANBAN_ONBOARDING_CHAT_BASE_URL}"
+    api_key: "${ANBAN_ONBOARDING_CHAT_API_KEY}"
+    model: "${ANBAN_ONBOARDING_CHAT_MODEL}"
+  speech:
+    base_url: "${ANBAN_ONBOARDING_SPEECH_BASE_URL}"
+    api_key: "${ANBAN_ONBOARDING_SPEECH_API_KEY}"
+    model: "${ANBAN_ONBOARDING_SPEECH_MODEL}"
+
 database:
   dsn: "${ANBAN_DATABASE_DSN}"
   max_open_conns: 20

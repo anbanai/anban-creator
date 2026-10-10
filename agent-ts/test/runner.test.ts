@@ -682,7 +682,9 @@ describe("managed progress hooks", () => {
     const root = await progressWorkspace();
     const pluginRoot = join(root, "plugin");
     await mkdir(join(pluginRoot, "hooks"), { recursive: true });
-    await writeFile(join(pluginRoot, "hooks", "seednote-quality-gate.sh"), "#!/bin/sh\nexit 0\n");
+    // Consume the hook payload before exiting, as the real gate does. Exiting
+    // before the parent writes stdin races with a broken pipe on Linux CI.
+    await writeFile(join(pluginRoot, "hooks", "seednote-quality-gate.sh"), "#!/bin/sh\ncat >/dev/null\nexit 0\n");
     await chmod(join(pluginRoot, "hooks", "seednote-quality-gate.sh"), 0o755);
     await writeFile(join(root, "output", "source-analysis.md"), "analysis");
     const previousPluginRoot = process.env.CLAUDE_PLUGIN_ROOT;

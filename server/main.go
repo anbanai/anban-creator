@@ -860,6 +860,7 @@ func main() {
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
+		PortraitOnboardingHandler:    handler.NewPortraitOnboardingHandler(service.NewPortraitOnboardingService(cfg.Onboarding, rdb)),
 		Config:                       cfg,
 		Logger:                       log,
 		DB:                           mysqlDB,

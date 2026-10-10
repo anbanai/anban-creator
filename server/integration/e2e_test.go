@@ -176,7 +176,8 @@ func registerUser(t *testing.T, app *fiber.App, email, password, nickname string
 	})
 	req := httptest.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
+	// Keep real password hashing, allowing for its cost under the race detector.
+	resp, err := app.Test(req, fiber.TestConfig{Timeout: 10 * time.Second, FailOnTimeout: true})
 	if err != nil {
 		t.Fatalf("register request failed: %v", err)
 	}
@@ -521,7 +522,7 @@ func TestE2E_AuthLifecycle(t *testing.T) {
 	})
 	loginReq := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(string(loginBody)))
 	loginReq.Header.Set("Content-Type", "application/json")
-	loginResp, err := app.Test(loginReq)
+	loginResp, err := app.Test(loginReq, fiber.TestConfig{Timeout: 10 * time.Second, FailOnTimeout: true})
 	if err != nil {
 		t.Fatalf("login request failed: %v", err)
 	}

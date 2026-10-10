@@ -20,6 +20,7 @@ import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
 import { TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
+import { TaskResults } from '@/components/tasks/TaskResults'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
@@ -664,7 +665,7 @@ export default function TaskDetailPage() {
               <span className="sr-only">{taskAgentLabel}</span>
             </div>
             <h1 className="min-w-0 max-w-4xl text-xl font-bold leading-tight text-foreground">
-              {task.title || task.prompt || `${taskAgentLabel}任务`}
+              {(task.title || task.prompt || '').length > 90 ? `${taskAgentLabel} · ${task.status === 'completed' ? '创作结果' : '创作任务'}` : task.title || task.prompt || `${taskAgentLabel}任务`}
             </h1>
             <StatusPill status={task.status} label={taskStatusLabel[task.status] || task.status} />
             {project && (
@@ -756,12 +757,15 @@ export default function TaskDetailPage() {
           filesLoading={filesLoading}
           filesError={filesError}
           onResume={() => setShowResumeDialog(true)}
-          onOpenMaterials={() => openTaskDetails('materials')}
+          onOpenMaterials={() => document.getElementById('task-results')?.scrollIntoView({behavior:'smooth',block:'start'})}
         />
       )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
+          <div id="task-results"><TaskResults key={task.id} task={task} files={files ?? []}/></div>
+          <details key={`${task.id}-${task.status === 'completed'}`} open={task.status !== 'completed'} className="rounded-xl border border-border bg-card">
+          <summary className="cursor-pointer px-5 py-4 text-sm font-medium">创作过程与文件记录 <span className="ml-2 text-xs font-normal text-muted-foreground">研究、大纲、检查记录及公众号交付状态</span></summary>
           <TaskExecutionRail
             key={task.id}
             taskId={task.id}
@@ -779,6 +783,7 @@ export default function TaskDetailPage() {
             filesError={filesError}
             onRetryFiles={() => void refetchFiles()}
           />
+          </details>
 
           {task.type === 'wechat-article' && task.status === 'completed' && project && (
             <WechatAnalyticsPanel taskId={task.id} />

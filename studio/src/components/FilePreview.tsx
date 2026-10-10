@@ -129,6 +129,7 @@ function taskFileRoleLabel(file: TaskFile, taskType?: string) {
 function FilePreviewModalContent({
   file,
   taskId,
+  previewTitle,
   details,
   navigation,
   onKeyDown,
@@ -136,6 +137,7 @@ function FilePreviewModalContent({
 }: {
   file: TaskFile
   taskId: string
+  previewTitle?: string
   details?: React.ReactNode
   navigation?: React.ReactNode
   onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>
@@ -288,9 +290,9 @@ function FilePreviewModalContent({
   return (
     <DialogContent className={`${modalClass} max-h-[calc(100dvh-2rem)] overflow-y-auto`} onKeyDown={onKeyDown}>
       <DialogHeader>
-        <DialogTitle className="truncate">{isVideo ? '视频结果' : file.file_name}</DialogTitle>
+        <DialogTitle className="truncate">{previewTitle || (isVideo ? '视频结果' : file.file_name)}</DialogTitle>
         <DialogDescription>
-          {isVideo ? `${file.file_name} · ` : ''}{file.mime_type} &middot; {formatSize(file.file_size)}
+          {previewTitle ? '检查内容后，可以在下方复制或下载。' : <>{isVideo ? `${file.file_name} · ` : ''}{file.mime_type} &middot; {formatSize(file.file_size)}</>}
         </DialogDescription>
       </DialogHeader>
 
@@ -452,6 +454,8 @@ export function FilePreviewGallery({
   taskType,
   inlineItemClassName,
   renderPreviewDetails,
+  renderTrigger,
+  previewTitle,
   compact = false,
 }: {
   files: TaskFile[]
@@ -459,6 +463,8 @@ export function FilePreviewGallery({
   taskType?: string
   inlineItemClassName?: string
   renderPreviewDetails?: (file: TaskFile) => React.ReactNode
+  renderTrigger?: (file: TaskFile, open: () => void) => React.ReactNode
+  previewTitle?: string
   compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -497,7 +503,7 @@ export function FilePreviewGallery({
   return (
     <>
       {files.map((file, index) => (
-        inlineItemClassName ? (
+        renderTrigger ? <div key={file.id}>{renderTrigger(file, () => handleOpen(index))}</div> : inlineItemClassName ? (
           <div key={file.id} className={inlineItemClassName}>
             <FilePreviewInline
               file={file}
@@ -523,6 +529,7 @@ export function FilePreviewGallery({
           <FilePreviewModalContent
             file={currentFile}
             taskId={taskId}
+            previewTitle={previewTitle}
             details={renderPreviewDetails?.(currentFile)}
             onKeyDown={handleKeyDown}
             navigation={compact && hasMultiple ? (

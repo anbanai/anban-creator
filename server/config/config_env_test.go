@@ -49,6 +49,8 @@ func TestNewConfigEnvInterpolation(t *testing.T) {
 	t.Setenv("ANBAN_TEST_REDIS", "redis:6379")
 	t.Setenv("ANBAN_TEST_ILINK_URL", "http://sidecar-ilink:18070")
 	t.Setenv("ANBAN_TEST_SEEDNOTE_URL", "http://sidecar-seednote:18060")
+	t.Setenv("ANBAN_TEST_DEEPSEEK_KEY", "existing-server-only-key")
+	t.Setenv("ANBAN_TEST_MEMORY_ROOT", filepath.ToSlash(t.TempDir()))
 	// An unrelated env var that must NOT leak into config.
 	t.Setenv("ANBAN_JWT_SECRET_KEY", "should-be-ignored-without-placeholder")
 
@@ -70,6 +72,19 @@ ilink:
   enabled: true
   base_url: "${ANBAN_TEST_ILINK_URL:-http://localhost:18070}"
 claude:
+  execution_profiles:
+    effective:
+      provider: deepseek
+      envs:
+        ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+        ANTHROPIC_AUTH_TOKEN: ${ANBAN_TEST_DEEPSEEK_KEY}
+        ANTHROPIC_MODEL: deepseek-flash
+        ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-flash
+        ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-flash
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-flash
+        ANTHROPIC_DEFAULT_FABLE_MODEL: deepseek-flash
+  project_memory:
+    root_dir: ${ANBAN_TEST_MEMORY_ROOT}
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
@@ -110,5 +125,18 @@ claude:
 	// NOT override the literal value — the hidden override layer is gone.
 	if cfg.JWT.SecretKey != "real-secret" {
 		t.Errorf("jwt.secret_key = %q, want \"real-secret\" (env must not override without ${...})", cfg.JWT.SecretKey)
+	}
+	if !cfg.Onboarding.Enabled || cfg.Onboarding.Chat.APIKey != "existing-server-only-key" || cfg.Onboarding.Chat.BaseURL != "https://api.deepseek.com" {
+		t.Fatal("NewConfig did not reuse the resolved server provider")
+	}
+	if err := os.WriteFile(path, []byte("onboarding:\n  enabled: false\n"+yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := NewConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.Onboarding.Enabled || disabled.Onboarding.Chat.APIKey != "" {
+		t.Fatal("explicit disable must prevent inheritance")
 	}
 }

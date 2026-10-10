@@ -166,23 +166,23 @@ func (h *TaskHandler) presentCloneTaskReference(ctx context.Context, userID stri
 // Request types.
 
 type createTaskRequest struct {
-	ProjectID          string                           `json:"project_id"`
-	AgentID            string                           `json:"agent_id"`
-	Channel            string                           `json:"channel"`
-	TaskKind           string                           `json:"task_kind"`
-	Type               string                           `json:"type"`
-	ExecutionProfile   string                           `json:"execution_profile"`
-	Prompt             string                           `json:"prompt"`
-	Quantity           int                              `json:"quantity"`
-	ImageRatio         string                           `json:"image_ratio"`
-	ImageCapabilityKey string                           `json:"image_capability_key"`
-	SkipReferenceImage *bool                            `json:"skip_reference_image"`
-	ReferenceImage     *service.ReferenceImageSelection `json:"reference_image"`
-	PortraitReferenceImage     *service.ReferenceImageSelection `json:"portrait_reference_image"`
+	ProjectID                 string                           `json:"project_id"`
+	AgentID                   string                           `json:"agent_id"`
+	Channel                   string                           `json:"channel"`
+	TaskKind                  string                           `json:"task_kind"`
+	Type                      string                           `json:"type"`
+	ExecutionProfile          string                           `json:"execution_profile"`
+	Prompt                    string                           `json:"prompt"`
+	Quantity                  int                              `json:"quantity"`
+	ImageRatio                string                           `json:"image_ratio"`
+	ImageCapabilityKey        string                           `json:"image_capability_key"`
+	SkipReferenceImage        *bool                            `json:"skip_reference_image"`
+	ReferenceImage            *service.ReferenceImageSelection `json:"reference_image"`
+	PortraitReferenceImage    *service.ReferenceImageSelection `json:"portrait_reference_image"`
 	PortraitReferenceImageSet bool                             `json:"-"`
-	InputAttachments   []model.EntryAttachment          `json:"input_attachments,omitempty"`
-	AgentInput         map[string]any                   `json:"agent_input,omitempty"`
-	Watermark          *bool                            `json:"watermark"`
+	InputAttachments          []model.EntryAttachment          `json:"input_attachments,omitempty"`
+	AgentInput                map[string]any                   `json:"agent_input,omitempty"`
+	Watermark                 *bool                            `json:"watermark"`
 	// HasContentImage / HasTailImage: seednote image composition (cover always
 	// generated). nil → fall back to CreateManualParams defaults (content on,
 	// tail off). Non-seednote task types ignore them.
@@ -210,31 +210,31 @@ type createTaskRequest struct {
 }
 
 type cloneTaskRequest struct {
-	ProjectID                string                           `json:"project_id"`
-	ExecutionProfile         string                           `json:"execution_profile"`
-	Prompt                   *string                          `json:"prompt"`
-	Quantity                 int                              `json:"quantity"`
-	ImageRatio               string                           `json:"image_ratio"`
-	ImageCapabilityKey       string                           `json:"image_capability_key"`
-	SkipReferenceImage       *bool                            `json:"skip_reference_image"`
-	ReferenceImage           *service.ReferenceImageSelection `json:"reference_image"`
-	PortraitReferenceImage   *service.ReferenceImageSelection `json:"portrait_reference_image"`
-	PortraitReferenceImageSet bool                            `json:"-"`
-	InputAttachments         *[]model.EntryAttachment         `json:"input_attachments"`
-	AgentInput               *map[string]any                  `json:"agent_input"`
-	Watermark                *bool                            `json:"watermark"`
-	HasContentImage          *bool                            `json:"has_content_image,omitempty"`
-	HasTailImage             *bool                            `json:"has_tail_image,omitempty"`
-	ArticleWithCover         *bool                            `json:"article_with_cover,omitempty"`
-	ArticleWithContentImages *bool                            `json:"article_with_content_images,omitempty"`
-	CoverUsePortrait         *bool                            `json:"cover_use_portrait,omitempty"`
-	ProductPhotos            []string                         `json:"product_photos,omitempty"`
-	SelectedModules          map[string]int                   `json:"selected_modules,omitempty"`
-	TargetPlatform           string                           `json:"target_platform,omitempty"`
-	SellingPoints            string                           `json:"selling_points,omitempty"`
-	Language                 string                           `json:"language,omitempty"`
-	MontageInput             *model.MontageInput              `json:"montage_input,omitempty"`
-	HypitInput               *model.HypitInput                `json:"hypit_input,omitempty"`
+	ProjectID                 string                           `json:"project_id"`
+	ExecutionProfile          string                           `json:"execution_profile"`
+	Prompt                    *string                          `json:"prompt"`
+	Quantity                  int                              `json:"quantity"`
+	ImageRatio                string                           `json:"image_ratio"`
+	ImageCapabilityKey        string                           `json:"image_capability_key"`
+	SkipReferenceImage        *bool                            `json:"skip_reference_image"`
+	ReferenceImage            *service.ReferenceImageSelection `json:"reference_image"`
+	PortraitReferenceImage    *service.ReferenceImageSelection `json:"portrait_reference_image"`
+	PortraitReferenceImageSet bool                             `json:"-"`
+	InputAttachments          *[]model.EntryAttachment         `json:"input_attachments"`
+	AgentInput                *map[string]any                  `json:"agent_input"`
+	Watermark                 *bool                            `json:"watermark"`
+	HasContentImage           *bool                            `json:"has_content_image,omitempty"`
+	HasTailImage              *bool                            `json:"has_tail_image,omitempty"`
+	ArticleWithCover          *bool                            `json:"article_with_cover,omitempty"`
+	ArticleWithContentImages  *bool                            `json:"article_with_content_images,omitempty"`
+	CoverUsePortrait          *bool                            `json:"cover_use_portrait,omitempty"`
+	ProductPhotos             []string                         `json:"product_photos,omitempty"`
+	SelectedModules           map[string]int                   `json:"selected_modules,omitempty"`
+	TargetPlatform            string                           `json:"target_platform,omitempty"`
+	SellingPoints             string                           `json:"selling_points,omitempty"`
+	Language                  string                           `json:"language,omitempty"`
+	MontageInput              *model.MontageInput              `json:"montage_input,omitempty"`
+	HypitInput                *model.HypitInput                `json:"hypit_input,omitempty"`
 }
 
 type resumeTaskRequest struct {
@@ -325,10 +325,10 @@ func (h *TaskHandler) Create(c fiber.Ctx) error {
 }
 
 type preparedTaskCreation struct {
-	params                 service.CreateManualParams
-	quantity               int
-	referenceView          *model.AssetView
-	portraitReferenceView  *model.AssetView
+	params                service.CreateManualParams
+	quantity              int
+	referenceView         *model.AssetView
+	portraitReferenceView *model.AssetView
 }
 
 type taskScopedCreationInput struct {
@@ -662,32 +662,32 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 		referenceView:         referenceView,
 		portraitReferenceView: portraitReferenceView,
 		params: service.CreateManualParams{
-			UserID:                   userID,
-			ProjectID:                req.ProjectID,
-			AgentID:                  strings.TrimSpace(req.AgentID),
-			Channel:                  strings.TrimSpace(req.Channel),
-			TaskKind:                 strings.TrimSpace(req.TaskKind),
-			RequestedTaskType:        requestedTaskType,
-			ExecutionProfile:         strings.TrimSpace(req.ExecutionProfile),
-			Prompt:                   prompt,
-			Quantity:                 quantity,
-			ImageRatio:               req.ImageRatio,
-			ImageCapabilityKey:       req.ImageCapabilityKey,
-			SkipRefImage:             req.SkipReferenceImage,
-			ReferenceImageAssetID:    referenceAssetID,
+			UserID:                        userID,
+			ProjectID:                     req.ProjectID,
+			AgentID:                       strings.TrimSpace(req.AgentID),
+			Channel:                       strings.TrimSpace(req.Channel),
+			TaskKind:                      strings.TrimSpace(req.TaskKind),
+			RequestedTaskType:             requestedTaskType,
+			ExecutionProfile:              strings.TrimSpace(req.ExecutionProfile),
+			Prompt:                        prompt,
+			Quantity:                      quantity,
+			ImageRatio:                    req.ImageRatio,
+			ImageCapabilityKey:            req.ImageCapabilityKey,
+			SkipRefImage:                  req.SkipReferenceImage,
+			ReferenceImageAssetID:         referenceAssetID,
 			PortraitReferenceImageAssetID: portraitReferenceAssetID,
-			ProjectSnapshot:          &projectSnapshot,
-			InputAttachments:         req.InputAttachments,
-			AgentInput:               req.AgentInput,
-			Watermark:                req.Watermark,
-			HasContentImage:          req.HasContentImage,
-			HasTailImage:             req.HasTailImage,
-			ArticleWithCover:         req.ArticleWithCover,
-			ArticleWithContentImages: req.ArticleWithContentImages,
-			CoverUsePortrait:         req.CoverUsePortrait,
-			Ecommerce:                ecommerceCfg,
-			MontageInput:             req.MontageInput,
-			HypitInput:               req.HypitInput,
+			ProjectSnapshot:               &projectSnapshot,
+			InputAttachments:              req.InputAttachments,
+			AgentInput:                    req.AgentInput,
+			Watermark:                     req.Watermark,
+			HasContentImage:               req.HasContentImage,
+			HasTailImage:                  req.HasTailImage,
+			ArticleWithCover:              req.ArticleWithCover,
+			ArticleWithContentImages:      req.ArticleWithContentImages,
+			CoverUsePortrait:              req.CoverUsePortrait,
+			Ecommerce:                     ecommerceCfg,
+			MontageInput:                  req.MontageInput,
+			HypitInput:                    req.HypitInput,
 		},
 	}, nil
 }
@@ -1063,33 +1063,33 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			attachments = *req.InputAttachments
 		}
 		creationReq := createTaskRequest{
-			ProjectID:                req.ProjectID,
-			AgentID:                  task.AgentID,
-			Channel:                  task.Channel,
-			TaskKind:                 task.TaskKind,
-			ExecutionProfile:         req.ExecutionProfile,
-			Prompt:                   prompt,
-			Quantity:                 req.Quantity,
-			ImageRatio:               req.ImageRatio,
-			ImageCapabilityKey:       req.ImageCapabilityKey,
-			SkipReferenceImage:       req.SkipReferenceImage,
-			ReferenceImage:           req.ReferenceImage,
-			PortraitReferenceImage:   req.PortraitReferenceImage,
+			ProjectID:                 req.ProjectID,
+			AgentID:                   task.AgentID,
+			Channel:                   task.Channel,
+			TaskKind:                  task.TaskKind,
+			ExecutionProfile:          req.ExecutionProfile,
+			Prompt:                    prompt,
+			Quantity:                  req.Quantity,
+			ImageRatio:                req.ImageRatio,
+			ImageCapabilityKey:        req.ImageCapabilityKey,
+			SkipReferenceImage:        req.SkipReferenceImage,
+			ReferenceImage:            req.ReferenceImage,
+			PortraitReferenceImage:    req.PortraitReferenceImage,
 			PortraitReferenceImageSet: req.PortraitReferenceImageSet,
-			InputAttachments:         attachments,
-			Watermark:                req.Watermark,
-			HasContentImage:          req.HasContentImage,
-			HasTailImage:             req.HasTailImage,
-			ArticleWithCover:         req.ArticleWithCover,
-			ArticleWithContentImages: req.ArticleWithContentImages,
-			CoverUsePortrait:         req.CoverUsePortrait != nil && *req.CoverUsePortrait,
-			ProductPhotos:            req.ProductPhotos,
-			SelectedModules:          req.SelectedModules,
-			TargetPlatform:           req.TargetPlatform,
-			SellingPoints:            req.SellingPoints,
-			Language:                 req.Language,
-			MontageInput:             req.MontageInput,
-			HypitInput:               req.HypitInput,
+			InputAttachments:          attachments,
+			Watermark:                 req.Watermark,
+			HasContentImage:           req.HasContentImage,
+			HasTailImage:              req.HasTailImage,
+			ArticleWithCover:          req.ArticleWithCover,
+			ArticleWithContentImages:  req.ArticleWithContentImages,
+			CoverUsePortrait:          req.CoverUsePortrait != nil && *req.CoverUsePortrait,
+			ProductPhotos:             req.ProductPhotos,
+			SelectedModules:           req.SelectedModules,
+			TargetPlatform:            req.TargetPlatform,
+			SellingPoints:             req.SellingPoints,
+			Language:                  req.Language,
+			MontageInput:              req.MontageInput,
+			HypitInput:                req.HypitInput,
 		}
 		if req.AgentInput != nil {
 			creationReq.AgentInput = *req.AgentInput
@@ -1101,25 +1101,25 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			return err
 		}
 		tasks, err := h.service.Clone(c.Context(), id, service.CloneTaskParams{ExecutionProfile: req.ExecutionProfile, Overrides: &service.CloneTaskOverrides{
-			ProjectID:                prepared.params.ProjectID,
-			Quantity:                 prepared.params.Quantity,
-			Prompt:                   prepared.params.Prompt,
-			ImageRatio:               prepared.params.ImageRatio,
-			ImageCapabilityKey:       prepared.params.ImageCapabilityKey,
-			SkipRefImage:             prepared.params.SkipRefImage,
-			ReferenceImageAssetID:    prepared.params.ReferenceImageAssetID,
+			ProjectID:                     prepared.params.ProjectID,
+			Quantity:                      prepared.params.Quantity,
+			Prompt:                        prepared.params.Prompt,
+			ImageRatio:                    prepared.params.ImageRatio,
+			ImageCapabilityKey:            prepared.params.ImageCapabilityKey,
+			SkipRefImage:                  prepared.params.SkipRefImage,
+			ReferenceImageAssetID:         prepared.params.ReferenceImageAssetID,
 			PortraitReferenceImageAssetID: prepared.params.PortraitReferenceImageAssetID,
-			InputAttachments:         prepared.params.InputAttachments,
-			AgentInput:               prepared.params.AgentInput,
-			Watermark:                prepared.params.Watermark,
-			HasContentImage:          prepared.params.HasContentImage,
-			HasTailImage:             prepared.params.HasTailImage,
-			ArticleWithCover:         prepared.params.ArticleWithCover,
-			ArticleWithContentImages: prepared.params.ArticleWithContentImages,
-			CoverUsePortrait:         req.CoverUsePortrait,
-			Ecommerce:                prepared.params.Ecommerce,
-			MontageInput:             prepared.params.MontageInput,
-			HypitInput:               prepared.params.HypitInput,
+			InputAttachments:              prepared.params.InputAttachments,
+			AgentInput:                    prepared.params.AgentInput,
+			Watermark:                     prepared.params.Watermark,
+			HasContentImage:               prepared.params.HasContentImage,
+			HasTailImage:                  prepared.params.HasTailImage,
+			ArticleWithCover:              prepared.params.ArticleWithCover,
+			ArticleWithContentImages:      prepared.params.ArticleWithContentImages,
+			CoverUsePortrait:              req.CoverUsePortrait,
+			Ecommerce:                     prepared.params.Ecommerce,
+			MontageInput:                  prepared.params.MontageInput,
+			HypitInput:                    prepared.params.HypitInput,
 		}})
 		if err != nil {
 			return h.respondTaskCreationServiceError(c, userID, err, "editable clone task failed", "克隆任务失败")
