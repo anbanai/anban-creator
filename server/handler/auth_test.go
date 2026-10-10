@@ -359,7 +359,8 @@ func postAuthRequest(t *testing.T, handler fiber.Handler, body string) *http.Res
 	app.Post("/", handler)
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
-	response, err := app.Test(request)
+	// Password hashing under -race can exceed Fiber's one-second default.
+	response, err := app.Test(request, fiber.TestConfig{Timeout: 10 * time.Second, FailOnTimeout: true})
 	if err != nil {
 		t.Fatalf("auth request: %v", err)
 	}

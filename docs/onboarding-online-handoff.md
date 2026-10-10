@@ -6,7 +6,7 @@
 
 ## 使用
 
-用户已选择连接现有线上案板账号。这是**真实线上读写**，不是 Mock。
+用户已选择连接现有线上Anban账号。这是**真实线上读写**，不是 Mock。
 
 在 `studio` 启动 `bun run dev -- --config preview.online.config.ts`；需要离线语音时沿用 `ANBAN_PREVIEW_WHISPER_ROOT`。本机登录地址 `http://127.0.0.1:5175/login`，通用空白入口 `http://127.0.0.1:5175/onboarding-online.html`。
 

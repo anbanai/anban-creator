@@ -112,7 +112,7 @@ export function PortraitConversation({
       </Dialog>
       <div className="portrait-messages" ref={messagesRef} role="log" aria-label="对话记录" aria-live="polite">
         {messages.map(message => <article key={message.id} className={`portrait-message ${message.role}`}>
-          <div className="portrait-speaker">{message.role === 'assistant' ? <><Sparkles size={14} /> 案板</> : '你'}</div>
+          <div className="portrait-speaker">{message.role === 'assistant' ? <><Sparkles size={14} /> Anban</> : '你'}</div>
           <p>{message.text}</p>
           {message.update && <span className="portrait-update"><Check size={13} />{message.update}</span>}
         </article>)}
@@ -121,7 +121,7 @@ export function PortraitConversation({
       <div className="portrait-compose">
         {suggestion && <button className="portrait-example" disabled={locked || voice.active} onClick={() => { setInput(suggestion); inputRef.current?.focus() }}>试用示例回答 <ArrowRight size={13} /></button>}
         <form onSubmit={event => { event.preventDefault(); void send() }}>
-          <textarea ref={inputRef} aria-label="给案板发消息" placeholder="像聊天一样说就好，也可以随时纠正我的理解…"
+          <textarea ref={inputRef} aria-label="给Anban发消息" placeholder="像聊天一样说就好，也可以随时纠正我的理解…"
             value={input} disabled={locked} readOnly={voice.active} onChange={event => setInput(event.target.value)} rows={3}
             onKeyDown={event => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {

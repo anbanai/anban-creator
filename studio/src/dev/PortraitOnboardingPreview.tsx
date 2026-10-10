@@ -101,7 +101,7 @@ export default function PortraitOnboardingPreview() {
 
   return <div className="portrait-preview">
     <div className="portrait-preview-bar"><span>交互样例 · 花店故事为虚构演示，回复按示例预设，未接入真实 AI</span><span>不连接账号，不生成作品；刷新后重置</span></div>
-    <nav className="portrait-preview-nav" aria-label="预览导航"><strong>案板 <span>让好内容，从认识你开始</span></strong><button onClick={() => setResetPrompt(true)}>从空白重新体验</button></nav>
+    <nav className="portrait-preview-nav" aria-label="预览导航"><strong>Anban <span>让好内容，从认识你开始</span></strong><button onClick={() => setResetPrompt(true)}>从空白重新体验</button></nav>
     {resetPrompt && <div className="portrait-reset" role="alert"><span>重新开始会清空本次演示对话和未发送文字。</span><button onClick={() => setResetPrompt(false)}>继续当前对话</button><button onClick={reset}>清空并重新开始</button></div>}
     {customPending && <div className="portrait-reset" role="status"><span>你的自由输入尚未纳入画像，当前只能演示预设故事。</span><button onClick={() => {
       setCustomPending(false)

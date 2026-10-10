@@ -107,8 +107,8 @@ export default function PortraitDelivery({ candidate, messages, sessionId, produ
   const canSave = receipt && (receipt.portraitKey === key || receipt.phase === 'new' || ['saved','task_created'].includes(receipt.phase))
   const status=task?({pending:'已排队',running:'正在创作',completed:'任务已完成',failed:'生成失败',cancelled:'已取消'}[task.status]):'读取任务进度中'
   return <div className="portrait-online" aria-label="线上项目与作品交付">
-    <p><strong>{production ? '保存你的画像，开始第一篇创作' : '连接现有线上案板账号'}</strong></p>
-    <p>{account?`当前账号：${account.name}`:'请先登录你的案板账号。'} {!production && <a href="/login" target="_blank" rel="noreferrer">登录线上账号</a>} <button disabled={checking||busy} onClick={()=>void connect()}>{checking?'正在连接…':'检查连接'}</button></p>
+    <p><strong>{production ? '保存你的画像，开始第一篇创作' : '连接现有线上Anban账号'}</strong></p>
+    <p>{account?`当前账号：${account.name}`:'请先登录你的Anban账号。'} {!production && <a href="/login" target="_blank" rel="noreferrer">登录线上账号</a>} <button disabled={checking||busy} onClick={()=>void connect()}>{checking?'正在连接…':'检查连接'}</button></p>
     {error&&<p className="portrait-error" role="alert">{error}</p>}
     {receipt?.portraitKey!==key&&receipt&&<p role="status">画像有了新的补充。保存后会更新同一个项目；若线上已有其他修改，会提示你核对。</p>}
     {receipt?.projectId&&<p>项目{saved?'及画像已保存':'已创建，画像尚待保存'}：<a target="_blank" rel="noreferrer" href={`/projects?edit=${encodeURIComponent(receipt.projectId)}`}>{production ? '查看项目' : '查看线上项目'}</a></p>}

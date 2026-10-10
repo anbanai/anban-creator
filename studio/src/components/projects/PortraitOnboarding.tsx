@@ -131,7 +131,7 @@ export default function PortraitOnboarding({ initialConversation, initialSession
 
   return <div className="portrait-preview">
     <div className="portrait-preview-bar"><span>{production ? '认识你 · 整理画像 · 开始创作' : `真实对话 · DeepSeek${connection.model ? ` / ${connection.model}` : ''}`}</span><span>{production ? '画像随对话更新；点击保存才会写入项目。' : '本机新界面 · 确认后可保存项目并生成作品'}</span></div>
-    <nav className="portrait-preview-nav" aria-label="画像访谈导航"><strong>案板 <span>让好内容，从认识你开始</span></strong><button onClick={() => setResetPrompt(true)}>从空白重新开始</button></nav>
+    <nav className="portrait-preview-nav" aria-label="画像访谈导航"><strong>Anban <span>让好内容，从认识你开始</span></strong><button onClick={() => setResetPrompt(true)}>从空白重新开始</button></nav>
     {!connection.configured && <div className="portrait-reset" role="status"><span>{checking ? '正在连接…' : connection.error || (production ? '正在准备访谈服务…' : '填写本机 DeepSeek 配置后，即可开始真实对话。')}</span><button disabled={checking || busy} onClick={() => void refreshConfiguration()}>重新连接</button></div>}
     {resetPrompt && <div className="portrait-reset" role="alert"><span>重新开始会清空本次对话、画像和未发送文字。</span><button onClick={() => setResetPrompt(false)}>继续当前对话</button><button onClick={reset}>清空并重新开始</button></div>}
     {creating ? <section className="portrait-next" tabIndex={-1} ref={nextRef} aria-label="本次创作简报">
