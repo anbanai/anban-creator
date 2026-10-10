@@ -82,6 +82,24 @@ function renderRoute(path: string, queryClient?: QueryClient, strictMode = false
   return render(strictMode ? <StrictMode>{content}</StrictMode> : content)
 }
 
+function nextStep() {
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+}
+
+function finishCreation() {
+  nextStep()
+  nextStep()
+  nextStep()
+  fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+}
+
+function openEditSave() {
+  nextStep()
+  nextStep()
+  nextStep()
+  fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+}
+
 describe('ProfileLabPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -93,9 +111,12 @@ describe('ProfileLabPage', () => {
     for (const label of ['公众号文章', '公众号贴图', '种草笔记', '视频生成', '视频复刻', '白板视频']) {
       fireEvent.click(screen.getByRole('checkbox', { name: label }))
     }
+    nextStep()
     fireEvent.change(screen.getByLabelText('主页链接 · 公众号'), { target: { value: 'https://example.com/wechat' } })
     fireEvent.change(screen.getByLabelText('主页链接 · 种草笔记'), { target: { value: 'https://example.com/seednote' } })
+    nextStep()
     fireEvent.change(screen.getByLabelText('运营目标'), { target: { value: '建立个人品牌' } })
+    nextStep()
     fireEvent.change(screen.getByLabelText('内容偏好'), { target: { value: '案例和实操' } })
     fireEvent.change(screen.getByLabelText('内容红线'), { target: { value: '不做夸大承诺' } })
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
@@ -126,6 +147,9 @@ describe('ProfileLabPage', () => {
     renderRoute('/projects/new')
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '只建项目' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
+    nextStep()
+    nextStep()
+    nextStep()
     fireEvent.click(screen.getByRole('checkbox', { name: '跳过画像分析' }))
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
     await waitFor(() => expect(api.projects.create).toHaveBeenCalled())
@@ -139,7 +163,7 @@ describe('ProfileLabPage', () => {
     renderRoute('/projects/new', undefined, true)
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: 'Strict Mode 项目' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    finishCreation()
 
     await waitFor(() => expect(window.location.pathname).toBe('/projects/created-1/profile-lab'))
     expect(await screen.findByText('分析中')).toBeInTheDocument()
@@ -149,8 +173,12 @@ describe('ProfileLabPage', () => {
     renderRoute('/projects/new')
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '视觉项目' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
+    nextStep()
+    fireEvent.click(screen.getByText('更多资料（可选）'))
     fireEvent.change(screen.getByLabelText('视觉风格描述'), { target: { value: '自然光、低饱和' } })
     fireEvent.click(screen.getByRole('button', { name: '项目参考图文件' }))
+    nextStep()
+    nextStep()
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
 
     await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -168,7 +196,7 @@ describe('ProfileLabPage', () => {
     vi.mocked(api.projects.get).mockResolvedValueOnce({ project: { ...project, profile_setup: legacySetup }, stats })
     renderRoute('/projects/project-1/profile-lab')
     await screen.findByRole('heading', { name: '云端手记' })
-    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    openEditSave()
 
     await waitFor(() => expect(api.projects.update).toHaveBeenCalledWith('project-1', expect.objectContaining({
       profile_setup: expect.objectContaining({
@@ -206,27 +234,51 @@ describe('ProfileLabPage', () => {
     await waitFor(() => expect(api.projects.restoreProfileRevision).toHaveBeenCalledWith('project-1', 1, 2))
   })
 
-  it('uses a three-column desktop workspace that collapses to one column on mobile', async () => {
+  it('uses a simple single-column workspace with a four-step progress line', async () => {
     renderRoute('/projects/new')
     const layout = screen.getByTestId('profile-lab-layout')
-    expect(layout).toHaveClass('xl:grid-cols-[12rem_minmax(0,1fr)_17rem]')
-    expect(layout).toHaveClass('grid-cols-1')
+    expect(layout).toHaveClass('max-w-3xl')
+    expect(screen.getByRole('navigation', { name: '创建进度' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '1. 基础信息' })).toHaveAttribute('aria-current', 'step')
+    expect(screen.queryByLabelText('运营目标')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '简洁项目' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
+    nextStep()
+    expect(screen.queryByLabelText('运营目标')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '你的公开账号' })).toBeInTheDocument()
+  })
+
+  it('keeps progress-line navigation sequential when an earlier step is invalid', async () => {
+    renderRoute('/projects/new')
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '顺序校验项目' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByRole('button', { name: '2. 社媒链接' })).toHaveAttribute('aria-current', 'step')
+
+    fireEvent.change(screen.getByLabelText('主页链接 · 公众号'), { target: { value: 'invalid' } })
+    fireEvent.click(screen.getByRole('button', { name: '4. 偏好与红线' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('请填写有效的公开 HTTP 或 HTTPS 链接')
+    expect(screen.getByRole('button', { name: '2. 社媒链接' })).toHaveAttribute('aria-current', 'step')
+    expect(screen.queryByLabelText('内容偏好')).not.toBeInTheDocument()
   })
 
   it('requires a name and at least one object, validates optional URLs, and retains account details without a URL', async () => {
     renderRoute('/projects/new')
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     expect(screen.getByRole('alert')).toHaveTextContent('请填写项目名称')
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '视频计划' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     expect(screen.getByRole('alert')).toHaveTextContent('至少选择一种创作对象')
     fireEvent.click(screen.getByRole('checkbox', { name: '视频生成' }))
+    nextStep()
     fireEvent.change(screen.getByLabelText('主页链接 · 公众号'), { target: { value: 'invalid' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    nextStep()
     expect(screen.getByRole('alert')).toHaveTextContent('请填写有效的公开 HTTP 或 HTTPS 链接')
     expect(api.projects.create).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText('主页链接 · 公众号'), { target: { value: '' } })
     fireEvent.change(screen.getByLabelText('公众号名称'), { target: { value: '筹备中的账号' } })
+    nextStep()
+    nextStep()
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
     await waitFor(() => expect(api.projects.create).toHaveBeenCalledWith(expect.objectContaining({
       agent_ids: ['montage'], platform: 'montage',
@@ -308,10 +360,13 @@ describe('ProfileLabPage', () => {
     renderRoute('/projects/project-1/profile-lab')
     await screen.findByRole('heading', { name: '云端手记' })
     fireEvent.click(screen.getByRole('checkbox', { name: '视频生成' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: '保存后重新分析画像' }))
+    nextStep()
     fireEvent.click(screen.getByRole('button', { name: '添加账号' }))
     fireEvent.change(screen.getByLabelText('账号 2 平台'), { target: { value: 'seednote' } })
     fireEvent.change(screen.getByLabelText('种草账号名称'), { target: { value: '新账号' } })
+    nextStep()
+    nextStep()
+    fireEvent.click(screen.getByRole('checkbox', { name: '保存后重新分析画像' }))
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
     await waitFor(() => expect(api.projects.update).toHaveBeenCalledWith('project-1', expect.objectContaining({
       agent_ids: ['wechat-article', 'montage'],
@@ -339,11 +394,14 @@ describe('ProfileLabPage', () => {
     } } as Awaited<ReturnType<typeof api.projects.get>>)
     renderRoute('/projects/project-1/profile-lab')
     await screen.findByRole('heading', { name: '云端手记' })
+    nextStep()
     expect(screen.getByLabelText('抖音名称 · 1')).toHaveValue('视频号甲')
     expect(screen.getByLabelText('抖音名称 · 2')).toHaveValue('视频号乙')
     expect(screen.getByLabelText('主页链接 · 知乎')).toHaveValue('https://example.com/zhihu')
     fireEvent.click(screen.getByRole('button', { name: '删除账号 3' }))
     fireEvent.change(screen.getByLabelText('内容样本'), { target: { value: '第一个内容标题\n来自用户粘贴的内容片段' } })
+    nextStep()
+    nextStep()
     fireEvent.click(screen.getByRole('checkbox', { name: '保存后重新分析画像' }))
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
     await waitFor(() => expect(api.projects.update).toHaveBeenCalledWith('project-1', expect.objectContaining({
@@ -369,6 +427,7 @@ describe('ProfileLabPage', () => {
     vi.mocked(api.projects.get).mockResolvedValueOnce({ stats, project: { ...project, profile_setup: { ...project.profile_setup!, platform_accounts: [] } } })
     renderRoute('/projects/project-1/profile-lab')
     await screen.findByRole('heading', { name: '云端手记' })
+    nextStep()
     expect(screen.queryByLabelText('主页链接 · 公众号')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('主页链接 · 种草笔记')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '添加账号' }))
@@ -379,7 +438,7 @@ describe('ProfileLabPage', () => {
     renderRoute('/projects/new?type=wechat-picture&intent=new&return_to=/tasks')
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '贴图项目' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号贴图' }))
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    finishCreation()
     await waitFor(() => expect(window.location.pathname).toBe('/tasks'))
     expect(new URLSearchParams(window.location.search).get('project_id')).toBe('created-1')
     expect(new URLSearchParams(window.location.search).get('type')).toBe('wechat-picture')
@@ -391,7 +450,7 @@ describe('ProfileLabPage', () => {
     renderRoute('/projects/new')
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '离开中的项目' } })
     fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    finishCreation()
     fireEvent.click(screen.getByRole('link', { name: '项目' }))
     expect(window.location.pathname).toBe('/projects')
     await act(async () => resolveCreate({ project: { ...project, id: 'late-created' } }))
