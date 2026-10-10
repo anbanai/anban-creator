@@ -50,6 +50,7 @@ func TestNewConfigEnvInterpolation(t *testing.T) {
 	t.Setenv("ANBAN_TEST_ILINK_URL", "http://sidecar-ilink:18070")
 	t.Setenv("ANBAN_TEST_SEEDNOTE_URL", "http://sidecar-seednote:18060")
 	t.Setenv("ANBAN_TEST_DEEPSEEK_KEY", "existing-server-only-key")
+	t.Setenv("ANBAN_TEST_MEMORY_ROOT", filepath.ToSlash(t.TempDir()))
 	// An unrelated env var that must NOT leak into config.
 	t.Setenv("ANBAN_JWT_SECRET_KEY", "should-be-ignored-without-placeholder")
 
@@ -78,6 +79,12 @@ claude:
         ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
         ANTHROPIC_AUTH_TOKEN: ${ANBAN_TEST_DEEPSEEK_KEY}
         ANTHROPIC_MODEL: deepseek-flash
+        ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-flash
+        ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-flash
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-flash
+        ANTHROPIC_DEFAULT_FABLE_MODEL: deepseek-flash
+  project_memory:
+    root_dir: ${ANBAN_TEST_MEMORY_ROOT}
   executor: docker
   execution_token_secret: 0123456789abcdef0123456789abcdef
   runtime_images:
