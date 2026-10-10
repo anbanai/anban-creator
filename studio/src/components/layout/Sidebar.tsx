@@ -125,8 +125,9 @@ function SidebarNavLink({ item, collapsed, onClick }: {
   collapsed: boolean
   onClick: () => void
 }) {
+  const { pathname } = useLocation()
   const link = (
-    <NavLink to={item.to} end={item.end} onClick={onClick} aria-label={collapsed ? item.label : undefined}
+    <NavLink to={item.to} end={item.end || (item.to === '/projects' && pathname === '/projects/new/interview')} onClick={onClick} aria-label={collapsed ? item.label : undefined}
       className={({ isActive }) => `flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm transition-colors ${isActive ? 'bg-sidebar-accent font-semibold text-sidebar-primary' : 'font-medium text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'} ${collapsed ? 'justify-center px-0' : ''}`}
     >
       <item.icon className="size-[18px] shrink-0" />

@@ -599,7 +599,7 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，可用于不同类型的任务。">
-        <Button variant="outline" onClick={() => navigate('/projects/new/interview')}>聊一聊，建立画像</Button>
+        <Button variant="outline" onClick={() => navigate('/projects/new/interview')}>新手引导 · 聊一聊建立画像</Button>
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" />
           新建项目

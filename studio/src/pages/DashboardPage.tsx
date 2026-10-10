@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { AlertTriangle, ArrowUpRight, Lightbulb } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, Lightbulb, MessageCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -311,7 +311,18 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col pb-8">
-      <section className="mx-auto flex w-full max-w-4xl flex-col gap-6 py-8 md:pt-[min(12vh,7rem)] md:pb-12">
+      <section className="mx-auto flex w-full max-w-4xl flex-col gap-6 py-8 md:pt-10 md:pb-12">
+        <section aria-labelledby="onboarding-entry-title" className="mx-auto flex w-full max-w-3xl flex-col gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div>
+            <p className="flex items-center gap-2 text-sm font-medium text-primary"><MessageCircle className="size-4" />新手引导</p>
+            <h2 id="onboarding-entry-title" className="mt-2 text-xl font-semibold">聊一聊，开始你的第一篇作品</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">用文字或语音介绍自己，AI 帮你整理 IP 画像，再一起开始创作。</p>
+            <p className="mt-2 text-xs text-muted-foreground">聊聊你是谁 → 确认画像 → 创作作品</p>
+          </div>
+          <Link to="/projects/new/interview" className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+            开始新手引导<ArrowUpRight className="size-4" />
+          </Link>
+        </section>
         <div className="mx-auto flex w-full flex-col items-center text-center">
           <p className="mb-3 text-sm font-medium text-primary">从一个想法开始</p>
           <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
