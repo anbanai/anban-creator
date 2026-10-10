@@ -117,7 +117,13 @@ func TestJSONOutputContractsDeclareSharedMetadata(t *testing.T) {
 			if !hasJSON {
 				continue
 			}
-			for _, field := range []string{"schema_version", "status", "source", "data_at", "missing", "evidence_paths"} {
+			fields := []string{"schema_version", "status", "source", "data_at", "missing", "evidence_paths"}
+			if pack.ID == "profile-analysis" {
+				// The profile result has its own closed Pack Schema. Provenance
+				// lives in dimensions; it is not an analytics delivery envelope.
+				fields = []string{"schema_version", "expected_revision", "dimensions", "analysis_limits", "missing_fields", "follow_up_questions"}
+			}
+			for _, field := range fields {
 				if !strings.Contains(body, field) {
 					t.Errorf("%s has JSON Pack outputs but does not declare %s", file, field)
 				}
