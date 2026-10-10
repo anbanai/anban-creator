@@ -860,7 +860,7 @@ type projectMemoryUpdateRequest struct {
 
 func protectedProjectMemoryPath(value string) bool {
 	clean := path.Clean(strings.ReplaceAll(strings.TrimSpace(value), "\\", "/"))
-	return clean == "AGENTS.md" || clean == "CLAUDE.md" || clean == "profile" || strings.HasPrefix(clean, "profile/") || clean == ".claude" || strings.HasPrefix(clean, ".claude/")
+	return clean == "MEMORY.md" || clean == "AGENTS.md" || clean == "CLAUDE.md" || clean == "profile" || strings.HasPrefix(clean, "profile/") || clean == ".claude" || strings.HasPrefix(clean, ".claude/")
 }
 
 // UpdateMemory handles PUT /projects/:id/memory. Memory edits are Server-owned

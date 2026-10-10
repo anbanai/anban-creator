@@ -1668,7 +1668,7 @@ func TestProjectHandlerMemoryUpdateUsesContentCASAndProtectsServerFiles(t *testi
 		t.Fatalf("stale CAS status = %d, want 409", resp.StatusCode)
 	}
 
-	for _, protected := range []string{"AGENTS.md", "CLAUDE.md", "profile/identity.md", ".claude/agent-memory/MEMORY.md"} {
+	for _, protected := range []string{"MEMORY.md", "AGENTS.md", "CLAUDE.md", "profile/identity.md", ".claude/agent-memory/MEMORY.md"} {
 		resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID+"/memory", ownerID, map[string]any{
 			"path": protected, "expected_content": "", "content": "blocked\n",
 		})
