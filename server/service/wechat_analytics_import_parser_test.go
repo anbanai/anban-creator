@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,46 @@ func TestParseWechatAnalyticsWorkbookXLSX(t *testing.T) {
 	}
 	if parsed.Rows[0].ReadCompletionRate == nil || *parsed.Rows[0].ReadCompletionRate != 0.401869148015976 {
 		t.Fatalf("rate = %#v", parsed.Rows[0].ReadCompletionRate)
+	}
+}
+
+func TestParseWechatAnalyticsWorkbookXLSXReadsAllWorksheetsAndRemapsHeaders(t *testing.T) {
+	file := xlsx.NewFile()
+	headers := []string{"数据来源概况", "内容标题", "发表日期", "阅读人数", "分享人数", "阅读后关注人数", "送达人数", "送达完成率", "阅读完成率", "内容url"}
+	for sheetIndex, order := range [][]string{
+		headers,
+		{"阅读人数", "内容url", "数据来源概况", "内容标题", "发表日期", "分享人数", "阅读后关注人数", "送达人数", "送达完成率", "阅读完成率"},
+	} {
+		sheet, err := file.AddSheet(fmt.Sprintf("数据%d", sheetIndex+1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := sheet.AddRow()
+		for _, header := range order {
+			row.AddCell().SetString(header)
+		}
+		values := map[string]string{
+			"数据来源概况": "公众号后台", "内容标题": fmt.Sprintf("内容%d", sheetIndex+1), "发表日期": fmt.Sprintf("2026091%d", sheetIndex+1),
+			"阅读人数": fmt.Sprintf("%d", 10+sheetIndex), "分享人数": "1", "阅读后关注人数": "0", "送达人数": "10", "送达完成率": "1", "阅读完成率": "0.5", "内容url": fmt.Sprintf("https://mp.weixin.qq.com/s/%d", sheetIndex+1),
+		}
+		row = sheet.AddRow()
+		for _, header := range order {
+			row.AddCell().SetString(values[header])
+		}
+	}
+	var buf bytes.Buffer
+	if err := file.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseWechatAnalyticsWorkbook(buf.Bytes(), time.FixedZone("Asia/Shanghai", 8*60*60))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Rows) != 2 {
+		t.Fatalf("rows = %#v", parsed.Rows)
+	}
+	if parsed.Rows[1].Title != "内容2" || parsed.Rows[1].ReadUsers == nil || *parsed.Rows[1].ReadUsers != 11 {
+		t.Fatalf("second worksheet row = %#v", parsed.Rows[1])
 	}
 }
 

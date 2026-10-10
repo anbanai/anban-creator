@@ -26,6 +26,7 @@ import { agentPacksApi } from './agent-packs'
 import { seednoteAdminApi } from './seednote-admin'
 import { seednoteImportApi } from './seednote-import'
 import { wechatAnalyticsImportApi } from './wechat-analytics-import'
+import { wechatAccountAnalyticsImportApi } from './wechat-account-analytics-import'
 import { imageAnalysesApi } from './image-analyses'
 import { trendsApi } from './trends'
 
@@ -58,6 +59,7 @@ export const api = {
   seednoteAdmin: seednoteAdminApi,
   seednoteImport: seednoteImportApi,
   wechatAnalyticsImport: wechatAnalyticsImportApi,
+  wechatAccountAnalyticsImport: wechatAccountAnalyticsImportApi,
   imageAnalyses: imageAnalysesApi,
   trends: trendsApi,
 }
