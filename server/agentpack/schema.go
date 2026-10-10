@@ -19,6 +19,7 @@ type basicSchema struct {
 	Properties           map[string]json.RawMessage `json:"properties"`
 	AdditionalProperties *bool                      `json:"additionalProperties"`
 	Enum                 []any                      `json:"enum"`
+	OneOf                json.RawMessage            `json:"oneOf"`
 	Items                json.RawMessage            `json:"items"`
 	Minimum              *float64                   `json:"minimum"`
 	Maximum              *float64                   `json:"maximum"`
@@ -46,11 +47,24 @@ func validateSchemaContract(raw json.RawMessage, path string, depth int, allowCo
 	if err != nil {
 		return err
 	}
-	if schema.Type == "" {
+	branches, err := decodeSchemaOneOf(schema.OneOf, path)
+	if err != nil {
+		return err
+	}
+	if schema.Type == "" && len(branches) == 0 {
 		return fmt.Errorf("%s Schema type is required", path)
 	}
-	if !root && !allowComplex && (schema.Type == "object" || schema.Type == "array") {
+	if !allowComplex && len(branches) > 0 {
+		return fmt.Errorf("%s oneOf requires ui.renderer custom:<key>", path)
+	}
+	if !root && !allowComplex && (schema.Type == "object" || schema.Type == "array" || schema.Type == "null") {
 		return fmt.Errorf("%s type %q requires ui.renderer custom:<key>", path, schema.Type)
+	}
+	for i, branch := range branches {
+		branchPath := fmt.Sprintf("%s.oneOf[%d]", path, i)
+		if err := validateSchemaContract(branch, branchPath, depth+1, allowComplex, false); err != nil {
+			return err
+		}
 	}
 	if err := validateSchemaEnum(raw, schema, path, depth); err != nil {
 		return err
@@ -66,7 +80,8 @@ func validateSchemaContract(raw json.RawMessage, path string, depth int, allowCo
 	}
 	switch schema.Type {
 	case "object":
-		if schema.AdditionalProperties == nil || *schema.AdditionalProperties {
+		// Custom renderers may consume explicitly open nested content, but roots stay closed.
+		if schema.AdditionalProperties == nil || (*schema.AdditionalProperties && (root || !allowComplex)) {
 			return fmt.Errorf("%s additionalProperties must be false", path)
 		}
 		requiredSet := make(map[string]bool, len(schema.Required))
@@ -102,6 +117,7 @@ func validateSchemaContract(raw json.RawMessage, path string, depth int, allowCo
 		if schema.Minimum != nil && schema.Maximum != nil && *schema.Minimum > *schema.Maximum {
 			return fmt.Errorf("%s minimum must not exceed maximum", path)
 		}
+	case "null", "":
 	default:
 		return fmt.Errorf("%s uses unsupported Schema type %q", path, schema.Type)
 	}
@@ -158,6 +174,20 @@ func decodeBasicSchema(raw json.RawMessage, path string) (basicSchema, error) {
 	return schema, nil
 }
 
+func decodeSchemaOneOf(raw json.RawMessage, path string) ([]json.RawMessage, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var branches []json.RawMessage
+	if err := json.Unmarshal(raw, &branches); err != nil {
+		return nil, fmt.Errorf("decode Schema oneOf at %s: %w", path, err)
+	}
+	if len(branches) == 0 {
+		return nil, fmt.Errorf("%s oneOf must be a non-empty array of Schemas", path)
+	}
+	return branches, nil
+}
+
 func ValidateTaskInput(pack Manifest, input map[string]any) error {
 	if pack.Schemas == nil || len(pack.Schemas.TaskInput) == 0 {
 		if len(input) == 0 {
@@ -175,6 +205,26 @@ func validateSchemaValue(raw json.RawMessage, value any, path string, depth int)
 	schema, err := decodeBasicSchema(raw, path)
 	if err != nil {
 		return err
+	}
+	branches, err := decodeSchemaOneOf(schema.OneOf, path)
+	if err != nil {
+		return err
+	}
+	if len(branches) > 0 {
+		matches := 0
+		for i, branch := range branches {
+			branchPath := fmt.Sprintf("%s.oneOf[%d]", path, i)
+			// Invalid alternatives must not be hidden by a matching branch.
+			if err := validateSchemaContract(branch, branchPath, depth+1, true, false); err != nil {
+				return err
+			}
+			if err := validateSchemaValue(branch, value, path, depth+1); err == nil {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("%s must match exactly one oneOf Schema (matched %d)", path, matches)
+		}
 	}
 	if len(schema.Enum) > 0 {
 		matched := false
@@ -231,6 +281,10 @@ func validateSchemaValue(raw json.RawMessage, value any, path string, depth int)
 		if _, ok := value.(bool); !ok {
 			return fmt.Errorf("%s must be a boolean", path)
 		}
+	case "null":
+		if value != nil {
+			return fmt.Errorf("%s must be null", path)
+		}
 	case "number", "integer":
 		number, ok := jsonNumber(value)
 		if !ok || (schema.Type == "integer" && math.Trunc(number) != number) {
@@ -243,7 +297,9 @@ func validateSchemaValue(raw json.RawMessage, value any, path string, depth int)
 			return fmt.Errorf("%s must be at most %v", path, *schema.Maximum)
 		}
 	case "":
-		return fmt.Errorf("%s Schema type is required", path)
+		if len(branches) == 0 {
+			return fmt.Errorf("%s Schema type is required", path)
+		}
 	default:
 		return fmt.Errorf("%s uses unsupported Schema type %q", path, schema.Type)
 	}
