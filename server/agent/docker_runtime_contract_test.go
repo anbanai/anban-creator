@@ -346,7 +346,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 	for _, want := range []string{
 		"FROM node:bookworm-slim",
 		"apt-get install -y --no-install-recommends ca-certificates curl git jq tini",
-		"COPY agent-ts/package.json agent-ts/package-lock.json ./",
+		"COPY runtime-claude/package.json runtime-claude/package-lock.json ./",
 		"npm prune --omit=dev",
 		"@anthropic-ai/claude-agent-sdk",
 		"COPY harness/",
@@ -380,8 +380,8 @@ func TestDockerRuntimeProfiles(t *testing.T) {
 		path := filepath.Join(root, name)
 		body := readTextFile(t, path)
 		for _, want := range []string{
-			"COPY --from=builder /app/anban-agent/node_modules",
-			"COPY --from=builder /app/anban-agent/dist",
+			"COPY --from=builder /app/runtime-claude/node_modules",
+			"COPY --from=builder /app/runtime-claude/dist",
 			"COPY harness/",
 			"ENTRYPOINT",
 		} {
@@ -468,8 +468,14 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"FROM alpine:latest",
 		"apk add --no-cache ca-certificates ffmpeg tzdata",
 		"WORKDIR /build/server",
+		"WORKDIR /build/runtime-dsh",
+		"apk add --no-cache nodejs npm python3 make g++",
 		"COPY server/go.mod server/go.sum ./",
 		"COPY server ./",
+		"COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./",
+		"COPY runtime-dsh/ ./",
+		"COPY --from=builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules",
+		"COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist",
 		"go build -ldflags=\"-s -w\" -o /anban-creator-server .",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
 		"COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/economics.yaml",
@@ -502,6 +508,8 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"mcporter",
 		"npx -y skills",
 		"claude plugin",
+		"runtime-claude/",
+		"@anthropic-ai/claude-agent-sdk",
 		"COPY --from=builder /build/server/billing /app/conf/billing",
 	} {
 		if strings.Contains(body, forbidden) {
@@ -628,8 +636,8 @@ func TestDockerRuntimeAgentLoadsImmutablePluginDirectly(t *testing.T) {
 			"COPY harness/ /anbanai/",
 			"ENV CLAUDE_PLUGIN_ROOT=/anbanai",
 			`find /anbanai -type l -print -quit`,
-			`chown -R root:root /anbanai /app/anban-agent`,
-			`chmod -R a=rX /anbanai /app/anban-agent`,
+			`chown -R root:root /anbanai /app/runtime-claude`,
+			`chmod -R a=rX /anbanai /app/runtime-claude`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing immutable home-template contract %q", path, want)
@@ -694,7 +702,7 @@ func TestAgentDockerfilesAreCentralized(t *testing.T) {
 		}
 	}
 	if _, err := os.Stat(filepath.Join(root, "agent")); err == nil {
-		t.Fatal("legacy agent directory must not exist; use agent-ts and deploy/docker Agent Dockerfiles")
+		t.Fatal("legacy agent directory must not exist; use runtime-claude and deploy/docker Agent Dockerfiles")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat legacy agent directory: %v", err)
 	}
@@ -795,6 +803,54 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s missing rolling image/build contract %q", tc.path, want)
 			}
+		}
+	}
+}
+
+func TestCatalogDigestIsEnforcedAtImageBuildBoundary(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{
+		"Dockerfile.agent-ecommerce",
+		"Dockerfile.agent-feedback-analysis",
+		"Dockerfile.agent-hypit",
+		"Dockerfile.agent-moments",
+		"Dockerfile.agent-montage",
+		"Dockerfile.agent-profile-analysis",
+		"Dockerfile.agent-seednote",
+		"Dockerfile.agent-wechat-article",
+		"Dockerfile.agent-wechat-picture",
+		"Dockerfile.agent-whiteboard-animation",
+	} {
+		body := readTextFile(t, filepath.Join(root, "deploy/docker", name))
+		for _, want := range []string{
+			"ARG ANBAN_AGENT_PACK_CATALOG_DIGEST",
+			"LABEL org.anban.agent.pack.catalog-digest=\"$ANBAN_AGENT_PACK_CATALOG_DIGEST\"",
+			"sha256sum /anbanai/agent-pack-catalog.json",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("deploy/docker/%s missing Catalog digest build check %q", name, want)
+			}
+		}
+	}
+
+	server := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.server"))
+	for _, want := range []string{
+		"ARG ANBAN_AGENT_PACK_CATALOG_DIGEST",
+		"LABEL org.anban.agent.pack.catalog-digest=\"$ANBAN_AGENT_PACK_CATALOG_DIGEST\"",
+		"sha256sum agentpack/catalog.generated.json",
+	} {
+		if !strings.Contains(server, want) {
+			t.Fatalf("deploy/docker/Dockerfile.server missing Catalog digest build check %q", want)
+		}
+	}
+
+	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
+	for _, want := range []string{
+		"ANBAN_AGENT_PACK_CATALOG_DIGEST: ${ANBAN_AGENT_PACK_CATALOG_DIGEST:?ANBAN_AGENT_PACK_CATALOG_DIGEST is required}",
+		"ANBAN_AGENT_PACK_CATALOG_DIGEST: \"${ANBAN_AGENT_PACK_CATALOG_DIGEST:?ANBAN_AGENT_PACK_CATALOG_DIGEST is required}\"",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("docker-compose.yml missing Catalog digest contract %q", want)
 		}
 	}
 }
@@ -975,12 +1031,12 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-ecommerce-agent-image:",
 		"docker-wechat-article-agent-image:",
 		"docker-wechat-picture-agent-image:",
-		"docker build -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
-		"docker build -f deploy/docker/Dockerfile.agent-montage",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
+		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-montage",
 		"--build-arg OPENMONTAGE_REPO=\"$(OPENMONTAGE_SOURCE_REPO)\"",
 		"--build-arg OPENMONTAGE_REF=\"$(OPENMONTAGE_SOURCE_REF)\"",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",

@@ -33,6 +33,7 @@ const SeednoteAdminPage = lazyWithRecovery(() => import('@/pages/SeednoteAdminPa
 const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
 const ContentAnalyticsPage = lazyWithRecovery(() => import('@/pages/ContentAnalyticsPage'))
 const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
+const ChatPage = lazyWithRecovery(() => import('@/pages/ChatPage'))
 
 function LoadingSpinner() {
   return (
@@ -145,6 +146,8 @@ function AppRoutes() {
             )}
           />
           <Route path="projects" element={<LazyPage component={ProjectsPage} />} />
+          <Route path="projects/create" element={<LazyPage component={ChatPage} />} />
+          <Route path="chat" element={<LazyPage component={ChatPage} />} />
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />

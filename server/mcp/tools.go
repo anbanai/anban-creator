@@ -61,6 +61,7 @@ type Services struct {
 	TaskImageSvc           TaskImageGenerator
 	TaskImageOperationsSvc TaskImageOperations
 	TaskVideoOperationsSvc TaskVideoAnalyzer
+	InteractiveSvc         *service.InteractiveService
 }
 
 // RegisterTools registers all MCP tools on the server.
@@ -81,6 +82,7 @@ func RegisterTools(server *mcp.Server) {
 	registerAgentFeedbackTools(server)
 	registerProfileTools(server)
 	registerContentMetadataTools(server)
+	registerInteractiveTools(server)
 }
 
 // parseArgs unmarshals raw JSON arguments into a map.

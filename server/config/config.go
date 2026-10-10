@@ -48,6 +48,22 @@ type Config struct {
 	Worldtree          WorldtreeConfig                 `yaml:"worldtree"`
 	Ilink              IlinkConfig                     `yaml:"ilink"`
 	Trends             TrendsConfig                    `yaml:"trends"`
+	Interactive        InteractiveConfig               `yaml:"interactive"`
+}
+
+// InteractiveConfig gates process-local conversational sessions. No executable
+// or model is selectable from a browser request.
+type InteractiveConfig struct {
+	Enabled           bool     `yaml:"enabled"`
+	AdminOnly         bool     `yaml:"admin_only"`
+	BridgeCommand     string   `yaml:"bridge_command"`
+	BridgeArgs        []string `yaml:"bridge_args"`
+	BridgeDir         string   `yaml:"bridge_dir"`
+	DSHPatch          string   `yaml:"dsh_patch"`
+	Provider          string   `yaml:"provider"`
+	ProviderAPIKeyEnv string   `yaml:"provider_api_key_env"`
+	Model             string   `yaml:"model"`
+	MCPURL            string   `yaml:"mcp_url"`
 }
 
 type TrendsConfig struct {
@@ -470,6 +486,7 @@ type ModelRuntimeConfig struct {
 type ClaudeConfig struct {
 	ExecutionProfiles                 map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
 	Executor                          string                                  `yaml:"executor"` // "docker" or "kubernetes"
+	AgentPackCatalogDigest            string                                  `yaml:"agent_pack_catalog_digest"`
 	RuntimeImages                     RuntimeImages                           `yaml:"runtime_images"`
 	RuntimeDiagnosticRetentionSeconds int                                     `yaml:"runtime_diagnostic_retention_seconds"`
 	runtimeDiagnosticRetentionSet     bool                                    `yaml:"-"`
@@ -494,7 +511,7 @@ type ClaudeExecutionProfileConfig struct {
 
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"execution_profiles": true, "executor": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
+		"execution_profiles": true, "executor": true, "agent_pack_catalog_digest": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
 		"execution_token_secret": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "project_memory": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
@@ -634,11 +651,31 @@ func (c ClaudeConfig) Validate() error {
 		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile-analysis" && profile != "feedback-analysis" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
+		if c.Executor == "kubernetes" && !immutableRuntimeImageReference(imageForProfile(c.RuntimeImages, profile)) {
+			errs = append(errs, fmt.Sprintf("claude.runtime_images.%s must use an immutable image digest (image@sha256:<64 hex>) when claude.executor is \"kubernetes\"", profile))
+		}
+	}
+	if digest := strings.TrimSpace(c.AgentPackCatalogDigest); digest == "" && c.Executor == "kubernetes" {
+		errs = append(errs, fmt.Sprintf("claude.agent_pack_catalog_digest is required when claude.executor is \"kubernetes\" (expected %s)", agentpack.CatalogDigest()))
+	} else if digest != "" && (!agentPackCatalogDigestPattern.MatchString(digest) || digest != agentpack.CatalogDigest()) {
+		errs = append(errs, fmt.Sprintf("claude.agent_pack_catalog_digest must equal the embedded Agent Pack Catalog digest %s", agentpack.CatalogDigest()))
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+var immutableRuntimeImagePattern = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
+var agentPackCatalogDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var interactiveProviderAPIKeyEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func imageForProfile(images RuntimeImages, profile string) string {
+	return strings.TrimSpace(images[profile])
+}
+
+func immutableRuntimeImageReference(image string) bool {
+	return immutableRuntimeImagePattern.MatchString(strings.TrimSpace(image))
 }
 
 // DockerConfig holds Docker executor settings for container-based task execution.
@@ -931,6 +968,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"worldtree":       true,
 		"ilink":           true,
 		"trends":          true,
+		"interactive":     true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -993,6 +1031,15 @@ func expandEnvVars(data []byte) []byte {
 
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
+	if c.Interactive.BridgeDir == "" {
+		c.Interactive.BridgeDir = "./runtime-dsh"
+	}
+	if c.Interactive.DSHPatch == "" {
+		c.Interactive.DSHPatch = "./harness/dsh/project-creator.patch.yml"
+	}
+	if c.Interactive.ProviderAPIKeyEnv == "" {
+		c.Interactive.ProviderAPIKeyEnv = "DEEPSEEK_API_KEY"
+	}
 	if c.Claude.RuntimeImages == nil {
 		c.Claude.RuntimeImages = RuntimeImages{}
 	}
@@ -1485,6 +1532,12 @@ func (c *Config) AgentServerURL() string {
 // applyDefaults (and after ${VAR} expansion in NewConfig) so that values
 // supplied via the environment are also resolved.
 func (c *Config) resolvePaths(rootConfigDir string) {
+	if c.Interactive.BridgeDir != "" && !filepath.IsAbs(c.Interactive.BridgeDir) {
+		c.Interactive.BridgeDir = filepath.Join(rootConfigDir, c.Interactive.BridgeDir)
+	}
+	if c.Interactive.DSHPatch != "" && !filepath.IsAbs(c.Interactive.DSHPatch) {
+		c.Interactive.DSHPatch = filepath.Join(rootConfigDir, c.Interactive.DSHPatch)
+	}
 	if c.BillingRuntime.ConfigDir != "" && !filepath.IsAbs(c.BillingRuntime.ConfigDir) {
 		c.BillingRuntime.ConfigDir = filepath.Join(rootConfigDir, c.BillingRuntime.ConfigDir)
 	}
@@ -1544,6 +1597,9 @@ func detectPluginDir() string {
 // Validate checks that required configuration fields are set.
 func (c *Config) Validate() error {
 	var errs []string
+	if !interactiveProviderAPIKeyEnvPattern.MatchString(c.Interactive.ProviderAPIKeyEnv) {
+		errs = append(errs, "interactive.provider_api_key_env must be a valid environment variable name")
+	}
 	if c.Trends.TTL <= 0 {
 		errs = append(errs, "trends.ttl must be positive")
 	}

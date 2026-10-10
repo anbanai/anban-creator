@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -16,18 +17,19 @@ func baseKubernetesConfigForTest() Config {
 	claude := validClaudeConfigForTest()
 	claude.Executor = "kubernetes"
 	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	claude.AgentPackCatalogDigest = agentpack.CatalogDigest()
 	claude.ExecutionTokenSecret = "0123456789abcdef0123456789abcdef"
 	claude.RuntimeImages = RuntimeImages{
 		"wechat-article":                  "registry.example.com/creator-agent-wechat-article@sha256:" + strings.Repeat("a", 64),
 		"wechat-picture":                  "registry.example.com/creator-agent-wechat-picture@sha256:" + strings.Repeat("e", 64),
 		model.PlatformSeednote:            "registry.example.com/creator-agent-seednote@sha256:" + strings.Repeat("b", 64),
 		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
-		"moments":                         "registry.example.com/creator-agent-moments@sha256:" + strings.Repeat("h", 64),
-		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("i", 64),
-		"profile-analysis":                "registry.example.com/creator-agent-profile-analysis@sha256:" + strings.Repeat("j", 64),
-		"feedback-analysis":               "registry.example.com/creator-agent-feedback-analysis@sha256:" + strings.Repeat("k", 64),
-		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:" + strings.Repeat("l", 64),
-		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:" + strings.Repeat("m", 64),
+		"moments":                         "registry.example.com/creator-agent-moments@sha256:" + strings.Repeat("d", 64),
+		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("f", 64),
+		"profile-analysis":                "registry.example.com/creator-agent-profile-analysis@sha256:" + strings.Repeat("a", 64),
+		"feedback-analysis":               "registry.example.com/creator-agent-feedback-analysis@sha256:" + strings.Repeat("b", 64),
+		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:" + strings.Repeat("c", 64),
+		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:" + strings.Repeat("e", 64),
 	}
 	claude.Kubernetes = KubernetesConfig{
 		Namespace:          "anbanai-prod",
@@ -127,6 +129,24 @@ func TestValidateRuntimeImagesRequiresExactCanonicalProfiles(t *testing.T) {
 				t.Fatalf("ClaudeConfig.Validate() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateKubernetesRejectsMutableRuntimeImageReferences(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.RuntimeImages["wechat-picture"] = "registry.example.com/creator-agent-wechat-picture:latest"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), `claude.runtime_images.wechat-picture must use an immutable image digest`) {
+		t.Fatalf("Validate() error = %v, want immutable image digest rejection", err)
+	}
+}
+
+func TestValidateRejectsCatalogDigestDrift(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.AgentPackCatalogDigest = strings.Repeat("a", 64)
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.agent_pack_catalog_digest must equal the embedded Agent Pack Catalog digest") {
+		t.Fatalf("Validate() error = %v, want Catalog digest rejection", err)
 	}
 }
 

@@ -15,10 +15,11 @@ This file provides guidance to AI coding assistants when working in this reposit
 
 **Anban 自媒体智能创作助手** is a Studio-first content creation platform for WeChat articles, Seednote-style notes, live slicing, AI image work, and agent-assisted publishing workflows.
 
-The current repository is not a standalone Cobra CLI. It has three main surfaces:
+The current repository is not a standalone Cobra CLI. It has four main surfaces:
 
 - `server/`: Go Fiber v3 API server, MCP endpoint, scheduler, storage, publishing, business services, and Server-owned reusable Go packages under `server/app/`.
-- `agent-ts/`: TypeScript runner used for one-shot managed agent execution.
+- `runtime-claude/`: TypeScript runtime used for one-shot managed Claude Agent execution.
+- `runtime-dsh/`: TypeScript runtime used for short-lived DSH interactive sessions.
 - `studio/`: React 19 + TypeScript + Vite 8 Web Studio.
 
 Plugin assets have one canonical source at `harness/`:
@@ -62,10 +63,10 @@ The Go module root is `server/`; run direct Go commands there or use the reposit
 ### Agent Runtime
 
 ```bash
-cd agent-ts && npm ci
-cd agent-ts && bun run test
-cd agent-ts && bun run typecheck
-cd agent-ts && bun run build
+cd runtime-claude && npm ci
+cd runtime-claude && bun run test
+cd runtime-claude && bun run typecheck
+cd runtime-claude && bun run build
 ```
 
 ### Studio
@@ -150,16 +151,26 @@ Keep handlers thin. Put behavior in services, persistence in repositories, and c
 
 ### Agent Runner
 
-`agent-ts/` is the single Agent runtime. It supports both the managed `job`
-entrypoint used by Docker/Kubernetes.
+`runtime-claude/` is the one-shot managed Agent runtime. It supports the managed
+`job` entrypoint used by Docker/Kubernetes and has no DSH SDK dependency.
 
 Important files:
 
-- `agent-ts/src/main.ts`: managed job lifecycle entry point.
-- `agent-ts/src/runner.ts`: Claude Agent SDK execution and stream handling.
-- `agent-ts/src/bootstrap.ts`: managed Bootstrap validation.
-- `agent-ts/src/downloads.ts`: generated image materialization.
-- `agent-ts/src/reporter.ts`: progress, artifact, and completion reporting.
+- `runtime-claude/src/main.ts`: managed job lifecycle entry point.
+- `runtime-claude/src/runner.ts`: Claude Agent SDK execution and stream handling.
+- `runtime-claude/src/bootstrap.ts`: managed Bootstrap validation.
+- `runtime-claude/src/downloads.ts`: generated image materialization.
+- `runtime-claude/src/reporter.ts`: progress, artifact, and completion reporting.
+
+### DSH Runtime
+
+`runtime-dsh/` is the independent interactive runtime. It contains only the
+DSH Bridge used by temporary Project Creator sessions; it does not own Claude
+task execution, artifact delivery, billing, resume, or completion logic.
+
+Important files:
+
+- `runtime-dsh/src/interactive-bridge.ts`: DSH session command and event adapter.
 
 ### Server App Packages
 

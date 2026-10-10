@@ -64,6 +64,9 @@ jwt:
   refresh_expiry: "168h"
 redis:
   addr: "${ANBAN_TEST_REDIS:-localhost:6379}"
+interactive:
+  bridge_dir: ./runtime-dsh
+  dsh_patch: ./harness/dsh/project-creator.patch.yml
 seednote:
   base_url: "${ANBAN_TEST_SEEDNOTE_URL:-http://localhost:18060}"
 ilink:
@@ -110,5 +113,16 @@ claude:
 	// NOT override the literal value — the hidden override layer is gone.
 	if cfg.JWT.SecretKey != "real-secret" {
 		t.Errorf("jwt.secret_key = %q, want \"real-secret\" (env must not override without ${...})", cfg.JWT.SecretKey)
+	}
+	wantBridgeDir := filepath.Join(dir, "runtime-dsh")
+	if cfg.Interactive.BridgeDir != wantBridgeDir {
+		t.Errorf("interactive.bridge_dir = %q, want %q", cfg.Interactive.BridgeDir, wantBridgeDir)
+	}
+	wantPatch := filepath.Join(dir, "harness/dsh/project-creator.patch.yml")
+	if cfg.Interactive.DSHPatch != wantPatch {
+		t.Errorf("interactive.dsh_patch = %q, want %q", cfg.Interactive.DSHPatch, wantPatch)
+	}
+	if cfg.Interactive.ProviderAPIKeyEnv != "DEEPSEEK_API_KEY" {
+		t.Errorf("interactive.provider_api_key_env = %q, want DEEPSEEK_API_KEY", cfg.Interactive.ProviderAPIKeyEnv)
 	}
 }

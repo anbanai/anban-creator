@@ -319,14 +319,16 @@ jobs:
           }
           NODE
 
-      - name: Set up Agent runtime Node
+      - name: Set up runtime Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: agent-ts/package-lock.json
+          cache-dependency-path: |
+            runtime-claude/package-lock.json
+            runtime-dsh/package-lock.json
 
-      - name: Build server binaries and Agent package
+      - name: Build server binaries and runtime packages
         run: |
           mkdir -p bin
 
@@ -336,17 +338,35 @@ jobs:
           GOOS=darwin  GOARCH=arm64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-darwin-arm64 .
           GOOS=windows GOARCH=amd64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-windows-amd64.exe .
 
-          cd agent-ts
+          cd runtime-claude
           npm ci
           npm run typecheck
           npm run test
           npm run build
           cd ..
-          tar -czf bin/anban-agent-runtime-${{ steps.version.outputs.VERSION }}.tar.gz \
-            -C agent-ts package.json package-lock.json dist
+          tar -czf bin/anban-runtime-claude-${{ steps.version.outputs.VERSION }}.tar.gz \
+            -C runtime-claude package.json package-lock.json dist
+
+          cd runtime-dsh
+          npm ci
+          npm run typecheck
+          npm run test
+          npm run build
+          cd ..
+          tar -czf bin/anban-runtime-dsh-${{ steps.version.outputs.VERSION }}.tar.gz \
+            -C runtime-dsh package.json package-lock.json dist
 
           chmod +x bin/anban-creator-server-linux-* bin/anban-creator-server-darwin-* 2>/dev/null || true
           echo "${{ steps.version.outputs.RELEASE_TAG }}" > bin/version.txt
+
+      - name: Freeze Agent Pack Catalog identity
+        run: |
+          set -euo pipefail
+          make agent-pack-check
+          server_digest=$(sha256sum server/agentpack/catalog.generated.json | awk '{print $1}')
+          runtime_digest=$(sha256sum harness/agent-pack-catalog.json | awk '{print $1}')
+          test "$server_digest" = "$runtime_digest"
+          printf '%s  %s\n' "$server_digest" "server/agentpack/catalog.generated.json" > bin/agent-pack-catalog.sha256
 
       - name: Restore release Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

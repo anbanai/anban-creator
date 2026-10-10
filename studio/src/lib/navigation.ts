@@ -24,9 +24,9 @@ export interface NavItem {
 
 export const mvpNavItems: NavItem[] = [
   { to: '/', label: 'AI助手', icon: Sparkles, end: true },
-  { to: '/projects', label: '项目', icon: Rss },
-  { to: '/tasks', label: '任务', icon: ListChecks },
-  { to: '/plans', label: '计划', icon: CalendarRange },
+  { to: '/projects', label: '创作项目', icon: Rss },
+  { to: '/tasks', label: '作品', icon: ListChecks },
+  { to: '/plans', label: '排期', icon: CalendarRange },
   { to: '/billing', label: '钱包', icon: Coins },
   { to: '/plugins', label: '插件', icon: PlugZap },
   { to: '/settings', label: '设置', icon: Settings },

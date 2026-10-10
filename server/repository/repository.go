@@ -25,6 +25,7 @@ type Repository interface {
 	Projects() ProjectRepository
 	ProjectProfileRevisions() ProjectProfileRevisionRepository
 	ProjectProfileStates() ProjectProfileStateRepository
+	InteractiveCommitReceipts() InteractiveCommitReceiptRepository
 	ProjectChannelConfigs() ProjectChannelConfigRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
@@ -521,6 +522,7 @@ type repository struct {
 	projects                ProjectRepository
 	projectProfileRevisions ProjectProfileRevisionRepository
 	projectProfileStates    ProjectProfileStateRepository
+	interactiveCommitReceipts InteractiveCommitReceiptRepository
 	projectChannelConfigs   ProjectChannelConfigRepository
 	apiKeys                 APIKeyRepository
 	feedbacks               FeedbackRepository
@@ -607,6 +609,7 @@ func New(db *gorm.DB) Repository {
 		projects:                projects,
 		projectProfileRevisions: newProjectProfileRevisionRepository(db),
 		projectProfileStates:    newProjectProfileStateRepository(db),
+		interactiveCommitReceipts: newInteractiveCommitReceiptRepository(db),
 		projectChannelConfigs:   projectChannelConfigs,
 		apiKeys:                 apiKeys,
 		feedbacks:               feedbacks,
@@ -655,6 +658,9 @@ func (r *repository) ProjectProfileRevisions() ProjectProfileRevisionRepository 
 
 func (r *repository) ProjectProfileStates() ProjectProfileStateRepository {
 	return r.projectProfileStates
+}
+func (r *repository) InteractiveCommitReceipts() InteractiveCommitReceiptRepository {
+	return r.interactiveCommitReceipts
 }
 func (r *repository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs
@@ -834,6 +840,9 @@ func (r *txRepository) ProjectProfileRevisions() ProjectProfileRevisionRepositor
 
 func (r *txRepository) ProjectProfileStates() ProjectProfileStateRepository {
 	return r.projectProfileStates
+}
+func (r *txRepository) InteractiveCommitReceipts() InteractiveCommitReceiptRepository {
+	return newInteractiveCommitReceiptRepository(r.db)
 }
 func (r *txRepository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs

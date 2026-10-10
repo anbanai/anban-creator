@@ -49,6 +49,7 @@ type Services struct {
 	WechatPublicationHandler     *handler.WechatPublicationHandler
 	ChannelsAnalyticsHandler     *handler.ChannelsAnalyticsHandler
 	AgentHandler                 *handler.AgentHandler
+	InteractiveHandler           *handler.InteractiveHandler
 	AgentProfileHandler          *handler.AgentProfileHandler
 	AgentPackHandler             *handler.AgentPackHandler
 	BillingHandler               *handler.BillingHandler
@@ -229,6 +230,16 @@ func NewRouter(svc *Services) *fiber.App {
 	authMiddleware := appmiddleware.AuthMiddleware(svc.JWTService, svc.Repo, svc.Logger)
 	rateLimiter := appmiddleware.RateLimit(svc.Redis, 100, 1*time.Minute)
 	apiV1 := app.Group("/api/v1", authMiddleware, rateLimiter)
+	if svc.InteractiveHandler != nil {
+		interactive := apiV1.Group("/interactive")
+		interactive.Get("/agents", svc.InteractiveHandler.Agents)
+		interactive.Post("/sessions", svc.InteractiveHandler.Create)
+		interactive.Get("/sessions/:id/events", svc.InteractiveHandler.Events)
+		interactive.Post("/sessions/:id/messages", svc.InteractiveHandler.Message)
+		interactive.Post("/sessions/:id/questions/:callId/answers", svc.InteractiveHandler.Answers)
+		interactive.Post("/sessions/:id/commit", svc.InteractiveHandler.Commit)
+		interactive.Delete("/sessions/:id", svc.InteractiveHandler.Delete)
+	}
 	if svc.BillingHandler != nil {
 		billingAPI := apiV1.Group("/billing")
 		billingAPI.Get("/wallet", svc.BillingHandler.Wallet)

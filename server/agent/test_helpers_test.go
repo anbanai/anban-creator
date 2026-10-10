@@ -33,8 +33,8 @@ func TestReleaseBuildsAgentRunnerAssets(t *testing.T) {
 		"npm run typecheck",
 		"npm run test",
 		"npm run build",
-		"anban-agent-runtime-${{ steps.version.outputs.VERSION }}.tar.gz",
-		"-C agent-ts package.json package-lock.json dist",
+		"anban-runtime-claude-${{ steps.version.outputs.VERSION }}.tar.gz",
+		"-C runtime-claude package.json package-lock.json dist",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("release workflow missing %q", want)

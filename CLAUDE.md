@@ -14,7 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 **Anban 自媒体智能创作助手** (anban-creator) is a content creation platform. Core components:
-- **Agent** (`agent-ts/`): TypeScript runtime for containerized Claude Code task execution
+- **Claude runtime** (`runtime-claude/`): TypeScript runtime for one-shot containerized Claude Code task execution
+- **DSH runtime** (`runtime-dsh/`): TypeScript runtime for temporary interactive DSH sessions
 - **Server** (`server/`): Fiber v3 HTTP API with MySQL, Redis, Asynq task queue, WebSocket, and MCP endpoint
 - **Studio** (`studio/`): React 19 + TypeScript + Vite 8 frontend for content management
 
@@ -96,7 +97,7 @@ cd studio && bun run test:watch  # Watch mode tests
 ### TypeScript Agent
 
 ```bash
-cd agent-ts && npm ci
+cd runtime-claude && npm ci
 make agent-test
 make agent-build
 ```
@@ -111,7 +112,7 @@ make docker-logs              # Follow container logs
 
 ## Architecture
 
-### Agent (`agent-ts/`)
+### Claude Runtime (`runtime-claude/`)
 
 TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes. The server dispatches each Agent Pack to its own runtime profile and image identity. Images may share a Dockerfile when dependencies match, while tags and configuration keys remain isolated per Agent.
 
@@ -120,6 +121,14 @@ TypeScript runtime that executes Claude Code tasks in Docker/Kubernetes. The ser
 - `src/bootstrap.ts` / `src/workspace.ts` — Bootstrap validation and workspace materialization
 - `src/downloads.ts` / `src/artifacts.ts` — Generated image and final artifact transport
 - `src/reporter.ts` — Progress, heartbeat, artifact, and completion reporting
+
+### DSH Runtime (`runtime-dsh/`)
+
+The DSH runtime is an independent package for temporary interactive sessions.
+It contains the DSH SDK Bridge only and must not acquire Claude Agent SDK,
+managed artifact, billing, resume, or completion dependencies.
+
+- `src/interactive-bridge.ts` — DSH session control and stable event adapter
 
 ### Server (`server/`)
 
@@ -130,7 +139,7 @@ Key packages:
 - `router/` — `router.go` registers all `/api/v1` route groups, middleware, and the WS hub (the single source of truth for routes)
 - `service/` — Business logic including `task_execution.go` (agent SDK integration), `task_files.go`, `credit.go`, `publishing.go`, `task_agent.go`, `redis_notifier.go` (Redis pub/sub progress events), `task_events.go` (notifier interface), `ilink_*.go` (WeChat assistant binding, conversation, polling, and terminal notification outbox)
 - `wcf/` — HTTP client for the iLink sidecar transport used by the iLink channel; do not put product-level WeChat assistant behavior here
-- `agent/` — Server-side execution policy, dispatch, and result contracts; this is distinct from the `agent-ts/` runtime
+- `agent/` — Server-side execution policy, dispatch, and result contracts; this is distinct from both TypeScript runtimes
 - `scheduler/` — Asynq-based background task processing with `plan_checker.go`
 - `model/` — GORM models with auto-migration
 - `storage/` — File storage factory (local filesystem or Alibaba Cloud OSS)

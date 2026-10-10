@@ -51,6 +51,16 @@ daemon access. Kubernetes instead uses the namespace, task/project PVC storage
 classes, and ServiceAccount settings in `server/Deployment.yaml`, while reading
 the execution token secret from a Kubernetes Secret.
 
+For an ACK release, build and push the Server and every managed Agent image
+from the same checkout, then resolve each pushed image to an immutable digest.
+Run `make agent-runtime-release-manifest` with those digest references before
+rendering `server/Deployment.yaml`; it verifies both Catalog copies and every
+image's `org.anban.agent.pack.catalog-digest` OCI label, then records the exact
+image set in `release/agent-runtime-manifest.json`. Use
+`scripts/render-ack-server-deployment.sh --manifest release/agent-runtime-manifest.json`
+to inject that set into the ACK template. The render step rejects mutable tags,
+missing images, a different Server digest, or a missing Catalog digest.
+
 ## Quick Start
 
 ```bash
@@ -92,8 +102,11 @@ cd studio && bun run test
 # Frontend production build
 cd studio && bun run build
 
-# TypeScript Agent runtime
-cd agent-ts && npm ci && bun run test && bun run typecheck && bun run build
+# Claude runtime
+cd runtime-claude && npm ci && bun run test && bun run typecheck && bun run build
+
+# DSH interactive runtime
+cd runtime-dsh && npm ci && bun run test && bun run typecheck && bun run build
 
 # Format and vet Go code
 make fmt
@@ -242,7 +255,8 @@ Users can configure per-account platform credentials and per-user model settings
 
 ```text
 server/       Go module: API server plus server/app reusable content and publishing packages
-agent-ts/     TypeScript Agent runtime used by Docker/Kubernetes managed execution
+runtime-claude/     TypeScript Agent runtime used by Docker/Kubernetes managed execution
+runtime-dsh/        TypeScript DSH runtime used by temporary interactive sessions
 studio/       React Web Studio
 harness/ Unified Claude Code and Codex plugin: shared skills plus native agents, manifests, MCP, hooks, and installers
 docs/         Design specs and implementation plans

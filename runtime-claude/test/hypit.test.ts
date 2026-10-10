@@ -389,7 +389,7 @@ test.skipIf(!hasMedia)(
           commands.push(args);
           return '{"ok":true}';
         },
-        revision: async () => "e8f94006e1eed9b299448fe5bce6afa5646e2ba5",
+        revision: async () => "ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1",
       };
       const receipt = await finalizeHypit(
         root,
@@ -772,8 +772,8 @@ test("prepared tool home seeds only image caches, remains writable and rejects e
   const root = await mkdtemp(join(tmpdir(), "hypit-home-"));
   try {
     const source = join(root, "image");
-    await mkdir(join(source, ".cache/hyperframes"), { recursive: true });
-    await writeFile(join(source, ".cache/hyperframes/browser"), "prepared");
+    await mkdir(join(source, ".cache/hypit"), { recursive: true });
+    await writeFile(join(source, ".cache/hypit/browser"), "prepared");
     await writeFile(join(source, ".env"), "secret");
     await prepareHypitToolHome(
       root,
@@ -782,7 +782,7 @@ test("prepared tool home seeds only image caches, remains writable and rejects e
     );
     expect(
       await readFile(
-        join(root, ".anban-runtime-home/.cache/hyperframes/browser"),
+        join(root, ".anban-runtime-home/.cache/hypit/browser"),
         "utf8",
       ),
     ).toBe("prepared");
@@ -790,7 +790,7 @@ test("prepared tool home seeds only image caches, remains writable and rejects e
       readFile(join(root, ".anban-runtime-home/.env")),
     ).rejects.toThrow();
     await writeFile(
-      join(root, ".anban-runtime-home/.cache/hyperframes/browser"),
+      join(root, ".anban-runtime-home/.cache/hypit/browser"),
       "working",
     );
     await prepareHypitToolHome(
@@ -800,7 +800,7 @@ test("prepared tool home seeds only image caches, remains writable and rejects e
     );
     expect(
       await readFile(
-        join(root, ".anban-runtime-home/.cache/hyperframes/browser"),
+        join(root, ".anban-runtime-home/.cache/hypit/browser"),
         "utf8",
       ),
     ).toBe("working");

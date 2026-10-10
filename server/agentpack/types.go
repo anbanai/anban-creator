@@ -27,6 +27,7 @@ type Manifest struct {
 	DisplayName         string                    `yaml:"display_name" json:"display_name"`
 	Description         string                    `yaml:"description" json:"description"`
 	Agent               AgentSpec                 `yaml:"agent" json:"agent"`
+	Interaction         *InteractionSpec          `yaml:"interaction,omitempty" json:"interaction,omitempty"`
 	Bindings            Bindings                  `yaml:"bindings" json:"bindings"`
 	Runtime             RuntimeSpec               `yaml:"runtime" json:"runtime"`
 	Surfaces            []string                  `yaml:"surfaces" json:"surfaces"`
@@ -43,6 +44,15 @@ type Manifest struct {
 	Digest              string                    `yaml:"-" json:"digest"`
 
 	dir string
+}
+
+// InteractionSpec declares capabilities that are only available to a
+// server-owned interactive runtime. Interactive Packs are intentionally kept
+// out of the ordinary task/channel routing and must opt in explicitly.
+type InteractionSpec struct {
+	UserQuestions bool     `yaml:"user_questions" json:"user_questions,omitempty"`
+	Capabilities  []string `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Intents       []string `yaml:"intents,omitempty" json:"intents,omitempty"`
 }
 
 func (m Manifest) SupportsTaskKind(taskKind string) bool {
@@ -229,6 +239,21 @@ func (c *Catalog) PlanPacks() []Manifest {
 	return packs
 }
 
+// InteractivePacks returns only Packs explicitly authorized for the
+// server-owned interactive capability surface.
+func (c *Catalog) InteractivePacks() []Manifest {
+	if c == nil {
+		return nil
+	}
+	packs := make([]Manifest, 0)
+	for _, pack := range c.Packs {
+		if pack.Interaction != nil && pack.Interaction.UserQuestions {
+			packs = append(packs, pack)
+		}
+	}
+	return packs
+}
+
 // ForTaskKind resolves a workflow task kind to its owning Pack.
 func (c *Catalog) ForTaskKind(taskKind string) (Manifest, bool) {
 	if c == nil {
@@ -255,6 +280,9 @@ func (c *Catalog) ForTaskType(taskType string) (Manifest, bool) {
 		return pack, true
 	}
 	if pack, ok := c.Pack(taskType); ok {
+		if pack.Interaction != nil && pack.Interaction.UserQuestions {
+			return Manifest{}, false
+		}
 		return pack, true
 	}
 	if taskType == "viral_analysis" {

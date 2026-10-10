@@ -21,6 +21,9 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 		if pack.Kind != agentpack.KindManaged {
 			continue
 		}
+		if pack.Interaction != nil && pack.Interaction.UserQuestions {
+			continue
+		}
 		pack := pack
 		t.Run(pack.ID, func(t *testing.T) {
 			wantVersion := "2.0.2"
@@ -43,7 +46,7 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 				wantVersion = "1.0.2"
 			}
 			if pack.ID == "profile-analysis" {
-				wantVersion = "2.1.3"
+				wantVersion = "2.1.4"
 			}
 			if pack.ID == "whiteboard-animation" {
 				wantVersion = "2.0.3"

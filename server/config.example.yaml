@@ -53,6 +53,20 @@ mcp:
   tool_timeouts:
     generate_image: 10m
 
+# Optional interactive Project Creator runtime. Sessions are process-local and
+# are discarded when the runtime exits or its lease expires.
+interactive:
+  enabled: false
+  admin_only: false
+  bridge_command: "node"
+  bridge_args: ["dist/interactive-bridge.js"]
+  bridge_dir: "${ANBAN_INTERACTIVE_BRIDGE_DIR:-./runtime-dsh}"
+  dsh_patch: "${ANBAN_INTERACTIVE_DSH_PATCH:-./harness/dsh/project-creator.patch.yml}"
+  provider: "deepseek-official"
+  provider_api_key_env: "DEEPSEEK_API_KEY"
+  model: "deepseek-v4-flash"
+  mcp_url: "${ANBAN_INTERACTIVE_MCP_URL:-https://creator.anbanai.com/mcp}"
+
 model_providers:
   moonshot:
     protocol: "openai_compatible"
@@ -155,9 +169,9 @@ hypit:
   #   credentials:
   #     env: { use: "@hypit/credential-store-env" }
   #   endpoints:
-  #     media.local: { use: "@hypit/provider-media-local" }
-  #     hyperframes.local:
-  #       use: "@hypit/provider-hyperframes-local"
+  #     media.local: { use: "@hypit/media-local" }
+  #     html.local:
+  #       use: "@hypit/provider-html-local"
   #       config: { workers: 2, defaultConcurrency: 1, browserGpu: software }
   #     configured.provider:
   #       use: "@hypit/provider-hypihub"
@@ -347,6 +361,8 @@ claude:
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
   executor: "${ANBAN_AGENT_EXECUTOR}"
+  # Must equal the SHA-256 of the exact generated Agent Pack Catalog used by the release.
+  agent_pack_catalog_digest: "${ANBAN_AGENT_PACK_CATALOG_DIGEST:-}"
   # 失败运行时保留多久供排查（秒），之后由 reconciler 清理。
   runtime_diagnostic_retention_seconds: 600
   # 每个 Agent 使用独立的 canonical runtime 镜像。

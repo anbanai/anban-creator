@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { readFile } from "node:fs/promises";
 
-import { bootstrap, executionProfileFingerprint, resolveAgentPackForTaskType, validateAgentPackCatalog, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
+import { bootstrap, executionProfileFingerprint, resolveAgentPackForTaskType, validateAgentPackCatalog, validateAgentPackCatalogDigest, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
 import type { JobConfig } from "../src/config.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
@@ -39,6 +39,7 @@ const validResponse = (): BootstrapResponse => {
     agent_pack_id: "wechat-article",
     agent_pack_version: "1.0.0",
     agent_pack_digest: "a".repeat(64),
+    agent_pack_catalog_digest: "b".repeat(64),
     runtime_profile: "wechat-article",
     runtime_adapter: "standard",
     project_id: "project-1",
@@ -64,6 +65,10 @@ const validResponse = (): BootstrapResponse => {
 };
 
 describe("validateBootstrapResponse", () => {
+  test("rejects a runtime Catalog whose bytes do not match the Server digest", () => {
+    const response = validateBootstrapResponse("execution-1", validResponse());
+    expect(() => validateAgentPackCatalogDigest(response, "c".repeat(64))).toThrow("Catalog digest does not match runtime image");
+  });
   test("rejects a response with a missing execution ID", () => {
     const response = validResponse() as Record<string, unknown>;
     delete response.execution_id;
@@ -92,7 +97,7 @@ describe("validateBootstrapResponse", () => {
         allowHTTPServer: false,
       };
       await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
-      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("5");
+      expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("6");
       expect(request?.body).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;

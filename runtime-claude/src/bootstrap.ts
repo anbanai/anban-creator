@@ -17,11 +17,11 @@ const MAX_MODEL_USAGE_ALIASES = 128;
 const MAX_CLAUDE_ENV_VALUE_BYTES = 16 << 10;
 const MAX_CLAUDE_ENV_TOTAL_BYTES = 32 << 10;
 const DEFAULT_AGENT_PACK_CATALOG_PATH = "/anbanai/agent-pack-catalog.json";
-export const AGENT_RUNTIME_CONTRACT_VERSION = 5;
+export const AGENT_RUNTIME_CONTRACT_VERSION = 6;
 
 const BOOTSTRAP_RESPONSE_KEYS = [
   "execution_token", "execution_id", "task_id", "task_type", "agent_id", "channel", "task_kind", "project_id", "prompt",
-  "agent_pack_id", "agent_pack_version", "agent_pack_digest", "runtime_profile", "runtime_adapter",
+  "agent_pack_id", "agent_pack_version", "agent_pack_digest", "agent_pack_catalog_digest", "runtime_profile", "runtime_adapter",
   "execution_profile", "max_turns", "agent_flag", "agent_memory_directory",
   "resume_session_id", "resume_context_path", "env", "files", "artifact_transport",
 ];
@@ -122,6 +122,7 @@ export interface BootstrapResponse {
   agent_pack_id: string;
   agent_pack_version: string;
   agent_pack_digest: string;
+  agent_pack_catalog_digest: string;
   runtime_profile: string;
   runtime_adapter: "standard" | "openmontage";
   project_id: string;
@@ -150,8 +151,9 @@ export interface AgentPack {
   digest: string;
   agent: { name: string };
   bindings: { task_kinds?: string[]; task_types?: string[] };
+  interaction?: { user_questions?: boolean };
   runtime: { profile?: string; adapter?: string; max_turns?: number };
-  artifacts: AgentPackArtifact[];
+  artifacts?: AgentPackArtifact[];
   artifacts_by_task_type?: Record<string, AgentPackArtifact[]>;
 }
 
@@ -165,7 +167,7 @@ export interface AgentPackCatalog {
 }
 
 export function resolveAgentPackForTaskType(pack: AgentPack, taskType: string): AgentPack {
-  const selected = pack.artifacts_by_task_type?.[taskType] ?? pack.artifacts;
+  const selected = pack.artifacts_by_task_type?.[taskType] ?? pack.artifacts ?? [];
   const artifacts = selected.map((artifact) => ({ ...artifact }));
   const { artifacts_by_task_type: _overrides, ...resolved } = pack;
   return { ...resolved, artifacts };
@@ -215,7 +217,9 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
   if (envelope.code !== 0 || !envelope.data) throw new Error("bootstrap request rejected");
   try {
     const data = validateBootstrapResponse(config.executionID, envelope.data);
-    const pack = validateAgentPackCatalog(data, await readAgentPackCatalog());
+    const localCatalog = await readAgentPackCatalogWithDigest();
+    validateAgentPackCatalogDigest(data, localCatalog.digest);
+    const pack = validateAgentPackCatalog(data, localCatalog.catalog);
     return { ...data, resolved_agent_pack: pack };
   } catch (error) {
     const identity = trustedBootstrapIdentity(config.executionID, envelope.data);
@@ -241,18 +245,30 @@ function bootstrapHTTPError(status: number, body: string): Error {
 }
 
 export async function readAgentPackCatalog(path = DEFAULT_AGENT_PACK_CATALOG_PATH): Promise<AgentPackCatalog> {
+  return (await readAgentPackCatalogWithDigest(path)).catalog;
+}
+
+export async function readAgentPackCatalogWithDigest(path = DEFAULT_AGENT_PACK_CATALOG_PATH): Promise<{ catalog: AgentPackCatalog; digest: string }> {
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_BOOTSTRAP_RESPONSE_BYTES) {
     throw new Error("Agent Pack Catalog is invalid");
   }
   let catalog: unknown;
+  let raw: Buffer;
   try {
-    catalog = JSON.parse(await readFile(path, "utf8"));
+    raw = await readFile(path);
+    catalog = JSON.parse(raw.toString("utf8"));
   } catch {
     throw new Error("Agent Pack Catalog is not valid JSON");
   }
   validateAgentPackCatalogShape(catalog);
-  return catalog;
+  return { catalog, digest: createHash("sha256").update(raw).digest("hex") };
+}
+
+export function validateAgentPackCatalogDigest(data: Pick<BootstrapResponse, "agent_pack_catalog_digest">, runtimeDigest: string): void {
+  if (data.agent_pack_catalog_digest !== runtimeDigest) {
+    throw new Error(`bootstrap Agent Pack Catalog digest does not match runtime image (execution=${data.agent_pack_catalog_digest}, runtime=${runtimeDigest}). Deploy Server and Agent images built from the same Agent Pack Catalog.`);
+  }
 }
 
 function trustedBootstrapIdentity(executionID: string, input: unknown): BootstrapIdentity | undefined {
@@ -299,6 +315,7 @@ export function validateBootstrapResponse(executionID: string, input: unknown): 
   data.task_kind = taskKind;
   if (!cleanString(data.task_type)) data.task_type = taskKind;
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.agent_pack_id) || !/^\d+\.\d+\.\d+$/.test(data.agent_pack_version) || !/^[0-9a-f]{64}$/.test(data.agent_pack_digest)) throw new Error("bootstrap Agent Pack identity is invalid");
+  if (!/^[0-9a-f]{64}$/.test(data.agent_pack_catalog_digest)) throw new Error("bootstrap Agent Pack Catalog digest is invalid");
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(data.runtime_profile) || (data.runtime_adapter !== "standard" && data.runtime_adapter !== "openmontage")) throw new Error("bootstrap runtime identity is invalid");
   if (data.artifact_transport?.mode !== "direct" && data.artifact_transport?.mode !== "stream") throw new Error("bootstrap artifact transport is invalid");
   if (!cleanString(data.prompt) || Buffer.byteLength(data.prompt) > MAX_BOOTSTRAP_PROMPT_BYTES) throw new Error("bootstrap prompt is invalid");
@@ -365,10 +382,14 @@ export function validateAgentPackCatalog(data: BootstrapResponse, catalog: Agent
 function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPackCatalog {
   if (!isRecord(input) || !Array.isArray(input.packs)) throw new Error("Agent Pack Catalog is invalid");
   for (const rawPack of input.packs) {
-    if (!isRecord(rawPack) || !Array.isArray(rawPack.artifacts)) {
+    if (!isRecord(rawPack) || (rawPack.artifacts !== undefined && !Array.isArray(rawPack.artifacts))) {
       throw new Error("Agent Pack Catalog artifacts are invalid");
     }
-    validateArtifactContract(rawPack.artifacts);
+    const interactive = isRecord(rawPack.interaction) && rawPack.interaction.user_questions === true;
+    if (rawPack.artifacts === undefined && !interactive) {
+      throw new Error("Agent Pack Catalog artifacts are invalid");
+    }
+    if (rawPack.artifacts !== undefined) validateArtifactContract(rawPack.artifacts);
     if (rawPack.artifacts_by_task_type === undefined) continue;
     if (!isRecord(rawPack.artifacts_by_task_type) || !isRecord(rawPack.bindings) || !(Array.isArray(rawPack.bindings.task_kinds) || Array.isArray(rawPack.bindings.task_types))) {
       throw new Error("Agent Pack Catalog artifact overrides are invalid");

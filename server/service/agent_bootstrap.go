@@ -60,27 +60,28 @@ type AgentBootstrapResponse struct {
 	ExecutionID    string `json:"execution_id"`
 	TaskID         string `json:"task_id"`
 	// TaskType is a deprecated wire alias. New runtimes consume TaskKind.
-	TaskType             string              `json:"task_type,omitempty"`
-	AgentID              string              `json:"agent_id"`
-	Channel              string              `json:"channel"`
-	TaskKind             string              `json:"task_kind"`
-	AgentPackID          string              `json:"agent_pack_id"`
-	AgentPackVersion     string              `json:"agent_pack_version"`
-	AgentPackDigest      string              `json:"agent_pack_digest"`
-	RuntimeAdapter       string              `json:"runtime_adapter"`
-	RuntimeProfile       string              `json:"runtime_profile"`
-	ProjectID            string              `json:"project_id"`
-	Prompt               string              `json:"prompt"`
-	ExecutionProfile     AgentRuntimeProfile `json:"execution_profile"`
-	MaxTurns             int                 `json:"max_turns"`
-	AgentFlag            string              `json:"agent_flag"`
-	AgentMemoryDirectory string              `json:"agent_memory_directory"`
-	ResumeSessionID      string              `json:"resume_session_id,omitempty"`
-	ResumeContextPath    string              `json:"resume_context_path,omitempty"`
-	Env                  map[string]string   `json:"env,omitempty"`
-	Files                []BootstrapFile     `json:"files"`
-	ArtifactTransport    ArtifactTransport   `json:"artifact_transport"`
-	recoveryImages       []*model.TaskFile
+	TaskType               string              `json:"task_type,omitempty"`
+	AgentID                string              `json:"agent_id"`
+	Channel                string              `json:"channel"`
+	TaskKind               string              `json:"task_kind"`
+	AgentPackID            string              `json:"agent_pack_id"`
+	AgentPackVersion       string              `json:"agent_pack_version"`
+	AgentPackDigest        string              `json:"agent_pack_digest"`
+	AgentPackCatalogDigest string              `json:"agent_pack_catalog_digest"`
+	RuntimeAdapter         string              `json:"runtime_adapter"`
+	RuntimeProfile         string              `json:"runtime_profile"`
+	ProjectID              string              `json:"project_id"`
+	Prompt                 string              `json:"prompt"`
+	ExecutionProfile       AgentRuntimeProfile `json:"execution_profile"`
+	MaxTurns               int                 `json:"max_turns"`
+	AgentFlag              string              `json:"agent_flag"`
+	AgentMemoryDirectory   string              `json:"agent_memory_directory"`
+	ResumeSessionID        string              `json:"resume_session_id,omitempty"`
+	ResumeContextPath      string              `json:"resume_context_path,omitempty"`
+	Env                    map[string]string   `json:"env,omitempty"`
+	Files                  []BootstrapFile     `json:"files"`
+	ArtifactTransport      ArtifactTransport   `json:"artifact_transport"`
+	recoveryImages         []*model.TaskFile
 }
 
 type AgentBootstrapConfig struct {
@@ -579,7 +580,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		ExecutionToken: token, ExecutionID: execution.ID, TaskID: task.ID, TaskType: bootstrapTaskType,
 		AgentID: execution.AgentID, Channel: execution.Channel, TaskKind: execution.TaskKind,
 		AgentPackID: execution.AgentPackID, AgentPackVersion: execution.AgentPackVersion,
-		AgentPackDigest: execution.AgentPackDigest, RuntimeAdapter: execution.RuntimeAdapter, RuntimeProfile: execution.RuntimeProfile,
+		AgentPackDigest: execution.AgentPackDigest, AgentPackCatalogDigest: agentpack.CatalogDigest(), RuntimeAdapter: execution.RuntimeAdapter, RuntimeProfile: execution.RuntimeProfile,
 		ProjectID: task.ProjectID, Prompt: prompt,
 		ExecutionProfile: AgentRuntimeProfile{
 			ProfileID: executionProfile.ID, Provider: executionProfile.Provider, Protocol: executionProfile.Protocol,

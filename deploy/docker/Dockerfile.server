@@ -2,16 +2,31 @@ FROM golang:alpine AS builder
 
 WORKDIR /build/server
 
+ARG ANBAN_AGENT_PACK_CATALOG_DIGEST
+
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 
 COPY server ./
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
+RUN set -eux; \
+    test "$(sha256sum agentpack/catalog.generated.json | awk '{print $1}')" = "$ANBAN_AGENT_PACK_CATALOG_DIGEST"; \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
+
+RUN apk add --no-cache nodejs npm python3 make g++
+WORKDIR /build/runtime-dsh
+COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./
+RUN npm ci
+COPY runtime-dsh/ ./
+RUN npm run build && npm prune --omit=dev
 
 FROM alpine:latest
 
+ARG ANBAN_AGENT_PACK_CATALOG_DIGEST
+LABEL org.anban.agent.pack.catalog-digest="$ANBAN_AGENT_PACK_CATALOG_DIGEST"
+
 RUN set -eux; \
     apk add --no-cache ca-certificates ffmpeg tzdata; \
+    apk add --no-cache nodejs; \
     addgroup -S -g 1000 anban; \
     adduser -S -D -u 1000 -G anban -h /home/anban anban; \
     mkdir -p \
@@ -26,6 +41,11 @@ COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/econo
 COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml
 COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml
 COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml
+COPY --from=builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
+COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
+COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml
+COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
+COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js
 
 WORKDIR /app
 USER 1000:1000

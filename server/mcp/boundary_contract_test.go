@@ -58,6 +58,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"renderTemplateHandler":                   "svcs.ContentRenderSvc.RenderTemplate",
 	"scoreArticleHandler":                     "svcs.ArticleScoreSvc.Score",
 	"searchSeednoteFeedsHandler":              "svcs.SeednoteCapabilitySvc.SearchFeeds",
+	"stageProjectCreatorDraftHandler":         "svcs.InteractiveSvc.StageDraftForSession",
 	"submitProfileResultHandler":              "svcs.ProjectSvc.ApplyAgentProfileResult",
 	"taskCancelHandler":                       "svcs.TaskSvc.CancelForUser",
 	"taskFilesHandler":                        "svcs.TaskSvc.GetVisibleFilesForUser",

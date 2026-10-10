@@ -2,7 +2,7 @@
 # Local rendering only: no hosted generation account is used.
 set -euo pipefail
 image="${1:-creator-agent-hypit:latest}"
-revision="${2:-e8f94006e1eed9b299448fe5bce6afa5646e2ba5}"
+revision="${2:-ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1}"
 docker info >/dev/null
 docker run --rm -i --platform linux/amd64 --init --cpus 4 --memory 8g \
   --read-only --network none -e HOME=/workspace/.anban-runtime-home \
@@ -17,7 +17,7 @@ test -s /opt/hypit/skills/hypit/SKILL.md
 test -s /opt/hypit/LICENSE
 (cd /opt/hypit && sha256sum --quiet -c .anban-source-files.sha256)
 node --input-type=module <<'JS'
-import { prepareHypitToolHome } from '/app/anban-agent/dist/hypit.js';
+import { prepareHypitToolHome } from '/app/runtime-claude/dist/hypit.js';
 await prepareHypitToolHome('/workspace', process.env);
 JS
 hypit --version
@@ -43,7 +43,7 @@ delete manifest.devDependencies;
 writeFileSync(file, JSON.stringify(manifest, null, 2));
 JS
 cat > /workspace/runtime-profile.json <<'JSON'
-{"format":"hypit.runtime-local@1","dataRoot":"/workspace/project/.hypit/execution","credentials":{},"endpoints":{"media.local":{"use":"@hypit/provider-media-local"},"hyperframes.local":{"use":"@hypit/provider-hyperframes-local","config":{"workers":2,"defaultConcurrency":1,"browserGpu":"software"}}},"bindings":{}}
+{"format":"hypit.runtime-local@1","dataRoot":"/workspace/project/.hypit/execution","credentials":{},"endpoints":{"media.local":{"use":"@hypit/media-local"},"html.local":{"use":"@hypit/provider-html-local","config":{"workers":2,"defaultConcurrency":1,"browserGpu":"software"}}},"bindings":{}}
 JSON
 trap 'hypit runtime down --runtime /workspace/runtime-profile.json >/dev/null 2>&1 || true' EXIT
 hypit check chat.svrun
@@ -56,12 +56,12 @@ ffmpeg -nostdin -v error -xerror -i /workspace/final.mp4 -f null -
 hypit runtime down --runtime /workspace/runtime-profile.json
 mkdir -p productions/main/runs
 cat > productions/main/runs/main.svrun <<'RUN'
-<?svml using="@hypit/run-markup@1"?>
+<?svml using="@hypit/markup/run@1"?>
 <svrun version="1"><author source="../../../chat.svml"/><target output="final.video"/></svrun>
 RUN
 node --input-type=module <<'JS'
 import { mkdir, rename, writeFile } from 'node:fs/promises';
-import { exportHypitProject, prepareHypitWorkspace, validateHypitReferences } from '/app/anban-agent/dist/hypit.js';
+import { exportHypitProject, prepareHypitWorkspace, validateHypitReferences } from '/app/runtime-claude/dist/hypit.js';
 await validateHypitReferences('/workspace/project');
 await mkdir('/workspace/.anban-creator', { recursive: true });
 await exportHypitProject('/workspace/project', '/workspace/.anban-creator/project.zip');

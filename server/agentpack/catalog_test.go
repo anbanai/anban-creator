@@ -970,8 +970,27 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 10 {
-		t.Fatalf("Pack count = %d, want 10", len(catalog.Packs))
+	if len(catalog.Packs) != 11 {
+		t.Fatalf("Pack count = %d, want 11", len(catalog.Packs))
+	}
+	creator, ok := catalog.Pack("project-creator")
+	if !ok {
+		t.Fatal("project-creator Pack missing")
+	}
+	if creator.DisplayName != "Project Creator" || creator.Interaction == nil || !creator.Interaction.UserQuestions {
+		t.Fatalf("project-creator metadata = %#v", creator)
+	}
+	if creator.Channel != "" || len(creator.Bindings.TaskKinds) != 0 || len(creator.Surfaces) != 1 || creator.Surfaces[0] != "plugin" {
+		t.Fatalf("project-creator routing = %#v", creator)
+	}
+	if creator.Agent.Name != "project-creator" || creator.Runtime.Profile != "project-creator" || creator.Runtime.Adapter != AdapterStandard {
+		t.Fatalf("project-creator runtime = %#v", creator)
+	}
+	if _, ok := catalog.ForTaskType("project-creator"); ok {
+		t.Fatal("project-creator must not resolve as an ordinary task type")
+	}
+	if _, ok := catalog.ForChannel("project-creator"); ok {
+		t.Fatal("project-creator must not resolve as an ordinary channel")
 	}
 
 	wantRoutes := map[string]struct {
@@ -1029,6 +1048,55 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 				t.Errorf("Pack %q binds undeclared task kind %q", pack.ID, taskKind)
 			}
 		}
+	}
+}
+
+func TestLoadCatalogEnforcesInteractivePackBoundary(t *testing.T) {
+	base := `
+id: project-creator
+version: 1.0.0
+kind: managed
+display_name: Project Creator
+description: Interactive project creator
+agent:
+  name: project-creator
+  claude_source: agent.claude.md
+  codex_source: agent.codex.toml
+  max_turns: 120
+interaction:
+  user_questions: true
+  capabilities: [ask_user_question]
+  intents: [create-project]
+runtime:
+  profile: project-creator
+  adapter: standard
+  max_turns: 120
+surfaces: [plugin]
+`
+	tests := []struct {
+		name string
+		edit func(string) string
+		want string
+	}{
+		{name: "channel", edit: func(manifest string) string { return manifest + "channel: wechat-article\n" }, want: "must not bind a channel"},
+		{name: "task kind", edit: func(manifest string) string { return manifest + "bindings:\n  task_kinds: [project_creation]\n" }, want: "must not bind task kinds"},
+		{name: "task surface", edit: func(manifest string) string {
+			return strings.Replace(manifest, "surfaces: [plugin]", "surfaces: [plugin, task]", 1)
+		}, want: "must not expose task or plan surfaces"},
+		{name: "billing", edit: func(manifest string) string {
+			return manifest + "billing_operations:\n  project_creation: task.project_creation\n"
+		}, want: "must not declare billing operations"},
+		{name: "artifact", edit: func(manifest string) string {
+			return manifest + "artifacts:\n  - {role: draft, path: output/draft.json, mime_type: application/json, required: true}\n"
+		}, want: "must not declare task artifacts or delivery"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeInteractivePackFixture(t, tt.edit(base))
+			if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadCatalog error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -1507,6 +1575,26 @@ func writePackFixture(t *testing.T, manifest string) string {
 	}
 	if strings.Contains(manifest, "dsh_source: agent.dsh.yml") {
 		files[filepath.Join(packDir, "agent.dsh.yml")] = validDSHComposition
+	}
+	for path, content := range files {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func writeInteractivePackFixture(t *testing.T, manifest string) string {
+	t.Helper()
+	root := t.TempDir()
+	packDir := filepath.Join(root, "packs", "project-creator")
+	if err := os.MkdirAll(packDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		filepath.Join(packDir, "agent-pack.yaml"):  manifest,
+		filepath.Join(packDir, "agent.claude.md"):  "---\nname: project-creator\nmaxTurns: 120\n---\n\n# Project Creator\n",
+		filepath.Join(packDir, "agent.codex.toml"): "name = \"project-creator\"\n",
 	}
 	for path, content := range files {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

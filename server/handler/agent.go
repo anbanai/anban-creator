@@ -355,7 +355,7 @@ func (r *agentCompleteRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-const agentRuntimeContractVersion = 5
+const agentRuntimeContractVersion = 6
 
 // ProgressPlan handles POST /api/v1/agent/progress-plan.
 func (h *AgentHandler) ProgressPlan(c fiber.Ctx) error {

@@ -1,5 +1,5 @@
 {
-  "name": "anban-agent-runtime",
+  "name": "anban-runtime-claude",
   "private": true,
   "version": "0.1.0",
   "type": "module",

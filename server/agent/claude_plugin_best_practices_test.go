@@ -611,6 +611,14 @@ func TestClaudeCodeManagedAgentsDeclareAutonomousExecution(t *testing.T) {
 		}
 		path := filepath.Join(root, "agents", pack.Agent.Name+".md")
 		body := readRepoFile(t, path)
+		if pack.Interaction != nil && pack.Interaction.UserQuestions {
+			for _, want := range []string{"允许使用 `AskUserQuestion`", "不得把临时草稿当成已确认的正式画像"} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing interactive contract %q", path, want)
+				}
+			}
+			continue
+		}
 		for _, want := range []string{
 			"全自动执行契约",
 			"不得调用 `AskUserQuestion`",

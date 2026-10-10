@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -25,7 +26,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 			t.Fatalf("%s FROM instructions mismatch\nwant: %v\n got: %v", runtime.name, runtime.from, got)
 		}
 		for _, want := range []string{
-			"agent-ts/package.json agent-ts/package-lock.json",
+			"runtime-claude/package.json runtime-claude/package-lock.json",
 			"npm ci",
 			"@anthropic-ai/claude-agent-sdk",
 			"COPY harness/ /anbanai/",
@@ -44,7 +45,7 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 		}
 	}
 	launcher := readTextFile(t, filepath.Join(root, "deploy", "docker", "anban-agent-launcher"))
-	if !strings.Contains(launcher, "exec node /app/anban-agent/dist/main.js \"$@\"") {
+	if !strings.Contains(launcher, "exec node /app/runtime-claude/dist/main.js \"$@\"") {
 		t.Fatal("TypeScript anban launcher must exec the compiled Node entrypoint")
 	}
 }
@@ -54,7 +55,7 @@ func TestTypeScriptRuntimeDockerfilesShareLockedSDKWithOptionalPackages(t *testi
 	for _, name := range []string{"Dockerfile.agent-wechat-article", "Dockerfile.agent-wechat-picture", "Dockerfile.agent-moments", "Dockerfile.agent-ecommerce", "Dockerfile.agent-seednote", "Dockerfile.agent-montage"} {
 		body := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
 		for _, required := range []string{
-			"COPY agent-ts/package.json agent-ts/package-lock.json ./",
+			"COPY runtime-claude/package.json runtime-claude/package-lock.json ./",
 			"RUN npm ci",
 			"npm prune --omit=dev",
 			"test -d node_modules/@anthropic-ai/claude-agent-sdk",
@@ -68,5 +69,23 @@ func TestTypeScriptRuntimeDockerfilesShareLockedSDKWithOptionalPackages(t *testi
 				t.Errorf("%s overrides the shared SDK dependency contract with %q", name, forbidden)
 			}
 		}
+	}
+}
+
+func TestRuntimePackageDependencyBoundaries(t *testing.T) {
+	root := repositoryRoot(t)
+	claudePackage, err := os.ReadFile(filepath.Join(root, "runtime-claude", "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dshPackage, err := os.ReadFile(filepath.Join(root, "runtime-dsh", "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(claudePackage), "@deepseek-ai/") || strings.Contains(string(claudePackage), "interactive-bridge") {
+		t.Fatal("runtime-claude must not declare DSH or interactive Bridge dependencies")
+	}
+	if strings.Contains(string(dshPackage), "@anthropic-ai/") || strings.Contains(string(dshPackage), "claude-agent") {
+		t.Fatal("runtime-dsh must not declare Claude runtime dependencies")
 	}
 }

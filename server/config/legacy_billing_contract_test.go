@@ -26,7 +26,7 @@ func TestProductionSourcesRejectLegacyDynamicBillingContracts(t *testing.T) {
 		filepath.Join("server", "app", "image", "openai.go"):     {"payment_required": true},
 		filepath.Join("server", "app", "image", "volcengine.go"): {"payment_required": true},
 	}
-	roots := []string{"server", filepath.Join("agent-ts", "src"), filepath.Join("studio", "src")}
+	roots := []string{"server", filepath.Join("runtime-claude", "src"), filepath.Join("studio", "src")}
 	for _, relativeRoot := range roots {
 		walkRoot := filepath.Join(root, relativeRoot)
 		err := filepath.WalkDir(walkRoot, func(path string, entry fs.DirEntry, walkErr error) error {

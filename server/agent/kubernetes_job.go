@@ -31,6 +31,7 @@ const (
 	kubernetesTokenFile                        = kubernetesTokenMountPath + "/token"
 	kubernetesTokenAudience                    = "anban-server"
 	kubernetesObjectConfigHashLabel            = "anban.ai/config-hash"
+	kubernetesCatalogDigestLabel               = "anban.ai/agent-pack-catalog-digest"
 )
 
 type kubernetesJobConfig struct {
@@ -284,6 +285,7 @@ func kubernetesExecutionLabels(execution *model.TaskExecution, task *model.Task)
 		"app.kubernetes.io/name":      kubernetesAgentAppName,
 		"app.kubernetes.io/component": "execution",
 		kubernetesExecutionIDLabel:    kubernetesLabelValue(executionID(execution)),
+		kubernetesCatalogDigestLabel:  agentpack.CatalogDigest(),
 	}
 	if task != nil {
 		labels[kubernetesTaskIDLabel] = kubernetesLabelValue(task.ID)

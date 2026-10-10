@@ -715,6 +715,23 @@ func main() {
 			planHandler.SetRepository(repo)
 		}
 	}
+	interactiveSvc := service.NewInteractiveService(repo)
+	if cfg.Interactive.Enabled && strings.TrimSpace(cfg.Interactive.BridgeCommand) != "" {
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{
+			Command:           cfg.Interactive.BridgeCommand,
+			Args:              cfg.Interactive.BridgeArgs,
+			Dir:               cfg.Interactive.BridgeDir,
+			DSHPatch:          cfg.Interactive.DSHPatch,
+			Provider:          cfg.Interactive.Provider,
+			ProviderAPIKeyEnv: cfg.Interactive.ProviderAPIKeyEnv,
+			Model:             cfg.Interactive.Model,
+			MCPURL:            cfg.Interactive.MCPURL,
+		})
+		interactiveSvc.SetEnabled(true)
+	}
+	// Apply authorization policy after selecting the runtime-backed service so
+	// enabling the bridge cannot silently drop admin-only access control.
+	interactiveSvc.SetAdminOnly(cfg.Interactive.AdminOnly)
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	var mcpHandler http.Handler
@@ -760,10 +777,11 @@ func main() {
 				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.VideoUnderstanding.Model,
 			}, log),
+			InteractiveSvc: interactiveSvc,
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)
-		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc))
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
@@ -773,7 +791,7 @@ func main() {
 			Bool("publishing_tools", publishingSvc != nil).
 			Msg("MCP handler initialized with tools (official SDK)")
 	} else {
-		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc))
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
 
@@ -846,6 +864,8 @@ func main() {
 		go ilinkWorker.Run(ilinkWorkerCtx)
 	}
 
+	interactiveHandler := handler.NewInteractiveHandler(interactiveSvc)
+
 	// 16. Build Services struct.
 	svcs := &router.Services{
 		Config:                       cfg,
@@ -872,6 +892,7 @@ func main() {
 		WechatPublicationHandler:     wechatPublicationHandler,
 		ChannelsAnalyticsHandler:     channelsAnalyticsHandler,
 		AgentHandler:                 agentHandler,
+		InteractiveHandler:           interactiveHandler,
 		AgentProfileHandler:          agentProfileHandler,
 		AgentPackHandler:             agentPackHandler,
 		BillingHandler:               fixedBilling.Handler,
@@ -946,6 +967,14 @@ func main() {
 		// loops tear down rather than leak to process exit — Fiber force-closes
 		// the sockets regardless, but without the quit signal run() never exits.
 		wsHub.Shutdown()
+
+		// Stop temporary DSH sessions while their Server-owned capabilities are
+		// still available for graceful shutdown.
+		interactiveShutdownCtx, interactiveShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := interactiveSvc.Shutdown(interactiveShutdownCtx); err != nil {
+			log.Error().Err(err).Msg("failed to close interactive sessions")
+		}
+		interactiveShutdownCancel()
 
 		// 2. Shutdown HTTP server.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

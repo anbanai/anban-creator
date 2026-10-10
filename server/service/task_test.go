@@ -161,10 +161,24 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	expectedRevision := int64(0)
 	input := map[string]any{
 		"project_id":  projectID,
-		"platform":    model.PlatformWechat,
 		"profile_url": "https://example.com/profile",
-		"answers":     map[string]any{},
-		"samples":     []any{},
+		"answers": map[string]any{
+			"basic": map[string]any{
+				"project_name":   "",
+				"account_status": "",
+			},
+			"platform_accounts": []any{},
+			"intent": map[string]any{
+				"goals": "", "direction": "", "differentiation": "",
+			},
+			"content": map[string]any{
+				"preferences": "", "formats": "", "tone": "", "audience": "",
+			},
+			"boundaries": map[string]any{
+				"exclusions": "", "collaboration": "", "compliance": "",
+			},
+		},
+		"samples": []any{},
 	}
 	params := CreateManualParams{
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
