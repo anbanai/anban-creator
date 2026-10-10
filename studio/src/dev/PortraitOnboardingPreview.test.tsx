@@ -33,7 +33,7 @@ describe('conversation portrait preview', () => {
     await sample(); await sample(); await sample()
     expect(screen.queryByRole('button', { name: /确认画像/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '继续示例，不采用自由输入' }))
-    expect(screen.getByRole('button', { name: /确认画像/ })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /确认画像/ })).toHaveLength(2)
   })
 
   it('allows an optional facet to stay empty, requires confirmation, and reconfirms after correction', async () => {
@@ -75,7 +75,7 @@ describe('portrait conversation input boundaries', () => {
     const onSend = vi.fn(() => new Promise<void>((_, fail) => { reject = fail }))
     render(<PortraitConversation messages={[]} draft={{}} ready confirmed={false} onSend={onSend} onConfirm={vi.fn()} onCreate={vi.fn()} />)
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '纠正一下' } })
-    expect(screen.getByRole('button', { name: /确认画像/ })).toBeDisabled()
+    screen.getAllByRole('button', { name: /确认画像/ }).forEach(button => expect(button).toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
     expect(onSend).toHaveBeenCalledTimes(1)

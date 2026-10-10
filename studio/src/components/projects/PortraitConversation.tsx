@@ -43,6 +43,8 @@ export function PortraitConversation({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
   const count = portraitFacets.filter(([key]) => draft[key]).length
+  const percent = Math.round(count / portraitFacets.length * 100)
+  const missingBasics = portraitFacets.filter(([key]) => ['identity', 'audience', 'platforms'].includes(key) && !draft[key]).map(([, label]) => label)
   const locked = busy || sending
   const browserVoice = useBrowserDictation(setInput)
   const localDictation = useLocalDictation(setInput)
@@ -86,6 +88,13 @@ export function PortraitConversation({
         <h1>聊一聊，让你的 IP 清晰起来。</h1>
         <p>说说你的故事。我们一起找到值得被看见的部分。</p>
       </header>
+      <section className={`portrait-progress ${ready ? 'is-ready' : ''}`} aria-label="访谈进度">
+        <div className="portrait-progress-heading"><strong>{confirmed ? '画像已确认，可以开始创作' : ready ? '已足够开始，可以结束访谈了' : '先认识你，再创作第一篇'}</strong><span>{percent}%</span></div>
+        <div role="progressbar" aria-label="画像信息完整度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={`已了解 ${count} / 6 项信息`} className="portrait-progress-track"><span style={{width:`${percent}%`}} /></div>
+        <div className="portrait-progress-steps">{portraitFacets.map(([key,label])=><span key={key} className={draft[key] ? 'known' : ''}>{draft[key] ? <Check size={12}/> : <span className="portrait-dot"/>}{label}</span>)}</div>
+        <p aria-live="polite">已了解 {count} / 6 项信息。{ready ? '其余信息可以以后补充，不必聊到 100%。' : `开始前还需了解：${missingBasics.join('、') || '请核对刚才的信息'}。一句话可以同时补充多项。`}</p>
+        {ready && <button className="portrait-progress-action" disabled={locked || voice.active || !!input.trim()} onClick={confirmed ? onCreate : onConfirm}>{confirmed ? '去创作第一篇' : '结束访谈，确认画像'}<ArrowRight size={15}/></button>}
+      </section>
       <div className="portrait-messages" ref={messagesRef} role="log" aria-label="对话记录" aria-live="polite">
         {messages.map(message => <article key={message.id} className={`portrait-message ${message.role}`}>
           <div className="portrait-speaker">{message.role === 'assistant' ? <><Sparkles size={14} /> 案板</> : '你'}</div>

@@ -1,4 +1,11 @@
 .portrait-preview { --portrait-ink: #34342e; --portrait-muted: #85847b; --portrait-accent: #ad552f; color: var(--portrait-ink); background: #f7f6f2; min-height: 100dvh; font-family: 'Inter Variable', 'Microsoft YaHei', sans-serif; }
+.portrait-progress { padding: 16px 18px; border: 1px solid #e2ddcf; border-radius: 14px; background: #fffdf8; margin-bottom: 12px; }
+.portrait-progress.is-ready { background: #f0f5ee; border-color: #ceddcb; }
+.portrait-progress-heading { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }.portrait-progress-heading > span { font-size: 20px; font-weight: 600; color: #577967; }
+.portrait-progress-track { height: 5px; border-radius: 4px; background: #e5e5da; margin: 10px 0; overflow: hidden; }.portrait-progress-track > span { display: block; height: 100%; background: #658665; transition: width .3s ease; }
+.portrait-progress-steps { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 10px; color: #928c7d; }.portrait-progress-steps > span { display: inline-flex; gap: 4px; align-items: center; }.portrait-progress-steps .known { color: #466847; }
+.portrait-progress p { font-size: 11px; line-height: 1.7; color: #777263; margin: 9px 0 0; }.portrait-progress-action { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; border: 0; border-radius: 8px; padding: 10px; margin-top: 12px; background: #496e50; color: white; font-size: 12px !important; }
+@media (max-height: 850px) and (min-width: 960px) { .portrait-chat-heading { padding: 12px 0 !important; }.portrait-chat-heading p { display: none; } }
 .portrait-preview * { box-sizing: border-box; }
 .portrait-preview button { cursor: pointer; font: inherit; }
 .portrait-preview button:disabled { cursor: default; opacity: .5; }
