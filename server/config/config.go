@@ -895,6 +895,9 @@ func NewConfig(path string) (*Config, error) {
 	}
 
 	cfg.applyDefaults()
+	if err := cfg.inheritOnboardingProvider(data); err != nil {
+		return nil, err
+	}
 	if err := cfg.deriveModelRouteRuntimeConfig(); err != nil {
 		return nil, err
 	}

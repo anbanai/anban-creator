@@ -9,6 +9,8 @@ logging:
 
 # Optional portrait interview. No browser/provider secrets or DB migration.
 # All requests require login; the platform pays provider costs within Redis quotas.
+# Omitting this entire section reuses the existing official DeepSeek effective
+# execution profile. An explicit section (including enabled:false) overrides reuse.
 onboarding:
   enabled: ${ANBAN_ONBOARDING_ENABLED:-false}
   daily_user_limit: ${ANBAN_ONBOARDING_DAILY_USER_LIMIT:-60}

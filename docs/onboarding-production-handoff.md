@@ -25,7 +25,9 @@
 
 ## Server 配置
 
-将 `server/config.example.yaml` 中完整 `onboarding:` 段合入实际挂载的 `/app/conf/config.yaml`。**只加环境变量而不加 YAML 引用不会生效。** 新段默认关闭，旧配置无需更改即可启动。
+默认复用现有服务端配置：如果 `/app/conf/config.yaml` 没有 `onboarding:` 段，且 `claude.execution_profiles.effective` 是完整的 DeepSeek 官方配置，访谈使用其中的 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`（支持已有模型别名映射），并把官方 `/anthropic` 地址转换为同域的 Chat Completions 根地址。无需新建 Secret、修改 ConfigMap 或把密钥交给前端。仍使用每日 60/1000 的 Redis 限额。
+
+仅当要显式关闭、改用独立供应商、修改配额或启用服务器语音识别时，将 `server/config.example.yaml` 中完整 `onboarding:` 段合入实际挂载的 `/app/conf/config.yaml`。显式配置始终优先，`enabled: false` 不会被继承逻辑重新打开。**独立配置的环境变量仍需 YAML 引用才生效。** 不完整配置、其他供应商或非官方代理地址不会被猜测转换或静默换服务。
 
 | 环境变量 | 用途 |
 | --- | --- |
@@ -64,7 +66,7 @@ Server 要能出站访问两个配置的 HTTPS 服务，并使用现有 Redis。
 6. 发布前运行 CI 的 Go `check` 和 Studio 测试/构建作业。现有 `.github/workflows/ci.yml` 仅在 main push 或面向 main 的 PR 触发；推本分支本身不等于 CI 已跑。`release.yml` 是 DSH 软件包流程，不是这次 Server/Studio 部署。
 7. 检查通过后合并主分支，两条生产流水线使用同一合并提交，先 Server 后 Studio，保留人工卡点。回滚时关闭 onboarding 并回退两张镜像；若回退到不认识新 YAML 段的旧 Server，须同步移除 `onboarding:` 段。无需数据库回滚。
 
-注意：本地原有 `harness` 工作目录与主仓库锁定的子模块版本不同，本次未改动它；流水线需确认锁定提交可拉取，不能把本地旧 Harness 当本次更新发布。
+Harness 原锁定提交不可拉取。2026-10-10 用户转述合伙人确认并明确授权改用最新可用版本，本次锁定为 `3bc900c5a69eb0dd2c45616ff1b31595becacf57`。它不是缺失提交的等价副本；须完成此提交组合的 CI 验证，不更新线上 Agent 镜像。
 
 ## 本次验证记录
 
@@ -95,14 +97,17 @@ Server 要能出站访问两个配置的 HTTPS 服务，并使用现有 Redis。
 
 ### 密钥的确切配置位置
 
+本次默认复用现有 **`anban-agent-profile-providers`** Secret 的 **`deepseek-api-key`**，由既有 `ANBAN_DEEPSEEK_API_KEY` 注入 Server，再由现有 YAML 的 `effective.envs.ANTHROPIC_AUTH_TOKEN` 引用。以下独立配置步骤为可选覆盖，**本次复用模式不需要执行**。
+
 1. 在生产集群的 `anbanai-prod` 命名空间创建或更新 Secret **`anban-onboarding-providers`**，模板见 `deploy/onboarding-secret.example.yaml`。填入实际可调用的 Chat 模型 ID 与 API Key，启用时设 `ANBAN_ONBOARDING_ENABLED=true`。语音三项可全部空白，表示未启用服务器转写。
 2. `server/Deployment.yaml` 通过可选 `envFrom.secretRef` 注入该 Secret。未创建 Secret 不阻止旧部署；禁止把密钥传入镜像构建参数或前端变量。
 3. 在 ConfigMap **`creator-prod`** 的 **`creator-api.yaml`** 中合入 `server/config.example.yaml` 的完整 `onboarding:` 段，保留其他配置。该键挂载到 `/app/conf/config.yaml`；环境变量没有对应 YAML 引用不会生效。
 4. Secret 与 ConfigMap 必须在新 Server 发布前准备好。旧 Server 不识别新段；若配置使用 subPath 挂载，变更需新 Pod 才生效，不单独重启旧 Server。回滚旧镜像前先恢复旧配置。
 5. 新 Server 就绪后，以登录账号验证 `/api/v1/onboarding/capabilities` 和一次虚构文本访谈，再发布前端。未配置语音供应商时不得宣称服务器语音识别已验收。
 
-### 当前阻塞，尚未合并或发布
+### 原阻塞及处理进展
 
-- GitHub PR 检查及云效后端 #298 都在拉取 `harness` 时失败：`not our ref ed8f056d2779d5e25fa057d92cf038d77857bfba`。需向 `anbanai/creator-harness` 恢复该确切提交到可访问分支；不替换为另一个未经验证的版本。本地也没有这个对象。
-- 当前 RAM 身份进入容器控制台时，`cs:DescribeClustersForRegion` 返回权限不足。生产 Secret/ConfigMap 尚未读取或修改；需管理员在正确的生产集群处理配置或授权后继续。
+- 原 GitHub PR 检查及云效后端 #298 在拉取 `harness` 时失败：`not our ref ed8f056d2779d5e25fa057d92cf038d77857bfba`。已按合伙人和用户确认改用上述可用提交，检查需重新执行。
+- 当前 RAM 身份进入容器控制台时，`cs:DescribeClustersForRegion` 返回权限不足。未读取或修改生产 Secret/ConfigMap；本次采用已获授权的现有服务端配置复用，不通过其他接口绕过容器权限。
 - 前端最近成功运行 #250 使用的是较早提交 `240e9767`，不代表后续完整功能已经上线。
+- 用户已确认合伙人同意使用可用 Harness 版本发布后端。合并、镜像发布与线上功能验证仍以实际检查和流水线结果为准。
