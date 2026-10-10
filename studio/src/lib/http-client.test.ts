@@ -2,6 +2,22 @@ import { describe, it, expect } from 'vitest'
 import { getApiErrorCode, getApiErrorMessage, sanitizeUserFacingErrorMessage } from './http-client'
 
 describe('getApiErrorMessage', () => {
+  it('does not describe a login timeout as an image service failure', () => {
+    const error = Object.assign(new Error('timeout of 30000ms exceeded'), { isAxiosError: true, code: 'ECONNABORTED' })
+    expect(getApiErrorMessage(error, '登录失败，请重试。')).toBe('服务响应超时，请稍后重试')
+  })
+
+  it.each([502, 503, 504])('hides gateway HTML for HTTP %s', (status) => {
+    const error = { response: { status, data: '<html>Service Temporarily Unavailable</html>' } }
+    expect(getApiErrorMessage(error, '登录失败，请重试。')).toBe(
+      status === 504 ? '服务响应超时，请稍后重试' : '服务暂时不可用，请稍后重试',
+    )
+  })
+
+  it('uses a service-neutral message for rate limits', () => {
+    expect(getApiErrorMessage(new Error('rate limit exceeded'), '登录失败')).toBe('请求过于频繁，请稍后重试')
+  })
+
   it('extracts msg from Axios error with response data', () => {
     const axiosError = {
       isAxiosError: true,

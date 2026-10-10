@@ -138,8 +138,11 @@ export function sanitizeUserFacingErrorMessage(message: unknown, fallback: strin
   ) {
     return '图像能力配置异常，请联系管理员'
   }
-  if (lower.includes('rate limit') || lower.includes('timeout')) {
-    return '图片服务繁忙，请稍后重试'
+  if (lower.includes('rate limit')) {
+    return '请求过于频繁，请稍后重试'
+  }
+  if (lower.includes('timeout')) {
+    return '服务响应超时，请稍后重试'
   }
 
   const internalMarkers = [
@@ -214,6 +217,9 @@ function isNetworkError(err: unknown): boolean {
 
 /** Extract user-friendly error message from an unknown error */
 export function getApiErrorMessage(err: unknown, fallback: string): string {
+  const status = (err as { response?: { status?: unknown } } | null)?.response?.status
+  if (status === 502 || status === 503) return '服务暂时不可用，请稍后重试'
+  if (status === 504) return '服务响应超时，请稍后重试'
   const body = getApiErrorBody(err)
   const code = getApiErrorCode(err)
   if (code !== undefined) {
