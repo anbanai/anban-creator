@@ -12,7 +12,7 @@ type Account = { id:string; name:string; profiles:AgentExecutionProfileCapabilit
 const receiptStorage = (userId:string) => `anban:portrait-online:${userId}`
 
 /** Uses the existing authenticated Server APIs; never a local replacement project store. */
-export default function PortraitDelivery({ candidate, messages, sessionId, production = false }: {candidate:PortraitCandidate;messages:PortraitChatMessage[];sessionId?:string;production?:boolean}) {
+export default function PortraitDelivery({ candidate, messages, sessionId, production = false, initialIdea, onIdeaChange }: {candidate:PortraitCandidate;messages:PortraitChatMessage[];sessionId?:string;production?:boolean;initialIdea?:string;onIdeaChange?:(text:string)=>void}) {
   const storageKey = (userId:string) => sessionId ? `anban:portrait-delivery:${userId}:${sessionId}` : receiptStorage(userId)
   const [account,setAccount] = useState<Account|null>(null)
   const [receipt,setReceipt] = useState<PortraitReceipt|null>(null)
@@ -23,6 +23,7 @@ export default function PortraitDelivery({ candidate, messages, sessionId, produ
   const [type,setType] = useState<'wechat-article'|'seednote'>('wechat-article')
   const [profile,setProfile] = useState<AgentExecutionProfileID|''>('')
   const [images,setImages] = useState(true)
+  const [idea,setIdea] = useState(initialIdea ?? candidate.creationIdea?.text ?? '')
   const locked = useRef(false)
   const mounted = useRef(true)
   const key = portraitKey(candidate)
@@ -74,7 +75,7 @@ export default function PortraitDelivery({ candidate, messages, sessionId, produ
     finally {locked.current=false;if(mounted.current)setBusy(false)}
   }
   async function generate() {
-    if(locked.current||!account||!receipt?.projectId||receipt.phase!=='saved'||!profile||receipt.portraitKey!==key) return
+    if(locked.current||!idea.trim()||!account||!receipt?.projectId||receipt.phase!=='saved'||!profile||receipt.portraitKey!==key) return
     locked.current=true;setBusy(true);setError('')
     try {
       const [user,current,catalog,wallet]=await Promise.all([api.auth.me(),api.projects.getAccountProfile(receipt.projectId),api.billing.catalog(),api.billing.wallet()])
@@ -91,7 +92,7 @@ export default function PortraitDelivery({ candidate, messages, sessionId, produ
       if(cost===undefined||cost!==taskCostFor(account.catalog,type,profile)||cost>wallet.balance) {
         setAccount({...account,catalog,wallet}); throw new Error('费用或余额已变化，请核对最新费用后再生成。')
       }
-      const prompt=portraitCreationBrief(candidate)
+      const prompt=portraitCreationBrief(candidate,idea)
       const request=taskFormValuesToRequest({...createTaskFormDefaults(),project_id:receipt.projectId,type,execution_profile:profile,prompt,quantity:1,article_with_cover:images,article_with_content_images:images})
       checkpoint({...receipt,phase:'task_creating'})
       const created=await api.tasks.create(request)
@@ -102,24 +103,26 @@ export default function PortraitDelivery({ candidate, messages, sessionId, produ
     finally {locked.current=false;if(mounted.current)setBusy(false)}
   }
   const cost=account&&profile?taskCostFor(account.catalog,type,profile):undefined
-  const saved=receipt?.profileVersion!==undefined
+  const saved=receipt?.portraitKey===key && receipt?.profileVersion!==undefined
+  const canSave = receipt && (receipt.portraitKey === key || receipt.phase === 'new' || ['saved','task_created'].includes(receipt.phase))
   const status=task?({pending:'已排队',running:'正在创作',completed:'任务已完成',failed:'生成失败',cancelled:'已取消'}[task.status]):'读取任务进度中'
   return <div className="portrait-online" aria-label="线上项目与作品交付">
     <p><strong>{production ? '保存你的画像，开始第一篇创作' : '连接现有线上案板账号'}</strong></p>
     <p>{account?`当前账号：${account.name}`:'请先登录你的案板账号。'} {!production && <a href="/login" target="_blank" rel="noreferrer">登录线上账号</a>} <button disabled={checking||busy} onClick={()=>void connect()}>{checking?'正在连接…':'检查连接'}</button></p>
     {error&&<p className="portrait-error" role="alert">{error}</p>}
-    {receipt?.portraitKey!==key&&receipt&&<p role="alert">这次画像与已保存记录不同。请在项目页核对修改后再创作，避免覆盖或重复建项目。</p>}
+    {receipt?.portraitKey!==key&&receipt&&<p role="status">画像有了新的补充。保存后会更新同一个项目；若线上已有其他修改，会提示你核对。</p>}
     {receipt?.projectId&&<p>项目{saved?'及画像已保存':'已创建，画像尚待保存'}：<a target="_blank" rel="noreferrer" href={`/projects?edit=${encodeURIComponent(receipt.projectId)}`}>{production ? '查看项目' : '查看线上项目'}</a></p>}
     {saved&&type==='wechat-article'&&<p>公众号创作需要先绑定公众号，用于读取历史文章。<a href="/projects" target="_blank" rel="noreferrer">打开项目列表</a>，在本项目的「渠道配置」中设置。密钥仅在现有配置页填写。</p>}
-    {!saved&&<button className="portrait-primary" disabled={!account||!receipt||busy||receipt.phase==='creating'||receipt.portraitKey!==key} onClick={()=>void save()}>{busy?'正在保存…':receipt?.projectId?'继续保存画像':'保存项目和已确认画像'}</button>}
+    {!receipt?.taskId && <p><label>这次想创作什么？<textarea aria-label="这次想创作什么" value={idea} maxLength={1800} rows={3} disabled={busy||receipt?.phase==='task_creating'} onChange={event=>{setIdea(event.target.value);onIdeaChange?.(event.target.value)}} placeholder="例如：写一篇给新手看的养花指南，也可以先描述一个大致想法。" /></label></p>}
+    {!saved&&<button className="portrait-primary" disabled={!account||!receipt||busy||receipt.phase==='creating'||!canSave} onClick={()=>void save()}>{busy?'正在保存…':receipt?.projectId?'保存更新后的画像':'保存当前画像并继续'}</button>}
     {receipt?.phase==='creating'&&!busy&&<p>项目创建结果需要核对，已暂停重复提交。<a href="/projects" target="_blank" rel="noreferrer">打开项目列表</a></p>}
     {saved&&!receipt?.taskId&&<>
-      {!candidate.creationIdea && <p>还没有确定选题。可以返回对话，说说第一篇想写什么，再回来开始创作。</p>}
+      {!idea.trim() && <p>在上方写下这次想创作什么，就可以继续；也可以返回对话一起找方向。</p>}
       <p><label>创作形式 <select aria-label="创作形式" value={type} disabled={busy||receipt?.phase==='task_creating'} onChange={e=>setType(e.target.value as typeof type)}><option value="wechat-article">微信公众号文章</option><option value="seednote">小红书图文</option></select></label></p>
       <p><label>创作档位 <select aria-label="创作档位" value={profile} disabled={busy||receipt?.phase==='task_creating'} onChange={e=>setProfile(e.target.value as AgentExecutionProfileID)}><option value="">请选择可用档位</option>{account?.profiles.filter(p=>p.available).map(p=><option key={p.id} value={p.id}>{p.display_name} · {taskCostFor(account.catalog,type,p.id) ?? '费用未就绪'} 积分起</option>)}</select></label></p>
       {type==='wechat-article'&&<p><label><input type="checkbox" checked={images} disabled={busy||receipt?.phase==='task_creating'} onChange={e=>setImages(e.target.checked)}/> 同时生成封面和正文配图</label></p>}
       <p>任务启动费用：{cost??'暂不可用'} 积分；账号余额：{account?.wallet.balance}。图片等后续操作按线上实际用量计费。</p>
-      <button className="portrait-primary" disabled={busy||receipt?.phase!=='saved'||receipt?.portraitKey!==key||!candidate.creationIdea||cost===undefined||cost>(account?.wallet.balance??0)} onClick={()=>void generate()}>生成第一篇作品</button>
+      <button className="portrait-primary" disabled={busy||receipt?.phase!=='saved'||receipt?.portraitKey!==key||!idea.trim()||cost===undefined||cost>(account?.wallet.balance??0)} onClick={()=>void generate()}>生成第一篇作品</button>
       {receipt?.phase==='task_creating'&&!busy&&<p>提交结果需要核对，暂不重复生成。<a href="/tasks" target="_blank" rel="noreferrer">打开任务列表</a></p>}
     </>}
     {receipt?.taskId&&<p role="status">{status}。<a className="portrait-primary" href={`/tasks/${encodeURIComponent(receipt.taskId)}`} target="_blank" rel="noreferrer">查看进度与作品</a></p>}

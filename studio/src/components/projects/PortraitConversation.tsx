@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowRight, Check, MessageCircle, Mic, Square, Sparkles, UserRound } from 'lucide-react'
 import { useBrowserDictation } from '@/hooks/useBrowserDictation'
 import { useLocalDictation } from '@/hooks/useLocalDictation'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import './portrait-conversation.css'
 
 export const portraitFacets = [
@@ -23,34 +25,34 @@ interface PortraitConversationProps {
   busy?: boolean
   error?: string
   ready: boolean
-  confirmed: boolean
   localVoice?: boolean
   transcribe?: (audio: Blob, signal: AbortSignal) => Promise<string>
   initialInput?: string
   onSend: (text: string) => Promise<void>
-  onConfirm: () => void
   onCreate: () => void
 }
 
 /** Presentation only. The caller owns conversation transport, revisions and persistence. */
 export function PortraitConversation({
   messages, draft, name, summary, creationIdea, suggestion, busy = false, error,
-  ready, confirmed, localVoice: preferLocalVoice = false, transcribe, initialInput = '', onSend, onConfirm, onCreate,
+  ready, localVoice: preferLocalVoice = false, transcribe, initialInput = '', onSend, onCreate,
 }: PortraitConversationProps) {
   const [input, setInput] = useState(initialInput)
   const [sendError, setSendError] = useState('')
   const [sending, setSending] = useState(false)
+  const [creationPrompt, setCreationPrompt] = useState(false)
   const sendingRef = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
   const count = portraitFacets.filter(([key]) => draft[key]).length
   const percent = Math.round(count / portraitFacets.length * 100)
-  const missingBasics = portraitFacets.filter(([key]) => ['identity', 'audience', 'platforms'].includes(key) && !draft[key]).map(([, label]) => label)
+  const missing = portraitFacets.filter(([key]) => !draft[key]).map(([, label]) => label)
   const locked = busy || sending
   const browserVoice = useBrowserDictation(setInput)
   const localDictation = useLocalDictation(setInput, transcribe)
   const localVoice = (preferLocalVoice || !!transcribe) && !browserVoice.active
   const voice = localVoice ? localDictation : browserVoice
+  const creationLocked = locked || voice.active || !!input.trim()
 
   useEffect(() => {
     const list = messagesRef.current
@@ -90,12 +92,24 @@ export function PortraitConversation({
         <p>说说你的故事。我们一起找到值得被看见的部分。</p>
       </header>
       <section className={`portrait-progress ${ready ? 'is-ready' : ''}`} aria-label="访谈进度">
-        <div className="portrait-progress-heading"><strong>{confirmed ? '画像已确认，可以开始创作' : ready ? '已足够开始，可以结束访谈了' : '先认识你，再创作第一篇'}</strong><span>{percent}%</span></div>
+        <div className="portrait-progress-heading"><strong>{ready ? '画像已初步清晰，随时可以创作' : '边聊边完善，也可以先开始创作'}</strong><span>{percent}%</span></div>
         <div role="progressbar" aria-label="画像信息完整度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={`已了解 ${count} / 6 项信息`} className="portrait-progress-track"><span style={{width:`${percent}%`}} /></div>
         <div className="portrait-progress-steps">{portraitFacets.map(([key,label])=><span key={key} className={draft[key] ? 'known' : ''}>{draft[key] ? <Check size={12}/> : <span className="portrait-dot"/>}{label}</span>)}</div>
-        <p aria-live="polite">已了解 {count} / 6 项信息。{ready ? '其余信息可以以后补充，不必聊到 100%。' : `开始前还需了解：${missingBasics.join('、') || '请核对刚才的信息'}。一句话可以同时补充多项。`}</p>
-        {ready && <button className="portrait-progress-action" disabled={locked || voice.active || !!input.trim()} onClick={confirmed ? onCreate : onConfirm}>{confirmed ? '去创作第一篇' : '结束访谈，确认画像'}<ArrowRight size={15}/></button>}
+        <p id="portrait-create-hint" aria-live="polite">已了解 {count} / 6 项信息。{ready ? '其余信息可以以后补充，不必聊到 100%。' : '建议补充到 4 项（约 67%），也可先用已有信息创作。'}</p>
+        <button className={`portrait-progress-action ${ready ? '' : 'is-incomplete'}`} disabled={creationLocked} aria-describedby="portrait-create-hint" onClick={() => ready ? onCreate() : setCreationPrompt(true)}>开始创作<ArrowRight size={15}/></button>
+        {!!input.trim() && <p>先发送或清空正在输入的话，再开始创作，避免漏掉你的补充。</p>}
+        {voice.active && <p>先结束录音并检查文字，再开始创作。</p>}
       </section>
+      <Dialog open={creationPrompt} onOpenChange={setCreationPrompt}>
+        <DialogContent>
+          <DialogTitle>先用当前画像开始吗？</DialogTitle>
+          <DialogDescription>目前已了解 {count} / 6 项信息（{percent}%），推荐达到约 67%。{missing.length > 0 ? `还可以补充：${missing.join('、')}。` : ''}现在创作可能不够贴合你的定位；缺失信息会保留为待补充，你可以随时回来继续聊。</DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setCreationPrompt(false); inputRef.current?.focus() }}>继续补充画像</Button>
+            <Button disabled={creationLocked} onClick={() => { setCreationPrompt(false); onCreate() }}>先用当前画像创作</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <div className="portrait-messages" ref={messagesRef} role="log" aria-label="对话记录" aria-live="polite">
         {messages.map(message => <article key={message.id} className={`portrait-message ${message.role}`}>
           <div className="portrait-speaker">{message.role === 'assistant' ? <><Sparkles size={14} /> 案板</> : '你'}</div>
@@ -131,7 +145,7 @@ export function PortraitConversation({
     </section>
 
     <aside className="portrait-sheet" aria-label="正在形成的 IP 画像">
-      <div className="portrait-sheet-top"><span>你的 IP 画像</span><span className="portrait-status">{confirmed ? '已确认' : count ? '逐渐清晰' : '等待认识你'}</span></div>
+      <div className="portrait-sheet-top"><span>你的 IP 画像</span><span className="portrait-status">{ready ? '已初步清晰' : count ? '逐渐清晰' : '等待认识你'}</span></div>
       <div className={`portrait-figure ${count ? 'has-story' : ''}`} role="img" aria-label={count ? '随着对话逐渐点亮的抽象人物形象，不代表真实外貌' : '尚未填入信息的空白人物轮廓'}>
         <div className="portrait-orbit" />
         <div className="portrait-person"><UserRound size={78} strokeWidth={1} /></div>
@@ -153,11 +167,7 @@ export function PortraitConversation({
       </div>
       {creationIdea && <div className="portrait-creation-idea"><span>这次想创作</span><p>{creationIdea}</p></div>}
       <footer className="portrait-sheet-footer">
-        <p><MessageCircle size={14} />{confirmed ? '想调整？继续聊，画像也会跟着更新。' : ready ? '看看这是不是你。有哪里不对，直接告诉我。' : '不用一次说完，也不用把每个维度填满。'}</p>
-        {ready && <button className="portrait-primary" disabled={locked || voice.active || !!input.trim()} onClick={confirmed ? onCreate : onConfirm}>
-          {confirmed ? '开始创作第一篇' : '这就是我，确认画像'}<ArrowRight size={16} />
-        </button>}
-        {ready && !!input.trim() && <small>先发送或清空正在输入的话，再继续。</small>}
+        <p><MessageCircle size={14} />随时继续聊，画像会跟着更新；不用一次把每个维度填满。</p>
       </footer>
     </aside>
   </div>

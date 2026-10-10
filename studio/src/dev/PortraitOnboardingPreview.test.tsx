@@ -19,7 +19,7 @@ describe('conversation portrait preview', () => {
     await sample()
     expect(within(portrait).getByText('小林，一家社区花店的经营者。')).toBeInTheDocument()
     expect(within(portrait).getByText('刚开始养花，担心养不活的人。')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '开始创作第一篇' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开始创作' })).toBeEnabled()
   })
 
   it('does not treat arbitrary input as scripted facts, and discloses the simulation', async () => {
@@ -33,23 +33,20 @@ describe('conversation portrait preview', () => {
     await sample(); await sample(); await sample()
     expect(screen.queryByRole('button', { name: /确认画像/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '继续示例，不采用自由输入' }))
-    expect(screen.getAllByRole('button', { name: /确认画像/ })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: '开始创作' })).toBeEnabled()
   })
 
-  it('allows an optional facet to stay empty, requires confirmation, and reconfirms after correction', async () => {
+  it('allows an optional facet to stay empty, allows immediate creation and ongoing correction', async () => {
     render(<PortraitOnboardingPreview />)
     await sample(); await sample(); await sample()
     const portrait = screen.getByRole('complementary', { name: '正在形成的 IP 画像' })
     expect(within(portrait).getByText('聊到时，再慢慢补充')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '开始创作第一篇' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '这就是我，确认画像' }))
-    expect(screen.getByRole('button', { name: '开始创作第一篇' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '开始创作' })).toBeEnabled()
     await sample()
     expect(within(portrait).getByText('想给家里添点花、没太多时间打理的上班族。')).toBeInTheDocument()
     expect(within(portrait).queryByText('刚开始养花，担心养不活的人。')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '开始创作第一篇' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '这就是我，确认画像' }))
-    fireEvent.click(screen.getByRole('button', { name: '开始创作第一篇' }))
+    expect(screen.getByRole('button', { name: '开始创作' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '开始创作' }))
     expect(screen.getByText(/没有创建任务、生成正文或发布内容/)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '第一篇创作交接示例' })).toHaveFocus()
   })
@@ -73,9 +70,9 @@ describe('portrait conversation input boundaries', () => {
   it('retains failed input, prevents duplicate sends, and blocks confirmation with an unsent correction', async () => {
     let reject!: (error: Error) => void
     const onSend = vi.fn(() => new Promise<void>((_, fail) => { reject = fail }))
-    render(<PortraitConversation messages={[]} draft={{}} ready confirmed={false} onSend={onSend} onConfirm={vi.fn()} onCreate={vi.fn()} />)
+    render(<PortraitConversation messages={[]} draft={{}} ready onSend={onSend} onCreate={vi.fn()} />)
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '纠正一下' } })
-    screen.getAllByRole('button', { name: /确认画像/ }).forEach(button => expect(button).toBeDisabled())
+    screen.getAllByRole('button', { name: '开始创作' }).forEach(button => expect(button).toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
     expect(onSend).toHaveBeenCalledTimes(1)
@@ -86,7 +83,7 @@ describe('portrait conversation input boundaries', () => {
 
   it('does not send while committing Chinese IME text or adding a newline', async () => {
     const onSend = vi.fn(async () => {})
-    render(<PortraitConversation messages={[]} draft={{}} ready={false} confirmed={false} onSend={onSend} onConfirm={vi.fn()} onCreate={vi.fn()} />)
+    render(<PortraitConversation messages={[]} draft={{}} ready={false} onSend={onSend} onCreate={vi.fn()} />)
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '你好' } })
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', isComposing: true })
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', keyCode: 229 })

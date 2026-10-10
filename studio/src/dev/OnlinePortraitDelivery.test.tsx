@@ -27,10 +27,24 @@ beforeEach(()=>{
 })
 async function save(){
   await screen.findByText('当前账号：测试账号')
-  fireEvent.click(screen.getByRole('button',{name:'保存项目和已确认画像'}))
+  fireEvent.click(screen.getByRole('button',{name:'保存当前画像并继续'}))
   await screen.findByRole('button',{name:'生成第一篇作品'})
 }
 describe('online project and task delivery',()=>{
+  it('can save a partial portrait and generate from a topic entered outside the interview',async()=>{
+    const partial={...candidate,facets:{...candidate.facets,audience:null,platforms:null},creationIdea:null}
+    const partialSaved={...portraitToProjectProfile(partial,current),status:'confirmed' as const,version:1}
+    vi.mocked(api.projects.confirmAccountProfile).mockResolvedValue(partialSaved)
+    render(<OnlinePortraitDelivery candidate={partial} messages={messages}/>)
+    await save()
+    expect(screen.getByRole('button',{name:'生成第一篇作品'})).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox',{name:'这次想创作什么'}),{target:{value:'给养花新手写一篇插花指南'}})
+    vi.mocked(api.projects.getAccountProfile).mockResolvedValue(partialSaved)
+    fireEvent.click(screen.getByRole('button',{name:'生成第一篇作品'}))
+    await screen.findByRole('link',{name:'查看进度与作品'})
+    expect(api.tasks.create).toHaveBeenCalledWith(expect.objectContaining({prompt:expect.stringContaining('给养花新手写一篇插花指南')}))
+    expect(vi.mocked(api.projects.confirmAccountProfile).mock.calls[0][1].dimensions.audience.missing_fields).toEqual(['尚未提供'])
+  })
   it('blocks missing WeChat configuration before billing admission and allows retry after binding',async()=>{
     render(<OnlinePortraitDelivery candidate={candidate} messages={messages}/>);await save()
     vi.mocked(api.projects.getAccountProfile).mockResolvedValue(confirmed)
@@ -59,11 +73,11 @@ describe('online project and task delivery',()=>{
     vi.mocked(api.projects.create).mockRejectedValue(new Error('lost response'))
     const view=render(<OnlinePortraitDelivery candidate={candidate} messages={messages}/>)
     await screen.findByText('当前账号：测试账号')
-    fireEvent.click(screen.getByRole('button',{name:'保存项目和已确认画像'}))
+    fireEvent.click(screen.getByRole('button',{name:'保存当前画像并继续'}))
     await screen.findByRole('alert');view.unmount()
     render(<OnlinePortraitDelivery candidate={candidate} messages={messages}/>)
     await screen.findByText('当前账号：测试账号')
-    expect(screen.getByRole('button',{name:'保存项目和已确认画像'})).toBeDisabled()
+    expect(screen.getByRole('button',{name:'保存当前画像并继续'})).toBeDisabled()
     expect(api.projects.create).toHaveBeenCalledTimes(1)
   })
   it('blocks generation when the server profile has changed',async()=>{
@@ -86,7 +100,7 @@ describe('online project and task delivery',()=>{
     vi.mocked(api.projects.create).mockImplementation(()=>new Promise(done=>{resolve=done}))
     const view=render(<OnlinePortraitDelivery candidate={candidate} messages={messages}/>)
     await screen.findByText('当前账号：测试账号')
-    fireEvent.click(screen.getByRole('button',{name:'保存项目和已确认画像'}))
+    fireEvent.click(screen.getByRole('button',{name:'保存当前画像并继续'}))
     await waitFor(()=>expect(api.projects.create).toHaveBeenCalledTimes(1));view.unmount()
     await act(async()=>resolve({project:{id:'p-1'}} as never))
     expect(JSON.parse(sessionStorage.getItem('anban:portrait-online:user-1')!).phase).toBe('saved')

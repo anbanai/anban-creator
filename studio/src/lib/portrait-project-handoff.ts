@@ -1,13 +1,12 @@
 import type { CreateProjectRequest, ProfileDimension, ProjectProfile } from '@/types'
-import { canConfirmPortrait, validatePortraitCandidate, type PortraitCandidate, type PortraitChatMessage } from './portrait-chat-contract'
+import { validatePortraitCandidate, type PortraitCandidate, type PortraitChatMessage } from './portrait-chat-contract'
 
 /** Only call after the user confirms the current conversation revision. */
 export function preparePortraitProject(candidate: PortraitCandidate, messages: PortraitChatMessage[]) {
   const checked = validatePortraitCandidate(candidate, messages)
-  if (!canConfirmPortrait(checked)) throw new Error('请先补充身份、读者和平台，再确认画像。')
   const project: CreateProjectRequest = {
     name: checked.name || '我的内容项目',
-    instructions: checked.summary || checked.facets.identity!.text,
+    instructions: checked.summary || checked.facets.identity?.text || '画像信息尚待补充，请勿编造用户身份与经历。',
   }
   return { project, candidate: checked }
 }
@@ -36,10 +35,10 @@ export function portraitToProjectProfile(candidate: PortraitCandidate, current: 
 }
 
 /** A single-work brief must not leak into long-term project instructions. */
-export function portraitCreationBrief(candidate: PortraitCandidate): string {
-  if (!candidate.creationIdea) throw new Error('先聊一下这次想创作的主题。')
+export function portraitCreationBrief(candidate: PortraitCandidate, idea = candidate.creationIdea?.text): string {
+  if (!idea?.trim()) throw new Error('请写下这次想创作什么。')
   return [
-    `本次创作：${candidate.creationIdea.text}`,
+    `本次创作：${idea.trim()}`,
     '依据已确认的项目画像创作；没有提供的案例、截图、数字和效果不得编造。',
     '交付可审阅的作品，保留需要补充的素材位置；不要自行公开发布。',
   ].join('\n\n')

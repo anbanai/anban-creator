@@ -25,10 +25,10 @@ async function sendIntro() {
 it('uses the formal transport and restores a per-account draft without restoring confirmation', async () => {
   const view=render(page());await sendIntro()
   expect(onboardingApi.chat).toHaveBeenCalledOnce()
-  fireEvent.click(screen.getByRole('button',{name:'结束访谈，确认画像'}))
+  fireEvent.click(screen.getByRole('button',{name:'开始创作'}))
   view.unmount();render(page())
   expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow','50')
-  expect(screen.getByRole('button',{name:'结束访谈，确认画像'})).toBeEnabled()
+  expect(screen.getByRole('button',{name:'开始创作'})).toBeEnabled()
   expect(screen.queryByRole('button',{name:'去创作第一篇'})).not.toBeInTheDocument()
   expect(onboardingApi.chat).toHaveBeenCalledOnce()
 })

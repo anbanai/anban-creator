@@ -51,6 +51,12 @@ export function validatePortraitCandidate(value: unknown, messages: PortraitChat
   return candidate
 }
 
-export function canConfirmPortrait(candidate: PortraitCandidate | null): boolean {
-  return !!(candidate?.facets.identity && candidate.facets.audience && candidate.facets.platforms)
+/** A recommendation, never a validation or persistence gate. Four of six rounds to 67%. */
+export function isPortraitReadyForCreation(candidate: PortraitCandidate | null): boolean {
+  return !!candidate && facetKeys.filter(key => candidate.facets[key]).length >= 4
+}
+
+export function emptyPortraitCandidate(): PortraitCandidate {
+  return { reply: '可以先说说这次想创作什么。', name: null, summary: null,
+    facets: { identity: null, audience: null, style: null, platforms: null, preferences: null, experience: null }, creationIdea: null }
 }

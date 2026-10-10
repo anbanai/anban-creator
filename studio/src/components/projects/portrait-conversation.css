@@ -7,6 +7,8 @@
 .portrait-progress p { font-size: 11px; line-height: 1.7; color: #777263; margin: 9px 0 0; }.portrait-progress-action { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; border: 0; border-radius: 8px; padding: 10px; margin-top: 12px; background: #496e50; color: white; font-size: 12px !important; }
 @media (max-height: 850px) and (min-width: 960px) { .portrait-chat-heading { padding: 12px 0 !important; }.portrait-chat-heading p { display: none; } }
 .portrait-preview * { box-sizing: border-box; }
+.portrait-progress-action.is-incomplete { background: #e4e3de; color: #626159; }
+.portrait-progress-action.is-incomplete:not(:disabled):hover { background: #d8d7d0; }
 .portrait-preview button { cursor: pointer; font: inherit; }
 .portrait-preview button:disabled { cursor: default; opacity: .5; }
 .portrait-preview button:focus-visible, .portrait-preview textarea:focus-visible { outline: 2px solid #ad552f; outline-offset: 4px; }
@@ -80,3 +82,5 @@
 .portrait-online button:not(.portrait-primary) { margin-left: 12px; text-decoration: underline; text-underline-offset: 3px; }
 .portrait-online button:disabled { opacity: .5; cursor: not-allowed; }
 .portrait-online .portrait-primary { display: inline-flex; margin: 8px 0; text-decoration: none; }
+
+.portrait-online textarea { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid #d8d0c3; border-radius: 8px; background: white; color: #34342e; font: inherit; resize: vertical; }

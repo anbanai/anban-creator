@@ -317,7 +317,7 @@ export default function DashboardPage() {
             <p className="flex items-center gap-2 text-sm font-medium text-primary"><MessageCircle className="size-4" />新手引导</p>
             <h2 id="onboarding-entry-title" className="mt-2 text-xl font-semibold">聊一聊，开始你的第一篇作品</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">用文字或语音介绍自己，AI 帮你整理 IP 画像，再一起开始创作。</p>
-            <p className="mt-2 text-xs text-muted-foreground">聊聊你是谁 → 确认画像 → 创作作品</p>
+            <p className="mt-2 text-xs text-muted-foreground">聊聊你是谁 → 丰富画像 → 随时创作</p>
           </div>
           <Link to="/projects/new/interview" className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
             开始新手引导<ArrowUpRight className="size-4" />

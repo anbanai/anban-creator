@@ -28,7 +28,7 @@ function AccountInterview({ userId }: { userId: string }) {
   })
   function persist(next: Draft) {
     try { sessionStorage.setItem(storageKey, JSON.stringify(next)); setWarning('') }
-    catch { setWarning('浏览器无法保存临时进度，请先完成画像确认并保存项目后再离开。') }
+    catch { setWarning('浏览器无法保存临时进度，请先在创作页保存当前画像后再离开。') }
   }
   function reset() {
     const next = { id: crypto.randomUUID() }

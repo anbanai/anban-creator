@@ -21,9 +21,21 @@ export async function savePortraitProject(
   checkpoint: (receipt: PortraitReceipt) => void,
 ): Promise<PortraitReceipt> {
   const prepared = preparePortraitProject(candidate, messages)
-  if (initial.portraitKey !== portraitKey(candidate)) throw new Error('画像已有变化，请先在已保存项目中核对修改，避免覆盖。')
   let receipt = { ...initial }
   const save = (patch: Partial<PortraitReceipt>) => { receipt = { ...receipt, ...patch }; checkpoint(receipt) }
+  if (receipt.portraitKey !== portraitKey(candidate)) {
+    if (receipt.phase === 'new' && !receipt.projectId) {
+      save({ portraitKey: portraitKey(candidate) })
+    } else if (receipt.projectId && receipt.profileVersion !== undefined && ['saved', 'task_created'].includes(receipt.phase)) {
+      // Explicitly saving a later conversation may update only the version we own.
+      // The existing Server confirmation API performs the final compare-and-swap.
+      const latest = await client.getAccountProfile(receipt.projectId)
+      if (latest.version !== receipt.profileVersion) throw new Error('线上画像已有新版本，请到项目中核对，暂不覆盖。')
+      save({ portraitKey: portraitKey(candidate), phase: 'project_created', baseRevision: latest.version, profileVersion: undefined })
+    } else {
+      throw new Error('上次保存或生成结果尚未确认，请先到项目或任务中核对，暂不覆盖。')
+    }
+  }
   if (!receipt.projectId) {
     if (receipt.phase !== 'new') throw new Error('上次创建结果尚未确认，请到项目列表核对，暂不重复创建。')
     save({ phase:'creating' })
@@ -50,6 +62,6 @@ export async function savePortraitProject(
   save({phase:'saving',baseRevision:current.version})
   const confirmed = await client.confirmAccountProfile(receipt.projectId!, next)
   if (confirmed.status !== 'confirmed' || confirmed.version <= current.version) throw new Error('服务端尚未确认保存结果，请检查项目后重试。')
-  save({phase:'saved',profileVersion:confirmed.version})
+  save({phase:receipt.taskId ? 'task_created' : 'saved',profileVersion:confirmed.version})
   return receipt
 }

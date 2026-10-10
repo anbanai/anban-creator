@@ -19,7 +19,7 @@ class FakeRecognition {
 
 function setup() {
   const send = vi.fn(async () => {})
-  const rendered = render(<PortraitConversation messages={[]} draft={{}} ready confirmed={false} onSend={send} onConfirm={vi.fn()} onCreate={vi.fn()} />)
+  const rendered = render(<PortraitConversation messages={[]} draft={{}} ready onSend={send} onCreate={vi.fn()} />)
   return { ...rendered, send }
 }
 
@@ -40,7 +40,7 @@ describe('portrait voice input', () => {
     act(() => speech.onstart?.())
     expect(screen.getByRole('textbox')).toHaveAttribute('readonly')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
-    screen.getAllByRole('button', { name: /确认画像/ }).forEach(button => expect(button).toBeDisabled())
+    screen.getAllByRole('button', { name: '开始创作' }).forEach(button => expect(button).toBeDisabled())
     act(() => speech.onresult?.({ results: [[{ transcript: '我卖' }]] }))
     act(() => speech.onresult?.({ results: [[{ transcript: '我卖花。' }], [{ transcript: '面向新手。' }]] }))
     expect(screen.getByRole('textbox')).toHaveValue('原有文字\n我卖花。面向新手。')

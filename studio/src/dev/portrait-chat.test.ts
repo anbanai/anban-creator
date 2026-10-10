@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { acceptsPortraitRequest, analyzePortrait, validateProviderConfig } from '../../scripts/portrait-chat'
-import { canConfirmPortrait, portraitChatRequest, validatePortraitCandidate, type PortraitCandidate } from '@/lib/portrait-chat-contract'
+import { isPortraitReadyForCreation, portraitChatRequest, validatePortraitCandidate, type PortraitCandidate } from '@/lib/portrait-chat-contract'
 
 const messages = [{ id: 'u-1', role: 'user' as const, text: '我叫小林，经营花店，为上班族服务，先做公众号。' }]
 const fact = { text: '经营花店', certainty: 'stated' as const, evidence: [{ messageId: 'u-1', quote: '经营花店' }] }
@@ -12,8 +12,9 @@ describe('portrait parsing and provider boundary', () => {
   it('accepts partial facts and keeps optional unknowns empty', () => {
     const parsed = validatePortraitCandidate(candidate, messages)
     expect(parsed.facets.audience).toBeNull()
-    expect(canConfirmPortrait(parsed)).toBe(false)
-    expect(canConfirmPortrait({ ...parsed, facets: { ...parsed.facets, audience: fact, platforms: fact } })).toBe(true)
+    expect(isPortraitReadyForCreation(parsed)).toBe(false)
+    expect(isPortraitReadyForCreation({ ...parsed, facets: { ...parsed.facets, audience: fact, platforms: fact } })).toBe(false)
+    expect(isPortraitReadyForCreation({ ...parsed, facets: { ...parsed.facets, audience: fact, platforms: fact, style: fact } })).toBe(true)
   })
   it('rejects invented evidence, assistant evidence, invented names and unreviewed properties', () => {
     expect(() => validatePortraitCandidate({ ...candidate, facets: { ...candidate.facets, identity: { ...fact, evidence: [{ messageId: 'u-1', quote: '经营了十年' }] } } }, messages)).toThrow()

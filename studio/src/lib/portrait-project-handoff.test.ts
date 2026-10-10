@@ -25,8 +25,10 @@ describe('portrait handoff to existing project contracts',()=>{
     expect(profile.dimensions.memory.content).toEqual({})
     expect(JSON.stringify(profile)).not.toContain('周末插花')
   })
-  it('rejects unsupported or incomplete portraits before preparing a project',()=>{
+  it('rejects fabricated evidence but permits incomplete portraits with unknowns retained',()=>{
     expect(()=>preparePortraitProject(candidate,[{id:'u-1',role:'user',text:'从未提供这些信息'}])).toThrow()
-    expect(()=>preparePortraitProject({...candidate,facets:{...candidate.facets,platforms:null}},[{id:'u-1',role:'user',text:input}])).toThrow()
+    const partial=preparePortraitProject({...candidate,facets:{...candidate.facets,platforms:null}},[{id:'u-1',role:'user',text:input}])
+    expect(partial.candidate.facets.platforms).toBeNull()
+    expect(portraitCreationBrief({...candidate,creationIdea:null},'写养花指南')).toContain('写养花指南')
   })
 })

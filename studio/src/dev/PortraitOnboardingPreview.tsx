@@ -43,7 +43,6 @@ export default function PortraitOnboardingPreview() {
   const [draft, setDraft] = useState<PortraitDraft>({})
   const [step, setStep] = useState(0)
   const [corrected, setCorrected] = useState(false)
-  const [confirmed, setConfirmed] = useState(false)
   const [customPending, setCustomPending] = useState(false)
   const [creating, setCreating] = useState(false)
   const [resetPrompt, setResetPrompt] = useState(false)
@@ -72,7 +71,7 @@ export default function PortraitOnboardingPreview() {
 
   function reset() {
     setMessages([welcome]); setDraft({}); setStep(0); setCorrected(false)
-    setConfirmed(false); setCustomPending(false); setCreating(false); setResetPrompt(false)
+    setCustomPending(false); setCreating(false); setResetPrompt(false)
     setEpoch(value => value + 1)
   }
 
@@ -80,7 +79,6 @@ export default function PortraitOnboardingPreview() {
     const turn = sampleTurns[step]
     let reply: string
     let update: string | undefined
-    setConfirmed(false)
     if (turn && text === turn.answer) {
       setDraft(previous => ({ ...previous, ...turn.facts }))
       setStep(value => value + 1)
@@ -100,11 +98,6 @@ export default function PortraitOnboardingPreview() {
     ])
   }
 
-  function confirm() {
-    if (step < sampleTurns.length || customPending) return
-    setConfirmed(true)
-    setMessages(previous => [...previous, { id: `confirmed-${previous.length}`, role: 'assistant', text: '示例画像已确认。接下来可以带着这个方向开始第一篇；以后有新的想法，我们再一起调整。', update: '仅在本次预览中确认，未保存到账号' }])
-  }
 
   return <div className="portrait-preview">
     <div className="portrait-preview-bar"><span>交互样例 · 花店故事为虚构演示，回复按示例预设，未接入真实 AI</span><span>不连接账号，不生成作品；刷新后重置</span></div>
@@ -125,7 +118,7 @@ export default function PortraitOnboardingPreview() {
       creationIdea={step >= sampleTurns.length ? '第一篇：刚买回家的花，为什么没几天就蔫了？' : undefined}
       summary={step ? (corrected ? '陪忙碌的上班族，把一点花香带回家。' : step >= 2 ? '像邻居一样，陪你把第一盆花养好。' : '从社区花店出发，分享让新手安心的养花经验。') : undefined}
       suggestion={sampleTurns[step]?.answer ?? (!corrected ? correction : undefined)}
-      ready={step >= sampleTurns.length && !customPending} confirmed={confirmed}
-      onSend={send} onConfirm={confirm} onCreate={() => { if (confirmed && !customPending) setCreating(true) }} />}
+      ready={step >= sampleTurns.length && !customPending}
+      onSend={send} onCreate={() => { if (!customPending) setCreating(true) }} />}
   </div>
 }
