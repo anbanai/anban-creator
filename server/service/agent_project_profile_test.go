@@ -108,6 +108,78 @@ func TestAgentProjectProfileReturnsPublicImageCapabilityMetadata(t *testing.T) {
 	}
 }
 
+func TestSixCreativeObjectsReadTheSameFrozenAppliedProfile(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "shared-profile.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	logger := zerolog.Nop()
+	projectSvc := NewProjectService(repo, &logger)
+	taskSvc := newTestTaskService(repo, nil, nil, &logger, "", nil, nil)
+	svc := NewAgentProjectProfileService(projectSvc, taskSvc, nil, config.MontageConfig{}, agentProjectProfileImageCapabilityResolver())
+	profile := model.NewProjectProfile()
+	profile.Status, profile.Version = model.ProfileStatusConfirmed, 2
+	profile.ApplicationSource = model.ProfileApplicationSourceSystemAnalysis
+	profile.InitializationStatus = model.ProfileInitializationRunning
+	profile.Dimensions.Identity.Content["positioning"] = "推断定位"
+	profile.Dimensions.Identity.Sources = []string{"[推断待确认]"}
+	profile.Dimensions.Preferences.Content["red_lines"] = "禁止编造成交案例"
+	profile.Dimensions.Preferences.Sources = []string{"[用户确认]"}
+	project := &model.Project{ID: uuid.NewString(), UserID: uuid.NewString(), Name: "共享画像", Platform: model.PlatformWechat, Profile: datatypes.NewJSONType(profile)}
+	if err := repo.Projects().Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+	types := []string{model.TaskTypeWechatArticle, model.TaskTypeWechatPicture, model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit, model.PlatformWhiteboardAnimation}
+	for _, taskType := range types {
+		t.Run(taskType, func(t *testing.T) {
+			task := &model.Task{ID: uuid.NewString(), UserID: project.UserID, ProjectID: project.ID, Type: taskType, Status: model.TaskStatusPending, ImageCapabilityKey: "server-owned-route"}
+			task.SetProjectSnapshot(model.SnapshotProject(project))
+			if err := repo.Tasks().Create(t.Context(), task); err != nil {
+				t.Fatal(err)
+			}
+			got, err := svc.Get(t.Context(), AgentProjectProfileRequest{UserID: project.UserID, ProjectID: project.ID, TaskID: task.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			applied, ok := (*got)["account_profile"].(model.ProjectProfile)
+			if !ok || !reflect.DeepEqual(applied, profile) {
+				t.Fatalf("%s account_profile = %#v, want shared frozen profile", taskType, (*got)["account_profile"])
+			}
+			resolved := (*got)["resolved_profile"].(map[string]any)
+			if !reflect.DeepEqual(resolved["account_profile"], profile) || resolved["uses_project_snapshot"] != true {
+				t.Fatalf("%s resolved_profile = %#v", taskType, resolved)
+			}
+			// The account profile is the task's immutable context, even after the
+			// current project profile changes during a running generation.
+			updated := *project
+			changed := profile
+			changed.Version = 3
+			updated.Profile = datatypes.NewJSONType(changed)
+			if err := repo.Projects().Update(t.Context(), &updated); err != nil {
+				t.Fatal(err)
+			}
+			frozen, err := svc.Get(t.Context(), AgentProjectProfileRequest{UserID: project.UserID, ProjectID: project.ID, TaskID: task.ID})
+			if err != nil || !reflect.DeepEqual((*frozen)["account_profile"], profile) {
+				t.Fatalf("%s context changed after project edit: %#v, %v", taskType, frozen, err)
+			}
+			if _, err := svc.Get(t.Context(), AgentProjectProfileRequest{UserID: uuid.NewString(), ProjectID: project.ID, TaskID: task.ID}); err == nil {
+				t.Fatal("different user read project profile")
+			}
+			other := &model.Project{ID: uuid.NewString(), UserID: project.UserID, Name: "other", Platform: model.PlatformWechat}
+			if err := repo.Projects().Create(t.Context(), other); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := svc.Get(t.Context(), AgentProjectProfileRequest{UserID: project.UserID, ProjectID: other.ID, TaskID: task.ID}); err == nil {
+				t.Fatal("different project read task profile")
+			}
+		})
+	}
+}
+
 func TestAgentProjectProfileIncludesMatchingFeedbackStrategy(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "profile-feedback.db")), &gorm.Config{})
 	if err != nil {

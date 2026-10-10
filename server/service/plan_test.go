@@ -1314,3 +1314,37 @@ func TestPlanServiceRejectsInvalidAgentSelections(t *testing.T) {
 		t.Fatalf("invalid selection persisted: %#v, %v", plans, err)
 	}
 }
+
+func TestPlanServiceHonorsPersistedProjectObjectSelection(t *testing.T) {
+	svc, repo := setupTestPlanService(t)
+	ctx := t.Context()
+	projectID := createTestProject(t, repo, "owner", model.PlatformWechat)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.AgentIDs = []string{model.AgentIDArticle}
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	params := CreatePlanParams{UserID: "owner", ProjectID: projectID, ExecutionProfile: "effective", CronExpr: "0 9 * * *", AgentIDs: []string{model.AgentIDSeednote}}
+	if _, err := svc.Create(ctx, params); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("unselected plan Create = %v", err)
+	}
+	params.AgentIDs = []string{model.AgentIDArticle}
+	plan, err := svc.Create(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := []string{model.AgentIDSeednote}
+	if _, err := svc.Update(ctx, UpdatePlanParams{ID: plan.ID, AgentIDs: &selection}); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("unselected plan Update = %v", err)
+	}
+	if _, err := svc.CreateEntry(ctx, CreatePlanEntryParams{UserID: "owner", PlanID: plan.ID, AgentID: model.AgentIDSeednote, Channel: model.ChannelSeednote, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective"}); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("unselected plan CreateEntry = %v", err)
+	}
+	stored, err := repo.PlanEntries().ListByPlanID(ctx, plan.ID)
+	if err != nil || len(stored) != 1 || stored[0].AgentID != model.AgentIDArticle {
+		t.Fatalf("invalid selection altered plan: %#v, %v", stored, err)
+	}
+}

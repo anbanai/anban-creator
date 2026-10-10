@@ -212,6 +212,19 @@ func (s *PlanService) planEntryPlan(ctx context.Context, userID, planID string) 
 	return plan, nil
 }
 
+func validatePlanProjectAgentSelection(ctx context.Context, repo repository.Repository, projectID string, ids []string) error {
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("find plan project: %w", err)
+	}
+	for _, agentID := range ids {
+		if !model.ProjectAllowsAgent(project, agentID) {
+			return fmt.Errorf("Agent %q is not enabled for this project", agentID)
+		}
+	}
+	return nil
+}
+
 // CreateEntry adds one unique Agent entry to a plan.
 func (s *PlanService) CreateEntry(ctx context.Context, p CreatePlanEntryParams) (*model.PlanEntry, error) {
 	if strings.TrimSpace(p.PlanID) == "" || strings.TrimSpace(p.AgentID) == "" || strings.TrimSpace(p.Channel) == "" || strings.TrimSpace(p.TaskKind) == "" {
@@ -224,7 +237,11 @@ func (s *PlanService) CreateEntry(ctx context.Context, p CreatePlanEntryParams) 
 	if err := validatePlanEntryIdentity(p); err != nil {
 		return nil, err
 	}
-	if _, err := s.planEntryPlan(ctx, p.UserID, p.PlanID); err != nil {
+	plan, err := s.planEntryPlan(ctx, p.UserID, p.PlanID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validatePlanProjectAgentSelection(ctx, s.repo, plan.ProjectID, []string{p.AgentID}); err != nil {
 		return nil, err
 	}
 	if _, err := s.repo.PlanEntries().FindByPlanIDAndAgentID(ctx, p.PlanID, strings.TrimSpace(p.AgentID)); err == nil {
@@ -263,7 +280,8 @@ func (s *PlanService) UpdateEntry(ctx context.Context, p UpdatePlanEntryParams) 
 		}
 		return nil, err
 	}
-	if _, err := s.planEntryPlan(ctx, p.UserID, entry.PlanID); err != nil {
+	plan, err := s.planEntryPlan(ctx, p.UserID, entry.PlanID)
+	if err != nil {
 		return nil, err
 	}
 	if p.AgentID != nil && strings.TrimSpace(*p.AgentID) != entry.AgentID {
@@ -306,6 +324,9 @@ func (s *PlanService) UpdateEntry(ctx context.Context, p UpdatePlanEntryParams) 
 	}
 	if entry.AgentID == "" || entry.Channel == "" || entry.TaskKind == "" || entry.ExecutionProfile == "" {
 		return nil, fmt.Errorf("agent_id, channel, task_kind, and execution_profile are required")
+	}
+	if err := validatePlanProjectAgentSelection(ctx, s.repo, plan.ProjectID, []string{entry.AgentID}); err != nil {
+		return nil, err
 	}
 	if err := s.repo.PlanEntries().Update(ctx, entry); err != nil {
 		return nil, err
@@ -420,6 +441,11 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 	if project.Status != model.ProjectStatusActive {
 		return nil, fmt.Errorf("project is not active")
 	}
+	for _, entry := range p.Entries {
+		if !model.ProjectAllowsAgent(project, entry.AgentID) {
+			return nil, fmt.Errorf("Agent %q is not enabled for this project", entry.AgentID)
+		}
+	}
 	var profile AgentExecutionProfile
 	profile, err = resolveAgentProfileForUser(ctx, s.repo, s.agentProfiles, p.UserID, p.ExecutionProfile)
 	if err != nil {
@@ -480,6 +506,11 @@ func (s *PlanService) Create(ctx context.Context, p CreatePlanParams) (*model.Pl
 		}
 		if authoritative.Status != model.ProjectStatusActive || authoritative.DeletingAt != nil {
 			return fmt.Errorf("project is not active")
+		}
+		for _, entry := range p.Entries {
+			if !model.ProjectAllowsAgent(authoritative, entry.AgentID) {
+				return fmt.Errorf("Agent %q is not enabled for this project", entry.AgentID)
+			}
 		}
 		if err := tx.Plans().Create(ctx, plan); err != nil {
 			return err
@@ -579,6 +610,9 @@ func (s *PlanService) updatePlan(ctx context.Context, p UpdatePlanParams, expect
 	if p.AgentIDs != nil {
 		desired, err = planEntriesFromAgentIDs(*p.AgentIDs, plan.ExecutionProfile)
 		if err != nil {
+			return nil, err
+		}
+		if err := validatePlanProjectAgentSelection(ctx, s.repo, plan.ProjectID, *p.AgentIDs); err != nil {
 			return nil, err
 		}
 	}

@@ -80,6 +80,28 @@ func TestDeletionAuthorityMigration(t *testing.T) {
 	}
 }
 
+func TestProfileLabProjectSetupMigration(t *testing.T) {
+	raw, err := os.ReadFile("20261010_profile_lab_project_setup.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"alter table `projects`",
+		"add column if not exists `agent_ids` json null",
+		"add column if not exists `profile_setup` json null",
+		"alter table `project_profile_revisions`",
+		"add column if not exists `profile_snapshot` json null",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("profile lab migration missing %q", fragment)
+		}
+	}
+	if strings.Contains(sql, "update `projects`") || strings.Contains(sql, "drop column") || strings.Contains(sql, "drop table") {
+		t.Fatal("profile lab migration must preserve legacy rows and remain additive")
+	}
+}
+
 func TestTaskFixedSKUBillingMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260911_task_fixed_sku_billing.sql")
 	if err != nil {

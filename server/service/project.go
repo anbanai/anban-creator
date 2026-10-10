@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
@@ -25,9 +26,10 @@ var (
 	ErrProjectProfileVersionConflict     = errors.New("project profile version conflict")
 	ErrProjectProfileAnalysisInProgress  = errors.New("project profile analysis is already in progress")
 	ErrProjectProfileResultAlreadyStored = errors.New("project profile result already submitted")
-	ErrProjectProfileUnsupportedPlatform = errors.New("project profile is only supported for WeChat and Seednote projects")
+	ErrProjectProfileUnsupportedPlatform = errors.New("project profile requires a valid project")
 	ErrInvalidProjectChannel             = errors.New("invalid project channel")
 	ErrProjectNameRequired               = errors.New("project name is required")
+	ErrProjectProfileSetup               = errors.New("invalid project profile setup")
 )
 
 var supportedProjectChannels = map[string]struct{}{
@@ -50,6 +52,22 @@ func (e projectDeleteConflictError) Is(target error) bool {
 
 func validProjectPlatform(platform string) bool {
 	return model.IsProjectPlatform(platform)
+}
+
+func validateProjectProfileSetup(project *model.Project) error {
+	if project == nil {
+		return fmt.Errorf("%w: project is required", ErrProjectProfileSetup)
+	}
+	if err := model.ValidateProjectAgentIDs(project.AgentIDs); err != nil {
+		return fmt.Errorf("%w: %v", ErrProjectProfileSetup, err)
+	}
+	if project.ProfileSetup != nil {
+		project.ProfileSetup.Normalize()
+		if err := project.ProfileSetup.Validate(); err != nil {
+			return fmt.Errorf("%w: %v", ErrProjectProfileSetup, err)
+		}
+	}
+	return nil
 }
 
 func validateProjectMontageDefaults(project *model.Project, capabilities *MontageCapabilityService) error {
@@ -136,6 +154,15 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	ch.Name = strings.TrimSpace(ch.Name)
 	if strings.TrimSpace(ch.Platform) != "" && !validProjectPlatform(ch.Platform) {
 		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
+	}
+	if ch.AgentIDs == nil && !ch.AgentIDsSet {
+		ch.AgentIDs = model.DefaultProjectAgentIDs(ch.Platform)
+	}
+	if err := validateProjectProfileSetup(ch); err != nil {
+		return nil, err
+	}
+	if ch.ProfileSetup != nil {
+		ch.ProfileURL = ch.ProfileSetup.PrimaryProfileURL(ch.Platform)
 	}
 	if err := validateHypitProject(ch, s.hypitCapabilities); err != nil {
 		return nil, err
@@ -332,16 +359,16 @@ func (s *ProjectService) GetProfile(ctx context.Context, userID, projectID strin
 }
 
 func (s *ProjectService) updateProfile(ctx context.Context, userID, projectID string, expectedVersion int64, next model.ProjectProfile) (model.ProjectProfile, error) {
-	return s.updateProfileWithSource(ctx, userID, projectID, expectedVersion, next, "", "")
+	return s.updateProfileWithSource(ctx, userID, projectID, expectedVersion, next, "", model.ProfileApplicationSourceUserEdit)
 }
 
 func (s *ProjectService) updateProfileWithSource(ctx context.Context, userID, projectID string, expectedVersion int64, next model.ProjectProfile, sourceTaskID, source string) (model.ProjectProfile, error) {
-	if source != "agent" {
-		for _, dimension := range []*model.ProfileDimension{&next.Dimensions.Identity, &next.Dimensions.Style, &next.Dimensions.Audience, &next.Dimensions.Platforms, &next.Dimensions.Preferences, &next.Dimensions.Memory} {
-			if !containsProfileSource(dimension.Sources, "[用户编辑]") {
-				dimension.Sources = append(dimension.Sources, "[用户编辑]")
-			}
-		}
+	next.ApplicationSource = source
+	if next.AnalysisLimits == nil {
+		next.AnalysisLimits = []string{}
+	}
+	if next.FollowUpQuestions == nil {
+		next.FollowUpQuestions = []string{}
 	}
 	if err := next.Validate(); err != nil {
 		return model.ProjectProfile{}, fmt.Errorf("invalid project profile: %w", err)
@@ -362,6 +389,14 @@ func (s *ProjectService) updateProfileWithSource(ctx context.Context, userID, pr
 		if expectedVersion != current.Version {
 			return ErrProjectProfileVersionConflict
 		}
+		if source == model.ProfileApplicationSourceUserEdit || source == model.ProfileApplicationSourceUserConfirmation {
+			before := []model.ProfileDimension{current.Dimensions.Identity, current.Dimensions.Style, current.Dimensions.Audience, current.Dimensions.Platforms, current.Dimensions.Preferences, current.Dimensions.Memory}
+			for i, dimension := range []*model.ProfileDimension{&next.Dimensions.Identity, &next.Dimensions.Style, &next.Dimensions.Audience, &next.Dimensions.Platforms, &next.Dimensions.Preferences, &next.Dimensions.Memory} {
+				if !reflect.DeepEqual(*dimension, before[i]) && !containsProfileSource(dimension.Sources, "[用户编辑]") {
+					dimension.Sources = append(dimension.Sources, "[用户编辑]")
+				}
+			}
+		}
 		if next.SchemaVersion == 0 {
 			next.SchemaVersion = 1
 		}
@@ -377,7 +412,11 @@ func (s *ProjectService) updateProfileWithSource(ctx context.Context, userID, pr
 		if err != nil {
 			return fmt.Errorf("marshal profile dimensions: %w", err)
 		}
-		if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: projectID, Revision: next.Version, SixDimensions: dimensions, SourceTaskID: strings.TrimSpace(sourceTaskID)}); err != nil {
+		snapshot, err := json.Marshal(next)
+		if err != nil {
+			return fmt.Errorf("marshal profile snapshot: %w", err)
+		}
+		if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: projectID, Revision: next.Version, SixDimensions: dimensions, ProfileSnapshot: snapshot, SourceTaskID: strings.TrimSpace(sourceTaskID)}); err != nil {
 			return fmt.Errorf("record profile revision: %w", err)
 		}
 		if err := persistProfileState(ctx, tx, projectID, next); err != nil {
@@ -396,6 +435,20 @@ func (s *ProjectService) updateProfileWithSource(ctx context.Context, userID, pr
 // profile result from the profile-analysis execution. The task and project
 // ownership checks happen server-side; callers cannot submit for another
 // execution or overwrite a newer revision.
+func profileTaskExpectedRevision(task *model.Task) (int64, error) {
+	encoded, err := json.Marshal(task.AgentInput.Data())
+	if err != nil {
+		return 0, fmt.Errorf("invalid frozen profile input: %w", err)
+	}
+	var frozen struct {
+		ExpectedRevision *int64 `json:"expected_revision"`
+	}
+	if err := json.Unmarshal(encoded, &frozen); err != nil || frozen.ExpectedRevision == nil || *frozen.ExpectedRevision < 0 {
+		return 0, fmt.Errorf("frozen profile input has no valid expected_revision")
+	}
+	return *frozen.ExpectedRevision, nil
+}
+
 func (s *ProjectService) ApplyAgentProfileResult(ctx context.Context, userID, projectID, taskID string, expectedVersion int64, dimensions model.ProjectProfileDimensions, limits, missing []string) (model.ProjectProfile, error) {
 	if taskID == "" {
 		return model.ProjectProfile{}, fmt.Errorf("profile task id is required")
@@ -426,11 +479,22 @@ func (s *ProjectService) ApplyAgentProfileResult(ctx context.Context, userID, pr
 		if expectedVersion != current.Version {
 			return ErrProjectProfileVersionConflict
 		}
+		if current.AnalysisTaskID != taskID {
+			return fmt.Errorf("profile analysis task is not the active project analysis")
+		}
+		frozenRevision, err := profileTaskExpectedRevision(task)
+		if err != nil {
+			return err
+		}
+		if frozenRevision != expectedVersion {
+			return ErrProjectProfileVersionConflict
+		}
 		next := current
 		next.Dimensions = dimensions
-		next.AnalysisLimits = append([]string(nil), limits...)
-		next.FollowUpQuestions = append([]string(nil), missing...)
+		next.AnalysisLimits = append([]string{}, limits...)
+		next.FollowUpQuestions = append([]string{}, missing...)
 		next.Status = model.ProfileStatusConfirmed
+		next.ApplicationSource = model.ProfileApplicationSourceSystemAnalysis
 		next.InitializationStatus = model.ProfileInitializationReady
 		next.LastError = ""
 		next.AnalysisTaskID = taskID
@@ -446,9 +510,13 @@ func (s *ProjectService) ApplyAgentProfileResult(ctx context.Context, userID, pr
 		if err != nil {
 			return fmt.Errorf("marshal profile dimensions: %w", err)
 		}
+		snapshot, err := json.Marshal(next)
+		if err != nil {
+			return fmt.Errorf("marshal profile snapshot: %w", err)
+		}
 		if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{
 			ID: uuid.NewString(), ProjectID: projectID, Revision: next.Version,
-			SixDimensions: dimensionsJSON, SourceTaskID: taskID,
+			SixDimensions: dimensionsJSON, ProfileSnapshot: snapshot, SourceTaskID: taskID,
 		}); err != nil {
 			return fmt.Errorf("record profile revision: %w", err)
 		}
@@ -521,11 +589,21 @@ func (s *ProjectService) RestoreProfileRevision(ctx context.Context, userID, pro
 		return model.ProjectProfile{}, fmt.Errorf("decode profile revision: %w", err)
 	}
 	next := projectProfileFor(project)
+	if len(row.ProfileSnapshot) > 0 && string(row.ProfileSnapshot) != "null" {
+		var historical model.ProjectProfile
+		if err := json.Unmarshal(row.ProfileSnapshot, &historical); err != nil {
+			return model.ProjectProfile{}, fmt.Errorf("decode profile snapshot: %w", err)
+		}
+		next.AnalysisLimits = historical.AnalysisLimits
+		next.FollowUpQuestions = historical.FollowUpQuestions
+	}
 	next.Dimensions = dimensions
 	next.Status = model.ProfileStatusConfirmed
-	next.InitializationStatus = model.ProfileInitializationReady
-	next.LastError = ""
-	return s.updateProfileWithSource(ctx, userID, projectID, expectedVersion, next, "", "user_restore")
+	if next.InitializationStatus != model.ProfileInitializationQueued && next.InitializationStatus != model.ProfileInitializationRunning {
+		next.InitializationStatus = model.ProfileInitializationReady
+		next.LastError = ""
+	}
+	return s.updateProfileWithSource(ctx, userID, projectID, expectedVersion, next, "", model.ProfileApplicationSourceUserRestore)
 }
 
 func (s *ProjectService) ConfirmProfile(ctx context.Context, userID, projectID string, expectedVersion int64, profile model.ProjectProfile) (model.ProjectProfile, error) {
@@ -536,6 +614,11 @@ func (s *ProjectService) ConfirmProfile(ctx context.Context, userID, projectID s
 		return model.ProjectProfile{}, err
 	}
 	profile.AnalysisTaskID = current.AnalysisTaskID
+	profile.InitializationStatus = current.InitializationStatus
+	if profile.InitializationStatus != model.ProfileInitializationQueued && profile.InitializationStatus != model.ProfileInitializationRunning {
+		profile.InitializationStatus = model.ProfileInitializationReady
+	}
+	profile.LastError = current.LastError
 	profile.Status = model.ProfileStatusConfirmed
 	for _, dimension := range []*model.ProfileDimension{&profile.Dimensions.Identity, &profile.Dimensions.Style, &profile.Dimensions.Audience, &profile.Dimensions.Platforms, &profile.Dimensions.Preferences, &profile.Dimensions.Memory} {
 		if !containsProfileSource(dimension.Sources, "[用户编辑]") {
@@ -545,7 +628,7 @@ func (s *ProjectService) ConfirmProfile(ctx context.Context, userID, projectID s
 	if profile.Version < 0 {
 		return model.ProjectProfile{}, fmt.Errorf("invalid project profile version")
 	}
-	return s.updateProfile(ctx, userID, projectID, expectedVersion, profile)
+	return s.updateProfileWithSource(ctx, userID, projectID, expectedVersion, profile, "", model.ProfileApplicationSourceUserConfirmation)
 }
 
 // SetProfileAnalysisTaskID links the server-owned analysis task to the
@@ -561,7 +644,7 @@ func (s *ProjectService) SetProfileAnalysisTaskID(ctx context.Context, userID, p
 	}
 	profile := projectProfileFor(project)
 	profile.AnalysisTaskID = strings.TrimSpace(taskID)
-	profile.Status = model.ProfileStatusDraft
+	// Admission never deactivates an already applied profile.
 	return s.updateProfile(ctx, userID, projectID, expectedVersion, profile)
 }
 
@@ -593,14 +676,14 @@ func (s *ProjectService) UpdateProfileDimension(ctx context.Context, userID, pro
 		}
 	}
 	previous := currentDimension()
-	if len(value.Sources) == 0 {
-		value.Sources = append([]string(nil), previous.Sources...)
+	if value.Sources == nil {
+		value.Sources = append([]string{}, previous.Sources...)
 	}
-	if len(value.Evidence) == 0 {
-		value.Evidence = append([]string(nil), previous.Evidence...)
+	if value.Evidence == nil {
+		value.Evidence = append([]string{}, previous.Evidence...)
 	}
-	if len(value.MissingFields) == 0 {
-		value.MissingFields = append([]string(nil), previous.MissingFields...)
+	if value.MissingFields == nil {
+		value.MissingFields = append([]string{}, previous.MissingFields...)
 	}
 	if !containsProfileSource(value.Sources, "[用户编辑]") {
 		value.Sources = append(value.Sources, "[用户编辑]")
@@ -630,6 +713,10 @@ func (s *ProjectService) UpdateProfileDimension(ctx context.Context, userID, pro
 		profile.Dimensions.Memory = value
 	default:
 		return model.ProjectProfile{}, fmt.Errorf("unknown profile dimension %q", dimension)
+	}
+	profile.Status = model.ProfileStatusConfirmed
+	if profile.InitializationStatus != model.ProfileInitializationQueued && profile.InitializationStatus != model.ProfileInitializationRunning {
+		profile.InitializationStatus = model.ProfileInitializationReady
 	}
 	return s.updateProfile(ctx, userID, projectID, expectedVersion, profile)
 }
@@ -878,6 +965,9 @@ func (s *ProjectService) update(ctx context.Context, userID, projectID string, c
 }
 
 func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
+	if err := validateProjectProfileSetup(ch); err != nil {
+		return err
+	}
 	// Apply updatable fields from ch to existing (only non-empty values).
 	platformChanged := ch.Platform != "" && ch.Platform != existing.Platform
 	if ch.Name != "" {
@@ -888,6 +978,17 @@ func (s *ProjectService) applyProjectUpdate(existing, ch *model.Project) error {
 			return fmt.Errorf("invalid platform: %s", ch.Platform)
 		}
 		existing.Platform = ch.Platform
+	}
+	if ch.AgentIDsSet {
+		existing.AgentIDs = append([]string{}, ch.AgentIDs...)
+	}
+	if ch.ProfileSetupSet {
+		existing.ProfileSetup = ch.ProfileSetup
+		if existing.ProfileSetup != nil {
+			existing.ProfileURL = existing.ProfileSetup.PrimaryProfileURL(existing.Platform)
+		} else {
+			existing.ProfileURL = ""
+		}
 	}
 	if ch.AvatarURL != "" {
 		existing.AvatarURL = ch.AvatarURL

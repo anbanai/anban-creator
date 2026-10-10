@@ -78,7 +78,9 @@ func setupProfileLifecycle(t *testing.T) *profileLifecycleFixture {
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeProfileAnalysis, Status: model.TaskStatusRunning}); err != nil {
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeProfileAnalysis, Status: model.TaskStatusRunning}
+	task.SetAgentInput(map[string]any{"expected_revision": 0})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	logger := zerolog.Nop()
@@ -86,6 +88,55 @@ func setupProfileLifecycle(t *testing.T) *profileLifecycleFixture {
 	svc := NewProjectService(repo, &logger)
 	svc.SetProjectProfileMemory(memory)
 	return &profileLifecycleFixture{repo: repo, service: svc, userID: userID, projectID: projectID, taskID: taskID, memory: memory}
+}
+
+func TestApplyAgentProfileResultCannotClaimRevisionAfterConcurrentEdit(t *testing.T) {
+	f := setupProfileLifecycle(t)
+	profile := f.currentProfile(t)
+	profile.Dimensions = validProfileDimensions()
+	profile.Dimensions.Identity.Content["summary"] = "用户刚修改"
+	if _, err := f.service.ConfirmProfile(context.Background(), f.userID, f.projectID, 0, profile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.ApplyAgentProfileResult(context.Background(), f.userID, f.projectID, f.taskID, 1, validProfileDimensions(), nil, nil); !errors.Is(err, ErrProjectProfileVersionConflict) {
+		t.Fatalf("result claiming newer revision = %v, want conflict with frozen input", err)
+	}
+	if got := f.currentProfile(t); got.Version != 1 || got.Dimensions.Identity.Content["summary"] != "用户刚修改" {
+		t.Fatalf("concurrent edit overwritten: %+v", got)
+	}
+	if f.currentTask(t).Result != nil || len(f.revisions(t)) != 1 {
+		t.Fatal("rejected analysis persisted a result")
+	}
+}
+
+func TestApplyAgentProfileResultRequiresActiveTaskAndFrozenRevision(t *testing.T) {
+	for _, tc := range []string{"inactive task", "missing revision"} {
+		t.Run(tc, func(t *testing.T) {
+			f := setupProfileLifecycle(t)
+			ctx := context.Background()
+			if tc == "inactive task" {
+				project, _ := f.repo.Projects().FindByID(ctx, f.projectID)
+				profile := project.Profile.Data()
+				profile.AnalysisTaskID = uuid.NewString()
+				project.Profile = datatypes.NewJSONType(profile)
+				if err := f.repo.Projects().Update(ctx, project); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				task := f.currentTask(t)
+				task.SetAgentInput(map[string]any{})
+				if err := f.repo.Tasks().Update(ctx, task); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.service.ApplyAgentProfileResult(ctx, f.userID, f.projectID, f.taskID, 0, validProfileDimensions(), nil, nil); err == nil {
+				t.Fatal("unauthorized or unfrozen result accepted")
+			}
+			if f.currentProfile(t).Version != 0 || f.currentTask(t).Result != nil || len(f.revisions(t)) != 0 {
+				t.Fatal("rejected result changed persistent state")
+			}
+		})
+	}
 }
 
 func validProfileDimensions() model.ProjectProfileDimensions {
@@ -157,6 +208,17 @@ func TestApplyAgentProfileResultPersistsRevisionTaskResultAndProjection(t *testi
 	}
 	if got.Version != 1 || got.InitializationStatus != model.ProfileInitializationReady || got.AnalysisTaskID != f.taskID {
 		t.Fatalf("profile metadata = version %d status %q task %q", got.Version, got.InitializationStatus, got.AnalysisTaskID)
+	}
+	encodedProfile, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profileMetadata map[string]any
+	if err := json.Unmarshal(encodedProfile, &profileMetadata); err != nil {
+		t.Fatal(err)
+	}
+	if profileMetadata["application_source"] != "system_analysis" {
+		t.Fatalf("application_source = %#v, want system_analysis", profileMetadata["application_source"])
 	}
 	rows := f.revisions(t)
 	if len(rows) != 1 || rows[0].Revision != 1 || rows[0].SourceTaskID != f.taskID {
@@ -311,5 +373,70 @@ func TestApplyAgentProfileResultRejectsTerminalTask(t *testing.T) {
 	}
 	if len(f.revisions(t)) != 0 || f.currentTask(t).Result != nil {
 		t.Fatal("terminal task submission changed profile state")
+	}
+}
+
+func TestProfileHistoryRestoresContentAndAnalysisContext(t *testing.T) {
+	f := setupProfileLifecycle(t)
+	ctx := context.Background()
+	first, err := f.service.ApplyAgentProfileResult(ctx, f.userID, f.projectID, f.taskID, 0, validProfileDimensions(), []string{"早期样本不足"}, []string{"补充受众"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.Dimensions = validProfileDimensions()
+	second.Dimensions.Identity.Content["summary"] = "第二版定位"
+	second.AnalysisLimits, second.FollowUpQuestions = []string{"新的限制"}, []string{}
+	if _, err := f.service.ConfirmProfile(ctx, f.userID, f.projectID, first.Version, second); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := f.service.RestoreProfileRevision(ctx, f.userID, f.projectID, first.Version, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Version != 3 || restored.ApplicationSource != model.ProfileApplicationSourceUserRestore || restored.Dimensions.Identity.Content["summary"] != "账号定位" || len(restored.AnalysisLimits) != 1 || restored.AnalysisLimits[0] != "早期样本不足" || restored.FollowUpQuestions[0] != "补充受众" {
+		t.Fatalf("restored profile is incomplete: %+v", restored)
+	}
+	if containsProfileSource(restored.Dimensions.Identity.Sources, "[用户编辑]") {
+		t.Fatal("restoring history changed its provenance")
+	}
+	if len(f.revisions(t)) != 3 {
+		t.Fatal("restore did not create a new immutable history entry")
+	}
+	if _, err := f.service.RestoreProfileRevision(ctx, f.userID, f.projectID, first.Version, 2); !errors.Is(err, ErrProjectProfileVersionConflict) {
+		t.Fatalf("stale restore = %v, want conflict", err)
+	}
+}
+
+func TestProfileDimensionEditPreservesOtherProvenanceAndCanClearGaps(t *testing.T) {
+	f := setupProfileLifecycle(t)
+	ctx := context.Background()
+	dimensions := validProfileDimensions()
+	dimensions.Identity.MissingFields = []string{"账号定位"}
+	first, err := f.service.ApplyAgentProfileResult(ctx, f.userID, f.projectID, f.taskID, 0, dimensions, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := model.ProfileDimension{Content: map[string]any{"summary": "用户补充定位"}, MissingFields: []string{}}
+	updated, err := f.service.UpdateProfileDimension(ctx, f.userID, f.projectID, "identity", first.Version, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Dimensions.Identity.MissingFields) != 0 || !containsProfileSource(updated.Dimensions.Identity.Sources, "[链接分析]") || !containsProfileSource(updated.Dimensions.Identity.Sources, "[用户编辑]") || len(updated.Dimensions.Identity.Evidence) != 1 {
+		t.Fatalf("edited dimension lost provenance or retained resolved gaps: %+v", updated.Dimensions.Identity)
+	}
+	if containsProfileSource(updated.Dimensions.Style.Sources, "[用户编辑]") {
+		t.Fatal("editing identity attributed unrelated style to the user")
+	}
+}
+
+func TestManualProfileDimensionAcceptsEmptyEvidence(t *testing.T) {
+	f := setupProfileLifecycle(t)
+	profile, err := f.service.UpdateProfileDimension(t.Context(), f.userID, f.projectID, "identity", 0, model.ProfileDimension{Content: map[string]any{"summary": "手工定位"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Dimensions.Identity.Evidence == nil || profile.Dimensions.Identity.MissingFields == nil {
+		t.Fatal("manual edit produced null arrays")
 	}
 }

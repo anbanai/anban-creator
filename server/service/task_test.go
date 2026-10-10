@@ -153,19 +153,56 @@ func TestTaskServiceCreateManualRejectsMissingExecutionProfile(t *testing.T) {
 	}
 }
 
+func profileAnalysisTestInput(t *testing.T, projectID string, revision int64) map[string]any {
+	t.Helper()
+	setup := model.NewProjectProfileSetup()
+	encoded, err := json.Marshal(map[string]any{
+		"project_id": projectID, "platform": model.PlatformWechat, "agent_ids": []string{model.AgentIDArticle},
+		"profile_url": "", "platform_accounts": setup.PlatformAccounts, "profile_setup": setup,
+		"answers": map[string]any{"basic": map[string]any{}, "intent": setup.Answers.Intent, "content": setup.Answers.Content, "boundaries": setup.Answers.Boundaries},
+		"samples": []string{}, "current_profile": nil, "expected_revision": revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input map[string]any
+	if err := json.Unmarshal(encoded, &input); err != nil {
+		t.Fatal(err)
+	}
+	return input
+}
+
+func TestResolveTaskIdentityUsesSelectedProjectObjects(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ids     []string
+		agent   string
+		channel string
+		kind    string
+		wantErr bool
+	}{
+		{name: "legacy remains derived", ids: nil, agent: model.AgentIDSeednote, channel: model.ChannelSeednote, kind: model.TaskKindContentGeneration},
+		{name: "selected cross-platform object", ids: []string{model.AgentIDArticle, model.AgentIDSeednote}, agent: model.AgentIDSeednote, channel: model.ChannelSeednote, kind: model.TaskKindContentGeneration},
+		{name: "unselected object", ids: []string{model.AgentIDArticle}, agent: model.AgentIDSeednote, channel: model.ChannelSeednote, kind: model.TaskKindContentGeneration, wantErr: true},
+		{name: "explicit empty", ids: []string{}, agent: model.AgentIDArticle, channel: model.ChannelArticle, kind: model.TaskKindContentGeneration, wantErr: true},
+		{name: "auxiliary analysis", ids: []string{}, agent: model.AgentIDProfileAnalysis, channel: model.ChannelProfileAnalysis, kind: model.TaskKindProfileAnalysis},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, err := resolveTaskIdentity(&model.Project{Platform: model.PlatformWechat, AgentIDs: tc.ids}, CreateManualParams{AgentID: tc.agent, Channel: tc.channel, TaskKind: tc.kind})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("resolveTaskIdentity = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	expectedRevision := int64(0)
-	input := map[string]any{
-		"project_id":  projectID,
-		"platform":    model.PlatformWechat,
-		"profile_url": "https://example.com/profile",
-		"answers":     map[string]any{},
-		"samples":     []any{},
-	}
+	input := profileAnalysisTestInput(t, projectID, expectedRevision)
 	params := CreateManualParams{
 		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
 		AgentID: model.AgentIDProfileAnalysis, Channel: model.ChannelProfileAnalysis, TaskKind: model.TaskKindProfileAnalysis,
@@ -189,6 +226,48 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	}
 	if _, err := svc.CreateManual(ctx, params); !errors.Is(err, ErrProjectProfileAnalysisInProgress) {
 		t.Fatalf("duplicate profile admission error = %v, want in-progress conflict", err)
+	}
+}
+
+func TestTaskServiceProfileAnalysisAdmissionPreservesAppliedProfile(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	project, err := repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := model.NewProjectProfile()
+	profile.Status = model.ProfileStatusConfirmed
+	profile.InitializationStatus = model.ProfileInitializationReady
+	profile.Version = 4
+	profile.ApplicationSource = "system_analysis"
+	profile.Dimensions.Identity.Content["summary"] = "仍在使用的画像"
+	project.Profile = datatypes.NewJSONType(profile)
+	if err := repo.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	expectedRevision := profile.Version
+	_, err = svc.CreateManual(ctx, CreateManualParams{
+		UserID: userID, ProjectID: projectID, ExecutionProfile: "effective",
+		AgentID: model.AgentIDProfileAnalysis, Channel: model.ChannelProfileAnalysis, TaskKind: model.TaskKindProfileAnalysis,
+		RequestedTaskType: model.TaskTypeProfileAnalysis, Prompt: "refresh", AgentInput: profileAnalysisTestInput(t, projectID, expectedRevision),
+		Quantity: 1, ProfileAnalysisExpectedVersion: &expectedRevision,
+	})
+	if err != nil {
+		t.Fatalf("CreateManual profile refresh: %v", err)
+	}
+	project, err = repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := projectProfileFor(project)
+	if got.Status != model.ProfileStatusConfirmed || got.Version != profile.Version || got.Dimensions.Identity.Content["summary"] != "仍在使用的画像" || got.ApplicationSource != "system_analysis" {
+		t.Fatalf("active profile changed during refresh admission: %+v", got)
+	}
+	if got.InitializationStatus != model.ProfileInitializationQueued {
+		t.Fatalf("initialization status = %q, want queued", got.InitializationStatus)
 	}
 }
 

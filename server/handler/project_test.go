@@ -456,6 +456,129 @@ func TestProjectHandlerCreateAutomaticallyQueuesFreeProfileAnalysis(t *testing.T
 	}
 }
 
+func TestProjectHandlerPersistsAgentIDsAndProfileSetupAndHonorsAnalyzeFalse(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	logger := zerolog.New(io.Discard).With().Timestamp().Logger()
+	projectSvc := service.NewProjectService(repo, &logger)
+	h := NewProjectHandler(projectSvc, &logger)
+	taskSvc := newHandlerTaskService(t, repo, noopTaskEnqueuer{}, nil, &logger, "", nil, nil)
+	taskSvc.SetRuntimeDispatcher(&availableRuntimeDispatcher{})
+	h.SetTaskService(taskSvc)
+
+	userID := uuid.NewString()
+	if err := repo.Users().Create(t.Context(), &model.User{ID: userID, Email: uuid.NewString() + "@test.local", Password: "x", InviteCode: uuid.NewString()[:12], Tier: model.TierFree}); err != nil {
+		t.Fatal(err)
+	}
+	app := fiber.New()
+	app.Post("/projects", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		c.Locals("user", &model.User{ID: userID, IsAdmin: true})
+		return h.Create(c)
+	})
+	resp, err := app.Test(httptestJSON("POST", "/projects", `{"platform":"wechat","name":"画像实验室","agent_ids":["wechat-article","wechat-picture","seednote","montage","hypit","whiteboard-animation"],"profile_setup":{"account_status":"existing","platform_accounts":[{"platform":"wechat","profile_url":"https://mp.weixin.qq.com/s/example"},{"platform":"seednote","profile_url":"https://www.xiaohongshu.com/user/profile/example"}],"answers":{"intent":{"goals":"增长","direction":"生活方式","differentiation":"真实体验"},"content":{"preferences":"实用","formats":"图文","tone":"克制","audience":"新手"},"boundaries":{"exclusions":"夸大","collaboration":"需披露","compliance":"不碰医疗承诺"}},"samples":["示例标题"],"analyze":false}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("create status = %d, body = %s", resp.StatusCode, readResponseBody(t, resp))
+	}
+	data := decodeBody(t, resp)["data"].(map[string]any)
+	projectView := data["project"].(map[string]any)
+	if got := projectView["agent_ids"].([]any); len(got) != 6 {
+		t.Fatalf("project agent_ids = %#v, want all six selected Agents", got)
+	}
+	setup, ok := projectView["profile_setup"].(map[string]any)
+	if !ok || setup["account_status"] != "existing" {
+		t.Fatalf("project profile_setup = %#v, want persisted setup", projectView["profile_setup"])
+	}
+	accounts := setup["platform_accounts"].([]any)
+	if accounts[0].(map[string]any)["source"] != "[用户确认]" {
+		t.Fatalf("account source = %#v, want server-derived [用户确认]", accounts[0])
+	}
+	if data["profile_initialization"].(map[string]any)["status"] != model.ProfileInitializationNotStarted {
+		t.Fatalf("profile initialization = %#v, want skipped", data["profile_initialization"])
+	}
+	project, err := repo.Projects().FindByID(t.Context(), projectView["id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.AgentIDs) != 6 || project.ProfileSetup == nil || project.ProfileSetup.Answers.Intent.Goals != "增长" {
+		t.Fatalf("persisted project = agent_ids:%v profile_setup:%+v", project.AgentIDs, project.ProfileSetup)
+	}
+	queued, err := repo.Tasks().FindByUserID(t.Context(), userID, project.ID, "", 0, 10)
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("tasks after analyze:false = %d, err=%v; want none", len(queued), err)
+	}
+}
+
+func TestProjectHandlerProjectUpdateDistinguishesOmittedAndEmptyAgentIDsAndProfileSetup(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "existing", Status: model.ProjectStatusActive}
+	if err := repo.Projects().Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	created := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID, userID, map[string]any{
+		"agent_ids":     []string{"seednote", "montage"},
+		"profile_setup": map[string]any{"account_status": "existing", "samples": []string{"sample"}},
+	})
+	if created.StatusCode != fiber.StatusOK {
+		t.Fatalf("initial update status/body = %d/%#v", created.StatusCode, decodeBody(t, created))
+	}
+	created.Body.Close()
+
+	omitted := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID, userID, map[string]any{"name": "renamed"})
+	if omitted.StatusCode != fiber.StatusOK {
+		t.Fatalf("omitted update status/body = %d/%#v", omitted.StatusCode, decodeBody(t, omitted))
+	}
+	omittedData := decodeBody(t, omitted)["data"].(map[string]any)
+	omitted.Body.Close()
+	if ids := omittedData["agent_ids"].([]any); len(ids) != 2 {
+		t.Fatalf("omitted agent_ids update = %#v, want previous selection retained", ids)
+	}
+	if setup := omittedData["profile_setup"].(map[string]any); len(setup["samples"].([]any)) != 1 {
+		t.Fatalf("omitted profile_setup update = %#v, want previous setup retained", setup)
+	}
+
+	cleared := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID, userID, map[string]any{
+		"agent_ids":     []string{},
+		"profile_setup": map[string]any{},
+	})
+	defer cleared.Body.Close()
+	if cleared.StatusCode != fiber.StatusOK {
+		t.Fatalf("explicit empty update status/body = %d/%#v", cleared.StatusCode, decodeBody(t, cleared))
+	}
+	clearedData := decodeBody(t, cleared)["data"].(map[string]any)
+	if ids := clearedData["agent_ids"].([]any); len(ids) != 0 {
+		t.Fatalf("explicit empty agent_ids = %#v, want empty selection", ids)
+	}
+	if setup := clearedData["profile_setup"].(map[string]any); setup["account_status"] != "new" || len(setup["samples"].([]any)) != 0 {
+		t.Fatalf("explicit empty profile_setup = %#v, want normalized empty setup", setup)
+	}
+}
+
+func TestProjectHandlerRejectsInvalidAgentIDsAndProfileSetup(t *testing.T) {
+	app, _, _ := setupProjectHandlerTest(t)
+	for name, body := range map[string]map[string]any{
+		"unknown agent":                {"platform": model.PlatformWechat, "name": "bad", "agent_ids": []string{"profile-analysis"}},
+		"unsupported account platform": {"platform": model.PlatformWechat, "name": "bad", "profile_setup": map[string]any{"account_status": "existing", "platform_accounts": []any{map[string]any{"platform": "tiktok", "profile_url": "https://example.com"}}}},
+		"invalid public url":           {"platform": model.PlatformWechat, "name": "bad", "profile_setup": map[string]any{"platform_accounts": []any{map[string]any{"platform": "wechat", "profile_url": "file:///tmp/profile"}}}},
+		"oversized answer":             {"platform": model.PlatformWechat, "name": "bad", "profile_setup": map[string]any{"answers": map[string]any{"intent": map[string]any{"goals": strings.Repeat("x", 6000)}}}},
+		"oversized sample set":         {"platform": model.PlatformWechat, "name": "bad", "profile_setup": map[string]any{"samples": make([]string, 21)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", uuid.NewString(), body)
+			defer resp.Body.Close()
+			if resp.StatusCode != fiber.StatusBadRequest {
+				t.Fatalf("create status = %d, want 400; body=%s", resp.StatusCode, readResponseBody(t, resp))
+			}
+		})
+	}
+}
+
 func TestProjectHandlerCreateReturnsCanonicalRecommendedTemplates(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	asset := createTemplateThumbnailAsset(t, repo, "admin-secret")
