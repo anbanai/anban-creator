@@ -1,5 +1,7 @@
 # 对话画像 → 线上项目与作品任务
 
+> 本文记录早期本机联调。后续已接入正式 Studio 路由与 Go Server；当前上线范围、两张镜像和配置请以 [正式产品交接](./onboarding-production-handoff.md) 为准。
+
 2026-10-10；分支 `feature/project-creator-onboarding`。仅新增本机联调入口，不合并主分支、不部署网站、不改 Go Server 或数据库。
 
 ## 使用

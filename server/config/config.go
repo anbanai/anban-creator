@@ -22,6 +22,7 @@ import (
 
 // Config holds all server configuration.
 type Config struct {
+	Onboarding         OnboardingConfig                `yaml:"onboarding"`
 	Server             ServerConfig                    `yaml:"server"`
 	Logging            LoggingConfig                   `yaml:"logging"`
 	Database           DatabaseConfig                  `yaml:"database"`
@@ -955,6 +956,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"ilink":           true,
 		"trends":          true,
 		"search":          true,
+		"onboarding":      true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -1017,6 +1019,12 @@ func expandEnvVars(data []byte) []byte {
 
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
+	if c.Onboarding.DailyUserLimit == 0 {
+		c.Onboarding.DailyUserLimit = 60
+	}
+	if c.Onboarding.DailyGlobalLimit == 0 {
+		c.Onboarding.DailyGlobalLimit = 1000
+	}
 	if c.Search.Doubao.Timeout == 0 {
 		c.Search.Doubao.Timeout = 30 * time.Second
 	}
@@ -1576,6 +1584,9 @@ func detectPluginDir() string {
 
 // Validate checks that required configuration fields are set.
 func (c *Config) Validate() error {
+	if err := c.Onboarding.Validate(); err != nil {
+		return err
+	}
 	var errs []string
 	if c.Trends.TTL <= 0 {
 		errs = append(errs, "trends.ttl must be positive")

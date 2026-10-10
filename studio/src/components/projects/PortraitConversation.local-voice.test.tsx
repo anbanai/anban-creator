@@ -62,6 +62,22 @@ describe('local voice input', () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
+  it('uses configured Server speech transport without calling the local preview and awaits user review', async () => {
+    const transcribe = vi.fn(async () => '服务器识别文字')
+    const onSend = vi.fn(async () => {})
+    render(<PortraitConversation messages={[]} draft={{}} ready confirmed={false} transcribe={transcribe} onSend={onSend} onConfirm={vi.fn()} onCreate={vi.fn()} />)
+    expect(screen.getByRole('status')).toHaveTextContent('音频会交由语音服务识别')
+    expect(getUserMedia).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '开始语音输入' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('正在录音'))
+    fireEvent.click(screen.getByRole('button', { name: '停止语音输入' }))
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('服务器识别文字'))
+    expect(trackStop).toHaveBeenCalled()
+    expect(transcribe).toHaveBeenCalledWith(expect.any(Blob), expect.any(AbortSignal))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
   it('releases a permission request that completes after cancellation', async () => {
     let grant!: (value: unknown) => void
     getUserMedia.mockImplementation(() => new Promise(resolve => { grant = resolve }))

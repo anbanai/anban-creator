@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { getApiErrorMessage } from '@/lib/http-client'
 
 interface Recording {
   stream?: MediaStream
@@ -7,8 +8,8 @@ interface Recording {
   request?: AbortController
 }
 
-/** Opt-in local preview transport. No cloud fallback or automatic microphone access. */
-export function useLocalDictation(onText: (text: string) => void) {
+/** Explicit recording; injected production transport or opt-in local preview. Never auto-sends text. */
+export function useLocalDictation(onText: (text: string) => void, transcribe?: (audio: Blob, signal: AbortSignal) => Promise<string>) {
   const [state, setState] = useState<'idle' | 'starting' | 'listening' | 'stopping'>('idle')
   const [notice, setNotice] = useState('')
   const current = useRef<Recording | null>(null)
@@ -68,19 +69,22 @@ export function useLocalDictation(onText: (text: string) => void) {
         try {
           const audio = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' })
           if (!audio.size) throw new Error('没有收到录音，请再试一次。')
+          const result = transcribe ? { text: await transcribe(audio, request.signal) } : await (async () => {
           const response = await fetch('/__local-preview/dictation', {
             method: 'POST', headers: { 'Content-Type': audio.type, 'X-Anban-Local-Voice': '1' }, body: audio, signal: request.signal,
           })
           const result: { text?: unknown; error?: unknown } = await response.json()
           if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : '本机转写暂时不可用。')
+          return result
+          })()
           if (typeof result.text !== 'string') throw new Error('本机转写返回异常，请重试。')
           if (current.current !== session) return
           const text = result.text.trim()
           if (text) onTextRef.current(base + (base && !/\s$/.test(base) ? '\n' : '') + text)
-          setNotice(text ? '已在本机转成文字，请检查后再发送。' : '没有识别到清晰的语音，请靠近麦克风重试。')
+          setNotice(text ? transcribe ? '已转成文字，请检查后再发送。' : '已在本机转成文字，请检查后再发送。' : '没有识别到清晰的语音，请靠近麦克风重试。')
         } catch (error) {
           if (current.current !== session) return
-          setNotice(`${error instanceof Error && error.name !== 'AbortError' ? error.message : '本机转写超时，请用短句重试。'} 原有文字已保留。`)
+          setNotice(`${getApiErrorMessage(error, '语音转文字未完成，请用短句重试。')} 原有文字已保留。`)
         } finally {
           if (current.current === session) { release(); setState('idle') }
         }

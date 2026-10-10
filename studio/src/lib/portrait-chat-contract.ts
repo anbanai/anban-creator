@@ -11,6 +11,8 @@ export const portraitConversationSchema = z.array(message).min(1).max(60).superR
   if (messages.reduce((size, item) => size + item.text.length, 0) > 40000) ctx.addIssue({ code: 'custom', message: '对话过长，请保存画像后重新开始。' })
 })
 export const portraitChatRequest = z.object({ messages: portraitConversationSchema }).strict().superRefine(({messages},ctx)=>{
+  // Leave room for the next assistant turn so a successful response is restorable.
+  if (messages.length > 59 || messages.reduce((size, item) => size + item.text.length, 0) > 38200) ctx.addIssue({ code: 'custom', message: '本次对话已较长，请先确认保存画像，或重新开始。' })
   if (messages[messages.length - 1]?.role !== 'user') ctx.addIssue({ code: 'custom', message: '最后一条必须是用户输入。' })
 })
 export type PortraitChatMessage = z.infer<typeof message>

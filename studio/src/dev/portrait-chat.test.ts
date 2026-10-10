@@ -27,6 +27,15 @@ describe('portrait parsing and provider boundary', () => {
     expect(portraitChatRequest.safeParse({ messages: [{ ...messages[0], role: 'system' }] }).success).toBe(false)
     expect(portraitChatRequest.safeParse({ messages: [{ ...messages[0], text: '长'.repeat(6001) }] }).success).toBe(false)
   })
+  it('leaves room for a complete reply in the recoverable conversation budget', () => {
+    const many = Array.from({length:60}, (_,i)=>({id:`u-${i}`,role:'user',text:'短句'}))
+    expect(portraitChatRequest.safeParse({messages:many.slice(0,59)}).success).toBe(true)
+    expect(portraitChatRequest.safeParse({messages:many}).success).toBe(false)
+    const long = Array.from({length:7}, (_,i)=>({id:`u-${i}`,role:'user',text:'长'.repeat(i===6 ? 2200 : 6000)}))
+    expect(portraitChatRequest.safeParse({messages:long}).success).toBe(true)
+    long[6].text += '长'
+    expect(portraitChatRequest.safeParse({messages:long}).success).toBe(false)
+  })
   it('accepts a creation brief supported by more than four conversation turns, but still checks every quote', async () => {
     const inputs = ['周末家庭插花', '选花难、搭配不好看', '图文', '引导预约到店', '课程还在筹备', '微信公众号']
     const history = inputs.map((text, i) => ({ id: `u-${i + 2}`, role: 'user' as const, text }))

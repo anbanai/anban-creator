@@ -25,6 +25,7 @@ interface PortraitConversationProps {
   ready: boolean
   confirmed: boolean
   localVoice?: boolean
+  transcribe?: (audio: Blob, signal: AbortSignal) => Promise<string>
   initialInput?: string
   onSend: (text: string) => Promise<void>
   onConfirm: () => void
@@ -34,7 +35,7 @@ interface PortraitConversationProps {
 /** Presentation only. The caller owns conversation transport, revisions and persistence. */
 export function PortraitConversation({
   messages, draft, name, summary, creationIdea, suggestion, busy = false, error,
-  ready, confirmed, localVoice: preferLocalVoice = false, initialInput = '', onSend, onConfirm, onCreate,
+  ready, confirmed, localVoice: preferLocalVoice = false, transcribe, initialInput = '', onSend, onConfirm, onCreate,
 }: PortraitConversationProps) {
   const [input, setInput] = useState(initialInput)
   const [sendError, setSendError] = useState('')
@@ -47,8 +48,8 @@ export function PortraitConversation({
   const missingBasics = portraitFacets.filter(([key]) => ['identity', 'audience', 'platforms'].includes(key) && !draft[key]).map(([, label]) => label)
   const locked = busy || sending
   const browserVoice = useBrowserDictation(setInput)
-  const localDictation = useLocalDictation(setInput)
-  const localVoice = preferLocalVoice && !browserVoice.active
+  const localDictation = useLocalDictation(setInput, transcribe)
+  const localVoice = (preferLocalVoice || !!transcribe) && !browserVoice.active
   const voice = localVoice ? localDictation : browserVoice
 
   useEffect(() => {
@@ -115,7 +116,7 @@ export function PortraitConversation({
             }} />
           <div className="portrait-compose-bottom"><span>Enter 发送 · Shift + Enter 换行</span><div className="portrait-compose-actions">
             <button type="button" className={`portrait-voice ${voice.active ? 'is-listening' : ''}`} aria-label={voice.active ? '停止语音输入' : '开始语音输入'} aria-pressed={voice.active}
-              disabled={(!voice.active && locked) || voice.state === 'stopping'} title={voice.supported ? localVoice ? '本机离线中文语音输入' : '浏览器中文语音输入' : '此浏览器不支持，点击查看替代方法'}
+              disabled={(!voice.active && locked) || voice.state === 'stopping'} title={voice.supported ? localVoice ? transcribe ? '录音转文字' : '本机离线中文语音输入' : '浏览器中文语音输入' : '此浏览器不支持，点击查看替代方法'}
               onClick={() => { if (voice.active) voice.stop(); else { voice.start(input); if (!voice.supported) inputRef.current?.focus() } }}>
               {voice.active ? <Square size={14} /> : <Mic size={17} />}{voice.active ? '结束录音' : '语音输入'}
             </button>
@@ -123,8 +124,8 @@ export function PortraitConversation({
           </div></div>
         </form>
         <p className="portrait-voice-notice" role="status">{voice.active
-          ? voice.state === 'starting' ? '正在启动，请允许麦克风权限…' : voice.state === 'stopping' ? localVoice ? '正在本机转成文字，请稍等…' : '正在结束识别…' : localVoice ? '正在录音…点击结束后转成文字，每段最多 55 秒。' : '正在听你说话…结束录音后可以修改文字，不会自动发送。'
-          : voice.notice || (localVoice ? '本机离线转写 · 录音不发往外部服务 · 检查文字后再发送' : voice.supported ? '语音由浏览器识别，可能联网处理；文字不会自动发送。' : '当前浏览器不支持网页语音识别，可使用系统或输入法的语音输入。')}</p>
+          ? voice.state === 'starting' ? '正在启动，请允许麦克风权限…' : voice.state === 'stopping' ? localVoice ? transcribe ? '正在转成文字，请稍等…' : '正在本机转成文字，请稍等…' : '正在结束识别…' : localVoice ? '正在录音…点击结束后转成文字，每段最多 55 秒。' : '正在听你说话…结束录音后可以修改文字，不会自动发送。'
+          : voice.notice || (localVoice ? transcribe ? '点击录音后，音频会交由语音服务识别；检查文字后再发送。' : '本机离线转写 · 录音不发往外部服务 · 检查文字后再发送' : voice.supported ? '语音由浏览器识别，可能联网处理；文字不会自动发送。' : '当前浏览器不支持网页语音识别，可使用系统或输入法的语音输入。')}</p>
         {(error || sendError) && <p className="portrait-error" role="alert">{error || sendError}</p>}
       </div>
     </section>
