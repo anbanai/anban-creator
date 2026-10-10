@@ -119,6 +119,7 @@ function ProfileLabPage() {
   const [newKeys, setNewKeys] = useState<Record<string, string>>({})
   const [newValues, setNewValues] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState('')
+  const [currentStep, setCurrentStep] = useState(0)
   const [hydratedProjectID, setHydratedProjectID] = useState('')
   const lastProfileRevision = useRef<{ projectId: string; version: number } | null>(null)
   const activeProjectID = useRef(projectId)
@@ -153,6 +154,7 @@ function ProfileLabPage() {
     setNewKeys({})
     setNewValues({})
     setFormError('')
+    setCurrentStep(0)
   }, [projectId])
 
   const projectQuery = useQuery({
@@ -303,23 +305,67 @@ function ProfileLabPage() {
     setSetup((current) => ({ ...current, answers: { ...current.answers, [group]: { ...current.answers[group], [key]: value } } }))
   }
 
+  const steps = [
+    { id: 'project-basics', label: '基础信息' },
+    { id: 'accounts', label: '社媒链接' },
+    { id: 'intent', label: '运营方向' },
+    { id: 'boundaries', label: '偏好与红线' },
+  ] as const
+
+  function validateStep(step: number) {
+    setFormError('')
+    if (step === 0) {
+      if (!name.trim()) {
+        setFormError('请填写项目名称')
+        document.getElementById('project-name')?.focus()
+        return false
+      }
+      if (!isEditing && selectedAgents.length === 0) {
+        setFormError('至少选择一种创作对象')
+        document.getElementById('agent-selection')?.focus()
+        return false
+      }
+    }
+    if (step === 1) {
+      const suppliedURLs = setup.platform_accounts.map((account) => account.profile_url.trim()).filter(Boolean)
+      if (suppliedURLs.some((item) => !isPublicURL(item))) {
+        setFormError('请填写有效的公开 HTTP 或 HTTPS 链接')
+        return false
+      }
+    }
+    return true
+  }
+
+  function focusStep(step: number) {
+    window.requestAnimationFrame(() => document.getElementById(steps[step].id)?.focus())
+  }
+
+  function goToStep(next: number) {
+    const bounded = Math.max(0, Math.min(steps.length - 1, next))
+    if (next > currentStep) {
+      for (let step = currentStep; step < bounded; step += 1) {
+        if (validateStep(step)) continue
+        setCurrentStep(step)
+        focusStep(step)
+        return
+      }
+    }
+    setCurrentStep(bounded)
+    setFormError('')
+    focusStep(bounded)
+  }
+
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (createMutation.isPending || saveProjectMutation.isPending || analysisMutation.isPending) return
-    setFormError('')
-    if (!name.trim()) {
-      setFormError('请填写项目名称')
-      document.getElementById('project-name')?.focus()
+    if (!validateStep(0)) {
+      setCurrentStep(0)
+      focusStep(0)
       return
     }
-    if (!isEditing && selectedAgents.length === 0) {
-      setFormError('至少选择一种创作对象')
-      document.getElementById('agent-selection')?.focus()
-      return
-    }
-    const suppliedURLs = setup.platform_accounts.map((account) => account.profile_url.trim()).filter(Boolean)
-    if (suppliedURLs.some((item) => !isPublicURL(item))) {
-      setFormError('请填写有效的公开 HTTP 或 HTTPS 链接')
+    if (!validateStep(1)) {
+      setCurrentStep(1)
+      focusStep(1)
       return
     }
     const profileSetup = {
@@ -400,31 +446,24 @@ function ProfileLabPage() {
         )}
       </header>
 
-      <div data-testid="profile-lab-layout" className="grid grid-cols-1 gap-5 xl:grid-cols-[12rem_minmax(0,1fr)_17rem] xl:items-start">
-        <aside className="space-y-4 xl:sticky xl:top-5">
-          <div className="border-y border-border py-3">
-            <h2 className="text-xs font-semibold uppercase text-muted-foreground">工作区</h2>
-            <nav aria-label="Profile Lab 步骤" className="mt-2 grid grid-cols-2 gap-1 xl:grid-cols-1">
-              {[
-                ['agent-selection', '创作对象', selectedAgents.length > 0],
-                ['project-basics', '基础信息与账号', Boolean(name.trim())],
-                ['intent', '运营意图', Boolean(setup.answers.intent.goals.trim() || setup.answers.intent.direction.trim())],
-                ['content', '内容偏好', Boolean(setup.answers.content.preferences.trim() || setup.answers.content.audience.trim())],
-                ['boundaries', '边界与红线', Boolean(setup.answers.boundaries.exclusions.trim() || setup.answers.boundaries.compliance.trim())],
-              ].map(([id, label, complete]) => (
-                <a key={id as string} href={`#${id}`} className="flex min-h-11 items-center gap-2 border-b border-border/60 px-2 text-sm hover:bg-muted/50">
-                  {complete ? <Check className="size-4 text-emerald-700" /> : <span className="size-4 rounded-full border border-muted-foreground/40" />}{label}
-                </a>
-              ))}
-            </nav>
-          </div>
-          <div className="hidden border-t border-border pt-3 text-xs leading-5 text-muted-foreground xl:block">
-            <span className="font-mono text-foreground">6</span> 个维度共用同一份项目画像
-          </div>
-        </aside>
+      <div data-testid="profile-lab-layout" className="mx-auto max-w-3xl">
+        <nav aria-label="创建进度" className="mb-8">
+          <ol className="grid grid-cols-4 gap-2">
+            {steps.map((step, index) => {
+              const active = currentStep === index
+              const complete = currentStep > index
+              return <li key={step.id}>
+                <button type="button" onClick={() => goToStep(index)} aria-current={active ? 'step' : undefined} className="group flex w-full flex-col gap-2 text-left">
+                  <span className={`h-1 w-full transition-colors ${active || complete ? 'bg-foreground' : 'bg-border'}`} />
+                  <span className={`text-xs ${active ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>{index + 1}. {step.label}</span>
+                </button>
+              </li>
+            })}
+          </ol>
+        </nav>
 
         <form onSubmit={submit} className="min-w-0 space-y-5" noValidate>
-          <section id="agent-selection" tabIndex={-1} className="scroll-mt-6 border-y border-foreground/80 py-4">
+          {currentStep === 0 && <section id="agent-selection" tabIndex={-1} className="scroll-mt-6 border-y border-foreground/80 py-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-lg font-semibold">创作对象</h2>
               <span className="font-mono text-xs text-muted-foreground">{selectedAgents.length.toString().padStart(2, '0')} SELECTED</span>
@@ -447,35 +486,28 @@ function ProfileLabPage() {
                 )
               })}
             </div>
-          </section>
+          </section>}
 
-          <section id="project-basics" className="scroll-mt-6 border-b border-border pb-5">
+          {currentStep === 0 && <section id="project-basics" tabIndex={-1} className="scroll-mt-6 border-b border-border pb-5">
             <div className="mb-4 flex items-baseline justify-between gap-3"><h2 className="text-lg font-semibold">基础信息与账号</h2><span className="text-xs text-muted-foreground">可稍后补充</span></div>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5 text-sm sm:col-span-2"><span>项目名称 <span className="text-destructive">*</span></span><Input id="project-name" aria-label="项目名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：城市慢行观察" maxLength={80} /></label>
               <label className="space-y-1.5 text-sm"><span>关键词</span><Input aria-label="关键词" value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="用逗号分隔" /></label>
               <label className="space-y-1.5 text-sm"><span>账号状态</span><select aria-label="账号状态" value={setup.account_status} onChange={(event) => setSetup((current) => ({ ...current, account_status: event.target.value as ProjectProfileSetup['account_status'] }))} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="new">筹备中 / 暂无账号</option><option value="existing">已有账号</option></select></label>
               <label className="space-y-1.5 text-sm sm:col-span-2"><span>项目定位</span><Textarea aria-label="项目定位" value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="这项内容希望长期服务什么方向？" rows={2} /></label>
-              <ProfileAccountFields accounts={setup.platform_accounts} onChange={(accounts) => setSetup((current) => ({ ...current, platform_accounts: accounts }))} />
-              <section aria-label="视觉参考与风格" className="space-y-2 sm:col-span-2">
-                <h3 className="text-sm font-medium">视觉参考与风格</h3>
-                <div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                  <ReferenceAssetUpload
-                    value={referenceImage}
-                    onChange={(value) => { setReferenceImage(value); setReferenceImageDirty(true) }}
-                    purpose="project_reference"
-                    ariaLabel="项目参考图文件"
-                    onUploadingChange={setReferenceUploading}
-                  />
-                  <label className="space-y-1.5 text-sm"><span>视觉风格描述</span><Textarea aria-label="视觉风格描述" value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} placeholder="例如：自然光、低饱和、留白充足" rows={4} maxLength={4000} /></label>
-                </div>
-                <p className="text-xs text-muted-foreground">可上传参考图并补充视觉特点，供项目内的创作任务使用。</p>
-              </section>
-              <label className="space-y-1.5 text-sm sm:col-span-2"><span>内容样本</span><Textarea aria-label="内容样本" value={setup.samples.join('\n')} onChange={(event) => setSetup((current) => ({ ...current, samples: event.target.value.split('\n') }))} placeholder="每行一个公开链接、标题或内容片段，选填" rows={3} /></label>
             </div>
-          </section>
+          </section>}
 
-          <section id="intent" className="scroll-mt-6 border-b border-border pb-5">
+          {currentStep === 1 && <section id="accounts" tabIndex={-1} className="scroll-mt-6 space-y-5 border-b border-border pb-5">
+            <div><h2 className="text-lg font-semibold">你的公开账号</h2><p className="mt-1 text-sm text-muted-foreground">没有账号也可以跳过，之后随时补充。</p></div>
+            <ProfileAccountFields accounts={setup.platform_accounts} onChange={(accounts) => setSetup((current) => ({ ...current, platform_accounts: accounts }))} />
+            <details className="border-t border-border pt-4"><summary className="cursor-pointer text-sm font-medium">更多资料（可选）</summary><div className="mt-4 space-y-4">
+              <label className="block space-y-1.5 text-sm"><span>内容样本</span><Textarea aria-label="内容样本" value={setup.samples.join('\n')} onChange={(event) => setSetup((current) => ({ ...current, samples: event.target.value.split('\n') }))} placeholder="每行一个公开链接、标题或内容片段" rows={4} /></label>
+              <section aria-label="视觉参考与风格" className="space-y-2"><h3 className="text-sm font-medium">视觉参考与风格</h3><div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]"><ReferenceAssetUpload value={referenceImage} onChange={(value) => { setReferenceImage(value); setReferenceImageDirty(true) }} purpose="project_reference" ariaLabel="项目参考图文件" onUploadingChange={setReferenceUploading} /><label className="space-y-1.5 text-sm"><span>视觉风格描述</span><Textarea aria-label="视觉风格描述" value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} placeholder="例如：自然光、低饱和、留白充足" rows={4} maxLength={4000} /></label></div><p className="text-xs text-muted-foreground">这些资料会帮助创作任务保持一致。</p></section>
+            </div></details>
+          </section>}
+
+          {currentStep === 2 && <section id="intent" tabIndex={-1} className="scroll-mt-6 border-b border-border pb-5">
             <h2 className="mb-4 text-lg font-semibold">运营意图</h2>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5 text-sm"><span>运营目标</span><Textarea aria-label="运营目标" value={setup.answers.intent.goals} onChange={(event) => setAnswer('intent', 'goals', event.target.value)} placeholder="希望账号长期带来什么价值？" rows={2} /></label>
@@ -484,9 +516,9 @@ function ProfileLabPage() {
               <label className="space-y-1.5 text-sm"><span>优势与资源</span><Textarea aria-label="优势与资源" value={setup.answers.intent.strengths} onChange={(event) => setAnswer('intent', 'strengths', event.target.value)} placeholder="经验、专业能力、独特资源" rows={2} /></label>
               <label className="space-y-1.5 text-sm"><span>可用素材资源</span><Textarea aria-label="可用素材资源" value={setup.answers.intent.resources} onChange={(event) => setAnswer('intent', 'resources', event.target.value)} placeholder="案例、数据、团队或拍摄条件" rows={2} /></label>
             </div>
-          </section>
+          </section>}
 
-          <section id="content" className="scroll-mt-6 border-b border-border pb-5">
+          {currentStep === 3 && <section id="content" className="scroll-mt-6 border-b border-border pb-5">
             <h2 className="mb-4 text-lg font-semibold">内容偏好与受众</h2>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5 text-sm"><span>内容偏好</span><Textarea aria-label="内容偏好" value={setup.answers.content.preferences} onChange={(event) => setAnswer('content', 'preferences', event.target.value)} placeholder="希望多出现什么内容？" rows={2} /></label>
@@ -496,32 +528,31 @@ function ProfileLabPage() {
               <label className="space-y-1.5 text-sm"><span>喜欢的内容</span><Textarea aria-label="喜欢的内容" value={setup.answers.content.favorites} onChange={(event) => setAnswer('content', 'favorites', event.target.value)} placeholder="喜欢的选题、形式或表达方式" rows={2} /></label>
               <label className="space-y-1.5 text-sm"><span>参考账号</span><Textarea aria-label="参考账号" value={setup.answers.content.reference_accounts} onChange={(event) => setAnswer('content', 'reference_accounts', event.target.value)} placeholder="账号名称或公开主页链接" rows={2} /></label>
             </div>
-          </section>
+          </section>}
 
-          <section id="boundaries" className="scroll-mt-6 border-b border-border pb-5">
+          {currentStep === 3 && <section id="boundaries" tabIndex={-1} className="scroll-mt-6 border-b border-border pb-5">
             <h2 className="mb-4 text-lg font-semibold">不做内容与合作边界</h2>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-1.5 text-sm"><span>内容红线</span><Textarea aria-label="内容红线" value={setup.answers.boundaries.exclusions} onChange={(event) => setAnswer('boundaries', 'exclusions', event.target.value)} placeholder="绝不出现或不希望生成的内容" rows={2} /></label>
               <label className="space-y-1.5 text-sm"><span>合作边界</span><Textarea aria-label="合作边界" value={setup.answers.boundaries.collaboration} onChange={(event) => setAnswer('boundaries', 'collaboration', event.target.value)} placeholder="合作主题、对象或表达上的限制" rows={2} /></label>
               <label className="space-y-1.5 text-sm sm:col-span-2"><span>合规要求</span><Textarea aria-label="合规要求" value={setup.answers.boundaries.compliance} onChange={(event) => setAnswer('boundaries', 'compliance', event.target.value)} placeholder="行业规范、事实核验或声明要求" rows={2} /></label>
             </div>
-          </section>
+          </section>}
 
           <div className="space-y-3 border-b border-border pb-4">
-            {!isEditing && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={skipAnalysis} onChange={(event) => setSkipAnalysis(event.target.checked)} className="size-4 accent-primary" aria-label="跳过画像分析" />跳过画像分析</label>}
-            {isEditing && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={analyzeOnSave} disabled={analysisRunning} onChange={(event) => setAnalyzeOnSave(event.target.checked)} className="size-4 accent-primary" aria-label="保存后重新分析画像" />{analysisRunning ? '分析中；保存资料后可重新分析' : '保存后重新分析画像'}</label>}
             {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Button type="button" variant="ghost" nativeButton={false} render={<Link to="/projects" />}><ArrowLeft />返回项目</Button>
-              <Button type="submit" disabled={createMutation.isPending || saveProjectMutation.isPending || analysisMutation.isPending || referenceUploading}>
-                {(createMutation.isPending || saveProjectMutation.isPending) ? <LoaderCircle className="animate-spin" /> : <Check />}
-                {isEditing ? '保存设置' : '创建项目'}
-              </Button>
+              <div className="flex items-center gap-2">
+                {currentStep > 0 && <Button type="button" variant="outline" onClick={() => goToStep(currentStep - 1)}>上一步</Button>}
+                {currentStep < steps.length - 1 ? <Button type="button" onClick={() => goToStep(currentStep + 1)}>下一步</Button> : <Button type="submit" disabled={createMutation.isPending || saveProjectMutation.isPending || analysisMutation.isPending || referenceUploading}>{(createMutation.isPending || saveProjectMutation.isPending) ? <LoaderCircle className="animate-spin" /> : <Check />}{isEditing ? '保存设置' : '创建项目'}</Button>}
+              </div>
             </div>
+            {currentStep === steps.length - 1 && <div className="space-y-3 pt-2">{!isEditing && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={skipAnalysis} onChange={(event) => setSkipAnalysis(event.target.checked)} className="size-4 accent-primary" aria-label="跳过画像分析" />先创建，稍后分析画像</label>}{isEditing && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={analyzeOnSave} disabled={analysisRunning} onChange={(event) => setAnalyzeOnSave(event.target.checked)} className="size-4 accent-primary" aria-label="保存后重新分析画像" />{analysisRunning ? '分析中；保存资料后可重新分析' : '保存后重新分析画像'}</label>}</div>}
           </div>
         </form>
 
-        <aside className="space-y-4 xl:sticky xl:top-5">
+        {isEditing && <aside className="space-y-4 xl:sticky xl:top-5">
           <section className="border-y border-foreground/80 py-4">
             <div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">六维画像</h2><span className="font-mono text-[10px] text-muted-foreground">PROFILE / 6</span></div>
             {profile && <p className="mt-3 text-xs font-medium">{applicationLabel(profile)}</p>}
@@ -564,7 +595,7 @@ function ProfileLabPage() {
               ) : <p className="py-3 text-xs text-muted-foreground">暂无可恢复版本</p>}
             </section>
           )}
-        </aside>
+        </aside>}
       </div>
 
       {isEditing && profile && (
