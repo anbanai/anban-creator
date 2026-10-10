@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Check, CircleAlert, CircleCheck, Clock3, LoaderCircle, Plus, RotateCcw, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
@@ -94,6 +94,7 @@ function sourcesForProfile(profile?: ProjectProfile | null): Set<string> {
 function ProfileLabPage() {
   const { projectId } = useParams()
   const [searchParams] = useSearchParams()
+  const location = useLocation()
   const isEditing = Boolean(projectId)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -116,6 +117,13 @@ function ProfileLabPage() {
   const lastProfileRevision = useRef<{ projectId: string; version: number } | null>(null)
   const activeProjectID = useRef(projectId)
   activeProjectID.current = projectId
+  const mountedRef = useRef(true)
+  const currentLocationKey = `${location.pathname}${location.search}`
+  const currentLocationRef = useRef(currentLocationKey)
+  currentLocationRef.current = currentLocationKey
+  const creationViewKey = useRef(currentLocationKey)
+
+  useEffect(() => () => { mountedRef.current = false }, [])
 
   useEffect(() => {
     setName('')
@@ -249,10 +257,11 @@ function ProfileLabPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (payload: CreateProjectRequest) => api.projects.create(payload),
-    onSuccess: ({ project: created }, payload) => {
+    mutationFn: ({ payload }: { payload: CreateProjectRequest; viewKey: string }) => api.projects.create(payload),
+    onSuccess: ({ project: created }, { payload, viewKey }) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       toast.success(payload.profile_setup?.analyze === false ? '项目已创建' : '项目已创建，画像分析将在后台运行')
+      if (!mountedRef.current || currentLocationRef.current !== viewKey || creationViewKey.current !== viewKey) return
       if (returnTo) {
         navigate(projectCreatedReturnHref({ returnTo, projectId: created.id, type: creationIntent.type, intent: creationIntent.intent }))
       } else navigate(`/projects/${created.id}/profile-lab`, { replace: true })
@@ -316,7 +325,7 @@ function ProfileLabPage() {
       payload.platform = primaryPlatform(selectedAgents) as CreateProjectRequest['platform']
     }
     if (isEditing) saveProjectMutation.mutate({ id: projectId!, payload, analyze: analyzeOnSave, priorProfile: profile })
-    else createMutation.mutate(payload)
+    else createMutation.mutate({ payload, viewKey: creationViewKey.current })
   }
 
   function saveDimension(key: DimensionKey) {

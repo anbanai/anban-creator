@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -15,6 +16,9 @@ function fieldLabel(key: string) {
 
 /** Preserve structured values; every leaf uses an ordinary form control. */
 function ValueField({ label, value, onChange }: { label: string; value: unknown; onChange: (next: unknown) => void }) {
+  // Keep numeric editing active after clearing so deletion is represented as
+  // an explicit null instead of changing the control into a text field.
+  const [numberMode] = useState(() => typeof value === 'number')
   if (Array.isArray(value)) {
     if (value.every((item) => typeof item === 'string')) {
       return <label className="block space-y-1.5 text-sm"><span>{label}</span><Textarea aria-label={label} value={value.join('\n')} onChange={(event) => onChange(event.target.value.split('\n'))} rows={2} /><span className="text-xs text-muted-foreground">每行一项</span></label>
@@ -27,8 +31,8 @@ function ValueField({ label, value, onChange }: { label: string; value: unknown;
   if (typeof value === 'boolean') {
     return <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" aria-label={label} checked={value} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-primary" />{label}</label>
   }
-  if (typeof value === 'number') {
-    return <label className="block space-y-1.5 text-sm"><span>{label}</span><Input aria-label={label} type="number" value={value} onChange={(event) => { if (event.target.value !== '') onChange(event.target.valueAsNumber) }} /></label>
+  if (numberMode) {
+    return <label className="block space-y-1.5 text-sm"><span>{label}</span><Input aria-label={label} type="number" value={value == null ? '' : String(value)} onChange={(event) => onChange(event.target.value === '' ? null : event.target.valueAsNumber)} /></label>
   }
   const text = value == null ? '' : String(value)
   return <label className="block space-y-1.5 text-sm"><span>{label}</span><Textarea aria-label={label} value={text} onChange={(event) => onChange(event.target.value)} rows={text.includes('\n') ? 3 : 2} /></label>

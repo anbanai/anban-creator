@@ -201,6 +201,23 @@ describe('ProfileLabPage', () => {
     })))
   })
 
+  it('removes a numeric profile field when the number input is cleared', async () => {
+    const typedProfile = {
+      ...profile,
+      dimensions: { ...profile.dimensions, identity: { ...profile.dimensions.identity, content: {
+        name: '云端手记', details: { goals: '长期创作', count: 3, enabled: true },
+      } } },
+    }
+    vi.mocked(api.projects.getAccountProfile).mockResolvedValueOnce(typedProfile)
+    renderRoute('/projects/project-1/profile-lab')
+    const identity = await screen.findByRole('region', { name: '定位 identity' })
+    fireEvent.change(within(identity).getByLabelText('Count'), { target: { value: '' } })
+    fireEvent.click(within(identity).getByRole('button', { name: '保存定位' }))
+    await waitFor(() => expect(api.projects.updateProfileDimension).toHaveBeenCalledWith('project-1', 'identity', 2, expect.objectContaining({
+      content: { name: '云端手记', details: { count: null, goals: '长期创作', enabled: true } },
+    })))
+  })
+
   it('keeps unsaved changes when automatic analysis applies and rejects saving a stale revision', async () => {
     const queryClient = createTestQueryClient()
     vi.mocked(api.projects.getAccountProfile).mockResolvedValueOnce({ ...profile, initialization_status: 'running' })
@@ -316,5 +333,18 @@ describe('ProfileLabPage', () => {
     await waitFor(() => expect(window.location.pathname).toBe('/tasks'))
     expect(new URLSearchParams(window.location.search).get('project_id')).toBe('created-1')
     expect(new URLSearchParams(window.location.search).get('type')).toBe('wechat-picture')
+  })
+
+  it('does not redirect back into the new project after leaving while creation is pending', async () => {
+    let resolveCreate!: (value: { project: Project }) => void
+    vi.mocked(api.projects.create).mockReturnValueOnce(new Promise((resolve) => { resolveCreate = resolve }))
+    renderRoute('/projects/new')
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '离开中的项目' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '公众号文章' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(screen.getByRole('link', { name: '项目' }))
+    expect(window.location.pathname).toBe('/projects')
+    await act(async () => resolveCreate({ project: { ...project, id: 'late-created' } }))
+    await waitFor(() => expect(window.location.pathname).toBe('/projects'))
   })
 })
