@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ type ProjectHandler struct {
 	imageCapabilities map[string]config.ImageGenerationRouteConfig
 	projectMemory     interface {
 		ReadProject(context.Context, string) (projectmemory.ProjectView, error)
+		ReplaceMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 	}
 	tasks             *service.TaskService
 	billingCatalog    *service.BillingCatalogService
@@ -72,6 +74,7 @@ func (h *ProjectHandler) SetReferenceAssetService(svc *service.ReferenceAssetSer
 
 func (h *ProjectHandler) SetProjectMemoryStore(store interface {
 	ReadProject(context.Context, string) (projectmemory.ProjectView, error)
+	ReplaceMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 }) {
 	h.projectMemory = store
 }
@@ -849,6 +852,72 @@ func (h *ProjectHandler) Memory(c fiber.Ctx) error {
 	return c.Send(body)
 }
 
+type projectMemoryUpdateRequest struct {
+	Path            string  `json:"path"`
+	ExpectedContent *string `json:"expected_content"`
+	Content         string  `json:"content"`
+}
+
+func protectedProjectMemoryPath(value string) bool {
+	clean := path.Clean(strings.ReplaceAll(strings.TrimSpace(value), "\\", "/"))
+	return clean == "AGENTS.md" || clean == "CLAUDE.md" || clean == "profile" || strings.HasPrefix(clean, "profile/") || clean == ".claude" || strings.HasPrefix(clean, ".claude/")
+}
+
+// UpdateMemory handles PUT /projects/:id/memory. Memory edits are Server-owned
+// NAS writes with content CAS. Generated profile projections and private Agent
+// memory are intentionally excluded; they have their own authoritative owners.
+func (h *ProjectHandler) UpdateMemory(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	projectID := strings.TrimSpace(c.Params("id"))
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project id is required")
+	}
+	if _, _, err := h.service.Get(c.Context(), userID, projectID); err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
+		}
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to verify project ownership")
+	}
+	if h.projectMemory == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "project memory is unavailable")
+	}
+	var req projectMemoryUpdateRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid project memory request")
+	}
+	relativePath := path.Clean(strings.ReplaceAll(strings.TrimSpace(req.Path), "\\", "/"))
+	if relativePath == "." || relativePath == "" || strings.HasPrefix(relativePath, "../") || relativePath == ".." || strings.HasPrefix(relativePath, "/") || !strings.EqualFold(path.Ext(relativePath), ".md") {
+		return Error(c, fiber.StatusBadRequest, "project memory path must be a relative Markdown file")
+	}
+	if protectedProjectMemoryPath(relativePath) {
+		return Forbidden(c, "this project memory file is managed by the Server")
+	}
+	if req.ExpectedContent == nil {
+		return Error(c, fiber.StatusBadRequest, "expected_content is required")
+	}
+	if err := h.projectMemory.ReplaceMarkdownFileIfUnchanged(c.Context(), projectID, relativePath, *req.ExpectedContent, req.Content); err != nil {
+		if errors.Is(err, projectmemory.ErrProjectMemoryConflict) {
+			return Error(c, fiber.StatusConflict, "project memory changed; refresh and retry")
+		}
+		if errors.Is(err, projectmemory.ErrProjectMemoryQuotaExceeded) || errors.Is(err, projectmemory.ErrProjectMemoryTooManyEntries) {
+			return Error(c, fiber.StatusRequestEntityTooLarge, "project memory quota exceeded")
+		}
+		if errors.Is(err, projectmemory.ErrProjectMemoryMissing) {
+			return Error(c, fiber.StatusNotFound, "project memory is unavailable")
+		}
+		h.logger.Error().Err(err).Str("project_id", projectID).Str("path", relativePath).Msg("write project memory failed")
+		return Error(c, fiber.StatusServiceUnavailable, "project memory is unavailable")
+	}
+	return h.Memory(c)
+}
+
 type profileUpdateRequest struct {
 	Version int64                `json:"version"`
 	Profile model.ProjectProfile `json:"profile"`
@@ -1115,11 +1184,40 @@ func profileAgentInput(project *model.Project, answers map[string]any, samples [
 	for _, sample := range samples {
 		values = append(values, sample)
 	}
+	// The profile-analysis Pack requires all five answer groups even when the
+	// project has no user-provided answers yet. Keep this normalization at the
+	// Server boundary so automatic initialization and explicit retries share the
+	// same valid input contract.
+	normalizedAnswers := map[string]any{
+		"basic": map[string]any{
+			"project_name":   project.Name,
+			"account_status": "",
+		},
+		"platform_accounts": []any{},
+		"intent": map[string]any{
+			"goals":           "",
+			"direction":       "",
+			"differentiation": "",
+		},
+		"content": map[string]any{
+			"preferences": "",
+			"formats":     "",
+			"tone":        "",
+			"audience":    "",
+		},
+		"boundaries": map[string]any{
+			"exclusions":    "",
+			"collaboration": "",
+			"compliance":    "",
+		},
+	}
+	for key, value := range answers {
+		normalizedAnswers[key] = value
+	}
 	return map[string]any{
 		"project_id":  project.ID,
-		"platform":    project.Platform,
 		"profile_url": project.ProfileURL,
-		"answers":     answers,
+		"answers":     normalizedAnswers,
 		"samples":     values,
 	}
 }

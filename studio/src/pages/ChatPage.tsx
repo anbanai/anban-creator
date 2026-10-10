@@ -97,6 +97,7 @@ function normalizeDraft(raw: JsonRecord): InteractiveDraft {
     ready: Boolean(draft.ready),
     name,
     fields,
+    memory_append: stringValue(draft.memory_append),
   }
 }
 
@@ -137,13 +138,13 @@ function isRunState(value: unknown): value is RunState {
   return value === 'idle' || value === 'starting' || value === 'running' || value === 'waiting_answer' || value === 'error' || value === 'expired' || value === 'closed'
 }
 
-function useNavigationWarning(when: boolean, committedRef: MutableRefObject<boolean>) {
+function useNavigationWarning(when: boolean, committedRef: MutableRefObject<boolean>, message: string) {
   const { navigator } = useContext(UNSAFE_NavigationContext)
   useEffect(() => {
     const blockable = navigator as unknown as BlockableNavigator
     if (!when) return
     const original = { push: blockable.push, replace: blockable.replace, go: blockable.go }
-    const allow = () => committedRef.current || window.confirm('当前创作项目创建尚未完成，确定离开吗？')
+    const allow = () => committedRef.current || window.confirm(message)
     if (original.push) blockable.push = (...args) => allow() ? original.push?.(...args) : undefined
     if (original.replace) blockable.replace = (...args) => allow() ? original.replace?.(...args) : undefined
     if (original.go) blockable.go = (...args) => allow() ? original.go?.(...args) : undefined
@@ -152,7 +153,7 @@ function useNavigationWarning(when: boolean, committedRef: MutableRefObject<bool
       if (original.replace && blockable.replace) blockable.replace = original.replace
       if (original.go && blockable.go) blockable.go = original.go
     }
-  }, [committedRef, navigator, when])
+  }, [committedRef, message, navigator, when])
 }
 
 function dimensionStatus(value?: string) {
@@ -169,6 +170,8 @@ export default function ChatPage() {
   const [params] = useSearchParams()
   const requestedAgent = params.get('agent') || ''
   const intent = params.get('intent') || 'create-project'
+  const projectId = params.get('project_id') || undefined
+  const isProjectUpdate = intent === 'update-project-profile'
   const [selectedAgent, setSelectedAgent] = useState(requestedAgent || (location.pathname === '/projects/create' ? 'project-creator' : ''))
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [runState, setRunState] = useState<RunState>('idle')
@@ -180,6 +183,7 @@ export default function ChatPage() {
   const [commitError, setCommitError] = useState<string | null>(null)
   const [committing, setCommitting] = useState(false)
   const [committed, setCommitted] = useState(false)
+  const [sessionProject, setSessionProject] = useState<{ id?: string; name?: string } | null>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [restartNonce, setRestartNonce] = useState(0)
   const idempotencyKeyRef = useRef(crypto.randomUUID())
@@ -204,7 +208,7 @@ export default function ChatPage() {
   const pendingQuestions = questions.filter((question) => !question.answers)
   const dirty = Boolean(sessionId && !committed)
 
-  useNavigationWarning(dirty, committedRef)
+  useNavigationWarning(dirty, committedRef, isProjectUpdate ? '当前项目画像更新尚未完成，离开后将丢失，确定离开吗？' : '当前创作项目创建尚未完成，离开后将丢失，确定离开吗？')
 
   const resetConversation = useCallback(() => {
     runGenerationRef.current += 1
@@ -217,6 +221,7 @@ export default function ChatPage() {
     setMessages([])
     setQuestions([])
     setDraft(null)
+    setSessionProject(null)
     confirmationTokenRef.current = null
     setComposer('')
     setStreamError(null)
@@ -289,16 +294,16 @@ export default function ChatPage() {
         break
       case 'expired':
       case 'session.expired':
-        terminateConversation('expired', '创作会话已过期，请重新开始创建。')
+        terminateConversation('expired', `创作会话已过期，请重新开始${isProjectUpdate ? '更新' : '创建'}。`)
         break
       case 'closed':
       case 'session.closed':
-        if (!committedRef.current) terminateConversation('closed', '创作会话已结束，请重新开始创建。')
+        if (!committedRef.current) terminateConversation('closed', `创作会话已结束，请重新开始${isProjectUpdate ? '更新' : '创建'}。`)
         break
       default:
         break
     }
-  }, [terminateConversation])
+  }, [isProjectUpdate, terminateConversation])
 
   const connectStream = useCallback(async (id: string, generation: number) => {
     streamAbortRef.current?.abort()
@@ -311,38 +316,42 @@ export default function ChatPage() {
         processEvent(event)
       }
       if (!controller.signal.aborted && generation === runGenerationRef.current) {
-        terminateConversation('error', '与创作会话的连接已断开，请重新开始创建。')
+        terminateConversation('error', `与创作会话的连接已断开，请重新开始${isProjectUpdate ? '更新' : '创建'}。`)
       }
     } catch (error) {
       if (controller.signal.aborted || disposedRef.current || generation !== runGenerationRef.current) return
       terminateConversation('error', error instanceof Error ? error.message : '与创作会话连接失败')
     }
-  }, [processEvent, terminateConversation, token])
+  }, [isProjectUpdate, processEvent, terminateConversation, token])
 
   const startSession = useCallback((agent: InteractiveAgent) => {
-    const key = `${agent.id}:${intent}:${restartNonce}`
+    const key = `${agent.id}:${intent}:${projectId ?? ''}:${restartNonce}`
     if (startPromiseRef.current?.key === key) return startPromiseRef.current.promise
     const generation = ++runGenerationRef.current
     disposedRef.current = false
     setRunState('starting')
     setStreamError(null)
-    const promise = api.interactive.createSession(agent.id, intent).then(async (session) => {
+    const promise = (projectId
+      ? api.interactive.createSession(agent.id, intent, projectId)
+      : api.interactive.createSession(agent.id, intent)
+    ).then(async (session) => {
       if (disposedRef.current || generation !== runGenerationRef.current) {
         await api.interactive.close(session.id).catch(() => undefined)
         return
       }
       sessionRef.current = session.id
+      setSessionProject({ id: session.project_id ?? projectId, name: session.project_name })
       setSessionId(session.id)
       setRunState((session.status as RunState) || 'running')
       await connectStream(session.id, generation)
     }).catch((error) => {
       if (disposedRef.current || generation !== runGenerationRef.current) return
-      setStreamError(error instanceof Error ? error.message : '无法启动创作会话')
+      setStreamError(error instanceof Error ? error.message : `无法启动创作${isProjectUpdate ? '更新' : '创建'}会话`)
       setRunState('error')
     })
     startPromiseRef.current = { key, promise }
     return promise
-  }, [connectStream, intent, restartNonce])
+  }, [connectStream, intent, isProjectUpdate, projectId, restartNonce])
 
   useEffect(() => {
     if (!selectedAgent || agentsQuery.isLoading || !activeAgent || sessionId || ['starting', 'error', 'expired', 'closed'].includes(runState)) return
@@ -378,7 +387,7 @@ export default function ChatPage() {
 
   const selectAgent = (agent: InteractiveAgent) => {
     if (agent.id === selectedAgent) return
-    if ((hasInputRef.current || draft) && !window.confirm('切换 Agent 会丢弃当前草稿，确定继续吗？')) return
+    if ((hasInputRef.current || draft) && !window.confirm(`切换 Agent 会丢弃当前${isProjectUpdate ? '更新' : '创建'}草稿，确定继续吗？`)) return
     resetConversation()
     startPromiseRef.current = null
     setSelectedAgent(agent.id)
@@ -425,13 +434,13 @@ export default function ChatPage() {
     setCommitting(true)
     setCommitError(null)
     try {
-      const result = await api.interactive.commit(sessionId, confirmationToken, idempotencyKeyRef.current)
+      const result = await api.interactive.commit(sessionId, confirmationToken, idempotencyKeyRef.current, draft?.memory_append)
       committedRef.current = true
       setCommitted(true)
-      const id = result.project?.id
+      const id = result.project?.id ?? (isProjectUpdate ? projectId : undefined)
       navigate(id ? `/projects?edit=${encodeURIComponent(id)}` : '/projects')
     } catch (error) {
-      setCommitError(error instanceof Error ? error.message : '创作项目创建失败，请重试。')
+      setCommitError(error instanceof Error ? error.message : `创作项目${isProjectUpdate ? '更新' : '创建'}失败，请重试。`)
     } finally {
       setCommitting(false)
     }
@@ -472,6 +481,16 @@ export default function ChatPage() {
         </div>
       </header>
 
+      {isProjectUpdate && (
+        <Alert className="border-primary/25 bg-primary/[0.035]">
+          <SquarePen className="size-4" />
+          <AlertTitle>更新现有项目画像</AlertTitle>
+          <AlertDescription>
+            正在更新 {sessionProject?.name || (projectId ? `项目 ${projectId}` : '当前创作项目')}，确认后会保存画像变更。
+          </AlertDescription>
+        </Alert>
+      )}
+
       {emptyRegistry ? (
         <Card className="mx-auto mt-16 w-full max-w-xl">
           <CardHeader><CardTitle>创作项目创建 Agent 暂不可用</CardTitle><CardDescription>当前没有可用的交互式 Agent，可以继续使用已有的创作项目表单。</CardDescription></CardHeader>
@@ -491,9 +510,9 @@ export default function ChatPage() {
               {messages.length === 0 && runState === 'starting' && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />正在准备对话…</div>}
               {messages.map((message) => <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <MessageSquare className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>)}
               {questions.map((question) => <QuestionCardView key={`${question.callId}:${question.id}`} question={question} disabled={!sessionId || Boolean(question.answers) || runState === 'starting'} onSubmit={(answers) => void submitAnswers(question, answers)} />)}
-              {draft?.ready && <ConfirmCard draft={draft} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />}
-              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>会话需要重新开始</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}<Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始创建</Button></AlertDescription></Alert>}
-              {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>创作项目已创建</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
+              {draft?.ready && <ConfirmCard draft={draft} isProjectUpdate={isProjectUpdate} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />}
+              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>会话需要重新开始</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}<Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button></AlertDescription></Alert>}
+              {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
             </div>
             <div className="border-t border-border p-3 sm:p-4"><div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息"><Send className="size-4" /></Button></div><p className="mt-2 text-center text-[11px] text-muted-foreground">Enter 发送，Shift + Enter 换行</p></div>
           </section>
@@ -517,10 +536,10 @@ function ProgressRail({ draft }: { draft: InteractiveDraft | null }) {
   return <aside className="order-first overflow-x-auto rounded-xl border border-border bg-card p-4 lg:order-last lg:overflow-visible"><div className="flex min-w-max gap-5 lg:min-w-0 lg:flex-col lg:gap-4"><div className="min-w-48 lg:min-w-0"><p className="text-sm font-semibold">创作项目画像</p><p className="mt-1 text-xs text-muted-foreground">六个维度逐步收集</p></div>{DIMENSIONS.map(([key, label]) => { const status = dimensionStatus(draft?.progress?.[key]); return <div key={key} className="min-w-28 border-l border-border pl-3 lg:min-w-0 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-3"><div className="flex items-center justify-between gap-2"><span className="text-sm">{label}</span><span className={`text-xs ${status.className}`}>{status.label}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-muted"><div className={`h-full transition-all ${status.label === '待开始' ? 'w-0' : status.label === '已确认' ? 'w-full bg-emerald-500' : 'w-2/3 bg-primary'}`} /></div></div> })}</div></aside>
 }
 
-function ConfirmCard({ draft, canCommit, committing, error, onCommit, onContinue }: { draft: InteractiveDraft; canCommit: boolean; committing: boolean; error: string | null; onCommit: () => void; onContinue: () => void }) {
+function ConfirmCard({ draft, isProjectUpdate, canCommit, committing, error, onCommit, onContinue }: { draft: InteractiveDraft; isProjectUpdate: boolean; canCommit: boolean; committing: boolean; error: string | null; onCommit: () => void; onContinue: () => void }) {
   const project = draft.project ?? {}
   const dimensions = isRecord(draft.profile?.dimensions) ? draft.profile.dimensions : {}
-  return <Card className="border-emerald-500/30 bg-emerald-500/[0.035]"><CardHeader><CardTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />确认创作项目画像</CardTitle><CardDescription>信息已整理完成，确认后会创建创作项目并保存六维画像。</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 rounded-lg border border-border bg-background/70 p-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">创作项目名称</span><p className="font-medium">{String(project.name ?? draft.name ?? '未命名创作项目')}</p></div><div><span className="text-xs text-muted-foreground">平台</span><p className="font-medium">{String(project.platform ?? '待设定')}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">定位</span><p className="mt-1 leading-5">{String(project.instructions ?? project.description ?? '已收集')}</p></div></div><div><p className="text-xs font-medium text-muted-foreground">六维画像摘要</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{DIMENSIONS.map(([key, label]) => <div key={key} className="rounded-lg border border-border bg-background/60 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm leading-5">{summarizeDimension(dimensions[key])}</p></div>)}</div></div>{(draft.missing_fields?.length || draft.inferred_fields?.length) ? <div className="grid gap-3 sm:grid-cols-2"><div><p className="text-xs font-medium text-muted-foreground">待补充字段</p><p className="mt-1 text-sm leading-5">{draft.missing_fields?.length ? draft.missing_fields.join('、') : '暂无'}</p></div><div><p className="text-xs font-medium text-muted-foreground">推断字段</p><p className="mt-1 text-sm leading-5">{draft.inferred_fields?.length ? draft.inferred_fields.join('、') : '暂无'}</p></div></div> : null}{!canCommit && <p className="text-sm text-muted-foreground">确认凭据尚未就绪，请等待会话继续同步。</p>}{error && <p className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button onClick={onCommit} disabled={committing || !canCommit}>{committing && <Loader2 className="size-4 animate-spin" />}确认创建创作项目</Button><Button variant="outline" onClick={onContinue} disabled={committing}><SquarePen className="size-4" />继续编辑</Button></div></CardContent></Card>
+  return <Card className="border-emerald-500/30 bg-emerald-500/[0.035]"><CardHeader><CardTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />{isProjectUpdate ? '确认更新创作项目画像' : '确认创作项目画像'}</CardTitle><CardDescription>{isProjectUpdate ? '信息已整理完成，确认后会更新现有项目画像并保存变更。' : '信息已整理完成，确认后会创建创作项目并保存六维画像。'}</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 rounded-lg border border-border bg-background/70 p-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">创作项目名称</span><p className="font-medium">{String(project.name ?? draft.name ?? '未命名创作项目')}</p></div><div><span className="text-xs text-muted-foreground">平台</span><p className="font-medium">{String(project.platform ?? '待设定')}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">定位</span><p className="mt-1 leading-5">{String(project.instructions ?? project.description ?? '已收集')}</p></div></div><div><p className="text-xs font-medium text-muted-foreground">六维画像摘要</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{DIMENSIONS.map(([key, label]) => <div key={key} className="rounded-lg border border-border bg-background/60 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm leading-5">{summarizeDimension(dimensions[key])}</p></div>)}</div></div>{(draft.missing_fields?.length || draft.inferred_fields?.length) ? <div className="grid gap-3 sm:grid-cols-2"><div><p className="text-xs font-medium text-muted-foreground">待补充字段</p><p className="mt-1 text-sm leading-5">{draft.missing_fields?.length ? draft.missing_fields.join('、') : '暂无'}</p></div><div><p className="text-xs font-medium text-muted-foreground">推断字段</p><p className="mt-1 text-sm leading-5">{draft.inferred_fields?.length ? draft.inferred_fields.join('、') : '暂无'}</p></div></div> : null}{draft.memory_append && <div className="rounded-lg border border-border bg-background/70 p-3"><p className="text-xs font-medium text-muted-foreground">将追加到项目记忆的内容</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5">{draft.memory_append}</p></div>}{!canCommit && <p className="text-sm text-muted-foreground">确认凭据尚未就绪，请等待会话继续同步。</p>}{error && <p className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button onClick={onCommit} disabled={committing || !canCommit}>{committing && <Loader2 className="size-4 animate-spin" />}确认{isProjectUpdate ? '更新画像' : '创建创作项目'}</Button><Button variant="outline" onClick={onContinue} disabled={committing}><SquarePen className="size-4" />继续编辑</Button></div></CardContent></Card>
 }
 
 function summarizeDimension(value: unknown): string {

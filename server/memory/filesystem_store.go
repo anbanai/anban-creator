@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -23,12 +25,13 @@ const (
 )
 
 var (
-	ErrInvalidProjectID            = errors.New("project ID must be a canonical UUID")
-	ErrProjectMemoryMissing        = errors.New("project memory directory is missing")
-	ErrProjectMemoryQuotaExceeded  = errors.New("project memory quota exceeded")
-	ErrProjectMemoryTooManyEntries = errors.New("project memory contains too many entries")
-	errFileChanged                 = errors.New("project memory file changed while reading")
-	errUnsafePath                  = errors.New("project memory path contains a symbolic link")
+	ErrInvalidProjectID             = errors.New("project ID must be a canonical UUID")
+	ErrProjectMemoryMissing         = errors.New("project memory directory is missing")
+	ErrProjectMemoryQuotaExceeded   = errors.New("project memory quota exceeded")
+	ErrProjectMemoryTooManyEntries  = errors.New("project memory contains too many entries")
+	ErrProjectMemoryVersionConflict = errors.New("project memory projection is older than the current version")
+	errFileChanged                  = errors.New("project memory file changed while reading")
+	errUnsafePath                   = errors.New("project memory path contains a symbolic link")
 )
 
 type Limits struct {
@@ -58,12 +61,164 @@ type FilesystemStore struct {
 	root     string
 	projects string
 	limits   Limits
+	mu       sync.Mutex
+}
+
+// ErrProjectMemoryConflict means the file changed since the caller's snapshot.
+// Callers must re-read the project before attempting another append.
+var ErrProjectMemoryConflict = errors.New("project memory file changed since snapshot")
+
+// AppendMarkdownFileIfUnchanged appends content to one Markdown file only when
+// its current contents exactly match expected. The store lock serializes
+// readers and writers in this process; the expected-content check prevents a
+// stale confirmed session from overwriting a concurrent NAS edit.
+func (s *FilesystemStore) AppendMarkdownFileIfUnchanged(ctx context.Context, projectID, relativePath, expected, content string) error {
+	if strings.TrimSpace(relativePath) == "" {
+		return errUnsafePath
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projectDir, err := s.projectDir(projectID)
+	if err != nil {
+		return err
+	}
+	if err := s.EnsureProject(ctx, projectID); err != nil {
+		return err
+	}
+	unlock, err := lockProject(projectDir)
+	if err != nil {
+		return fmt.Errorf("lock project memory: %w", err)
+	}
+	defer unlock()
+	view, err := s.ReadProject(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	var current string
+	for _, file := range view.Files {
+		if file.Path == relativePath {
+			if file.Truncated {
+				return ErrProjectMemoryConflict
+			}
+			current = file.Content
+			break
+		}
+	}
+	if current != expected {
+		// A process may have crashed after the atomic NAS rename but before the
+		// durable receipt was marked applied. Treat the already-materialized
+		// append as an idempotent retry.
+		if current == expected+content {
+			return nil
+		}
+		return ErrProjectMemoryConflict
+	}
+	return s.writeMarkdownFile(ctx, projectID, relativePath, current+content)
+}
+
+// ReplaceMarkdownFileIfUnchanged atomically replaces one Markdown file only
+// when its current contents exactly match expected. It is the write primitive
+// for user-facing memory editing; callers must provide the content they read
+// so a concurrent editor cannot be silently overwritten.
+func (s *FilesystemStore) ReplaceMarkdownFileIfUnchanged(ctx context.Context, projectID, relativePath, expected, content string) error {
+	if strings.TrimSpace(relativePath) == "" {
+		return errUnsafePath
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projectDir, err := s.projectDir(projectID)
+	if err != nil {
+		return err
+	}
+	if err := s.EnsureProject(ctx, projectID); err != nil {
+		return err
+	}
+	unlock, err := lockProject(projectDir)
+	if err != nil {
+		return fmt.Errorf("lock project memory: %w", err)
+	}
+	defer unlock()
+	current, ok, err := readMarkdownFileInProject(projectDir, relativePath, s.limits.MaxFileBytes)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		current = FileView{}
+	}
+	if current.Truncated {
+		return ErrProjectMemoryConflict
+	}
+	if current.Content != expected {
+		// A retry after a successful atomic rename is idempotent.
+		if current.Content == content {
+			return nil
+		}
+		return ErrProjectMemoryConflict
+	}
+	return s.writeMarkdownFile(ctx, projectID, relativePath, content)
 }
 
 // WriteMarkdownFile atomically replaces one project-scoped Markdown file.
 // Profile and AGENTS.md projections use this method so callers never expose a
 // partially-written document to a subsequent Agent bootstrap.
 func (s *FilesystemStore) WriteMarkdownFile(ctx context.Context, projectID, relativePath, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projectDir, err := s.projectDir(projectID)
+	if err != nil {
+		return err
+	}
+	if err := s.EnsureProject(ctx, projectID); err != nil {
+		return err
+	}
+	unlock, err := lockProject(projectDir)
+	if err != nil {
+		return fmt.Errorf("lock project memory: %w", err)
+	}
+	defer unlock()
+	if err := s.rejectOlderProjection(projectDir, relativePath, content); err != nil {
+		return err
+	}
+	return s.writeMarkdownFile(ctx, projectID, relativePath, content)
+}
+
+func (s *FilesystemStore) rejectOlderProjection(projectDir, relativePath, content string) error {
+	incomingVersion, incomingOK := projectionVersion(content)
+	if !incomingOK {
+		return nil
+	}
+	current, ok, err := readMarkdownFileInProject(projectDir, relativePath, s.limits.MaxFileBytes)
+	if err != nil {
+		return err
+	}
+	if !ok || current.Truncated {
+		return nil
+	}
+	currentVersion, currentOK := projectionVersion(current.Content)
+	if currentOK && incomingVersion < currentVersion {
+		return ErrProjectMemoryVersionConflict
+	}
+	return nil
+}
+
+const projectionVersionPrefix = "<!-- anban-profile-version:"
+
+func projectionVersion(content string) (int64, bool) {
+	lineEnd := strings.IndexByte(content, '\n')
+	line := content
+	if lineEnd >= 0 {
+		line = content[:lineEnd]
+	}
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, projectionVersionPrefix) || !strings.HasSuffix(line, "-->") {
+		return 0, false
+	}
+	value := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, projectionVersionPrefix), "-->"))
+	version, err := strconv.ParseInt(value, 10, 64)
+	return version, err == nil && version >= 0
+}
+
+func (s *FilesystemStore) writeMarkdownFile(ctx context.Context, projectID, relativePath, content string) error {
 	projectDir, err := s.projectDir(projectID)
 	if err != nil {
 		return err
@@ -93,6 +248,9 @@ func (s *FilesystemStore) WriteMarkdownFile(ctx context.Context, projectID, rela
 	if _, err := openProjectDirectoryNoSymlinks(projectDir, parent); err != nil {
 		return err
 	}
+	if err := s.checkQuotaForReplacement(ctx, projectDir, clean, int64(len([]byte(content)))); err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(filepath.Join(projectDir, parent), ".profile-write-*")
 	if err != nil {
 		return fmt.Errorf("create project memory temporary file: %w", err)
@@ -118,7 +276,7 @@ func (s *FilesystemStore) WriteMarkdownFile(ctx context.Context, projectID, rela
 	if err := os.Rename(tmpPath, target); err != nil {
 		return fmt.Errorf("replace project memory file: %w", err)
 	}
-	return s.checkQuota(ctx, projectDir)
+	return nil
 }
 
 func NewFilesystemStore(root string, limits Limits) (*FilesystemStore, error) {
@@ -280,6 +438,8 @@ func (s *FilesystemStore) ReadProject(ctx context.Context, projectID string) (Pr
 }
 
 func (s *FilesystemStore) DeleteProject(ctx context.Context, projectID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projectDir, err := s.projectDir(projectID)
 	if err != nil {
 		return err
@@ -287,6 +447,17 @@ func (s *FilesystemStore) DeleteProject(ctx context.Context, projectID string) e
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := s.requireDirectory(projectDir); err != nil {
+		if errors.Is(err, ErrProjectMemoryMissing) {
+			return nil
+		}
+		return err
+	}
+	unlock, err := lockProject(projectDir)
+	if err != nil {
+		return fmt.Errorf("lock project memory: %w", err)
+	}
+	defer unlock()
 	if err := os.RemoveAll(projectDir); err != nil {
 		return fmt.Errorf("delete project memory directory: %w", err)
 	}
@@ -337,6 +508,50 @@ func (s *FilesystemStore) checkQuota(ctx context.Context, projectDir string) err
 		return ErrProjectMemoryTooManyEntries
 	}
 	return err
+}
+
+func (s *FilesystemStore) checkQuotaForReplacement(ctx context.Context, projectDir, replacement string, replacementSize int64) error {
+	var total int64
+	entries := 0
+	limitReached, err := walkProjectEntries(ctx, projectDir, maxScanEntries, func(rel string, entry fs.DirEntry) (bool, error) {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			return false, nil
+		}
+		entries++
+		if filepath.ToSlash(rel) == filepath.ToSlash(replacement) {
+			return false, nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return false, err
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return false, nil
+	})
+	if err != nil {
+		return err
+	}
+	if limitReached {
+		return ErrProjectMemoryTooManyEntries
+	}
+	if entries >= s.limits.MaxFiles && !fileExistsInProject(projectDir, replacement) {
+		return ErrProjectMemoryTooManyEntries
+	}
+	if total+replacementSize > s.limits.MaxProjectBytes {
+		return ErrProjectMemoryQuotaExceeded
+	}
+	return nil
+}
+
+func fileExistsInProject(projectDir, relative string) bool {
+	file, err := openProjectFileNoSymlinks(projectDir, relative)
+	if err != nil {
+		return false
+	}
+	_ = file.Close()
+	return true
 }
 
 type projectEntryVisitor func(relativePath string, entry fs.DirEntry) (skipDir bool, err error)

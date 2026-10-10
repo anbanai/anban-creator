@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 Studio、Go Server、TypeScript Bridge 和 DSH SDK 之间实现可复用的临时交互 Agent 工作区，并将 Project Creator 作为首个交互 Agent。
+**Goal:** 在 Studio、Go Server、TypeScript Bridge 和 DSH SDK 之间实现可复用的临时交互 Agent 工作区，并将 Project Creator 用于新建项目和对现有项目进行有版本保护的六维画像更新。
 
-**Architecture:** Studio 通过稳定的 REST/SSE 协议与 Server 交互；Server 为每个创建页面启动一个带 lease 的独立 Runtime，并以 opaque runtime token 绑定会话身份；TypeScript Bridge 将 DSH Runtime 的控制协议和原始事件转换为 Server 事件。Runtime 只能 stage 临时草稿，最终项目创建、profile revision 和幂等提交全部由 Server 事务完成。
+**Architecture:** Studio 通过稳定的 REST/SSE 协议与 Server 交互；Server 为每个工作区启动一个带 lease 的独立 Runtime，并以 opaque runtime token 绑定会话身份；TypeScript Bridge 将 DSH Runtime 的控制协议和原始事件转换为 Server 事件。对于已有项目，Server 校验归属后把数据库画像、Server 生成的画像文件投影和有界根 `MEMORY.md` 作为受限 `initialContext` 绑定到 Session；Runtime 不能访问原项目路径。Runtime 只能 stage 临时草稿和受控 memory 变更意图，最终创建或更新、profile revision、NAS 投影和幂等提交由 Server 完成。
 
 **Tech Stack:** Go Fiber v3、GORM、SSE、TypeScript、DSH SDK、React 19、React Router、TanStack Query、Vitest、Go test、Agent Pack catalog generator。
 
@@ -18,6 +18,10 @@
 - 浏览器不得提交任意 profile、插件路径、MCP 配置或用户身份；Server 从能力注册表、鉴权上下文和 Session 推导全部权限。
 - `AskUserQuestion` 只对 manifest 声明 `interaction.user_questions: true` 的 root Agent 开放；子 Agent 和现有托管 Agent 继续禁止。
 - MCP 只能执行原子 capability；Runtime 不得修改正式 profile、项目 memory、活动上下文、`AGENTS.md` 或 `CLAUDE.md`。
+- 已有项目模式绑定 Server 校验的 `project_id` 和快照时画像版本；提交时同一事务执行归属、版本 CAS、画像更新、revision/state 与幂等记录。
+- 现有项目快照只含数据库画像生成的 `AGENTS.md`、六个 `profile/*.md` 和有界根 `MEMORY.md`；不包含任意目录、`.claude/agent-memory` 或其它项目文件。
+- 更新画像成功后 Server 通过 memory NAS 重投影 `AGENTS.md` 和六个画像文件；根 `MEMORY.md` 允许按快照指纹/CAS 受控追加或合并，不能任意替换，冲突和写入失败进入可重试投影流程。画像的 `memory` 维度通过 `profile/memory.md` 跟随确认后的数据库画像更新。
+- 记忆查看和人工编辑统一经过 Server-owned memory NAS：GET 只读受限快照，PUT 编辑必须携带 `expected_content` 并执行原子 CAS。禁止直接从 Studio、Agent 或 Runtime 写 NAS；`AGENTS.md`、`CLAUDE.md`、`profile/*`、`.claude/*` 由各自事实源/运行时边界管理。
 - 修改 `harness/` 后必须运行 `make agent-pack-generate`、`make agent-pack-check`，并同步 Claude/Codex plugin 版本。
 
 ### Task 1: DSH interactive protocol
@@ -71,6 +75,8 @@
 - [x] Add strict question batch validation and pending-answer serialization.
 - [x] Validate six dimensions and draft revisions on the Server; keep profile status `draft`.
 - [x] Implement transaction-backed commit and user/idempotency receipt replay.
+- [x] Add an update intent with server-validated project ownership, frozen profile revision, bounded NAS file context, transactional revision CAS, controlled `MEMORY.md` change intent, and idempotency replay.
+- [x] Project confirmed updates back to `AGENTS.md` and `profile/*.md` through memory NAS; apply root `MEMORY.md` with content-fingerprint/CAS and retryable projection.
 - [x] Add tests for ownership, expiry, answer retry, draft validation, commit idempotency, and failure cleanup.
 
 ### Task 4: MCP and TypeScript Bridge boundary
@@ -102,6 +108,7 @@
 - [x] Add automatic Session creation after Agent selection and remove the “new session” step.
 - [x] Add DSH-style mode selector, message stream, Markdown rendering, question cards, answer locking, draft confirmation, and six-dimension progress.
 - [x] Add mobile horizontal progress, fixed composer, leave/refresh warning, retry state, and form fallback.
+- [x] Add an existing-project entry point, source-project context banner, memory change preview, and update-specific confirmation copy.
 - [x] Preserve messages and local draft on terminal errors; only explicit restart or Agent switch clears the temporary conversation.
 - [x] Filter unavailable registry entries and handle a URL that requests an unavailable Agent.
 - [x] Run `bun run test` and `bun run build`, recording unrelated pre-existing build failures separately.

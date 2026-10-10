@@ -732,6 +732,9 @@ func main() {
 	// Apply authorization policy after selecting the runtime-backed service so
 	// enabling the bridge cannot silently drop admin-only access control.
 	interactiveSvc.SetAdminOnly(cfg.Interactive.AdminOnly)
+	if projectMemoryStore != nil {
+		interactiveSvc.SetProjectMemory(projectMemoryStore)
+	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	var mcpHandler http.Handler

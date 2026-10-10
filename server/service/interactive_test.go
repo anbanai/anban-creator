@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"gorm.io/driver/sqlite"
@@ -42,6 +43,27 @@ type interactiveFailingRuntimeFactory struct{}
 
 func (interactiveFailingRuntimeFactory) Start(context.Context, string, string, string, func(string, any)) (Runtime, error) {
 	return nil, errors.New("bridge failed to start")
+}
+
+type retryInteractiveMemory struct {
+	failWrites bool
+}
+
+func (m *retryInteractiveMemory) ReadProject(context.Context, string) (projectmemory.ProjectView, error) {
+	return projectmemory.ProjectView{}, nil
+}
+
+func (m *retryInteractiveMemory) EnsureProject(context.Context, string) error { return nil }
+
+func (m *retryInteractiveMemory) WriteMarkdownFile(context.Context, string, string, string) error {
+	if m.failWrites {
+		return errors.New("memory projection unavailable")
+	}
+	return nil
+}
+
+func (m *retryInteractiveMemory) AppendMarkdownFileIfUnchanged(context.Context, string, string, string, string) error {
+	return nil
 }
 
 func newInteractiveTestService(sess *InteractiveSession) *InteractiveService {
@@ -210,6 +232,20 @@ func TestInteractiveRuntimeStartFailureIsReplayableOverSSE(t *testing.T) {
 	}
 }
 
+func TestInteractiveSessionStateIncludesFastRuntimeFailure(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.Status = "error"
+	sess.Closed = true
+	svc := newInteractiveTestService(sess)
+	status, err := svc.SessionState(sess.UserID, sess.ID)
+	if err != nil {
+		t.Fatalf("SessionState() error = %v", err)
+	}
+	if status != "error" {
+		t.Fatalf("SessionState() = %q, want error", status)
+	}
+}
+
 func TestInteractiveClosedSessionTombstoneIsCollected(t *testing.T) {
 	sess := newInteractiveTestSession()
 	svc := newInteractiveTestService(sess)
@@ -251,7 +287,7 @@ func TestInteractiveEventsRejectsHistoryGap(t *testing.T) {
 	}
 }
 
-func TestInteractiveEventsRejectsHistoryGapOnFirstConnection(t *testing.T) {
+func TestInteractiveEventsAllowsFreshConnectionAfterHistoryCompaction(t *testing.T) {
 	sess := newInteractiveTestSession()
 	svc := newInteractiveTestService(sess)
 	for i := 0; i < 4; i++ {
@@ -262,8 +298,21 @@ func TestInteractiveEventsRejectsHistoryGapOnFirstConnection(t *testing.T) {
 	sess.events = trimInteractiveEvents(sess.events, svc.maxHistory)
 	sess.mu.Unlock()
 
-	if _, _, _, err := svc.Events(sess.UserID, sess.ID, 0); !errors.Is(err, ErrInteractiveEventGap) {
-		t.Fatalf("Events() error = %v, want ErrInteractiveEventGap", err)
+	history, events, closeFn, err := svc.Events(sess.UserID, sess.ID, 0)
+	if err != nil {
+		t.Fatalf("Events() error = %v, want fresh connection to receive retained history", err)
+	}
+	closeFn()
+	if len(history) != 2 || history[0].ID != 3 || history[1].ID != 4 {
+		t.Fatalf("retained history = %#v, want events 3 and 4", history)
+	}
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("fresh connection channel unexpectedly yielded an event")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fresh connection channel did not close after cleanup")
 	}
 }
 
@@ -423,5 +472,72 @@ func TestInteractiveCommitAcceptsTokenIssuedByReadyDraft(t *testing.T) {
 	}
 	if result.Project == nil || result.Project.Name != "Project Creator test 2" {
 		t.Fatalf("Commit() result = %#v", result)
+	}
+}
+
+func TestInteractiveCommitReplayRetriesFailedMemoryProjection(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "interactive-replay.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Project{}, &model.ProjectProfileRevision{}, &model.ProjectProfileState{}, &model.InteractiveCommitReceipt{}); err != nil {
+		t.Fatal(err)
+	}
+	sess := newInteractiveTestSession()
+	svc := newInteractiveTestService(sess)
+	svc.repo = repository.New(db)
+	memory := &retryInteractiveMemory{failWrites: true}
+	svc.SetProjectMemory(memory)
+	progress := InteractiveProgress{
+		"identity": "collected", "style": "collected", "audience": "collected",
+		"platforms": "collected", "preferences": "collected", "memory": "collected",
+	}
+	if err := svc.StageDraftForSession(sess.ID, InteractiveStageInput{
+		Project: InteractiveProject{Name: "Replay project", Platform: model.PlatformSeednote},
+		Profile: model.NewProjectProfile(), Progress: progress, Ready: true,
+	}); err != nil {
+		t.Fatalf("StageDraftForSession() error = %v", err)
+	}
+	history, _, closeEvents, err := svc.Events(sess.UserID, sess.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeEvents()
+	var token string
+	for _, event := range history {
+		if event.Type == "draft.ready" {
+			if draft, ok := event.Data.(InteractiveDraft); ok {
+				token = draft.ConfirmationToken
+			}
+		}
+	}
+	if token == "" {
+		t.Fatal("ready draft did not issue a confirmation token")
+	}
+	req := InteractiveCommitRequest{ConfirmationToken: token, IdempotencyKey: "interactive-replay"}
+	if _, err := svc.Commit(context.Background(), sess.UserID, sess.ID, req); !errors.Is(err, ErrInteractivePersistence) {
+		t.Fatalf("first Commit() error = %v, want projection persistence error", err)
+	}
+	receipt, err := svc.repo.InteractiveCommitReceipts().FindByUserAndKey(context.Background(), sess.UserID, req.IdempotencyKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.MemoryAppliedAt != nil || receipt.MemoryError == "" {
+		t.Fatalf("failed projection receipt = %+v, want unapplied error marker", receipt)
+	}
+	memory.failWrites = false
+	result, err := svc.Commit(context.Background(), sess.UserID, sess.ID, req)
+	if err != nil {
+		t.Fatalf("replay Commit() error = %v", err)
+	}
+	if result.Project == nil {
+		t.Fatal("replay returned no project")
+	}
+	receipt, err = svc.repo.InteractiveCommitReceipts().FindByUserAndKey(context.Background(), sess.UserID, req.IdempotencyKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.MemoryAppliedAt == nil || receipt.MemoryError != "" {
+		t.Fatalf("replayed receipt = %+v, want applied projection", receipt)
 	}
 }

@@ -309,6 +309,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Patch("/projects/:id/profile/:dimension", svc.ProjectHandler.UpdateProfileDimension)
 		apiV1.Patch("/projects/:id/profile/dimensions/:dimension", svc.ProjectHandler.UpdateProfileDimension)
 		apiV1.Get("/projects/:id/memory", svc.ProjectHandler.Memory)
+		apiV1.Put("/projects/:id/memory", svc.ProjectHandler.UpdateMemory)
 		apiV1.Put("/projects/:id", svc.ProjectHandler.Update)
 		apiV1.Patch("/projects/:id/archive", svc.ProjectHandler.Archive)
 		apiV1.Patch("/projects/:id/restore", svc.ProjectHandler.Restore)

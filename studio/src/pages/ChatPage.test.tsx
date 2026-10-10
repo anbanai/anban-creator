@@ -90,6 +90,15 @@ describe('ChatPage', () => {
     expect(screen.getByRole('button', { name: /Project Creator/ })).toBeInTheDocument()
   })
 
+  it('starts an existing project update session with its project context', async () => {
+    interactiveMocks.createSession.mockResolvedValueOnce({ id: 'session-1', agent_id: agent.id, intent: 'update-project-profile', project_id: 'project-9', project_name: '茶品牌', status: 'running' })
+    renderChat('/chat?agent=project-creator&intent=update-project-profile&project_id=project-9')
+
+    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'update-project-profile', 'project-9'))
+    expect(await screen.findByText('更新现有项目画像')).toBeInTheDocument()
+    expect(screen.getByText(/茶品牌/)).toBeInTheDocument()
+  })
+
   it('disables question controls optimistically and restores the card when answering fails', async () => {
     let rejectAnswer: ((error: Error) => void) | undefined
     interactiveMocks.answer.mockImplementationOnce(() => new Promise((_, reject) => {
@@ -178,6 +187,17 @@ describe('ChatPage', () => {
     expect(screen.getByText(/products: 春茶系列/)).toBeInTheDocument()
     expect(screen.getByText('线下门店地址')).toBeInTheDocument()
     expect(screen.getByText('主要受众为一二线城市白领')).toBeInTheDocument()
+  })
+
+  it('previews memory additions and uses update confirmation copy', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 2, ready: true, confirmation_token: 'secret-token', memory_append: '补充：春茶系列将在四月上线。', project: { name: '茶品牌', platform: 'wechat' } } }) },
+    ], signal))
+    renderChat('/chat?agent=project-creator&intent=update-project-profile&project_id=project-9')
+
+    expect(await screen.findByRole('button', { name: '确认更新画像' })).toBeInTheDocument()
+    expect(screen.getByText('将追加到项目记忆的内容')).toBeInTheDocument()
+    expect(screen.getByText('补充：春茶系列将在四月上线。')).toBeInTheDocument()
   })
 
   it('keeps a replayed ready draft visible while waiting for its confirmation credential', async () => {

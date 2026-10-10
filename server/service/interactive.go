@@ -13,12 +13,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/agentpack"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
@@ -38,6 +40,7 @@ var (
 	ErrInteractiveIdempotency     = errors.New("idempotency key was already used with different content")
 	ErrInteractivePersistence     = errors.New("interactive persistence is unavailable")
 	ErrInteractiveEventGap        = errors.New("interactive session event history is no longer available")
+	ErrProjectMemoryConflict      = projectmemory.ErrProjectMemoryConflict
 )
 
 type InteractiveAgent struct {
@@ -88,6 +91,7 @@ type InteractiveDraft struct {
 	InferredFields    []string             `json:"inferred_fields"`
 	Ready             bool                 `json:"ready"`
 	ConfirmationToken string               `json:"confirmation_token,omitempty"`
+	MemoryAppend      string               `json:"memory_append,omitempty"`
 }
 type InteractiveStageInput struct {
 	Project        InteractiveProject   `json:"project"`
@@ -96,6 +100,7 @@ type InteractiveStageInput struct {
 	Ready          bool                 `json:"ready"`
 	MissingFields  []string             `json:"missing_fields"`
 	InferredFields []string             `json:"inferred_fields"`
+	MemoryAppend   string               `json:"memory_append,omitempty"`
 }
 
 type InteractiveSession struct {
@@ -119,6 +124,10 @@ type InteractiveSession struct {
 	// confirmationTokenHash is server-only state. The raw token is included
 	// only in the draft.ready event sent to the owning Studio client.
 	confirmationTokenHash string
+	ProjectID             string
+	ProfileVersion        int64
+	initialContext        string
+	memoryExpected        string
 }
 type interactiveWatcher struct {
 	ch     chan InteractiveEvent
@@ -130,6 +139,17 @@ type Runtime interface {
 }
 type RuntimeFactory interface {
 	Start(context.Context, string, string, string, func(string, any)) (Runtime, error)
+}
+
+type RuntimeFactoryWithContext interface {
+	StartWithContext(context.Context, string, string, string, string, func(string, any)) (Runtime, error)
+}
+
+type InteractiveMemoryStore interface {
+	ReadProject(context.Context, string) (projectmemory.ProjectView, error)
+	EnsureProject(context.Context, string) error
+	WriteMarkdownFile(context.Context, string, string, string) error
+	AppendMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 }
 type InteractiveService struct {
 	repo         repository.Repository
@@ -144,6 +164,14 @@ type InteractiveService struct {
 	maxSessions  int
 	maxPerUser   int
 	tombstoneTTL time.Duration
+	memory       InteractiveMemoryStore
+	receiptMu    sync.Mutex
+}
+
+func (s *InteractiveService) SetProjectMemory(memory InteractiveMemoryStore) {
+	s.mu.Lock()
+	s.memory = memory
+	s.mu.Unlock()
 }
 
 func NewInteractiveService(repo repository.Repository) *InteractiveService {
@@ -228,7 +256,114 @@ func cloneStage(in InteractiveStageInput) (InteractiveStageInput, error) {
 	return copy, nil
 }
 
-func (s *InteractiveService) CreateSession(_ context.Context, userID, agentID, intent string) (*InteractiveSession, error) {
+const interactiveContextMaxBytes = 256 << 10
+
+func interactiveInitialContext(project *model.Project, profile model.ProjectProfile, view projectmemory.ProjectView) (string, string) {
+	type contextFile struct {
+		Path      string `json:"path"`
+		Content   string `json:"content"`
+		Truncated bool   `json:"truncated,omitempty"`
+	}
+	// The database profile is the authoritative source for rebuildable Agent
+	// projections. Read the NAS only for the continuously maintained root
+	// MEMORY.md, so a stale or incomplete NAS projection cannot hide current
+	// profile facts from the update conversation.
+	files := make([]contextFile, 0, len(model.ProfileDimensions())+2)
+	files = append(files, contextFile{Path: "AGENTS.md", Content: ProfileAgentsMarkdown()})
+	for _, name := range model.ProfileDimensions() {
+		content, err := ProfileDimensionMarkdownAtVersion(name, profileDimension(profile, name), profile.Version)
+		if err != nil {
+			return "", ""
+		}
+		files = append(files, contextFile{Path: "profile/" + name + ".md", Content: content})
+	}
+	memoryExpected := ""
+	for _, file := range view.Files {
+		if file.Path != "MEMORY.md" {
+			continue
+		}
+		content := file.Content
+		if file.Path == "MEMORY.md" && !file.Truncated {
+			memoryExpected = content
+		}
+		truncated := file.Truncated
+		files = append(files, contextFile{Path: file.Path, Content: content, Truncated: truncated})
+	}
+	ctx := map[string]any{
+		"kind": "anban.project_profile_reference", "version": 1,
+		"untrusted_reference_data": true,
+		"project":                  map[string]string{"id": project.ID, "name": project.Name, "platform": project.Platform, "instructions": project.Instructions, "keywords": project.Keywords, "visual_style": project.VisualStyle},
+		"profile_version":          profile.Version, "profile": profile, "files": files,
+	}
+	for {
+		raw, err := json.Marshal(ctx)
+		if err != nil {
+			return "", memoryExpected
+		}
+		if len(raw) <= interactiveContextMaxBytes {
+			return string(raw), memoryExpected
+		}
+		// Keep the context valid UTF-8 while reducing the largest file until
+		// the complete serialized snapshot, including profile metadata, fits
+		// the bridge limit. The limit applies to the wire value, not just file
+		// bodies, so a future profile expansion cannot bypass it.
+		largest := -1
+		largestBytes := 0
+		for index, file := range files {
+			if size := len([]byte(file.Content)); size > largestBytes {
+				largest, largestBytes = index, size
+			}
+		}
+		if largest < 0 || largestBytes == 0 {
+			return "", memoryExpected
+		}
+		keep := largestBytes / 2
+		if excess := len(raw) - interactiveContextMaxBytes; excess > largestBytes-keep {
+			keep = largestBytes - excess
+		}
+		if keep < 0 {
+			keep = 0
+		}
+		bytes := []byte(files[largest].Content)
+		keep = truncateUTF8Boundary(bytes, keep)
+		files[largest].Content = string(bytes[:keep])
+		files[largest].Truncated = true
+	}
+}
+
+func truncateUTF8Boundary(value []byte, limit int) int {
+	if limit <= 0 {
+		return 0
+	}
+	if len(value) <= limit {
+		return len(value)
+	}
+	for limit > 0 && (value[limit]&0xc0) == 0x80 {
+		limit--
+	}
+	return limit
+}
+
+func writeInteractiveProfileProjection(ctx context.Context, memory InteractiveMemoryStore, projectID string, profile model.ProjectProfile) error {
+	if memory == nil {
+		return nil
+	}
+	if err := memory.EnsureProject(ctx, projectID); err != nil {
+		return err
+	}
+	for _, name := range model.ProfileDimensions() {
+		content, err := ProfileDimensionMarkdownAtVersion(name, profileDimension(profile, name), profile.Version)
+		if err != nil {
+			return err
+		}
+		if err := memory.WriteMarkdownFile(ctx, projectID, "profile/"+name+".md", content); err != nil {
+			return err
+		}
+	}
+	return memory.WriteMarkdownFile(ctx, projectID, "AGENTS.md", ProfileAgentsMarkdownAtVersion(profile.Version))
+}
+
+func (s *InteractiveService) CreateSession(ctx context.Context, userID, agentID, intent string, projectIDs ...string) (*InteractiveSession, error) {
 	if !s.Enabled() || strings.TrimSpace(userID) == "" {
 		return nil, ErrInteractiveAgent
 	}
@@ -249,13 +384,47 @@ func (s *InteractiveService) CreateSession(_ context.Context, userID, agentID, i
 			return nil, ErrInteractiveAgent
 		}
 	}
+	projectID := ""
+	if len(projectIDs) > 0 {
+		projectID = strings.TrimSpace(projectIDs[0])
+	}
+	var initialContext, memoryExpected string
+	var profileVersion int64
+	if intent == "update-project-profile" {
+		if projectID == "" || s.repo == nil {
+			return nil, ErrInteractiveDraftInvalid
+		}
+		project, err := s.repo.Projects().FindByID(ctx, projectID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrInteractiveDraftInvalid
+			}
+			return nil, errors.Join(ErrInteractivePersistence, err)
+		}
+		if project.UserID != userID {
+			return nil, ErrInteractiveSessionOwner
+		}
+		profile := projectProfileFor(project)
+		profileVersion = profile.Version
+		var view projectmemory.ProjectView
+		s.mu.RLock()
+		memory := s.memory
+		s.mu.RUnlock()
+		if memory != nil {
+			view, err = memory.ReadProject(ctx, projectID)
+			if err != nil && !errors.Is(err, projectmemory.ErrProjectMemoryMissing) {
+				return nil, errors.Join(ErrInteractivePersistence, err)
+			}
+		}
+		initialContext, memoryExpected = interactiveInitialContext(project, profile, view)
+	}
 	now := time.Now()
 	runtimeToken, err := randomToken()
 	if err != nil {
 		return nil, err
 	}
 	runtimeCtx, cancel := context.WithCancel(context.Background())
-	sess := &InteractiveSession{ID: uuid.NewString(), UserID: userID, AgentID: agentID, Intent: intent, CreatedAt: now, ExpiresAt: now.Add(s.ttl), Status: "starting", watchers: map[*interactiveWatcher]struct{}{}, pendingQuestions: map[string]InteractiveQuestion{}, runtimeTokenHash: confirmationHash(runtimeToken), cancel: cancel}
+	sess := &InteractiveSession{ID: uuid.NewString(), UserID: userID, AgentID: agentID, Intent: intent, ProjectID: projectID, ProfileVersion: profileVersion, initialContext: initialContext, memoryExpected: memoryExpected, CreatedAt: now, ExpiresAt: now.Add(s.ttl), Status: "starting", watchers: map[*interactiveWatcher]struct{}{}, pendingQuestions: map[string]InteractiveQuestion{}, runtimeTokenHash: confirmationHash(runtimeToken), cancel: cancel}
 	s.mu.Lock()
 	s.pruneTombstonesLocked(time.Now())
 	activeTotal, activeUser := 0, 0
@@ -281,7 +450,14 @@ func (s *InteractiveService) CreateSession(_ context.Context, userID, agentID, i
 	return sess, nil
 }
 func (s *InteractiveService) startRuntime(ctx context.Context, sess *InteractiveSession, runtimeToken string) {
-	rt, e := s.factory.Start(ctx, sess.ID, sess.AgentID, runtimeToken, func(k string, d any) { s.runtimeEvent(sess.ID, k, d) })
+	emit := func(k string, d any) { s.runtimeEvent(sess.ID, k, d) }
+	var rt Runtime
+	var e error
+	if factory, ok := s.factory.(RuntimeFactoryWithContext); ok {
+		rt, e = factory.StartWithContext(ctx, sess.ID, sess.AgentID, runtimeToken, sess.initialContext, emit)
+	} else {
+		rt, e = s.factory.Start(ctx, sess.ID, sess.AgentID, runtimeToken, emit)
+	}
 	if e != nil {
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": "interactive runtime failed to start"})
 		s.closeSession(sess.ID, false)
@@ -295,7 +471,7 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	}
 	sess.runtime = rt
 	sess.mu.Unlock()
-	if e = rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID}); e != nil {
+	if e = rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID, "initialContext": sess.initialContext}); e != nil {
 		_ = rt.Close()
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": "interactive runtime failed to initialize"})
 		s.closeSession(sess.ID, false)
@@ -466,6 +642,26 @@ func (s *InteractiveService) SessionStatus(uid, id string) (string, error) {
 	return status, nil
 }
 
+// SessionState returns the current state, including terminal error/committed
+// states, for the create response and other control-plane callers. Unlike
+// SessionStatus it does not reject a closed tombstone, so a runtime that fails
+// before the HTTP response is written is reported accurately.
+func (s *InteractiveService) SessionState(uid, id string) (string, error) {
+	s.mu.RLock()
+	sess := s.sessions[id]
+	s.mu.RUnlock()
+	if sess == nil {
+		return "", ErrInteractiveSessionNotFound
+	}
+	if sess.UserID != uid {
+		return "", ErrInteractiveSessionOwner
+	}
+	sess.mu.Lock()
+	status := sess.Status
+	sess.mu.Unlock()
+	return status, nil
+}
+
 func (s *InteractiveService) emit(sess *InteractiveSession, typ string, data any) {
 	sess.mu.Lock()
 	if sess.Closed {
@@ -527,7 +723,11 @@ func (s *InteractiveService) Events(uid, id string, after uint64) ([]Interactive
 		sess.mu.Unlock()
 		return nil, nil, func() {}, ErrInteractiveSessionClosed
 	}
-	if len(sess.events) > 0 && sess.events[0].ID > 0 && after < sess.events[0].ID-1 {
+	// A fresh connection (after == 0) may legitimately start at a later event
+	// ID when the in-memory history was compacted or a failed session retained
+	// only its terminal event. Only a reconnect with an explicit cursor can
+	// prove that events were lost and must receive a 409 for recovery.
+	if after > 0 && len(sess.events) > 0 && sess.events[0].ID > after+1 {
 		sess.mu.Unlock()
 		return nil, nil, func() {}, ErrInteractiveEventGap
 	}
@@ -869,6 +1069,9 @@ func validateStage(in InteractiveStageInput) error {
 	if len([]rune(in.Project.Instructions)) > 20000 || len([]rune(in.Project.Keywords)) > 10000 || len([]rune(in.Project.VisualStyle)) > 10000 {
 		return ErrInteractiveDraftInvalid
 	}
+	if len([]rune(in.MemoryAppend)) > 64*1024 {
+		return ErrInteractiveDraftInvalid
+	}
 	if err := in.Profile.Validate(); err != nil {
 		return errors.Join(ErrInteractiveDraftInvalid, err)
 	}
@@ -916,6 +1119,7 @@ func (s *InteractiveService) stage(sess *InteractiveSession, in InteractiveStage
 	sess.Draft.Progress = in.Progress
 	sess.Draft.MissingFields = append([]string(nil), in.MissingFields...)
 	sess.Draft.InferredFields = append([]string(nil), in.InferredFields...)
+	sess.Draft.MemoryAppend = in.MemoryAppend
 	sess.Draft.Ready = in.Ready
 	sess.Draft.ConfirmationToken = ""
 	sess.confirmationTokenHash = ""
@@ -943,6 +1147,7 @@ func (s *InteractiveService) stage(sess *InteractiveSession, in InteractiveStage
 type InteractiveCommitRequest struct {
 	ConfirmationToken string `json:"confirmation_token"`
 	IdempotencyKey    string `json:"idempotency_key"`
+	MemoryAppend      string `json:"memory_append,omitempty"`
 }
 type InteractiveCommitResult struct {
 	Project *model.Project       `json:"project"`
@@ -957,14 +1162,22 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 		return InteractiveCommitResult{}, ErrInteractivePersistence
 	}
 	tokenHash := confirmationHash(req.ConfirmationToken)
+	// The confirmation token is generated for one staged draft. The browser
+	// must not be able to alter the staged memory change by sending a second
+	// copy in the commit request, so the request fingerprint is independent of
+	// any legacy client-provided memory_append field.
+	requestHash := confirmationHash(tokenHash)
 	// Durable receipts are checked before the process-local session. This is
 	// what makes an idempotent replay work after a lease expiry or restart.
 	if receipt, err := s.repo.InteractiveCommitReceipts().FindByUserAndKey(ctx, userID, req.IdempotencyKey); err == nil {
-		if receipt.SessionID != id || receipt.ConfirmationHash != tokenHash {
+		if receipt.SessionID != id || receipt.ConfirmationHash != tokenHash || (receipt.RequestHash != "" && receipt.RequestHash != requestHash) {
 			return InteractiveCommitResult{}, ErrInteractiveIdempotency
 		}
 		var replay InteractiveCommitResult
 		if err := json.Unmarshal(receipt.ResultJSON, &replay); err != nil {
+			return InteractiveCommitResult{}, err
+		}
+		if err := s.applyReceipt(ctx, receipt, replay); err != nil {
 			return InteractiveCommitResult{}, err
 		}
 		s.closeSession(id, false)
@@ -999,12 +1212,20 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 	}
 	sess.committing = true
 	draft := sess.Draft
+	projectID := sess.ProjectID
+	profileVersion := sess.ProfileVersion
+	memoryExpected := sess.memoryExpected
+	memoryAppend := draft.MemoryAppend
+	if projectID == "" && memoryAppend != "" {
+		sess.mu.Unlock()
+		return InteractiveCommitResult{}, ErrInteractiveDraftInvalid
+	}
 	sess.mu.Unlock()
 	var result InteractiveCommitResult
 	e = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		receipt, err := tx.InteractiveCommitReceipts().FindByUserAndKeyForUpdate(ctx, userID, req.IdempotencyKey)
 		if err == nil {
-			if receipt.SessionID != id || receipt.ConfirmationHash != tokenHash {
+			if receipt.SessionID != id || receipt.ConfirmationHash != tokenHash || (receipt.RequestHash != "" && receipt.RequestHash != requestHash) {
 				return ErrInteractiveIdempotency
 			}
 			return json.Unmarshal(receipt.ResultJSON, &result)
@@ -1012,29 +1233,67 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		profile := draft.Profile
-		// Project creation records a draft profile. Confirmation is a separate
-		// user action in the profile editor and must not be implied by creation.
-		profile.Status = model.ProfileStatusDraft
-		profile.InitializationStatus = model.ProfileInitializationReady
-		profile.Version = 1
-		if err := profile.Validate(); err != nil {
-			return err
-		}
-		p := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: draft.Project.Platform, Name: draft.Project.Name, Instructions: draft.Project.Instructions, Keywords: draft.Project.Keywords, VisualStyle: draft.Project.VisualStyle, Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(profile)}
-		if err := tx.Projects().Create(ctx, p); err != nil {
-			return err
-		}
-		dims, _ := json.Marshal(profile.Dimensions)
-		if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: p.ID, Revision: 1, SixDimensions: dims}); err != nil {
-			return err
-		}
-		if err := tx.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: p.ID, Status: model.ProfileInitializationReady, Revision: 1}); err != nil {
-			return err
+		var p *model.Project
+		var profile model.ProjectProfile
+		if projectID != "" {
+			p, err = tx.Projects().FindByIDForUpdate(ctx, projectID)
+			if err != nil {
+				return err
+			}
+			if p.UserID != userID {
+				return ErrInteractiveSessionOwner
+			}
+			current := projectProfileFor(p)
+			if current.Version != profileVersion {
+				return ErrProjectProfileVersionConflict
+			}
+			profile = current
+			profile.Dimensions = draft.Profile.Dimensions
+			profile.AnalysisLimits = draft.Profile.AnalysisLimits
+			profile.FollowUpQuestions = draft.Profile.FollowUpQuestions
+			// The interactive confirmation updates the profile facts only. Lifecycle
+			// state is owned by the profile service and must not be promoted or
+			// cleared as a side effect of this conversation.
+			profile.Version = current.Version + 1
+			if err := profile.Validate(); err != nil {
+				return err
+			}
+			p.Profile = datatypes.NewJSONType(profile)
+			if err := tx.Projects().Update(ctx, p); err != nil {
+				return err
+			}
+			dims, _ := json.Marshal(profile.Dimensions)
+			if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: p.ID, Revision: profile.Version, SourceTaskID: profile.AnalysisTaskID, SixDimensions: dims}); err != nil {
+				return err
+			}
+			if err := persistProfileState(ctx, tx, p.ID, profile); err != nil {
+				return err
+			}
+		} else {
+			profile = draft.Profile
+			// Project creation records a draft profile. Confirmation is a separate
+			// user action in the profile editor and must not be implied by creation.
+			profile.Status = model.ProfileStatusDraft
+			profile.InitializationStatus = model.ProfileInitializationReady
+			profile.Version = 1
+			if err := profile.Validate(); err != nil {
+				return err
+			}
+			p = &model.Project{ID: uuid.NewString(), UserID: userID, Platform: draft.Project.Platform, Name: draft.Project.Name, Instructions: draft.Project.Instructions, Keywords: draft.Project.Keywords, VisualStyle: draft.Project.VisualStyle, Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(profile)}
+			if err := tx.Projects().Create(ctx, p); err != nil {
+				return err
+			}
+			dims, _ := json.Marshal(profile.Dimensions)
+			if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: p.ID, Revision: 1, SixDimensions: dims}); err != nil {
+				return err
+			}
+			if err := tx.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: p.ID, Status: model.ProfileInitializationReady, Revision: 1}); err != nil {
+				return err
+			}
 		}
 		result = InteractiveCommitResult{Project: p, Profile: profile}
 		raw, _ := json.Marshal(result)
-		return tx.InteractiveCommitReceipts().Create(ctx, &model.InteractiveCommitReceipt{ID: uuid.NewString(), UserID: userID, IdempotencyKey: req.IdempotencyKey, SessionID: id, ConfirmationHash: tokenHash, ProjectID: p.ID, ResultJSON: raw})
+		return tx.InteractiveCommitReceipts().Create(ctx, &model.InteractiveCommitReceipt{ID: uuid.NewString(), UserID: userID, IdempotencyKey: req.IdempotencyKey, SessionID: id, ConfirmationHash: tokenHash, RequestHash: requestHash, ProjectID: p.ID, MemoryAppend: memoryAppend, MemoryExpected: memoryExpected, ResultJSON: raw})
 	})
 	if e != nil {
 		sess.mu.Lock()
@@ -1044,16 +1303,32 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 		// durable winner before reporting a transient duplicate-key failure.
 		if repository.IsDuplicateKeyError(e) {
 			if receipt, lookupErr := s.repo.InteractiveCommitReceipts().FindByUserAndKey(ctx, userID, req.IdempotencyKey); lookupErr == nil {
-				if receipt.SessionID != id || receipt.ConfirmationHash != tokenHash {
+				if receipt.SessionID != id || receipt.ConfirmationHash != tokenHash || (receipt.RequestHash != "" && receipt.RequestHash != requestHash) {
 					return InteractiveCommitResult{}, ErrInteractiveIdempotency
 				}
 				if jsonErr := json.Unmarshal(receipt.ResultJSON, &result); jsonErr == nil {
+					if applyErr := s.applyReceipt(ctx, receipt, result); applyErr != nil {
+						return InteractiveCommitResult{}, applyErr
+					}
 					s.closeSession(id, false)
 					return result, nil
 				}
 			}
 		}
 		return InteractiveCommitResult{}, e
+	}
+	receipt, receiptErr := s.repo.InteractiveCommitReceipts().FindByUserAndKey(ctx, userID, req.IdempotencyKey)
+	if receiptErr != nil {
+		sess.mu.Lock()
+		sess.committing = false
+		sess.mu.Unlock()
+		return InteractiveCommitResult{}, errors.Join(ErrInteractivePersistence, receiptErr)
+	}
+	if applyErr := s.applyReceipt(ctx, receipt, result); applyErr != nil {
+		sess.mu.Lock()
+		sess.committing = false
+		sess.mu.Unlock()
+		return InteractiveCommitResult{}, applyErr
 	}
 	sess.mu.Lock()
 	sess.committing = false
@@ -1078,6 +1353,82 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 	s.closeWatchers(sess)
 	s.scheduleTombstoneCollection(id, sess)
 	return result, nil
+}
+
+// applyReceipt materializes the durable database result into the Server-owned
+// memory NAS. It is deliberately outside the database transaction: NAS writes
+// are recoverable projections and must never make a committed project roll
+// back. MEMORY.md uses expected-content CAS so a later editor cannot be
+// overwritten by a replay or retry.
+func (s *InteractiveService) applyReceipt(ctx context.Context, receipt *model.InteractiveCommitReceipt, result InteractiveCommitResult) error {
+	if receipt == nil || result.Project == nil {
+		return ErrInteractivePersistence
+	}
+	s.mu.RLock()
+	memory := s.memory
+	s.mu.RUnlock()
+	if memory == nil {
+		return nil
+	}
+	// A durable receipt can be replayed after a later profile revision was
+	// committed. Resolve the projection source from the database before writing
+	// NAS so an old receipt cannot reintroduce an older profile. The database is
+	// the authoritative source; the receipt only carries the original result
+	// and the controlled MEMORY.md append intent.
+	if s.repo == nil {
+		return ErrInteractivePersistence
+	}
+	currentProject, err := s.repo.Projects().FindByID(ctx, result.Project.ID)
+	if err != nil {
+		return s.recordReceiptProjectionError(ctx, receipt, err)
+	}
+	currentProfile := projectProfileFor(currentProject)
+	if currentProfile.Version > result.Profile.Version {
+		result.Profile = currentProfile
+	}
+	s.receiptMu.Lock()
+	defer s.receiptMu.Unlock()
+	if receipt.MemoryAppliedAt != nil {
+		return nil
+	}
+	if err := writeInteractiveProfileProjection(ctx, memory, result.Project.ID, result.Profile); err != nil {
+		return s.recordReceiptProjectionError(ctx, receipt, err)
+	}
+	if strings.TrimSpace(receipt.MemoryAppend) == "" {
+		now := time.Now()
+		receipt.MemoryAppliedAt = &now
+		receipt.MemoryError = ""
+		if err := s.repo.InteractiveCommitReceipts().Update(ctx, receipt); err != nil {
+			return errors.Join(ErrInteractivePersistence, err)
+		}
+		return nil
+	}
+	if err := memory.EnsureProject(ctx, result.Project.ID); err != nil {
+		return s.recordReceiptProjectionError(ctx, receipt, err)
+	}
+	if err := memory.AppendMarkdownFileIfUnchanged(ctx, result.Project.ID, "MEMORY.md", receipt.MemoryExpected, receipt.MemoryAppend); err != nil {
+		return s.recordReceiptProjectionError(ctx, receipt, err)
+	}
+	now := time.Now()
+	receipt.MemoryAppliedAt = &now
+	receipt.MemoryError = ""
+	if err := s.repo.InteractiveCommitReceipts().Update(ctx, receipt); err != nil {
+		return errors.Join(ErrInteractivePersistence, err)
+	}
+	return nil
+}
+
+// recordReceiptProjectionError persists the failure marker used by replay and
+// operational repair. Never discard an error from this update: a missing
+// marker would make a committed project look fully materialized when its NAS
+// projection actually needs retrying.
+func (s *InteractiveService) recordReceiptProjectionError(ctx context.Context, receipt *model.InteractiveCommitReceipt, projectionErr error) error {
+	receipt.MemoryError = projectionErr.Error()
+	updateErr := s.repo.InteractiveCommitReceipts().Update(ctx, receipt)
+	if updateErr != nil {
+		return errors.Join(ErrInteractivePersistence, projectionErr, updateErr)
+	}
+	return errors.Join(ErrInteractivePersistence, projectionErr)
 }
 func (s *InteractiveService) Close(userID, id string) error {
 	sess, e := s.getOwned(userID, id)
@@ -1165,6 +1516,14 @@ type ExecRuntimeFactory struct {
 }
 
 func (f ExecRuntimeFactory) Start(ctx context.Context, sessionID, _ string, runtimeToken string, emit func(string, any)) (Runtime, error) {
+	return f.start(ctx, sessionID, runtimeToken, "", emit)
+}
+
+func (f ExecRuntimeFactory) StartWithContext(ctx context.Context, sessionID, _ string, runtimeToken, initialContext string, emit func(string, any)) (Runtime, error) {
+	return f.start(ctx, sessionID, runtimeToken, initialContext, emit)
+}
+
+func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, initialContext string, emit func(string, any)) (Runtime, error) {
 	if strings.TrimSpace(f.Command) == "" {
 		return nil, ErrInteractiveAgent
 	}
@@ -1181,6 +1540,14 @@ func (f ExecRuntimeFactory) Start(ctx context.Context, sessionID, _ string, runt
 	if err != nil {
 		return nil, fmt.Errorf("create interactive DSH home: %w", err)
 	}
+	initialContextFile := ""
+	if strings.TrimSpace(initialContext) != "" {
+		initialContextFile = filepath.Join(dshHome, "initial-context.json")
+		if err := os.WriteFile(initialContextFile, []byte(initialContext), 0o600); err != nil {
+			_ = os.RemoveAll(dshHome)
+			return nil, fmt.Errorf("write interactive initial context: %w", err)
+		}
+	}
 	cmd := exec.CommandContext(ctx, f.Command, f.Args...)
 	if f.Dir != "" {
 		cmd.Dir = f.Dir
@@ -1191,6 +1558,7 @@ func (f ExecRuntimeFactory) Start(ctx context.Context, sessionID, _ string, runt
 		"ANBAN_INTERACTIVE_RUNTIME_TOKEN="+runtimeToken,
 		"ANBAN_INTERACTIVE_DSH_HOME="+dshHome,
 		"ANBAN_INTERACTIVE_DSH_PATCH="+f.DSHPatch,
+		"ANBAN_INTERACTIVE_INITIAL_CONTEXT_FILE="+initialContextFile,
 		"ANBAN_INTERACTIVE_PROVIDER="+f.Provider,
 		"ANBAN_INTERACTIVE_MODEL="+f.Model,
 		"ANBAN_INTERACTIVE_MCP_URL="+f.MCPURL,

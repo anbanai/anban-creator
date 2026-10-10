@@ -258,7 +258,7 @@ func (s *ProjectService) writeProfileProjection(ctx context.Context, projectID s
 		return fmt.Errorf("ensure project profile memory: %w", err)
 	}
 	for _, name := range model.ProfileDimensions() {
-		content, err := ProfileDimensionMarkdown(name, profileDimension(profile, name))
+		content, err := ProfileDimensionMarkdownAtVersion(name, profileDimension(profile, name), profile.Version)
 		if err != nil {
 			return err
 		}
@@ -266,7 +266,7 @@ func (s *ProjectService) writeProfileProjection(ctx context.Context, projectID s
 			return fmt.Errorf("write profile/%s.md: %w", name, err)
 		}
 	}
-	if err := s.profileMemory.WriteMarkdownFile(ctx, projectID, "AGENTS.md", ProfileAgentsMarkdown()); err != nil {
+	if err := s.profileMemory.WriteMarkdownFile(ctx, projectID, "AGENTS.md", ProfileAgentsMarkdownAtVersion(profile.Version)); err != nil {
 		return fmt.Errorf("write AGENTS.md: %w", err)
 	}
 	return nil

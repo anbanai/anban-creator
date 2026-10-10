@@ -30,6 +30,7 @@ func registerInteractiveTools(server *mcp.Server) {
 					"type": "array", "maxItems": 64,
 					"items": map[string]any{"type": "string", "maxLength": 300},
 				},
+				"memory_append": map[string]any{"type": "string", "maxLength": 65536},
 			},
 			"required": []any{"project", "profile", "progress", "ready", "missing_fields", "inferred_fields"},
 		},
@@ -69,6 +70,11 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 	}
 	if err := decodeInteractiveArgument(args, "inferred_fields", &input.InferredFields); err != nil {
 		return errorResult(fmt.Sprintf("inferred_fields is invalid: %v", err)), nil
+	}
+	if raw, exists := args["memory_append"]; exists && raw != nil {
+		if err := decodeInteractiveArgument(args, "memory_append", &input.MemoryAppend); err != nil {
+			return errorResult(fmt.Sprintf("memory_append is invalid: %v", err)), nil
+		}
 	}
 
 	if err := svcs.InteractiveSvc.StageDraftForSession(identity.SessionID, input); err != nil {

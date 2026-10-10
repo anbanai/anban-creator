@@ -22,8 +22,9 @@ func NewInteractiveHandler(svc *service.InteractiveService) *InteractiveHandler 
 func (h *InteractiveHandler) Agents(c fiber.Ctx) error { return Success(c, h.svc.Agents()) }
 
 type createInteractiveRequest struct {
-	AgentID string `json:"agent_id"`
-	Intent  string `json:"intent"`
+	AgentID   string `json:"agent_id"`
+	Intent    string `json:"intent"`
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 func (h *InteractiveHandler) Create(c fiber.Ctx) error {
@@ -35,11 +36,15 @@ func (h *InteractiveHandler) Create(c fiber.Ctx) error {
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	sess, err := h.svc.CreateSession(c.Context(), uid, req.AgentID, req.Intent)
+	sess, err := h.svc.CreateSession(c.Context(), uid, req.AgentID, req.Intent, req.ProjectID)
 	if err != nil {
 		return interactiveError(c, err)
 	}
-	return Success(c, fiber.Map{"id": sess.ID, "status": "starting", "agent_id": sess.AgentID, "intent": sess.Intent, "expires_at": sess.ExpiresAt})
+	status := "starting"
+	if current, stateErr := h.svc.SessionState(uid, sess.ID); stateErr == nil && current != "" {
+		status = current
+	}
+	return Success(c, fiber.Map{"id": sess.ID, "status": status, "agent_id": sess.AgentID, "intent": sess.Intent, "expires_at": sess.ExpiresAt})
 }
 func (h *InteractiveHandler) Events(c fiber.Ctx) error {
 	uid := GetUserID(c)
@@ -203,6 +208,8 @@ func interactiveError(c fiber.Ctx, err error) error {
 	case errors.Is(err, service.ErrInteractiveSessionClosed):
 		return Error(c, 410, err.Error())
 	case errors.Is(err, service.ErrInteractiveEventGap):
+		return Error(c, 409, err.Error())
+	case errors.Is(err, service.ErrProjectProfileVersionConflict), errors.Is(err, service.ErrProjectMemoryConflict):
 		return Error(c, 409, err.Error())
 	case errors.Is(err, service.ErrInteractiveAgent):
 		return Error(c, 503, err.Error())

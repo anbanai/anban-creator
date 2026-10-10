@@ -12,6 +12,9 @@ export interface InteractiveAgent {
 export interface InteractiveSession {
   id: string
   agent_id: string
+  intent?: string
+  project_id?: string
+  project_name?: string
   status: string
   expires_at?: string
 }
@@ -41,6 +44,7 @@ export interface InteractiveDraft {
   ready?: boolean
   name?: string
   fields?: Record<string, unknown>
+  memory_append?: string
 }
 
 export interface InteractiveCommitResult {
@@ -50,16 +54,21 @@ export interface InteractiveCommitResult {
 
 export const interactiveApi = {
   agents: () => unwrap<InteractiveAgent[]>(http.get('/interactive/agents')),
-  createSession: (agentId: string, intent: string) =>
-    unwrap<InteractiveSession>(http.post('/interactive/sessions', { agent_id: agentId, intent })),
+  createSession: (agentId: string, intent: string, projectId?: string) =>
+    unwrap<InteractiveSession>(http.post('/interactive/sessions', {
+      agent_id: agentId,
+      intent,
+      ...(projectId ? { project_id: projectId } : {}),
+    })),
   message: (sessionId: string, text: string) =>
     unwrap<unknown>(http.post(`/interactive/sessions/${sessionId}/messages`, { text })),
   answer: (sessionId: string, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>) =>
     unwrap<unknown>(http.post(`/interactive/sessions/${sessionId}/questions/${encodeURIComponent(callId)}/answers`, { answers })),
-  commit: (sessionId: string, confirmationToken: string, idempotencyKey: string) =>
+  commit: (sessionId: string, confirmationToken: string, idempotencyKey: string, memoryAppend?: string) =>
     unwrap<InteractiveCommitResult>(http.post(`/interactive/sessions/${sessionId}/commit`, {
       confirmation_token: confirmationToken,
       idempotency_key: idempotencyKey,
+      ...(memoryAppend ? { memory_append: memoryAppend } : {}),
     })),
   close: (sessionId: string) => http.delete(`/interactive/sessions/${sessionId}`),
 }

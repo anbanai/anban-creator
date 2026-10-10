@@ -9,6 +9,7 @@ import (
 
 type InteractiveCommitReceiptRepository interface {
 	Create(ctx context.Context, receipt *model.InteractiveCommitReceipt) error
+	Update(ctx context.Context, receipt *model.InteractiveCommitReceipt) error
 	FindByUserAndKey(ctx context.Context, userID, key string) (*model.InteractiveCommitReceipt, error)
 	FindByUserAndKeyForUpdate(ctx context.Context, userID, key string) (*model.InteractiveCommitReceipt, error)
 }
@@ -20,6 +21,9 @@ func newInteractiveCommitReceiptRepository(db *gorm.DB) InteractiveCommitReceipt
 }
 func (r *interactiveCommitReceiptRepository) Create(ctx context.Context, v *model.InteractiveCommitReceipt) error {
 	return r.db.WithContext(ctx).Create(v).Error
+}
+func (r *interactiveCommitReceiptRepository) Update(ctx context.Context, v *model.InteractiveCommitReceipt) error {
+	return r.db.WithContext(ctx).Save(v).Error
 }
 func (r *interactiveCommitReceiptRepository) FindByUserAndKey(ctx context.Context, userID, key string) (*model.InteractiveCommitReceipt, error) {
 	var v model.InteractiveCommitReceipt

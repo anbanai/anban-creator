@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Brain, FileText, ImageOff, Loader2, RefreshCw, X } from 'lucide-react'
+import { Brain, FileText, ImageOff, Loader2, Pencil, RefreshCw, Save, X } from 'lucide-react'
 
 import { projectsApi } from '@/lib/api/projects'
 import { Button } from '@/components/ui/button'
@@ -37,6 +37,10 @@ function fileDirectory(path: string) {
 
 export function ProjectMemoryDialog({ projectId, projectName, project, open, onOpenChange }: ProjectMemoryDialogProps) {
   const [selectedPath, setSelectedPath] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [draftContent, setDraftContent] = useState('')
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const readingPaneRef = useRef<HTMLElement>(null)
   const query = useQuery({
     queryKey: ['project-memory', projectId],
@@ -56,8 +60,30 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
   const selected = files.find((file) => file.path === selectedPath) ?? files[0]
 
   useEffect(() => {
+    setEditing(false)
+    setDraftContent(selected?.content ?? '')
+    setSaveError(null)
+  }, [selected?.path, selected?.content])
+
+  useEffect(() => {
     if (readingPaneRef.current) readingPaneRef.current.scrollTop = 0
   }, [selected?.path, open])
+
+  const canEdit = Boolean(selected && selected.path !== 'MEMORY.md' && !selected.path.startsWith('profile/') && selected.path !== 'AGENTS.md' && selected.path !== 'CLAUDE.md' && !selected.path.startsWith('.claude/'))
+  const save = async () => {
+    if (!selected || !canEdit) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await projectsApi.updateMemory(projectId, { path: selected.path, expected_content: selected.content, content: draftContent })
+      setEditing(false)
+      await query.refetch()
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : '保存失败，请刷新后重试')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -68,12 +94,12 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
         <DialogHeader className="shrink-0 gap-1 border-b bg-background px-5 py-4 pr-24 sm:px-6 sm:pr-24">
           <div className="flex min-w-0 items-center gap-2">
             <Brain className="size-4 shrink-0 text-primary" />
-            <DialogTitle className="truncate text-lg">项目记忆</DialogTitle>
+            <DialogTitle className="truncate text-lg">创作项目记忆</DialogTitle>
           </div>
           <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             {project ? <ProjectIdentity project={project} compact /> : <span className="break-words font-medium text-foreground/80">{projectName}</span>}
             <span aria-hidden="true">·</span>
-            <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的项目上下文'}</span>
+            <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的创作项目上下文'}</span>
           </DialogDescription>
           <Button
             variant="outline"
@@ -85,7 +111,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
           >
             <RefreshCw className={query.isFetching ? 'animate-spin' : ''} />
           </Button>
-          <DialogClose render={<Button variant="ghost" size="icon-sm" className="absolute right-3 top-3" aria-label="关闭项目记忆" />}>
+          <DialogClose render={<Button variant="ghost" size="icon-sm" className="absolute right-3 top-3" aria-label="关闭创作项目记忆" />}>
             <X />
           </DialogClose>
         </DialogHeader>
@@ -94,14 +120,14 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
           <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground"><Loader2 className="mr-2 size-4 animate-spin" />正在读取记忆</div>
         ) : query.isError ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="text-sm font-medium">无法读取项目记忆</p>
+            <p className="text-sm font-medium">无法读取创作项目记忆</p>
             <Button variant="outline" size="sm" onClick={() => void query.refetch()}><RefreshCw />重试</Button>
           </div>
         ) : query.data?.status === 'empty' || files.length === 0 ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
             <Brain className="size-8" />
-            <p className="text-sm font-medium text-foreground">还没有项目记忆</p>
-            <p className="max-w-sm text-xs">完成一次创作后，项目会在这里积累可复用的上下文。</p>
+            <p className="text-sm font-medium text-foreground">还没有创作项目记忆</p>
+            <p className="max-w-sm text-xs">完成一次创作后，创作项目会在这里积累可复用的上下文。</p>
           </div>
         ) : (
           <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] md:grid-rows-1">
@@ -146,11 +172,16 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
                     <h2 className="break-all text-base font-semibold leading-6 text-foreground">{selected?.path}</h2>
                     {selected?.modified_at && <p className="mt-1 text-xs text-muted-foreground">修改于 {formatUpdatedAt(selected.modified_at)}</p>}
                   </div>
-                  <span className="shrink-0 rounded-full bg-background px-2.5 py-1 text-xs tabular-nums text-muted-foreground shadow-sm">{formatBytes(selected?.size_bytes ?? 0)}</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-full bg-background px-2.5 py-1 text-xs tabular-nums text-muted-foreground shadow-sm">{formatBytes(selected?.size_bytes ?? 0)}</span>
+                    {canEdit && !editing && <Button variant="outline" size="sm" onClick={() => { setDraftContent(selected?.content ?? ''); setEditing(true) }}><Pencil />编辑</Button>}
+                    {canEdit && editing && <Button size="sm" disabled={saving} onClick={() => void save()}>{saving ? <Loader2 className="animate-spin" /> : <Save />}保存</Button>}
+                  </div>
                 </div>
+                {saveError && <p role="alert" className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{saveError}</p>}
                 {query.data?.partial && <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"><span className="font-medium">内容已按安全限制截断</span><span className="ml-1">仅展示可读取部分。</span></p>}
                 {selected?.truncated && <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"><span className="font-medium">此文件已截断</span><span className="ml-1">仅展示可读取部分。</span></p>}
-                <article className="prose prose-sm max-w-3xl break-words leading-7 dark:prose-invert prose-headings:scroll-mt-6 prose-headings:font-semibold prose-a:break-all prose-code:break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-table:block prose-table:overflow-x-auto">
+                {editing ? <textarea aria-label="编辑记忆文件" value={draftContent} onChange={(event) => setDraftContent(event.target.value)} className="min-h-[50vh] w-full resize-y rounded-md border bg-background p-4 font-mono text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring" /> : <article className="prose prose-sm max-w-3xl break-words leading-7 dark:prose-invert prose-headings:scroll-mt-6 prose-headings:font-semibold prose-a:break-all prose-code:break-words prose-pre:max-w-full prose-pre:overflow-x-auto prose-table:block prose-table:overflow-x-auto">
                   <Markdown
                     remarkPlugins={[remarkGfm]}
                     skipHtml
@@ -160,7 +191,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
                   >
                     {selected?.content ?? ''}
                   </Markdown>
-                </article>
+                </article>}
               </div>
             </section>
           </div>

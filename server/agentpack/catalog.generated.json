@@ -932,7 +932,8 @@
           "stage_project_creator_draft"
         ],
         "intents": [
-          "create-project"
+          "create-project",
+          "update-project-profile"
         ]
       },
       "bindings": {},
@@ -955,7 +956,8 @@
             "intent": {
               "type": "string",
               "enum": [
-                "create-project"
+                "create-project",
+                "update-project-profile"
               ]
             },
             "initial_context": {
@@ -1042,6 +1044,10 @@
               "items": {
                 "type": "string"
               }
+            },
+            "memory_append": {
+              "type": "string",
+              "maxLength": 65536
             }
           }
         }
@@ -1049,7 +1055,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "817523fe77c78fd2df562fe3572e00576324df2c86ed65fe646dca8c4033ae26"
+      "digest": "494674cb527eeabb388cfb2af939b607121e5af5f4775fa346e107e73d18fb12"
     },
     {
       "id": "seednote",
