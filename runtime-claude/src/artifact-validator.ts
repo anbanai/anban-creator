@@ -16,7 +16,8 @@ export async function validateRequiredArtifact(workspace: string, artifactPath: 
 }
 
 export async function validateFinalArtifacts(pack: AgentPack, workspace: string): Promise<ArtifactValidationResult> {
-  return validateArtifacts(pack.artifacts.filter((artifact) => artifact.required).map((artifact) => artifact.path), workspace);
+  const artifacts = pack.artifacts ?? [];
+  return validateArtifacts(artifacts.filter((artifact) => artifact.required).map((artifact) => artifact.path), workspace);
 }
 
 async function validateArtifacts(required: string[], workspace: string): Promise<ArtifactValidationResult> {

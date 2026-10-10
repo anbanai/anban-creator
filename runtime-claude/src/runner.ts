@@ -307,7 +307,7 @@ export function buildQueryOptions(
   const cwd = data.runtime_adapter === "openmontage" ? `${workspace}/openmontage` : workspace;
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.trim() || "/anbanai";
   const pack = data.task_type === "hypit" ? { ...data.resolved_agent_pack, artifacts: [
-    ...data.resolved_agent_pack.artifacts.filter(a => !["output/project.json", "output/project.zip", "output/quality-report.json"].includes(a.path)),
+    ...(data.resolved_agent_pack.artifacts ?? []).filter(a => !["output/project.json", "output/project.zip", "output/quality-report.json"].includes(a.path)),
     { role: "semantic_report", path: "output/semantic-report.json", required: true },
   ] } : data.resolved_agent_pack;
   const diagnostic: ProgressDiagnostic = (message) => {

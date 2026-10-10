@@ -184,6 +184,110 @@ func TestFilesystemStoreWritesProjectMarkdownAtomically(t *testing.T) {
 	}
 }
 
+func TestFilesystemStoreAppendsMarkdownWithContentCASAndIdempotentRetry(t *testing.T) {
+	root := t.TempDir()
+	limits := testLimits()
+	limits.MaxFileBytes = 128
+	store, err := NewFilesystemStore(root, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := uuid.NewString()
+	if err := store.EnsureProject(context.Background(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteMarkdownFile(context.Background(), projectID, "MEMORY.md", "before\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendMarkdownFileIfUnchanged(context.Background(), projectID, "MEMORY.md", "stale\n", "new\n"); !errors.Is(err, ErrProjectMemoryConflict) {
+		t.Fatalf("stale append error = %v, want ErrProjectMemoryConflict", err)
+	}
+	if err := store.AppendMarkdownFileIfUnchanged(context.Background(), projectID, "MEMORY.md", "before\n", "new\n"); err != nil {
+		t.Fatalf("append error = %v", err)
+	}
+	if err := store.AppendMarkdownFileIfUnchanged(context.Background(), projectID, "MEMORY.md", "before\n", "new\n"); err != nil {
+		t.Fatalf("idempotent retry error = %v", err)
+	}
+	view, err := store.ReadProject(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Files) != 1 || view.Files[0].Content != "before\nnew\n" {
+		t.Fatalf("memory after append = %#v", view.Files)
+	}
+}
+
+func TestFilesystemStoreReplacesMarkdownWithContentCASAndIdempotentRetry(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewFilesystemStore(root, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := uuid.NewString()
+	if err := store.WriteMarkdownFile(context.Background(), projectID, "MEMORY.md", "before\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceMarkdownFileIfUnchanged(context.Background(), projectID, "MEMORY.md", "stale\n", "next\n"); !errors.Is(err, ErrProjectMemoryConflict) {
+		t.Fatalf("stale replace error = %v, want ErrProjectMemoryConflict", err)
+	}
+	if err := store.ReplaceMarkdownFileIfUnchanged(context.Background(), projectID, "MEMORY.md", "before\n", "next\n"); err != nil {
+		t.Fatalf("replace error = %v", err)
+	}
+	if err := store.ReplaceMarkdownFileIfUnchanged(context.Background(), projectID, "MEMORY.md", "before\n", "next\n"); err != nil {
+		t.Fatalf("idempotent retry = %v", err)
+	}
+	view, err := store.ReadProject(context.Background(), projectID)
+	if err != nil || len(view.Files) != 1 || view.Files[0].Content != "next\n" {
+		t.Fatalf("replaced memory = %#v, err=%v", view.Files, err)
+	}
+}
+
+func TestFilesystemStoreRejectsOlderProfileProjection(t *testing.T) {
+	limits := testLimits()
+	limits.MaxProjectBytes, limits.MaxFileBytes, limits.MaxPreviewBytes = 512, 256, 512
+	store, err := NewFilesystemStore(filepath.Join(t.TempDir(), "memory"), limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := uuid.NewString()
+	newer := "<!-- anban-profile-version: 2 -->\n# identity\n"
+	older := "<!-- anban-profile-version: 1 -->\n# identity\n"
+	if err := store.WriteMarkdownFile(context.Background(), projectID, "profile/identity.md", newer); err != nil {
+		t.Fatalf("write newer projection: %v", err)
+	}
+	if err := store.WriteMarkdownFile(context.Background(), projectID, "profile/identity.md", older); !errors.Is(err, ErrProjectMemoryVersionConflict) {
+		t.Fatalf("older projection error = %v, want version conflict", err)
+	}
+	view, err := store.ReadProject(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Files) != 1 || view.Files[0].Content != newer {
+		t.Fatalf("projection after stale retry = %#v, want newer content", view.Files)
+	}
+}
+
+func TestFilesystemStoreRejectsAppendAgainstTruncatedSnapshot(t *testing.T) {
+	root := t.TempDir()
+	limits := testLimits()
+	limits.MaxFileBytes = 128
+	limits.MaxPreviewBytes = 4
+	store, err := NewFilesystemStore(root, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := uuid.NewString()
+	if err := store.EnsureProject(context.Background(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteMarkdownFile(context.Background(), projectID, "MEMORY.md", "long-memory\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendMarkdownFileIfUnchanged(context.Background(), projectID, "MEMORY.md", "long-memory\n", "next\n"); !errors.Is(err, ErrProjectMemoryConflict) {
+		t.Fatalf("truncated snapshot error = %v, want ErrProjectMemoryConflict", err)
+	}
+}
+
 func TestFilesystemStoreReturnsEmptyAndDeletesOnlyRequestedProject(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewFilesystemStore(root, testLimits())

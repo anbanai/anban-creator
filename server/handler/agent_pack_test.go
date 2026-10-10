@@ -39,7 +39,7 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.Code != 0 || len(envelope.Data.Packs) != 10 {
+	if envelope.Code != 0 || len(envelope.Data.Packs) != 11 {
 		t.Fatalf("catalog response = %#v", envelope)
 	}
 	if envelope.Data.Packs[0].ID != "ecommerce" {
@@ -64,5 +64,27 @@ func TestAgentPackHandlerListsEmbeddedCatalog(t *testing.T) {
 		if !found {
 			t.Fatalf("channel Agent %q not found with a single matching channel", id)
 		}
+	}
+	var interactive struct {
+		ID       string
+		Kind     string
+		Surfaces []string
+		Channel  string
+		Bindings struct {
+			TaskKinds []string
+		}
+	}
+	for _, pack := range envelope.Data.Packs {
+		if pack.ID == "project-creator" {
+			interactive.ID = pack.ID
+			interactive.Kind = pack.Kind
+			interactive.Surfaces = pack.Surfaces
+			interactive.Channel = pack.Channel
+			interactive.Bindings.TaskKinds = pack.Bindings.TaskKinds
+			break
+		}
+	}
+	if interactive.ID == "" || interactive.Kind != "managed" || !slices.Equal(interactive.Surfaces, []string{"plugin"}) || interactive.Channel != "" || len(interactive.Bindings.TaskKinds) != 0 {
+		t.Fatalf("interactive Project Creator Pack has an invalid routing contract: %#v", interactive)
 	}
 }

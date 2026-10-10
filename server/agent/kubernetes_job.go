@@ -32,7 +32,6 @@ const (
 	kubernetesTokenAudience                    = "anban-server"
 	kubernetesObjectConfigHashLabel            = "anban.ai/config-hash"
 	kubernetesCatalogDigestLabel               = "anban.ai/agent-pack-catalog-digest"
-	kubernetesCatalogDigestAnnotation           = "anban.ai/agent-pack-catalog-digest"
 )
 
 type kubernetesJobConfig struct {
@@ -185,10 +184,7 @@ func buildKubernetesJob(cfg kubernetesJobConfig, execution *model.TaskExecution,
 	if strings.TrimSpace(cfg.ImagePullSecret) != "" {
 		job.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: cfg.ImagePullSecret}}
 	}
-	job.Annotations = map[string]string{
-		kubernetesObjectConfigHashLabel:  kubernetesObjectHash(job.Spec),
-		kubernetesCatalogDigestAnnotation: agentpack.CatalogDigest(),
-	}
+	job.Annotations = map[string]string{kubernetesObjectConfigHashLabel: kubernetesObjectHash(job.Spec)}
 	return job
 }
 
@@ -289,7 +285,7 @@ func kubernetesExecutionLabels(execution *model.TaskExecution, task *model.Task)
 		"app.kubernetes.io/name":      kubernetesAgentAppName,
 		"app.kubernetes.io/component": "execution",
 		kubernetesExecutionIDLabel:    kubernetesLabelValue(executionID(execution)),
-		kubernetesCatalogDigestLabel:  agentpack.CatalogDigest()[:16],
+		kubernetesCatalogDigestLabel:  agentpack.CatalogDigest(),
 	}
 	if task != nil {
 		labels[kubernetesTaskIDLabel] = kubernetesLabelValue(task.ID)

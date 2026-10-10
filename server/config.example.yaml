@@ -22,20 +22,6 @@ trends:
   ttl: 10m
   timeout: 8s
 
-search:
-  enabled: ${ANBAN_SEARCH_ENABLED:-false}
-  provider: "${ANBAN_SEARCH_PROVIDER:-custom}"
-  custom:
-    endpoint: "${ANBAN_DOUBAO_CUSTOM_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/web_search}"
-    api_key: "${ANBAN_DOUBAO_CUSTOM_SEARCH_API_KEY:-}"
-    timeout: 30s
-    max_web_results: 10
-  global:
-    endpoint: "${ANBAN_DOUBAO_GLOBAL_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/global_search}"
-    api_key: "${ANBAN_DOUBAO_GLOBAL_SEARCH_API_KEY:-}"
-    timeout: 30s
-    max_web_results: 10
-
 jwt:
   secret_key: "${ANBAN_JWT_SECRET_KEY}"
   access_expiry: "24h"
@@ -66,6 +52,34 @@ mcp:
   api_key: "${ANBAN_MCP_API_KEY}"
   tool_timeouts:
     generate_image: 10m
+
+search:
+  enabled: ${ANBAN_SEARCH_ENABLED:-false}
+  provider: "${ANBAN_SEARCH_PROVIDER:-custom}"
+  custom:
+    endpoint: "${ANBAN_DOUBAO_CUSTOM_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/web_search}"
+    api_key: "${ANBAN_DOUBAO_CUSTOM_SEARCH_API_KEY:-}"
+    timeout: 30s
+    max_web_results: 10
+  global:
+    endpoint: "${ANBAN_DOUBAO_GLOBAL_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/global_search}"
+    api_key: "${ANBAN_DOUBAO_GLOBAL_SEARCH_API_KEY:-}"
+    timeout: 30s
+    max_web_results: 10
+
+# Optional interactive Project Creator runtime. Sessions are process-local and
+# are discarded when the runtime exits or its lease expires.
+interactive:
+  enabled: false
+  admin_only: false
+  bridge_command: "node"
+  bridge_args: ["dist/interactive-bridge.js"]
+  bridge_dir: "${ANBAN_INTERACTIVE_BRIDGE_DIR:-./runtime-dsh}"
+  dsh_patch: "${ANBAN_INTERACTIVE_DSH_PATCH:-./harness/dsh/project-creator.patch.yml}"
+  provider: "deepseek-official"
+  provider_api_key_env: "DEEPSEEK_API_KEY"
+  model: "deepseek-v4-flash"
+  mcp_url: "${ANBAN_INTERACTIVE_MCP_URL:-https://creator.anbanai.com/mcp}"
 
 model_providers:
   moonshot:
@@ -361,8 +375,8 @@ claude:
   agent_server_url: "${ANBAN_CLAUDE_AGENT_SERVER_URL:-https://creator-api-svc:8443}"
   # 托管 Agent 执行器类型：docker 用于单机容器；kubernetes 用于生产队列。
   executor: "${ANBAN_AGENT_EXECUTOR}"
-  # Server 与所有 Agent runtime 必须来自同一份生成 Catalog。
-  agent_pack_catalog_digest: "${ANBAN_AGENT_PACK_CATALOG_DIGEST}"
+  # Must equal the SHA-256 of the exact generated Agent Pack Catalog used by the release.
+  agent_pack_catalog_digest: "${ANBAN_AGENT_PACK_CATALOG_DIGEST:-}"
   # 失败运行时保留多久供排查（秒），之后由 reconciler 清理。
   runtime_diagnostic_retention_seconds: 600
   # 每个 Agent 使用独立的 canonical runtime 镜像。

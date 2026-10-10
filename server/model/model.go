@@ -12,6 +12,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&Project{},
 		&ProjectProfileState{},
 		&ProjectProfileRevision{},
+		&InteractiveCommitReceipt{},
 		&ProjectChannelConfig{},
 		&Plan{},
 		&PlanEntry{},

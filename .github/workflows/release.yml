@@ -223,7 +223,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -320,14 +319,16 @@ jobs:
           }
           NODE
 
-      - name: Set up Agent runtime Node
+      - name: Set up runtime Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: agent-ts/package-lock.json
+          cache-dependency-path: |
+            runtime-claude/package-lock.json
+            runtime-dsh/package-lock.json
 
-      - name: Build server binaries and Agent package
+      - name: Build server binaries and runtime packages
         run: |
           mkdir -p bin
 
@@ -337,14 +338,23 @@ jobs:
           GOOS=darwin  GOARCH=arm64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-darwin-arm64 .
           GOOS=windows GOARCH=amd64 go -C server build -ldflags="-s -w" -o ../bin/anban-creator-server-windows-amd64.exe .
 
-          cd agent-ts
+          cd runtime-claude
           npm ci
           npm run typecheck
           npm run test
           npm run build
           cd ..
-          tar -czf bin/anban-agent-runtime-${{ steps.version.outputs.VERSION }}.tar.gz \
-            -C agent-ts package.json package-lock.json dist
+          tar -czf bin/anban-runtime-claude-${{ steps.version.outputs.VERSION }}.tar.gz \
+            -C runtime-claude package.json package-lock.json dist
+
+          cd runtime-dsh
+          npm ci
+          npm run typecheck
+          npm run test
+          npm run build
+          cd ..
+          tar -czf bin/anban-runtime-dsh-${{ steps.version.outputs.VERSION }}.tar.gz \
+            -C runtime-dsh package.json package-lock.json dist
 
           chmod +x bin/anban-creator-server-linux-* bin/anban-creator-server-darwin-* 2>/dev/null || true
           echo "${{ steps.version.outputs.RELEASE_TAG }}" > bin/version.txt
@@ -357,129 +367,6 @@ jobs:
           runtime_digest=$(sha256sum harness/agent-pack-catalog.json | awk '{print $1}')
           test "$server_digest" = "$runtime_digest"
           printf '%s  %s\n' "$server_digest" "server/agentpack/catalog.generated.json" > bin/agent-pack-catalog.sha256
-
-      - name: Build and publish immutable runtime images
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ steps.version.outputs.RELEASE_TAG }}
-          HYPIT_SOURCE_REPO: https://github.com/hypit-ai/hypit.git
-          HYPIT_SOURCE_REF: ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1
-          OPENMONTAGE_SOURCE_REPO: https://github.com/calesthio/OpenMontage.git
-          OPENMONTAGE_SOURCE_REF: 9327439db69021ab4b0e2776729bf3b58fdb5a87
-          WHITEBOARD_ANIMATION_SOURCE_REPO: https://github.com/geeklee/srt-whiteboard-animation.git
-          WHITEBOARD_ANIMATION_SOURCE_REF: 696a7243c0e6ffb6827676e539c2ca5ebae2bf6b
-        run: |
-          set -euo pipefail
-          catalog_digest=$(sha256sum server/agentpack/catalog.generated.json | awk '{print $1}')
-          image_prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-
-          image_specs=(
-            "server|deploy/docker/Dockerfile.server|SERVER_IMAGE"
-            "wechat-article|deploy/docker/Dockerfile.agent-wechat-article|AGENT_IMAGE_WECHAT_ARTICLE"
-            "wechat-picture|deploy/docker/Dockerfile.agent-wechat-picture|AGENT_IMAGE_WECHAT_PICTURE"
-            "seednote|deploy/docker/Dockerfile.agent-seednote|AGENT_IMAGE_SEEDNOTE"
-            "montage|deploy/docker/Dockerfile.agent-montage|AGENT_IMAGE_MONTAGE"
-            "moments|deploy/docker/Dockerfile.agent-moments|AGENT_IMAGE_MOMENTS"
-            "ecommerce|deploy/docker/Dockerfile.agent-ecommerce|AGENT_IMAGE_ECOMMERCE"
-            "profile-analysis|deploy/docker/Dockerfile.agent-profile-analysis|AGENT_IMAGE_PROFILE_ANALYSIS"
-            "feedback-analysis|deploy/docker/Dockerfile.agent-feedback-analysis|AGENT_IMAGE_FEEDBACK_ANALYSIS"
-            "whiteboard-animation|deploy/docker/Dockerfile.agent-whiteboard-animation|AGENT_IMAGE_WHITEBOARD_ANIMATION"
-            "hypit|deploy/docker/Dockerfile.agent-hypit|AGENT_IMAGE_HYPIT"
-          )
-          : > "$RUNNER_TEMP/agent-runtime-images.env"
-          for spec in "${image_specs[@]}"; do
-            IFS='|' read -r profile dockerfile output_name <<<"$spec"
-            if [[ "$profile" == server ]]; then
-              image_name=anban-creator-server
-            else
-              image_name="creator-agent-$profile"
-            fi
-            tag="$image_prefix/$image_name:$RELEASE_TAG"
-            build_args=(
-              --build-arg "ANBAN_AGENT_PACK_CATALOG_DIGEST=$catalog_digest"
-            )
-            case "$profile" in
-              montage)
-                build_args+=(
-                  --build-arg "OPENMONTAGE_REPO=$OPENMONTAGE_SOURCE_REPO"
-                  --build-arg "OPENMONTAGE_REF=$OPENMONTAGE_SOURCE_REF"
-                )
-                ;;
-              whiteboard-animation)
-                build_args+=(
-                  --build-arg "WHITEBOARD_ANIMATION_REPO=$WHITEBOARD_ANIMATION_SOURCE_REPO"
-                  --build-arg "WHITEBOARD_ANIMATION_REF=$WHITEBOARD_ANIMATION_SOURCE_REF"
-                )
-                ;;
-              hypit)
-                build_args+=(
-                  --build-arg "HYPIT_REPO=$HYPIT_SOURCE_REPO"
-                  --build-arg "HYPIT_REF=$HYPIT_SOURCE_REF"
-                )
-                ;;
-            esac
-            docker buildx build \
-              --file "$dockerfile" \
-              "${build_args[@]}" \
-              --tag "$tag" \
-              --provenance=false \
-              --sbom=false \
-              --push .
-            digest=$(docker buildx imagetools inspect "$tag" | awk '/^Digest:/ {print $2; exit}')
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            immutable_ref="$image_prefix/$image_name@$digest"
-            docker pull "$immutable_ref"
-            label=$(docker image inspect --format '{{index .Config.Labels "org.anban.agent.pack.catalog-digest"}}' "$immutable_ref")
-            test "$label" = "$catalog_digest"
-            printf '%s=%s\n' "$output_name" "$immutable_ref" >> "$RUNNER_TEMP/agent-runtime-images.env"
-          done
-          cat "$RUNNER_TEMP/agent-runtime-images.env" >> "$GITHUB_ENV"
-
-      - name: Create immutable Agent runtime release manifest
-        run: |
-          set -euo pipefail
-          mkdir -p release
-          scripts/agent-runtime-release.sh --output release/agent-runtime-manifest.json
-
-      - name: Render ACK Server Deployment from release manifest
-        env:
-          ACK_NAMESPACE: ${{ vars.ACK_NAMESPACE || 'anbanai-prod' }}
-          ACK_IMAGE_PULL_SECRET: ${{ vars.ACK_IMAGE_PULL_SECRET }}
-          ACK_MICRO_SERVICE_NAME: ${{ vars.ACK_MICRO_SERVICE_NAME || 'creator-api' }}
-          ACK_CONFIGMAP_NAME: ${{ vars.ACK_CONFIGMAP_NAME || 'creator-api-config' }}
-          ACK_LOG_STORE: ${{ vars.ACK_LOG_STORE || 'creator-server' }}
-          ACK_REPLICAS: ${{ vars.ACK_REPLICAS || '2' }}
-          ACK_MIN_REPLICAS: ${{ vars.ACK_MIN_REPLICAS || '2' }}
-          ACK_MAX_REPLICAS: ${{ vars.ACK_MAX_REPLICAS || '4' }}
-          ACK_REQUESTS_CPU: ${{ vars.ACK_REQUESTS_CPU || '1' }}
-          ACK_REQUESTS_MEMORY: ${{ vars.ACK_REQUESTS_MEMORY || '2Gi' }}
-          ACK_LIMITS_CPU: ${{ vars.ACK_LIMITS_CPU || '2' }}
-          ACK_LIMITS_MEMORY: ${{ vars.ACK_LIMITS_MEMORY || '4Gi' }}
-          ACK_VERSION_SWITCH: ${{ steps.version.outputs.RELEASE_TAG }}
-        run: |
-          set -euo pipefail
-          : "${ACK_IMAGE_PULL_SECRET:?Configure vars.ACK_IMAGE_PULL_SECRET with a Kubernetes pull secret authorized for ghcr.io}"
-          mkdir -p release/ack
-          export namespace="$ACK_NAMESPACE"
-          export imagePullSecret="$ACK_IMAGE_PULL_SECRET"
-          export micro_service_name="$ACK_MICRO_SERVICE_NAME"
-          export configmap_name="$ACK_CONFIGMAP_NAME"
-          export log_store="$ACK_LOG_STORE"
-          export replicas_count="$ACK_REPLICAS"
-          export min_replica="$ACK_MIN_REPLICAS"
-          export max_replica="$ACK_MAX_REPLICAS"
-          export requests_cpu="$ACK_REQUESTS_CPU"
-          export requests_memory="$ACK_REQUESTS_MEMORY"
-          export limits_cpu="$ACK_LIMITS_CPU"
-          export limits_memory="$ACK_LIMITS_MEMORY"
-          export version_switch="$ACK_VERSION_SWITCH"
-          export image_repo="$SERVER_IMAGE"
-          scripts/render-ack-server-deployment.sh \
-            --manifest release/agent-runtime-manifest.json \
-            --output "release/ack/server-Deployment-${ACK_VERSION_SWITCH}.yaml"
-          cp release/agent-runtime-manifest.json bin/agent-runtime-manifest.json
-          cp "release/ack/server-Deployment-${ACK_VERSION_SWITCH}.yaml" "bin/ack-server-Deployment-${ACK_VERSION_SWITCH}.yaml"
 
       - name: Restore release Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

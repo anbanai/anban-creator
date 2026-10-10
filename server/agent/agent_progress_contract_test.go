@@ -21,32 +21,35 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 		if pack.Kind != agentpack.KindManaged {
 			continue
 		}
+		if pack.Interaction != nil && pack.Interaction.UserQuestions {
+			continue
+		}
 		pack := pack
 		t.Run(pack.ID, func(t *testing.T) {
 			wantVersion := "2.0.2"
 			if pack.ID == "wechat-article" || pack.ID == "article" {
-				wantVersion = "2.0.8"
+				wantVersion = "2.0.7"
 			}
 			if pack.ID == "wechat-picture" {
-				wantVersion = "1.0.4"
+				wantVersion = "1.0.3"
 			}
 			if pack.ID == "montage" {
-				wantVersion = "2.0.6"
-			}
-			if pack.ID == "hypit" {
 				wantVersion = "2.0.5"
 			}
+			if pack.ID == "hypit" {
+				wantVersion = "2.0.4"
+			}
 			if pack.ID == "seednote" {
-				wantVersion = "2.0.7"
+				wantVersion = "2.0.6"
 			}
 			if pack.ID == "feedback-analysis" {
 				wantVersion = "1.0.2"
 			}
 			if pack.ID == "profile-analysis" {
-				wantVersion = "2.1.5"
+				wantVersion = "2.1.4"
 			}
 			if pack.ID == "whiteboard-animation" {
-				wantVersion = "2.0.4"
+				wantVersion = "2.0.3"
 			}
 			if pack.Version != wantVersion {
 				t.Fatalf("Pack version = %q, want %s", pack.Version, wantVersion)

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -42,6 +42,7 @@ type ProjectHandler struct {
 	imageCapabilities map[string]config.ImageGenerationRouteConfig
 	projectMemory     interface {
 		ReadProject(context.Context, string) (projectmemory.ProjectView, error)
+		ReplaceMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 	}
 	tasks             *service.TaskService
 	billingCatalog    *service.BillingCatalogService
@@ -73,6 +74,7 @@ func (h *ProjectHandler) SetReferenceAssetService(svc *service.ReferenceAssetSer
 
 func (h *ProjectHandler) SetProjectMemoryStore(store interface {
 	ReadProject(context.Context, string) (projectmemory.ProjectView, error)
+	ReplaceMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 }) {
 	h.projectMemory = store
 }
@@ -121,19 +123,16 @@ func (h *ProjectHandler) populateProjectAgentIDs(ctx context.Context, projects [
 	}
 	projectIDs := make([]string, 0, len(projects))
 	for _, project := range projects {
-		if project != nil && project.AgentIDs == nil {
+		if project != nil {
 			projectIDs = append(projectIDs, project.ID)
 		}
-	}
-	if len(projectIDs) == 0 {
-		return nil
 	}
 	agentIDs, err := h.service.ListAgentIDsByProjectIDs(ctx, projectIDs)
 	if err != nil {
 		return err
 	}
 	for _, project := range projects {
-		if project == nil || project.AgentIDs != nil {
+		if project == nil {
 			continue
 		}
 		derived := agentIDs[project.ID]
@@ -272,10 +271,6 @@ func (h *ProjectHandler) ensureSeednoteReady(c fiber.Ctx) (bool, error) {
 type projectRequest struct {
 	Platform                      string                           `json:"platform"`
 	Name                          string                           `json:"name"`
-	AgentIDs                      []string                         `json:"agent_ids"`
-	AgentIDsSet                   bool                             `json:"-"`
-	ProfileSetup                  *projectProfileSetupRequest      `json:"profile_setup"`
-	ProfileSetupSet               bool                             `json:"-"`
 	ProfileURL                    string                           `json:"profile_url"`
 	AvatarURL                     string                           `json:"avatar_url"`
 	Positioning                   string                           `json:"positioning"`
@@ -303,32 +298,6 @@ type projectRequest struct {
 	WechatAppID             string  `json:"wechat_app_id"`
 	WechatSecret            string  `json:"wechat_secret"`
 	LegacyWechatPublishMode *string `json:"wechat_publish_mode"`
-}
-
-type projectProfileSetupRequest struct {
-	model.ProjectProfileSetup
-	Analyze *bool `json:"analyze,omitempty"`
-}
-
-func (req *projectRequest) validateProfileSetup(body []byte) error {
-	req.AgentIDsSet = hasJSONField(body, "agent_ids")
-	if req.AgentIDsSet {
-		if req.AgentIDs == nil {
-			req.AgentIDs = []string{}
-		}
-		if err := model.ValidateProjectAgentIDs(req.AgentIDs); err != nil {
-			return err
-		}
-	}
-	req.ProfileSetupSet = hasJSONField(body, "profile_setup")
-	if req.ProfileSetupSet {
-		if req.ProfileSetup == nil {
-			req.ProfileSetup = &projectProfileSetupRequest{ProjectProfileSetup: model.NewProjectProfileSetup()}
-		}
-		req.ProfileSetup.Normalize()
-		return req.ProfileSetup.Validate()
-	}
-	return nil
 }
 
 type projectConfigResponse struct {
@@ -414,9 +383,6 @@ func (req *projectRequest) toProject() *model.Project {
 	p := &model.Project{
 		Platform:                      req.Platform,
 		Name:                          req.Name,
-		AgentIDs:                      req.AgentIDs,
-		AgentIDsSet:                   req.AgentIDsSet,
-		ProfileSetupSet:               req.ProfileSetupSet,
 		ProfileURL:                    req.ProfileURL,
 		AvatarURL:                     req.AvatarURL,
 		Keywords:                      req.Keywords,
@@ -434,12 +400,6 @@ func (req *projectRequest) toProject() *model.Project {
 		MaxConcurrentTasks:            req.MaxConcurrentTasks,
 		Instructions:                  instructions,
 		InstructionsSet:               instructionsSet,
-	}
-	if req.ProfileSetup != nil {
-		setup := req.ProfileSetup.ProjectProfileSetup
-		p.ProfileSetup = &setup
-		p.ProfileAnalysisEnabled = req.ProfileSetup.Analyze
-		p.ProfileURL = setup.PrimaryProfileURL(req.Platform)
 	}
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
@@ -591,9 +551,6 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	if err := req.validateProfileSetup(c.Body()); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
-	}
 	if req.LegacyWechatPublishMode != nil {
 		return Error(c, fiber.StatusBadRequest, "wechat_publish_mode is no longer supported; publishing is capability-driven")
 	}
@@ -667,15 +624,13 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) || errors.Is(err, service.ErrProjectProfileSetup) {
+		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())
 	}
-	if err := h.populateProjectAgentIDs(c.Context(), []*model.Project{created}); err != nil {
-		return Error(c, fiber.StatusInternalServerError, "failed to derive project Agent IDs")
-	}
+	created.AgentIDs = append([]string(nil), defaultProjectAgentIDs(created.Platform)...)
 	if ch.Platform == model.PlatformWechat && (strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != "") {
 		if _, configErr := h.service.UpsertChannelConfig(c.Context(), userID, ch.ID, model.ChannelArticle, req.wechatChannelConfig()); configErr != nil {
 			return h.respondProjectConfigError(c, configErr)
@@ -705,6 +660,7 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 		}
 	}
 	profileInitialization := h.ensureProfileInitialization(c.Context(), userID, created)
+
 	return Success(c, fiber.Map{
 		"project":                projectAPIResponse(created),
 		"recommended_templates":  recommended,
@@ -713,8 +669,8 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 }
 
 func (h *ProjectHandler) ensureProfileInitialization(ctx context.Context, userID string, project *model.Project) map[string]any {
-	result := map[string]any{"status": model.ProfileInitializationNotStarted}
-	if h.tasks == nil || project == nil || (project.ProfileAnalysisEnabled != nil && !*project.ProfileAnalysisEnabled) || !profileInitializationSupported(project.Platform) {
+	result := map[string]any{"status": "not_started"}
+	if h.tasks == nil || project == nil || !profileInitializationSupported(project.Platform) {
 		return result
 	}
 	profile, err := h.service.GetProfile(ctx, userID, project.ID)
@@ -730,8 +686,9 @@ func (h *ProjectHandler) ensureProfileInitialization(ctx context.Context, userID
 	tasks, err := h.tasks.CreateManual(ctx, service.CreateManualParams{
 		UserID: userID, ProjectID: project.ID, ExecutionProfile: "effective",
 		AgentID: model.AgentIDProfileAnalysis, Channel: model.ChannelProfileAnalysis, TaskKind: model.TaskKindProfileAnalysis,
-		Prompt: project.ProfileURL, AgentInput: profileAgentInput(project, nil, nil), Quantity: 1,
-		ProfileAnalysisExpectedVersion: &expectedVersion,
+		Prompt:     project.ProfileURL,
+		AgentInput: profileAgentInput(project, map[string]any{}, nil),
+		Quantity:   1, ProfileAnalysisExpectedVersion: &expectedVersion,
 	})
 	if err != nil || len(tasks) == 0 {
 		message := "profile initialization task was not created"
@@ -750,8 +707,7 @@ func (h *ProjectHandler) ensureProfileInitialization(ctx context.Context, userID
 
 func profileInitializationSupported(platform string) bool {
 	switch strings.TrimSpace(platform) {
-	case model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments,
-		model.PlatformMontage, model.PlatformHypit, model.PlatformWhiteboardAnimation:
+	case model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments:
 		return true
 	default:
 		return false
@@ -896,6 +852,72 @@ func (h *ProjectHandler) Memory(c fiber.Ctx) error {
 	return c.Send(body)
 }
 
+type projectMemoryUpdateRequest struct {
+	Path            string  `json:"path"`
+	ExpectedContent *string `json:"expected_content"`
+	Content         string  `json:"content"`
+}
+
+func protectedProjectMemoryPath(value string) bool {
+	clean := path.Clean(strings.ReplaceAll(strings.TrimSpace(value), "\\", "/"))
+	return clean == "AGENTS.md" || clean == "CLAUDE.md" || clean == "profile" || strings.HasPrefix(clean, "profile/") || clean == ".claude" || strings.HasPrefix(clean, ".claude/")
+}
+
+// UpdateMemory handles PUT /projects/:id/memory. Memory edits are Server-owned
+// NAS writes with content CAS. Generated profile projections and private Agent
+// memory are intentionally excluded; they have their own authoritative owners.
+func (h *ProjectHandler) UpdateMemory(c fiber.Ctx) error {
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	projectID := strings.TrimSpace(c.Params("id"))
+	if projectID == "" {
+		return Error(c, fiber.StatusBadRequest, "project id is required")
+	}
+	if _, _, err := h.service.Get(c.Context(), userID, projectID); err != nil {
+		if errors.Is(err, service.ErrProjectNotFound) {
+			return Error(c, fiber.StatusNotFound, "project not found")
+		}
+		if errors.Is(err, service.ErrProjectOwnedByUser) {
+			return Forbidden(c, "you do not have access to this project")
+		}
+		return Error(c, fiber.StatusInternalServerError, "failed to verify project ownership")
+	}
+	if h.projectMemory == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "project memory is unavailable")
+	}
+	var req projectMemoryUpdateRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid project memory request")
+	}
+	relativePath := path.Clean(strings.ReplaceAll(strings.TrimSpace(req.Path), "\\", "/"))
+	if relativePath == "." || relativePath == "" || strings.HasPrefix(relativePath, "../") || relativePath == ".." || strings.HasPrefix(relativePath, "/") || !strings.EqualFold(path.Ext(relativePath), ".md") {
+		return Error(c, fiber.StatusBadRequest, "project memory path must be a relative Markdown file")
+	}
+	if protectedProjectMemoryPath(relativePath) {
+		return Forbidden(c, "this project memory file is managed by the Server")
+	}
+	if req.ExpectedContent == nil {
+		return Error(c, fiber.StatusBadRequest, "expected_content is required")
+	}
+	if err := h.projectMemory.ReplaceMarkdownFileIfUnchanged(c.Context(), projectID, relativePath, *req.ExpectedContent, req.Content); err != nil {
+		if errors.Is(err, projectmemory.ErrProjectMemoryConflict) {
+			return Error(c, fiber.StatusConflict, "project memory changed; refresh and retry")
+		}
+		if errors.Is(err, projectmemory.ErrProjectMemoryQuotaExceeded) || errors.Is(err, projectmemory.ErrProjectMemoryTooManyEntries) {
+			return Error(c, fiber.StatusRequestEntityTooLarge, "project memory quota exceeded")
+		}
+		if errors.Is(err, projectmemory.ErrProjectMemoryMissing) {
+			return Error(c, fiber.StatusNotFound, "project memory is unavailable")
+		}
+		h.logger.Error().Err(err).Str("project_id", projectID).Str("path", relativePath).Msg("write project memory failed")
+		return Error(c, fiber.StatusServiceUnavailable, "project memory is unavailable")
+	}
+	return h.Memory(c)
+}
+
 type profileUpdateRequest struct {
 	Version int64                `json:"version"`
 	Profile model.ProjectProfile `json:"profile"`
@@ -987,11 +1009,9 @@ type profileAnalysisInput struct {
 
 func normalizeProfileAnalysisInput(req profileAnalysisInput) (profileAnalysisInput, error) {
 	req.ExecutionProfile = firstNonEmpty(req.ExecutionProfile, "effective")
-	answers, err := normalizeProfileAnalysisAnswers(req.Answers)
-	if err != nil {
-		return profileAnalysisInput{}, err
+	if req.Answers == nil {
+		req.Answers = map[string]any{}
 	}
-	req.Answers = answers
 	if req.Samples == nil {
 		req.Samples = []string{}
 	}
@@ -1004,151 +1024,6 @@ func normalizeProfileAnalysisInput(req profileAnalysisInput) (profileAnalysisInp
 		}
 	}
 	return req, nil
-}
-
-const (
-	profileAnswerMaxBytes    = 5000
-	profileAnswerMaxURL      = 2048
-	profileAnswerMaxAccounts = 7
-)
-
-var profilePlatformIDs = map[string]struct{}{
-	"xiaohongshu": {}, "douyin": {}, "bilibili": {}, "video_account": {},
-	"wechat_official_account": {}, "weibo": {}, "zhihu": {},
-}
-
-func validateProfileHomepage(value string) error {
-	if len([]byte(value)) > profileAnswerMaxURL {
-		return fmt.Errorf("profile homepage is too large")
-	}
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	parsed, err := url.ParseRequestURI(value)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return fmt.Errorf("profile homepage must be an absolute HTTP(S) URL")
-	}
-	return nil
-}
-
-func normalizeProfileAnalysisAnswers(answers map[string]any) (map[string]any, error) {
-	if answers == nil {
-		answers = map[string]any{}
-	}
-	sections := map[string][]string{
-		"basic":      {"project_name", "account_status"},
-		"intent":     {"goals", "direction", "differentiation"},
-		"content":    {"preferences", "formats", "tone", "audience"},
-		"boundaries": {"exclusions", "collaboration", "compliance"},
-	}
-	allowed := map[string]struct{}{"platform_accounts": {}}
-	for section := range sections {
-		allowed[section] = struct{}{}
-	}
-	for key := range answers {
-		if _, ok := allowed[key]; !ok {
-			return nil, fmt.Errorf("unexpected profile answer section %q", key)
-		}
-	}
-	normalized := make(map[string]any, len(allowed))
-	for section, fields := range sections {
-		values, err := profileAnswerSection(answers[section], section, fields)
-		if err != nil {
-			return nil, err
-		}
-		normalized[section] = values
-	}
-	accounts, err := profilePlatformAccounts(answers["platform_accounts"])
-	if err != nil {
-		return nil, err
-	}
-	normalized["platform_accounts"] = accounts
-	return normalized, nil
-}
-
-func profileAnswerSection(value any, name string, fields []string) (map[string]any, error) {
-	values := map[string]any{}
-	if value != nil {
-		var ok bool
-		values, ok = value.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("profile answers.%s must be an object", name)
-		}
-	}
-	allowed := make(map[string]struct{}, len(fields))
-	for _, field := range fields {
-		allowed[field] = struct{}{}
-	}
-	for field := range values {
-		if _, ok := allowed[field]; !ok {
-			return nil, fmt.Errorf("unexpected profile answer field %s.%s", name, field)
-		}
-	}
-	normalized := make(map[string]any, len(fields))
-	for _, field := range fields {
-		value, exists := values[field]
-		if !exists || value == nil {
-			normalized[field] = ""
-			continue
-		}
-		text, ok := value.(string)
-		if !ok {
-			return nil, fmt.Errorf("profile answers.%s.%s must be a string", name, field)
-		}
-		maxBytes := profileAnswerMaxBytes
-		if field == "project_name" || field == "account_status" || field == "account_name" || field == "platform" {
-			maxBytes = 200
-		}
-		if field == "profile_url" {
-			if err := validateProfileHomepage(text); err != nil {
-				return nil, fmt.Errorf("profile answers.%s.%s: %w", name, field, err)
-			}
-			maxBytes = profileAnswerMaxURL
-		}
-		if len([]byte(text)) > maxBytes {
-			return nil, fmt.Errorf("profile answers.%s.%s is too large", name, field)
-		}
-		if name == "basic" && field == "account_status" && text != "" && text != "new" && text != "existing" {
-			return nil, fmt.Errorf("profile answers.basic.account_status is unsupported")
-		}
-		normalized[field] = text
-	}
-	return normalized, nil
-}
-
-func profilePlatformAccounts(value any) ([]any, error) {
-	if value == nil {
-		return []any{}, nil
-	}
-	rows, ok := value.([]any)
-	if !ok {
-		return nil, fmt.Errorf("profile answers.platform_accounts must be an array")
-	}
-	if len(rows) > profileAnswerMaxAccounts {
-		return nil, fmt.Errorf("profile answers.platform_accounts may contain at most %d accounts", profileAnswerMaxAccounts)
-	}
-	accounts := make([]any, 0, len(rows))
-	seenPlatforms := make(map[string]struct{}, len(rows))
-	for index, row := range rows {
-		fields, ok := row.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("profile answers.platform_accounts[%d] must be an object", index)
-		}
-		account, err := profileAnswerSection(fields, fmt.Sprintf("platform_accounts[%d]", index), []string{"platform", "account_name", "profile_url"})
-		if err != nil {
-			return nil, err
-		}
-		platform := strings.TrimSpace(account["platform"].(string))
-		if _, ok := profilePlatformIDs[platform]; !ok {
-			return nil, fmt.Errorf("profile answers.platform_accounts[%d].platform is unsupported", index)
-		}
-		if _, duplicate := seenPlatforms[platform]; duplicate {
-			return nil, fmt.Errorf("profile answers.platform_accounts contains duplicate platform %q", platform)
-		}
-		seenPlatforms[platform] = struct{}{}
-		accounts = append(accounts, account)
-	}
-	return accounts, nil
 }
 
 func profileAnalysisRequestFingerprint(project *model.Project, profile model.ProjectProfile, req profileAnalysisInput) (string, string, error) {
@@ -1262,9 +1137,6 @@ func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
 	if err != nil {
 		return h.respondProfileError(c, err)
 	}
-	if err := validateProfileHomepage(project.ProfileURL); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid project profile URL: "+err.Error())
-	}
 	profile := project.Profile.Data()
 	if profile.SchemaVersion == 0 {
 		profile = model.NewProjectProfile()
@@ -1308,60 +1180,46 @@ func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
 // validation. In particular, []string is not a JSON array when passed through
 // the schema validator's generic map representation.
 func profileAgentInput(project *model.Project, answers map[string]any, samples []string) map[string]any {
-	setup := model.NewProjectProfileSetup()
-	if project.ProfileSetup != nil {
-		setup = *project.ProfileSetup
-	} else if project.ProfileURL != "" && (project.Platform == model.PlatformWechat || project.Platform == model.PlatformSeednote) {
-		setup.AccountStatus = "existing"
-		setup.PlatformAccounts = []model.ProjectProfileAccount{{Platform: project.Platform, ProfileURL: project.ProfileURL, Source: model.ProfileSourceUserConfirmed}}
+	values := make([]any, 0, len(samples))
+	for _, sample := range samples {
+		values = append(values, sample)
 	}
-	setup.Normalize()
-	ids := project.AgentIDs
-	if ids == nil {
-		ids = model.DefaultProjectAgentIDs(project.Platform)
-	}
-	if ids == nil {
-		ids = []string{}
-	}
-	grouped := map[string]any{
-		"basic":      map[string]any{"project_name": project.Name, "platform": project.Platform, "account_status": setup.AccountStatus, "platform_accounts": setup.PlatformAccounts},
-		"intent":     setup.Answers.Intent,
-		"content":    setup.Answers.Content,
-		"boundaries": setup.Answers.Boundaries,
+	// The profile-analysis Pack requires all five answer groups even when the
+	// project has no user-provided answers yet. Keep this normalization at the
+	// Server boundary so automatic initialization and explicit retries share the
+	// same valid input contract.
+	normalizedAnswers := map[string]any{
+		"basic": map[string]any{
+			"project_name":   project.Name,
+			"account_status": "",
+		},
+		"platform_accounts": []any{},
+		"intent": map[string]any{
+			"goals":           "",
+			"direction":       "",
+			"differentiation": "",
+		},
+		"content": map[string]any{
+			"preferences": "",
+			"formats":     "",
+			"tone":        "",
+			"audience":    "",
+		},
+		"boundaries": map[string]any{
+			"exclusions":    "",
+			"collaboration": "",
+			"compliance":    "",
+		},
 	}
 	for key, value := range answers {
-		grouped[key] = value
+		normalizedAnswers[key] = value
 	}
-	if samples == nil {
-		samples = setup.Samples
+	return map[string]any{
+		"project_id":  project.ID,
+		"profile_url": project.ProfileURL,
+		"answers":     normalizedAnswers,
+		"samples":     values,
 	}
-	profile := project.Profile.Data()
-	if profile.AnalysisLimits == nil {
-		profile.AnalysisLimits = []string{}
-	}
-	if profile.FollowUpQuestions == nil {
-		profile.FollowUpQuestions = []string{}
-	}
-	var currentProfile any
-	if profile.IsConfirmed() {
-		currentProfile = profile
-	}
-	payload := map[string]any{
-		"project_id":        project.ID,
-		"platform":          project.Platform,
-		"profile_url":       project.ProfileURL,
-		"agent_ids":         ids,
-		"platform_accounts": setup.PlatformAccounts,
-		"profile_setup":     setup,
-		"expected_revision": profile.Version,
-		"current_profile":   currentProfile,
-		"answers":           grouped,
-		"samples":           samples,
-	}
-	encoded, _ := json.Marshal(payload)
-	var input map[string]any
-	_ = json.Unmarshal(encoded, &input)
-	return input
 }
 
 // RefreshProfile and RetryProfile are free, explicit aliases for the same
@@ -1474,9 +1332,6 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-	if err := req.validateProfileSetup(c.Body()); err != nil {
-		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if req.LegacyWechatPublishMode != nil {
 		return Error(c, fiber.StatusBadRequest, "wechat_publish_mode is no longer supported; publishing is capability-driven")

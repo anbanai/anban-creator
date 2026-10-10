@@ -16,6 +16,7 @@ var (
 	ErrFeedbackInsightNotFound       = errors.New("feedback insight not found")
 	ErrFeedbackInsightNotConfirmable = errors.New("feedback insight is not confirmable")
 	ErrFeedbackInsightNotValidated   = errors.New("feedback insight has not been independently validated")
+	ErrFeedbackMemoryCASUnavailable  = errors.New("feedback memory does not support complete-read CAS")
 )
 
 type FeedbackPromotionService struct {
@@ -24,7 +25,8 @@ type FeedbackPromotionService struct {
 }
 
 type ProjectMemoryWriter interface {
-	WriteMarkdownFile(context.Context, string, string, string) error
+	ProjectMemoryReader
+	AppendMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 }
 
 type ProjectMemoryReader interface {
@@ -112,28 +114,55 @@ func (s *FeedbackPromotionService) Promote(ctx context.Context, insightID, userI
 		return nil, errors.New("project memory writer is unavailable")
 	}
 	marker := "<!-- feedback-insight:" + insight.ID + " -->"
-	content := fmt.Sprintf("%s\n- Content: %s\n- Insight: %s\n- Evidence revision: %d\n- Confidence: %s\n- Limitation: %s\n", marker, insight.TargetContentID, insight.Summary, insight.AnalyticsRevision, insight.Confidence, insight.Limitations)
-	if reader, ok := s.memory.(ProjectMemoryReader); ok {
-		if view, readErr := reader.ReadProject(ctx, insight.ProjectID); readErr == nil {
-			for _, file := range view.Files {
-				if file.Path == ".claude/agent-memory/anban-feedback/MEMORY.md" {
-					if strings.Contains(file.Content, marker) {
-						content = file.Content
-						break
-					}
-					content = strings.TrimSpace(file.Content) + "\n\n" + content
-					break
-				}
-			}
-		}
+	entry := fmt.Sprintf("%s\n- Content: %s\n- Insight: %s\n- Evidence revision: %d\n- Confidence: %s\n- Limitation: %s\n", marker, insight.TargetContentID, insight.Summary, insight.AnalyticsRevision, insight.Confidence, insight.Limitations)
+	reader := s.memory
+	view, readErr := reader.ReadProject(ctx, insight.ProjectID)
+	if readErr != nil && !errors.Is(readErr, memory.ErrProjectMemoryMissing) {
+		return nil, readErr
 	}
-	content = strings.TrimSpace(content)
-	if !strings.HasPrefix(content, "# Anban Feedback Memory") {
-		content = "# Anban Feedback Memory\n\n" + content
+	expected := ""
+	content := entry
+	alreadyMaterialized := false
+	fileFound := false
+	for _, file := range view.Files {
+		if file.Path != ".claude/agent-memory/anban-feedback/MEMORY.md" {
+			continue
+		}
+		fileFound = true
+		// A bounded preview is not a valid CAS base. Refuse to append
+		// against a partial snapshot rather than risking a lost update.
+		if file.Truncated {
+			return nil, memory.ErrProjectMemoryConflict
+		}
+		if strings.Contains(file.Content, marker) {
+			alreadyMaterialized = true
+		}
+		expected = file.Content
+		break
+	}
+	// A partial project view that omitted the target file cannot prove that
+	// the file is absent. Treat it as a conflict instead of creating a new
+	// file from an incomplete snapshot.
+	if !fileFound && view.Partial {
+		return nil, memory.ErrProjectMemoryConflict
+	}
+	if !alreadyMaterialized && expected == "" {
+		content = "# Anban Feedback Memory\n\n" + entry
+	} else if !alreadyMaterialized {
+		content = strings.TrimRight(expected, "\n") + "\n\n" + entry
 	}
 	content += "\n"
-	if err := s.memory.WriteMarkdownFile(ctx, insight.ProjectID, ".claude/agent-memory/anban-feedback/MEMORY.md", content); err != nil {
-		return nil, err
+	if alreadyMaterialized {
+		// The durable insight row may have lost a race after the NAS write. The
+		// marker makes this retry idempotent; only the DB promotion CAS remains.
+	} else {
+		appendContent := content
+		if expected != "" {
+			appendContent = "\n\n" + entry + "\n"
+		}
+		if err := s.memory.AppendMarkdownFileIfUnchanged(ctx, insight.ProjectID, ".claude/agent-memory/anban-feedback/MEMORY.md", expected, appendContent); err != nil {
+			return nil, err
+		}
 	}
 	nextMemoryRevision := insight.MemoryRevision + 1
 	if nextMemoryRevision == 0 {

@@ -118,9 +118,6 @@ func main() {
 		if err := requireServerOwnedArticlePublicationSchema(mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database schema is not ready for Server-owned article publication")
 		}
-		if err := requireWechatAccountAnalyticsSchema(mysqlDB); err != nil {
-			log.Fatal().Err(err).Msg("database schema is not ready for WeChat account analytics")
-		}
 		if err := service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database executable identity is not ready")
 		}
@@ -586,8 +583,6 @@ func main() {
 	var seednoteImportHandler *handler.SeednoteImportHandler
 	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
 	var wechatAnalyticsImportHandler *handler.WechatAnalyticsImportHandler
-	var wechatAccountAnalyticsHandler *handler.WechatAccountAnalyticsHandler
-	var wechatAccountAnalyticsImportHandler *handler.WechatAccountAnalyticsImportHandler
 	var wechatPublicationHandler *handler.WechatPublicationHandler
 	var channelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
 	var agentHandler *handler.AgentHandler
@@ -634,8 +629,6 @@ func main() {
 		seednoteImportHandler = handler.NewSeednoteImportHandler(service.NewSeednoteImportService(repo, store), log)
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
 		wechatAnalyticsImportHandler = handler.NewWechatAnalyticsImportHandler(service.NewWechatAnalyticsImportService(repo, store), log)
-		wechatAccountAnalyticsHandler = handler.NewWechatAccountAnalyticsHandler(service.NewWechatAccountAnalyticsService(repo), log)
-		wechatAccountAnalyticsImportHandler = handler.NewWechatAccountAnalyticsImportHandler(service.NewWechatAccountAnalyticsImportService(repo, store), log)
 		wechatPublicationHandler = handler.NewWechatPublicationHandler(wechatPublicationSvc, log)
 		channelsAnalyticsHandler = handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, log)
 		if ilinkBindingSvc != nil {
@@ -722,6 +715,26 @@ func main() {
 			planHandler.SetRepository(repo)
 		}
 	}
+	interactiveSvc := service.NewInteractiveService(repo)
+	if cfg.Interactive.Enabled && strings.TrimSpace(cfg.Interactive.BridgeCommand) != "" {
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{
+			Command:           cfg.Interactive.BridgeCommand,
+			Args:              cfg.Interactive.BridgeArgs,
+			Dir:               cfg.Interactive.BridgeDir,
+			DSHPatch:          cfg.Interactive.DSHPatch,
+			Provider:          cfg.Interactive.Provider,
+			ProviderAPIKeyEnv: cfg.Interactive.ProviderAPIKeyEnv,
+			Model:             cfg.Interactive.Model,
+			MCPURL:            cfg.Interactive.MCPURL,
+		})
+		interactiveSvc.SetEnabled(true)
+	}
+	// Apply authorization policy after selecting the runtime-backed service so
+	// enabling the bridge cannot silently drop admin-only access control.
+	interactiveSvc.SetAdminOnly(cfg.Interactive.AdminOnly)
+	if projectMemoryStore != nil {
+		interactiveSvc.SetProjectMemory(projectMemoryStore)
+	}
 
 	// 14.1. Create MCP handler (using official MCP Go SDK).
 	var mcpHandler http.Handler
@@ -729,6 +742,7 @@ func main() {
 		// Create AI operation services for MCP tools.
 		var imageSvc *service.ImageService
 		var contentRenderSvc *service.ContentRenderService
+		var searchSvc *service.SearchService
 
 		if store != nil {
 			imageSvc = service.NewImageService(defaultImageAPI, store, repo, log)
@@ -739,7 +753,6 @@ func main() {
 		if repo != nil {
 			contentRenderSvc = service.NewContentRenderService(repo, log)
 		}
-		var searchSvc *service.SearchService
 		if cfg.Search.Enabled {
 			var searchProvider service.SearchProvider
 			switch strings.TrimSpace(cfg.Search.Provider) {
@@ -780,11 +793,12 @@ func main() {
 				UnderstandingProvider: cfg.VideoUnderstanding.ProviderKey,
 				UnderstandingModel:    cfg.VideoUnderstanding.Model,
 			}, log),
-			SearchSvc: searchSvc,
+			InteractiveSvc: interactiveSvc,
+			SearchSvc:      searchSvc,
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)
-		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc))
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
@@ -794,7 +808,7 @@ func main() {
 			Bool("publishing_tools", publishingSvc != nil).
 			Msg("MCP handler initialized with tools (official SDK)")
 	} else {
-		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc))
+		mcpHandler = mcp.NewMCPHandler(apiKeySvc, cfg.MCP.APIKey, log, mcp.WithExecutionAuthentication(executionTokens, taskSvc), mcp.WithInteractiveAuthentication(interactiveSvc))
 		log.Info().Msg("MCP handler initialized (no tools, services unavailable)")
 	}
 
@@ -867,57 +881,58 @@ func main() {
 		go ilinkWorker.Run(ilinkWorkerCtx)
 	}
 
+	interactiveHandler := handler.NewInteractiveHandler(interactiveSvc)
+
 	// 16. Build Services struct.
 	svcs := &router.Services{
-		Config:                              cfg,
-		Logger:                              log,
-		DB:                                  mysqlDB,
-		Redis:                               rdb,
-		Repo:                                repo,
-		JWTService:                          jwtSvc,
-		WechatSvc:                           wechatSvc,
-		WSHub:                               wsHub,
-		AuthHandler:                         authHandler,
-		PlanService:                         planSvc,
-		TaskService:                         taskSvc,
-		ProjectHandler:                      projectHandler,
-		FeedbackDashboardHandler:            feedbackDashboardHandler,
-		PlanHandler:                         planHandler,
-		TaskHandler:                         taskHandler,
-		SeednoteAnalyticsHandler:            seednoteAnalyticsHandler,
-		ContentAnalyticsHandler:             contentAnalyticsHandler,
-		AnalyticsHandler:                    analyticsHandler,
-		SeednoteImportHandler:               seednoteImportHandler,
-		WechatAnalyticsHandler:              wechatAnalyticsHandler,
-		WechatAnalyticsImportHandler:        wechatAnalyticsImportHandler,
-		WechatAccountAnalyticsHandler:       wechatAccountAnalyticsHandler,
-		WechatAccountAnalyticsImportHandler: wechatAccountAnalyticsImportHandler,
-		WechatPublicationHandler:            wechatPublicationHandler,
-		ChannelsAnalyticsHandler:            channelsAnalyticsHandler,
-		AgentHandler:                        agentHandler,
-		AgentProfileHandler:                 agentProfileHandler,
-		AgentPackHandler:                    agentPackHandler,
-		BillingHandler:                      fixedBilling.Handler,
-		BillingAdminHandler:                 fixedBilling.AdminHandler,
-		TimelineHandler:                     timelineHandler,
-		APIKeyHandler:                       apiKeyHandler,
-		FileHandler:                         fileHandler,
-		UploadHandler:                       uploadHandler,
-		AIEntryHandler:                      aiEntryHandler,
-		FeedbackHandler:                     feedbackHandler,
-		ImageCapabilityHandler:              imageCapabilityHandler,
-		MontageCapabilityHandler:            montageCapabilityHandler,
-		HypitCapabilityHandler:              hypitCapabilityHandler,
-		TemplateHandler:                     templateHandler,
-		ImageAnalysisHandler:                imageAnalysisHandler,
-		ViralAnalysisHandler:                viralAnalysisHandler,
-		PosterHandler:                       posterHandler,
-		ResourceHandler:                     resourceHandler,
-		TopicPoolHandler:                    topicPoolHandler,
-		TrendsHandler:                       trendsHandler,
-		IlinkHandler:                        ilinkHandler,
-		MCPHandler:                          mcpHandler,
-		StorageProvider:                     store,
+		Config:                       cfg,
+		Logger:                       log,
+		DB:                           mysqlDB,
+		Redis:                        rdb,
+		Repo:                         repo,
+		JWTService:                   jwtSvc,
+		WechatSvc:                    wechatSvc,
+		WSHub:                        wsHub,
+		AuthHandler:                  authHandler,
+		PlanService:                  planSvc,
+		TaskService:                  taskSvc,
+		ProjectHandler:               projectHandler,
+		FeedbackDashboardHandler:     feedbackDashboardHandler,
+		PlanHandler:                  planHandler,
+		TaskHandler:                  taskHandler,
+		SeednoteAnalyticsHandler:     seednoteAnalyticsHandler,
+		ContentAnalyticsHandler:      contentAnalyticsHandler,
+		AnalyticsHandler:             analyticsHandler,
+		SeednoteImportHandler:        seednoteImportHandler,
+		WechatAnalyticsHandler:       wechatAnalyticsHandler,
+		WechatAnalyticsImportHandler: wechatAnalyticsImportHandler,
+		WechatPublicationHandler:     wechatPublicationHandler,
+		ChannelsAnalyticsHandler:     channelsAnalyticsHandler,
+		AgentHandler:                 agentHandler,
+		InteractiveHandler:           interactiveHandler,
+		AgentProfileHandler:          agentProfileHandler,
+		AgentPackHandler:             agentPackHandler,
+		BillingHandler:               fixedBilling.Handler,
+		BillingAdminHandler:          fixedBilling.AdminHandler,
+		TimelineHandler:              timelineHandler,
+		APIKeyHandler:                apiKeyHandler,
+		FileHandler:                  fileHandler,
+		UploadHandler:                uploadHandler,
+		AIEntryHandler:               aiEntryHandler,
+		FeedbackHandler:              feedbackHandler,
+		ImageCapabilityHandler:       imageCapabilityHandler,
+		MontageCapabilityHandler:     montageCapabilityHandler,
+		HypitCapabilityHandler:       hypitCapabilityHandler,
+		TemplateHandler:              templateHandler,
+		ImageAnalysisHandler:         imageAnalysisHandler,
+		ViralAnalysisHandler:         viralAnalysisHandler,
+		PosterHandler:                posterHandler,
+		ResourceHandler:              resourceHandler,
+		TopicPoolHandler:             topicPoolHandler,
+		TrendsHandler:                trendsHandler,
+		IlinkHandler:                 ilinkHandler,
+		MCPHandler:                   mcpHandler,
+		StorageProvider:              store,
 	}
 
 	// 17. Create router.
@@ -969,6 +984,14 @@ func main() {
 		// loops tear down rather than leak to process exit — Fiber force-closes
 		// the sockets regardless, but without the quit signal run() never exits.
 		wsHub.Shutdown()
+
+		// Stop temporary DSH sessions while their Server-owned capabilities are
+		// still available for graceful shutdown.
+		interactiveShutdownCtx, interactiveShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := interactiveSvc.Shutdown(interactiveShutdownCtx); err != nil {
+			log.Error().Err(err).Msg("failed to close interactive sessions")
+		}
+		interactiveShutdownCancel()
 
 		// 2. Shutdown HTTP server.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1162,47 +1185,6 @@ func requireServerOwnedArticlePublicationSchema(db *gorm.DB) error {
 		return fmt.Errorf("existing database requires server/migrations/20260916_server_owned_article_publication.sql and 20261001_wechat_picture_publication_evidence.sql before startup")
 	}
 	return migrations.RequireWechatPublicationStatusConstraint(context.Background(), db)
-}
-
-// requireWechatAccountAnalyticsSchema prevents an existing deployment from
-// starting with only part of the account-level analytics migration applied.
-// AutoMigrate remains available for fresh databases, while production schemas
-// must apply the reviewed forward migration before startup.
-func requireWechatAccountAnalyticsSchema(db *gorm.DB) error {
-	if db == nil {
-		return nil
-	}
-	required := []struct {
-		model  any
-		name   string
-		column string
-	}{
-		{&model.WechatAccountAnalyticsBatch{}, "wechat_account_analytics_batches", "ProjectID"},
-		{&model.WechatAccountAnalyticsBatch{}, "wechat_account_analytics_batches", "IdempotencyKey"},
-		{&model.WechatAccountAnalyticsBatch{}, "wechat_account_analytics_batches", "DataAsOfAt"},
-		{&model.WechatAccountAnalyticsDay{}, "wechat_account_analytics_days", "BatchID"},
-		{&model.WechatAccountAnalyticsDay{}, "wechat_account_analytics_days", "StatDate"},
-		{&model.WechatAccountAnalyticsDay{}, "wechat_account_analytics_days", "ReadUsers"},
-		{&model.WechatTrafficSourceDay{}, "wechat_traffic_source_days", "BatchID"},
-		{&model.WechatTrafficSourceDay{}, "wechat_traffic_source_days", "Source"},
-		{&model.WechatTrafficSourceDay{}, "wechat_traffic_source_days", "ReadUsers"},
-	}
-	hasAny := false
-	for _, item := range required {
-		if db.Migrator().HasTable(item.name) {
-			hasAny = true
-			break
-		}
-	}
-	if !hasAny {
-		return nil
-	}
-	for _, item := range required {
-		if !db.Migrator().HasTable(item.name) || !db.Migrator().HasColumn(item.model, item.column) {
-			return fmt.Errorf("existing database requires server/migrations/20261009_wechat_account_analytics.sql before startup (missing %s.%s)", item.name, item.column)
-		}
-	}
-	return nil
 }
 
 func requireMySQLTaskDeliveryConstraints(db *gorm.DB) error {

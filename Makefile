@@ -34,6 +34,8 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
 .PHONY: all clean distclean test help lint fmt vet deps ci coverage \
         server-build server-run server-dev server-test git-sync-setup humanizer-update \
         agent-pack-new agent-pack-generate agent-pack-check \
+        runtime-claude-install runtime-claude-test runtime-claude-build \
+        runtime-dsh-install runtime-dsh-test runtime-dsh-build \
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
@@ -60,7 +62,8 @@ distclean: clean
 # Run all tests
 test:
 	@go -C server test -v ./...
-	@cd agent-ts && bun run test
+	@$(MAKE) runtime-claude-test
+	@$(MAKE) runtime-dsh-test
 
 # Code linting (requires golangci-lint)
 lint:
@@ -138,15 +141,30 @@ server-test:
 # Agent targets
 # ---------------------------------------------------------------------------
 
-agent-install:
-	@cd agent-ts && bun install --frozen-lockfile
+runtime-claude-install:
+	@cd runtime-claude && npm ci
 
-agent-test:
-	@cd agent-ts && bun run test
-	@cd agent-ts && bun run typecheck
+runtime-claude-test: runtime-claude-install
+	@cd runtime-claude && npm run test
+	@cd runtime-claude && npm run typecheck
 
-agent-build:
-	@cd agent-ts && bun run build
+runtime-claude-build: runtime-claude-install
+	@cd runtime-claude && npm run build
+
+runtime-dsh-install:
+	@cd runtime-dsh && npm ci
+
+runtime-dsh-test: runtime-dsh-install
+	@cd runtime-dsh && npm run test
+	@cd runtime-dsh && npm run typecheck
+
+runtime-dsh-build: runtime-dsh-install
+	@cd runtime-dsh && npm run build
+
+# Compatibility aliases for local scripts that still use the old generic name.
+agent-install: runtime-claude-install
+agent-test: runtime-claude-test
+agent-build: runtime-claude-build
 
 # ---------------------------------------------------------------------------
 # Frontend targets

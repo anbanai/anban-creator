@@ -41,6 +41,9 @@ export const projectsApi = {
   memory: (id: string) =>
     unwrap<ProjectMemory>(http.get(`/projects/${id}/memory`)),
 
+  updateMemory: (id: string, data: { path: string; expected_content: string; content: string }) =>
+    unwrap<ProjectMemory>(http.put(`/projects/${id}/memory`, data)),
+
   stats: (ids: string[]) =>
     unwrap<Record<string, ProjectStats>>(http.get('/projects/stats', {
       params: {

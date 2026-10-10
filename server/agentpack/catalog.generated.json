@@ -223,19 +223,18 @@
         }
       ],
       "ui": {},
-      "digest": "2867212f1ccd8910a9db7cb4724fcdc35c577e8deac4bda01163f64f0251615e"
+      "digest": "a9724802a54f61e8016c1db1b4a67f81af52009dbfeffeb384b177282a9d0f39"
     },
     {
       "id": "hypit",
       "channel": "hypit",
-      "version": "2.0.5",
+      "version": "2.0.4",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
       "agent": {
         "name": "hypit",
         "skills": [
-          "project-profile-context",
           "portrait-cover-design"
         ],
         "max_turns": 180
@@ -398,7 +397,7 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "ab0d6033a30ef258ac039d41a5bb6f091f3094ea54f451292f8bfe71535d172e"
+      "digest": "e0bf3ec61183cda1fda8d2971e656836f846fa3e0c998ea7601456b1ccd17c2d"
     },
     {
       "id": "moments",
@@ -494,14 +493,13 @@
     {
       "id": "montage",
       "channel": "montage",
-      "version": "2.0.6",
+      "version": "2.0.5",
       "kind": "managed",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
       "agent": {
         "name": "montage",
         "skills": [
-          "project-profile-context",
           "montage",
           "portrait-cover-design"
         ],
@@ -605,12 +603,12 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "b352647fc593ef9b5c9c74115a9fddcbb1a529e2c1d7fb9b8e4c4ee9eeda005a"
+      "digest": "82489a0ce09659d93b957b0a4c1de998136f47f9f1bc35ca0c3fac5d38f52241"
     },
     {
       "id": "profile-analysis",
       "channel": "profile-analysis",
-      "version": "2.1.5",
+      "version": "2.1.4",
       "kind": "managed",
       "display_name": "账号画像分析",
       "description": "基于用户提供的公开资料和问答生成并提交六维项目账号画像。",
@@ -643,33 +641,9 @@
       },
       "artifacts": [
         {
-          "role": "input_snapshot",
-          "path": "output/profile-input.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
-          "role": "profile_result",
-          "path": "output/profile-draft.json",
-          "mime_type": "application/json",
-          "required": true
-        },
-        {
           "role": "progress_state",
           "path": "output/progress-state.json",
           "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "failure_state",
-          "path": "output/failure-state.json",
-          "mime_type": "application/json",
-          "required": false
-        },
-        {
-          "role": "failure_diagnosis",
-          "path": "output/failure-diagnosis.md",
-          "mime_type": "text/markdown",
           "required": false
         }
       ],
@@ -682,239 +656,27 @@
       ],
       "schemas": {
         "task_input": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",
           "required": [
             "project_id",
-            "platform",
-            "agent_ids",
             "profile_url",
-            "platform_accounts",
-            "profile_setup",
             "answers",
-            "samples",
-            "current_profile",
-            "expected_revision"
+            "samples"
           ],
           "additionalProperties": false,
           "properties": {
             "project_id": {
               "type": "string"
             },
-            "platform": {
-              "type": "string",
-              "description": "Legacy primary context. The selected creation Agents are authoritative in agent_ids."
-            },
-            "agent_ids": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "wechat-article",
-                  "wechat-picture",
-                  "seednote",
-                  "montage",
-                  "hypit",
-                  "whiteboard-animation"
-                ]
-              }
-            },
             "profile_url": {
               "type": "string",
-              "description": "Legacy primary homepage URL; prefer platform_accounts."
-            },
-            "platform_accounts": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": [
-                  "platform",
-                  "profile_url",
-                  "source"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                  "platform": {
-                    "type": "string",
-                    "enum": [
-                      "wechat",
-                      "seednote",
-                      "douyin",
-                      "bilibili",
-                      "weibo",
-                      "zhihu",
-                      "kuaishou",
-                      "channels"
-                    ]
-                  },
-                  "account_name": {
-                    "type": "string"
-                  },
-                  "profile_url": {
-                    "type": "string"
-                  },
-                  "follower_range": {
-                    "type": "string"
-                  },
-                  "source": {
-                    "type": "string",
-                    "enum": [
-                      "[用户确认]",
-                      "[用户编辑]",
-                      "[链接分析]",
-                      "[推断待确认]",
-                      "[待补充]"
-                    ]
-                  }
-                }
-              }
-            },
-            "profile_setup": {
-              "type": "object",
-              "required": [
-                "account_status",
-                "platform_accounts",
-                "answers",
-                "samples"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "account_status": {
-                  "type": "string",
-                  "enum": [
-                    "new",
-                    "existing"
-                  ]
-                },
-                "platform_accounts": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": [
-                      "platform",
-                      "profile_url",
-                      "source"
-                    ],
-                    "additionalProperties": false,
-                    "properties": {
-                      "platform": {
-                        "type": "string",
-                        "enum": [
-                          "wechat",
-                          "seednote",
-                          "douyin",
-                          "bilibili",
-                          "weibo",
-                          "zhihu",
-                          "kuaishou",
-                          "channels"
-                        ]
-                      },
-                      "account_name": {
-                        "type": "string"
-                      },
-                      "profile_url": {
-                        "type": "string"
-                      },
-                      "follower_range": {
-                        "type": "string"
-                      },
-                      "source": {
-                        "type": "string",
-                        "enum": [
-                          "[用户确认]",
-                          "[用户编辑]",
-                          "[链接分析]",
-                          "[推断待确认]",
-                          "[待补充]"
-                        ]
-                      }
-                    }
-                  }
-                },
-                "answers": {
-                  "type": "object",
-                  "required": [
-                    "intent",
-                    "content",
-                    "boundaries"
-                  ],
-                  "additionalProperties": false,
-                  "properties": {
-                    "intent": {
-                      "type": "object",
-                      "properties": {
-                        "goals": {
-                          "type": "string"
-                        },
-                        "direction": {
-                          "type": "string"
-                        },
-                        "differentiation": {
-                          "type": "string"
-                        },
-                        "strengths": {
-                          "type": "string"
-                        },
-                        "resources": {
-                          "type": "string"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    "content": {
-                      "type": "object",
-                      "properties": {
-                        "preferences": {
-                          "type": "string"
-                        },
-                        "favorites": {
-                          "type": "string"
-                        },
-                        "formats": {
-                          "type": "string"
-                        },
-                        "tone": {
-                          "type": "string"
-                        },
-                        "audience": {
-                          "type": "string"
-                        },
-                        "reference_accounts": {
-                          "type": "string"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    "boundaries": {
-                      "type": "object",
-                      "properties": {
-                        "exclusions": {
-                          "type": "string"
-                        },
-                        "collaboration": {
-                          "type": "string"
-                        },
-                        "compliance": {
-                          "type": "string"
-                        }
-                      },
-                      "additionalProperties": false
-                    }
-                  }
-                },
-                "samples": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              }
+              "description": "Optional legacy project homepage; Server accepts empty or validates an absolute HTTP(S) URL."
             },
             "answers": {
               "type": "object",
               "required": [
                 "basic",
+                "platform_accounts",
                 "intent",
                 "content",
                 "boundaries"
@@ -923,67 +685,66 @@
               "properties": {
                 "basic": {
                   "type": "object",
+                  "required": [
+                    "project_name",
+                    "account_status"
+                  ],
+                  "additionalProperties": false,
                   "properties": {
-                    "account_status": {
-                      "type": "string"
-                    },
-                    "platform": {
-                      "type": "string"
-                    },
                     "project_name": {
                       "type": "string"
                     },
-                    "platform_accounts": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "platform",
-                          "profile_url",
-                          "source"
-                        ],
-                        "additionalProperties": false,
-                        "properties": {
-                          "platform": {
-                            "type": "string",
-                            "enum": [
-                              "wechat",
-                              "seednote",
-                              "douyin",
-                              "bilibili",
-                              "weibo",
-                              "zhihu",
-                              "kuaishou",
-                              "channels"
-                            ]
-                          },
-                          "account_name": {
-                            "type": "string"
-                          },
-                          "profile_url": {
-                            "type": "string"
-                          },
-                          "follower_range": {
-                            "type": "string"
-                          },
-                          "source": {
-                            "type": "string",
-                            "enum": [
-                              "[用户确认]",
-                              "[用户编辑]",
-                              "[链接分析]",
-                              "[推断待确认]",
-                              "[待补充]"
-                            ]
-                          }
-                        }
+                    "account_status": {
+                      "type": "string",
+                      "enum": [
+                        "",
+                        "new",
+                        "existing"
+                      ]
+                    }
+                  }
+                },
+                "platform_accounts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "platform",
+                      "account_name",
+                      "profile_url"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "platform": {
+                        "type": "string",
+                        "enum": [
+                          "xiaohongshu",
+                          "douyin",
+                          "bilibili",
+                          "video_account",
+                          "wechat_official_account",
+                          "weibo",
+                          "zhihu"
+                        ]
+                      },
+                      "account_name": {
+                        "type": "string"
+                      },
+                      "profile_url": {
+                        "type": "string",
+                        "description": "Optional; non-empty values must be absolute HTTP(S) URLs."
                       }
                     }
-                  },
-                  "additionalProperties": false
+                  }
                 },
                 "intent": {
                   "type": "object",
+                  "required": [
+                    "goals",
+                    "direction",
+                    "differentiation"
+                  ],
+                  "additionalProperties": false,
                   "properties": {
                     "goals": {
                       "type": "string"
@@ -993,23 +754,20 @@
                     },
                     "differentiation": {
                       "type": "string"
-                    },
-                    "strengths": {
-                      "type": "string"
-                    },
-                    "resources": {
-                      "type": "string"
                     }
-                  },
-                  "additionalProperties": false
+                  }
                 },
                 "content": {
                   "type": "object",
+                  "required": [
+                    "preferences",
+                    "formats",
+                    "tone",
+                    "audience"
+                  ],
+                  "additionalProperties": false,
                   "properties": {
                     "preferences": {
-                      "type": "string"
-                    },
-                    "favorites": {
                       "type": "string"
                     },
                     "formats": {
@@ -1020,15 +778,17 @@
                     },
                     "audience": {
                       "type": "string"
-                    },
-                    "reference_accounts": {
-                      "type": "string"
                     }
-                  },
-                  "additionalProperties": false
+                  }
                 },
                 "boundaries": {
                   "type": "object",
+                  "required": [
+                    "exclusions",
+                    "collaboration",
+                    "compliance"
+                  ],
+                  "additionalProperties": false,
                   "properties": {
                     "exclusions": {
                       "type": "string"
@@ -1039,8 +799,7 @@
                     "compliance": {
                       "type": "string"
                     }
-                  },
-                  "additionalProperties": false
+                  }
                 }
               }
             },
@@ -1049,287 +808,6 @@
               "items": {
                 "type": "string"
               }
-            },
-            "current_profile": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "required": [
-                    "schema_version",
-                    "status",
-                    "initialization_status",
-                    "version",
-                    "dimensions",
-                    "analysis_limits",
-                    "follow_up_questions"
-                  ],
-                  "additionalProperties": false,
-                  "properties": {
-                    "schema_version": {
-                      "type": "integer",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "initialization_status": {
-                      "type": "string"
-                    },
-                    "last_error": {
-                      "type": "string"
-                    },
-                    "version": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "analysis_task_id": {
-                      "type": "string"
-                    },
-                    "application_source": {
-                      "type": "string"
-                    },
-                    "dimensions": {
-                      "type": "object",
-                      "required": [
-                        "identity",
-                        "style",
-                        "audience",
-                        "platforms",
-                        "preferences",
-                        "memory"
-                      ],
-                      "additionalProperties": false,
-                      "properties": {
-                        "identity": {
-                          "type": "object",
-                          "required": [
-                            "content",
-                            "sources",
-                            "evidence",
-                            "missing_fields"
-                          ],
-                          "additionalProperties": false,
-                          "properties": {
-                            "content": {
-                              "type": "object",
-                              "additionalProperties": true
-                            },
-                            "sources": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "evidence": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "missing_fields": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "style": {
-                          "type": "object",
-                          "required": [
-                            "content",
-                            "sources",
-                            "evidence",
-                            "missing_fields"
-                          ],
-                          "additionalProperties": false,
-                          "properties": {
-                            "content": {
-                              "type": "object",
-                              "additionalProperties": true
-                            },
-                            "sources": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "evidence": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "missing_fields": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "audience": {
-                          "type": "object",
-                          "required": [
-                            "content",
-                            "sources",
-                            "evidence",
-                            "missing_fields"
-                          ],
-                          "additionalProperties": false,
-                          "properties": {
-                            "content": {
-                              "type": "object",
-                              "additionalProperties": true
-                            },
-                            "sources": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "evidence": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "missing_fields": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "platforms": {
-                          "type": "object",
-                          "required": [
-                            "content",
-                            "sources",
-                            "evidence",
-                            "missing_fields"
-                          ],
-                          "additionalProperties": false,
-                          "properties": {
-                            "content": {
-                              "type": "object",
-                              "additionalProperties": true
-                            },
-                            "sources": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "evidence": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "missing_fields": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "preferences": {
-                          "type": "object",
-                          "required": [
-                            "content",
-                            "sources",
-                            "evidence",
-                            "missing_fields"
-                          ],
-                          "additionalProperties": false,
-                          "properties": {
-                            "content": {
-                              "type": "object",
-                              "additionalProperties": true
-                            },
-                            "sources": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "evidence": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "missing_fields": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "memory": {
-                          "type": "object",
-                          "required": [
-                            "content",
-                            "sources",
-                            "evidence",
-                            "missing_fields"
-                          ],
-                          "additionalProperties": false,
-                          "properties": {
-                            "content": {
-                              "type": "object",
-                              "additionalProperties": true
-                            },
-                            "sources": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "evidence": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "missing_fields": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "analysis_limits": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "follow_up_questions": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "expected_revision": {
-              "type": "integer",
-              "minimum": 0
             }
           }
         },
@@ -1337,10 +815,8 @@
           "type": "object",
           "required": [
             "schema_version",
-            "expected_revision",
             "dimensions",
             "analysis_limits",
-            "missing_fields",
             "follow_up_questions"
           ],
           "additionalProperties": false,
@@ -1350,10 +826,6 @@
               "enum": [
                 1
               ]
-            },
-            "expected_revision": {
-              "type": "integer",
-              "minimum": 0
             },
             "dimensions": {
               "type": "object",
@@ -1388,12 +860,6 @@
               }
             },
             "analysis_limits": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "missing_fields": {
               "type": "array",
               "items": {
                 "type": "string"
@@ -1447,20 +913,161 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "e743a3178b47b1f6128b1dadd9b4614a982185e2a3226315e8315d445c97e921"
+      "digest": "d9d6252860aa456d613e1b5f5f2660f0835a02d3d90551b1bca131e8587aa82b"
+    },
+    {
+      "id": "project-creator",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "Project Creator",
+      "description": "通过对话收集六维项目画像并提交临时项目草稿。",
+      "agent": {
+        "name": "project-creator",
+        "max_turns": 120
+      },
+      "interaction": {
+        "user_questions": true,
+        "capabilities": [
+          "ask_user_question",
+          "stage_project_creator_draft"
+        ],
+        "intents": [
+          "create-project",
+          "update-project-profile"
+        ]
+      },
+      "bindings": {},
+      "runtime": {
+        "profile": "project-creator",
+        "adapter": "standard",
+        "max_turns": 120
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "interactive-project-creation"
+      ],
+      "schemas": {
+        "task_input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "intent": {
+              "type": "string",
+              "enum": [
+                "create-project",
+                "update-project-profile"
+              ]
+            },
+            "initial_context": {
+              "type": "string"
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "profile",
+            "progress",
+            "ready",
+            "missing_fields",
+            "inferred_fields"
+          ],
+          "properties": {
+            "project": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "platform"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "platform": {
+                  "type": "string"
+                },
+                "instructions": {
+                  "type": "string"
+                },
+                "keywords": {
+                  "type": "string"
+                },
+                "visual_style": {
+                  "type": "string"
+                }
+              }
+            },
+            "profile": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "progress": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "identity": {
+                  "type": "string"
+                },
+                "style": {
+                  "type": "string"
+                },
+                "audience": {
+                  "type": "string"
+                },
+                "platforms": {
+                  "type": "string"
+                },
+                "preferences": {
+                  "type": "string"
+                },
+                "memory": {
+                  "type": "string"
+                }
+              }
+            },
+            "ready": {
+              "type": "boolean"
+            },
+            "missing_fields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "inferred_fields": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "memory_append": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          }
+        }
+      },
+      "ui": {
+        "renderer": "custom:project-creator"
+      },
+      "digest": "494674cb527eeabb388cfb2af939b607121e5af5f4775fa346e107e73d18fb12"
     },
     {
       "id": "seednote",
       "channel": "seednote",
       "plan_task_kind": "content_generation",
-      "version": "2.0.7",
+      "version": "2.0.6",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
       "agent": {
         "name": "seednote",
         "skills": [
-          "project-profile-context",
           "portrait-cover-design",
           "humanizer",
           "seednote-research",
@@ -1669,20 +1276,19 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "cb9eb31914bc11ccfe84e7de599b8abcfcde08741cd43c03bbacc18b0fbddca9"
+      "digest": "337ffc5a3329858fafb61e8a233c513748ea5395e13805b4090ecca1a291c22b"
     },
     {
       "id": "wechat-article",
       "channel": "wechat-article",
       "plan_task_kind": "content_generation",
-      "version": "2.0.8",
+      "version": "2.0.7",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
       "agent": {
         "name": "wechat-article",
         "skills": [
-          "project-profile-context",
           "portrait-cover-design",
           "content-writing",
           "humanizer",
@@ -1891,20 +1497,19 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "3ed57008b9ca17468bc03af7a0ebe80f08cc8a1d792855a70a14ffbae4e5c93f"
+      "digest": "267f01ba61a6d60b4bbf3828a56f1a5b012f434c189adaa86480c7d392a74709"
     },
     {
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.4",
+      "version": "1.0.3",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
       "agent": {
         "name": "wechat-picture",
         "skills": [
-          "project-profile-context",
           "wechat-picture-research",
           "wechat-picture-writing",
           "wechat-picture-visual-design"
@@ -2027,19 +1632,18 @@
       "ui": {
         "renderer": "custom:wechat-picture"
       },
-      "digest": "e328313b83f34bdb018fbc61b0d3ce5bdaa45b7434c4256b5d3e74641811a7a7"
+      "digest": "8d51d94eb183f1c24a2fb90b761e890f2f4777f170960efb2b3552f8a9401d90"
     },
     {
       "id": "whiteboard-animation",
       "channel": "whiteboard-animation",
-      "version": "2.0.4",
+      "version": "2.0.3",
       "kind": "managed",
       "display_name": "白板动画",
       "description": "根据 SRT 字幕生成分镜、白板手绘场景和最终动画视频。",
       "agent": {
         "name": "whiteboard-animation",
         "skills": [
-          "project-profile-context",
           "whiteboard-animation"
         ],
         "max_turns": 120
@@ -2169,7 +1773,7 @@
       "ui": {
         "renderer": "custom:whiteboard-animation"
       },
-      "digest": "e7086b26278d3cf9b6cdd60ef3edeab8b49f6608fb19f4ba914f921c4c16488d"
+      "digest": "d38ff3e48f586184dcc099a14b774c6b7de73947ce531628d8caeaba8fc761f4"
     }
   ]
 }

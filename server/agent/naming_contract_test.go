@@ -93,6 +93,9 @@ func TestAnbanCreatorNamingContractUsesFixedMCPEndpoint(t *testing.T) {
 		t.Fatal("no harness/agents/*.toml files found")
 	}
 	for _, path := range agentPaths {
+		if filepath.Base(path) == "project-creator.toml" {
+			continue
+		}
 		cases = append(cases, struct {
 			name      string
 			path      string

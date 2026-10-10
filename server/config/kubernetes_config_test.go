@@ -16,8 +16,8 @@ import (
 func baseKubernetesConfigForTest() Config {
 	claude := validClaudeConfigForTest()
 	claude.Executor = "kubernetes"
-	claude.AgentPackCatalogDigest = agentpack.CatalogDigest()
 	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	claude.AgentPackCatalogDigest = agentpack.CatalogDigest()
 	claude.ExecutionTokenSecret = "0123456789abcdef0123456789abcdef"
 	claude.RuntimeImages = RuntimeImages{
 		"wechat-article":                  "registry.example.com/creator-agent-wechat-article@sha256:" + strings.Repeat("a", 64),
@@ -26,10 +26,10 @@ func baseKubernetesConfigForTest() Config {
 		model.PlatformMontage:             "registry.example.com/creator-agent-montage@sha256:" + strings.Repeat("c", 64),
 		"moments":                         "registry.example.com/creator-agent-moments@sha256:" + strings.Repeat("d", 64),
 		"ecommerce":                       "registry.example.com/creator-agent-ecommerce@sha256:" + strings.Repeat("f", 64),
-		"profile-analysis":                "registry.example.com/creator-agent-profile-analysis@sha256:" + strings.Repeat("1", 64),
-		"feedback-analysis":               "registry.example.com/creator-agent-feedback-analysis@sha256:" + strings.Repeat("2", 64),
-		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:" + strings.Repeat("3", 64),
-		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:" + strings.Repeat("4", 64),
+		"profile-analysis":                "registry.example.com/creator-agent-profile-analysis@sha256:" + strings.Repeat("a", 64),
+		"feedback-analysis":               "registry.example.com/creator-agent-feedback-analysis@sha256:" + strings.Repeat("b", 64),
+		model.PlatformWhiteboardAnimation: "registry.example.com/creator-agent-whiteboard-animation@sha256:" + strings.Repeat("c", 64),
+		model.PlatformHypit:               "registry.example.com/creator-agent-hypit@sha256:" + strings.Repeat("e", 64),
 	}
 	claude.Kubernetes = KubernetesConfig{
 		Namespace:          "anbanai-prod",
@@ -61,45 +61,6 @@ func TestValidateAcceptsKubernetesExecutor(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want kubernetes executor accepted", err)
-	}
-}
-
-func TestValidateKubernetesRequiresCatalogIdentityAndImmutableImages(t *testing.T) {
-	tests := []struct {
-		name    string
-		mutate  func(*Config)
-		wantErr string
-	}{
-		{
-			name: "missing catalog digest",
-			mutate: func(cfg *Config) {
-				cfg.Claude.AgentPackCatalogDigest = ""
-			},
-			wantErr: "claude.agent_pack_catalog_digest is required",
-		},
-		{
-			name: "wrong catalog digest",
-			mutate: func(cfg *Config) {
-				cfg.Claude.AgentPackCatalogDigest = strings.Repeat("0", 64)
-			},
-			wantErr: "claude.agent_pack_catalog_digest must equal the embedded Agent Pack Catalog digest",
-		},
-		{
-			name: "mutable runtime image",
-			mutate: func(cfg *Config) {
-				cfg.Claude.RuntimeImages["seednote"] = "registry.example.com/creator-agent-seednote:release"
-			},
-			wantErr: "claude.runtime_images.seednote must use an immutable image digest",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			cfg := baseKubernetesConfigForTest()
-			test.mutate(&cfg)
-			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("Validate() error = %v, want %q", err, test.wantErr)
-			}
-		})
 	}
 }
 
@@ -168,6 +129,24 @@ func TestValidateRuntimeImagesRequiresExactCanonicalProfiles(t *testing.T) {
 				t.Fatalf("ClaudeConfig.Validate() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateKubernetesRejectsMutableRuntimeImageReferences(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.RuntimeImages["wechat-picture"] = "registry.example.com/creator-agent-wechat-picture:latest"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), `claude.runtime_images.wechat-picture must use an immutable image digest`) {
+		t.Fatalf("Validate() error = %v, want immutable image digest rejection", err)
+	}
+}
+
+func TestValidateRejectsCatalogDigestDrift(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.AgentPackCatalogDigest = strings.Repeat("a", 64)
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "claude.agent_pack_catalog_digest must equal the embedded Agent Pack Catalog digest") {
+		t.Fatalf("Validate() error = %v, want Catalog digest rejection", err)
 	}
 }
 

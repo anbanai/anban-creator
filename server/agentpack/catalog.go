@@ -191,25 +191,60 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			return fmt.Errorf("missing Skill %q: %w", skill, err)
 		}
 	}
+	interactive := manifest.Interaction != nil && manifest.Interaction.UserQuestions
+	if interactive {
+		if len(manifest.Interaction.Capabilities) == 0 {
+			return fmt.Errorf("interactive Pack requires interaction.capabilities")
+		}
+		if len(manifest.Interaction.Intents) == 0 {
+			return fmt.Errorf("interactive Pack requires interaction.intents")
+		}
+	}
+	if interactive && manifest.Kind != KindManaged {
+		return fmt.Errorf("interaction.user_questions requires a managed Pack")
+	}
 	if manifest.Kind == KindManaged {
-		if strings.TrimSpace(manifest.Channel) == "" {
-			return fmt.Errorf("managed Pack requires exactly one channel")
-		}
-		if !isSupportedChannel(manifest.Channel) {
-			return fmt.Errorf("unsupported channel %q", manifest.Channel)
-		}
-		if len(manifest.Bindings.TaskKinds) == 0 {
-			return fmt.Errorf("managed Pack requires at least one task kind")
-		}
-		if hasSurface(manifest.Surfaces, "plan") {
-			if strings.TrimSpace(manifest.PlanTaskKind) == "" {
-				return fmt.Errorf("managed Pack with plan surface requires plan_task_kind")
+		if interactive {
+			// Interactive Packs are exposed through the chat capability registry,
+			// never through ordinary task/channel routing or billing.
+			if strings.TrimSpace(manifest.Channel) != "" {
+				return fmt.Errorf("interactive Pack must not bind a channel")
 			}
-			if !containsString(manifest.Bindings.TaskKinds, manifest.PlanTaskKind) {
-				return fmt.Errorf("plan_task_kind %q must be declared in bindings.task_kinds", manifest.PlanTaskKind)
+			if len(manifest.Bindings.TaskKinds) > 0 {
+				return fmt.Errorf("interactive Pack must not bind task kinds")
 			}
-		} else if strings.TrimSpace(manifest.PlanTaskKind) != "" {
-			return fmt.Errorf("plan_task_kind requires plan surface")
+			if strings.TrimSpace(manifest.PlanTaskKind) != "" {
+				return fmt.Errorf("interactive Pack must not declare plan_task_kind")
+			}
+			if len(manifest.BillingOperations) > 0 {
+				return fmt.Errorf("interactive Pack must not declare billing operations")
+			}
+			if len(manifest.Artifacts) > 0 || len(manifest.ArtifactsByTaskType) > 0 || len(manifest.Delivery) > 0 || len(manifest.DeliveryByTaskType) > 0 || len(manifest.DataDeliveries) > 0 {
+				return fmt.Errorf("interactive Pack must not declare task artifacts or delivery")
+			}
+			if hasSurface(manifest.Surfaces, "task") || hasSurface(manifest.Surfaces, "plan") {
+				return fmt.Errorf("interactive Pack must not expose task or plan surfaces")
+			}
+		} else {
+			if strings.TrimSpace(manifest.Channel) == "" {
+				return fmt.Errorf("managed Pack requires exactly one channel")
+			}
+			if !isSupportedChannel(manifest.Channel) {
+				return fmt.Errorf("unsupported channel %q", manifest.Channel)
+			}
+			if len(manifest.Bindings.TaskKinds) == 0 {
+				return fmt.Errorf("managed Pack requires at least one task kind")
+			}
+			if hasSurface(manifest.Surfaces, "plan") {
+				if strings.TrimSpace(manifest.PlanTaskKind) == "" {
+					return fmt.Errorf("managed Pack with plan surface requires plan_task_kind")
+				}
+				if !containsString(manifest.Bindings.TaskKinds, manifest.PlanTaskKind) {
+					return fmt.Errorf("plan_task_kind %q must be declared in bindings.task_kinds", manifest.PlanTaskKind)
+				}
+			} else if strings.TrimSpace(manifest.PlanTaskKind) != "" {
+				return fmt.Errorf("plan_task_kind requires plan surface")
+			}
 		}
 		if strings.TrimSpace(manifest.Runtime.Profile) == "" {
 			return fmt.Errorf("managed Pack requires runtime.profile")
@@ -299,7 +334,7 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 	if err := validateArtifactContract(manifest.Artifacts); err != nil {
 		return err
 	}
-	if manifest.Kind == KindManaged {
+	if manifest.Kind == KindManaged && !interactive {
 		for taskKind, artifacts := range manifest.ArtifactsByTaskType {
 			if !taskKinds[taskKind] {
 				return fmt.Errorf("artifact override references unbound task type %q (task kind)", taskKind)
@@ -315,7 +350,7 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 	if err := validateDeliveryContract(manifest.Delivery); err != nil {
 		return err
 	}
-	if manifest.Kind == KindManaged {
+	if manifest.Kind == KindManaged && !interactive {
 		for taskKind, deliveries := range manifest.DeliveryByTaskType {
 			if !taskKinds[taskKind] {
 				return fmt.Errorf("delivery override references unbound task kind %q", taskKind)
@@ -328,7 +363,7 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
-	if manifest.Kind == KindManaged {
+	if manifest.Kind == KindManaged && !interactive {
 		for _, taskKind := range manifest.Bindings.TaskKinds {
 			allowsProfileData := taskKind == "profile_analysis" && manifest.hasRequiredDataDelivery("profile_result")
 			if len(manifest.DeliveryForTaskType(taskKind)) == 0 && !allowsProfileData {

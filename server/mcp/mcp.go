@@ -30,6 +30,7 @@ type ExecutionAccessAuthorizer interface {
 type mcpHandlerConfig struct {
 	executionTokens     *serverauth.ExecutionTokenService
 	executionAuthorizer ExecutionAccessAuthorizer
+	interactiveSvc      *service.InteractiveService
 }
 
 // MCPHandlerOption configures optional MCP authentication modes.
@@ -42,6 +43,15 @@ func WithExecutionAuthentication(tokens *serverauth.ExecutionTokenService, autho
 	return func(cfg *mcpHandlerConfig) {
 		cfg.executionTokens = tokens
 		cfg.executionAuthorizer = authorizer
+	}
+}
+
+// WithInteractiveAuthentication lets the MCP transport authenticate the
+// opaque bearer token issued to an interactive runtime. The resolved session
+// identity is placed in TokenInfo.Extra; the token is never exposed to tools.
+func WithInteractiveAuthentication(svc *service.InteractiveService) MCPHandlerOption {
+	return func(cfg *mcpHandlerConfig) {
+		cfg.interactiveSvc = svc
 	}
 }
 
@@ -164,8 +174,8 @@ func NewMCPHandler(apiKeySvc *service.APIKeyService, staticKey string, zlog *zer
 	)
 
 	// Auth middleware: validate bearer token via per-user API keys or static key.
-	verifier := newTokenVerifier(apiKeySvc, staticKey, cfg.executionTokens, cfg.executionAuthorizer, zlog)
-	scoped := executionScopeMiddleware(mcpHTTP, cfg.executionAuthorizer)
+	verifier := newTokenVerifier(apiKeySvc, staticKey, cfg.executionTokens, cfg.executionAuthorizer, cfg.interactiveSvc, zlog)
+	scoped := interactiveScopeMiddleware(executionScopeMiddleware(mcpHTTP, cfg.executionAuthorizer))
 	protected := mcpauth.RequireBearerToken(verifier, nil)(scoped)
 
 	return mcpLoggingMiddleware(protected, zlog)
@@ -191,15 +201,20 @@ func requestIdentityMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
 			taskID, _ = info.Extra["task_id"].(string)
 			executionID, _ = info.Extra["execution_id"].(string)
 		}
+		var interactiveSessionID string
+		if slices.Contains(info.Scopes, "interactive") {
+			interactiveSessionID, _ = info.Extra["interactive_session_id"].(string)
+		}
 		// Empty values intentionally shadow any identity from session setup when
 		// this request uses a user/API-key credential instead of an execution JWT.
 		ctx = withMCPExecutionIdentity(ctx, info.UserID, projectID, taskID, executionID)
+		ctx = withMCPInteractiveIdentity(ctx, info.UserID, interactiveSessionID)
 		return next(ctx, method, req)
 	}
 }
 
 // tokenVerifier validates execution JWTs and per-user API keys, with static key fallback.
-func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, executionTokens *serverauth.ExecutionTokenService, executionAuthorizer ExecutionAccessAuthorizer, zlog *zerolog.Logger) mcpauth.TokenVerifier {
+func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, executionTokens *serverauth.ExecutionTokenService, executionAuthorizer ExecutionAccessAuthorizer, interactiveSvc *service.InteractiveService, zlog *zerolog.Logger) mcpauth.TokenVerifier {
 	return func(ctx context.Context, token string, r *http.Request) (*mcpauth.TokenInfo, error) {
 		if token == "" {
 			if zlog != nil {
@@ -223,6 +238,22 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, execut
 						"project_id":   claims.ProjectID,
 						"task_id":      claims.TaskID,
 						"execution_id": claims.ExecutionID,
+					},
+				}, nil
+			}
+		}
+
+		// Interactive runtime tokens are opaque, short-lived session credentials.
+		// Resolve them before user API keys and retain only the protected session
+		// identity in MCP context.
+		if interactiveSvc != nil {
+			if sessionID, userID, expiresAt, err := interactiveSvc.ResolveRuntimeSession(token); err == nil {
+				return &mcpauth.TokenInfo{
+					UserID:     userID,
+					Scopes:     []string{"mcp", "interactive"},
+					Expiration: expiresAt,
+					Extra: map[string]any{
+						"interactive_session_id": sessionID,
 					},
 				}, nil
 			}
@@ -324,6 +355,43 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 	})
 }
 
+// interactiveScopeMiddleware constrains the opaque credential issued to a
+// one-shot interactive runtime. The runtime can only stage the draft for its
+// own authenticated session; all other MCP tools remain user/API-key scoped.
+func interactiveScopeMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		info := mcpauth.TokenInfoFromContext(r.Context())
+		if info == nil || !slices.Contains(info.Scopes, "interactive") || r.Method != http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		const maximumScopeRequestBytes = 1 << 20
+		body, err := io.ReadAll(io.LimitReader(r.Body, maximumScopeRequestBytes+1))
+		if err != nil {
+			http.Error(w, "invalid MCP request", http.StatusBadRequest)
+			return
+		}
+		if len(body) > maximumScopeRequestBytes {
+			http.Error(w, "MCP request is too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		requests, err := parseScopeRequests(body)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		for _, request := range requests {
+			if request.Method == "tools/call" && request.Params.Name != "stage_project_creator_draft" {
+				http.Error(w, "interactive runtime credential cannot call this MCP tool", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 type scopeRequest struct {
 	Method string `json:"method"`
 	Params struct {
@@ -379,6 +447,7 @@ var executionToolScopes = map[string]executionToolScope{
 	"recompute_agent_feedback":       {RequireTaskID: true, AllowExecutionTarget: true},
 	"get_completion_metadata_status": {RequireTaskID: true, AllowExecutionTarget: true},
 	"create_draft":                   {Denied: true},
+	"stage_project_creator_draft":    {Denied: true},
 	"generate_image":                 {RequireProjectID: true, RequireTaskID: true},
 	"crop_image":                     {RequireTaskID: true},
 	"upload_image":                   {RequireProjectID: true, RequireTaskID: true},
@@ -565,11 +634,18 @@ type mcpExecutionIDContextKey struct{}
 
 type mcpExecutionIdentityContextKey struct{}
 
+type mcpInteractiveIdentityContextKey struct{}
+
 type mcpExecutionIdentity struct {
 	UserID      string
 	ProjectID   string
 	TaskID      string
 	ExecutionID string
+}
+
+type mcpInteractiveIdentity struct {
+	UserID    string
+	SessionID string
 }
 
 func withMCPUserID(ctx context.Context, userID string) context.Context {
@@ -593,6 +669,20 @@ func getMCPExecutionIdentity(ctx context.Context) (mcpExecutionIdentity, bool) {
 	identity, ok := ctx.Value(mcpExecutionIdentityContextKey{}).(mcpExecutionIdentity)
 	if !ok || identity.ExecutionID == "" {
 		return mcpExecutionIdentity{}, false
+	}
+	return identity, true
+}
+
+func withMCPInteractiveIdentity(ctx context.Context, userID, sessionID string) context.Context {
+	return context.WithValue(ctx, mcpInteractiveIdentityContextKey{}, mcpInteractiveIdentity{
+		UserID: strings.TrimSpace(userID), SessionID: strings.TrimSpace(sessionID),
+	})
+}
+
+func getMCPInteractiveIdentity(ctx context.Context) (mcpInteractiveIdentity, bool) {
+	identity, ok := ctx.Value(mcpInteractiveIdentityContextKey{}).(mcpInteractiveIdentity)
+	if !ok || identity.SessionID == "" {
+		return mcpInteractiveIdentity{}, false
 	}
 	return identity, true
 }

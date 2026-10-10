@@ -59,6 +59,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"scoreArticleHandler":                     "svcs.ArticleScoreSvc.Score",
 	"searchWebHandler":                        "svcs.SearchSvc.Search",
 	"searchSeednoteFeedsHandler":              "svcs.SeednoteCapabilitySvc.SearchFeeds",
+	"stageProjectCreatorDraftHandler":         "svcs.InteractiveSvc.StageDraftForSession",
 	"submitProfileResultHandler":              "svcs.ProjectSvc.ApplyAgentProfileResult",
 	"taskCancelHandler":                       "svcs.TaskSvc.CancelForUser",
 	"taskFilesHandler":                        "svcs.TaskSvc.GetVisibleFilesForUser",

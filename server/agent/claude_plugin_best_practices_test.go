@@ -611,20 +611,21 @@ func TestClaudeCodeManagedAgentsDeclareAutonomousExecution(t *testing.T) {
 		}
 		path := filepath.Join(root, "agents", pack.Agent.Name+".md")
 		body := readRepoFile(t, path)
-		wants := []string{
+		if pack.Interaction != nil && pack.Interaction.UserQuestions {
+			for _, want := range []string{"允许使用 `AskUserQuestion`", "不得把临时草稿当成已确认的正式画像"} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("%s missing interactive contract %q", path, want)
+				}
+			}
+			continue
+		}
+		for _, want := range []string{
 			"全自动执行契约",
 			"不得调用 `AskUserQuestion`",
 			"不得在文本中向用户提问",
+			"任务输入 -> 项目默认 -> 服务端默认 -> 能力注册表推荐",
 			"结构化失败诊断",
-		}
-		if pack.ID == "profile-analysis" {
-			// Profile analysis consumes the frozen Server input rather than
-			// resolving generation options from mutable project defaults.
-			wants = append(wants, "get_task", "expected_revision", "不更换 expected_revision 重试")
-		} else {
-			wants = append(wants, "任务输入 -> 项目默认 -> 服务端默认 -> 能力注册表推荐")
-		}
-		for _, want := range wants {
+		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing autonomous contract %q", path, want)
 			}

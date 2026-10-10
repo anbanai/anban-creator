@@ -49,6 +49,22 @@ type Config struct {
 	Ilink              IlinkConfig                     `yaml:"ilink"`
 	Trends             TrendsConfig                    `yaml:"trends"`
 	Search             SearchConfig                    `yaml:"search"`
+	Interactive        InteractiveConfig               `yaml:"interactive"`
+}
+
+// InteractiveConfig gates process-local conversational sessions. No executable
+// or model is selectable from a browser request.
+type InteractiveConfig struct {
+	Enabled           bool     `yaml:"enabled"`
+	AdminOnly         bool     `yaml:"admin_only"`
+	BridgeCommand     string   `yaml:"bridge_command"`
+	BridgeArgs        []string `yaml:"bridge_args"`
+	BridgeDir         string   `yaml:"bridge_dir"`
+	DSHPatch          string   `yaml:"dsh_patch"`
+	Provider          string   `yaml:"provider"`
+	ProviderAPIKeyEnv string   `yaml:"provider_api_key_env"`
+	Model             string   `yaml:"model"`
+	MCPURL            string   `yaml:"mcp_url"`
 }
 
 type TrendsConfig struct {
@@ -60,7 +76,7 @@ type TrendsConfig struct {
 // intentionally kept in server configuration and are never exposed to Agents.
 type SearchConfig struct {
 	Enabled  bool               `yaml:"enabled"`
-	Provider string             `yaml:"provider"` // custom or global
+	Provider string             `yaml:"provider"`
 	Custom   SearchDoubaoConfig `yaml:"custom"`
 	Global   SearchDoubaoConfig `yaml:"global"`
 }
@@ -669,6 +685,7 @@ func (c ClaudeConfig) Validate() error {
 
 var immutableRuntimeImagePattern = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 var agentPackCatalogDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var interactiveProviderAPIKeyEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func imageForProfile(images RuntimeImages, profile string) string {
 	return strings.TrimSpace(images[profile])
@@ -969,6 +986,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"ilink":           true,
 		"trends":          true,
 		"search":          true,
+		"interactive":     true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -1032,18 +1050,21 @@ func expandEnvVars(data []byte) []byte {
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
 	applySearchDefaults := func(cfg *SearchDoubaoConfig, endpoint string) {
-		if cfg.Endpoint == "" {
-			cfg.Endpoint = endpoint
-		}
-		if cfg.Timeout == 0 {
-			cfg.Timeout = 30 * time.Second
-		}
-		if cfg.MaxWebResults == 0 {
-			cfg.MaxWebResults = 10
-		}
+		if cfg.Endpoint == "" { cfg.Endpoint = endpoint }
+		if cfg.Timeout == 0 { cfg.Timeout = 30 * time.Second }
+		if cfg.MaxWebResults == 0 { cfg.MaxWebResults = 10 }
 	}
 	applySearchDefaults(&c.Search.Custom, "https://open.feedcoopapi.com/search_api/web_search")
 	applySearchDefaults(&c.Search.Global, "https://open.feedcoopapi.com/search_api/global_search")
+	if c.Interactive.BridgeDir == "" {
+		c.Interactive.BridgeDir = "./runtime-dsh"
+	}
+	if c.Interactive.DSHPatch == "" {
+		c.Interactive.DSHPatch = "./harness/dsh/project-creator.patch.yml"
+	}
+	if c.Interactive.ProviderAPIKeyEnv == "" {
+		c.Interactive.ProviderAPIKeyEnv = "DEEPSEEK_API_KEY"
+	}
 	if c.Claude.RuntimeImages == nil {
 		c.Claude.RuntimeImages = RuntimeImages{}
 	}
@@ -1536,6 +1557,12 @@ func (c *Config) AgentServerURL() string {
 // applyDefaults (and after ${VAR} expansion in NewConfig) so that values
 // supplied via the environment are also resolved.
 func (c *Config) resolvePaths(rootConfigDir string) {
+	if c.Interactive.BridgeDir != "" && !filepath.IsAbs(c.Interactive.BridgeDir) {
+		c.Interactive.BridgeDir = filepath.Join(rootConfigDir, c.Interactive.BridgeDir)
+	}
+	if c.Interactive.DSHPatch != "" && !filepath.IsAbs(c.Interactive.DSHPatch) {
+		c.Interactive.DSHPatch = filepath.Join(rootConfigDir, c.Interactive.DSHPatch)
+	}
 	if c.BillingRuntime.ConfigDir != "" && !filepath.IsAbs(c.BillingRuntime.ConfigDir) {
 		c.BillingRuntime.ConfigDir = filepath.Join(rootConfigDir, c.BillingRuntime.ConfigDir)
 	}
@@ -1595,6 +1622,9 @@ func detectPluginDir() string {
 // Validate checks that required configuration fields are set.
 func (c *Config) Validate() error {
 	var errs []string
+	if !interactiveProviderAPIKeyEnvPattern.MatchString(c.Interactive.ProviderAPIKeyEnv) {
+		errs = append(errs, "interactive.provider_api_key_env must be a valid environment variable name")
+	}
 	if c.Trends.TTL <= 0 {
 		errs = append(errs, "trends.ttl must be positive")
 	}
@@ -1607,31 +1637,18 @@ func (c *Config) Validate() error {
 		}
 		var selected *SearchDoubaoConfig
 		switch strings.TrimSpace(c.Search.Provider) {
-		case "custom":
-			selected = &c.Search.Custom
-		case "global":
-			selected = &c.Search.Global
-		default:
-			errs = append(errs, fmt.Sprintf("search.provider %q is unsupported", c.Search.Provider))
+		case "custom": selected = &c.Search.Custom
+		case "global": selected = &c.Search.Global
+		default: errs = append(errs, fmt.Sprintf("search.provider %q is unsupported", c.Search.Provider))
 		}
 		if selected != nil {
 			prefix := "search." + strings.TrimSpace(c.Search.Provider)
-			if strings.TrimSpace(selected.Endpoint) == "" {
-				errs = append(errs, prefix+".endpoint is required when search is enabled")
-			}
-			if strings.TrimSpace(selected.APIKey) == "" {
-				errs = append(errs, prefix+".api_key is required when search is enabled")
-			}
-			if selected.Timeout <= 0 {
-				errs = append(errs, prefix+".timeout must be positive when search is enabled")
-			}
+			if strings.TrimSpace(selected.Endpoint) == "" { errs = append(errs, prefix+".endpoint is required when search is enabled") }
+			if strings.TrimSpace(selected.APIKey) == "" { errs = append(errs, prefix+".api_key is required when search is enabled") }
+			if selected.Timeout <= 0 { errs = append(errs, prefix+".timeout must be positive when search is enabled") }
 			maxResults := 50
-			if strings.TrimSpace(c.Search.Provider) == "global" {
-				maxResults = 20
-			}
-			if selected.MaxWebResults <= 0 || selected.MaxWebResults > maxResults {
-				errs = append(errs, fmt.Sprintf("%s.max_web_results must be between 1 and %d when search is enabled", prefix, maxResults))
-			}
+			if strings.TrimSpace(c.Search.Provider) == "global" { maxResults = 20 }
+			if selected.MaxWebResults <= 0 || selected.MaxWebResults > maxResults { errs = append(errs, fmt.Sprintf("%s.max_web_results must be between 1 and %d when search is enabled", prefix, maxResults)) }
 		}
 	}
 	if err := c.Claude.Validate(); err != nil {

@@ -25,7 +25,7 @@ metadata:
   labels:
     app: ${micro_service_name}
     version: ${version_switch}
-    anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest_short}
+    anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest}
   annotations:
     anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest}
 spec:
@@ -38,7 +38,7 @@ spec:
       labels:
         app: ${micro_service_name}
         version: ${version_switch}
-        anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest_short}
+        anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest}
     spec:
       serviceAccountName: creator-server
       initContainers:

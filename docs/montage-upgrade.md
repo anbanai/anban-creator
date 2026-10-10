@@ -89,7 +89,7 @@ SHA keeps runtime builds reviewable and reproducible.
 cd server && go test ./agent -run Montage -count=1
 cd server && go test ./service -run Montage -count=1
 cd server && go test ./config -run Montage -count=1
-(cd agent-ts && bun run typecheck && bun run test && bun run build)
+(cd runtime-claude && bun run typecheck && bun run test && bun run build)
 (cd studio && bun run test -- src/lib/montage-form.test.ts src/pages/MontageUx.contract.test.ts src/lib/schemas.test.ts)
 ```
 

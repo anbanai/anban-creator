@@ -96,9 +96,8 @@ describe("validateBootstrapResponse", () => {
         workloadTokenFile: "/token",
         allowHTTPServer: false,
       };
-      await expect(bootstrap(config, "workload-token", undefined, new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname)).rejects.toThrow("HTTP 503");
+      await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
       expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("6");
-      expect(request?.headers.get("X-Anban-Agent-Pack-Catalog-Digest")).toMatch(/^[0-9a-f]{64}$/);
       expect(request?.body).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
@@ -120,7 +119,7 @@ describe("validateBootstrapResponse", () => {
         workloadTokenFile: "/token",
         allowHTTPServer: false,
       };
-      await expect(bootstrap(config, "workload-token", undefined, new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname)).rejects.toThrow(
+      await expect(bootstrap(config, "workload-token")).rejects.toThrow(
         "bootstrap returned HTTP 426: agent_runtime_upgrade_required: agent runtime contract upgrade required",
       );
     } finally {

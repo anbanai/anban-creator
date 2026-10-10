@@ -17,7 +17,7 @@ test -s /opt/hypit/skills/hypit/SKILL.md
 test -s /opt/hypit/LICENSE
 (cd /opt/hypit && sha256sum --quiet -c .anban-source-files.sha256)
 node --input-type=module <<'JS'
-import { prepareHypitToolHome } from '/app/anban-agent/dist/hypit.js';
+import { prepareHypitToolHome } from '/app/runtime-claude/dist/hypit.js';
 await prepareHypitToolHome('/workspace', process.env);
 JS
 hypit --version
@@ -61,7 +61,7 @@ cat > productions/main/runs/main.svrun <<'RUN'
 RUN
 node --input-type=module <<'JS'
 import { mkdir, rename, writeFile } from 'node:fs/promises';
-import { exportHypitProject, prepareHypitWorkspace, validateHypitReferences } from '/app/anban-agent/dist/hypit.js';
+import { exportHypitProject, prepareHypitWorkspace, validateHypitReferences } from '/app/runtime-claude/dist/hypit.js';
 await validateHypitReferences('/workspace/project');
 await mkdir('/workspace/.anban-creator', { recursive: true });
 await exportHypitProject('/workspace/project', '/workspace/.anban-creator/project.zip');

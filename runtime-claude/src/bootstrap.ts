@@ -151,8 +151,9 @@ export interface AgentPack {
   digest: string;
   agent: { name: string };
   bindings: { task_kinds?: string[]; task_types?: string[] };
+  interaction?: { user_questions?: boolean };
   runtime: { profile?: string; adapter?: string; max_turns?: number };
-  artifacts: AgentPackArtifact[];
+  artifacts?: AgentPackArtifact[];
   artifacts_by_task_type?: Record<string, AgentPackArtifact[]>;
 }
 
@@ -166,7 +167,7 @@ export interface AgentPackCatalog {
 }
 
 export function resolveAgentPackForTaskType(pack: AgentPack, taskType: string): AgentPack {
-  const selected = pack.artifacts_by_task_type?.[taskType] ?? pack.artifacts;
+  const selected = pack.artifacts_by_task_type?.[taskType] ?? pack.artifacts ?? [];
   const artifacts = selected.map((artifact) => ({ ...artifact }));
   const { artifacts_by_task_type: _overrides, ...resolved } = pack;
   return { ...resolved, artifacts };
@@ -198,15 +199,10 @@ export async function readWorkloadToken(path: string): Promise<string> {
   return token;
 }
 
-export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal, catalogPath = DEFAULT_AGENT_PACK_CATALOG_PATH): Promise<ResolvedBootstrapResponse> {
-  const localCatalog = await readAgentPackCatalogWithDigest(catalogPath);
+export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse> {
   const response = await fetch(`${config.serverURL}/api/v1/agent/bootstrap`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION),
-      "X-Anban-Agent-Pack-Catalog-Digest": localCatalog.digest,
-    },
+    headers: { Authorization: `Bearer ${token}`, "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION) },
     signal,
     redirect: "error",
   });
@@ -221,6 +217,7 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
   if (envelope.code !== 0 || !envelope.data) throw new Error("bootstrap request rejected");
   try {
     const data = validateBootstrapResponse(config.executionID, envelope.data);
+    const localCatalog = await readAgentPackCatalogWithDigest();
     validateAgentPackCatalogDigest(data, localCatalog.digest);
     const pack = validateAgentPackCatalog(data, localCatalog.catalog);
     return { ...data, resolved_agent_pack: pack };
@@ -385,10 +382,14 @@ export function validateAgentPackCatalog(data: BootstrapResponse, catalog: Agent
 function validateAgentPackCatalogShape(input: unknown): asserts input is AgentPackCatalog {
   if (!isRecord(input) || !Array.isArray(input.packs)) throw new Error("Agent Pack Catalog is invalid");
   for (const rawPack of input.packs) {
-    if (!isRecord(rawPack) || !Array.isArray(rawPack.artifacts)) {
+    if (!isRecord(rawPack) || (rawPack.artifacts !== undefined && !Array.isArray(rawPack.artifacts))) {
       throw new Error("Agent Pack Catalog artifacts are invalid");
     }
-    validateArtifactContract(rawPack.artifacts);
+    const interactive = isRecord(rawPack.interaction) && rawPack.interaction.user_questions === true;
+    if (rawPack.artifacts === undefined && !interactive) {
+      throw new Error("Agent Pack Catalog artifacts are invalid");
+    }
+    if (rawPack.artifacts !== undefined) validateArtifactContract(rawPack.artifacts);
     if (rawPack.artifacts_by_task_type === undefined) continue;
     if (!isRecord(rawPack.artifacts_by_task_type) || !isRecord(rawPack.bindings) || !(Array.isArray(rawPack.bindings.task_kinds) || Array.isArray(rawPack.bindings.task_types))) {
       throw new Error("Agent Pack Catalog artifact overrides are invalid");

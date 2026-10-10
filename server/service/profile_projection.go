@@ -40,6 +40,18 @@ func ProfileDimensionMarkdown(name string, dimension model.ProfileDimension) (st
 		markdownList(dimension.MissingFields)), nil
 }
 
+// ProfileDimensionMarkdownAtVersion adds a server-owned version marker to a
+// rebuildable projection. The marker lets the NAS reject a late retry of an
+// older database revision without treating ordinary user Markdown as a
+// versioned profile file.
+func ProfileDimensionMarkdownAtVersion(name string, dimension model.ProfileDimension, version int64) (string, error) {
+	content, err := ProfileDimensionMarkdown(name, dimension)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("<!-- anban-profile-version: %d -->\n%s", version, content), nil
+}
+
 func markdownList(values []string) string {
 	if len(values) == 0 {
 		return "- 无"
@@ -84,4 +96,10 @@ func ProfileAgentsMarkdown() string {
 - 画像文件不属于 Agent 自动记忆，不要写入 .claude/agent-memory/*/MEMORY.md。
 - 数据不足时保留缺失字段，不得编造结论。
 `
+}
+
+// ProfileAgentsMarkdownAtVersion is the versioned form used for the
+// Server-owned AGENTS.md projection.
+func ProfileAgentsMarkdownAtVersion(version int64) string {
+	return fmt.Sprintf("<!-- anban-profile-version: %d -->\n%s", version, ProfileAgentsMarkdown())
 }

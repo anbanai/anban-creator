@@ -65,7 +65,6 @@ if [[ ! "$image_repo" =~ @sha256:[0-9a-f]{64}$ ]]; then
 fi
 
 agent_pack_catalog_digest=$catalog_digest
-agent_pack_catalog_digest_short=${catalog_digest:0:16}
 wechat_article_agent_image_repo=$(jq -r '.images["wechat-article"] // empty' "$manifest_path")
 wechat_picture_agent_image_repo=$(jq -r '.images["wechat-picture"] // empty' "$manifest_path")
 seednote_agent_image_repo=$(jq -r '.images.seednote // empty' "$manifest_path")
@@ -85,7 +84,7 @@ for profile in wechat_article wechat_picture seednote montage moments ecommerce 
   fi
 done
 
-export image_repo agent_pack_catalog_digest agent_pack_catalog_digest_short
+export image_repo agent_pack_catalog_digest
 export wechat_article_agent_image_repo wechat_picture_agent_image_repo
 export seednote_agent_image_repo montage_agent_image_repo moments_agent_image_repo
 export ecommerce_agent_image_repo profile_analysis_agent_image_repo

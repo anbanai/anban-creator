@@ -1615,6 +1615,76 @@ func TestProjectHandlerMemoryPreviewRequiresOwnershipAndDoesNotCache(t *testing.
 	}
 }
 
+func TestProjectHandlerMemoryUpdateUsesContentCASAndProtectsServerFiles(t *testing.T) {
+	_, repo, _ := setupProjectHandlerTest(t)
+	ctx := context.Background()
+	ownerID := uuid.NewString()
+	projectID := uuid.NewString()
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: ownerID, Platform: model.PlatformWechat, Name: "Memory", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	memoryStore, err := projectmemory.NewFilesystemStore(root, projectmemory.Limits{MaxProjectBytes: 1 << 20, MaxFiles: 64, MaxDepth: 4, MaxFileBytes: 64 << 10, MaxPreviewBytes: 256 << 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.EnsureProject(ctx, projectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := memoryStore.WriteMarkdownFile(ctx, projectID, "notes/preferences.md", "old\n"); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewProjectHandler(service.NewProjectService(repo, &logger), &logger)
+	h.SetProjectMemoryStore(memoryStore)
+	app := fiber.New()
+	app.Put("/api/v1/projects/:id/memory", func(c fiber.Ctx) error {
+		c.Locals("user_id", c.Get("X-User-ID"))
+		return h.UpdateMemory(c)
+	})
+	app.Get("/api/v1/projects/:id/memory", func(c fiber.Ctx) error {
+		c.Locals("user_id", c.Get("X-User-ID"))
+		return h.Memory(c)
+	})
+
+	resp := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID+"/memory", ownerID, map[string]any{
+		"path": "notes/preferences.md", "expected_content": "old\n", "content": "new\n",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CAS update status = %d, want 200", resp.StatusCode)
+	}
+	view, err := memoryStore.ReadProject(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Files) != 1 || view.Files[0].Content != "new\n" {
+		t.Fatalf("updated memory = %#v", view.Files)
+	}
+
+	resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID+"/memory", ownerID, map[string]any{
+		"path": "notes/preferences.md", "expected_content": "old\n", "content": "stale overwrite\n",
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale CAS status = %d, want 409", resp.StatusCode)
+	}
+
+	for _, protected := range []string{"AGENTS.md", "CLAUDE.md", "profile/identity.md", ".claude/agent-memory/MEMORY.md"} {
+		resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID+"/memory", ownerID, map[string]any{
+			"path": protected, "expected_content": "", "content": "blocked\n",
+		})
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("protected path %q status = %d, want 403", protected, resp.StatusCode)
+		}
+	}
+
+	resp = doRequest(t, app, http.MethodPut, "/api/v1/projects/"+projectID+"/memory", uuid.NewString(), map[string]any{
+		"path": "notes/preferences.md", "expected_content": "new\n", "content": "foreign\n",
+	})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign update status = %d, want 403", resp.StatusCode)
+	}
+}
+
 func TestProjectHandlerMemoryPreviewBoundsSerializedResponse(t *testing.T) {
 	_, repo, _ := setupProjectHandlerTest(t)
 	ctx := context.Background()

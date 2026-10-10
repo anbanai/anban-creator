@@ -60,9 +60,6 @@ image set in `release/agent-runtime-manifest.json`. Use
 `scripts/render-ack-server-deployment.sh --manifest release/agent-runtime-manifest.json`
 to inject that set into the ACK template. The render step rejects mutable tags,
 missing images, a different Server digest, or a missing Catalog digest.
-The release workflow publishes images to GHCR, so configure the repository
-variable `ACK_IMAGE_PULL_SECRET` with a Kubernetes image pull secret that can
-read those GHCR packages before creating a release.
 
 ## Quick Start
 
@@ -105,8 +102,11 @@ cd studio && bun run test
 # Frontend production build
 cd studio && bun run build
 
-# TypeScript Agent runtime
-cd agent-ts && npm ci && bun run test && bun run typecheck && bun run build
+# Claude runtime
+cd runtime-claude && npm ci && bun run test && bun run typecheck && bun run build
+
+# DSH interactive runtime
+cd runtime-dsh && npm ci && bun run test && bun run typecheck && bun run build
 
 # Format and vet Go code
 make fmt
@@ -255,7 +255,8 @@ Users can configure per-account platform credentials and per-user model settings
 
 ```text
 server/       Go module: API server plus server/app reusable content and publishing packages
-agent-ts/     TypeScript Agent runtime used by Docker/Kubernetes managed execution
+runtime-claude/     TypeScript Agent runtime used by Docker/Kubernetes managed execution
+runtime-dsh/        TypeScript DSH runtime used by temporary interactive sessions
 studio/       React Web Studio
 harness/ Unified Claude Code and Codex plugin: shared skills plus native agents, manifests, MCP, hooks, and installers
 docs/         Design specs and implementation plans

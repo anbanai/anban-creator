@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { render } from '@/test/test-utils'
@@ -6,11 +6,14 @@ import { ProjectMemoryDialog } from './ProjectMemoryDialog'
 import { projectsApi } from '@/lib/api/projects'
 
 vi.mock('@/lib/api/projects', () => ({
-  projectsApi: { memory: vi.fn() },
+  projectsApi: { memory: vi.fn(), updateMemory: vi.fn() },
 }))
 
 describe('ProjectMemoryDialog', () => {
-  beforeEach(() => vi.mocked(projectsApi.memory).mockReset())
+  beforeEach(() => {
+    vi.mocked(projectsApi.memory).mockReset()
+    vi.mocked(projectsApi.updateMemory).mockReset()
+  })
 
   it('loads only when opened, prioritizes MEMORY.md, switches files, and blocks images', async () => {
     vi.mocked(projectsApi.memory).mockResolvedValue({
@@ -78,6 +81,46 @@ describe('ProjectMemoryDialog', () => {
     expect(await screen.findByText('还没有创作项目记忆')).toBeInTheDocument()
     expect(screen.getByRole('dialog', { name: '创作项目记忆' })).toBeInTheDocument()
     expect(projectsApi.memory).toHaveBeenCalledTimes(2)
+  })
+
+  it('edits an unprotected markdown file through the CAS API and refreshes', async () => {
+    vi.mocked(projectsApi.memory)
+      .mockResolvedValueOnce({
+        status: 'ready', updated_at: null, partial: false,
+        files: [{ path: 'notes/style.md', content: '旧风格', size_bytes: 9, modified_at: '2026-09-22T03:45:00Z', truncated: false }],
+      })
+      .mockResolvedValueOnce({
+        status: 'ready', updated_at: null, partial: false,
+        files: [{ path: 'notes/style.md', content: '新风格', size_bytes: 9, modified_at: '2026-09-22T03:46:00Z', truncated: false }],
+      })
+    vi.mocked(projectsApi.updateMemory).mockResolvedValue({
+      status: 'ready', updated_at: null, partial: false,
+      files: [{ path: 'notes/style.md', content: '新风格', size_bytes: 9, modified_at: '2026-09-22T03:46:00Z', truncated: false }],
+    })
+
+    render(<ProjectMemoryDialog projectId="editable" projectName="创作项目" open onOpenChange={() => {}} />)
+    expect(await screen.findByText('旧风格')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const editor = screen.getByRole('textbox', { name: '编辑记忆文件' })
+    fireEvent.change(editor, { target: { value: '新风格' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(projectsApi.updateMemory).toHaveBeenCalledWith('editable', {
+      path: 'notes/style.md', expected_content: '旧风格', content: '新风格',
+    }))
+    await waitFor(() => expect(projectsApi.memory).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('textbox', { name: '编辑记忆文件' })).not.toBeInTheDocument()
+    expect(screen.getByText('新风格')).toBeInTheDocument()
+  })
+
+  it('does not expose editing for server-managed memory files', async () => {
+    vi.mocked(projectsApi.memory).mockResolvedValue({
+      status: 'ready', updated_at: null, partial: false,
+      files: [{ path: 'MEMORY.md', content: 'managed', size_bytes: 7, modified_at: '2026-09-22T03:45:00Z', truncated: false }],
+    })
+    render(<ProjectMemoryDialog projectId="managed" projectName="创作项目" open onOpenChange={() => {}} />)
+    expect(await screen.findByText('managed')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
   })
 
 })

@@ -29,6 +29,7 @@ import { wechatAnalyticsImportApi } from './wechat-analytics-import'
 import { wechatAccountAnalyticsImportApi } from './wechat-account-analytics-import'
 import { imageAnalysesApi } from './image-analyses'
 import { trendsApi } from './trends'
+import { interactiveApi } from './interactive'
 
 export const api = {
   auth: authApi,
@@ -62,4 +63,5 @@ export const api = {
   wechatAccountAnalyticsImport: wechatAccountAnalyticsImportApi,
   imageAnalyses: imageAnalysesApi,
   trends: trendsApi,
+  interactive: interactiveApi,
 }

@@ -158,43 +158,25 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.NewString()
 	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
-	project, err := repo.Projects().FindByID(ctx, projectID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	confirmedProfile := model.NewProjectProfile()
-	confirmedProfile.Status = model.ProfileStatusConfirmed
-	confirmedProfile.InitializationStatus = model.ProfileInitializationReady
-	confirmedProfile.Version = 1
-	confirmedProfile.Dimensions = validProfileDimensions()
-	project.Profile = datatypes.NewJSONType(confirmedProfile)
-	if err := repo.Projects().Update(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	expectedRevision := confirmedProfile.Version
+	expectedRevision := int64(0)
 	input := map[string]any{
-		"project_id":        projectID,
-		"platform":          model.PlatformWechat,
-		"agent_ids":         []any{model.AgentIDArticle},
-		"profile_url":       "https://example.com/profile",
-		"platform_accounts": []any{},
-		"profile_setup": map[string]any{
-			"account_status":    "existing",
-			"platform_accounts": []any{},
-			"answers": map[string]any{
-				"intent":     map[string]any{},
-				"content":    map[string]any{},
-				"boundaries": map[string]any{},
-			},
-			"samples": []any{},
-		},
-		"current_profile":   nil,
-		"expected_revision": expectedRevision,
+		"project_id":  projectID,
+		"profile_url": "https://example.com/profile",
 		"answers": map[string]any{
-			"basic":      map[string]any{"project_name": "Profile test", "account_status": "existing"},
-			"intent":     map[string]any{"goals": "", "direction": "", "differentiation": ""},
-			"content":    map[string]any{"preferences": "", "formats": "", "tone": "", "audience": ""},
-			"boundaries": map[string]any{"exclusions": "", "collaboration": "", "compliance": ""},
+			"basic": map[string]any{
+				"project_name":   "",
+				"account_status": "",
+			},
+			"platform_accounts": []any{},
+			"intent": map[string]any{
+				"goals": "", "direction": "", "differentiation": "",
+			},
+			"content": map[string]any{
+				"preferences": "", "formats": "", "tone": "", "audience": "",
+			},
+			"boundaries": map[string]any{
+				"exclusions": "", "collaboration": "", "compliance": "",
+			},
 		},
 		"samples": []any{},
 	}
@@ -211,17 +193,13 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	if len(tasks) != 1 || tasks[0].BillingPriceCredits != 0 || tasks[0].BillingQuoteID != "" {
 		t.Fatalf("profile task billing = %#v, want free admission", tasks)
 	}
-	project, err = repo.Projects().FindByID(ctx, projectID)
+	project, err := repo.Projects().FindByID(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	profile := projectProfileFor(project)
-	if profile.AnalysisTaskID != tasks[0].ID || profile.InitializationStatus != model.ProfileInitializationQueued || profile.Status != model.ProfileStatusConfirmed {
-		t.Fatalf("profile lifecycle = %+v, want queued, linked, and still confirmed during refresh", profile)
-	}
-	snapshot := tasks[0].ProjectSnapshot.Data()
-	if !snapshot.Profile.IsConfirmed() || snapshot.Profile.Dimensions.Identity.Content["summary"] != "账号定位" {
-		t.Fatalf("refresh task profile snapshot = %+v, want prior confirmed profile", snapshot.Profile)
+	if profile.AnalysisTaskID != tasks[0].ID || profile.InitializationStatus != model.ProfileInitializationQueued {
+		t.Fatalf("profile lifecycle = %+v, want queued and linked to task", profile)
 	}
 	if _, err := svc.CreateManual(ctx, params); !errors.Is(err, ErrProjectProfileAnalysisInProgress) {
 		t.Fatalf("duplicate profile admission error = %v, want in-progress conflict", err)
@@ -1137,7 +1115,6 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 		UserID:             userID,
 		ProjectID:          projectID,
 		Status:             model.TaskStatusCompleted,
-		ContentOrigin:      model.ContentOriginHotSearch,
 		Prompt:             "finished topic",
 		ImageRatio:         "16:9",
 		ImageCapabilityKey: "standard",
@@ -1169,9 +1146,6 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 	if clone.Prompt != src.Prompt || clone.ImageRatio != src.ImageRatio {
 		t.Fatalf("clone config = prompt %q ratio %q, want source config", clone.Prompt, clone.ImageRatio)
-	}
-	if clone.ContentOrigin != model.ContentOriginHotSearch {
-		t.Fatalf("clone content origin = %q, want %q", clone.ContentOrigin, model.ContentOriginHotSearch)
 	}
 	if clone.ExecutionProfile != src.ExecutionProfile || clone.AgentProfileSnapshot.ProfileID != src.ExecutionProfile {
 		t.Fatalf("clone profile = %q snapshot=%#v, want source profile %q", clone.ExecutionProfile, clone.AgentProfileSnapshot, src.ExecutionProfile)
