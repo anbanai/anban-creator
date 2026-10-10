@@ -575,7 +575,7 @@ func TestProjectToolSchemasIncludeMoments(t *testing.T) {
 	assertToolEnumContains("get_project_profile", "scope", "montage")
 }
 
-func TestGetProjectProfileRequiresTaskAndSupportsWhiteboardScope(t *testing.T) {
+func TestGetProjectProfileKeepsTaskOptionalAndSupportsCreativeScopes(t *testing.T) {
 	handler := NewMCPHandler(nil, "test-key", nil)
 	for _, tool := range listMCPToolsForTest(t, handler) {
 		entry, ok := tool.(map[string]any)
@@ -595,6 +595,15 @@ func TestGetProjectProfileRequiresTaskAndSupportsWhiteboardScope(t *testing.T) {
 		if !found {
 			t.Fatalf("get_project_profile.scope enum = %v, missing whiteboard-animation", values)
 		}
+		found = false
+		for _, value := range values {
+			if value == "wechat-picture" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("get_project_profile.scope enum = %v, missing wechat-picture", values)
+		}
 		required := schema["required"].([]any)
 		found = false
 		for _, value := range required {
@@ -602,8 +611,8 @@ func TestGetProjectProfileRequiresTaskAndSupportsWhiteboardScope(t *testing.T) {
 				found = true
 			}
 		}
-		if !found {
-			t.Fatalf("get_project_profile required = %v, missing task_id", required)
+		if found {
+			t.Fatalf("get_project_profile required = %v, task_id must remain optional for project-level reads", required)
 		}
 		return
 	}

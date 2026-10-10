@@ -152,10 +152,10 @@ func registerProjectTools(server *mcp.Server) {
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"wechat", "seednote", "moments", "ecommerce", "montage", "hypit", "whiteboard-animation"}, "description": "Optional output-shape hint."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"wechat", "wechat-picture", "seednote", "moments", "ecommerce", "montage", "hypit", "whiteboard-animation"}, "description": "Optional output-shape hint."},
 				"task_id":    map[string]any{"type": "string", "description": "Task UUID for resolving its frozen project_snapshot; it must belong to the same project and user."},
 			},
-			"required": []any{"project_id", "task_id"},
+			"required": []any{"project_id"},
 		},
 	}, accountInfoHandler)
 }

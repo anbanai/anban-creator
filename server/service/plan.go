@@ -213,7 +213,23 @@ func (s *PlanService) planEntryPlan(ctx context.Context, userID, planID string) 
 }
 
 func validatePlanProjectAgentSelection(ctx context.Context, repo repository.Repository, projectID string, ids []string) error {
-	project, err := repo.Projects().FindByID(ctx, projectID)
+	return validatePlanProjectAgentSelectionWithLookup(ctx, repo, projectID, ids, false)
+}
+
+func validatePlanProjectAgentSelectionLocked(ctx context.Context, repo repository.Repository, projectID string, ids []string) error {
+	return validatePlanProjectAgentSelectionWithLookup(ctx, repo, projectID, ids, true)
+}
+
+func validatePlanProjectAgentSelectionWithLookup(ctx context.Context, repo repository.Repository, projectID string, ids []string, lock bool) error {
+	var (
+		project *model.Project
+		err     error
+	)
+	if lock {
+		project, err = repo.Projects().FindByIDForUpdate(ctx, projectID)
+	} else {
+		project, err = repo.Projects().FindByID(ctx, projectID)
+	}
 	if err != nil {
 		return fmt.Errorf("find plan project: %w", err)
 	}
@@ -620,6 +636,15 @@ func (s *PlanService) updatePlan(ctx context.Context, p UpdatePlanParams, expect
 		return nil, ErrPlanUpdateConflict
 	}
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		if p.AgentIDs != nil {
+			// The project selection can change after preparePlanUpdate and the
+			// optimistic preflight above. Lock and re-read it in the same
+			// transaction that writes the plan and entries so a plan can never
+			// commit an Agent disabled before admission completes.
+			if err := validatePlanProjectAgentSelectionLocked(ctx, tx, plan.ProjectID, *p.AgentIDs); err != nil {
+				return err
+			}
+		}
 		if expectedID == nil {
 			if err := tx.Plans().UpdateEditable(ctx, plan, scheduleChanged); err != nil {
 				return fmt.Errorf("update plan: %w", err)

@@ -48,6 +48,25 @@ type planCASRepositoryOverride struct {
 	plans repository.PlanRepository
 }
 
+type interleavingProjectRepository struct {
+	repository.ProjectRepository
+}
+
+type interleavingPlanRepository struct {
+	repository.Repository
+	projects repository.ProjectRepository
+	beforeTx func()
+}
+
+func (r interleavingPlanRepository) Projects() repository.ProjectRepository { return r.projects }
+
+func (r interleavingPlanRepository) WithTx(ctx context.Context, fn func(repository.Repository) error) error {
+	if r.beforeTx != nil {
+		r.beforeTx()
+	}
+	return r.Repository.WithTx(ctx, fn)
+}
+
 func (r planCASRepositoryOverride) Plans() repository.PlanRepository {
 	return r.plans
 }
@@ -1346,5 +1365,57 @@ func TestPlanServiceHonorsPersistedProjectObjectSelection(t *testing.T) {
 	stored, err := repo.PlanEntries().ListByPlanID(ctx, plan.ID)
 	if err != nil || len(stored) != 1 || stored[0].AgentID != model.AgentIDArticle {
 		t.Fatalf("invalid selection altered plan: %#v, %v", stored, err)
+	}
+}
+
+func TestPlanServiceUpdateRechecksProjectSelectionInsideTransaction(t *testing.T) {
+	ctx := t.Context()
+	db := setupTestDB(t)
+	base := repository.New(db)
+	projectID := createTestProject(t, base, "owner", model.PlatformWechat)
+	project, err := base.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.AgentIDs = []string{model.AgentIDArticle, model.AgentIDSeednote}
+	if err := base.Projects().Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	svc := newTestPlanService(t, base)
+	plan, err := svc.Create(ctx, CreatePlanParams{
+		UserID: "owner", ProjectID: projectID, ExecutionProfile: "effective",
+		CronExpr: "0 9 * * *", Prompt: "before", AgentIDs: []string{model.AgentIDArticle},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	projectRepo := &interleavingProjectRepository{ProjectRepository: base.Projects()}
+	repo := interleavingPlanRepository{Repository: base, projects: projectRepo}
+	repo.beforeTx = func() {
+		current, err := base.Projects().FindByID(ctx, projectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current.AgentIDs = []string{model.AgentIDArticle}
+		if err := base.Projects().Update(ctx, current); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc = newTestPlanService(t, repo)
+	selection := []string{model.AgentIDSeednote}
+	if _, err := svc.Update(ctx, UpdatePlanParams{ID: plan.ID, ExecutionProfile: "effective", Prompt: "after", AgentIDs: &selection}); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("Update after project selection changed = %v, want not enabled", err)
+	}
+	stored, err := base.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := base.PlanEntries().ListByPlanID(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Prompt != "before" || len(entries) != 1 || entries[0].AgentID != model.AgentIDArticle {
+		t.Fatalf("rejected update changed plan: plan=%#v entries=%#v", stored, entries)
 	}
 }
