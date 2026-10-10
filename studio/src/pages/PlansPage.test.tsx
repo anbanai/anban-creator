@@ -131,7 +131,7 @@ describe('PlansPage multi-output plans', () => {
     expect(api.plans.create).not.toHaveBeenCalled()
   })
   it('shows output Agent icons and restores the saved selection when editing', async () => {
-    const plan = { ...mockPlans.items[0], prompt: '多种输出', agent_ids: ['seednote', 'wechat-picture'] }
+    const plan = { ...mockPlans.items[0], title: '多种输出', prompt: '多种输出', agent_ids: ['seednote', 'wechat-picture'] }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
     await screen.findByText('多种输出')
@@ -171,7 +171,7 @@ describe('PlansPage multi-output plans', () => {
   })
 
   it('shows output Agents only once and keeps edit as an unfilled icon action', async () => {
-    const plan: Plan = { ...mockPlans.items[0], id: 'multi-output-plan', agent_ids: ['wechat-article', 'seednote'] }
+    const plan: Plan = { ...mockPlans.items[0], title: '多种输出', id: 'multi-output-plan', agent_ids: ['wechat-article', 'seednote'] }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
 
@@ -189,7 +189,7 @@ describe('PlansPage multi-output plans', () => {
 
   it.each([false, true])('shows the saved reference and submits its selection after removal=%s', async (remove) => {
     const reference = { asset_id: '44444444-4444-4444-8444-444444444444', file_name: 'cover.png', content_type: 'image/png', size: 9, download_url: 'https://signed.example/cover.png', download_expires_at: '2026-10-04T10:00:00Z' }
-    const plan = { ...mockPlans.items[0], agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
+    const plan = { ...mockPlans.items[0], title: '多种输出', agent_ids: ['seednote'], reference_image: reference, skip_reference_image: false }
     vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
     render(<PlansPage />)
     fireEvent.click(await screen.findByRole('button', { name: '编辑计划：多种输出' }))

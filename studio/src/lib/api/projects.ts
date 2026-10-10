@@ -9,6 +9,7 @@ import type {
   PlatformProfile,
   ProjectMemory,
   ProjectProfile,
+  ProjectProfileRevision,
   ProfileDimension,
   ProfileAnalysisResponse,
   Task,
@@ -86,6 +87,9 @@ export const projectsApi = {
   }, { timeout: 120000 })),
 
   getAccountProfile: (id: string) => unwrap<ProjectProfile>(http.get(`/projects/${id}/profile`)),
+  profileRevisions: (id: string) => unwrap<ProjectProfileRevision[]>(http.get(`/projects/${id}/profile/revisions`)),
+  restoreProfileRevision: (id: string, revision: number, expectedRevision: number) =>
+    unwrap<ProjectProfile>(http.post(`/projects/${id}/profile/revisions/${revision}/restore`, { expected_revision: expectedRevision })),
   refreshProfile: (id: string, expectedRevision: number) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/refresh`, { expected_revision: expectedRevision })),
   retryProfile: (id: string, expectedRevision: number) => unwrap<{ task: Task; profile: ProjectProfile }>(http.post(`/projects/${id}/profile/retry`, { expected_revision: expectedRevision })),
   profileAnalysis: (id: string) => unwrap<ProfileAnalysisResponse>(http.get(`/projects/${id}/profile/analysis`)),

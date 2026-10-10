@@ -14,7 +14,7 @@ export interface ProjectIdentityProject {
   positioning?: string
   instructions?: string
   keywords?: string
-  agent_ids?: readonly string[]
+  agent_ids?: readonly string[] | null
   agent_id?: string
 }
 
@@ -25,7 +25,7 @@ export interface ProjectIdentitySnapshot {
   positioning?: string
   instructions?: string
   keywords?: string
-  agent_ids?: readonly string[]
+  agent_ids?: readonly string[] | null
   agent_id?: string
 }
 
@@ -66,7 +66,7 @@ const defaultProjectAgentIDs: Record<string, readonly string[]> = {
 }
 
 export function projectAgentIDs(project: ProjectIdentityProject) {
-  if (project.agent_ids?.length) return project.agent_ids
+  if (project.agent_ids != null) return project.agent_ids
   if (project.agent_id) return [project.agent_id]
   return defaultProjectAgentIDs[project.platform ?? ''] ?? []
 }

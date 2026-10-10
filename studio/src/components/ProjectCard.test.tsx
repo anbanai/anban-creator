@@ -75,6 +75,13 @@ describe('ProjectCard', () => {
     expect(screen.queryByRole('button', { name: /创建任务/ })).not.toBeInTheDocument()
   })
 
+  it.each(['moments', 'ecommerce'] as const)('keeps legacy %s projects in their basic settings flow', (platform) => {
+    render(<ProjectCard project={project({ platform, agent_ids: null })} onProfile={vi.fn()} onEdit={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: '项目画像：公众号项目' })).not.toBeInTheDocument()
+    expect(screen.queryByText('画像待配置')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑项目：公众号项目' })).toBeInTheDocument()
+  })
+
   it('shows a completion ring and compact metric strip from project stats', () => {
     render(<ProjectCard project={project()} stats={stats} />)
 
@@ -82,6 +89,26 @@ describe('ProjectCard', () => {
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('10')
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('8')
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('2')
+  })
+
+  it('shows selected creation objects and the applied profile lifecycle status', () => {
+    render(<ProjectCard project={project({
+      agent_ids: ['wechat-article', 'hypit', 'whiteboard-animation'],
+      profile: {
+        schema_version: 1, status: 'confirmed', initialization_status: 'running', version: 4,
+        application_source: 'system_analysis', dimensions: {
+          identity: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          style: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          audience: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          platforms: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          preferences: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          memory: { content: {}, sources: [], evidence: [], missing_fields: [] },
+        }, analysis_limits: [], follow_up_questions: [],
+      },
+    })} />)
+
+    expect(screen.getByLabelText('创作对象')).toHaveTextContent('公众号文章 · 视频复刻 · 白板视频')
+    expect(screen.getByText('画像分析中')).toBeInTheDocument()
   })
 
   it('does not show a precise completion percentage when a project has no tasks', () => {

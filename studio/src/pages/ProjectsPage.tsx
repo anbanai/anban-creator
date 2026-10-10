@@ -10,7 +10,7 @@ import QueryErrorState from '@/components/QueryErrorState'
 import { FieldHint } from '@/components/common/FieldHint'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { ImageAnalysis, Project, ProjectPlatform, ProjectStats, CreateProjectRequest, ProjectProfile } from '@/types'
+import type { ImageAnalysis, Project, ProjectPlatform, ProjectStats, CreateProjectRequest } from '@/types'
 import { isImageAnalysisActive, isImageAnalysisUpdateOlder } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
@@ -30,13 +30,13 @@ import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
-import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
+import { parseCreationIntent } from '@/lib/command-center'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
 import { MetricStrip } from '@/components/workspace'
 
-const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
+const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce'])
 
 function canViewPlatform(platform: ProjectPlatform | '', isAdmin: boolean) {
   return isAdmin || platform === '' || !adminOnlyPlatforms.has(platform)
@@ -77,24 +77,17 @@ export default function ProjectsPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const createIntent = parseCreationIntent(searchParams)
-  const returnTo = searchParams.get('return_to')
   const [statusFilter, setStatusFilter] = useState('all')
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const formSessionRef = useRef(0)
-  const createdProjectReturnHrefRef = useRef<string | null>(null)
   useEffect(() => () => { formSessionRef.current += 1 }, [])
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [editingAnalysis, setEditingAnalysis] = useState<ImageAnalysis | null>(null)
   const editingAnalysisUpdatedAtRef = useRef('')
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [channelProject, setChannelProject] = useState<Project | null>(null)
-  const [profileProject, setProfileProject] = useState<Project | null>(null)
-  const [profileDraft, setProfileDraft] = useState<ProjectProfile | null>(null)
-  const [profileDraftText, setProfileDraftText] = useState<Record<string, string>>({})
-  const [profileJsonError, setProfileJsonError] = useState<string | null>(null)
-  const [profileModalOpen, setProfileModalOpen] = useState(false)
   const { submit } = useSubmitLock()
 
   const form = useForm<ProjectFormValues>({
@@ -181,105 +174,6 @@ export default function ProjectsPage() {
     if (project) openEdit(project)
   }, [modalOpen, searchParams, visibleProjects])
 
-  const createMutation = useMutation({
-    mutationFn: async ({ data, sessionID, returnContext }: { data: CreateProjectRequest; sessionID: number; returnContext: Omit<Parameters<typeof projectCreatedReturnHref>[0], 'projectId'> | null }) => {
-      const created = await api.projects.create(data)
-      if (sessionID === formSessionRef.current) {
-        createdProjectReturnHrefRef.current = returnContext ? projectCreatedReturnHref({ ...returnContext, projectId: created.project.id }) : null
-      }
-      return created
-    },
-    onSuccess: (created, { sessionID }) => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-      queryClient.invalidateQueries({ queryKey: ['project-stats'] })
-      if (sessionID !== formSessionRef.current) return
-      toast.success(created.project.image_analysis ? '项目已创建，正在后台识别视觉风格' : '项目创建成功')
-      finishProjectSave()
-    },
-    onError: (err, { sessionID }) => {
-      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建项目失败，请重试'))
-    },
-  })
-
-  const profileQuery = useQuery({
-    queryKey: ['project-profile', profileProject?.id],
-    queryFn: () => api.projects.getAccountProfile(profileProject!.id),
-    enabled: profileModalOpen && Boolean(profileProject),
-  })
-  useEffect(() => {
-    if (!profileQuery.data) return
-    setProfileDraft(profileQuery.data)
-    setProfileDraftText(Object.fromEntries(Object.entries(profileQuery.data.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
-    setProfileJsonError(null)
-  }, [profileQuery.data])
-  const profileAnalysisQuery = useQuery({
-    queryKey: ['project-profile-analysis', profileProject?.id, profileDraft?.analysis_task_id],
-    queryFn: () => api.projects.profileAnalysis(profileProject!.id),
-    enabled: profileModalOpen && Boolean(profileProject?.id && profileDraft?.analysis_task_id),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === 'pending' || status === 'running' ? 2000 : false
-    },
-  })
-  useEffect(() => {
-    const result = profileAnalysisQuery.data
-    if (!result) return
-    setProfileDraft(result.profile)
-    setProfileDraftText(Object.fromEntries(Object.entries(result.profile.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
-    setProfileJsonError(null)
-  }, [profileAnalysisQuery.data])
-  const profileAnalysisMutation = useMutation({
-    mutationFn: (retry: boolean) => retry
-      ? api.projects.retryProfile(profileProject!.id, profileDraft!.version)
-      : api.projects.refreshProfile(profileProject!.id, profileDraft!.version),
-    onSuccess: (result) => {
-      setProfileDraft(result.profile)
-      queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
-      toast.success('画像任务已加入队列')
-    },
-    onError: (err) => {
-      if (getApiErrorMessage(err, '').includes('profile_revision_conflict')) {
-        toast.error('画像版本已变化，请刷新后再试')
-        queryClient.invalidateQueries({ queryKey: ['project-profile', profileProject?.id] })
-      } else toast.error(getApiErrorMessage(err, '画像更新失败'))
-    },
-  })
-
-  function resetProfileFlow() {
-    setProfileDraft(null)
-    setProfileDraftText({})
-    setProfileJsonError(null)
-  }
-
-  function openProfile(project: Project) {
-    resetProfileFlow()
-    setProfileProject(project)
-    setProfileModalOpen(true)
-    void queryClient.invalidateQueries({ queryKey: ['project-profile', project.id] })
-  }
-
-  function closeProfile() {
-    setProfileModalOpen(false)
-    setProfileProject(null)
-    resetProfileFlow()
-  }
-
-  const profileDimensionMutation = useMutation({
-    mutationFn: ({ name, dimension }: { name: string; dimension: ProjectProfile['dimensions'][keyof ProjectProfile['dimensions']] }) => api.projects.updateProfileDimension(profileProject!.id, name, profileDraft!.version, dimension),
-    onSuccess: (profile) => {
-      setProfileDraft(profile)
-      queryClient.setQueryData(['project-profile', profileProject?.id], profile)
-      queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
-      toast.success('画像文件已保存')
-    },
-    onError: (err) => {
-      if (getApiErrorMessage(err, '').includes('profile_revision_conflict')) {
-        toast.error('画像版本冲突，正在重新加载当前内容')
-        queryClient.invalidateQueries({ queryKey: ['project-profile', profileProject?.id] })
-      } else toast.error(getApiErrorMessage(err, '画像保存失败'))
-    },
-  })
-
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<CreateProjectRequest>; sessionID: number }) => {
       const updated = await api.projects.update(id, data)
@@ -322,14 +216,8 @@ export default function ProjectsPage() {
   })
 
   function openCreate() {
-    formSessionRef.current += 1
-    createdProjectReturnHrefRef.current = null
-    setEditingProject(null)
-    form.reset(PROJECT_FORM_DEFAULTS)
-    setEditingAnalysis(null)
-    editingAnalysisUpdatedAtRef.current = ''
-    setReferenceUploading(false)
-    setModalOpen(true)
+    const query = searchParams.toString()
+    navigate(`/projects/new${query ? `?${query}` : ''}`)
   }
 
   useEffect(() => {
@@ -339,7 +227,6 @@ export default function ProjectsPage() {
 
   function openEdit(project: Project) {
     formSessionRef.current += 1
-    createdProjectReturnHrefRef.current = null
     setEditingProject(project)
     setEditingAnalysis(project.image_analysis ?? null)
     editingAnalysisUpdatedAtRef.current = project.image_analysis?.updated_at ?? ''
@@ -349,10 +236,7 @@ export default function ProjectsPage() {
   }
 
   function finishProjectSave() {
-    const returnHref = createdProjectReturnHrefRef.current
-    if (returnHref) closeProfile()
     resetModal()
-    if (returnHref) navigate(returnHref)
   }
 
   function closeModal() {
@@ -365,7 +249,6 @@ export default function ProjectsPage() {
 
   function resetModal() {
     formSessionRef.current += 1
-    createdProjectReturnHrefRef.current = null
     setModalOpen(false)
     setShowDirtyDialog(false)
     setEditingProject(null)
@@ -388,26 +271,18 @@ export default function ProjectsPage() {
       keywords: values.keywords?.trim() || '',
       instructions: values.instructions?.trim() || '',
     }
-    if (!editingProject || form.formState.dirtyFields.visual_style) {
+    if (form.formState.dirtyFields.visual_style) {
       payload.visual_style = values.visual_style?.trim() ?? ''
     }
     const referenceImage = referenceSelectionFromValue(values.reference_image)
     const portraitReferenceImage = referenceSelectionFromValue(values.portrait_reference_image)
-    if (editingProject) {
-      const updatePayload = {
-        ...payload,
-        ...(form.formState.dirtyFields.reference_image ? { reference_image: referenceImage } : {}),
-        ...(form.formState.dirtyFields.portrait_reference_image ? { portrait_reference_image: portraitReferenceImage } : {}),
-      }
-      await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: updatePayload, sessionID: formSessionRef.current })).catch(() => {})
-    } else {
-      const createPayload = {
-        ...payload,
-        ...(referenceImage ? { reference_image: referenceImage } : {}),
-        ...(portraitReferenceImage ? { portrait_reference_image: portraitReferenceImage } : {}),
-      }
-      await submit(async () => createMutation.mutateAsync({ data: createPayload, sessionID: formSessionRef.current, returnContext: returnTo ? { returnTo, type: createIntent.type, intent: createIntent.intent } : null })).catch(() => {})
+    if (!editingProject) return
+    const updatePayload = {
+      ...payload,
+      ...(form.formState.dirtyFields.reference_image ? { reference_image: referenceImage } : {}),
+      ...(form.formState.dirtyFields.portrait_reference_image ? { portrait_reference_image: portraitReferenceImage } : {}),
     }
+    await submit(async () => updateMutation.mutateAsync({ id: editingProject.id, data: updatePayload, sessionID: formSessionRef.current })).catch(() => {})
   }
 
   function handleProjectSubmit(event?: React.BaseSyntheticEvent) {
@@ -418,12 +293,7 @@ export default function ProjectsPage() {
     return form.handleSubmit(onSubmit)(event)
   }
 
-  const isSubmitting = createMutation.isPending || updateMutation.isPending
-  const profileDimensionLabels: Record<string, string> = { identity: '定位', style: '风格', audience: '受众', platforms: '平台', preferences: '偏好与红线', memory: '记忆' }
-  const profileAnalysisStatus = profileAnalysisQuery.data?.status ?? (profileDraft?.analysis_task_id ? 'pending' : 'not_started')
-  const profileAnalysisRunning = profileAnalysisStatus === 'pending' || profileAnalysisStatus === 'running' || profileAnalysisMutation.isPending
-  const profileAnalysisFailed = profileAnalysisStatus === 'failed' || profileAnalysisStatus === 'cancelled'
-
+  const isSubmitting = updateMutation.isPending
   return (
     <div className="space-y-6">
       <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，可用于不同类型的任务。">
@@ -502,7 +372,7 @@ export default function ProjectsPage() {
               project={project}
               stats={projectStats[project.id]}
               onEdit={openEdit}
-              onProfile={openProfile}
+              onProfile={(selectedProject) => navigate(`/projects/${selectedProject.id}/profile-lab`)}
               onChannelConfig={setChannelProject}
               archiving={archiveMutation.isPending}
               restoring={restoreMutation.isPending}
@@ -513,11 +383,11 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {/* Create/Edit Dialog */}
+      {/* Basic settings retain existing asset editing. Profile settings live in Profile Lab. */}
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editingProject ? '编辑项目' : '新建项目'}</DialogTitle>
+            <DialogTitle>编辑项目</DialogTitle>
           </DialogHeader>
           <Form {...form}>
             <form id="project-form" onSubmit={handleProjectSubmit} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
@@ -616,63 +486,8 @@ export default function ProjectsPage() {
           <DialogFooter>
             <Button variant="secondary" onClick={closeModal}>取消</Button>
             <Button type="submit" form="project-form" loading={isSubmitting} disabled={referenceUploading}>
-              {editingProject ? '更新' : '创建'}
+              更新
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={profileModalOpen} onOpenChange={(open) => { if (!open) closeProfile() }}>
-        <DialogContent className="sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>项目画像</DialogTitle>
-          </DialogHeader>
-          <div className="max-h-[70vh] space-y-4 overflow-y-auto">
-            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
-              <div>
-                <p className="text-sm font-medium">初始化状态：{profileDraft?.initialization_status ?? 'not_started'}</p>
-                {profileDraft?.last_error && <p className="text-xs text-destructive" role="alert">{profileDraft.last_error}</p>}
-              </div>
-              {profileDraft && <Button variant="outline" size="sm" loading={profileAnalysisMutation.isPending} disabled={profileAnalysisRunning} onClick={() => profileAnalysisMutation.mutate(profileAnalysisFailed)}>更新画像</Button>}
-            </div>
-            {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像任务执行中，完成后会自动刷新。</p>}
-            {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像任务失败，当前画像保持不变，可以重试。</p>}
-            <table className="w-full text-left text-xs"><thead><tr className="border-b"><th className="py-2 pr-3">引用路径</th><th className="py-2">用途</th></tr></thead><tbody>
-              {Object.entries(profileDimensionLabels).map(([key, label]) => <tr key={key} className="border-b"><td className="py-2 pr-3 font-mono">profile/{key}.md</td><td className="py-2">{label}</td></tr>)}
-            </tbody></table>
-            {profileDraft && (
-              <div className="space-y-3">
-                {Object.entries(profileDraft.dimensions).map(([key, dimension]) => (
-                  <div key={key} className="space-y-2 rounded-md border p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-medium">{profileDimensionLabels[key] || key}</span>
-                      <span className="text-xs text-muted-foreground">{dimension.sources.join('、') || '[待补充]'}</span>
-                    </div>
-                    <Textarea
-                      value={profileDraftText[key] ?? JSON.stringify(dimension.content, null, 2)}
-                      onChange={(event) => {
-                        const text = event.target.value
-                        setProfileDraftText((current) => ({ ...current, [key]: text }))
-                        try {
-                          const content = JSON.parse(text) as Record<string, unknown>
-                          if (!content || Array.isArray(content) || typeof content !== 'object') throw new Error('object required')
-                          setProfileJsonError(null)
-                          setProfileDraft({ ...profileDraft, dimensions: { ...profileDraft.dimensions, [key]: { ...dimension, content } } })
-                        } catch { setProfileJsonError(`${profileDimensionLabels[key] || key} 的内容必须是有效 JSON 对象`) }
-                      }}
-                      className="min-h-[76px] font-mono text-xs"
-                    />
-                    <Button size="sm" variant="secondary" disabled={Boolean(profileJsonError) || profileDimensionMutation.isPending || profileAnalysisRunning} onClick={() => profileDimensionMutation.mutate({ name: key, dimension })}>保存文件</Button>
-                    {dimension.missing_fields.length > 0 && <p className="mt-1 text-xs text-amber-600">待补充：{dimension.missing_fields.join('、')}</p>}
-                  </div>
-                ))}
-                {profileDraft.follow_up_questions.length > 0 && <div className="text-sm text-muted-foreground">待确认问题：{profileDraft.follow_up_questions.join('；')}</div>}
-                {profileJsonError && <p className="text-sm text-destructive" role="alert">{profileJsonError}</p>}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={closeProfile}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

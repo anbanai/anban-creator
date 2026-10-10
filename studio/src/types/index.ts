@@ -23,6 +23,8 @@ export type {
   ProjectStats,
   ProjectDetail,
   ProjectProfile,
+  ProjectProfileSetup,
+  ProjectProfileRevision,
   ProfileDimension,
   ProfileAnalysisStatus,
   ProfileAnalysisResponse,

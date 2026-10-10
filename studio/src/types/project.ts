@@ -22,8 +22,10 @@ export interface Project {
   platform: ProjectPlatform | ''
   name: string
   avatar_url: string
-  /** Derived from durable tasks and plan entries; never user-edited. */
-  agent_ids?: string[]
+  /** Persisted creation capabilities; old rows fall back to derived task/plan capabilities. */
+  agent_ids?: string[] | null
+  profile_setup?: ProjectProfileSetup
+  profile?: ProjectProfile
 	profile_url?: string
   description?: string
   /** @deprecated use instructions */
@@ -115,9 +117,31 @@ export interface ProjectProfile {
   last_error?: string
   version: number
   analysis_task_id?: string
+  application_source?: 'system_analysis' | 'user_confirmation' | 'user_edit' | 'user_restore' | string
   dimensions: Record<'identity' | 'style' | 'audience' | 'platforms' | 'preferences' | 'memory', ProfileDimension>
   analysis_limits: string[]
   follow_up_questions: string[]
+}
+
+export interface ProjectProfileSetup {
+  account_status: 'new' | 'existing'
+  platform_accounts: Array<{ platform: 'wechat' | 'seednote' | 'douyin' | 'bilibili' | 'weibo' | 'zhihu' | 'kuaishou' | 'channels'; profile_url: string; account_name?: string; follower_range?: string; source?: string }>
+  answers: {
+    intent: { goals: string; direction: string; differentiation: string; strengths: string; resources: string }
+    content: { preferences: string; formats: string; tone: string; audience: string; favorites: string; reference_accounts: string }
+    boundaries: { exclusions: string; collaboration: string; compliance: string }
+  }
+  samples: string[]
+  analyze?: boolean
+}
+
+export interface ProjectProfileRevision {
+  id: string
+  project_id: string
+  revision: number
+  six_dimensions: ProjectProfile['dimensions']
+  source_task_id?: string
+  created_at: string
 }
 
 export type ProfileAnalysisStatus = TaskStatusLike | 'not_started'
@@ -165,6 +189,8 @@ export interface CreateProjectRequest {
   hypit_defaults?: HypitDefaults
   montage_defaults?: MontageProjectDefaults
   max_concurrent_tasks?: number
+  agent_ids?: string[]
+  profile_setup?: ProjectProfileSetup
 }
 
 export interface CreateProjectResponse {

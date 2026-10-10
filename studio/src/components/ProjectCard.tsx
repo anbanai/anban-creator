@@ -14,6 +14,17 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { MetricStrip, ProgressRing, StatusPill } from '@/components/workspace'
+import { creationObjectLabels, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
+
+function profileStatusLabel(project: Project) {
+  switch (project.profile?.initialization_status) {
+    case 'queued':
+    case 'running': return '画像分析中'
+    case 'failed': return '画像分析失败'
+    case 'ready': return `画像已应用 · v${project.profile.version}`
+    default: return '画像待配置'
+  }
+}
 
 interface ProjectCardProps {
   project: Project
@@ -45,6 +56,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
   const feedbackEnabled = platform === '' || platform === 'wechat' || platform === 'seednote'
+  const objectLabels = projectAgentIDs(project).map((id) => creationObjectLabels[id] ?? id)
   const feedbackQuery = useQuery({
     queryKey: ['project-feedback', project.id],
     queryFn: ({ signal }) => api.projects.feedback(project.id, signal),
@@ -98,6 +110,14 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
         </div>
       </div>
       <div className="mt-auto pt-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border pb-3 text-xs">
+          <span aria-label="创作对象" className="min-w-0 text-muted-foreground">
+            {objectLabels.length ? objectLabels.join(' · ') : '尚未选择创作对象'}
+          </span>
+          {supportsProfileLab(project) && <span data-profile-status={project.profile?.initialization_status ?? 'not_started'} className="shrink-0 text-muted-foreground">
+            {profileStatusLabel(project)}
+          </span>}
+        </div>
         {stats && (
           <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border pt-3">
             {completionRate === null ? (
@@ -192,7 +212,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
               <TooltipContent>编辑</TooltipContent>
             </Tooltip>
           )}
-          {onProfile && (
+          {onProfile && supportsProfileLab(project) && (
             <Tooltip>
               <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onProfile(project)} aria-label={`项目画像：${project.name}`} />}>
                 <UserRound />
