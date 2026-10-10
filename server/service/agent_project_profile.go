@@ -83,6 +83,10 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 			resourcePlatform = platform
 		}
 	}
+	projectProfile := project.Profile.Data()
+	if projectProfile.SchemaVersion == 0 {
+		projectProfile = model.NewProjectProfile()
+	}
 	if model.IsHypitPlatform(outputType) {
 		in := model.HypitInput{}
 		if task != nil {
@@ -108,6 +112,12 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		}
 		if projectStyleReferenceAssetID(task) != "" {
 			resolved["project_style_reference_path"] = serveragent.ProjectStyleReferenceImagePath
+		}
+		if projectProfile.IsConfirmed() {
+			p["account_profile"] = projectProfile
+			resolved["account_profile"] = projectProfile
+		} else {
+			resolved["account_profile_status"] = projectProfile.Status
 		}
 		p["resolved_profile"] = resolved
 		return &p, nil
@@ -139,14 +149,8 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"visual_style_source": style.VisualStyleSource, "writer_source": style.WriterSource,
 		"author_source": style.AuthorSource, "theme_source": style.ThemeSource,
 	}
-	projectProfile := project.Profile.Data()
-	if projectProfile.SchemaVersion == 0 {
-		projectProfile = model.NewProjectProfile()
-	}
-	// Drafts are review material for Studio only. Downstream Agents may consume
-	// an account profile after the user confirms it through the versioned
-	// project-profile API; exposing an unconfirmed draft here would let a
-	// creative workflow silently treat inference as project truth.
+	// Server-applied profiles are usable during refreshes. Their source labels
+	// remain intact so inferred content cannot be treated as verified facts.
 	if projectProfile.IsConfirmed() {
 		profile["account_profile"] = projectProfile
 	}

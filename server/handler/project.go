@@ -121,16 +121,19 @@ func (h *ProjectHandler) populateProjectAgentIDs(ctx context.Context, projects [
 	}
 	projectIDs := make([]string, 0, len(projects))
 	for _, project := range projects {
-		if project != nil {
+		if project != nil && project.AgentIDs == nil {
 			projectIDs = append(projectIDs, project.ID)
 		}
+	}
+	if len(projectIDs) == 0 {
+		return nil
 	}
 	agentIDs, err := h.service.ListAgentIDsByProjectIDs(ctx, projectIDs)
 	if err != nil {
 		return err
 	}
 	for _, project := range projects {
-		if project == nil {
+		if project == nil || project.AgentIDs != nil {
 			continue
 		}
 		derived := agentIDs[project.ID]
@@ -269,6 +272,10 @@ func (h *ProjectHandler) ensureSeednoteReady(c fiber.Ctx) (bool, error) {
 type projectRequest struct {
 	Platform                      string                           `json:"platform"`
 	Name                          string                           `json:"name"`
+	AgentIDs                      []string                         `json:"agent_ids"`
+	AgentIDsSet                   bool                             `json:"-"`
+	ProfileSetup                  *projectProfileSetupRequest      `json:"profile_setup"`
+	ProfileSetupSet               bool                             `json:"-"`
 	ProfileURL                    string                           `json:"profile_url"`
 	AvatarURL                     string                           `json:"avatar_url"`
 	Positioning                   string                           `json:"positioning"`
@@ -296,6 +303,32 @@ type projectRequest struct {
 	WechatAppID             string  `json:"wechat_app_id"`
 	WechatSecret            string  `json:"wechat_secret"`
 	LegacyWechatPublishMode *string `json:"wechat_publish_mode"`
+}
+
+type projectProfileSetupRequest struct {
+	model.ProjectProfileSetup
+	Analyze *bool `json:"analyze,omitempty"`
+}
+
+func (req *projectRequest) validateProfileSetup(body []byte) error {
+	req.AgentIDsSet = hasJSONField(body, "agent_ids")
+	if req.AgentIDsSet {
+		if req.AgentIDs == nil {
+			req.AgentIDs = []string{}
+		}
+		if err := model.ValidateProjectAgentIDs(req.AgentIDs); err != nil {
+			return err
+		}
+	}
+	req.ProfileSetupSet = hasJSONField(body, "profile_setup")
+	if req.ProfileSetupSet {
+		if req.ProfileSetup == nil {
+			req.ProfileSetup = &projectProfileSetupRequest{ProjectProfileSetup: model.NewProjectProfileSetup()}
+		}
+		req.ProfileSetup.Normalize()
+		return req.ProfileSetup.Validate()
+	}
+	return nil
 }
 
 type projectConfigResponse struct {
@@ -381,6 +414,9 @@ func (req *projectRequest) toProject() *model.Project {
 	p := &model.Project{
 		Platform:                      req.Platform,
 		Name:                          req.Name,
+		AgentIDs:                      req.AgentIDs,
+		AgentIDsSet:                   req.AgentIDsSet,
+		ProfileSetupSet:               req.ProfileSetupSet,
 		ProfileURL:                    req.ProfileURL,
 		AvatarURL:                     req.AvatarURL,
 		Keywords:                      req.Keywords,
@@ -398,6 +434,12 @@ func (req *projectRequest) toProject() *model.Project {
 		MaxConcurrentTasks:            req.MaxConcurrentTasks,
 		Instructions:                  instructions,
 		InstructionsSet:               instructionsSet,
+	}
+	if req.ProfileSetup != nil {
+		setup := req.ProfileSetup.ProjectProfileSetup
+		p.ProfileSetup = &setup
+		p.ProfileAnalysisEnabled = req.ProfileSetup.Analyze
+		p.ProfileURL = setup.PrimaryProfileURL(req.Platform)
 	}
 	if req.EcommerceDefaults != nil {
 		p.SetEcommerceDefaults(*req.EcommerceDefaults)
@@ -549,6 +591,9 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
 	}
+	if err := req.validateProfileSetup(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	if req.LegacyWechatPublishMode != nil {
 		return Error(c, fiber.StatusBadRequest, "wechat_publish_mode is no longer supported; publishing is capability-driven")
 	}
@@ -622,13 +667,15 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 
 	created, err := h.service.Create(c.Context(), userID, ch)
 	if err != nil {
-		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
+		if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) || errors.Is(err, service.ErrProjectProfileSetup) {
 			return Error(c, fiber.StatusBadRequest, err.Error())
 		}
 		h.logger.Error().Err(err).Str("user_id", userID).Msg("create project failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to create project: "+err.Error())
 	}
-	created.AgentIDs = append([]string(nil), defaultProjectAgentIDs(created.Platform)...)
+	if err := h.populateProjectAgentIDs(c.Context(), []*model.Project{created}); err != nil {
+		return Error(c, fiber.StatusInternalServerError, "failed to derive project Agent IDs")
+	}
 	if ch.Platform == model.PlatformWechat && (strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != "") {
 		if _, configErr := h.service.UpsertChannelConfig(c.Context(), userID, ch.ID, model.ChannelArticle, req.wechatChannelConfig()); configErr != nil {
 			return h.respondProjectConfigError(c, configErr)
@@ -657,11 +704,58 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 			}
 		}
 	}
+	profileInitialization := h.ensureProfileInitialization(c.Context(), userID, created)
 	return Success(c, fiber.Map{
 		"project":                projectAPIResponse(created),
 		"recommended_templates":  recommended,
-		"profile_initialization": map[string]any{"status": model.ProfileInitializationNotStarted},
+		"profile_initialization": profileInitialization,
 	})
+}
+
+func (h *ProjectHandler) ensureProfileInitialization(ctx context.Context, userID string, project *model.Project) map[string]any {
+	result := map[string]any{"status": model.ProfileInitializationNotStarted}
+	if h.tasks == nil || project == nil || (project.ProfileAnalysisEnabled != nil && !*project.ProfileAnalysisEnabled) || !profileInitializationSupported(project.Platform) {
+		return result
+	}
+	profile, err := h.service.GetProfile(ctx, userID, project.ID)
+	if err != nil {
+		return map[string]any{"status": model.ProfileInitializationFailed, "error": err.Error()}
+	}
+	if strings.TrimSpace(profile.AnalysisTaskID) != "" {
+		if existing, getErr := h.tasks.GetByID(ctx, profile.AnalysisTaskID); getErr == nil && existing.UserID == userID && existing.ProjectID == project.ID && (existing.Status == model.TaskStatusPending || existing.Status == model.TaskStatusRunning) {
+			return map[string]any{"status": profile.InitializationStatus, "task_id": existing.ID, "revision": profile.Version}
+		}
+	}
+	expectedVersion := profile.Version
+	tasks, err := h.tasks.CreateManual(ctx, service.CreateManualParams{
+		UserID: userID, ProjectID: project.ID, ExecutionProfile: "effective",
+		AgentID: model.AgentIDProfileAnalysis, Channel: model.ChannelProfileAnalysis, TaskKind: model.TaskKindProfileAnalysis,
+		Prompt: project.ProfileURL, AgentInput: profileAgentInput(project, nil, nil), Quantity: 1,
+		ProfileAnalysisExpectedVersion: &expectedVersion,
+	})
+	if err != nil || len(tasks) == 0 {
+		message := "profile initialization task was not created"
+		if err != nil {
+			message = err.Error()
+		}
+		h.logger.Warn().Err(err).Str("project_id", project.ID).Msg("profile initialization admission failed")
+		return map[string]any{"status": model.ProfileInitializationFailed, "error": message, "revision": profile.Version}
+	}
+	profile, err = h.service.GetProfile(ctx, userID, project.ID)
+	if err != nil {
+		return map[string]any{"status": model.ProfileInitializationQueued, "task_id": tasks[0].ID, "revision": expectedVersion}
+	}
+	return map[string]any{"status": profile.InitializationStatus, "task_id": tasks[0].ID, "revision": profile.Version}
+}
+
+func profileInitializationSupported(platform string) bool {
+	switch strings.TrimSpace(platform) {
+	case model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments,
+		model.PlatformMontage, model.PlatformHypit, model.PlatformWhiteboardAnimation:
+		return true
+	default:
+		return false
+	}
 }
 
 // Get handles GET /projects/:id.
@@ -1214,16 +1308,60 @@ func (h *ProjectHandler) StartProfileAnalysis(c fiber.Ctx) error {
 // validation. In particular, []string is not a JSON array when passed through
 // the schema validator's generic map representation.
 func profileAgentInput(project *model.Project, answers map[string]any, samples []string) map[string]any {
-	values := make([]any, 0, len(samples))
-	for _, sample := range samples {
-		values = append(values, sample)
+	setup := model.NewProjectProfileSetup()
+	if project.ProfileSetup != nil {
+		setup = *project.ProfileSetup
+	} else if project.ProfileURL != "" && (project.Platform == model.PlatformWechat || project.Platform == model.PlatformSeednote) {
+		setup.AccountStatus = "existing"
+		setup.PlatformAccounts = []model.ProjectProfileAccount{{Platform: project.Platform, ProfileURL: project.ProfileURL, Source: model.ProfileSourceUserConfirmed}}
 	}
-	return map[string]any{
-		"project_id":  project.ID,
-		"profile_url": project.ProfileURL,
-		"answers":     answers,
-		"samples":     values,
+	setup.Normalize()
+	ids := project.AgentIDs
+	if ids == nil {
+		ids = model.DefaultProjectAgentIDs(project.Platform)
 	}
+	if ids == nil {
+		ids = []string{}
+	}
+	grouped := map[string]any{
+		"basic":      map[string]any{"project_name": project.Name, "platform": project.Platform, "account_status": setup.AccountStatus, "platform_accounts": setup.PlatformAccounts},
+		"intent":     setup.Answers.Intent,
+		"content":    setup.Answers.Content,
+		"boundaries": setup.Answers.Boundaries,
+	}
+	for key, value := range answers {
+		grouped[key] = value
+	}
+	if samples == nil {
+		samples = setup.Samples
+	}
+	profile := project.Profile.Data()
+	if profile.AnalysisLimits == nil {
+		profile.AnalysisLimits = []string{}
+	}
+	if profile.FollowUpQuestions == nil {
+		profile.FollowUpQuestions = []string{}
+	}
+	var currentProfile any
+	if profile.IsConfirmed() {
+		currentProfile = profile
+	}
+	payload := map[string]any{
+		"project_id":        project.ID,
+		"platform":          project.Platform,
+		"profile_url":       project.ProfileURL,
+		"agent_ids":         ids,
+		"platform_accounts": setup.PlatformAccounts,
+		"profile_setup":     setup,
+		"expected_revision": profile.Version,
+		"current_profile":   currentProfile,
+		"answers":           grouped,
+		"samples":           samples,
+	}
+	encoded, _ := json.Marshal(payload)
+	var input map[string]any
+	_ = json.Unmarshal(encoded, &input)
+	return input
 }
 
 // RefreshProfile and RetryProfile are free, explicit aliases for the same
@@ -1336,6 +1474,9 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	var req projectRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	if err := req.validateProfileSetup(c.Body()); err != nil {
+		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	if req.LegacyWechatPublishMode != nil {
 		return Error(c, fiber.StatusBadRequest, "wechat_publish_mode is no longer supported; publishing is capability-driven")

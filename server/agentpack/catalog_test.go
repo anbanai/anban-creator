@@ -1316,7 +1316,7 @@ func TestLoadCatalogRejectsUnsupportedExtensionSchemaContracts(t *testing.T) {
 		},
 		{
 			name:     "unknown JSON Schema keyword",
-			schema:   `{"type":"object","properties":{},"oneOf":[]}`,
+			schema:   `{"type":"object","properties":{},"anyOf":[]}`,
 			manifest: validFixtureManifest,
 			want:     "unknown field",
 		},

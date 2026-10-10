@@ -38,6 +38,22 @@ func setupTestDBForHandler(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestTimelineProjectAgentIDsPrefersPersistedSelection(t *testing.T) {
+	derived := map[string][]string{"project": {model.AgentIDSeednote}}
+	project := &model.Project{ID: "project", Platform: model.PlatformWechat, AgentIDs: []string{model.AgentIDHypit, model.AgentIDWhiteboard}}
+	if got := timelineProjectAgentIDs(project, derived); !reflect.DeepEqual(got, project.AgentIDs) {
+		t.Fatalf("timeline selection = %v, want persisted %v", got, project.AgentIDs)
+	}
+	project.AgentIDs = []string{}
+	if got := timelineProjectAgentIDs(project, derived); got == nil || len(got) != 0 {
+		t.Fatalf("explicit empty selection = %v, must not derive old task objects", got)
+	}
+	project.AgentIDs = nil
+	if got := timelineProjectAgentIDs(project, derived); !reflect.DeepEqual(got, derived["project"]) {
+		t.Fatalf("legacy selection = %v, want derived", got)
+	}
+}
+
 func TestTimelineIncludesDerivedProjectAgentIDs(t *testing.T) {
 	repo, logger := setupTimelineHandler(t)
 	ctx := t.Context()

@@ -579,6 +579,50 @@ func TestProjectToolSchemasIncludeMoments(t *testing.T) {
 	assertToolEnumContains("get_project_profile", "scope", "montage")
 }
 
+func TestGetProjectProfileKeepsTaskOptionalAndSupportsCreativeScopes(t *testing.T) {
+	handler := NewMCPHandler(nil, "test-key", nil)
+	for _, tool := range listMCPToolsForTest(t, handler) {
+		entry, ok := tool.(map[string]any)
+		if !ok || entry["name"] != "get_project_profile" {
+			continue
+		}
+		schema := entry["inputSchema"].(map[string]any)
+		properties := schema["properties"].(map[string]any)
+		scope := properties["scope"].(map[string]any)
+		values := scope["enum"].([]any)
+		found := false
+		for _, value := range values {
+			if value == "whiteboard-animation" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("get_project_profile.scope enum = %v, missing whiteboard-animation", values)
+		}
+		found = false
+		for _, value := range values {
+			if value == "wechat-picture" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("get_project_profile.scope enum = %v, missing wechat-picture", values)
+		}
+		required := schema["required"].([]any)
+		found = false
+		for _, value := range required {
+			if value == "task_id" {
+				found = true
+			}
+		}
+		if found {
+			t.Fatalf("get_project_profile required = %v, task_id must remain optional for project-level reads", required)
+		}
+		return
+	}
+	t.Fatal("get_project_profile tool was not registered")
+}
+
 func TestGetProjectSchemaOnlyAcceptsProjectID(t *testing.T) {
 	handler := NewMCPHandler(nil, "test-key", nil)
 	tools := listMCPToolsForTest(t, handler)

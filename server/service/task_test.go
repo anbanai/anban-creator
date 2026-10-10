@@ -173,14 +173,28 @@ func TestTaskServiceProfileAnalysisAdmissionIsFreeAndIdempotent(t *testing.T) {
 	}
 	expectedRevision := confirmedProfile.Version
 	input := map[string]any{
-		"project_id":  projectID,
-		"profile_url": "https://example.com/profile",
-		"answers": map[string]any{
-			"basic":             map[string]any{"project_name": "Profile test", "account_status": "existing"},
+		"project_id":        projectID,
+		"platform":          model.PlatformWechat,
+		"agent_ids":         []any{model.AgentIDArticle},
+		"profile_url":       "https://example.com/profile",
+		"platform_accounts": []any{},
+		"profile_setup": map[string]any{
+			"account_status":    "existing",
 			"platform_accounts": []any{},
-			"intent":            map[string]any{"goals": "", "direction": "", "differentiation": ""},
-			"content":           map[string]any{"preferences": "", "formats": "", "tone": "", "audience": ""},
-			"boundaries":        map[string]any{"exclusions": "", "collaboration": "", "compliance": ""},
+			"answers": map[string]any{
+				"intent":     map[string]any{},
+				"content":    map[string]any{},
+				"boundaries": map[string]any{},
+			},
+			"samples": []any{},
+		},
+		"current_profile":   nil,
+		"expected_revision": expectedRevision,
+		"answers": map[string]any{
+			"basic":      map[string]any{"project_name": "Profile test", "account_status": "existing"},
+			"intent":     map[string]any{"goals": "", "direction": "", "differentiation": ""},
+			"content":    map[string]any{"preferences": "", "formats": "", "tone": "", "audience": ""},
+			"boundaries": map[string]any{"exclusions": "", "collaboration": "", "compliance": ""},
 		},
 		"samples": []any{},
 	}

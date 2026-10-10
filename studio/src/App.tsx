@@ -22,6 +22,7 @@ const RegisterPage = lazyWithRecovery(() => import('@/pages/RegisterPage'))
 const DashboardPage = lazyWithRecovery(() => import('@/pages/DashboardPage'))
 const TimelinePage = lazyWithRecovery(() => import('@/pages/TimelinePage'))
 const ProjectsPage = lazyWithRecovery(() => import('@/pages/ProjectsPage'))
+const ProfileLabPage = lazyWithRecovery(() => import('@/pages/ProfileLabPage'))
 const PlansPage = lazyWithRecovery(() => import('@/pages/PlansPage'))
 const TasksPage = lazyWithRecovery(() => import('@/pages/TasksPage'))
 const TaskDetailPage = lazyWithRecovery(() => import('@/pages/TaskDetailPage'))
@@ -145,6 +146,8 @@ function AppRoutes() {
             )}
           />
           <Route path="projects" element={<LazyPage component={ProjectsPage} />} />
+          <Route path="projects/new" element={<LazyPage component={ProfileLabPage} />} />
+          <Route path="projects/:projectId/profile-lab" element={<LazyPage component={ProfileLabPage} />} />
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />

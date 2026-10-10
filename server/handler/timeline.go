@@ -52,6 +52,9 @@ func timelineProjectAgentIDs(project *model.Project, derived map[string][]string
 	if project == nil {
 		return nil
 	}
+	if project.AgentIDs != nil {
+		return append([]string{}, project.AgentIDs...)
+	}
 	ids := derived[project.ID]
 	if len(ids) == 0 {
 		ids = defaultProjectAgentIDs(project.Platform)

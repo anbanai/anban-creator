@@ -78,7 +78,9 @@ func setupProfileLifecycle(t *testing.T) *profileLifecycleFixture {
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeProfileAnalysis, Status: model.TaskStatusRunning}); err != nil {
+	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeProfileAnalysis, Status: model.TaskStatusRunning}
+	task.SetAgentInput(map[string]any{"expected_revision": 0})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	logger := zerolog.Nop()
@@ -158,8 +160,8 @@ func TestApplyAgentProfileResultPersistsRevisionTaskResultAndProjection(t *testi
 	if got.Version != 1 || got.InitializationStatus != model.ProfileInitializationReady || got.AnalysisTaskID != f.taskID {
 		t.Fatalf("profile metadata = version %d status %q task %q", got.Version, got.InitializationStatus, got.AnalysisTaskID)
 	}
-	if got.Status != model.ProfileStatusDraft {
-		t.Fatalf("profile status = %q, want an unconfirmed first-result draft", got.Status)
+	if got.Status != model.ProfileStatusConfirmed || got.ApplicationSource != model.ProfileApplicationSourceSystemAnalysis {
+		t.Fatalf("profile status/source = %q/%q, want confirmed/system_analysis", got.Status, got.ApplicationSource)
 	}
 	rows := f.revisions(t)
 	if len(rows) != 1 || rows[0].Revision != 1 || rows[0].SourceTaskID != f.taskID {
@@ -176,18 +178,8 @@ func TestApplyAgentProfileResultPersistsRevisionTaskResultAndProjection(t *testi
 	if result == nil || !strings.Contains(*result, `"profile_revision":1`) {
 		t.Fatalf("task result = %v, want revision summary", result)
 	}
-	if len(f.memory.files) != 0 {
-		t.Fatalf("unconfirmed draft was projected into project memory: %#v", f.memory.files)
-	}
-	confirmed, err := f.service.ConfirmProfile(context.Background(), f.userID, f.projectID, got.Version, got)
-	if err != nil {
-		t.Fatalf("ConfirmProfile: %v", err)
-	}
-	if confirmed.Status != model.ProfileStatusConfirmed || confirmed.Version != 2 {
-		t.Fatalf("confirmed profile metadata = status %q version %d", confirmed.Status, confirmed.Version)
-	}
 	if len(f.memory.files) != 7 {
-		t.Fatalf("projected files = %d, want six dimensions and AGENTS.md after confirmation", len(f.memory.files))
+		t.Fatalf("projected files = %d, want six dimensions and AGENTS.md", len(f.memory.files))
 	}
 	if !strings.Contains(f.memory.files["AGENTS.md"], "profile/preferences.md") || !strings.Contains(f.memory.files["profile/memory.md"], "复盘经验") {
 		t.Fatalf("projection missing expected AGENTS/profile content: %#v", f.memory.files)
@@ -196,8 +188,8 @@ func TestApplyAgentProfileResultPersistsRevisionTaskResultAndProjection(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Status != model.ProfileInitializationReady || state.Revision != 2 || state.ActiveTaskID != f.taskID {
-		t.Fatalf("profile state = %+v, want ready revision 2 linked to task", state)
+	if state.Status != model.ProfileInitializationReady || state.Revision != 1 || state.ActiveTaskID != f.taskID {
+		t.Fatalf("profile state = %+v, want ready revision 1 linked to task", state)
 	}
 }
 
@@ -208,13 +200,12 @@ func TestConfirmedProfileRemainsAvailableDuringRefreshAndRefreshReplacesIt(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := f.service.ConfirmProfile(context.Background(), f.userID, f.projectID, first.Version, first)
-	if err != nil {
-		t.Fatal(err)
-	}
+	confirmed := first
 
 	refreshTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: refreshTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeProfileAnalysis, Status: model.TaskStatusRunning}); err != nil {
+	refreshTask := &model.Task{ID: refreshTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeProfileAnalysis, Status: model.TaskStatusRunning}
+	refreshTask.SetAgentInput(map[string]any{"expected_revision": confirmed.Version})
+	if err := f.repo.Tasks().Create(context.Background(), refreshTask); err != nil {
 		t.Fatal(err)
 	}
 	refreshing, err := f.service.SetProfileAnalysisTaskID(context.Background(), f.userID, f.projectID, confirmed.Version, refreshTaskID)
@@ -223,6 +214,10 @@ func TestConfirmedProfileRemainsAvailableDuringRefreshAndRefreshReplacesIt(t *te
 	}
 	if refreshing.Status != model.ProfileStatusConfirmed || refreshing.Dimensions.Identity.Content["summary"] != "账号定位" {
 		t.Fatalf("confirmed profile was hidden during refresh: status=%q dimensions=%#v", refreshing.Status, refreshing.Dimensions.Identity.Content)
+	}
+	refreshTask.SetAgentInput(map[string]any{"expected_revision": refreshing.Version})
+	if err := f.repo.Tasks().Update(context.Background(), refreshTask); err != nil {
+		t.Fatal(err)
 	}
 
 	updated := validProfileDimensions()

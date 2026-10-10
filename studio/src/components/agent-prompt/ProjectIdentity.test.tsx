@@ -43,6 +43,12 @@ describe('ProjectIdentity', () => {
     expect(screen.queryByText('尚未关联 Agent')).not.toBeInTheDocument()
   })
 
+  it('respects an explicitly empty capability collection without deriving from the platform', () => {
+    render(<ProjectIdentity project={{ id: 'empty', name: '清空了创作对象', platform: 'seednote', agent_ids: [] }} />)
+    expect(document.querySelector('[data-agent-id="seednote"]')).not.toBeInTheDocument()
+    expect(screen.getByText('尚未关联 Agent')).toBeInTheDocument()
+  })
+
   it('uses a neutral project mark when no image is available', () => {
     render(<ProjectIdentity project={{ id: 'project', name: 'Garden Notes' }} />)
     expect(screen.getByLabelText('Garden Notes')).toBeInTheDocument()

@@ -86,6 +86,19 @@ func seedPlanHandlerUser(t *testing.T, repo repository.Repository, userID string
 	}
 }
 
+func seedPlanHandlerProject(t *testing.T, repo repository.Repository, userID string) string {
+	t.Helper()
+	project := &model.Project{
+		ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat,
+		Name: "Plan update project", AgentIDs: []string{model.AgentIDArticle},
+		Status: model.ProjectStatusActive,
+	}
+	if err := repo.Projects().Create(t.Context(), project); err != nil {
+		t.Fatalf("create plan project: %v", err)
+	}
+	return project.ID
+}
+
 func TestCreatePlanRejectsMissingExecutionProfile(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	h := NewPlanHandler(nil, &logger)
@@ -744,6 +757,7 @@ func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.
 	userID := uuid.NewString()
 	planID := uuid.NewString()
 	seedPlanHandlerUser(t, base, userID)
+	projectID := seedPlanHandlerProject(t, base, userID)
 	for _, assetID := range []string{"asset-a", "asset-b"} {
 		if err := base.Assets().Create(t.Context(), &model.Asset{
 			ID: assetID, UserID: userID, Purpose: service.DirectUploadPurposeTaskReference,
@@ -754,7 +768,7 @@ func TestPlanUpdateReferenceOmissionRetriesCASAndReturnsMatchingView(t *testing.
 		}
 	}
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Prompt: "before",
+		ID: planID, UserID: userID, ProjectID: projectID, Prompt: "before",
 		CronExpr: "0 9 * * *", ReferenceImageAssetID: "asset-a", Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)
@@ -806,6 +820,7 @@ func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *tes
 	userID := uuid.NewString()
 	planID := uuid.NewString()
 	seedPlanHandlerUser(t, base, userID)
+	projectID := seedPlanHandlerProject(t, base, userID)
 	assetIDs := []string{"asset-a", "asset-b", "asset-c", "asset-d"}
 	for _, assetID := range assetIDs {
 		if err := base.Assets().Create(t.Context(), &model.Asset{
@@ -817,7 +832,7 @@ func TestPlanUpdateReferenceOmissionReturnsConflictAfterBoundedCASRetries(t *tes
 		}
 	}
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Prompt: "before",
+		ID: planID, UserID: userID, ProjectID: projectID, Prompt: "before",
 		CronExpr: "0 9 * * *", ReferenceImageAssetID: assetIDs[0], Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)
@@ -867,8 +882,9 @@ func TestPlanUpdateReferenceOmissionMatchesNullReferenceRow(t *testing.T) {
 	userID := uuid.NewString()
 	planID := uuid.NewString()
 	seedPlanHandlerUser(t, base, userID)
+	projectID := seedPlanHandlerProject(t, base, userID)
 	if err := base.Plans().Create(t.Context(), &model.Plan{
-		ID: planID, UserID: userID, Prompt: "before",
+		ID: planID, UserID: userID, ProjectID: projectID, Prompt: "before",
 		CronExpr: "0 9 * * *", Status: model.PlanStatusActive,
 	}); err != nil {
 		t.Fatal(err)

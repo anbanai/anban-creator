@@ -13,6 +13,11 @@ const (
 	ProfileStatusDraft     = "draft"
 	ProfileStatusConfirmed = "confirmed"
 
+	ProfileApplicationSourceSystemAnalysis   = "system_analysis"
+	ProfileApplicationSourceUserConfirmation = "user_confirmation"
+	ProfileApplicationSourceUserEdit         = "user_edit"
+	ProfileApplicationSourceUserRestore      = "user_restore"
+
 	ProfileInitializationNotStarted = "not_started"
 	ProfileInitializationQueued     = "queued"
 	ProfileInitializationRunning    = "running"
@@ -45,6 +50,7 @@ type ProjectProfile struct {
 	InitializationStatus string                   `json:"initialization_status"`
 	LastError            string                   `json:"last_error,omitempty"`
 	Version              int64                    `json:"version"`
+	ApplicationSource    string                   `json:"application_source,omitempty"`
 	AnalysisTaskID       string                   `json:"analysis_task_id,omitempty"`
 	Dimensions           ProjectProfileDimensions `json:"dimensions"`
 	AnalysisLimits       []string                 `json:"analysis_limits"`
@@ -55,12 +61,13 @@ type ProjectProfile struct {
 // profile. The current Project.Profile column remains a fast read model; this
 // table is the audit trail and source for restore/query operations.
 type ProjectProfileRevision struct {
-	ID            string         `gorm:"type:char(36);primaryKey" json:"id"`
-	ProjectID     string         `gorm:"type:char(36);index:idx_profile_revision,priority:1;not null" json:"project_id"`
-	Revision      int64          `gorm:"index:idx_profile_revision,priority:2;not null" json:"revision"`
-	SixDimensions datatypes.JSON `gorm:"type:json;not null" json:"six_dimensions"`
-	SourceTaskID  string         `gorm:"type:char(36);index" json:"source_task_id,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
+	ID              string         `gorm:"type:char(36);primaryKey" json:"id"`
+	ProjectID       string         `gorm:"type:char(36);index:idx_profile_revision,priority:1;not null" json:"project_id"`
+	Revision        int64          `gorm:"index:idx_profile_revision,priority:2;not null" json:"revision"`
+	SixDimensions   datatypes.JSON `gorm:"type:json;not null" json:"six_dimensions"`
+	ProfileSnapshot datatypes.JSON `gorm:"type:json" json:"profile_snapshot,omitempty"`
+	SourceTaskID    string         `gorm:"type:char(36);index" json:"source_task_id,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
 }
 
 // ProjectProfileState is the queryable lifecycle read model for the current
@@ -116,6 +123,12 @@ func (p ProjectProfile) Validate() error {
 	}
 	if p.Status != ProfileStatusDraft && p.Status != ProfileStatusConfirmed {
 		return fmt.Errorf("invalid profile status")
+	}
+	switch p.ApplicationSource {
+	case "", ProfileApplicationSourceSystemAnalysis, ProfileApplicationSourceUserConfirmation,
+		ProfileApplicationSourceUserEdit, ProfileApplicationSourceUserRestore:
+	default:
+		return fmt.Errorf("invalid profile application source")
 	}
 	switch p.InitializationStatus {
 	case ProfileInitializationNotStarted, ProfileInitializationQueued, ProfileInitializationRunning,

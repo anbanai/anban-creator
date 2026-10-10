@@ -28,7 +28,7 @@ func setupProjectEcommerceTest(t *testing.T) (*fiber.App, repository.Repository,
 			sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.Template{}, &model.Project{}); err != nil {
+	if err := model.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	db.Exec("DELETE FROM templates")

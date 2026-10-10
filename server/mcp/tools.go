@@ -149,13 +149,13 @@ func registerProjectTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "get_project_profile",
-		Description: "Get the resolved project runtime profile for AI content generation. The server applies task snapshots, sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as ecommerce or montage. When task_id is provided, the task's frozen project_snapshot is used; old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials.",
+		Description: "Get the resolved project runtime profile for AI content generation using the task's frozen project_snapshot. The server sanitizes secrets, resolves style/theme/author dimensions, and returns platform-specific blocks such as ecommerce or montage. Applied account profiles retain provenance and preferences are hard constraints. Old rows without a snapshot fall back to legacy task overrides/project resolution. Does NOT expose credentials.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"project_id": map[string]any{"type": "string", "description": "Project ID"},
-				"scope":      map[string]any{"type": "string", "enum": []any{"wechat", "seednote", "moments", "ecommerce", "montage", "hypit"}, "description": "Optional output-shape hint."},
-				"task_id":    map[string]any{"type": "string", "description": "Optional task UUID for resolving its frozen project_snapshot; it must belong to the same project and user."},
+				"scope":      map[string]any{"type": "string", "enum": []any{"wechat", "wechat-picture", "seednote", "moments", "ecommerce", "montage", "hypit", "whiteboard-animation"}, "description": "Optional output-shape hint."},
+				"task_id":    map[string]any{"type": "string", "description": "Task UUID for resolving its frozen project_snapshot; it must belong to the same project and user."},
 			},
 			"required": []any{"project_id"},
 		},

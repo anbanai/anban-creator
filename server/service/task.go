@@ -456,12 +456,14 @@ type CreateManualParams struct {
 }
 
 func resolveTaskIdentity(project *model.Project, p CreateManualParams) (agentID, channel, taskKind string, pack agentpack.Manifest, err error) {
-	_ = project
 	agentID = strings.TrimSpace(p.AgentID)
 	channel = strings.TrimSpace(p.Channel)
 	taskKind = strings.TrimSpace(p.TaskKind)
 	if agentID == "" || channel == "" || taskKind == "" {
 		return "", "", "", agentpack.Manifest{}, fmt.Errorf("agent_id, channel, and task_kind are required")
+	}
+	if !model.ProjectAllowsAgent(project, agentID) {
+		return "", "", "", agentpack.Manifest{}, fmt.Errorf("Agent %q is not enabled for this project", agentID)
 	}
 	pack, ok := agentpack.Default().ForAgent(agentID)
 	if !ok {
@@ -967,6 +969,9 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 			if task.ProjectID != project.ID || task.UserID != project.UserID {
 				return fmt.Errorf("task admission project identity mismatch")
 			}
+			if !model.ProjectAllowsAgent(project, task.AgentID) {
+				return fmt.Errorf("Agent %q is not enabled for this project", task.AgentID)
+			}
 		}
 		for _, task := range tasks {
 			if task.PlanID == nil || strings.TrimSpace(*task.PlanID) == "" {
@@ -1021,16 +1026,21 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		if profile.Version != *manualAdmission.ProfileAnalysisExpectedVersion {
 			return ErrProjectProfileVersionConflict
 		}
+		frozenRevision, err := profileTaskExpectedRevision(tasks[0])
+		if err != nil {
+			return err
+		}
+		if frozenRevision != profile.Version {
+			return ErrProjectProfileVersionConflict
+		}
 		if profile.AnalysisTaskID != "" {
 			if existing, findErr := tx.Tasks().FindByID(ctx, profile.AnalysisTaskID); findErr == nil && (existing.Status == model.TaskStatusPending || existing.Status == model.TaskStatusRunning) {
 				return ErrProjectProfileAnalysisInProgress
 			}
 		}
 		profile.AnalysisTaskID = tasks[0].ID
-		if !profile.IsConfirmed() {
-			profile.Status = model.ProfileStatusDraft
-		}
 		profile.InitializationStatus = model.ProfileInitializationQueued
+		profile.LastError = ""
 		project.Profile = datatypes.NewJSONType(profile)
 		if err := tx.Projects().Update(ctx, project); err != nil {
 			return err
@@ -1196,6 +1206,9 @@ func (s *TaskService) createFromPlanWithEntryInputs(ctx context.Context, plan *m
 			return nil, err
 		}
 		project = found
+	}
+	if !model.ProjectAllowsAgent(project, agentID) {
+		return nil, fmt.Errorf("Agent %q is not enabled for this project", agentID)
 	}
 	if pack, ok := agentpack.Default().ForAgent(agentID); !ok {
 		return nil, fmt.Errorf("unknown Agent %q", agentID)
