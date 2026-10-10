@@ -155,6 +155,12 @@ spec:
                   key: api-key
             - name: ANBAN_AGENT_IMAGE_PULL_SECRET
               value: ${imagePullSecret}
+          # Optional so existing installations can deploy with onboarding disabled.
+          # The mounted config.yaml must also contain the onboarding section.
+          envFrom:
+            - secretRef:
+                name: anban-onboarding-providers
+                optional: true
           name: ${micro_service_name}-${version_switch}
           image: ${image_repo}
           ports:
