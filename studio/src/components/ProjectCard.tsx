@@ -206,7 +206,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
         <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`创作项目操作：${project.name}`}>
           {onEdit && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`${project.agent_ids == null ? '编辑项目' : '编辑创作项目'}：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`编辑创作项目：${project.name}`} />}>
                 <SquarePen />
               </TooltipTrigger>
               <TooltipContent>编辑</TooltipContent>
