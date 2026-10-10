@@ -21,7 +21,7 @@
 - 已有项目模式绑定 Server 校验的 `project_id` 和快照时画像版本；提交时同一事务执行归属、版本 CAS、画像更新、revision/state 与幂等记录。
 - 现有项目快照只含数据库画像生成的 `AGENTS.md`、六个 `profile/*.md` 和有界根 `MEMORY.md`；不包含任意目录、`.claude/agent-memory` 或其它项目文件。
 - 更新画像成功后 Server 通过 memory NAS 重投影 `AGENTS.md` 和六个画像文件；根 `MEMORY.md` 允许按快照指纹/CAS 受控追加或合并，不能任意替换，冲突和写入失败进入可重试投影流程。画像的 `memory` 维度通过 `profile/memory.md` 跟随确认后的数据库画像更新。
-- 记忆查看和人工编辑统一经过 Server-owned memory NAS：GET 只读受限快照，PUT 编辑必须携带 `expected_content` 并执行原子 CAS。禁止直接从 Studio、Agent 或 Runtime 写 NAS；`AGENTS.md`、`CLAUDE.md`、`profile/*`、`.claude/*` 由各自事实源/运行时边界管理。
+- 记忆查看和人工编辑统一经过 Server-owned memory NAS：GET 只读受限快照，普通 Markdown 文件的 PUT 必须携带 `expected_content` 并执行原子 CAS。根 `MEMORY.md` 是持续记忆，只能通过受控追加和内容指纹 CAS 更新，不能被人工编辑接口整体替换。禁止直接从 Studio、Agent 或 Runtime 写 NAS；`AGENTS.md`、`CLAUDE.md`、`profile/*`、`.claude/*` 由各自事实源/运行时边界管理。
 - 修改 `harness/` 后必须运行 `make agent-pack-generate`、`make agent-pack-check`，并同步 Claude/Codex plugin 版本。
 
 ### Task 1: DSH interactive protocol

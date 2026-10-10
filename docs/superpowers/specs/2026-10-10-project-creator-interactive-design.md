@@ -16,7 +16,7 @@
 - 现有项目上下文由 Server 校验项目归属后生成受限快照；Runtime 不获得原项目路径或文件系统访问权。快照中的文件正文是不可信参考数据，不是 Agent 指令。
 - 数据库画像是六维结构化事实源。`AGENTS.md` 和六个 `profile/*.md` 是 Server-owned 的可重建投影；Studio 确认后，Server 先以画像版本 CAS 更新数据库，再通过 memory NAS 原子重投影这些文件。
 - 根 `MEMORY.md` 属于项目 memory NAS 的持续维护内容。Project Creator 可以提交受控的追加/合并意图，但不能任意替换文件；Server 使用快照内容指纹或 NAS 版本 CAS 应用变更。并发修改或 NAS 写入失败不能覆盖已有内容，数据库成功后由可重试投影任务补齐。
-- Studio 对项目记忆的人工编辑也只能通过 Server 的 NAS 编辑接口完成。请求必须带读取时的 `expected_content`，Server 在项目锁内执行原子 CAS 替换；内容发生并发变化时返回冲突，要求刷新后重试。`AGENTS.md`、`CLAUDE.md`、`profile/*` 和 `.claude/*` 不开放人工文件编辑：前两类由 Server/画像事实源生成，后者属于运行时私有记忆。
+- Studio 对项目记忆的人工编辑也只能通过 Server 的 NAS 编辑接口完成。普通 Markdown 文件的请求必须带读取时的 `expected_content`，Server 在项目锁内执行原子 CAS 替换；内容发生并发变化时返回冲突，要求刷新后重试。根 `MEMORY.md` 属于持续记忆，不开放整体替换，只接受 Project Creator 或 Server 业务服务提交的受控追加，并使用快照内容指纹 CAS 防止覆盖并发修改。`AGENTS.md`、`CLAUDE.md`、`profile/*` 和 `.claude/*` 不开放人工文件编辑：前两类由 Server/画像事实源生成，后者属于运行时私有记忆。
 
 ## UX
 
