@@ -117,7 +117,7 @@ describe('ProjectCard', () => {
     expect(screen.queryByText('更多')).not.toBeInTheDocument()
     const channelConfig = screen.getByRole('button', { name: '渠道配置：公众号创作项目' })
     const edit = screen.getByRole('button', { name: '编辑创作项目：公众号创作项目' })
-    const profile = screen.getByRole('button', { name: '创作项目画像：公众号创作项目' })
+    const profile = screen.getByRole('button', { name: '人设画像：公众号创作项目' })
     const memory = screen.getByRole('button', { name: '创作项目记忆：公众号创作项目' })
     for (const control of [channelConfig, edit, profile, memory]) expect(control).toHaveClass('size-11')
 
@@ -143,7 +143,7 @@ describe('ProjectCard', () => {
     const onProfile = vi.fn()
     render(<ProjectCard project={project({ platform })} onProfile={onProfile} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '创作项目画像：公众号创作项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '人设画像：公众号创作项目' }))
     expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ platform }))
     expect(screen.queryByRole('button', { name: /配置账号画像/ })).not.toBeInTheDocument()
   })

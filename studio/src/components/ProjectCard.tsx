@@ -194,10 +194,10 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
           )}
           {onProfile && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onProfile(project)} aria-label={`创作项目画像：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onProfile(project)} aria-label={`人设画像：${project.name}`} />}>
                 <UserRound />
               </TooltipTrigger>
-              <TooltipContent>创作项目画像</TooltipContent>
+              <TooltipContent>人设画像</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>

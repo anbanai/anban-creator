@@ -363,7 +363,7 @@ export default function ProjectsPage() {
       setProfileDraft(profile)
       queryClient.setQueryData(['project-profile', profileProject?.id], profile)
       queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
-      toast.success('创作项目画像已确认，可用于后续创作')
+      toast.success('人设画像已确认，可用于后续创作')
     },
     onError: (error) => toast.error(getApiErrorMessage(error, '画像确认失败，请重试')),
   })
@@ -715,7 +715,7 @@ export default function ProjectsPage() {
       <Dialog open={profileModalOpen} onOpenChange={(open) => { if (!open) closeProfile() }}>
         <DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
           <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
-            <DialogTitle>{profileWizardMode ? '创作项目画像引导' : '创作项目画像'}</DialogTitle>
+            <DialogTitle>{profileWizardMode ? '人设画像引导' : '人设画像'}</DialogTitle>
           </DialogHeader>
           {profileWizardMode && profileWizardStep < 4 ? (
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
@@ -791,7 +791,7 @@ export default function ProjectsPage() {
             </div>
           ) : (
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-              {!profileWizardMode && profileQuery.isPending ? <p className="text-sm text-muted-foreground" role="status">正在加载创作项目画像…</p> : null}
+              {!profileWizardMode && profileQuery.isPending ? <p className="text-sm text-muted-foreground" role="status">正在加载人设画像…</p> : null}
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
                 <div>
                   <p className="text-sm font-medium">初始化状态：{profileDraft?.initialization_status ?? 'not_started'}</p>
@@ -801,7 +801,7 @@ export default function ProjectsPage() {
               </div>
               {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像分析已加入队列，完成后会显示可确认的结果。</p>}
               {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像分析失败，已确认的画像保持不变，可以重试。</p>}
-              {!profileWizardMode && !profileDraft?.analysis_task_id && profileDraft?.status !== 'confirmed' ? <p className="text-sm text-muted-foreground">尚未初始化创作项目画像。可以稍后从这里开始，也可以直接创建作品或排期。</p> : null}
+              {!profileWizardMode && !profileDraft?.analysis_task_id && profileDraft?.status !== 'confirmed' ? <p className="text-sm text-muted-foreground">尚未初始化人设画像。可以稍后从这里开始，也可以直接创建作品或排期。</p> : null}
               {profileWizardMode && profileAnalysisFailed ? <Button variant="outline" disabled={profileAnalysisMutation.isPending} loading={profileAnalysisMutation.isPending} onClick={() => startProfileAnalysis(true)}>重试画像分析</Button> : null}
               {profileResultReady && profileDraft ? (
                 <>
