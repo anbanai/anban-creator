@@ -27,6 +27,7 @@ import (
 
 // Services aggregates all service dependencies required by the router.
 type Services struct {
+	PortraitOnboardingHandler           *handler.PortraitOnboardingHandler
 	AnalyticsHandler                    *handler.AnalyticsHandler
 	ContentAnalyticsHandler             *handler.ContentAnalyticsHandler
 	Config                              *config.Config
@@ -241,6 +242,11 @@ func NewRouter(svc *Services) *fiber.App {
 		interactive.Post("/sessions/:id/questions/:callId/answers", svc.InteractiveHandler.Answers)
 		interactive.Post("/sessions/:id/commit", svc.InteractiveHandler.Commit)
 		interactive.Delete("/sessions/:id", svc.InteractiveHandler.Delete)
+	}
+	if h := svc.PortraitOnboardingHandler; h != nil {
+		apiV1.Get("/onboarding/capabilities", h.Capabilities)
+		apiV1.Post("/onboarding/chat", h.Chat)
+		apiV1.Post("/onboarding/transcribe", h.Transcribe)
 	}
 	if svc.BillingHandler != nil {
 		billingAPI := apiV1.Group("/billing")

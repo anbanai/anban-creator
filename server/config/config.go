@@ -22,6 +22,7 @@ import (
 
 // Config holds all server configuration.
 type Config struct {
+	Onboarding         OnboardingConfig                `yaml:"onboarding"`
 	Server             ServerConfig                    `yaml:"server"`
 	Logging            LoggingConfig                   `yaml:"logging"`
 	Database           DatabaseConfig                  `yaml:"database"`
@@ -925,6 +926,9 @@ func NewConfig(path string) (*Config, error) {
 	}
 
 	cfg.applyDefaults()
+	if err := cfg.inheritOnboardingProvider(data); err != nil {
+		return nil, err
+	}
 	if err := cfg.deriveModelRouteRuntimeConfig(); err != nil {
 		return nil, err
 	}
@@ -987,6 +991,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"trends":          true,
 		"search":          true,
 		"interactive":     true,
+		"onboarding":      true,
 	}
 	for key := range top {
 		if !known[key] {
@@ -1050,9 +1055,21 @@ func expandEnvVars(data []byte) []byte {
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
 	applySearchDefaults := func(cfg *SearchDoubaoConfig, endpoint string) {
-		if cfg.Endpoint == "" { cfg.Endpoint = endpoint }
-		if cfg.Timeout == 0 { cfg.Timeout = 30 * time.Second }
-		if cfg.MaxWebResults == 0 { cfg.MaxWebResults = 10 }
+		if cfg.Endpoint == "" {
+			cfg.Endpoint = endpoint
+		}
+		if cfg.Timeout == 0 {
+			cfg.Timeout = 30 * time.Second
+		}
+		if cfg.MaxWebResults == 0 {
+			cfg.MaxWebResults = 10
+		}
+	}
+	if c.Onboarding.DailyUserLimit == 0 {
+		c.Onboarding.DailyUserLimit = 60
+	}
+	if c.Onboarding.DailyGlobalLimit == 0 {
+		c.Onboarding.DailyGlobalLimit = 1000
 	}
 	applySearchDefaults(&c.Search.Custom, "https://open.feedcoopapi.com/search_api/web_search")
 	applySearchDefaults(&c.Search.Global, "https://open.feedcoopapi.com/search_api/global_search")
@@ -1621,6 +1638,9 @@ func detectPluginDir() string {
 
 // Validate checks that required configuration fields are set.
 func (c *Config) Validate() error {
+	if err := c.Onboarding.Validate(); err != nil {
+		return err
+	}
 	var errs []string
 	if !interactiveProviderAPIKeyEnvPattern.MatchString(c.Interactive.ProviderAPIKeyEnv) {
 		errs = append(errs, "interactive.provider_api_key_env must be a valid environment variable name")
@@ -1637,18 +1657,31 @@ func (c *Config) Validate() error {
 		}
 		var selected *SearchDoubaoConfig
 		switch strings.TrimSpace(c.Search.Provider) {
-		case "custom": selected = &c.Search.Custom
-		case "global": selected = &c.Search.Global
-		default: errs = append(errs, fmt.Sprintf("search.provider %q is unsupported", c.Search.Provider))
+		case "custom":
+			selected = &c.Search.Custom
+		case "global":
+			selected = &c.Search.Global
+		default:
+			errs = append(errs, fmt.Sprintf("search.provider %q is unsupported", c.Search.Provider))
 		}
 		if selected != nil {
 			prefix := "search." + strings.TrimSpace(c.Search.Provider)
-			if strings.TrimSpace(selected.Endpoint) == "" { errs = append(errs, prefix+".endpoint is required when search is enabled") }
-			if strings.TrimSpace(selected.APIKey) == "" { errs = append(errs, prefix+".api_key is required when search is enabled") }
-			if selected.Timeout <= 0 { errs = append(errs, prefix+".timeout must be positive when search is enabled") }
+			if strings.TrimSpace(selected.Endpoint) == "" {
+				errs = append(errs, prefix+".endpoint is required when search is enabled")
+			}
+			if strings.TrimSpace(selected.APIKey) == "" {
+				errs = append(errs, prefix+".api_key is required when search is enabled")
+			}
+			if selected.Timeout <= 0 {
+				errs = append(errs, prefix+".timeout must be positive when search is enabled")
+			}
 			maxResults := 50
-			if strings.TrimSpace(c.Search.Provider) == "global" { maxResults = 20 }
-			if selected.MaxWebResults <= 0 || selected.MaxWebResults > maxResults { errs = append(errs, fmt.Sprintf("%s.max_web_results must be between 1 and %d when search is enabled", prefix, maxResults)) }
+			if strings.TrimSpace(c.Search.Provider) == "global" {
+				maxResults = 20
+			}
+			if selected.MaxWebResults <= 0 || selected.MaxWebResults > maxResults {
+				errs = append(errs, fmt.Sprintf("%s.max_web_results must be between 1 and %d when search is enabled", prefix, maxResults))
+			}
 		}
 	}
 	if err := c.Claude.Validate(); err != nil {

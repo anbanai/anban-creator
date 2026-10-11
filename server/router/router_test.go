@@ -21,6 +21,22 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 )
 
+func TestOnboardingRoutesRequireAuthentication(t *testing.T) {
+	logger := zerolog.New(io.Discard)
+	h := handler.NewPortraitOnboardingHandler(service.NewPortraitOnboardingService(config.OnboardingConfig{}, nil))
+	app := NewRouter(&Services{Config: &config.Config{}, Logger: &logger, Repo: repository.New(nil), PortraitOnboardingHandler: h})
+	for _, entry := range []struct{ method, path string }{{"GET", "capabilities"}, {"POST", "chat"}, {"POST", "transcribe"}} {
+		resp, err := app.Test(httptest.NewRequest(entry.method, "/api/v1/onboarding/"+entry.path, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("%s status %d", entry.path, resp.StatusCode)
+		}
+	}
+}
+
 // setupTestApp creates a minimal Fiber app with the health endpoint
 // backed by an in-memory SQLite database.
 func setupTestApp(t *testing.T, withDB bool) (*fiber.App, func()) {

@@ -664,7 +664,7 @@ export default function TaskDetailPage() {
               <span className="sr-only">{taskAgentLabel}</span>
             </div>
             <h1 className="min-w-0 max-w-4xl text-xl font-bold leading-tight text-foreground">
-              {task.title || task.prompt || `${taskAgentLabel}作品`}
+              {(task.title || task.prompt || '').length > 90 ? `${taskAgentLabel} · ${task.status === 'completed' ? '创作结果' : '创作任务'}` : task.title || task.prompt || `${taskAgentLabel}作品`}
             </h1>
             <StatusPill status={task.status} label={taskStatusLabel[task.status] || task.status} />
             {project && (

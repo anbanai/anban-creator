@@ -386,7 +386,9 @@ describe('TasksPage URL-driven recovery filters', () => {
         lifecycle: {
           version: 1,
           revision: 1,
-          updated_at: '2026-07-06T01:02:00.000Z',
+          // The UI displays browser-local time; keep this fixture independent
+          // of the runner's UTC/Asia-Shanghai timezone.
+          updated_at: new Date(2026, 6, 6, 9, 2).toISOString(),
           stages: [{ id: 'writing', title: '撰写正文', source: 'agent', kind: 'work', state: 'failed' }],
         },
       }],

@@ -5,7 +5,7 @@ describe('Studio nginx backend proxy contract', () => {
   it('keeps local HTTP defaults while ACK selects the TLS service', () => {
     const template = readFileSync('default.conf.template', 'utf8')
     const dockerfile = readFileSync('../deploy/docker/Dockerfile.studio', 'utf8')
-    const deployment = readFileSync('Deployment.yaml', 'utf8')
+    const deployment = readFileSync('Deployment.yaml', 'utf8').replace(/\r\n/g, '\n')
 
     expect(template).toContain('proxy_pass ${BACKEND_SCHEME}://${BACKEND_HOST}:${BACKEND_PORT};')
     expect(template).not.toContain('proxy_pass http://${BACKEND_HOST}:8080;')
