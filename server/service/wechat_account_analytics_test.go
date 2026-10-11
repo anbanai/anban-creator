@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -40,15 +40,11 @@ func TestWechatAccountCoverageAndNullZeroSemantics(t *testing.T) {
 	if coverage.Complete || coverage.CoveredDays != 2 || len(covered) != 2 {
 		t.Fatalf("coverage = %#v dates=%#v", coverage, covered)
 	}
-	value, reason := sumWechatMetric([]string{"2026-09-01", "2026-09-03"}, days, "read_users")
+	value, reason := sumWechatMetric(days, "read_users")
 	if value == nil || *value != 1 || reason != "" {
 		t.Fatalf("sum = %v reason=%q", value, reason)
 	}
-	missing, reason := sumWechatMetric([]string{"2026-09-01", "2026-09-02", "2026-09-03"}, days, "read_users")
-	if missing != nil || reason == "" {
-		t.Fatalf("incomplete coverage sum = %v reason=%q", missing, reason)
-	}
-	missing, reason = sumWechatMetric([]string{"2026-09-01"}, []*model.WechatAccountAnalyticsDay{{StatDate: "2026-09-01"}}, "read_users")
+	missing, reason := sumWechatMetric([]*model.WechatAccountAnalyticsDay{{StatDate: "2026-09-01"}}, "read_users")
 	if missing != nil || reason == "" {
 		t.Fatalf("missing metric = %v reason=%q", missing, reason)
 	}
@@ -63,6 +59,59 @@ func TestWechatAccountPreviousRangeAndZeroDenominator(t *testing.T) {
 	}
 	if percentChange(5, 0) != nil {
 		t.Fatal("zero previous denominator must be unavailable")
+	}
+}
+
+func TestWechatAccountOverviewReturnsPreviousDayAndWeekComparisons(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	ctx := context.Background()
+	project := &model.Project{ID: "project-comparisons", UserID: "user-comparisons", Platform: model.PlatformWechat, Name: "公众号"}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	for i, item := range []struct {
+		date  string
+		value int64
+	}{
+		{date: "2026-10-07", value: 5},
+		{date: "2026-10-01", value: 2},
+		{date: "2026-10-08", value: 10},
+	} {
+		batchID := fmt.Sprintf("batch-comparison-%d", i)
+		batch := &model.WechatAccountAnalyticsBatch{ID: batchID, UserID: project.UserID, ProjectID: project.ID, IdempotencyKey: fmt.Sprintf("comparison-%d", i), Status: model.WechatAccountAnalyticsBatchCompleted, ReceivedAt: time.Date(2026, 10, 9, i, 0, 0, 0, time.UTC), EffectiveAt: time.Date(2026, 10, 9, i, 0, 0, 0, time.UTC)}
+		if err := repo.WechatAccountAnalytics().CreateBatch(ctx, batch); err != nil {
+			t.Fatal(err)
+		}
+		value := item.value
+		if err := repo.WechatAccountAnalytics().CreateDays(ctx, []*model.WechatAccountAnalyticsDay{{ID: fmt.Sprintf("day-comparison-%d", i), ProjectID: project.ID, BatchID: batchID, StatDate: item.date, ReadUsers: &value}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	previousDays, previousErr := repo.WechatAccountAnalytics().ListWinningDays(ctx, project.ID, "2026-10-07", "2026-10-07")
+	weekDays, weekErr := repo.WechatAccountAnalytics().ListWinningDays(ctx, project.ID, "2026-10-01", "2026-10-01")
+	if previousErr != nil || weekErr != nil || len(previousDays) != 1 || len(weekDays) != 1 {
+		t.Fatalf("previous days=%#v err=%v week=%#v err=%v", previousDays, previousErr, weekDays, weekErr)
+	}
+	overview, err := NewWechatAccountAnalyticsService(repo).Overview(ctx, project.UserID, project.ID, "2026-10-08", "2026-10-08")
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparisons := overview.Comparisons["read_users"]
+	if comparisons == nil || comparisons.PreviousDay == nil || comparisons.PreviousWeek == nil {
+		t.Fatalf("comparisons = %#v, want previous day and week", comparisons)
+	}
+	if comparisons.PreviousDay.Value == nil || *comparisons.PreviousDay.Value != 1 {
+		t.Fatalf("previous day = %#v, want 100%%", comparisons.PreviousDay)
+	}
+	if comparisons.PreviousWeek.Value == nil || *comparisons.PreviousWeek.Value != 4 {
+		t.Fatalf("previous week = %#v, want 400%%", comparisons.PreviousWeek)
 	}
 }
 
@@ -90,41 +139,6 @@ func TestWechatAccountImportFingerprintIncludesDataAsOfAndClientModifiedAt(t *te
 	}
 }
 
-func TestNormalizeWechatAccountAnalyticsIdempotencyKey(t *testing.T) {
-	got, err := normalizeWechatAccountAnalyticsIdempotencyKey("  replay-key  ")
-	if err != nil || got != "replay-key" {
-		t.Fatalf("normalized key = %q, err = %v", got, err)
-	}
-	if _, err := normalizeWechatAccountAnalyticsIdempotencyKey(" \t\n "); err == nil {
-		t.Fatal("whitespace-only idempotency key must be rejected")
-	}
-	if _, err := normalizeWechatAccountAnalyticsIdempotencyKey(strings.Repeat("a", 129)); err == nil {
-		t.Fatal("oversized ASCII idempotency key must be rejected")
-	}
-	if _, err := normalizeWechatAccountAnalyticsIdempotencyKey(strings.Repeat("界", 43)); err == nil {
-		t.Fatal("oversized UTF-8 idempotency key must be rejected by byte length")
-	}
-}
-
-func TestWechatTrafficSourcesRejectUnsupportedMetric(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := model.AutoMigrate(db); err != nil {
-		t.Fatal(err)
-	}
-	repo := repository.New(db)
-	project := &model.Project{ID: "project-traffic-metric", UserID: "user-traffic-metric", Platform: model.PlatformWechat, Name: "公众号"}
-	if err := repo.Projects().Create(context.Background(), project); err != nil {
-		t.Fatal(err)
-	}
-	_, err = NewWechatAccountAnalyticsService(repo).TrafficSources(context.Background(), project.UserID, project.ID, "2026-10-08", "2026-10-08", "share_users", "all")
-	if !errors.Is(err, ErrAnalyticsInvalidQuery) || !strings.Contains(err.Error(), "read_users") {
-		t.Fatalf("unsupported source metric error = %v", err)
-	}
-}
-
 func TestWechatTrafficSourcesZeroTotalLeavesSharesUnavailable(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
@@ -139,7 +153,7 @@ func TestWechatTrafficSourcesZeroTotalLeavesSharesUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	zero := int64(0)
-	batch := &model.WechatAccountAnalyticsBatch{ID: "batch-traffic-zero", UserID: project.UserID, ProjectID: project.ID, Status: model.WechatAccountAnalyticsBatchCompleted, ReceivedAt: time.Now().UTC(), EffectiveAt: time.Now().UTC()}
+	batch := &model.WechatAccountAnalyticsBatch{ID: "batch-traffic-zero", UserID: project.UserID, ProjectID: project.ID, IdempotencyKey: "traffic-zero", Status: model.WechatAccountAnalyticsBatchCompleted, ReceivedAt: time.Now().UTC(), EffectiveAt: time.Now().UTC()}
 	if err := repo.WechatAccountAnalytics().CreateBatch(context.Background(), batch); err != nil {
 		t.Fatal(err)
 	}
@@ -161,42 +175,4 @@ func TestWechatTrafficSourcesZeroTotalLeavesSharesUnavailable(t *testing.T) {
 	}
 }
 
-func TestWechatTrafficSourcesExposeSourceTotalsWithoutAccountDays(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := model.AutoMigrate(db); err != nil {
-		t.Fatal(err)
-	}
-	repo := repository.New(db)
-	ctx := context.Background()
-	project := &model.Project{ID: "project-source-only", UserID: "user-source-only", Platform: model.PlatformWechat, Name: "公众号"}
-	if err := repo.Projects().Create(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-	batch := &model.WechatAccountAnalyticsBatch{ID: "batch-source-only", UserID: project.UserID, ProjectID: project.ID, Status: model.WechatAccountAnalyticsBatchCompleted, ReceivedAt: time.Now().UTC(), EffectiveAt: time.Now().UTC()}
-	if err := repo.WechatAccountAnalytics().CreateBatch(ctx, batch); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.WechatAccountAnalytics().CreateSources(ctx, []*model.WechatTrafficSourceDay{
-		{ID: "source-only-1", ProjectID: project.ID, BatchID: batch.ID, StatDate: "2026-10-08", Source: model.WechatTrafficSourceMessage, ReadUsers: ptrInt64(100)},
-		{ID: "source-only-2", ProjectID: project.ID, BatchID: batch.ID, StatDate: "2026-10-09", Source: model.WechatTrafficSourceMessage, ReadUsers: ptrInt64(120)},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	response, err := NewWechatAccountAnalyticsService(repo).TrafficSources(ctx, project.UserID, project.ID, "2026-10-08", "2026-10-09", "read_users", "all")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(response.Items) != 1 || response.Items[0].Value == nil || *response.Items[0].Value != 220 {
-		t.Fatalf("items = %#v, want source total 220", response.Items)
-	}
-	if response.Items[0].Share != nil || response.DataQuality == nil {
-		t.Fatalf("source-only share/data quality = %#v / %#v, want unavailable share and warning", response.Items[0].Share, response.DataQuality)
-	}
-}
-
 func timePtr(value time.Time) *time.Time { return &value }
-
-func ptrInt64(value int64) *int64 { return &value }

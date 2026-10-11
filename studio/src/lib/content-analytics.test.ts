@@ -5,6 +5,23 @@ vi.mock('@/lib/http-client', () => ({ http: { get: vi.fn(), post: vi.fn() }, unw
 const params = { from: '2026-09-01', to: '2026-09-30', granularity: 'month' as const, metric_basis: 'cumulative' as const }
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(http.get).mockResolvedValue({ data: { data: { revision: 7, totals: { views: null }, items: [], total: 0 } } }) })
 describe('bounded analytics API', () => {
+  it('organizes Seednote metrics into official analysis views', async () => {
+    const { seednoteAnalyticsViews } = await import('./content-analytics')
+
+    expect(seednoteAnalyticsViews.map(view => view.key)).toEqual(['watch', 'interaction', 'follower', 'publication'])
+    expect(seednoteAnalyticsViews[0].metricKeys).toEqual([
+      'exposure_count',
+      'view_count',
+      'cover_click_rate',
+      'avg_watch_duration',
+      'watch_total_duration',
+      'video_completion_rate',
+    ])
+    expect(seednoteAnalyticsViews[1].metricKeys).toContain('share_count')
+    expect(seednoteAnalyticsViews[2].metricKeys).toContain('follower_gain_count')
+    expect(seednoteAnalyticsViews[3].metricKeys).toContain('view_count')
+  })
+
   it('reads a detail alias directly without downloading account content', async () => {
     const signal = new AbortController().signal
     const result = await contentAnalyticsApi.detail('p1', 'task:t1', params, signal)

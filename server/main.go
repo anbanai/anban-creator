@@ -586,6 +586,8 @@ func main() {
 	var seednoteImportHandler *handler.SeednoteImportHandler
 	var wechatAnalyticsHandler *handler.WechatAnalyticsHandler
 	var wechatAnalyticsImportHandler *handler.WechatAnalyticsImportHandler
+	var wechatAccountAnalyticsImportHandler *handler.WechatAccountAnalyticsImportHandler
+	var wechatAccountAnalyticsHandler *handler.WechatAccountAnalyticsHandler
 	var wechatPublicationHandler *handler.WechatPublicationHandler
 	var channelsAnalyticsHandler *handler.ChannelsAnalyticsHandler
 	var agentHandler *handler.AgentHandler
@@ -632,6 +634,8 @@ func main() {
 		seednoteImportHandler = handler.NewSeednoteImportHandler(service.NewSeednoteImportService(repo, store), log)
 		wechatAnalyticsHandler = handler.NewWechatAnalyticsHandler(wechatTrackingSvc, log)
 		wechatAnalyticsImportHandler = handler.NewWechatAnalyticsImportHandler(service.NewWechatAnalyticsImportService(repo, store), log)
+		wechatAccountAnalyticsImportHandler = handler.NewWechatAccountAnalyticsImportHandler(service.NewWechatAccountAnalyticsImportService(repo, store), log)
+		wechatAccountAnalyticsHandler = handler.NewWechatAccountAnalyticsHandler(service.NewWechatAccountAnalyticsService(repo), log)
 		wechatPublicationHandler = handler.NewWechatPublicationHandler(wechatPublicationSvc, log)
 		channelsAnalyticsHandler = handler.NewChannelsAnalyticsHandler(channelsTrackingSvc, log)
 		if ilinkBindingSvc != nil {
@@ -894,54 +898,56 @@ func main() {
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
-		Config:                       cfg,
-		Logger:                       log,
-		DB:                           mysqlDB,
-		Redis:                        rdb,
-		Repo:                         repo,
-		JWTService:                   jwtSvc,
-		WechatSvc:                    wechatSvc,
-		WSHub:                        wsHub,
-		AuthHandler:                  authHandler,
-		PlanService:                  planSvc,
-		TaskService:                  taskSvc,
-		ProjectHandler:               projectHandler,
-		FeedbackDashboardHandler:     feedbackDashboardHandler,
-		PlanHandler:                  planHandler,
-		TaskHandler:                  taskHandler,
-		SeednoteAnalyticsHandler:     seednoteAnalyticsHandler,
-		ContentAnalyticsHandler:      contentAnalyticsHandler,
-		AnalyticsHandler:             analyticsHandler,
-		SeednoteImportHandler:        seednoteImportHandler,
-		WechatAnalyticsHandler:       wechatAnalyticsHandler,
-		WechatAnalyticsImportHandler: wechatAnalyticsImportHandler,
-		WechatPublicationHandler:     wechatPublicationHandler,
-		ChannelsAnalyticsHandler:     channelsAnalyticsHandler,
-		AgentHandler:                 agentHandler,
-		InteractiveHandler:           interactiveHandler,
-		AgentProfileHandler:          agentProfileHandler,
-		AgentPackHandler:             agentPackHandler,
-		BillingHandler:               fixedBilling.Handler,
-		BillingAdminHandler:          fixedBilling.AdminHandler,
-		TimelineHandler:              timelineHandler,
-		APIKeyHandler:                apiKeyHandler,
-		FileHandler:                  fileHandler,
-		UploadHandler:                uploadHandler,
-		AIEntryHandler:               aiEntryHandler,
-		FeedbackHandler:              feedbackHandler,
-		ImageCapabilityHandler:       imageCapabilityHandler,
-		MontageCapabilityHandler:     montageCapabilityHandler,
-		HypitCapabilityHandler:       hypitCapabilityHandler,
-		TemplateHandler:              templateHandler,
-		ImageAnalysisHandler:         imageAnalysisHandler,
-		ViralAnalysisHandler:         viralAnalysisHandler,
-		PosterHandler:                posterHandler,
-		ResourceHandler:              resourceHandler,
-		TopicPoolHandler:             topicPoolHandler,
-		TrendsHandler:                trendsHandler,
-		IlinkHandler:                 ilinkHandler,
-		MCPHandler:                   mcpHandler,
-		StorageProvider:              store,
+		Config:                              cfg,
+		Logger:                              log,
+		DB:                                  mysqlDB,
+		Redis:                               rdb,
+		Repo:                                repo,
+		JWTService:                          jwtSvc,
+		WechatSvc:                           wechatSvc,
+		WSHub:                               wsHub,
+		AuthHandler:                         authHandler,
+		PlanService:                         planSvc,
+		TaskService:                         taskSvc,
+		ProjectHandler:                      projectHandler,
+		FeedbackDashboardHandler:            feedbackDashboardHandler,
+		PlanHandler:                         planHandler,
+		TaskHandler:                         taskHandler,
+		SeednoteAnalyticsHandler:            seednoteAnalyticsHandler,
+		ContentAnalyticsHandler:             contentAnalyticsHandler,
+		AnalyticsHandler:                    analyticsHandler,
+		SeednoteImportHandler:               seednoteImportHandler,
+		WechatAnalyticsHandler:              wechatAnalyticsHandler,
+		WechatAnalyticsImportHandler:        wechatAnalyticsImportHandler,
+		WechatAccountAnalyticsImportHandler: wechatAccountAnalyticsImportHandler,
+		WechatAccountAnalyticsHandler:       wechatAccountAnalyticsHandler,
+		WechatPublicationHandler:            wechatPublicationHandler,
+		ChannelsAnalyticsHandler:            channelsAnalyticsHandler,
+		AgentHandler:                        agentHandler,
+		InteractiveHandler:                  interactiveHandler,
+		AgentProfileHandler:                 agentProfileHandler,
+		AgentPackHandler:                    agentPackHandler,
+		BillingHandler:                      fixedBilling.Handler,
+		BillingAdminHandler:                 fixedBilling.AdminHandler,
+		TimelineHandler:                     timelineHandler,
+		APIKeyHandler:                       apiKeyHandler,
+		FileHandler:                         fileHandler,
+		UploadHandler:                       uploadHandler,
+		AIEntryHandler:                      aiEntryHandler,
+		FeedbackHandler:                     feedbackHandler,
+		ImageCapabilityHandler:              imageCapabilityHandler,
+		MontageCapabilityHandler:            montageCapabilityHandler,
+		HypitCapabilityHandler:              hypitCapabilityHandler,
+		TemplateHandler:                     templateHandler,
+		ImageAnalysisHandler:                imageAnalysisHandler,
+		ViralAnalysisHandler:                viralAnalysisHandler,
+		PosterHandler:                       posterHandler,
+		ResourceHandler:                     resourceHandler,
+		TopicPoolHandler:                    topicPoolHandler,
+		TrendsHandler:                       trendsHandler,
+		IlinkHandler:                        ilinkHandler,
+		MCPHandler:                          mcpHandler,
+		StorageProvider:                     store,
 	}
 
 	// 17. Create router.

@@ -1123,7 +1123,7 @@ func (s *InteractiveService) stage(sess *InteractiveSession, in InteractiveStage
 		}
 		return ErrInteractiveBusy
 	}
-	if sess.ProjectID == "" && sess.Intent == "create-project" && strings.TrimSpace(in.MemoryAppend) != "" {
+	if sess.ProjectID == "" && strings.TrimSpace(in.MemoryAppend) != "" {
 		sess.mu.Unlock()
 		return ErrInteractiveDraftInvalid
 	}

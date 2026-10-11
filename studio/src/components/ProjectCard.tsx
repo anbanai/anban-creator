@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, Pause, Play, RefreshCw, RotateCcw, SquarePen, UserRound } from 'lucide-react'
+import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, MessageSquare, Pause, Play, RefreshCw, RotateCcw, SquarePen, UserRound } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
@@ -32,13 +32,14 @@ interface ProjectCardProps {
   onEdit?: (project: Project) => void
   onChannelConfig?: (project: Project) => void
   onProfile?: (project: Project) => void
+  onUpdateProfile?: (project: Project) => void
   archiving?: boolean
   restoring?: boolean
   onArchive?: (id: string) => void
   onRestore?: (id: string) => void
 }
 
-export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
+export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile, onChannelConfig, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [monthlyRerunOpen, setMonthlyRerunOpen] = useState(false)
@@ -57,6 +58,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
   const feedbackEnabled = platform === '' || platform === 'wechat' || platform === 'seednote'
   const objectLabels = projectAgentIDs(project).map((id) => creationObjectLabels[id] ?? id)
+  const editLabel = supportsProfileLab(project) ? '编辑创作项目' : '编辑项目'
   const feedbackQuery = useQuery({
     queryKey: ['project-feedback', project.id],
     queryFn: ({ signal }) => api.projects.feedback(project.id, signal),
@@ -206,7 +208,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
         <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`创作项目操作：${project.name}`}>
           {onEdit && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`编辑创作项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`${editLabel}：${project.name}`} />}>
                 <SquarePen />
               </TooltipTrigger>
               <TooltipContent>编辑</TooltipContent>
@@ -218,6 +220,14 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onChannelConfig
                 <UserRound />
               </TooltipTrigger>
               <TooltipContent>人设画像</TooltipContent>
+            </Tooltip>
+          )}
+          {onUpdateProfile && !isArchived && (
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onUpdateProfile(project)} aria-label={`对话更新项目画像：${project.name}`} />}>
+                <MessageSquare />
+              </TooltipTrigger>
+              <TooltipContent>对话更新画像</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>

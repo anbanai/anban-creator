@@ -38,6 +38,10 @@ type WechatAccountAnalyticsImportRequest struct {
 }
 type WechatAccountAnalyticsImportPreview struct {
 	Source           string                            `json:"source"`
+	ReportType       string                            `json:"report_type"`
+	SupportedFields  []string                          `json:"supported_fields"`
+	DateFrom         string                            `json:"date_from,omitempty"`
+	DateTo           string                            `json:"date_to,omitempty"`
 	FileName         string                            `json:"file_name"`
 	ParserVersion    string                            `json:"parser_version"`
 	Rows             []ParsedWechatAccountAnalyticsRow `json:"rows"`
@@ -116,18 +120,18 @@ func (s *WechatAccountAnalyticsImportService) Preview(ctx context.Context, req W
 	if err != nil {
 		return nil, err
 	}
-	return &WechatAccountAnalyticsImportPreview{Source: parsed.Source, FileName: asset.FileName, ParserVersion: WechatAccountAnalyticsImportParserVersion, Rows: parsed.Rows, Sources: parsed.Sources, UnknownHeaders: parsed.UnknownHeaders, DuplicateDates: parsed.DuplicateDates, DuplicateSources: parsed.DuplicateSources, Errors: parsed.Errors}, nil
+	return &WechatAccountAnalyticsImportPreview{Source: parsed.Source, ReportType: parsed.ReportType, SupportedFields: parsed.SupportedFields, DateFrom: parsed.DateFrom, DateTo: parsed.DateTo, FileName: asset.FileName, ParserVersion: WechatAccountAnalyticsImportParserVersion, Rows: parsed.Rows, Sources: parsed.Sources, UnknownHeaders: parsed.UnknownHeaders, DuplicateDates: parsed.DuplicateDates, DuplicateSources: parsed.DuplicateSources, Errors: parsed.Errors}, nil
 }
 
 func (s *WechatAccountAnalyticsImportService) Import(ctx context.Context, req WechatAccountAnalyticsImportRequest) (*WechatAccountAnalyticsImportSummary, error) {
-	idempotencyKey, keyErr := normalizeWechatAccountAnalyticsIdempotencyKey(req.IdempotencyKey)
-	if keyErr != nil {
-		return nil, keyErr
+	key, keyErr := normalizeWechatAccountAnalyticsIdempotencyKey(req.IdempotencyKey)
+	if keyErr != nil || req.DataAsOfAt == nil || req.DataAsOfAt.IsZero() || req.DataAsOfAt.Year() < 2000 || req.DataAsOfAt.Year() > 9999 {
+		if keyErr != nil {
+			return nil, keyErr
+		}
+		return nil, fmt.Errorf("%w: data_as_of_at must be a valid date between years 2000 and 9999", ErrWechatAccountAnalyticsImportInvalid)
 	}
-	if req.DataAsOfAt == nil {
-		return nil, fmt.Errorf("%w: idempotency_key and data_as_of_at are required", ErrWechatAccountAnalyticsImportInvalid)
-	}
-	req.IdempotencyKey = idempotencyKey
+	req.IdempotencyKey = key
 	project, asset, parsed, data, err := s.readWorkbook(ctx, req)
 	if err != nil {
 		return nil, err
@@ -146,29 +150,22 @@ func (s *WechatAccountAnalyticsImportService) Import(ctx context.Context, req We
 	var summary *WechatAccountAnalyticsImportSummary
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
 		analyticsRepo := tx.WechatAccountAnalytics()
-		if err := analyticsRepo.LockProject(ctx, project.ID); err != nil {
+		state, err := tx.Analytics().LockProject(ctx, project.ID)
+		if err != nil {
 			return err
 		}
-		// LockProject is the first database read in this transaction. This keeps
-		// the subsequent idempotency lookup a current read under MySQL's default
-		// REPEATABLE READ isolation, so a request waiting on the project lock can
-		// observe a batch committed by the request that held it.
 		if existing, findErr := analyticsRepo.FindBatchByIdempotency(ctx, project.ID, req.IdempotencyKey); findErr == nil {
 			if existing.RequestHash != hash {
 				return repository.ErrAnalyticsIdempotencyConflict
 			}
-			revision, revErr := analyticsRepo.CurrentRevision(ctx, project.ID)
-			if revErr != nil {
-				return revErr
-			}
-			summary = &WechatAccountAnalyticsImportSummary{Revision: revision, Batch: existing}
+			summary = &WechatAccountAnalyticsImportSummary{Revision: state.Revision, Batch: existing}
 			return nil
 		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
 			return findErr
 		}
 		now := s.now().UTC()
 		effective := req.DataAsOfAt.UTC()
-		raw, _ := json.Marshal(map[string]any{"unknown_headers": parsed.UnknownHeaders, "duplicate_dates": parsed.DuplicateDates, "duplicate_sources": parsed.DuplicateSources})
+		raw, _ := json.Marshal(map[string]any{"report_type": parsed.ReportType, "supported_fields": parsed.SupportedFields, "date_from": parsed.DateFrom, "date_to": parsed.DateTo, "unknown_headers": parsed.UnknownHeaders, "duplicate_dates": parsed.DuplicateDates, "duplicate_sources": parsed.DuplicateSources})
 		batch := &model.WechatAccountAnalyticsBatch{ID: uuid.NewString(), UserID: req.UserID, ProjectID: project.ID, AssetID: asset.ID, FileName: asset.FileName, SHA256: hex.EncodeToString(sha256Bytes(data)), Source: parsed.Source, Timezone: defaultWechatAnalyticsImportTimezone(req.Timezone), ParserVersion: WechatAccountAnalyticsImportParserVersion, Status: model.WechatAccountAnalyticsBatchCompleted, IdempotencyKey: req.IdempotencyKey, RequestHash: hash, RawProvenance: string(raw), ReceivedAt: now, EffectiveAt: effective, DataAsOfAt: effective, CreatedAt: now, UpdatedAt: now}
 		if err := analyticsRepo.CreateBatch(ctx, batch); err != nil {
 			return err
@@ -187,14 +184,10 @@ func (s *WechatAccountAnalyticsImportService) Import(ctx context.Context, req We
 		if err := analyticsRepo.CreateSources(ctx, sources); err != nil {
 			return err
 		}
-		if err := analyticsRepo.BumpRevisionInTx(ctx, project.ID); err != nil {
+		if err := tx.Analytics().AdvanceRevision(ctx, state); err != nil {
 			return err
 		}
-		revision, err := analyticsRepo.CurrentRevision(ctx, project.ID)
-		if err != nil {
-			return err
-		}
-		summary = &WechatAccountAnalyticsImportSummary{Revision: revision, Batch: batch}
+		summary = &WechatAccountAnalyticsImportSummary{Revision: state.Revision, Batch: batch}
 		return nil
 	})
 	return summary, err
@@ -275,29 +268,28 @@ func (s *WechatAccountAnalyticsImportService) Revoke(ctx context.Context, userID
 	}
 	var out *WechatAccountAnalyticsImportSummary
 	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
-		if err := tx.WechatAccountAnalytics().LockProject(ctx, projectID); err != nil {
+		state, err := tx.Analytics().LockProject(ctx, projectID)
+		if err != nil {
+			return err
+		}
+		if existing, findErr := tx.WechatAccountAnalytics().FindBatchByID(ctx, projectID, batchID); findErr != nil {
+			return findErr
+		} else if existing.RevokedAt != nil {
+			out = &WechatAccountAnalyticsImportSummary{Revision: state.Revision, Batch: existing}
+			return nil
+		}
+		if err := tx.WechatAccountAnalytics().RevokeBatch(ctx, projectID, batchID, s.now().UTC()); err != nil {
+			return err
+		}
+		if err := tx.Analytics().AdvanceRevision(ctx, state); err != nil {
 			return err
 		}
 		batch, err := tx.WechatAccountAnalytics().FindBatchByID(ctx, projectID, batchID)
 		if err != nil {
 			return err
 		}
-		if batch.UserID != userID {
-			return errors.New("import does not belong to user")
-		}
-		if err := tx.WechatAccountAnalytics().RevokeBatch(ctx, projectID, batchID, s.now().UTC()); err != nil {
-			return err
-		}
-		if err := tx.WechatAccountAnalytics().BumpRevisionInTx(ctx, projectID); err != nil {
-			return err
-		}
-		batch, err = tx.WechatAccountAnalytics().FindBatchByID(ctx, projectID, batchID)
-		if err != nil {
-			return err
-		}
-		revision, err := tx.WechatAccountAnalytics().CurrentRevision(ctx, projectID)
-		out = &WechatAccountAnalyticsImportSummary{Revision: revision, Batch: batch}
-		return err
+		out = &WechatAccountAnalyticsImportSummary{Revision: state.Revision, Batch: batch}
+		return nil
 	})
 	return out, err
 }

@@ -27,6 +27,10 @@ export interface WechatTrafficSourceRow {
 
 export interface WechatAccountAnalyticsPreview {
   source: string
+  report_type: string
+  supported_fields: string[]
+  date_from?: string
+  date_to?: string
   file_name: string
   parser_version: string
   rows: WechatAccountAnalyticsRow[]

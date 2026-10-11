@@ -107,6 +107,7 @@ func TestAgentHandlerExecutionTokenAndWorkloadBootstrap(t *testing.T) {
 	req = httptest.NewRequest("POST", "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
 	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err = app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +130,7 @@ func TestAgentBootstrapRejectsCallerSuppliedIdentity(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", strings.NewReader(`{"execution_id":"execution-1"}`))
 	req.Header.Set("Authorization", "Bearer workload-token")
 	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -159,6 +161,7 @@ func TestAgentBootstrapRejectsResponseTokenOutsideWorkloadIdentity(t *testing.T)
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
 	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -232,6 +235,7 @@ func TestAgentBootstrapRejectsMismatchedResponseExecutionID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
 	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -330,6 +334,7 @@ func TestAgentBootstrapRedactsInternalErrors(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 			req.Header.Set("Authorization", "Bearer workload-token")
 			req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+			req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := app.Test(req)
 			if err != nil {
@@ -359,6 +364,7 @@ func TestAgentBootstrapLogsWorkloadVerificationErrorWithoutLeakingIt(t *testing.
 	req := httptest.NewRequest(http.MethodPost, "/agent/bootstrap", nil)
 	req.Header.Set("Authorization", "Bearer workload-token")
 	req.Header.Set("X-Anban-Agent-Contract-Version", "6")
+	req.Header.Set("X-Anban-Agent-Pack-Catalog-Digest", agentpack.CatalogDigest())
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)

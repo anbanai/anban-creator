@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/test-utils'
 import { http } from '@/lib/http-client'
-import { wechatAccountAnalyticsApi, wechatTrafficMetrics, type WechatAccountOverview, type WechatTrafficSource } from '@/lib/wechat-account-analytics'
+import { wechatAccountAnalyticsApi, type WechatAccountOverview, type WechatTrafficSource } from '@/lib/wechat-account-analytics'
 import WechatAccountOverviewPanel from './WechatAccountOverview'
 import WechatTrafficSources from './WechatTrafficSources'
 
@@ -23,17 +23,15 @@ const overview: WechatAccountOverview = {
   ],
   totals: { read_users: 60, share_users: 2 },
   comparisons: {
-    previous_day: { label: '较前一日', value: 0.5 },
-    previous_week: { label: '较上周同期', value: null },
+    read_users: {
+      previous_day: { label: '较前一日', value: 0.5 },
+      previous_week: { label: '较上周同期', value: null },
+    },
   },
 }
 
 describe('WeChat account analytics contract', () => {
   beforeEach(() => vi.clearAllMocks())
-
-  it('only offers the official traffic source metric currently backed by imported facts', () => {
-    expect(wechatTrafficMetrics.map(item => item.key)).toEqual(['read_users'])
-  })
 
   it('calls the account overview endpoint with the selected inclusive range', async () => {
     vi.mocked(http.get).mockResolvedValue({ data: { data: overview } })

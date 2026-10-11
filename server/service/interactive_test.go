@@ -118,6 +118,30 @@ func TestInteractiveCloseSessionWithShortHistory(t *testing.T) {
 	closeFn()
 }
 
+func TestInteractiveCreateDraftRejectsMemoryAppend(t *testing.T) {
+	sess := newInteractiveTestSession()
+	svc := newInteractiveTestService(sess)
+	progress := InteractiveProgress{
+		"identity": "collected", "style": "collected", "audience": "collected",
+		"platforms": "collected", "preferences": "collected", "memory": "collected",
+	}
+	err := svc.StageDraftForSession(sess.ID, InteractiveStageInput{
+		Project:      InteractiveProject{Name: "Create project", Platform: model.PlatformSeednote},
+		Profile:      model.NewProjectProfile(),
+		Progress:     progress,
+		MemoryAppend: "should not be written before a project exists",
+		Ready:        true,
+	})
+	if !errors.Is(err, ErrInteractiveDraftInvalid) {
+		t.Fatalf("StageDraftForSession() error = %v, want ErrInteractiveDraftInvalid", err)
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if sess.Draft.Revision != 0 || sess.committing {
+		t.Fatalf("rejected create draft mutated session: revision=%d committing=%v", sess.Draft.Revision, sess.committing)
+	}
+}
+
 func TestInteractiveShutdownClosesLiveRuntimeBeforeCancellingIt(t *testing.T) {
 	sess := newInteractiveTestSession()
 	cancelled := false

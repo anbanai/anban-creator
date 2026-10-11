@@ -666,6 +666,16 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
+	// The profile revision is Server-owned admission state. Inject it after
+	// Pack schema validation so the frozen task input carries the exact
+	// revision reserved by this transaction without allowing callers to forge
+	// it in the submitted Pack input.
+	if taskType == model.TaskTypeProfileAnalysis && p.ProfileAnalysisExpectedVersion != nil {
+		if agentInput == nil {
+			agentInput = map[string]any{}
+		}
+		agentInput["expected_revision"] = *p.ProfileAnalysisExpectedVersion
+	}
 	if p.MontageInput != nil && !model.IsMontagePlatform(taskType) {
 		return nil, fmt.Errorf("%w: montage_input 只能用于视频生成任务", ErrMontageInput)
 	}

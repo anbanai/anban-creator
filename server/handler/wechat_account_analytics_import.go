@@ -103,7 +103,11 @@ func (h *WechatAccountAnalyticsImportHandler) Detail(c fiber.Ctx) error {
 	if userID == "" {
 		return Error(c, fiber.StatusUnauthorized, "unauthorized")
 	}
-	result, err := h.service.GetBatch(c.Context(), userID, projectID, strings.TrimSpace(c.Params("batchId")))
+	batchID, err := validateUUIDParam(c, "batchId")
+	if err != nil {
+		return err
+	}
+	result, err := h.service.GetBatch(c.Context(), userID, projectID, batchID)
 	return h.respond(c, result, err)
 }
 

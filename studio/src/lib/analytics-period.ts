@@ -1,5 +1,5 @@
 export type Granularity = 'day' | 'week' | 'month'
-export type DatePreset = '7d' | '30d' | 'week' | 'month' | 'custom'
+export type DatePreset = 'yesterday' | '7d' | '30d' | 'week' | 'month' | 'custom'
 export interface AnalyticsPeriod { preset: DatePreset; from: string; to: string; granularity: Granularity }
 export type AnalyticsPoint = { date: string; [key: string]: string | number | null | undefined }
 export function shanghaiDay(value: string | Date) {
@@ -17,7 +17,7 @@ export function periodKey(day: string, granularity: Granularity) {
 }
 export function rangeForPreset(preset: Exclude<DatePreset, 'custom'>, now = new Date()) {
   const to = shanghaiDay(now)
-  const from = preset === '7d' ? addDays(to, -6) : preset === '30d' ? addDays(to, -29) : periodKey(to, preset === 'week' ? 'week' : 'month')
+  const from = preset === 'yesterday' ? addDays(to, -1) : preset === '7d' ? addDays(to, -6) : preset === '30d' ? addDays(to, -29) : periodKey(to, preset === 'week' ? 'week' : 'month')
   return { from, to }
 }
 export function defaultAnalyticsPeriod(): AnalyticsPeriod { return { ...rangeForPreset('30d'), preset: '30d', granularity: 'day' } }

@@ -2,7 +2,7 @@ import { AlertCircle, CalendarDays, CheckCircle2, Database, Minus, TrendingDown,
 import AnalyticsTrend from '@/components/analytics/AnalyticsTrend'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
-import { formatWechatComparison, wechatAccountMetrics, type WechatAccountMetric, type WechatAccountOverview as Overview } from '@/lib/wechat-account-analytics'
+import { formatWechatComparison, wechatAccountMetrics, type WechatAccountMetric, type WechatAccountOverview as Overview, type WechatComparisonSet } from '@/lib/wechat-account-analytics'
 
 function MetricValue({ value, format }: { value: number | null | undefined; format: (value: number) => string }) {
   return <span className="mt-2 block text-2xl font-semibold tracking-tight tabular-nums">{value == null ? '—' : format(value)}</span>
@@ -11,6 +11,13 @@ function MetricValue({ value, format }: { value: number | null | undefined; form
 function Comparison({ value, label }: { value: number | null | undefined; label: string }) {
   const Icon = value == null ? Minus : value >= 0 ? TrendingUp : TrendingDown
   return <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Icon className="size-3" />{label} {formatWechatComparison(value)}</span>
+}
+
+function Comparisons({ comparison }: { comparison?: WechatComparisonSet | null }) {
+  if (!comparison) return null
+  const entries = [comparison.previous_day, comparison.previous_period, comparison.previous_week].filter((item): item is NonNullable<typeof item> => Boolean(item))
+  if (!entries.length) return <Comparison value={null} label="比较" />
+  return <span className="flex flex-col items-start gap-0.5">{entries.map((item) => <Comparison key={`${item.label}:${item.from ?? ''}:${item.to ?? ''}`} value={item?.value} label={item?.label ?? '比较'} />)}</span>
 }
 
 export default function WechatAccountOverviewPanel({
@@ -42,10 +49,10 @@ export default function WechatAccountOverviewPanel({
     {!error && coverage && <div className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs ${coverage.complete ? 'border-emerald-500/30 bg-emerald-500/[0.04] text-emerald-700 dark:text-emerald-300' : 'border-amber-500/30 bg-amber-500/[0.05] text-amber-700 dark:text-amber-300'}`} role="status">
       {coverage.complete ? <CheckCircle2 className="size-3.5" /> : <Database className="size-3.5" />}<span>数据覆盖 {coverage.covered_days} / {coverage.expected_days} 天</span>{!coverage.complete && <span>，比较值暂不可用。</span>}
     </div>}
-    <div className="grid grid-cols-2 overflow-hidden rounded-xl border bg-card sm:grid-cols-3 xl:grid-cols-6" aria-label="公众号账号关键指标">
-      {wechatAccountMetrics.filter(item => item.summary).map(item => <button key={item.key} type="button" aria-pressed={selectedMetric === item.key} onClick={() => onMetricChange?.(item.key)} className={`relative min-w-0 border-b border-r px-4 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-primary xl:border-b-0 ${selectedMetric === item.key ? 'bg-primary/[0.045]' : ''}`}>
+    <div className="grid grid-cols-2 overflow-hidden rounded-xl border bg-card sm:grid-cols-3 xl:grid-cols-4" aria-label="公众号账号关键指标">
+      {wechatAccountMetrics.map(item => <button key={item.key} type="button" aria-pressed={selectedMetric === item.key} onClick={() => onMetricChange?.(item.key)} className={`relative min-w-0 border-b border-r px-4 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-primary xl:border-b-0 ${selectedMetric === item.key ? 'bg-primary/[0.045]' : ''}`}>
         {selectedMetric === item.key && <span className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-primary" />}<span className="text-xs text-muted-foreground">{item.label}</span><MetricValue value={loading ? null : overview?.totals[item.key]} format={item.format} />
-        <Comparison value={overview?.comparisons?.[item.key]?.value} label={overview?.comparisons?.[item.key]?.label ?? '较前一日'} />
+        <Comparisons comparison={overview?.comparisons?.[item.key]} />
       </button>)}
     </div>
     {unavailable && !error && <p className="text-xs text-muted-foreground">{metric.label}：{unavailable}</p>}

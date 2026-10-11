@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +16,10 @@ const WechatAccountAnalyticsImportParserVersion = "wechat-account-xls-v1"
 
 type ParsedWechatAccountAnalyticsWorkbook struct {
 	Source           string                            `json:"source"`
+	ReportType       string                            `json:"report_type"`
+	SupportedFields  []string                          `json:"supported_fields"`
+	DateFrom         string                            `json:"date_from,omitempty"`
+	DateTo           string                            `json:"date_to,omitempty"`
 	Rows             []ParsedWechatAccountAnalyticsRow `json:"rows"`
 	Sources          []ParsedWechatTrafficSourceRow    `json:"sources"`
 	UnknownHeaders   []string                          `json:"unknown_headers,omitempty"`
@@ -101,12 +104,9 @@ func ParseWechatAccountAnalyticsWorkbook(data []byte, location *time.Location) (
 		return nil, fmt.Errorf("%w: workbook contains more than %d data rows", ErrWechatAccountAnalyticsWorkbookUnsupported, MaxWechatAnalyticsImportRows)
 	}
 	result := &ParsedWechatAccountAnalyticsWorkbook{Source: "wechat_console", Rows: make([]ParsedWechatAccountAnalyticsRow, 0), Sources: make([]ParsedWechatTrafficSourceRow, 0)}
-	unknownHeaders := make([]string, 0)
-	unknownHeaderSeen := map[string]bool{}
+	unknownHeaders := map[string]bool{}
+	collectWechatAccountUnknownHeaders(rows[headerIndex], columns, unknownHeaders)
 	sourceOnlyTable := hasWechatExplicitSourceColumn(columns)
-	if _, headers, ok := parseWechatAccountHeader(rows[headerIndex]); ok {
-		unknownHeaders = collectWechatAccountUnknownHeaders(unknownHeaders, unknownHeaderSeen, columns, headers)
-	}
 	for _, row := range rows[:headerIndex] {
 		for _, v := range row {
 			if strings.TrimSpace(v) == "数据来源概况" {
@@ -115,15 +115,21 @@ func ParseWechatAccountAnalyticsWorkbook(data []byte, location *time.Location) (
 		}
 	}
 	for i, row := range rows[headerIndex+1:] {
+		if row == nil {
+			columns = nil
+			sourceOnlyTable = false
+			continue
+		}
 		if rowEmpty(row) {
 			continue
 		}
 		if rowHeaderIndex, rowColumns := findWechatAccountHeader([][]string{row}); rowHeaderIndex == 0 {
 			columns = rowColumns
 			sourceOnlyTable = hasWechatExplicitSourceColumn(columns)
-			if _, headers, ok := parseWechatAccountHeader(row); ok {
-				unknownHeaders = collectWechatAccountUnknownHeaders(unknownHeaders, unknownHeaderSeen, columns, headers)
-			}
+			collectWechatAccountUnknownHeaders(row, columns, unknownHeaders)
+			continue
+		}
+		if columns == nil {
 			continue
 		}
 		sourceRow := headerIndex + i + 2
@@ -174,16 +180,16 @@ func ParseWechatAccountAnalyticsWorkbook(data []byte, location *time.Location) (
 			}
 			result.Rows = append(result.Rows, parsed)
 		}
-		for _, sourceColumn := range sourceColumnKeys(columns) {
-			v, msg := parseAccountMetric(value(sourceColumn.index), "流量来源")
+		for source, key := range sourceColumnKeys(columns) {
+			v, msg := parseAccountMetric(value(key), "流量来源")
 			if msg != "" {
 				result.Errors = append(result.Errors, fmt.Sprintf("第%d行：%s", sourceRow, msg))
 				continue
 			}
-			if v == nil && value(sourceColumn.index) == "" {
+			if v == nil && value(key) == "" {
 				continue
 			}
-			result.Sources = append(result.Sources, ParsedWechatTrafficSourceRow{SourceRow: sourceRow, StatDate: date, Source: sourceColumn.source, OriginalLabel: sourceLabelForColumn(columns, sourceColumn.index), ReadUsers: v, Raw: raw})
+			result.Sources = append(result.Sources, ParsedWechatTrafficSourceRow{SourceRow: sourceRow, StatDate: date, Source: source, OriginalLabel: sourceLabelForColumn(columns, key), ReadUsers: v, Raw: raw})
 		}
 		if sourceIndex, ok := columns["__source"]; ok {
 			label := value(sourceIndex)
@@ -220,8 +226,61 @@ func ParseWechatAccountAnalyticsWorkbook(data []byte, location *time.Location) (
 	if len(result.Rows) == 0 && len(result.Sources) == 0 {
 		return nil, fmt.Errorf("%w: workbook has no usable data rows", ErrWechatAccountAnalyticsWorkbookUnsupported)
 	}
-	result.UnknownHeaders = unknownHeaders
+	for header := range unknownHeaders {
+		result.UnknownHeaders = appendUniqueString(result.UnknownHeaders, header)
+	}
+	sort.Strings(result.UnknownHeaders)
+	sort.SliceStable(result.Sources, func(i, j int) bool {
+		if result.Sources[i].StatDate != result.Sources[j].StatDate {
+			return result.Sources[i].StatDate < result.Sources[j].StatDate
+		}
+		if result.Sources[i].Source != result.Sources[j].Source {
+			return result.Sources[i].Source < result.Sources[j].Source
+		}
+		return result.Sources[i].SourceRow < result.Sources[j].SourceRow
+	})
+	result.ReportType = "traffic_source_daily"
+	if len(result.Rows) > 0 && len(result.Sources) > 0 {
+		result.ReportType = "account_and_traffic_source_daily"
+	} else if len(result.Rows) > 0 {
+		result.ReportType = "account_daily"
+	}
+	fields := map[string]bool{}
+	for key := range wechatAccountMetricHeaders {
+		if _, ok := columns[key]; ok {
+			fields[key] = true
+		}
+	}
+	if len(result.Sources) > 0 {
+		fields["traffic_source_read_users"] = true
+	}
+	for field := range fields {
+		result.SupportedFields = append(result.SupportedFields, field)
+	}
+	sort.Strings(result.SupportedFields)
+	dates := make([]string, 0, len(result.Rows)+len(result.Sources))
+	for _, row := range result.Rows {
+		dates = append(dates, row.StatDate)
+	}
+	for _, row := range result.Sources {
+		dates = append(dates, row.StatDate)
+	}
+	if len(dates) > 0 {
+		sort.Strings(dates)
+		result.DateFrom, result.DateTo = dates[0], dates[len(dates)-1]
+	}
 	return result, nil
+}
+
+func collectWechatAccountUnknownHeaders(row []string, columns map[string]int, unknown map[string]bool) {
+	for header, index := range columns {
+		if strings.HasPrefix(header, "__") || index < 0 || index >= len(row) || recognizedWechatAccountColumn(columns, index) {
+			continue
+		}
+		if strings.TrimSpace(row[index]) == header {
+			unknown[header] = true
+		}
+	}
 }
 
 func recognizedWechatAccountColumn(columns map[string]int, index int) bool {
@@ -265,76 +324,52 @@ func hasWechatAccountMetricColumn(columns map[string]int) bool {
 
 func findWechatAccountHeader(rows [][]string) (int, map[string]int) {
 	for i, row := range rows {
-		if columns, _, ok := parseWechatAccountHeader(row); ok {
-			return i, columns
+		columns := map[string]int{}
+		for col, raw := range row {
+			header := strings.TrimSpace(raw)
+			if header == "" {
+				continue
+			}
+			columns[header] = col
+		}
+		dateIndex := -1
+		for _, header := range wechatAccountDateHeaders {
+			if idx, ok := columns[header]; ok {
+				dateIndex = idx
+				break
+			}
+		}
+		if dateIndex < 0 {
+			continue
+		}
+		mapped := map[string]int{"__date": dateIndex}
+		for key, aliases := range wechatAccountMetricHeaders {
+			for _, alias := range aliases {
+				if idx, ok := columns[alias]; ok {
+					mapped[key] = idx
+					break
+				}
+			}
+		}
+		for source, aliases := range wechatAccountSourceHeaders {
+			for _, alias := range aliases {
+				if idx, ok := columns[alias]; ok {
+					mapped["__source_"+string(source)] = idx
+					break
+				}
+			}
+		}
+		for _, alias := range []string{"来源", "流量来源", "source", "original_label"} {
+			if idx, ok := columns[alias]; ok {
+				mapped["__source"] = idx
+				break
+			}
+		}
+		if len(mapped) > 1 {
+			return i, mergeAccountColumns(columns, mapped)
 		}
 	}
 	return -1, nil
-}
-
-func parseWechatAccountHeader(row []string) (map[string]int, []string, bool) {
-	columns := map[string]int{}
-	headers := make([]string, 0, len(row))
-	for col, raw := range row {
-		header := strings.TrimSpace(raw)
-		if header == "" {
-			continue
-		}
-		columns[header] = col
-		headers = append(headers, header)
-	}
-	dateIndex := -1
-	for _, header := range wechatAccountDateHeaders {
-		if idx, ok := columns[header]; ok {
-			dateIndex = idx
-			break
-		}
-	}
-	if dateIndex < 0 {
-		return nil, nil, false
-	}
-	mapped := map[string]int{"__date": dateIndex}
-	for key, aliases := range wechatAccountMetricHeaders {
-		for _, alias := range aliases {
-			if idx, ok := columns[alias]; ok {
-				mapped[key] = idx
-				break
-			}
-		}
-	}
-	for source, aliases := range wechatAccountSourceHeaders {
-		for _, alias := range aliases {
-			if idx, ok := columns[alias]; ok {
-				mapped["__source_"+string(source)] = idx
-				break
-			}
-		}
-	}
-	for _, alias := range []string{"来源", "流量来源", "source", "original_label"} {
-		if idx, ok := columns[alias]; ok {
-			mapped["__source"] = idx
-			break
-		}
-	}
-	if len(mapped) <= 1 {
-		return nil, nil, false
-	}
-	return mergeAccountColumns(columns, mapped), headers, true
-}
-
-func collectWechatAccountUnknownHeaders(unknown []string, seen map[string]bool, columns map[string]int, headers []string) []string {
-	for _, header := range headers {
-		if seen[header] {
-			continue
-		}
-		index, ok := columns[header]
-		if !ok || recognizedWechatAccountColumn(columns, index) {
-			continue
-		}
-		seen[header] = true
-		unknown = append(unknown, header)
-	}
-	return unknown
 }
 
 func mergeAccountColumns(all, mapped map[string]int) map[string]int {
@@ -355,19 +390,13 @@ func accountMetricIndex(columns map[string]int, key string) int {
 	return -1
 }
 
-type wechatSourceColumn struct {
-	source model.WechatTrafficSource
-	index  int
-}
-
-func sourceColumnKeys(columns map[string]int) []wechatSourceColumn {
-	result := make([]wechatSourceColumn, 0, len(wechatAccountSourceHeaders))
+func sourceColumnKeys(columns map[string]int) map[model.WechatTrafficSource]int {
+	result := map[model.WechatTrafficSource]int{}
 	for source := range wechatAccountSourceHeaders {
 		if idx, ok := columns["__source_"+string(source)]; ok {
-			result = append(result, wechatSourceColumn{source: source, index: idx})
+			result[source] = idx
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].index < result[j].index })
 	return result
 }
 
@@ -385,7 +414,7 @@ func parseAccountDate(value string, location *time.Location) (string, string) {
 	if parsed == nil {
 		return "", "日期格式无效"
 	}
-	return parsed.Format("2006-01-02"), ""
+	return parsed.In(location).Format("2006-01-02"), ""
 }
 
 func parseAccountMetric(value, field string) (*int64, string) {
@@ -393,14 +422,11 @@ func parseAccountMetric(value, field string) (*int64, string) {
 	if value == "" {
 		return nil, ""
 	}
-	n, err := strconv.ParseInt(strings.ReplaceAll(value, ",", ""), 10, 64)
-	if err != nil || (field != "follower_gain_count" && n < 0) {
-		if field == "follower_gain_count" {
-			return nil, field + "必须是整数"
-		}
-		return nil, field + "必须是非负整数"
+	n, err := parseWechatInteger(value, field, nil)
+	if len(err) > 0 {
+		return nil, err[0]
 	}
-	return &n, ""
+	return n, ""
 }
 func joinAccountError(a, b string) string {
 	if a == "" {

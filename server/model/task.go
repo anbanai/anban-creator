@@ -55,8 +55,6 @@ func (s ImageCapabilitySnapshot) ComputedDigest() (string, error) {
 
 const TaskLifecycleVersion = 1
 
-const ContentOriginHotSearch = "hot_search"
-
 const (
 	TaskLifecycleSourceAgent  = "agent"
 	TaskLifecycleSourceServer = "server"
