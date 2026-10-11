@@ -114,7 +114,7 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
       <DialogContent className="sm:max-w-lg" closeButtonDisabled={editorState.busy}>
         <DialogHeader>
           <DialogTitle>渠道配置</DialogTitle>
-          <DialogDescription className="flex items-center gap-2">为「<ProjectIdentity project={project} compact />」配置发布账号。项目可供不同创作任务共用。</DialogDescription>
+          <DialogDescription className="flex items-center gap-2">为「<ProjectIdentity project={project} compact />」配置发布账号。创作项目可供不同作品共用。</DialogDescription>
         </DialogHeader>
         {configs.isPending || (!configs.isFetchedAfterMount && !configs.isError) ? <p role="status">正在加载渠道配置…</p> : configs.isError ? (
           <div role="alert" className="space-y-3">

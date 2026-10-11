@@ -14,6 +14,10 @@ const (
 	ContentMetadataFailed    = "failed"
 	ContentTagCanonical      = "canonical"
 	ContentTagCandidate      = "candidate"
+	// ContentOriginHotSearch is a Server-owned provenance marker for content
+	// created from a hot-search source. It is surfaced as a canonical metadata
+	// tag without being mixed into user-authored tags.
+	ContentOriginHotSearch = "hot_search"
 )
 
 var ContentTagDimensions = map[string]struct{}{

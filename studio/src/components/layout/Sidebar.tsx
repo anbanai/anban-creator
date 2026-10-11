@@ -29,7 +29,7 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useCollapsedState()
   const isAdmin = user?.is_admin === true
   const currentPage = allNavItems.find(item => item.to === pathname)?.label
-    ?? (pathname.startsWith('/tasks/') ? '任务详情' : '工作空间')
+    ?? (pathname.startsWith('/tasks/') ? '作品详情' : '工作空间')
   const visibleWorkspaceNavItems = visibleNavItems(workspaceNavItems, isAdmin)
 
   // Account links and keyboard shortcuts can navigate outside the drawer's own links.

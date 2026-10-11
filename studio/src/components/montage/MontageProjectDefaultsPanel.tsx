@@ -92,7 +92,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
     <section aria-labelledby="montage-defaults-heading" className="flex flex-col gap-4 border-t border-border pt-4">
       <div>
         <h4 id="montage-defaults-heading" className="text-sm font-medium text-foreground">视频默认设置</h4>
-        <p className="mt-1 text-xs text-muted-foreground">用于此项目的新任务和计划，创建时仍可单独调整。</p>
+        <p className="mt-1 text-xs text-muted-foreground">用于此创作项目的新作品和排期，创建时仍可单独调整。</p>
       </div>
 
       <MontagePipelineSelector
@@ -143,7 +143,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
                 ))}
               </NativeSelect>
             </FormControl>
-            <FormDescription>留空表示由每次任务自行决定。</FormDescription>
+            <FormDescription>留空表示由每次创作自行决定。</FormDescription>
             <FormMessage />
           </FormItem>
         )} />
@@ -160,7 +160,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
                 ))}
               </NativeSelect>
             </FormControl>
-            <FormDescription>留空表示由每次任务自行决定。</FormDescription>
+            <FormDescription>留空表示由每次创作自行决定。</FormDescription>
             <FormMessage />
           </FormItem>
         )} />
@@ -172,7 +172,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
           <FormControl>
             <Textarea aria-label="风格偏好" {...field} value={field.value ?? ''} rows={3} placeholder="镜头、色彩、节奏与整体视觉调性" />
           </FormControl>
-          <FormDescription>作为该项目每次视频创作的默认风格约束。</FormDescription>
+          <FormDescription>作为该创作项目每次视频创作的默认风格约束。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />
@@ -182,7 +182,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
           <FormControl>
             <Textarea aria-label="音乐提示" {...field} value={field.value ?? ''} rows={2} placeholder="音乐风格、情绪与节奏" />
           </FormControl>
-          <FormDescription>默认配乐方向；单次任务可临时改写。</FormDescription>
+          <FormDescription>默认配乐方向；单次创作可临时改写。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />
@@ -207,7 +207,7 @@ export function MontageProjectDefaultsPanel({ form, onReadyChange }: MontageProj
               maxTags={20}
             />
           </FormControl>
-          <FormDescription>该项目视频任务的默认交付要求；单次任务可追加。</FormDescription>
+          <FormDescription>该创作项目视频作品的默认交付要求；单次创作可追加。</FormDescription>
           <FormMessage />
         </FormItem>
       )} />

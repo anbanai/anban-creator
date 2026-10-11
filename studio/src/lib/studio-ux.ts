@@ -27,8 +27,8 @@ export function buildDashboardBlocker({
   if (activeProjectCount === 0) {
     return {
       id: 'no-project',
-      message: '先创建一个项目，再开始创作。',
-      actionLabel: '创建项目',
+      message: '先创建一个创作项目，再开始创作。',
+      actionLabel: '创建创作项目',
       actionHref: projectsReturnHref({ type: 'seednote', intent: 'new' }),
       blocking: true,
     }
@@ -149,7 +149,7 @@ export function taskActionSignal(task: Task): TaskActionSignal {
       tone: 'success',
     }
   }
-  return { label: '查看详情', hint: '进入任务详情', tone: 'neutral' }
+  return { label: '查看详情', hint: '进入作品详情', tone: 'neutral' }
 }
 
 export interface SettingsReadinessListItem {
@@ -174,7 +174,7 @@ export function buildSettingsReadinessItems({
       id: 'execution',
       title: '执行环境',
       status: '云端执行',
-      impact: '当前任务统一由云端执行。',
+      impact: '当前作品统一由云端执行。',
       actionLabel: '查看执行说明',
       href: '#execution-settings',
       ready: true,

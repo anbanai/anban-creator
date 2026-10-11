@@ -40,6 +40,7 @@ type Repository interface {
 	WechatPublications() WechatPublicationRepository
 	WechatMetricSnapshots() WechatMetricSnapshotRepository
 	WechatAnalyticsImports() WechatAnalyticsImportRepository
+	WechatAccountAnalytics() WechatAccountAnalyticsRepository
 	WechatCapabilities() WechatCapabilityRepository
 	ChannelsTrackings() ChannelsTrackingRepository
 	ChannelsMetricSnapshots() ChannelsMetricSnapshotRepository
@@ -424,6 +425,25 @@ type WechatAnalyticsImportRepository interface {
 	FindSnapshotsByPublicationID(ctx context.Context, projectID, publicationID string) ([]*model.WechatAnalyticsSnapshot, error)
 }
 
+// WechatAccountAnalyticsRepository persists account-level daily and source
+// facts independently from generic per-content observations.
+type WechatAccountAnalyticsRepository interface {
+	CreateBatch(ctx context.Context, batch *model.WechatAccountAnalyticsBatch) error
+	FindBatchByID(ctx context.Context, projectID, id string) (*model.WechatAccountAnalyticsBatch, error)
+	ListBatches(ctx context.Context, projectID string, offset, limit int) ([]*model.WechatAccountAnalyticsBatch, int64, error)
+	UpdateBatch(ctx context.Context, batch *model.WechatAccountAnalyticsBatch) error
+	CreateDays(ctx context.Context, days []*model.WechatAccountAnalyticsDay) error
+	CreateSources(ctx context.Context, sources []*model.WechatTrafficSourceDay) error
+	FindBatchByIdempotency(ctx context.Context, projectID, key string) (*model.WechatAccountAnalyticsBatch, error)
+	ListWinningDays(ctx context.Context, projectID, from, to string) ([]*model.WechatAccountAnalyticsDay, error)
+	ListWinningSources(ctx context.Context, projectID, from, to string) ([]*model.WechatTrafficSourceDay, error)
+	RevokeBatch(ctx context.Context, projectID, batchID string, revokedAt time.Time) error
+	LockProject(ctx context.Context, projectID string) error
+	CurrentRevision(ctx context.Context, projectID string) (int64, error)
+	BumpRevision(ctx context.Context, projectID string) error
+	BumpRevisionInTx(ctx context.Context, projectID string) error
+}
+
 type WechatCapabilityRepository interface {
 	ListByProject(ctx context.Context, projectID string) ([]*model.WechatAccountCapability, error)
 	Upsert(ctx context.Context, capability *model.WechatAccountCapability) error
@@ -498,6 +518,7 @@ type FeedbackLoopRepository interface {
 type ContentMetadataRepository interface {
 	CreateOrUpdate(ctx context.Context, report *model.ContentMetadataReport) error
 	FindByTaskExecution(ctx context.Context, taskID, executionID string) (*model.ContentMetadataReport, error)
+	ListTagsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*model.ContentTagAssignment, error)
 	ReplaceTags(ctx context.Context, reportID string, tags []*model.ContentTagAssignment) error
 	ListVocabulary(ctx context.Context, dimension, taxonomyVersion string) ([]*model.ContentTagVocabulary, error)
 	UpsertVocabulary(ctx context.Context, vocabulary *model.ContentTagVocabulary) error
@@ -508,49 +529,50 @@ type ContentMetadataRepository interface {
 // -----------------------------------------------------------------------------
 
 type repository struct {
-	db                      *gorm.DB
-	users                   UserRepository
-	sessions                SessionRepository
-	plans                   PlanRepository
-	planEntries             PlanEntryRepository
-	tasks                   TaskRepository
-	taskExecutions          TaskExecutionRepository
-	files                   TaskFileRepository
-	uploadSessions          UploadSessionRepository
-	assets                  AssetRepository
-	imageAnalyses           ImageAnalysisRepository
-	projects                ProjectRepository
-	projectProfileRevisions ProjectProfileRevisionRepository
-	projectProfileStates    ProjectProfileStateRepository
+	db                        *gorm.DB
+	users                     UserRepository
+	sessions                  SessionRepository
+	plans                     PlanRepository
+	planEntries               PlanEntryRepository
+	tasks                     TaskRepository
+	taskExecutions            TaskExecutionRepository
+	files                     TaskFileRepository
+	uploadSessions            UploadSessionRepository
+	assets                    AssetRepository
+	imageAnalyses             ImageAnalysisRepository
+	projects                  ProjectRepository
+	projectProfileRevisions   ProjectProfileRevisionRepository
+	projectProfileStates      ProjectProfileStateRepository
 	interactiveCommitReceipts InteractiveCommitReceiptRepository
-	projectChannelConfigs   ProjectChannelConfigRepository
-	apiKeys                 APIKeyRepository
-	feedbacks               FeedbackRepository
-	taskFeedbacks           TaskFeedbackRepository
-	seednoteTrackings       SeednoteTrackingRepository
-	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
-	seednoteImports         SeednoteImportRepository
-	seednotePosts           SeednotePostRepository
-	seednotePostAliases     SeednotePostAliasRepository
-	seednoteMetricVersions  SeednoteMetricVersionRepository
-	wechatTrackings         WechatTrackingRepository
-	wechatPublications      WechatPublicationRepository
-	wechatMetricSnapshots   WechatMetricSnapshotRepository
-	wechatAnalyticsImports  WechatAnalyticsImportRepository
-	wechatCapabilities      WechatCapabilityRepository
-	channelsTrackings       ChannelsTrackingRepository
-	channelsMetricSnapshots ChannelsMetricSnapshotRepository
-	templates               TemplateRepository
-	viralAnalyses           ViralAnalysisRepository
-	posterTasks             PosterTaskRepository
-	topicPools              TopicPoolRepository
-	trendSnapshots          TrendSnapshotRepository
-	agentFeedbacks          AgentFeedbackRepository
-	feedbackLoop            FeedbackLoopRepository
-	contentMetadata         ContentMetadataRepository
-	ilinkBindings           IlinkBindingRepository
-	ilinkNotifications      IlinkNotificationRepository
-	billing                 BillingRepository
+	projectChannelConfigs     ProjectChannelConfigRepository
+	apiKeys                   APIKeyRepository
+	feedbacks                 FeedbackRepository
+	taskFeedbacks             TaskFeedbackRepository
+	seednoteTrackings         SeednoteTrackingRepository
+	seednoteMetricSnapshots   SeednoteMetricSnapshotRepository
+	seednoteImports           SeednoteImportRepository
+	seednotePosts             SeednotePostRepository
+	seednotePostAliases       SeednotePostAliasRepository
+	seednoteMetricVersions    SeednoteMetricVersionRepository
+	wechatTrackings           WechatTrackingRepository
+	wechatPublications        WechatPublicationRepository
+	wechatMetricSnapshots     WechatMetricSnapshotRepository
+	wechatAnalyticsImports    WechatAnalyticsImportRepository
+	wechatAccountAnalytics    WechatAccountAnalyticsRepository
+	wechatCapabilities        WechatCapabilityRepository
+	channelsTrackings         ChannelsTrackingRepository
+	channelsMetricSnapshots   ChannelsMetricSnapshotRepository
+	templates                 TemplateRepository
+	viralAnalyses             ViralAnalysisRepository
+	posterTasks               PosterTaskRepository
+	topicPools                TopicPoolRepository
+	trendSnapshots            TrendSnapshotRepository
+	agentFeedbacks            AgentFeedbackRepository
+	feedbackLoop              FeedbackLoopRepository
+	contentMetadata           ContentMetadataRepository
+	ilinkBindings             IlinkBindingRepository
+	ilinkNotifications        IlinkNotificationRepository
+	billing                   BillingRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -579,6 +601,7 @@ func New(db *gorm.DB) Repository {
 	wechatPublications := newWechatPublicationRepository(db)
 	wechatMetricSnapshots := newWechatMetricSnapshotRepository(db)
 	wechatAnalyticsImports := newWechatAnalyticsImportRepository(db)
+	wechatAccountAnalytics := newWechatAccountAnalyticsRepository(db)
 	wechatCapabilities := newWechatCapabilityRepository(db)
 	channelsTrackings := newChannelsTrackingRepository(db)
 	channelsMetricSnapshots := newChannelsMetricSnapshotRepository(db)
@@ -595,49 +618,50 @@ func New(db *gorm.DB) Repository {
 	billing := newBillingRepository(db)
 
 	return &repository{
-		db:                      db,
-		users:                   users,
-		sessions:                sessions,
-		plans:                   plans,
-		planEntries:             newPlanEntryRepository(db),
-		tasks:                   tasks,
-		taskExecutions:          taskExecutions,
-		files:                   files,
-		uploadSessions:          uploadSessions,
-		assets:                  assets,
-		imageAnalyses:           imageAnalyses,
-		projects:                projects,
-		projectProfileRevisions: newProjectProfileRevisionRepository(db),
-		projectProfileStates:    newProjectProfileStateRepository(db),
+		db:                        db,
+		users:                     users,
+		sessions:                  sessions,
+		plans:                     plans,
+		planEntries:               newPlanEntryRepository(db),
+		tasks:                     tasks,
+		taskExecutions:            taskExecutions,
+		files:                     files,
+		uploadSessions:            uploadSessions,
+		assets:                    assets,
+		imageAnalyses:             imageAnalyses,
+		projects:                  projects,
+		projectProfileRevisions:   newProjectProfileRevisionRepository(db),
+		projectProfileStates:      newProjectProfileStateRepository(db),
 		interactiveCommitReceipts: newInteractiveCommitReceiptRepository(db),
-		projectChannelConfigs:   projectChannelConfigs,
-		apiKeys:                 apiKeys,
-		feedbacks:               feedbacks,
-		taskFeedbacks:           taskFeedbacks,
-		seednoteTrackings:       seednoteTrackings,
-		seednoteMetricSnapshots: seednoteMetricSnapshots,
-		seednoteImports:         seednoteImports,
-		seednotePosts:           seednotePosts,
-		seednotePostAliases:     seednotePostAliases,
-		seednoteMetricVersions:  seednoteMetricVersions,
-		wechatTrackings:         wechatTrackings,
-		wechatPublications:      wechatPublications,
-		wechatMetricSnapshots:   wechatMetricSnapshots,
-		wechatAnalyticsImports:  wechatAnalyticsImports,
-		wechatCapabilities:      wechatCapabilities,
-		channelsTrackings:       channelsTrackings,
-		channelsMetricSnapshots: channelsMetricSnapshots,
-		templates:               templates,
-		viralAnalyses:           viralAnalyses,
-		posterTasks:             posterTasks,
-		topicPools:              topicPools,
-		trendSnapshots:          trendSnapshots,
-		agentFeedbacks:          agentFeedbacks,
-		feedbackLoop:            feedbackLoop,
-		contentMetadata:         contentMetadata,
-		ilinkBindings:           ilinkBindings,
-		ilinkNotifications:      ilinkNotifications,
-		billing:                 billing,
+		projectChannelConfigs:     projectChannelConfigs,
+		apiKeys:                   apiKeys,
+		feedbacks:                 feedbacks,
+		taskFeedbacks:             taskFeedbacks,
+		seednoteTrackings:         seednoteTrackings,
+		seednoteMetricSnapshots:   seednoteMetricSnapshots,
+		seednoteImports:           seednoteImports,
+		seednotePosts:             seednotePosts,
+		seednotePostAliases:       seednotePostAliases,
+		seednoteMetricVersions:    seednoteMetricVersions,
+		wechatTrackings:           wechatTrackings,
+		wechatPublications:        wechatPublications,
+		wechatMetricSnapshots:     wechatMetricSnapshots,
+		wechatAnalyticsImports:    wechatAnalyticsImports,
+		wechatAccountAnalytics:    wechatAccountAnalytics,
+		wechatCapabilities:        wechatCapabilities,
+		channelsTrackings:         channelsTrackings,
+		channelsMetricSnapshots:   channelsMetricSnapshots,
+		templates:                 templates,
+		viralAnalyses:             viralAnalyses,
+		posterTasks:               posterTasks,
+		topicPools:                topicPools,
+		trendSnapshots:            trendSnapshots,
+		agentFeedbacks:            agentFeedbacks,
+		feedbackLoop:              feedbackLoop,
+		contentMetadata:           contentMetadata,
+		ilinkBindings:             ilinkBindings,
+		ilinkNotifications:        ilinkNotifications,
+		billing:                   billing,
 	}
 }
 
@@ -685,6 +709,9 @@ func (r *repository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
 }
 func (r *repository) WechatAnalyticsImports() WechatAnalyticsImportRepository {
 	return r.wechatAnalyticsImports
+}
+func (r *repository) WechatAccountAnalytics() WechatAccountAnalyticsRepository {
+	return r.wechatAccountAnalytics
 }
 func (r *repository) WechatCapabilities() WechatCapabilityRepository { return r.wechatCapabilities }
 func (r *repository) ChannelsTrackings() ChannelsTrackingRepository  { return r.channelsTrackings }
@@ -760,6 +787,7 @@ type txRepository struct {
 	wechatPublications      WechatPublicationRepository
 	wechatMetricSnapshots   WechatMetricSnapshotRepository
 	wechatAnalyticsImports  WechatAnalyticsImportRepository
+	wechatAccountAnalytics  WechatAccountAnalyticsRepository
 	wechatCapabilities      WechatCapabilityRepository
 	channelsTrackings       ChannelsTrackingRepository
 	channelsMetricSnapshots ChannelsMetricSnapshotRepository
@@ -806,6 +834,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		wechatPublications:      newWechatPublicationRepository(tx),
 		wechatMetricSnapshots:   newWechatMetricSnapshotRepository(tx),
 		wechatAnalyticsImports:  newWechatAnalyticsImportRepository(tx),
+		wechatAccountAnalytics:  newWechatAccountAnalyticsRepository(tx),
 		wechatCapabilities:      newWechatCapabilityRepository(tx),
 		channelsTrackings:       newChannelsTrackingRepository(tx),
 		channelsMetricSnapshots: newChannelsMetricSnapshotRepository(tx),
@@ -869,6 +898,9 @@ func (r *txRepository) WechatMetricSnapshots() WechatMetricSnapshotRepository {
 }
 func (r *txRepository) WechatAnalyticsImports() WechatAnalyticsImportRepository {
 	return r.wechatAnalyticsImports
+}
+func (r *txRepository) WechatAccountAnalytics() WechatAccountAnalyticsRepository {
+	return r.wechatAccountAnalytics
 }
 func (r *txRepository) WechatCapabilities() WechatCapabilityRepository { return r.wechatCapabilities }
 func (r *txRepository) ChannelsTrackings() ChannelsTrackingRepository  { return r.channelsTrackings }

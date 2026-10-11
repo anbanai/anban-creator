@@ -229,39 +229,39 @@ export default function PlansPage() {
   const createMutation = useMutation({
     mutationFn: (payload: CreatePlanRequest) => api.plans.create(payload),
     onSuccess: () => {
-      toast.success('计划创建成功')
+      toast.success('排期创建成功')
       void queryClient.invalidateQueries({ queryKey: ['plans'] })
       resetModal()
     },
-    onError: (error) => toast.error(getApiErrorMessage(error, '创建计划失败')),
+    onError: (error) => toast.error(getApiErrorMessage(error, '创建排期失败')),
   })
   const updateMutation = useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: UpdatePlanRequest }) => api.plans.update(id, payload),
     onSuccess: () => {
-      toast.success('计划更新成功')
+      toast.success('排期更新成功')
       void queryClient.invalidateQueries({ queryKey: ['plans'] })
       resetModal()
     },
-    onError: (error) => toast.error(getApiErrorMessage(error, '更新计划失败')),
+    onError: (error) => toast.error(getApiErrorMessage(error, '更新排期失败')),
   })
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.plans.delete(id),
     onSuccess: () => {
-      toast.success('计划已删除')
+      toast.success('排期已删除')
       void queryClient.invalidateQueries({ queryKey: ['plans'] })
       setDeleteTarget(null)
     },
-    onError: (error) => toast.error(getApiErrorMessage(error, '删除计划失败')),
+    onError: (error) => toast.error(getApiErrorMessage(error, '删除排期失败')),
   })
   const pauseMutation = useMutation({
     mutationFn: (id: string) => api.plans.pause(id),
-    onSuccess: () => { toast.success('计划已暂停'); void queryClient.invalidateQueries({ queryKey: ['plans'] }) },
-    onError: (error) => toast.error(getApiErrorMessage(error, '暂停计划失败')),
+    onSuccess: () => { toast.success('排期已暂停'); void queryClient.invalidateQueries({ queryKey: ['plans'] }) },
+    onError: (error) => toast.error(getApiErrorMessage(error, '暂停排期失败')),
   })
   const resumeMutation = useMutation({
     mutationFn: (id: string) => api.plans.resume(id),
-    onSuccess: () => { toast.success('计划已恢复'); void queryClient.invalidateQueries({ queryKey: ['plans'] }) },
-    onError: (error) => toast.error(getApiErrorMessage(error, '恢复计划失败')),
+    onSuccess: () => { toast.success('排期已恢复'); void queryClient.invalidateQueries({ queryKey: ['plans'] }) },
+    onError: (error) => toast.error(getApiErrorMessage(error, '恢复排期失败')),
   })
 
   const resetModal = useCallback(() => {
@@ -375,9 +375,9 @@ export default function PlansPage() {
           <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-start gap-2">
               <div className="min-w-0 flex-1">
-                <h2 className="truncate text-sm font-semibold text-foreground">{plan.prompt || plan.title || '定时创作计划'}</h2>
+                <h2 className="truncate text-sm font-semibold text-foreground">{plan.prompt || plan.title || '定时排期'}</h2>
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  {project ? <ProjectIdentity project={project} compact showAgents={false} /> : <span>未命名项目</span>}
+                  {project ? <ProjectIdentity project={project} compact showAgents={false} /> : <span>未命名创作项目</span>}
                   <span aria-hidden="true">·</span>
                   <span>{outputIDs.length} 种输出</span>
                 </div>
@@ -405,7 +405,7 @@ export default function PlansPage() {
             <div className="flex flex-wrap items-center justify-end gap-1.5">
               <Tooltip>
                 <TooltipTrigger
-                  render={<Button type="button" variant="ghost" size="icon-md" aria-label={`编辑计划：${plan.title || plan.prompt || '定时创作计划'}`} onClick={() => openEdit(plan)} />}
+                  render={<Button type="button" variant="ghost" size="icon-md" aria-label={`编辑排期：${plan.title || plan.prompt || '定时排期'}`} onClick={() => openEdit(plan)} />}
                 >
                   <SquarePen className="size-4" />
                 </TooltipTrigger>
@@ -413,32 +413,32 @@ export default function PlansPage() {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger
-                  render={<Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} aria-label={`查看任务：${plan.title || plan.prompt || '定时创作计划'}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} />}
+                  render={<Link to={`/tasks?plan_id=${encodeURIComponent(plan.id)}`} aria-label={`查看作品：${plan.title || plan.prompt || '定时排期'}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} />}
                 >
                   <ListTodo className="size-4" />
                 </TooltipTrigger>
-                <TooltipContent>查看任务</TooltipContent>
+                <TooltipContent>查看作品</TooltipContent>
               </Tooltip>
               {plan.status === 'active' ? (
                 <Tooltip>
-                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`暂停计划：${plan.title || plan.prompt || '定时创作计划'}`} onClick={() => void pauseMutation.mutateAsync(plan.id)} />}>
+                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`暂停排期：${plan.title || plan.prompt || '定时排期'}`} onClick={() => void pauseMutation.mutateAsync(plan.id)} />}>
                     <Pause className="size-4" />
                   </TooltipTrigger>
-                  <TooltipContent>暂停计划</TooltipContent>
+                  <TooltipContent>暂停排期</TooltipContent>
                 </Tooltip>
               ) : plan.status === 'paused' ? (
                 <Tooltip>
-                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`恢复计划：${plan.title || plan.prompt || '定时创作计划'}`} onClick={() => void resumeMutation.mutateAsync(plan.id)} />}>
+                  <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`恢复排期：${plan.title || plan.prompt || '定时排期'}`} onClick={() => void resumeMutation.mutateAsync(plan.id)} />}>
                     <Play className="size-4" />
                   </TooltipTrigger>
-                  <TooltipContent>恢复计划</TooltipContent>
+                  <TooltipContent>恢复排期</TooltipContent>
                 </Tooltip>
               ) : null}
               <Tooltip>
-                <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`删除计划：${plan.title || plan.prompt || '定时创作计划'}`} onClick={() => setDeleteTarget(plan.id)} />}>
+                <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`删除排期：${plan.title || plan.prompt || '定时排期'}`} onClick={() => setDeleteTarget(plan.id)} />}>
                   <Trash2 className="size-4" />
                 </TooltipTrigger>
-                <TooltipContent>删除计划</TooltipContent>
+                <TooltipContent>删除排期</TooltipContent>
               </Tooltip>
             </div>
             <StatusPill status={plan.status} label={statusLabel} />
@@ -464,8 +464,8 @@ export default function PlansPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="计划" description="一次排期可同时生成多种输出，每种输出独立执行。">
-        <Button className="min-h-11" onClick={openCreate}><Plus className="h-4 w-4" />新建计划</Button>
+      <PageHeader title="排期" description="一次排期可同时生成多种输出，每种输出独立执行。">
+        <Button className="min-h-11" onClick={openCreate}><Plus className="h-4 w-4" />新建排期</Button>
       </PageHeader>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -474,37 +474,37 @@ export default function PlansPage() {
           projects={projects}
           value={projectFilter || null}
           allowNoProject
-          noProjectLabel="全部项目"
+          noProjectLabel="全部创作项目"
           loading={projectsLoading}
           onValueChange={(id) => { setProjectFilter(id ?? ''); setPage(1) }}
-          ariaLabel="筛选项目"
+          ariaLabel="筛选创作项目"
           compact
         />
-        <Input value={searchFilter} onChange={(event) => setSearchFilter(event.target.value)} placeholder="搜索计划" className="min-h-11 w-full sm:w-64" />
+        <Input value={searchFilter} onChange={(event) => setSearchFilter(event.target.value)} placeholder="搜索排期" className="min-h-11 w-full sm:w-64" />
       </div>
 
       {isError ? <QueryErrorState onRetry={() => void refetch()} /> : isLoading ? (
-        <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">正在加载计划...</div>
+        <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">正在加载排期...</div>
       ) : plans.length === 0 ? (
-        <EmptyState icon={Inbox} title="还没有计划" description="创建计划后，系统会按排期自动生成任务。" action={{ label: '新建计划', onClick: openCreate }} />
+        <EmptyState icon={Inbox} title="还没有排期" description="创建排期后，系统会按时间自动生成作品。" action={{ label: '新建排期', onClick: openCreate }} />
       ) : (
         <div className="space-y-5">
-          {renderPlanGroup('运行中的计划', activePlans, '运行中的计划')}
-          {renderPlanGroup('已暂停的计划', pausedPlans, '已暂停的计划')}
-          {renderPlanGroup('已完成的计划', completedPlans, '已完成的计划')}
+          {renderPlanGroup('运行中的排期', activePlans, '运行中的排期')}
+          {renderPlanGroup('已暂停的排期', pausedPlans, '已暂停的排期')}
+          {renderPlanGroup('已完成的排期', completedPlans, '已完成的排期')}
           {totalPages > 1 ? <div className="flex items-center justify-between pt-2 text-sm text-muted-foreground"><span>第 {page} / {totalPages} 页</span><div className="flex gap-2"><Button variant="outline" size="sm" className="min-h-11" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</Button><Button variant="outline" size="sm" className="min-h-11" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>下一页</Button></div></div> : null}
         </div>
       )}
 
       <Dialog open={modalOpen} onOpenChange={(open) => { if (!open) closeModal() }}>
         <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
-          <DialogHeader className="shrink-0 border-b border-border px-4 py-3"><DialogTitle>{editingPlan ? '编辑计划' : '新建计划'}</DialogTitle><DialogDescription>选择创作类型，设置每次创作的要求和排期。生成的内容可在任务中查看。</DialogDescription></DialogHeader>
+          <DialogHeader className="shrink-0 border-b border-border px-4 py-3"><DialogTitle>{editingPlan ? '编辑排期' : '新建排期'}</DialogTitle><DialogDescription>选择创作类型，设置每次创作的要求和排期。生成的内容可在作品中查看。</DialogDescription></DialogHeader>
           <Form {...form}>
             <form id="plan-form" onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
               <fieldset disabled={isSubmitting} className="min-w-0 space-y-5">
               <section className="space-y-2">
                 <div className="flex items-baseline justify-between gap-3">
-                  <div><h3 className="text-sm font-semibold">创作类型</h3><p className="mt-1 text-xs text-muted-foreground">可多选，每次按排期为每种类型创建一个任务。</p></div>
+                  <div><h3 className="text-sm font-semibold">创作类型</h3><p className="mt-1 text-xs text-muted-foreground">可多选，每次按排期为每种类型创建一个作品。</p></div>
                   <span className="shrink-0 text-xs text-muted-foreground">已选 {watchedAgentIDs.length} 项</span>
                 </div>
                 <FormField control={form.control} name="agent_ids" render={({ field }) => <FormItem>
@@ -513,11 +513,11 @@ export default function PlansPage() {
                     label: outputLabel(pack),
                     description: pack.description,
                     disabled: !canUseForPlan(pack),
-                    disabledReason: canUseForPlan(pack) ? undefined : '需要任务级输入，暂不支持定时计划',
+                    disabledReason: canUseForPlan(pack) ? undefined : '需要单次输入，暂不支持定时排期',
                   }))} value={field.value} onChange={field.onChange} disabled={isSubmitting} />
                   {packsQuery.isLoading ? <p className="text-sm text-muted-foreground">正在加载可用输出...</p> : null}
                   <FormMessage />
-                  {!packsQuery.isLoading && (packsQuery.isError || outputPacks.length === 0) ? <p role="alert" className="text-sm text-destructive">暂时没有可用于计划的输出类型。</p> : null}
+                  {!packsQuery.isLoading && (packsQuery.isError || outputPacks.length === 0) ? <p role="alert" className="text-sm text-destructive">暂时没有可用于排期的输出类型。</p> : null}
                   {watchedAgentIDs.some((id) => !outputPacks.some((pack) => pack.id === id)) && !packsQuery.isLoading ? <p role="alert" className="text-sm text-destructive">部分创作类型已不可用，请重新选择。<Button type="button" variant="link" size="sm" onClick={() => field.onChange(field.value.filter((id) => outputPacks.some((pack) => pack.id === id)))}>移除不可用类型</Button></p> : null}
                 </FormItem>} />
               </section>
@@ -537,7 +537,7 @@ export default function PlansPage() {
                   disabled={isSubmitting}
                   leadingTools={(
                     <div className="flex min-w-0 flex-wrap items-center gap-1">
-                      {editingPlan ? <ProjectContextControl mode="readonly" project={selectedProject ?? null} compact /> : <ProjectContextControl mode="select" projects={projects} value={watchedProjectID || null} onValueChange={changeProject} loading={projectsLoading} disabled={isSubmitting} allowNoProject={false} placeholder="选择项目" ariaLabel="项目" compact />}
+                      {editingPlan ? <ProjectContextControl mode="readonly" project={selectedProject ?? null} compact /> : <ProjectContextControl mode="select" projects={projects} value={watchedProjectID || null} onValueChange={changeProject} loading={projectsLoading} disabled={isSubmitting} allowNoProject={false} placeholder="选择创作项目" ariaLabel="创作项目" compact />}
                       <TaskComposerParameters
                         execution={{ profiles: executionProfileOptions, value: watchedExecutionProfile as AgentExecutionProfileID | '', onChange: (value) => form.setValue('execution_profile', value, { shouldDirty: true, shouldValidate: true }), loading: executionProfilesQuery.isLoading, disabled: isSubmitting || executionProfilesQuery.isError }}
                         image={{ ratios: sharedImageRatios, ratio: watchedImageRatio, onRatioChange: (value) => form.setValue('image_ratio', value, { shouldDirty: true }), capabilities: imageCapabilities, capabilityKey: effectiveImageCapability, onCapabilityChange: (value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true }), loading: imageCapabilitiesLoading, disabled: isSubmitting || imageCapabilitiesError }}
@@ -547,7 +547,7 @@ export default function PlansPage() {
                   )}
                   status={<span className="hidden text-xs text-muted-foreground sm:inline">每次创作均使用</span>}
                 />
-                <p className="text-xs text-muted-foreground">项目提供定位、关键词、视觉风格和作者设置；附件会用于每次创作。</p>
+                <p className="text-xs text-muted-foreground">创作项目提供定位、关键词、视觉风格和作者设置；附件会用于每次创作。</p>
                 {form.formState.errors.prompt ? <p role="alert" className="text-sm text-destructive">{form.formState.errors.prompt.message}</p> : null}
                 {attachmentUploading || attachmentFailed ? <p role="status" className="text-xs text-destructive">{attachmentUploading ? '素材上传中，请稍候。' : '素材上传失败，请重试或移除后保存。'}</p> : null}
               </section>
@@ -567,7 +567,7 @@ export default function PlansPage() {
                   <details className="mt-4 border-t border-border pt-3">
                     <summary className="cursor-pointer text-sm font-medium">高级设置</summary>
                     <div className="mt-3 space-y-4">
-                      <FormField control={form.control} name="skip_reference_image" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>跳过参考图</FormLabel><FormDescription>本次计划不使用参考图。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />
+                      <FormField control={form.control} name="skip_reference_image" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>跳过参考图</FormLabel><FormDescription>本次排期不使用参考图。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />
                       {!watchedSkipReference ? <FormField control={form.control} name="reference_image" render={({ field }) => <FormItem><FormLabel>参考图</FormLabel><FormControl><ReferenceAssetUpload value={(field.value as ReferenceImageValue | null) ?? null} onChange={field.onChange} purpose="task_reference" onUploadingChange={setReferenceUploading} disabled={isSubmitting} /></FormControl><FormMessage /></FormItem>} /> : null}
                       <FormField control={form.control} name="watermark" render={({ field }) => <FormItem className="flex items-center justify-between gap-3 space-y-0"><div><FormLabel>水印</FormLabel><FormDescription>在支持的图片能力中启用水印。</FormDescription></div><FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>} />
                     </div>
@@ -581,7 +581,7 @@ export default function PlansPage() {
             </form>
           </Form>
           <DialogFooter className="mx-0 mb-0 shrink-0 border-t border-border bg-popover px-4 py-3 sm:items-center sm:justify-between">
-            <p className="text-xs text-muted-foreground">每次生成 {watchedAgentIDs.length} 个任务 · {cronToHuman(form.watch('cron_expr'))} · 北京时间</p>
+            <p className="text-xs text-muted-foreground">每次生成 {watchedAgentIDs.length} 个作品 · {cronToHuman(form.watch('cron_expr'))} · 北京时间</p>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeModal} disabled={isSubmitting}>取消</Button>
               <Button type="submit" form="plan-form" loading={isSubmitting} disabled={submitDisabled}>{editingPlan ? '保存' : '创建'}</Button>
@@ -591,7 +591,7 @@ export default function PlansPage() {
       </Dialog>
 
       <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>放弃未保存的修改？</AlertDialogTitle><AlertDialogDescription>关闭后当前表单内容会丢失。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>继续编辑</AlertDialogCancel><AlertDialogAction onClick={resetModal}>放弃修改</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>删除这个计划？</AlertDialogTitle><AlertDialogDescription>删除后不会再触发新的任务。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) void deleteMutation.mutateAsync(deleteTarget) }}>删除</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>删除这个排期？</AlertDialogTitle><AlertDialogDescription>删除后不会再触发新的作品。</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) void deleteMutation.mutateAsync(deleteTarget) }}>删除</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     </div>
   )
 }

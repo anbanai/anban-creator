@@ -196,13 +196,13 @@ function SnapshotFallback({
   parseFailed: boolean
   compact: boolean
 }) {
-  const originLabel = task.plan_id ? '计划快照' : '首次输入'
+  const originLabel = task.plan_id ? '排期快照' : '首次输入'
   const warning = parseFailed
     ? task.plan_id
-      ? '参考使用摘要无法解析，以下仅展示计划快照。'
+      ? '参考使用摘要无法解析，以下仅展示排期快照。'
       : '参考使用摘要无法解析，以下仅展示首次输入快照。'
     : task.plan_id
-      ? '未找到参考使用摘要，以下仅展示计划快照。'
+      ? '未找到参考使用摘要，以下仅展示排期快照。'
       : '未找到参考使用摘要，以下仅展示首次输入快照。'
   const attachments = task.input_attachments ?? []
 
@@ -211,8 +211,8 @@ function SnapshotFallback({
       <div className="flex flex-col gap-3">
         <p className="text-xs leading-5 text-muted-foreground">
           {parseFailed
-            ? '素材使用结论无法解析，仅展示任务输入。'
-            : '未生成素材使用结论，仅展示任务输入。'}
+            ? '素材使用结论无法解析，仅展示作品输入。'
+            : '未生成素材使用结论，仅展示作品输入。'}
         </p>
         {attachments.length > 0 ? (
           <div className="flex flex-col gap-2">
@@ -241,7 +241,7 @@ function SnapshotFallback({
               <Images className="size-4 text-primary" />
               参考素材使用
             </CardTitle>
-            <CardDescription className="mt-1">摘要不可用时仍保留任务创建时的素材记录。</CardDescription>
+            <CardDescription className="mt-1">摘要不可用时仍保留作品创建时的素材记录。</CardDescription>
           </div>
           <Badge variant="outline">{originLabel}</Badge>
         </div>

@@ -85,9 +85,9 @@ export function useKeyboardShortcuts(
 
 export const SHORTCUT_LIST = [
   { keys: "g d", description: "前往仪表盘" },
-  { keys: "g c", description: "前往项目" },
-  { keys: "g p", description: "前往计划" },
-  { keys: "g t", description: "前往任务" },
+  { keys: "g c", description: "前往创作项目" },
+  { keys: "g p", description: "前往排期" },
+  { keys: "g t", description: "前往作品" },
   { keys: "g l", description: "前往时间线", adminOnly: true },
   { keys: "g $", description: "前往积分" },
   { keys: "g s", description: "前往设置", adminOnly: true },

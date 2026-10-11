@@ -188,7 +188,7 @@ describe('MontageCreationPanel', () => {
     await waitFor(() => expect(screen.getByRole('radio', { name: /电影感制作/ })).toBeChecked())
 
     expect(screen.getByText('Agent 按 brief 组织叙事、镜头和节奏；写得越具体，成片越可控。')).toBeInTheDocument()
-    expect(screen.getByText('可上传文件，也可以引用其他任务的产物链接。')).toBeInTheDocument()
+    expect(screen.getByText('可上传文件，也可以引用其他作品的产物链接。')).toBeInTheDocument()
     expect(screen.getByText('智能决定会按素材语言和画面内容自行判断是否需要字幕。')).toBeInTheDocument()
     expect(screen.getByText(/保留原声适合素材本身有解说的情况/)).toBeInTheDocument()
 
@@ -264,7 +264,7 @@ describe('MontageCreationPanel', () => {
       capabilityByKey: () => undefined,
     })
     const input: MontageInput = {
-      brief: '项目快照', pipeline_key: 'screen-demo', source_assets: [],
+      brief: '创作项目快照', pipeline_key: 'screen-demo', source_assets: [],
       preferences: { duration_seconds: 75 }, delivery_targets: [],
     }
     const { rerender } = render(<PanelHarness input={input} />)

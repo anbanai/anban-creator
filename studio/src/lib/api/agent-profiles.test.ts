@@ -15,7 +15,7 @@ describe('agentProfilesApi', () => {
             display_name: '性价比',
             provider: 'deepseek',
             model_name: 'deepseek-v4-pro',
-            description: '适合日常创作和批量任务，成本最低',
+            description: '适合日常创作和批量作品，成本最低',
             min_tier: 'free',
             available: true,
           },

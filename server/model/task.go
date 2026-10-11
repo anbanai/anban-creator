@@ -188,6 +188,9 @@ type Task struct {
 	Channel                 string                                      `gorm:"type:varchar(40);index" json:"channel"`
 	TaskKind                string                                      `gorm:"type:varchar(80);index" json:"task_kind"`
 	Type                    string                                      `gorm:"type:varchar(20);not null" json:"-"`
+	// ContentOrigin is a Server-owned provenance fact used by metadata and
+	// analytics views. An empty value means no origin was assigned.
+	ContentOrigin            string                                      `gorm:"type:varchar(40);index;not null;default:''" json:"content_origin,omitempty"`
 	Status                  string                                      `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
 	Prompt                  string                                      `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
 	Title                   string                                      `gorm:"type:varchar(200)" json:"title,omitempty"`

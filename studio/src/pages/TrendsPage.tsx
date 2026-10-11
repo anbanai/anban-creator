@@ -65,7 +65,7 @@ export default function TrendsPage() {
     mutationFn: ({ projectId: targetProjectId, title }: SaveInput) => api.topicPool.create(targetProjectId, { topics: [title] }),
     onSuccess: async (data, variables) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.topicPool.all(variables.projectId) })
-      toast.success(data.count ? "已收藏到项目选题池" : "该标题已在选题池中")
+      toast.success(data.count ? "已收藏到创作项目选题池" : "该标题已在选题池中")
       setSaveTarget(null)
     },
     onError: () => toast.error("收藏失败"),
@@ -133,8 +133,8 @@ export default function TrendsPage() {
                 <Popover open={saveTarget === itemKey} onOpenChange={(open) => setSaveTarget(open ? itemKey : null)}>
                   <PopoverTrigger render={<Button size="icon-xs" variant="ghost" aria-label="收藏" title="收藏热点"><BookmarkPlus /></Button>} />
                   <PopoverContent align="end" className="w-80">
-                    <div className="space-y-1"><PopoverTitle>收藏到项目</PopoverTitle><PopoverDescription>选择一个项目，之后可在选题池继续创作。</PopoverDescription></div>
-                    <ProjectContextControl mode="select" projects={projects} value={projectId || null} onValueChange={(id) => setProjectId(id || "")} loading={projectsQuery.isLoading} placeholder="选择目标项目" ariaLabel="收藏目标项目" />
+                    <div className="space-y-1"><PopoverTitle>收藏到创作项目</PopoverTitle><PopoverDescription>选择一个创作项目，之后可在选题池继续创作。</PopoverDescription></div>
+                    <ProjectContextControl mode="select" projects={projects} value={projectId || null} onValueChange={(id) => setProjectId(id || "")} loading={projectsQuery.isLoading} placeholder="选择目标创作项目" ariaLabel="收藏目标创作项目" />
                     <Button size="sm" className="w-full" disabled={!projectId || save.isPending} onClick={() => projectId && save.mutate({ projectId, title: item.title })}>确认收藏</Button>
                   </PopoverContent>
                 </Popover>

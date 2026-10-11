@@ -31,7 +31,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   window.history.replaceState(null, '', '/content-analytics?account=wechat&from=2026-09-01&to=2026-09-30')
-  vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目' }] as Awaited<ReturnType<typeof api.projects.list>>)
+  vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号创作项目' }] as Awaited<ReturnType<typeof api.projects.list>>)
   vi.mocked(contentAnalyticsApi.overview).mockResolvedValue(overview)
   vi.mocked(contentAnalyticsApi.contents).mockImplementation(async (_project, params) => {
     const items = [article, picture].filter(item => !params.content_type || item.content_type === params.content_type)
@@ -42,25 +42,31 @@ beforeEach(() => {
 })
 
 describe('persisted WeChat analytics display', () => {
-  it('preserves nonzero, zero and missing values in four summary metrics, trend details and list columns', async () => {
+  it('preserves nonzero, zero and missing values in the content list columns', async () => {
     render(<ContentAnalyticsPage />)
     await screen.findByRole('button', { name: article.title }, hydrationWait)
+    const row = screen.getByRole('button', { name: article.title }).closest('tr')!
+    expect(within(row).getAllByRole('cell').slice(2, 6).map(cell => cell.textContent)).toEqual(['1,286', '0', '—', '9,800'])
+  })
+
+  it('preserves nonzero, zero and missing values in single-content summary and trend details', async () => {
+    window.history.replaceState(null, '', '/content-analytics?account=wechat&content=article-1&from=2026-09-01&to=2026-09-30')
+    render(<ContentAnalyticsPage />)
+    await screen.findByRole('heading', { name: article.title }, hydrationWait)
     const summary = within(screen.getByLabelText('关键指标'))
     expect(summary.getByRole('button', { name: '阅读人数1,286' })).toBeInTheDocument()
     expect(summary.getByRole('button', { name: '分享人数0' })).toBeInTheDocument()
     expect(summary.getByRole('button', { name: '阅读后关注—' })).toBeInTheDocument()
     expect(summary.getByRole('button', { name: '送达人数9,800' })).toBeInTheDocument()
-    const row = screen.getByRole('button', { name: article.title }).closest('tr')!
-    expect(within(row).getAllByRole('cell').slice(2, 6).map(cell => cell.textContent)).toEqual(['1,286', '0', '—', '9,800'])
     const trend = within(screen.getByText('查看趋势明细').closest('details')!)
     expect(trend.getByText('1,286')).toBeInTheDocument()
     fireEvent.click(summary.getByRole('button', { name: '分享人数0' }))
-    expect(screen.getByRole('img', { name: '整体趋势：分享人数' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '内容趋势：分享人数' })).toBeInTheDocument()
     expect(trend.getAllByText('0')).toHaveLength(2)
     fireEvent.click(summary.getByRole('button', { name: '送达人数9,800' }))
     expect(trend.getByText('9,800')).toBeInTheDocument()
     fireEvent.click(summary.getByRole('button', { name: '阅读后关注—' }))
-    expect(screen.queryByRole('img', { name: '整体趋势：阅读后关注' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: '内容趋势：阅读后关注' })).not.toBeInTheDocument()
     expect(screen.getByText('当前时间范围暂无数据，请调整日期或导入数据。')).toBeInTheDocument()
   })
 

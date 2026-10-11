@@ -71,7 +71,7 @@ describe('TaskComposerParameters', () => {
           onCapabilityChange,
         }}
         quantity={{
-          label: '任务数量',
+          label: '作品数量',
           value: 1,
           min: 1,
           max: 5,
@@ -84,7 +84,7 @@ describe('TaskComposerParameters', () => {
     expect(trigger).toHaveTextContent('创作参数')
     expect(screen.queryByRole('button', { name: /^执行配置：/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^图像设置：/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '任务数量：1' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '作品数量：1' })).not.toBeInTheDocument()
 
     fireEvent.click(trigger)
     const popover = screen.getByRole('dialog', { name: '创作参数' })
@@ -94,14 +94,14 @@ describe('TaskComposerParameters', () => {
     expect(within(popover).getByRole('group', { name: 'Agent 执行配置' })).not.toHaveClass('grid-cols-1')
     expect(within(popover).getByRole('group', { name: '图片比例' })).toBeInTheDocument()
     expect(within(popover).getByRole('group', { name: '图像能力' })).toBeInTheDocument()
-    expect(within(popover).getByLabelText('任务数量：1')).toBeInTheDocument()
-    expect(within(popover).getByText('任务数量').closest('section')).toHaveClass(
+    expect(within(popover).getByLabelText('作品数量：1')).toBeInTheDocument()
+    expect(within(popover).getByText('作品数量').closest('section')).toHaveClass(
       'grid-cols-[4.5rem_minmax(0,1fr)]',
     )
 
     fireEvent.click(within(popover).getByRole('button', { name: /^平衡型，/ }))
     fireEvent.click(within(popover).getByRole('button', { name: '4:3' }))
-    fireEvent.click(within(popover).getByRole('button', { name: '增加任务数量' }))
+    fireEvent.click(within(popover).getByRole('button', { name: '增加作品数量' }))
     expect(onExecutionProfileChange).toHaveBeenCalledWith('balanced')
     expect(onRatioChange).toHaveBeenCalledWith('4:3')
     expect(onQuantityChange).toHaveBeenCalledWith(2)
@@ -118,7 +118,7 @@ describe('TaskComposerParameters', () => {
     const popover = screen.getByRole('dialog', { name: '创作参数' })
     expect(within(popover).getByText('执行配置')).toBeInTheDocument()
     expect(within(popover).queryByText('图片比例')).not.toBeInTheDocument()
-    expect(within(popover).queryByText('任务数量')).not.toBeInTheDocument()
+    expect(within(popover).queryByText('作品数量')).not.toBeInTheDocument()
   })
 
   it('labels the shared ratio as a video setting for Montage', () => {
@@ -147,7 +147,7 @@ describe('TaskComposerParameters', () => {
       <TaskComposerParameters
         execution={{ profiles, value: 'effective', onChange: vi.fn() }}
         quantity={{
-          label: '任务数量',
+          label: '作品数量',
           value: 1,
           min: 1,
           max: 1,
@@ -157,7 +157,7 @@ describe('TaskComposerParameters', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: /创作参数：/ }))
-    const fixedQuantity = screen.getByText('任务数量 1 · 当前能力上限')
+    const fixedQuantity = screen.getByText('作品数量 1 · 当前能力上限')
     expect(fixedQuantity.parentElement).toHaveClass('col-span-2')
   })
 })

@@ -20,7 +20,7 @@ const clientContent: Record<PluginClient, {
     label: 'Codex',
     guideUrl: 'https://creator.anbanai.com/codex',
     prompt: '阅读 https://creator.anbanai.com/codex，帮我安装并配置 Anban Creator 插件。需要 ANBAN_API_KEY 时向我索取。',
-    detail: '粘贴到 Codex 的任意任务。Agent 会读取专用说明并完成安装。',
+    detail: '粘贴到 Codex 的任意作品。Agent 会读取专用说明并完成安装。',
   },
   dsh: {
     label: 'DeepSeek Harness',

@@ -12,7 +12,7 @@ function project(overrides: Partial<Project> = {}): Project {
     user_id: 'user-1',
     platform: 'wechat',
     agent_ids: ['wechat-article'],
-    name: '公众号项目',
+    name: '公众号创作项目',
     avatar_url: '',
     profile_url: '',
     keywords: '',
@@ -67,18 +67,18 @@ describe('ProjectCard', () => {
 
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('10')
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('8')
-    expect(screen.queryByText('10 个任务')).not.toBeInTheDocument()
+    expect(screen.queryByText('10 个作品')).not.toBeInTheDocument()
     expect(screen.queryByText('8 个已完成')).not.toBeInTheDocument()
     expect(screen.queryByText('创作配置已就绪')).not.toBeInTheDocument()
     expect(screen.queryByText('还有配置可补齐')).not.toBeInTheDocument()
     expect(screen.queryByText(/成功率/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /创建任务/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /创建作品/ })).not.toBeInTheDocument()
   })
 
   it('shows a completion ring and compact metric strip from project stats', () => {
     render(<ProjectCard project={project()} stats={stats} />)
 
-    expect(screen.getByRole('progressbar', { name: '任务完成率：80%' })).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: '作品完成率：80%' })).toBeInTheDocument()
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('10')
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('8')
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('2')
@@ -88,7 +88,7 @@ describe('ProjectCard', () => {
     render(<ProjectCard project={project()} stats={{ ...stats, total_tasks: 0, completed_tasks: 0, failed_tasks: 0 }} />)
 
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
-    expect(screen.getByText('暂无任务')).toBeInTheDocument()
+    expect(screen.getByText('暂无作品')).toBeInTheDocument()
   })
 
   it('shows common actions directly and opens the topic pool', async () => {
@@ -96,16 +96,16 @@ describe('ProjectCard', () => {
     const onArchive = vi.fn()
     render(<ProjectCard project={project()} stats={stats} onEdit={onEdit} onArchive={onArchive} />)
 
-    expect(screen.queryByRole('button', { name: '更多项目操作：公众号项目' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多创作项目操作：公众号创作项目' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑项目：公众号项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑创作项目：公众号创作项目' }))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '归档项目：公众号项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '归档创作项目：公众号创作项目' }))
     expect(onArchive).toHaveBeenCalledWith('project-1')
 
-    fireEvent.click(screen.getByRole('button', { name: '选题池：公众号项目，剩余 6 个' }))
-    expect(await screen.findByRole('dialog', { name: /选题池 - 公众号项目/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '选题池：公众号创作项目，剩余 6 个' }))
+    expect(await screen.findByRole('dialog', { name: /选题池 - 公众号创作项目/ })).toBeInTheDocument()
   })
 
   it('lists project actions directly without a more menu and uses accessible icon targets', async () => {
@@ -115,10 +115,10 @@ describe('ProjectCard', () => {
     render(<ProjectCard project={project()} onChannelConfig={onChannelConfig} onEdit={onEdit} onProfile={onProfile} onArchive={vi.fn()} />)
 
     expect(screen.queryByText('更多')).not.toBeInTheDocument()
-    const channelConfig = screen.getByRole('button', { name: '渠道配置：公众号项目' })
-    const edit = screen.getByRole('button', { name: '编辑项目：公众号项目' })
-    const profile = screen.getByRole('button', { name: '项目画像：公众号项目' })
-    const memory = screen.getByRole('button', { name: '项目记忆：公众号项目' })
+    const channelConfig = screen.getByRole('button', { name: '渠道配置：公众号创作项目' })
+    const edit = screen.getByRole('button', { name: '编辑创作项目：公众号创作项目' })
+    const profile = screen.getByRole('button', { name: '创作项目画像：公众号创作项目' })
+    const memory = screen.getByRole('button', { name: '创作项目记忆：公众号创作项目' })
     for (const control of [channelConfig, edit, profile, memory]) expect(control).toHaveClass('size-11')
 
     fireEvent.click(channelConfig)
@@ -128,13 +128,21 @@ describe('ProjectCard', () => {
     fireEvent.click(profile)
     expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
     fireEvent.click(memory)
-    expect(await screen.findByRole('dialog', { name: /项目记忆/ })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: /创作项目记忆/ })).toBeInTheDocument()
+  })
+
+  it('exposes a dialogue entry point for updating an existing project profile', () => {
+    const onUpdateProfile = vi.fn()
+    render(<ProjectCard project={project()} onUpdateProfile={onUpdateProfile} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '对话更新项目画像：公众号创作项目' }))
+    expect(onUpdateProfile).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
   })
 
   it('does not report zero remaining topics before stats are available', () => {
     render(<ProjectCard project={project()} />)
 
-    const topicPoolButton = screen.getByRole('button', { name: '选题池：公众号项目' })
+    const topicPoolButton = screen.getByRole('button', { name: '选题池：公众号创作项目' })
     expect(topicPoolButton.querySelector('svg')).toBeInTheDocument()
     expect(topicPoolButton).not.toHaveTextContent('0')
   })
@@ -143,7 +151,7 @@ describe('ProjectCard', () => {
     const onProfile = vi.fn()
     render(<ProjectCard project={project({ platform })} onProfile={onProfile} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '项目画像：公众号项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '创作项目画像：公众号创作项目' }))
     expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ platform }))
     expect(screen.queryByRole('button', { name: /配置账号画像/ })).not.toBeInTheDocument()
   })
@@ -160,8 +168,8 @@ describe('ProjectCard', () => {
       />,
     )
 
-    expect(screen.queryByRole('button', { name: '归档项目：公众号项目' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '恢复项目：公众号项目' }))
+    expect(screen.queryByRole('button', { name: '归档创作项目：公众号创作项目' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '恢复创作项目：公众号创作项目' }))
     expect(onRestore).toHaveBeenCalledWith('project-1')
   })
 

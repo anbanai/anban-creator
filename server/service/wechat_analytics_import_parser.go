@@ -98,6 +98,10 @@ func ParseWechatAnalyticsWorkbook(data []byte, location *time.Location) (*Parsed
 		if rowEmpty(rows[i]) {
 			continue
 		}
+		if rowHeaderIndex, rowColumns := findWechatHeader([][]string{rows[i]}); rowHeaderIndex == 0 {
+			columns = rowColumns
+			continue
+		}
 		parsedRow := parseWechatAnalyticsRow(i+1, rows[i], columns, location)
 		if parsedRow.Source == "" {
 			parsedRow.Source = source
@@ -106,6 +110,16 @@ func ParseWechatAnalyticsWorkbook(data []byte, location *time.Location) (*Parsed
 		result.Rows = append(result.Rows, parsedRow)
 	}
 	return result, nil
+}
+
+func isWechatAnalyticsHeaderRow(row []string, columns map[string]int) bool {
+	for _, header := range wechatAnalyticsRequiredHeaders {
+		index, ok := columns[header]
+		if !ok || index >= len(row) || strings.TrimSpace(row[index]) != header {
+			return false
+		}
+	}
+	return true
 }
 
 func readWechatXLS(data []byte) ([][]string, error) {
@@ -125,20 +139,27 @@ func readWechatXLSX(data []byte) ([][]string, error) {
 		return nil, fmt.Errorf("%w: open xlsx: %v", ErrWechatAnalyticsWorkbookInvalid, err)
 	}
 	if len(file.Sheets) == 0 {
-		return nil, fmt.Errorf("%w: first worksheet not found", ErrWechatAnalyticsWorkbookInvalid)
+		return nil, fmt.Errorf("%w: worksheet not found", ErrWechatAnalyticsWorkbookInvalid)
 	}
-	rows := make([][]string, 0, file.Sheets[0].MaxRow)
-	err = file.Sheets[0].ForEachRow(func(row *xlsx.Row) error {
-		values := make([]string, 0, file.Sheets[0].MaxCol)
-		err := row.ForEachCell(func(cell *xlsx.Cell) error {
-			values = append(values, strings.TrimSpace(cell.String()))
-			return nil
+	rows := make([][]string, 0)
+	for sheetIndex, sheet := range file.Sheets {
+		if sheetIndex > 0 {
+			// Preserve worksheet boundaries while allowing a report split across
+			// multiple sheets to be parsed as one workbook.
+			rows = append(rows, nil)
+		}
+		err = sheet.ForEachRow(func(row *xlsx.Row) error {
+			values := make([]string, 0, sheet.MaxCol)
+			err := row.ForEachCell(func(cell *xlsx.Cell) error {
+				values = append(values, strings.TrimSpace(cell.String()))
+				return nil
+			})
+			rows = append(rows, values)
+			return err
 		})
-		rows = append(rows, values)
-		return err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("%w: read xlsx rows: %v", ErrWechatAnalyticsWorkbookInvalid, err)
+		if err != nil {
+			return nil, fmt.Errorf("%w: read xlsx worksheet %d rows: %v", ErrWechatAnalyticsWorkbookInvalid, sheetIndex+1, err)
+		}
 	}
 	return rows, nil
 }

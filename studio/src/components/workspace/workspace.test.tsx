@@ -26,22 +26,22 @@ describe('workspace visual primitives', () => {
     render(
       <MetricStrip
         metrics={[
-          { label: '任务', value: 12 },
+          { label: '作品', value: 12 },
           { label: '完成', value: '75%' },
         ]}
       />,
     )
 
     expect(screen.getByRole('group', { name: '指标概览' })).toBeInTheDocument()
-    expect(screen.getByText('任务')).toBeInTheDocument()
+    expect(screen.getByText('作品')).toBeInTheDocument()
     expect(screen.getByText('12')).toBeInTheDocument()
     expect(screen.getByText('75%')).toBeInTheDocument()
   })
 
   it('clamps progress and exposes an accessible progressbar without animation', () => {
-    render(<ProgressRing value={140} label="任务完成率" />)
+    render(<ProgressRing value={140} label="作品完成率" />)
 
-    const ring = screen.getByRole('progressbar', { name: '任务完成率：100%' })
+    const ring = screen.getByRole('progressbar', { name: '作品完成率：100%' })
     expect(ring).toHaveAttribute('aria-valuenow', '100')
     expect(ring).toHaveAttribute('data-progress', '100')
     expect(ring).toHaveAttribute('data-motion', 'reduced-safe')

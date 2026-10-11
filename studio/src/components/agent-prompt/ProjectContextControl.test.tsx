@@ -36,26 +36,26 @@ describe('ProjectContextControl', () => {
         onValueChange={onValueChange}
       />,
     )
-    const trigger = screen.getByRole('combobox', { name: '项目上下文' })
+    const trigger = screen.getByRole('combobox', { name: '创作项目上下文' })
     expect(trigger).toHaveTextContent('Morning Brief')
     expect(trigger).toHaveTextContent('Daily editorial briefing')
-    expect(trigger).not.toHaveTextContent('公众号项目')
+    expect(trigger).not.toHaveTextContent('公众号创作项目')
     expect(trigger.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
     expect(trigger).toHaveClass('border-border')
 
     fireEvent.click(trigger)
-    const popup = screen.getByPlaceholderText('搜索项目...').closest('[data-slot="combobox-content"]')
+    const popup = screen.getByPlaceholderText('搜索创作项目...').closest('[data-slot="combobox-content"]')
     expect(popup).toHaveClass('w-[min(36rem,calc(100vw-2rem))]')
     expect(popup?.querySelector('[data-slot="combobox-list"]')).toHaveClass('sm:grid-cols-2')
     expect(screen.getAllByRole('img', { name: '公众号文章' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('img', { name: '种草笔记' }).length).toBeGreaterThan(0)
     const selectedOption = screen.getByRole('option', { name: /Morning Brief.*Daily editorial briefing/ })
     expect(selectedOption).toHaveTextContent('Daily editorial briefing')
-    expect(selectedOption).not.toHaveTextContent('公众号项目')
+    expect(selectedOption).not.toHaveTextContent('公众号创作项目')
     expect(selectedOption).toHaveAttribute('aria-selected', 'true')
     expect(selectedOption).toHaveClass('min-h-11')
 
-    const search = screen.getByPlaceholderText('搜索项目...')
+    const search = screen.getByPlaceholderText('搜索创作项目...')
     fireEvent.change(search, { target: { value: 'Seasonal planting' } })
     expect(screen.queryByRole('option', { name: /Morning Brief/ })).not.toBeInTheDocument()
     const garden = screen.getByRole('option', { name: /Garden Notes/ })
@@ -76,8 +76,8 @@ describe('ProjectContextControl', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
-    fireEvent.click(await screen.findByRole('option', { name: '不使用项目' }))
+    fireEvent.click(screen.getByRole('combobox', { name: '创作项目上下文' }))
+    fireEvent.click(await screen.findByRole('option', { name: '不使用创作项目' }))
 
     expect(onValueChange).toHaveBeenCalledWith(null, undefined)
   })
@@ -90,24 +90,24 @@ describe('ProjectContextControl', () => {
         value={null}
         onValueChange={vi.fn()}
         allowNoProject
-        noProjectLabel="全部项目"
+        noProjectLabel="全部创作项目"
       />,
     )
 
-    const trigger = screen.getByRole('combobox', { name: '项目上下文' })
-    expect(trigger).toHaveTextContent('全部项目')
+    const trigger = screen.getByRole('combobox', { name: '创作项目上下文' })
+    expect(trigger).toHaveTextContent('全部创作项目')
     fireEvent.click(trigger)
-    expect(await screen.findByRole('option', { name: '全部项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: '全部创作项目' })).toBeInTheDocument()
 
     rerender(
       <ProjectContextControl
         mode="readonly"
         project={null}
-        noProjectLabel="独立任务"
+        noProjectLabel="独立作品"
       />,
     )
-    expect(screen.getByText('独立任务')).toBeInTheDocument()
-    expect(screen.queryByText('全部项目')).not.toBeInTheDocument()
+    expect(screen.getByText('独立作品')).toBeInTheDocument()
+    expect(screen.queryByText('全部创作项目')).not.toBeInTheDocument()
   })
 
   it('shows the no-project value and links to project creation', async () => {
@@ -122,11 +122,11 @@ describe('ProjectContextControl', () => {
         createProjectHref="/projects/new"
       />,
     )
-    const trigger = screen.getByRole('combobox', { name: '项目上下文' })
-    expect(trigger).toHaveTextContent('不使用项目')
+    const trigger = screen.getByRole('combobox', { name: '创作项目上下文' })
+    expect(trigger).toHaveTextContent('不使用创作项目')
 
     fireEvent.click(trigger)
-    const link = await screen.findByRole('link', { name: '新建项目' })
+    const link = await screen.findByRole('link', { name: '新建创作项目' })
     expect(link).toHaveAttribute('href', '/projects/new')
     await waitFor(() => {
       expect(consoleError).not.toHaveBeenCalledWith(
@@ -142,7 +142,7 @@ describe('ProjectContextControl', () => {
     )
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.getByText('Daily editorial briefing')).toBeInTheDocument()
-    expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
+    expect(screen.queryByText('公众号创作项目')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
     expect(screen.queryByRole('img', { name: 'Morning Brief' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
@@ -165,7 +165,7 @@ describe('ProjectContextControl', () => {
     expect(screen.getByText('Morning Brief')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '公众号文章' })).toBeInTheDocument()
     expect(document.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
-    expect(screen.queryByText('公众号项目')).not.toBeInTheDocument()
+    expect(screen.queryByText('公众号创作项目')).not.toBeInTheDocument()
     expect(screen.queryByText('Daily editorial briefing')).not.toBeInTheDocument()
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
       'data-compact',
@@ -199,7 +199,7 @@ describe('ProjectContextControl', () => {
     fireEvent.click(trigger)
     const option = await screen.findByRole('option', { name: /Morning Brief.*Daily editorial briefing/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
-    expect(option).not.toHaveTextContent('公众号项目')
+    expect(option).not.toHaveTextContent('公众号创作项目')
   })
 
   it('selects legacy projects without showing their old platform identity', async () => {
@@ -215,8 +215,8 @@ describe('ProjectContextControl', () => {
       />,
     )
 
-    const trigger = screen.getByRole('combobox', { name: '项目上下文' })
-    expect(trigger).not.toHaveTextContent('视频复刻项目')
+    const trigger = screen.getByRole('combobox', { name: '创作项目上下文' })
+    expect(trigger).not.toHaveTextContent('视频复刻创作项目')
     expect(trigger.querySelector('[data-project-mark="true"] [data-platform-icon]')).not.toBeInTheDocument()
     expect(trigger.querySelector('[data-agent-id="hypit"]')).toBeInTheDocument()
 
@@ -244,11 +244,11 @@ describe('ProjectContextControl', () => {
         loading
       />,
     )
-    const trigger = screen.getByRole('combobox', { name: '项目上下文' })
+    const trigger = screen.getByRole('combobox', { name: '创作项目上下文' })
     expect(trigger).toBeDisabled()
-    expect(trigger).toHaveTextContent('加载项目...')
+    expect(trigger).toHaveTextContent('加载创作项目...')
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute('aria-busy', 'true')
-    expect(screen.getByText('正在加载项目')).toBeInTheDocument()
+    expect(screen.getByText('正在加载创作项目')).toBeInTheDocument()
   })
 
   it('keeps object selection stable while projects rerender with the popup open', async () => {
@@ -260,7 +260,7 @@ describe('ProjectContextControl', () => {
         onValueChange={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole('combobox', { name: '项目上下文' }))
+    fireEvent.click(screen.getByRole('combobox', { name: '创作项目上下文' }))
     expect(await screen.findByRole('option', { name: /Morning Brief/ })).toHaveAttribute('aria-selected', 'true')
 
     rerender(
@@ -272,7 +272,7 @@ describe('ProjectContextControl', () => {
       />,
     )
 
-    expect(screen.getByPlaceholderText('搜索项目...')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('搜索创作项目...')).toBeInTheDocument()
     expect(screen.getByRole('option', { name: /Morning Brief/ })).toHaveAttribute('aria-selected', 'true')
   })
 
@@ -286,11 +286,11 @@ describe('ProjectContextControl', () => {
         placeholder="Choose context"
       />,
     )
-    const trigger = screen.getByRole('combobox', { name: '项目上下文' })
+    const trigger = screen.getByRole('combobox', { name: '创作项目上下文' })
     expect(trigger).toHaveTextContent('Choose context')
 
     fireEvent.click(trigger)
-    expect(await screen.findByText('没有可用项目')).toBeInTheDocument()
+    expect(await screen.findByText('没有可用创作项目')).toBeInTheDocument()
   })
 
   it('honors the disabled select state', () => {
@@ -303,6 +303,6 @@ describe('ProjectContextControl', () => {
         disabled
       />,
     )
-    expect(screen.getByRole('combobox', { name: '项目上下文' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '创作项目上下文' })).toBeDisabled()
   })
 })

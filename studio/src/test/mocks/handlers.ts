@@ -121,7 +121,7 @@ export const mockPlans: PaginatedResponse<Plan> = {
   items: [
     {
       id: 'plan-1',
-      title: '测试计划',
+      title: '测试排期',
       description: '',
       cron_expr: '0 9 * * 1',
       prompt: '',
@@ -142,7 +142,7 @@ export const mockTasks: PaginatedResponse<Task> = {
     {
       id: 'task-1',
       type: 'wechat-article',
-      prompt: '测试任务',
+      prompt: '测试作品',
       status: 'completed',
       plan_id: null,
       project_id: 'ch-1',
@@ -161,7 +161,7 @@ export const mockProjects: Project[] = [
     id: 'ch-1',
     user_id: '1',
     platform: 'wechat',
-    name: '测试项目',
+    name: '测试创作项目',
     avatar_url: '',
     profile_url: 'https://mp.weixin.qq.com/test',
     instructions: '测试定位',

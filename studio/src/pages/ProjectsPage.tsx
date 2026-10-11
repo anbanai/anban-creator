@@ -336,6 +336,10 @@ export default function ProjectsPage() {
     navigate('/chat?agent=project-creator&intent=create-project')
   }
 
+  function openProfileCreator(project: Project) {
+    navigate(`/chat?agent=project-creator&intent=update-project-profile&project_id=${encodeURIComponent(project.id)}`)
+  }
+
   useEffect(() => {
     if (!createIntent.shouldCreate || modalOpen) return
     openCreate()
@@ -511,6 +515,7 @@ export default function ProjectsPage() {
               stats={projectStats[project.id]}
               onEdit={openEdit}
               onProfile={openProfile}
+              onUpdateProfile={openProfileCreator}
               onChannelConfig={setChannelProject}
               archiving={archiveMutation.isPending}
               restoring={restoreMutation.isPending}

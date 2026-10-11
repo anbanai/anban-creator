@@ -32,7 +32,7 @@ vi.mock('@/lib/api', async () => {
             id: 'failed-task',
             type: 'wechat-article',
             title: '失败文章',
-            prompt: '失败任务',
+            prompt: '失败作品',
             status: 'failed',
             error_message: '模型超时',
             plan_id: null,
@@ -50,7 +50,7 @@ vi.mock('@/lib/api', async () => {
           id: 'project-1',
           user_id: 'user-1',
           platform: 'wechat',
-          name: '公众号项目',
+          name: '公众号创作项目',
           avatar_url: '',
           profile_url: '',
           keywords: '',
@@ -103,7 +103,7 @@ describe('GlobalCommandPalette actions', () => {
     expect(await screen.findByText('插件')).toBeInTheDocument()
     expect((await screen.findAllByText('设置')).length).toBeGreaterThan(0)
     expect(screen.queryByText('打开接入就绪中心')).not.toBeInTheDocument()
-    expect(await screen.findByText('恢复失败任务')).toBeInTheDocument()
+    expect(await screen.findByText('恢复失败作品')).toBeInTheDocument()
     expect(await screen.findByText('新建公众号文章')).toBeInTheDocument()
   })
 

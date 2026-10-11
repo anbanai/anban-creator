@@ -26,9 +26,9 @@ describe('FieldHint', () => {
   })
 
   it('keeps a custom accessible name without leaking the icon into the name', () => {
-    renderHint(<span>说明</span>, '关于项目定位')
+    renderHint(<span>说明</span>, '关于创作项目定位')
 
-    const trigger = screen.getByRole('button', { name: '关于项目定位' })
+    const trigger = screen.getByRole('button', { name: '关于创作项目定位' })
     expect(trigger).toBeInTheDocument()
   })
 })

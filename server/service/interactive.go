@@ -1113,6 +1113,13 @@ func (s *InteractiveService) stage(sess *InteractiveSession, in InteractiveStage
 		}
 		return ErrInteractiveBusy
 	}
+	// Memory append is a profile-update projection. A create-project session
+	// has no durable project to append to yet, so reject it before publishing a
+	// ready draft that can never be committed.
+	if sess.ProjectID == "" && strings.TrimSpace(in.MemoryAppend) != "" {
+		sess.mu.Unlock()
+		return ErrInteractiveDraftInvalid
+	}
 	sess.Draft.Revision++
 	sess.Draft.Project = in.Project
 	sess.Draft.Profile = in.Profile
@@ -1210,7 +1217,6 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 		sess.mu.Unlock()
 		return InteractiveCommitResult{}, ErrInteractiveToken
 	}
-	sess.committing = true
 	draft := sess.Draft
 	projectID := sess.ProjectID
 	profileVersion := sess.ProfileVersion
@@ -1220,6 +1226,10 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 		sess.mu.Unlock()
 		return InteractiveCommitResult{}, ErrInteractiveDraftInvalid
 	}
+	// Mark the session as committing only after all synchronous validation has
+	// passed.  This keeps a rejected request retryable instead of leaving the
+	// temporary session permanently busy.
+	sess.committing = true
 	sess.mu.Unlock()
 	var result InteractiveCommitResult
 	e = s.repo.WithTx(ctx, func(tx repository.Repository) error {

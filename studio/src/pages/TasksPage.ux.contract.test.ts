@@ -11,7 +11,7 @@ describe('TasksPage recovery workspace contract', () => {
 
     expect(source).not.toContain('恢复工作台')
     expect(source).toContain('需要处理')
-    expect(source).toContain('个失败任务')
+    expect(source).toContain('个失败作品')
     expect(source).not.toContain('待发布确认')
   })
 

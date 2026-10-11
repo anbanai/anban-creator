@@ -198,6 +198,22 @@ func registerUser(t *testing.T, app *fiber.App, email, password, nickname string
 	return token, userID
 }
 
+// promoteAdmin opts a test user into the administrator-only timeline surface.
+// Timeline access is intentionally restricted in production; E2E cases that
+// exercise its date, ownership, or aggregation behavior must use an admin
+// identity while router tests cover regular-user denial.
+func promoteAdmin(t *testing.T, repo repository.Repository, userID string) {
+	t.Helper()
+	user, err := repo.Users().FindByID(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("find test user %s: %v", userID, err)
+	}
+	user.IsAdmin = true
+	if err := repo.Users().Update(context.Background(), user); err != nil {
+		t.Fatalf("promote test user %s: %v", userID, err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // E2E Tests
 // ---------------------------------------------------------------------------
@@ -210,6 +226,7 @@ func TestE2E_FullUserFlow(t *testing.T) {
 
 	// Step 1: Register user 1.
 	token1, userID1 := registerUser(t, app, "test@example.com", "testpassword123", "Test User")
+	promoteAdmin(t, repo, userID1)
 
 	// Step 1.5: Create a test project for the user.
 	testProject := &model.Project{
@@ -741,10 +758,11 @@ func TestE2E_PlanOwnershipIsolation(t *testing.T) {
 
 // TestE2E_InvalidInputs tests various invalid input scenarios.
 func TestE2E_InvalidInputs(t *testing.T) {
-	app, closeFunc, _ := setupTestRouter(t)
+	app, closeFunc, repo := setupTestRouter(t)
 	defer closeFunc()
 
-	token, _ := registerUser(t, app, "input@example.com", "password123", "Input User")
+	token, userID := registerUser(t, app, "input@example.com", "password123", "Input User")
+	promoteAdmin(t, repo, userID)
 
 	tests := []struct {
 		name       string
@@ -835,7 +853,9 @@ func TestE2E_FindRunningByUserDoesNotLeak(t *testing.T) {
 	defer closeFunc()
 
 	token1, userID1 := registerUser(t, app, "runner1@example.com", "password123", "Runner One")
-	token2, _ := registerUser(t, app, "runner2@example.com", "password123", "Runner Two")
+	token2, userID2 := registerUser(t, app, "runner2@example.com", "password123", "Runner Two")
+	promoteAdmin(t, repo, userID1)
+	promoteAdmin(t, repo, userID2)
 
 	// Create a test project for user 1.
 	testProject := &model.Project{

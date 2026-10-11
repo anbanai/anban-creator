@@ -211,8 +211,8 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
   const checks: CommandCenterReadiness['checks'] = {
     projects: {
       status: projectStatus,
-      label: '项目定位',
-      description: projects.length > 0 ? `${projects.length} 个项目可用` : '先创建账号/项目',
+      label: '创作项目定位',
+      description: projects.length > 0 ? `${projects.length} 个创作项目可用` : '先创建账号/创作项目',
       href: projects.length > 0 ? '/projects' : projectsReturnHref({ type: 'seednote', intent: 'new' }),
     },
     apiKeys: {
@@ -231,10 +231,10 @@ export function buildCommandCenterSignals(input: BuildCommandCenterSignalsInput)
       label: '发布能力',
       description:
         publishingStatus === 'ready'
-          ? `${publishableProjects.length} 个项目已配置公众号发布流程`
+          ? `${publishableProjects.length} 个创作项目已配置公众号发布流程`
           : publishingStatus === 'not_ready'
             ? '需要检查发布配置'
-            : '创建项目后检查发布配置',
+            : '创建创作项目后检查发布配置',
       href: '/settings',
     },
   }
@@ -268,7 +268,7 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
   if (failedTask) {
     actions.push({
       id: 'recover-failed-task',
-      label: '恢复失败任务',
+      label: '恢复失败作品',
       description: failedTask.title || failedTask.prompt || '查看失败原因并重新推进',
       href: `/tasks/${failedTask.id}`,
       kind: 'risk',
@@ -278,8 +278,8 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
   if (!signals.readiness.projectsReady) {
     actions.push({
       id: 'create-first-project',
-      label: '创建第一个项目',
-      description: '先建立账号定位，再让任务自动继承风格和配置',
+      label: '创建第一个创作项目',
+      description: '先建立账号定位，再让作品自动继承风格和配置',
       href: projectsReturnHref({ type: 'seednote' }),
       kind: 'neutral',
     })
@@ -289,7 +289,7 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
     actions.push({
       id: 'connect-settings',
       label: '检查接入设置',
-      description: '确认平台密钥和接入状态后再创建任务',
+      description: '确认平台密钥和接入状态后再创建作品',
       href: '/settings',
       kind: 'neutral',
     })
@@ -301,10 +301,10 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
       label: signals.walletRisk.debt && signals.walletRisk.debt > 0 ? '补齐钱包欠费' : '查看钱包余额',
       description:
         signals.walletRisk.debt && signals.walletRisk.debt > 0
-          ? `当前欠费 ${signals.walletRisk.debt.toLocaleString()}，新任务暂不可创建`
+          ? `当前欠费 ${signals.walletRisk.debt.toLocaleString()}，新作品暂不可创建`
           : signals.walletRisk.balance === null
             ? '检查钱包是否可用'
-            : `当前余额 ${signals.walletRisk.balance.toLocaleString()}，建议充值后再创建任务`,
+            : `当前余额 ${signals.walletRisk.balance.toLocaleString()}，建议充值后再创建作品`,
       href: '/billing',
       kind: 'risk',
     })
@@ -314,7 +314,7 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
     actions.push({
       id: 'review-upcoming-plan',
       label: '检查下一次排期',
-      description: upcomingPlan.title || upcomingPlan.prompt || '确认即将触发的自动计划',
+      description: upcomingPlan.title || upcomingPlan.prompt || '确认即将触发的自动排期',
       href: `/plans?highlight=${upcomingPlan.id}`,
       kind: 'waiting',
     })
@@ -323,8 +323,8 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
   if (signals.readiness.projectsReady) {
     actions.push({
       id: 'create-task',
-      label: signals.tasks.length === 0 ? '创建首个任务' : '新建创作任务',
-      description: defaultProject ? `使用「${defaultProject.name}」继续产出` : '开始新的内容任务',
+      label: signals.tasks.length === 0 ? '创建首个作品' : '新建作品',
+      description: defaultProject ? `使用「${defaultProject.name}」继续产出` : '开始新的内容创作',
       href: createTaskHref({ type: defaultProject?.platform === 'wechat' ? 'wechat-article' : defaultProject?.platform || undefined, projectId: defaultProject?.id, intent: 'new' }),
       kind: 'running',
     })

@@ -204,7 +204,7 @@ export default function DashboardPage() {
           navigate(`/tasks/${createdTasks[0].id}`)
           return
         }
-        toast.success(result.message || `已创建 ${createdTasks.length} 个任务`)
+        toast.success(result.message || `已创建 ${createdTasks.length} 个作品`)
         navigate('/tasks')
         return
       }
@@ -223,7 +223,7 @@ export default function DashboardPage() {
       setEntryError({ message })
     },
     onError: (err) => {
-      const message = err instanceof Error ? err.message : '创建任务失败，请重试。'
+      const message = err instanceof Error ? err.message : '创建作品失败，请重试。'
       setEntryError({ message })
     },
   })
@@ -251,7 +251,7 @@ export default function DashboardPage() {
   async function handleSubmit() {
     const text = prompt.trim()
     if (!selectedProject) {
-      setEntryError({ message: '请先创建或选择一个活跃项目。', actionUrl: '/projects' })
+      setEntryError({ message: '请先创建或选择一个活跃创作项目。', actionUrl: '/projects' })
       return
     }
     if (!text) {
@@ -306,8 +306,8 @@ export default function DashboardPage() {
   }
 
   const starterPrompts = selectedProject?.platform === 'montage'
-    ? ['制作一条 30 秒的品牌介绍视频，突出产品特点，画面简洁。', '把上传的口播视频剪成节奏紧凑的短片，保留重点并加上字幕。', '根据项目定位，制作一个适合社交平台传播的产品演示视频。']
-    : ['围绕项目定位，创作一篇适合新手阅读的实用指南，给出具体步骤。', '把上传的素材整理成一篇内容，突出重点，语言自然、有条理。', '围绕项目主题，创作一份值得收藏的实用清单，附上使用建议。']
+    ? ['制作一条 30 秒的品牌介绍视频，突出产品特点，画面简洁。', '把上传的口播视频剪成节奏紧凑的短片，保留重点并加上字幕。', '根据创作项目定位，制作一个适合社交平台传播的产品演示视频。']
+    : ['围绕创作项目定位，创作一篇适合新手阅读的实用指南，给出具体步骤。', '把上传的素材整理成一篇内容，突出重点，语言自然、有条理。', '围绕创作项目主题，创作一份值得收藏的实用清单，附上使用建议。']
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col pb-8">
@@ -317,7 +317,7 @@ export default function DashboardPage() {
           <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
             今天想创作什么？
           </h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">选好项目，写下想法或上传素材，剩下的交给 AI 助手。</p>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">选好创作项目，写下想法或上传素材，剩下的交给 AI 助手。</p>
         </div>
 
         <div ref={composerRef} className="mx-auto w-full max-w-3xl">
@@ -331,7 +331,7 @@ export default function DashboardPage() {
             attachmentController={attachmentController}
             attachmentPolicy={GENERAL_AGENT_ATTACHMENT_POLICY}
             placeholder="描述你想创作的内容、目标和素材要求..."
-            submitLabel="发送创建任务"
+            submitLabel="发送创建作品"
             submitting={submitMutation.isPending}
             submitDisabled={!canSubmit}
             leadingTools={(
@@ -344,13 +344,13 @@ export default function DashboardPage() {
                   allowNoProject={false}
                   loading={projectsLoading || platformConfigsQuery.isLoading}
                   disabled={submitMutation.isPending || platformConfigsQuery.isError}
-                  placeholder="选择项目"
+                  placeholder="选择创作项目"
                   createProjectHref={projectsReturnHref({ type: 'seednote', intent: 'new' })}
                   ariaLabel={selectedProject
-                    ? `项目：${selectedProject.name}`
+                    ? `创作项目：${selectedProject.name}`
                     : projectsLoading || platformConfigsQuery.isLoading
-                      ? '项目：加载中'
-                      : '项目：未选择'}
+                      ? '创作项目：加载中'
+                      : '创作项目：未选择'}
                   compact
                 />
                 <TaskComposerParameters
@@ -374,7 +374,7 @@ export default function DashboardPage() {
                     disabled: imageCapabilitiesError,
                   } : undefined}
                   quantity={{
-                    label: '任务数量',
+                    label: '作品数量',
                     value: quantity,
                     min: 1,
                     max: taskQuantityMax,
@@ -388,8 +388,8 @@ export default function DashboardPage() {
         </div>
 
         <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>任务创建后，可在「任务」中查看进度与作品</span>
-          {executionProfilePrice !== undefined && <span className="tabular-nums">任务固定费 { (executionProfilePrice * quantity).toLocaleString() } 积分{quantity > 1 ? ` / ${quantity} 个任务` : ''} · 图片、视频等按用量另计</span>}
+          <span>作品创建后，可在「作品」中查看进度与生成结果</span>
+          {executionProfilePrice !== undefined && <span className="tabular-nums">创作固定费 { (executionProfilePrice * quantity).toLocaleString() } 积分{quantity > 1 ? ` / ${quantity} 个作品` : ''} · 图片、视频等按用量另计</span>}
         </div>
 
         <section aria-label="今日热点" className="mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-4">

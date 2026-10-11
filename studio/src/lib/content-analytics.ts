@@ -4,7 +4,7 @@ import type { Project } from '@/types'
 import type { AnalyticsCandidate, AnalyticsImportPayload, AnalyticsPreview, AnalyticsTarget } from '@/types/content-analytics'
 export type AnalyticsPlatform = 'wechat' | 'seednote'
 export type MetricBasis = 'cumulative'
-export interface AnalyticsMetric { key: string; label: string; color: string; kind: 'count' | 'rate' | 'duration'; summary: boolean; format: (value: number) => string }
+export interface AnalyticsMetric { key: string; label: string; color: string; kind: 'count' | 'rate' | 'duration' | 'duration_hours'; summary: boolean; format: (value: number) => string }
 export interface AnalyticsContentTag { dimension: string; value: string; display_name: string }
 export interface AnalyticsContent { id: string; title: string; content_type: string; status?: string; url?: string; date?: string; last_stat_date?: string; tags?: AnalyticsContentTag[]; metrics: Record<string, number | null> }
 export interface AnalyticsParams { platform?: AnalyticsPlatform; from: string; to: string; granularity: 'day' | 'week' | 'month'; metric_basis: MetricBasis; expected_revision?: number; content_type?: string }
@@ -13,10 +13,22 @@ export interface AnalyticsDetail extends Omit<AnalyticsOverview, 'coverage'> { c
 export interface AnalyticsPage<T> { revision: number; items: T[]; total: number; offset: number; limit: number }
 export interface AnalyticsListParams extends AnalyticsParams { search?: string; sort?: string; direction?: 'asc' | 'desc'; offset?: number; limit?: number }
 export interface AnalyticsObservation { id: string; stat_date: string; source: string; metric_basis: MetricBasis; effective_at: string; received_at: string; revoked_at?: string; metrics: Record<string, number | null> }
-const metric = (key: string, label: string, kind: AnalyticsMetric['kind'] = 'count', summary = true): AnalyticsMetric => ({ key, label, kind, summary, color: 'var(--primary)', format: (value) => kind === 'rate' ? `${(value * 100).toFixed(2)}%` : kind === 'duration' ? `${value.toFixed(1)} 秒` : value.toLocaleString('zh-CN') })
+const metric = (key: string, label: string, kind: AnalyticsMetric['kind'] = 'count', summary = true): AnalyticsMetric => ({ key, label, kind, summary, color: 'var(--primary)', format: (value) => kind === 'rate' ? `${(value * 100).toFixed(2)}%` : kind === 'duration' ? `${value.toFixed(1)} 秒` : kind === 'duration_hours' ? `${value.toFixed(1)} 小时` : value.toLocaleString('zh-CN') })
 const wechatMetrics = [metric('read_users', '阅读人数'), metric('share_users', '分享人数'), metric('read_to_follow_users', '阅读后关注'), metric('delivered_users', '送达人数'), metric('read_completion_rate', '阅读完成率', 'rate', false), metric('average_read_active_time', '平均阅读时长', 'duration', false), metric('delivery_completion_rate', '送达完成率', 'rate', false), metric('collection_users', '收藏人数', 'count', false), metric('like_users', '点赞人数', 'count', false), metric('zaikan_users', '在看人数', 'count', false), metric('comment_count', '评论', 'count', false)]
-const seednoteMetrics = [metric('exposure_count', '曝光'), metric('view_count', '观看量'), metric('like_count', '点赞'), metric('comment_count', '评论'), metric('collect_count', '收藏'), metric('follower_gain_count', '涨粉'), metric('cover_click_rate', '封面点击率', 'rate', false), metric('share_count', '分享', 'count', false), metric('avg_watch_duration', '人均观看时长', 'duration', false), metric('barrage_count', '弹幕', 'count', false)]
+const seednoteMetrics = [metric('exposure_count', '曝光数'), metric('view_count', '观看数'), metric('like_count', '点赞'), metric('comment_count', '评论'), metric('collect_count', '收藏'), metric('follower_gain_count', '涨粉'), metric('cover_click_rate', '封面点击率', 'rate', false), metric('share_count', '分享', 'count', false), metric('avg_watch_duration', '平均观看时长', 'duration', false), metric('barrage_count', '弹幕', 'count', false), metric('watch_total_duration', '观看总时长', 'duration_hours', false), metric('video_completion_rate', '视频完播率', 'rate', false), metric('profile_visit_count', '主页访问', 'count', false), metric('follower_conversion_rate', '关注转化率', 'rate', false), metric('published_count', '发布数', 'count', false), metric('image_text_count', '图文数', 'count', false), metric('video_count', '视频数', 'count', false)]
 export const metricsFor = (platform: string) => platform === 'wechat' ? wechatMetrics : seednoteMetrics
+export type SeednoteAnalyticsViewKey = 'watch' | 'interaction' | 'follower' | 'publication'
+export interface SeednoteAnalyticsView { key: SeednoteAnalyticsViewKey; label: string; description: string; metricKeys: string[] }
+export const seednoteAnalyticsViews: SeednoteAnalyticsView[] = [
+  { key: 'watch', label: '观看数据', description: '看见内容被发现、点击和消费的完整链路。', metricKeys: ['exposure_count', 'view_count', 'cover_click_rate', 'avg_watch_duration', 'watch_total_duration', 'video_completion_rate'] },
+  { key: 'interaction', label: '互动数据', description: '比较点赞、评论、收藏和分享，识别内容的互动强度。', metricKeys: ['like_count', 'comment_count', 'collect_count', 'share_count', 'barrage_count'] },
+  { key: 'follower', label: '涨粉数据', description: '把内容触达和关注转化放在同一条链路里观察。', metricKeys: ['follower_gain_count', 'profile_visit_count', 'follower_conversion_rate', 'view_count'] },
+  { key: 'publication', label: '发布数据', description: '按发布节奏和内容类型复盘账号供给。', metricKeys: ['published_count', 'image_text_count', 'video_count', 'view_count', 'like_count'] },
+]
+export const seednoteMetricsForView = (view: SeednoteAnalyticsViewKey) => {
+  const keys = seednoteAnalyticsViews.find(item => item.key === view)?.metricKeys ?? seednoteAnalyticsViews[0].metricKeys
+  return keys.map(key => seednoteMetrics.find(item => item.key === key)).filter((item): item is AnalyticsMetric => Boolean(item))
+}
 const metricMetadata = new Map([...wechatMetrics, ...seednoteMetrics].map(item => [item.key, item]))
 export const metricLabel = (key: string) => metricMetadata.get(key)?.label ?? '未知指标'
 export const formatMetric = (key: string, value: number | null | undefined) => value == null ? '—' : (metricMetadata.get(key)?.format(value) ?? value.toLocaleString('zh-CN'))

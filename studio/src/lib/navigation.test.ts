@@ -13,9 +13,9 @@ describe('navigation IA', () => {
   it('defines the MVP navigation in approved order', () => {
     expect(mvpNavItems.map((item) => item.label)).toEqual([
       'AI助手',
-      '项目',
-      '任务',
-      '计划',
+      '创作项目',
+      '作品',
+      '排期',
       '钱包',
       '插件',
       '设置',

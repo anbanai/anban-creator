@@ -47,7 +47,7 @@ export function TaskFeedbackCard({ taskId, enabled = true, showHeader = true }: 
       {showHeader && (
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">人工评价</h2>
-          <p className="mt-1 text-xs text-muted-foreground">请为本次任务产出评分，帮助我们持续改进。</p>
+          <p className="mt-1 text-xs text-muted-foreground">请为本次作品产出评分，帮助我们持续改进。</p>
         </div>
       )}
       <div className="space-y-4 p-4">
@@ -84,7 +84,7 @@ export function TaskFeedbackCard({ taskId, enabled = true, showHeader = true }: 
               aria-label="评价意见"
             />
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-muted-foreground">{feedbackQuery.data ? '已评价，可随时修改' : '评价只对当前任务生效'}</span>
+              <span className="text-xs text-muted-foreground">{feedbackQuery.data ? '已评价，可随时修改' : '评价只对当前作品生效'}</span>
               <Button size="sm" loading={saveMutation.isPending} disabled={rating === 0} onClick={() => saveMutation.mutate()}>
                 {feedbackQuery.data ? '更新评价' : '提交评价'}
               </Button>

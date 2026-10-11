@@ -221,7 +221,7 @@ export function TaskFormDialog({
       ...imageCapabilityOptions,
       {
         key: watchedImageCapabilityKey,
-        display_name: '已停用图像能力（当前任务配置）',
+        display_name: '已停用图像能力（当前作品配置）',
         enabled: false,
       },
     ]
@@ -301,7 +301,7 @@ export function TaskFormDialog({
   const taskMutation = useMutation({
     mutationFn: ({ request }: { request: CreateTaskRequest; quantity: number }) => {
       if (mode === 'clone') {
-        if (!sourceTask) return Promise.reject(new Error('缺少要克隆的源任务'))
+        if (!sourceTask) return Promise.reject(new Error('缺少要克隆的源作品'))
         return api.tasks.clone(sourceTask.id, request)
       }
       return api.tasks.create(request)
@@ -310,8 +310,8 @@ export function TaskFormDialog({
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       if (shouldHandleResult && !shouldHandleResult()) return
       toast.success(mode === 'clone'
-        ? variables.quantity > 1 ? `已克隆 ${variables.quantity} 个任务` : '任务克隆成功'
-        : '任务创建成功')
+        ? variables.quantity > 1 ? `已克隆 ${variables.quantity} 个作品` : '作品克隆成功'
+        : '作品创建成功')
       onCreated(task, variables.quantity)
       form.reset(createTaskFormDefaults())
       attachmentController.clear()
@@ -320,7 +320,7 @@ export function TaskFormDialog({
     },
     onError: (error) => {
       if (shouldHandleResult && !shouldHandleResult()) return
-      toast.error(getApiErrorMessage(error, mode === 'clone' ? '克隆任务失败，请稍后再试' : '创建任务失败，请重试'))
+      toast.error(getApiErrorMessage(error, mode === 'clone' ? '克隆作品失败，请稍后再试' : '创建作品失败，请重试'))
     },
   })
   const isSubmitting = form.formState.isSubmitting || taskMutation.isPending
@@ -425,13 +425,13 @@ export function TaskFormDialog({
         : !costPreview.priceAvailable
           ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
           : mode === 'clone' && projectsLoading
-            ? { message: '正在加载可用项目，请稍候。', href: '' }
+            ? { message: '正在加载可用创作项目，请稍候。', href: '' }
             : mode === 'clone' && !selectedProject
-              ? { message: '源任务项目不可用，请选择一个有效项目。', href: '' }
+              ? { message: '源作品所属创作项目不可用，请选择一个有效创作项目。', href: '' }
           : hasIncompatibleSeednoteAttachments
             ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
             : !selectedProject
-              ? { message: '请在提示框中选择一个项目。', href: '' }
+              ? { message: '请在提示框中选择一个创作项目。', href: '' }
             : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
               ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
               : imageCapabilityUnavailable
@@ -448,14 +448,14 @@ export function TaskFormDialog({
       allowNoProject={false}
       loading={projectsLoading}
       disabled={isSubmitting}
-      placeholder="选择项目"
+      placeholder="选择创作项目"
       createProjectHref={projectsReturnHref({ type: isViralAnalysisTask ? 'seednote' : watchedType, intent: 'new' })}
       onValueChange={changeProject}
       ariaLabel={selectedProject
-        ? `项目：${selectedProject.name}`
+        ? `创作项目：${selectedProject.name}`
         : projectsLoading
-          ? '项目：加载中'
-          : '项目：未选择'}
+          ? '创作项目：加载中'
+          : '创作项目：未选择'}
       compact
     />
   )
@@ -483,7 +483,7 @@ export function TaskFormDialog({
         disabled: imageCapabilitiesError,
       } : undefined}
       quantity={{
-        label: '任务数量',
+        label: '作品数量',
         value: quantity,
         min: 1,
         max: taskQuantityMax,
@@ -551,7 +551,7 @@ export function TaskFormDialog({
       ariaLabel={watchedType === 'hypit' ? '复刻要求' : undefined}
       submitMode="external"
       placeholder={watchedType === 'hypit' ? '描述希望保留的镜头、节奏及需要替换的内容…' : '描述创作目标、内容要求和素材使用方式...'}
-      submitLabel={mode === 'clone' ? '克隆任务' : '创建任务'}
+      submitLabel={mode === 'clone' ? '克隆作品' : '创建作品'}
       submitting={isSubmitting}
       disabled={isSubmitting}
       submitDisabled={Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || (isMontageTask && !montageReady)}
@@ -564,17 +564,17 @@ export function TaskFormDialog({
     />
   )
 
-  const submitLabel = mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆') : quantity > 1 ? `创建 ${quantity} 个任务` : '创建'
+  const submitLabel = mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆') : quantity > 1 ? `创建 ${quantity} 个作品` : '创建'
 
   return (
     <>
       <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !isSubmitting) requestClose() }}>
         <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
           <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
-            <DialogTitle>{mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆任务') : '新建任务'}</DialogTitle>
+            <DialogTitle>{mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆作品') : '新建作品'}</DialogTitle>
             <DialogDescription>
               {mode === 'clone'
-                ? '编辑完整配置并创建一份新任务。'
+                ? '编辑完整配置并创建一份新作品。'
                 : watchedType === 'whiteboard-animation'
                   ? '上传 SRT 字幕，Agent 将按字幕生成白板动画。'
                 : isMontageTask
@@ -595,9 +595,9 @@ export function TaskFormDialog({
                     </span>
                   </summary>
                   <div className="mt-2 space-y-1 border-t border-border pt-2 text-muted-foreground">
-                    <p>{isMontageTask ? `项目定位：${selectedProject.instructions || selectedProject.positioning || '—'}` : `视觉风格：${selectedProject.visual_style || '—'}`}</p>
+                    <p>{isMontageTask ? `创作项目定位：${selectedProject.instructions || selectedProject.positioning || '—'}` : `视觉风格：${selectedProject.visual_style || '—'}`}</p>
                     {watchedType === 'wechat-article' ? <p>署名：{selectedProject.author || '—'} · 写作风格：{selectedProject.writer || '—'} · 排版：{selectedProject.theme || '默认'}</p> : null}
-                    <p>创建后项目再修改，不会影响这个任务。</p>
+                    <p>创建后创作项目再修改，不会影响这个作品。</p>
                   </div>
                 </details>
               ) : null}
@@ -610,7 +610,7 @@ export function TaskFormDialog({
 
               {watchedType !== 'hypit' && <div className="pt-1">
                 <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
-                <p className="mb-2 text-xs text-muted-foreground">写清目标、素材用法和不能出现的表达；未填写的部分按项目默认值执行。</p>
+                <p className="mb-2 text-xs text-muted-foreground">写清目标、素材用法和不能出现的表达；未填写的部分按创作项目默认值执行。</p>
                 {!isViralAnalysisTask ? (
                   <SeednoteTemplateGallery
                     platform={selectedProject?.platform || undefined}
@@ -700,7 +700,7 @@ export function TaskFormDialog({
                       <div className="flex items-center justify-between py-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-foreground">封面图</p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">按任务比例生成，保护微信中心分享卡安全区</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">按作品比例生成，保护微信中心分享卡安全区</p>
                         </div>
                         <Switch aria-label="生成封面图" checked={articleWithCover} onCheckedChange={(checked) => {
                           setFormValue('article_with_cover', checked)
@@ -785,7 +785,7 @@ export function TaskFormDialog({
                       <Package className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-foreground">电商素材包</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">上传产品图，选择交付模块。创建只扣基础任务费，后续图片生成和理解按实际用量结算。</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">上传产品图，选择交付模块。创建只扣基础作品费，后续图片生成和理解按实际用量结算。</p>
                       </div>
                     </div>
                     <FormField control={form.control} name="product_photos" render={({ field }) => (
@@ -887,14 +887,14 @@ export function TaskFormDialog({
                 <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                   {costPreview.priceAvailable ? (
                     <div className="space-y-1 text-muted-foreground">
-                      <p>{billingCatalog?.pricing_tier ? `${billingCatalog.pricing_tier === 'enterprise' ? '企业版' : billingCatalog.pricing_tier === 'pro' ? '专业版' : '免费版'}任务价` : '固定任务价'}：{costPreview.baseCost.toLocaleString()} × {costPreview.billableQuantity} = <span className="font-medium text-foreground">{costPreview.totalCost.toLocaleString()}</span> 积分</p>
+                      <p>{billingCatalog?.pricing_tier ? `${billingCatalog.pricing_tier === 'enterprise' ? '企业版' : billingCatalog.pricing_tier === 'pro' ? '专业版' : '免费版'}创作价` : '固定创作价'}：{costPreview.baseCost.toLocaleString()} × {costPreview.billableQuantity} = <span className="font-medium text-foreground">{costPreview.totalCost.toLocaleString()}</span> 积分</p>
                       {costPreview.discountPerTask > 0 ? (
-                        <p className="text-xs">标准价 <span className="line-through">{costPreview.listBaseCost.toLocaleString()}</span> · 每个任务优惠 {costPreview.discountPerTask.toLocaleString()} 积分</p>
+                        <p className="text-xs">标准价 <span className="line-through">{costPreview.listBaseCost.toLocaleString()}</span> · 每个作品优惠 {costPreview.discountPerTask.toLocaleString()} 积分</p>
                       ) : null}
                     </div>
-                  ) : <p className="font-medium text-red-500">固定任务价暂不可用</p>}
+                  ) : <p className="font-medium text-red-500">固定创作价暂不可用</p>}
                   <p className="text-xs text-muted-foreground">云端 Agent 运行成本由平台承担，不额外预留或补扣。</p>
-                  <p className="text-xs text-muted-foreground">任务内成功交付的图片、视频等增值操作按开始前确认的固定 SKU 另行记账。</p>
+                  <p className="text-xs text-muted-foreground">创作内成功交付的图片、视频等增值操作按开始前确认的固定 SKU 另行记账。</p>
                   {costPreview.priceAvailable ? (
                     <p className="text-muted-foreground">余额：{(billingWallet?.balance ?? 0).toLocaleString()} → <span className={`font-medium ${costPreview.remaining < 0 ? 'text-red-500' : 'text-foreground'}`}>{costPreview.remaining.toLocaleString()}</span></p>
                   ) : null}
