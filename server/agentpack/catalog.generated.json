@@ -1279,7 +1279,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "be69666590263d1e698deb7589c12b0d8b8171166f4c67e9901fec384f1f6a3e"
+      "digest": "2855b193437d732716ca4ee21621b65faa7797a704ec061db776149672c04eaf"
     },
     {
       "id": "wechat-article",
@@ -1501,7 +1501,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "12af1d015cbef9265e065d8330516692289a0414fbdc908d2ea194d7b6de5287"
+      "digest": "426265853dc8176c0c19178b1727897f51bc13d5be675ac7d5cec2c1e45d0d29"
     },
     {
       "id": "wechat-picture",
