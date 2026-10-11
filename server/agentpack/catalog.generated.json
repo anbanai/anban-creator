@@ -235,6 +235,7 @@
       "agent": {
         "name": "hypit",
         "skills": [
+          "project-profile-context",
           "portrait-cover-design"
         ],
         "max_turns": 180
@@ -397,7 +398,7 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "e0bf3ec61183cda1fda8d2971e656836f846fa3e0c998ea7601456b1ccd17c2d"
+      "digest": "2663f2b528afa1be18fdd652c2a24656bcdaa3b988779f964c47e37b4f04f6c1"
     },
     {
       "id": "moments",
@@ -500,6 +501,7 @@
       "agent": {
         "name": "montage",
         "skills": [
+          "project-profile-context",
           "montage",
           "portrait-cover-design"
         ],
@@ -603,7 +605,7 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "82489a0ce09659d93b957b0a4c1de998136f47f9f1bc35ca0c3fac5d38f52241"
+      "digest": "6b9e1cdb96fc0b02d80e1627f7e78c2d6e1f9c7eafee7873ff3a6db5264baebc"
     },
     {
       "id": "profile-analysis",
@@ -615,7 +617,7 @@
       "agent": {
         "name": "profile-analysis",
         "skills": [
-          "profile-builder"
+          "project-profile-context"
         ],
         "max_turns": 80
       },
@@ -913,7 +915,7 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "d9d6252860aa456d613e1b5f5f2660f0835a02d3d90551b1bca131e8587aa82b"
+      "digest": "a6a344db07e26a89d07e12429222c2563a3f66ea02ef64c650d73eb2f64c2432"
     },
     {
       "id": "project-creator",
@@ -1068,6 +1070,7 @@
       "agent": {
         "name": "seednote",
         "skills": [
+          "project-profile-context",
           "portrait-cover-design",
           "humanizer",
           "seednote-research",
@@ -1276,7 +1279,7 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "337ffc5a3329858fafb61e8a233c513748ea5395e13805b4090ecca1a291c22b"
+      "digest": "be69666590263d1e698deb7589c12b0d8b8171166f4c67e9901fec384f1f6a3e"
     },
     {
       "id": "wechat-article",
@@ -1289,6 +1292,7 @@
       "agent": {
         "name": "wechat-article",
         "skills": [
+          "project-profile-context",
           "portrait-cover-design",
           "content-writing",
           "humanizer",
@@ -1497,7 +1501,7 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "267f01ba61a6d60b4bbf3828a56f1a5b012f434c189adaa86480c7d392a74709"
+      "digest": "12af1d015cbef9265e065d8330516692289a0414fbdc908d2ea194d7b6de5287"
     },
     {
       "id": "wechat-picture",

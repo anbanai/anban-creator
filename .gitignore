@@ -18,6 +18,11 @@
 # Dependency directories
 vendor/
 
+# runtime-dsh intentionally vendors the unreleased DSH interactive SDK
+# protocol until a published package exposes session/start and session/answer.
+!runtime-dsh/vendor/
+!runtime-dsh/vendor/**
+
 # Go workspace file
 go.work
 

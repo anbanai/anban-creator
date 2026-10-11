@@ -46,6 +46,7 @@ COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/d
 COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml
 COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js
+COPY --chown=1000:1000 harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js
 
 WORKDIR /app
 USER 1000:1000

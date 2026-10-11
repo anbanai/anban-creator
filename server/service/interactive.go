@@ -153,6 +153,7 @@ type InteractiveMemoryStore interface {
 }
 type InteractiveService struct {
 	repo         repository.Repository
+	projectSvc   *ProjectService
 	factory      RuntimeFactory
 	mu           sync.RWMutex
 	sessions     map[string]*InteractiveSession
@@ -183,10 +184,19 @@ func NewInteractiveServiceWithRuntime(repo repository.Repository, factory Runtim
 
 func NewInteractiveServiceWithRuntimeAndAgents(repo repository.Repository, factory RuntimeFactory, agents []InteractiveAgent) *InteractiveService {
 	return &InteractiveService{
-		repo: repo, factory: factory, sessions: map[string]*InteractiveSession{},
+		repo: repo, projectSvc: NewProjectService(repo, nil), factory: factory, sessions: map[string]*InteractiveSession{},
 		ttl: 30 * time.Minute, maxHistory: 256, agents: append([]InteractiveAgent(nil), agents...),
 		maxSessions: 32, maxPerUser: 2, tombstoneTTL: 5 * time.Minute,
 	}
+}
+
+// SetProjectService supplies the Server's configured project application
+// service so interactive commits share the same capability validation and
+// project defaults as the regular project API.
+func (s *InteractiveService) SetProjectService(projectSvc *ProjectService) {
+	s.mu.Lock()
+	s.projectSvc = projectSvc
+	s.mu.Unlock()
 }
 
 // InteractiveAgentsFromCatalog builds the client-visible registry from the
@@ -1113,6 +1123,10 @@ func (s *InteractiveService) stage(sess *InteractiveSession, in InteractiveStage
 		}
 		return ErrInteractiveBusy
 	}
+	if sess.ProjectID == "" && sess.Intent == "create-project" && strings.TrimSpace(in.MemoryAppend) != "" {
+		sess.mu.Unlock()
+		return ErrInteractiveDraftInvalid
+	}
 	sess.Draft.Revision++
 	sess.Draft.Project = in.Project
 	sess.Draft.Profile = in.Profile
@@ -1217,6 +1231,7 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 	memoryExpected := sess.memoryExpected
 	memoryAppend := draft.MemoryAppend
 	if projectID == "" && memoryAppend != "" {
+		sess.committing = false
 		sess.mu.Unlock()
 		return InteractiveCommitResult{}, ErrInteractiveDraftInvalid
 	}
@@ -1279,7 +1294,28 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 			if err := profile.Validate(); err != nil {
 				return err
 			}
-			p = &model.Project{ID: uuid.NewString(), UserID: userID, Platform: draft.Project.Platform, Name: draft.Project.Name, Instructions: draft.Project.Instructions, Keywords: draft.Project.Keywords, VisualStyle: draft.Project.VisualStyle, Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(profile)}
+			p = &model.Project{
+				Platform: draft.Project.Platform, Name: draft.Project.Name,
+				Instructions: draft.Project.Instructions, Keywords: draft.Project.Keywords,
+				VisualStyle: draft.Project.VisualStyle, Profile: datatypes.NewJSONType(profile),
+			}
+			// Reuse the regular project creation validation/defaults while keeping
+			// the write on this transaction. Image-analysis side effects are not
+			// part of an interactive draft commit.
+			s.mu.RLock()
+			projectSvc := s.projectSvc
+			s.mu.RUnlock()
+			if projectSvc == nil {
+				projectSvc = NewProjectService(tx, nil)
+			} else {
+				configured := *projectSvc
+				configured.repo = tx
+				configured.imageAnalyses = nil
+				projectSvc = &configured
+			}
+			if err := projectSvc.prepareCreate(userID, p); err != nil {
+				return err
+			}
 			if err := tx.Projects().Create(ctx, p); err != nil {
 				return err
 			}
@@ -1287,7 +1323,7 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 			if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: p.ID, Revision: 1, SixDimensions: dims}); err != nil {
 				return err
 			}
-			if err := tx.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: p.ID, Status: model.ProfileInitializationReady, Revision: 1}); err != nil {
+			if err := tx.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: p.ID, Status: model.ProfileInitializationReady, Revision: 1}); err != nil && !missingProfileStateTable(err) {
 				return err
 			}
 		}

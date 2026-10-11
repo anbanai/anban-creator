@@ -285,7 +285,10 @@ func kubernetesExecutionLabels(execution *model.TaskExecution, task *model.Task)
 		"app.kubernetes.io/name":      kubernetesAgentAppName,
 		"app.kubernetes.io/component": "execution",
 		kubernetesExecutionIDLabel:    kubernetesLabelValue(executionID(execution)),
-		kubernetesCatalogDigestLabel:  agentpack.CatalogDigest(),
+		// Kubernetes label values are limited to 63 characters. Keep the
+		// full digest in the runtime configuration and encode the label with
+		// the same bounded identity helper used for other execution labels.
+		kubernetesCatalogDigestLabel:  kubernetesLabelValue(agentpack.CatalogDigest()),
 	}
 	if task != nil {
 		labels[kubernetesTaskIDLabel] = kubernetesLabelValue(task.ID)

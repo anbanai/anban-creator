@@ -838,6 +838,7 @@ func TestCatalogDigestIsEnforcedAtImageBuildBoundary(t *testing.T) {
 		"ARG ANBAN_AGENT_PACK_CATALOG_DIGEST",
 		"LABEL org.anban.agent.pack.catalog-digest=\"$ANBAN_AGENT_PACK_CATALOG_DIGEST\"",
 		"sha256sum agentpack/catalog.generated.json",
+		"harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js",
 	} {
 		if !strings.Contains(server, want) {
 			t.Fatalf("deploy/docker/Dockerfile.server missing Catalog digest build check %q", want)

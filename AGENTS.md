@@ -24,6 +24,10 @@ The current repository is not a standalone Cobra CLI. It has four main surfaces:
 
 Plugin assets have one canonical source at `harness/`:
 
+The public plugin install name is `anban@anbanai` (`plugin@marketplace`). The
+MCP server key is `creator`; Agent names use the `anban:<agent>` namespace.
+The MCP server key is `creator`.
+
 - `.claude-plugin/` and `.codex-plugin/` are native host manifests.
 - `skills/`, templates, writers, scripts, and binaries are shared once.
 - `agents/*.md` are Claude Code Agents; `agents/*.toml` are Codex subagents.

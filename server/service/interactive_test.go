@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -472,6 +474,109 @@ func TestInteractiveCommitAcceptsTokenIssuedByReadyDraft(t *testing.T) {
 	}
 	if result.Project == nil || result.Project.Name != "Project Creator test 2" {
 		t.Fatalf("Commit() result = %#v", result)
+	}
+	if result.Project.ImageRatio != model.DefaultImageRatio(model.PlatformSeednote) {
+		t.Fatalf("interactive project image ratio = %q, want regular project default %q", result.Project.ImageRatio, model.DefaultImageRatio(model.PlatformSeednote))
+	}
+	if !reflect.DeepEqual(result.Project.AgentIDs, model.DefaultProjectAgentIDs(model.PlatformSeednote)) {
+		t.Fatalf("interactive project agent ids = %#v, want regular project defaults %#v", result.Project.AgentIDs, model.DefaultProjectAgentIDs(model.PlatformSeednote))
+	}
+	if state, stateErr := svc.repo.ProjectProfileStates().FindByProjectID(context.Background(), result.Project.ID); stateErr != nil || state.Status != model.ProfileInitializationReady || state.Revision != 1 {
+		t.Fatalf("interactive profile state = %#v, err = %v, want ready revision 1", state, stateErr)
+	}
+}
+
+func TestInteractiveCommitMatchesProjectCreateDefaults(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "interactive-parity.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Project{}, &model.ProjectProfileRevision{}, &model.ProjectProfileState{}, &model.InteractiveCommitReceipt{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	if err := db.AutoMigrate(&model.InteractiveCommitReceipt{}); err != nil {
+		t.Fatal(err)
+	}
+	sess := newInteractiveTestSession()
+	svc := newInteractiveTestService(sess)
+	svc.repo = repo
+	progress := InteractiveProgress{
+		"identity": "collected", "style": "collected", "audience": "collected",
+		"platforms": "collected", "preferences": "collected", "memory": "collected",
+	}
+	if err := svc.StageDraftForSession(sess.ID, InteractiveStageInput{
+		Project: InteractiveProject{Name: "Parity project", Platform: model.PlatformMoments, VisualStyle: "minimal editorial"},
+		Profile: model.NewProjectProfile(), Progress: progress, Ready: true,
+	}); err != nil {
+		t.Fatalf("StageDraftForSession() error = %v", err)
+	}
+	history, _, closeEvents, err := svc.Events(sess.UserID, sess.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeEvents()
+	var token string
+	for _, event := range history {
+		if event.Type == "draft.ready" {
+			if draft, ok := event.Data.(InteractiveDraft); ok {
+				token = draft.ConfirmationToken
+			}
+		}
+	}
+	if token == "" {
+		t.Fatal("ready draft did not issue a confirmation token")
+	}
+	result, err := svc.Commit(context.Background(), sess.UserID, sess.ID, InteractiveCommitRequest{ConfirmationToken: token, IdempotencyKey: "interactive-parity"})
+	if err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+
+	// Run the same input through the regular preparation path. Interactive
+	// creation intentionally changes profile lifecycle state, but its project
+	// identity, capability defaults, ratio defaults, and visual-style source
+	// must remain identical to the ordinary project API.
+	expected := &model.Project{
+		Name: "Parity project", Platform: model.PlatformMoments,
+		VisualStyle: "minimal editorial", Profile: datatypes.NewJSONType(model.NewProjectProfile()),
+	}
+	if err := NewProjectService(repo, nil).prepareCreate(sess.UserID, expected); err != nil {
+		t.Fatalf("regular project preparation error = %v", err)
+	}
+	if result.Project.UserID != expected.UserID || result.Project.Status != expected.Status ||
+		result.Project.ImageRatio != expected.ImageRatio || result.Project.VisualStyleSource != expected.VisualStyleSource ||
+		!reflect.DeepEqual(result.Project.AgentIDs, expected.AgentIDs) {
+		t.Fatalf("interactive project defaults = %#v, regular defaults = %#v", result.Project, expected)
+	}
+}
+
+func TestInteractiveCommitRejectsMemoryAppendForNewProjectWithoutStickingBusy(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "interactive-memory-append.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	if err := db.AutoMigrate(&model.InteractiveCommitReceipt{}); err != nil {
+		t.Fatal(err)
+	}
+	sess := newInteractiveTestSession()
+	sess.Draft.Ready = true
+	sess.Draft.MemoryAppend = "should only update an existing project"
+	sess.confirmationTokenHash = confirmationHash("token")
+	svc := newInteractiveTestService(sess)
+	svc.repo = repo
+	req := InteractiveCommitRequest{ConfirmationToken: "token", IdempotencyKey: "memory-append-new-project"}
+	if _, err := svc.Commit(context.Background(), sess.UserID, sess.ID, req); !errors.Is(err, ErrInteractiveDraftInvalid) {
+		t.Fatalf("first Commit() error = %v, want ErrInteractiveDraftInvalid", err)
+	}
+	sess.mu.Lock()
+	stuck := sess.committing
+	sess.mu.Unlock()
+	if stuck {
+		t.Fatal("session remained in committing state after rejected draft")
+	}
+	if _, err := svc.Commit(context.Background(), sess.UserID, sess.ID, req); !errors.Is(err, ErrInteractiveDraftInvalid) {
+		t.Fatalf("retry Commit() error = %v, want ErrInteractiveDraftInvalid", err)
 	}
 }
 

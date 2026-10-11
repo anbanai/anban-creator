@@ -140,35 +140,31 @@ func (s *ProjectService) SetImageAnalysisService(analyses *ImageAnalysisService)
 	s.imageAnalyses = analyses
 }
 
-// Create creates a new project for the given user.
-// It sets UserID and Status, validates the platform, then persists via the repository.
-//
-// Style dimensions are NOT defaulted here: VisualStyle (图片视觉) is free text and
-// never defaults, and the article writer voice default (writer.DefaultStyleName)
-// is injected at RESOLUTION time (resolver.ResolveStyle) so every consumer agrees
-// on the single source of truth. The project stores only what the user set.
-func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
+// prepareCreate applies the shared, deterministic project creation rules. It is
+// deliberately independent of persistence so transactional workflows such as
+// interactive Project Creator can use the same validation and defaults.
+func (s *ProjectService) prepareCreate(userID string, ch *model.Project) error {
 	if strings.TrimSpace(ch.Name) == "" {
-		return nil, ErrProjectNameRequired
+		return ErrProjectNameRequired
 	}
 	ch.Name = strings.TrimSpace(ch.Name)
 	if strings.TrimSpace(ch.Platform) != "" && !validProjectPlatform(ch.Platform) {
-		return nil, fmt.Errorf("invalid platform: %s", ch.Platform)
+		return fmt.Errorf("invalid platform: %s", ch.Platform)
 	}
 	if ch.AgentIDs == nil && !ch.AgentIDsSet {
 		ch.AgentIDs = model.DefaultProjectAgentIDs(ch.Platform)
 	}
 	if err := validateProjectProfileSetup(ch); err != nil {
-		return nil, err
+		return err
 	}
 	if ch.ProfileSetup != nil {
 		ch.ProfileURL = ch.ProfileSetup.PrimaryProfileURL(ch.Platform)
 	}
 	if err := validateHypitProject(ch, s.hypitCapabilities); err != nil {
-		return nil, err
+		return err
 	}
 	if err := validateProjectMontageDefaults(ch, s.montageCapabilities); err != nil {
-		return nil, err
+		return err
 	}
 	if ch.Instructions == "" && ch.Positioning != "" {
 		ch.Instructions = ch.Positioning
@@ -178,14 +174,14 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if pc != nil {
 		if len(pc.SupportedImageRatios) == 0 {
 			if strings.TrimSpace(ch.ImageRatio) != "" {
-				return nil, fmt.Errorf("image_ratio is not supported for platform %s", ch.Platform)
+				return fmt.Errorf("image_ratio is not supported for platform %s", ch.Platform)
 			}
 		} else {
 			if ch.ImageRatio == "" && pc.DefaultImageRatio != "" {
 				ch.ImageRatio = pc.DefaultImageRatio
 			}
 			if !model.IsBusinessImageRatioAllowed(ch.Platform, ch.ImageRatio) {
-				return nil, fmt.Errorf("%s: %s", model.ValidImageRatioHint, ch.ImageRatio)
+				return fmt.Errorf("%s: %s", model.ValidImageRatioHint, ch.ImageRatio)
 			}
 		}
 	}
@@ -197,6 +193,20 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	}
 	if strings.TrimSpace(ch.VisualStyle) != "" {
 		ch.VisualStyleSource = model.ImageAnalysisSourceManual
+	}
+	return nil
+}
+
+// Create creates a new project for the given user.
+// It sets UserID and Status, validates the platform, then persists via the repository.
+//
+// Style dimensions are NOT defaulted here: VisualStyle (图片视觉) is free text and
+// never defaults, and the article writer voice default (writer.DefaultStyleName)
+// is injected at RESOLUTION time (resolver.ResolveStyle) so every consumer agrees
+// on the single source of truth. The project stores only what the user set.
+func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Project) (*model.Project, error) {
+	if err := s.prepareCreate(userID, ch); err != nil {
+		return nil, err
 	}
 
 	if s.imageAnalyses != nil && ch.Platform != model.PlatformMontage && ch.Platform != model.PlatformHypit && ch.ReferenceImageAssetID != "" && strings.TrimSpace(ch.VisualStyle) == "" {
