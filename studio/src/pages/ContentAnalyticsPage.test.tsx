@@ -229,11 +229,21 @@ describe('server analytics queries', () => {
   it('shows each content item tags below its title without making them interactive', async () => {
     render(<ContentAnalyticsPage />)
 
-    const row = await screen.findByRole('row', { name: /服务器内容/ })
-    expect(row).toHaveTextContent('热搜')
-    expect(row).toHaveTextContent('爆款')
-    expect(row.querySelectorAll('[data-content-tag]')).toHaveLength(2)
+    const tagRow = await screen.findByTestId('content-tags-row-canonical-1')
+    const row = tagRow.previousElementSibling as HTMLElement
+    expect(row).toHaveTextContent('服务器内容')
+    expect(tagRow).toHaveTextContent('热搜')
+    expect(tagRow).toHaveTextContent('爆款')
+    expect(tagRow.querySelectorAll('[data-content-tag]')).toHaveLength(2)
     expect(row.querySelectorAll('button')).toHaveLength(1)
+  })
+  it('gives each content item a full-width tag row beneath its metrics row', async () => {
+    render(<ContentAnalyticsPage />)
+
+    const tagRow = await screen.findByTestId('content-tags-row-canonical-1')
+    expect(tagRow).toHaveAttribute('aria-label', '服务器内容的内容标签')
+    expect(tagRow.querySelector('td')).toHaveAttribute('colspan', '9')
+    expect(tagRow.querySelectorAll('[data-content-tag]')).toHaveLength(2)
   })
   it('shows the selected content tags below its title in detail view', async () => {
     window.history.replaceState(null, '', '/content-analytics?account=notes&content=canonical-1')
