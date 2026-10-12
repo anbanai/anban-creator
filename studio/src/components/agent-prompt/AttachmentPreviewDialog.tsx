@@ -507,16 +507,19 @@ export function AttachmentPreviewDialog({
             {selected ? `${activeIndex + 1} / ${items.length} · ${selected.contentType || selected.type}` : '附件详情'}
           </DialogDescription>
           {selected ? (
-            <Button type="button" variant="secondary" size="icon" onClick={handleDownload} aria-label={`下载 ${selected.fileName}`} className="rounded-full bg-white text-black hover:bg-white/85">
-              <DownloadIcon />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<Button type="button" variant="secondary" size="icon-md" onClick={handleDownload} aria-label={`下载 ${selected.fileName}`} className="rounded-full bg-white text-black hover:bg-white/85" />}>
+                <DownloadIcon className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent>下载附件</TooltipContent>
+            </Tooltip>
           ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
                 <DialogClose
                   render={
-                    <Button type="button" variant="secondary" size="icon" aria-label="关闭附件预览" className="rounded-full bg-white text-black hover:bg-white/85" />
+                    <Button type="button" variant="secondary" size="icon-md" aria-label="关闭附件预览" className="rounded-full bg-white text-black hover:bg-white/85" />
                   }
                 />
               }

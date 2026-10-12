@@ -449,7 +449,7 @@ function PublicationStageActions({
   const retryAction = (label: string, onClick: () => void) => (
     <Tooltip>
       <TooltipTrigger
-        render={<Button size="icon-md" variant="outline" loading={pending} onClick={onClick} aria-label={label} />}
+        render={<Button size="icon-md" variant="ghost" loading={pending} onClick={onClick} aria-label={label} />}
       >
         {pending ? null : <RefreshCw className="size-4" aria-hidden="true" />}
       </TooltipTrigger>

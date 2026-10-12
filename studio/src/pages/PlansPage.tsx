@@ -6,6 +6,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   Inbox,
+  ChevronLeft,
+  ChevronRight,
   ListTodo,
   Pause,
   SquarePen,
@@ -547,7 +549,7 @@ export default function PlansPage() {
           {renderPlanGroup('运行中的排期', activePlans, '运行中的排期')}
           {renderPlanGroup('已暂停的排期', pausedPlans, '已暂停的排期')}
           {renderPlanGroup('已完成的排期', completedPlans, '已完成的排期')}
-          {totalPages > 1 ? <div className="flex items-center justify-between pt-2 text-sm text-muted-foreground"><span>第 {page} / {totalPages} 页</span><div className="flex gap-2"><Button variant="outline" size="sm" className="min-h-11" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>上一页</Button><Button variant="outline" size="sm" className="min-h-11" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>下一页</Button></div></div> : null}
+          {totalPages > 1 ? <div className="flex items-center justify-between pt-2 text-sm text-muted-foreground"><span>第 {page} / {totalPages} 页</span><div className="flex gap-1"><Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label="上一页" disabled={page <= 1} onClick={() => setPage((current) => current - 1)} />}><ChevronLeft className="size-4" /></TooltipTrigger><TooltipContent>上一页</TooltipContent></Tooltip><Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label="下一页" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)} />}><ChevronRight className="size-4" /></TooltipTrigger><TooltipContent>下一页</TooltipContent></Tooltip></div></div> : null}
         </div>
       )}
 
