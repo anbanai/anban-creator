@@ -222,11 +222,11 @@ claude:
 	}
 }
 
-func TestKubernetesDefaultsDoNotSynthesizeMutableRuntimeImages(t *testing.T) {
+func TestKubernetesDefaultsSynthesizeLocalRuntimeImages(t *testing.T) {
 	cfg := Config{}
 	cfg.Claude.Executor = "kubernetes"
 	cfg.applyDefaults()
-	if len(cfg.Claude.RuntimeImages) != 0 {
-		t.Fatalf("Kubernetes runtime image defaults = %#v, want no synthesized images", cfg.Claude.RuntimeImages)
+	if got := cfg.Claude.RuntimeImages["wechat-article"]; got != "creator-agent-wechat-article:latest" {
+		t.Fatalf("Kubernetes article runtime image default = %q, want creator-agent-wechat-article:latest", got)
 	}
 }

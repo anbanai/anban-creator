@@ -297,10 +297,10 @@ docker-studio-image:
 # Build all supported images.
 docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
 
-# Validate and record one immutable release set for the Server and every
-# managed Agent runtime. Pass registry digest references through the existing
+# Validate and record one release set for the Server and every managed Agent
+# runtime. Pass image references through the existing
 # image variables, for example `make agent-runtime-release-manifest
-# SERVER_IMAGE=registry/anban/server@sha256:...`.
+# SERVER_IMAGE=registry/anban/server:release-20261012`.
 agent-runtime-release-manifest:
 	@SERVER_IMAGE="$(SERVER_IMAGE)" \
 	AGENT_IMAGE_WECHAT_ARTICLE="$(WECHAT_ARTICLE_AGENT_IMAGE)" \

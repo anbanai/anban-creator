@@ -668,10 +668,6 @@ func (c ClaudeConfig) Validate() error {
 		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile-analysis" && profile != "feedback-analysis" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
-		image := imageForProfile(c.RuntimeImages, profile)
-		if c.Executor == "kubernetes" && image != "" && !immutableRuntimeImageReference(image) {
-			errs = append(errs, fmt.Sprintf("claude.runtime_images.%s must use an immutable image digest (image@sha256:<64 hex>) when claude.executor is \"kubernetes\"", profile))
-		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
@@ -679,16 +675,7 @@ func (c ClaudeConfig) Validate() error {
 	return nil
 }
 
-var immutableRuntimeImagePattern = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 var interactiveProviderAPIKeyEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
-func imageForProfile(images RuntimeImages, profile string) string {
-	return strings.TrimSpace(images[profile])
-}
-
-func immutableRuntimeImageReference(image string) bool {
-	return immutableRuntimeImagePattern.MatchString(strings.TrimSpace(image))
-}
 
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
@@ -1079,28 +1066,26 @@ func (c *Config) applyDefaults() {
 	if c.Claude.RuntimeImages == nil {
 		c.Claude.RuntimeImages = RuntimeImages{}
 	}
-	if c.Claude.Executor != "kubernetes" {
-		if strings.TrimSpace(c.Claude.RuntimeImages["wechat-article"]) == "" {
-			c.Claude.RuntimeImages["wechat-article"] = "creator-agent-wechat-article:latest"
-		}
-		if strings.TrimSpace(c.Claude.RuntimeImages["wechat-picture"]) == "" {
-			c.Claude.RuntimeImages["wechat-picture"] = "creator-agent-wechat-picture:latest"
-		}
-		if strings.TrimSpace(c.Claude.RuntimeImages["moments"]) == "" {
-			c.Claude.RuntimeImages["moments"] = "creator-agent-moments:latest"
-		}
-		if strings.TrimSpace(c.Claude.RuntimeImages["ecommerce"]) == "" {
-			c.Claude.RuntimeImages["ecommerce"] = "creator-agent-ecommerce:latest"
-		}
-		if strings.TrimSpace(c.Claude.RuntimeImages["profile-analysis"]) == "" {
-			c.Claude.RuntimeImages["profile-analysis"] = "creator-agent-profile-analysis:latest"
-		}
-		if strings.TrimSpace(c.Claude.RuntimeImages["feedback-analysis"]) == "" {
-			c.Claude.RuntimeImages["feedback-analysis"] = "creator-agent-feedback-analysis:latest"
-		}
-		if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation]) == "" {
-			c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation] = "creator-agent-whiteboard-animation:latest"
-		}
+	if strings.TrimSpace(c.Claude.RuntimeImages["wechat-article"]) == "" {
+		c.Claude.RuntimeImages["wechat-article"] = "creator-agent-wechat-article:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["wechat-picture"]) == "" {
+		c.Claude.RuntimeImages["wechat-picture"] = "creator-agent-wechat-picture:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["moments"]) == "" {
+		c.Claude.RuntimeImages["moments"] = "creator-agent-moments:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["ecommerce"]) == "" {
+		c.Claude.RuntimeImages["ecommerce"] = "creator-agent-ecommerce:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["profile-analysis"]) == "" {
+		c.Claude.RuntimeImages["profile-analysis"] = "creator-agent-profile-analysis:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages["feedback-analysis"]) == "" {
+		c.Claude.RuntimeImages["feedback-analysis"] = "creator-agent-feedback-analysis:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation]) == "" {
+		c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation] = "creator-agent-whiteboard-animation:latest"
 	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080

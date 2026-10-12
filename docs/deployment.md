@@ -34,6 +34,10 @@ kubectl -n "$namespace" rollout status deployment/creator-studio-web-base --time
 
 ## Agent Pack Catalog 与云效构建
 
+Agent runtime image references may use normal registry tags or immutable
+digests. Digest pinning is recommended for production rollback safety, but it
+is not required by the Server configuration or ACK renderer.
+
 云效构建 Agent 或 Server 镜像时不需要配置
 `ANBAN_AGENT_PACK_CATALOG_DIGEST` Build Arg，也不需要写入 Catalog OCI
 label。构建前在同一提交上运行：

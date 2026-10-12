@@ -305,10 +305,10 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	} {
 		for _, want := range []string{
 			`executor: "${ANBAN_AGENT_EXECUTOR}"`,
-			`wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE}"`,
-			`wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE}"`,
-			`seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"`,
-			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"`,
+			`wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}"`,
+			`wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"`,
+			`seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"`,
+			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
 			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"`,
 			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,

@@ -892,7 +892,7 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 	}
 
 	release := readTextFile(t, filepath.Join(root, "scripts/agent-runtime-release.sh"))
-	for _, want := range []string{"catalog_digest", "Agent Pack Catalog files differ", "RepoDigest"} {
+	for _, want := range []string{"catalog_digest", "Agent Pack Catalog files differ"} {
 		if !strings.Contains(release, want) {
 			t.Fatalf("release manifest script missing Catalog audit contract %q", want)
 		}
@@ -1195,9 +1195,9 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
 			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
-			"wechat-article: \"${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE}\"",
-			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE}\"",
-			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE}\"",
+			"wechat-article: \"${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}\"",
+			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}\"",
+			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}\"",
 			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}\"",
 			"pids_limit: 512",
 		} {

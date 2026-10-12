@@ -11,9 +11,8 @@ usage() {
   cat >&2 <<'EOF'
 Usage: scripts/agent-runtime-release.sh [--output PATH]
 
-Required image references are supplied through SERVER_IMAGE and one
-AGENT_IMAGE_* variable for every managed runtime profile. Each reference must
-be an immutable registry digest (name@sha256:<64 lowercase hex characters>).
+Image references are supplied through SERVER_IMAGE and one AGENT_IMAGE_* variable
+for every managed runtime profile. Tags and digests are both accepted.
 EOF
 }
 
@@ -35,10 +34,6 @@ while (($# > 0)); do
   esac
 done
 
-command -v docker >/dev/null 2>&1 || {
-  echo "docker is required to inspect release images" >&2
-  exit 1
-}
 command -v jq >/dev/null 2>&1 || {
   echo "jq is required to write the release manifest" >&2
   exit 1
@@ -55,12 +50,7 @@ if [[ ! "$catalog_digest" =~ ^[0-9a-f]{64}$ ]]; then
   exit 1
 fi
 
-: "${SERVER_IMAGE:?SERVER_IMAGE must be set to an immutable server image reference}"
-
-if [[ ! "$SERVER_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
-  echo "SERVER_IMAGE must use image@sha256:<64 lowercase hex characters>: $SERVER_IMAGE" >&2
-  exit 1
-fi
+: "${SERVER_IMAGE:?SERVER_IMAGE must be set}"
 
 image_entries=(
   "server=$SERVER_IMAGE"
@@ -80,22 +70,6 @@ images_json='{}'
 for entry in "${image_entries[@]}"; do
   profile=${entry%%=*}
   image=${entry#*=}
-  if [[ ! "$image" =~ @sha256:[0-9a-f]{64}$ ]]; then
-    echo "$profile image must use image@sha256:<64 lowercase hex characters>: $image" >&2
-    exit 1
-  fi
-
-  repo_digests=$(docker image inspect --format '{{json .RepoDigests}}' "$image" 2>/dev/null || true)
-  if [[ -z "$repo_digests" || "$repo_digests" == "null" ]]; then
-    echo "$profile image has no immutable RepoDigest: $image" >&2
-    exit 1
-  fi
-  requested_digest="@${image##*@}"
-  if ! jq -e --arg requested_digest "$requested_digest" 'any(.[]?; endswith($requested_digest))' <<<"$repo_digests" >/dev/null; then
-    echo "$profile image is not available under its requested immutable digest: $image (RepoDigests=$repo_digests)" >&2
-    exit 1
-  fi
-
   images_json=$(jq --arg key "$profile" --arg value "$image" '. + {($key): $value}' <<<"$images_json")
 done
 

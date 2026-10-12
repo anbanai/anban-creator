@@ -396,18 +396,17 @@ claude:
   runtime_diagnostic_retention_seconds: 600
   # 每个 Agent 使用独立的 canonical runtime 镜像。
   runtime_images:
-    # Runtime images are always supplied by the deployment environment. Do not
-    # fall back to mutable tags: Kubernetes requires the release digest.
-    wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE}"
-    wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE}"
-    seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE}"
-    montage: "${ANBAN_AGENT_IMAGE_MONTAGE}"
-    moments: "${ANBAN_AGENT_IMAGE_MOMENTS}"
-    ecommerce: "${ANBAN_AGENT_IMAGE_ECOMMERCE}"
-    profile-analysis: "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS}"
-    feedback-analysis: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS}"
-    whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION}"
-    hypit: "${ANBAN_AGENT_IMAGE_HYPIT}"
+    # Local tags, registry tags, or immutable digests may be supplied freely.
+    wechat-article: "${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}"
+    wechat-picture: "${ANBAN_AGENT_IMAGE_WECHAT_PICTURE:-creator-agent-wechat-picture:latest}"
+    seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"
+    montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"
+    moments: "${ANBAN_AGENT_IMAGE_MOMENTS:-creator-agent-moments:latest}"
+    ecommerce: "${ANBAN_AGENT_IMAGE_ECOMMERCE:-creator-agent-ecommerce:latest}"
+    profile-analysis: "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}"
+    feedback-analysis: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
+    whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
+    hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
   # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
   execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
   # 是否启用 agent 沙箱隔离。生产建议 true。

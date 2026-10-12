@@ -11,9 +11,9 @@ usage() {
   cat >&2 <<'EOF'
 Usage: scripts/render-ack-server-deployment.sh [--manifest PATH] [--output PATH]
 
-Render server/Deployment.yaml from one immutable Agent runtime release
-manifest. The caller must provide the normal ACK variables and image_repo;
-image_repo must equal the Server digest recorded in the manifest.
+Render server/Deployment.yaml from optional Agent runtime release metadata.
+The caller may provide normal ACK variables directly; image tags and digests
+are both accepted.
 EOF
 }
 
@@ -40,48 +40,27 @@ while (($# > 0)); do
   esac
 done
 
-command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 command -v envsubst >/dev/null 2>&1 || { echo "envsubst is required" >&2; exit 1; }
 
-[[ -f "$manifest_path" ]] || { echo "release manifest not found: $manifest_path" >&2; exit 1; }
 [[ -f "$template_path" ]] || { echo "ACK deployment template not found: $template_path" >&2; exit 1; }
 
-schema_version=$(jq -r '.schema_version // empty' "$manifest_path")
-catalog_digest=$(jq -r '.catalog_digest // empty' "$manifest_path")
-manifest_server_image=$(jq -r '.images.server // empty' "$manifest_path")
-if [[ "$schema_version" != 1 || ! "$catalog_digest" =~ ^[0-9a-f]{64}$ || ! "$manifest_server_image" =~ @sha256:[0-9a-f]{64}$ ]]; then
-  echo "invalid Agent runtime release manifest: $manifest_path" >&2
-  exit 1
+if [[ -f "$manifest_path" ]]; then
+  command -v jq >/dev/null 2>&1 || { echo "jq is required when using a release manifest" >&2; exit 1; }
+  jq empty "$manifest_path" >/dev/null || { echo "invalid Agent runtime release manifest: $manifest_path" >&2; exit 1; }
+  image_repo=${image_repo:-$(jq -r '.images.server // empty' "$manifest_path")}
+  wechat_article_agent_image_repo=${wechat_article_agent_image_repo:-$(jq -r '.images["wechat-article"] // empty' "$manifest_path")}
+  wechat_picture_agent_image_repo=${wechat_picture_agent_image_repo:-$(jq -r '.images["wechat-picture"] // empty' "$manifest_path")}
+  seednote_agent_image_repo=${seednote_agent_image_repo:-$(jq -r '.images.seednote // empty' "$manifest_path")}
+  montage_agent_image_repo=${montage_agent_image_repo:-$(jq -r '.images.montage // empty' "$manifest_path")}
+  moments_agent_image_repo=${moments_agent_image_repo:-$(jq -r '.images.moments // empty' "$manifest_path")}
+  ecommerce_agent_image_repo=${ecommerce_agent_image_repo:-$(jq -r '.images.ecommerce // empty' "$manifest_path")}
+  profile_analysis_agent_image_repo=${profile_analysis_agent_image_repo:-$(jq -r '.images["profile-analysis"] // empty' "$manifest_path")}
+  feedback_analysis_agent_image_repo=${feedback_analysis_agent_image_repo:-$(jq -r '.images["feedback-analysis"] // empty' "$manifest_path")}
+  whiteboard_animation_agent_image_repo=${whiteboard_animation_agent_image_repo:-$(jq -r '.images["whiteboard-animation"] // empty' "$manifest_path")}
+  hypit_agent_image_repo=${hypit_agent_image_repo:-$(jq -r '.images.hypit // empty' "$manifest_path")}
 fi
 
-: "${image_repo:?image_repo must be set to the Server image digest}"
-if [[ "$image_repo" != "$manifest_server_image" ]]; then
-  echo "ACK Server image differs from release manifest: image_repo=$image_repo manifest=$manifest_server_image" >&2
-  exit 1
-fi
-if [[ ! "$image_repo" =~ @sha256:[0-9a-f]{64}$ ]]; then
-  echo "image_repo must use image@sha256:<64 lowercase hex characters>: $image_repo" >&2
-  exit 1
-fi
-
-wechat_article_agent_image_repo=$(jq -r '.images["wechat-article"] // empty' "$manifest_path")
-wechat_picture_agent_image_repo=$(jq -r '.images["wechat-picture"] // empty' "$manifest_path")
-seednote_agent_image_repo=$(jq -r '.images.seednote // empty' "$manifest_path")
-montage_agent_image_repo=$(jq -r '.images.montage // empty' "$manifest_path")
-moments_agent_image_repo=$(jq -r '.images.moments // empty' "$manifest_path")
-ecommerce_agent_image_repo=$(jq -r '.images.ecommerce // empty' "$manifest_path")
-profile_analysis_agent_image_repo=$(jq -r '.images["profile-analysis"] // empty' "$manifest_path")
-feedback_analysis_agent_image_repo=$(jq -r '.images["feedback-analysis"] // empty' "$manifest_path")
-whiteboard_animation_agent_image_repo=$(jq -r '.images["whiteboard-animation"] // empty' "$manifest_path")
-hypit_agent_image_repo=$(jq -r '.images.hypit // empty' "$manifest_path")
-for profile in wechat_article wechat_picture seednote montage moments ecommerce profile_analysis feedback_analysis whiteboard_animation hypit; do
-  var_name="${profile}_agent_image_repo"
-  image=${!var_name}
-  if [[ ! "$image" =~ @sha256:[0-9a-f]{64}$ ]]; then
-    echo "release manifest image $profile is missing or mutable: $image" >&2
-    exit 1
-  fi
-done
+: "${image_repo:?image_repo must be set}"
 
 export image_repo
 export wechat_article_agent_image_repo wechat_picture_agent_image_repo

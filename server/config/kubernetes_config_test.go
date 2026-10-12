@@ -130,12 +130,11 @@ func TestValidateRuntimeImagesRequiresExactCanonicalProfiles(t *testing.T) {
 	}
 }
 
-func TestValidateKubernetesRejectsMutableRuntimeImageReferences(t *testing.T) {
+func TestValidateKubernetesAcceptsMutableRuntimeImageReferences(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Claude.RuntimeImages["wechat-picture"] = "registry.example.com/creator-agent-wechat-picture:latest"
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), `claude.runtime_images.wechat-picture must use an immutable image digest`) {
-		t.Fatalf("Validate() error = %v, want immutable image digest rejection", err)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want mutable runtime image accepted", err)
 	}
 }
 
