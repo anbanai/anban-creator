@@ -235,6 +235,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"ANBAN_SERVER_TLS_CERT_FILE":        "/var/run/secrets/anban-server-tls/tls.crt",
 		"ANBAN_SERVER_TLS_KEY_FILE":         "/var/run/secrets/anban-server-tls/tls.key",
 		"SSL_CERT_FILE":                     "/var/run/secrets/anban-internal-ca/ca.crt",
+		"NODE_EXTRA_CA_CERTS":               "/var/run/secrets/anban-internal-ca/ca.crt",
 	} {
 		if got := env[name]; got != want {
 			t.Fatalf("server env %s = %q, want %q", name, got, want)

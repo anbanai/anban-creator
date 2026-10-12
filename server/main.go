@@ -729,16 +729,19 @@ func main() {
 	if projectSvc != nil {
 		interactiveSvc.SetProjectService(projectSvc)
 	}
-	if cfg.Interactive.Enabled && strings.TrimSpace(cfg.Interactive.BridgeCommand) != "" {
+	if cfg.Dsh.Enabled && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
+		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{
-			Command:           cfg.Interactive.BridgeCommand,
-			Args:              cfg.Interactive.BridgeArgs,
-			Dir:               cfg.Interactive.BridgeDir,
-			DSHPatch:          cfg.Interactive.DSHPatch,
-			Provider:          cfg.Interactive.Provider,
-			ProviderAPIKeyEnv: cfg.Interactive.ProviderAPIKeyEnv,
-			Model:             cfg.Interactive.Model,
-			MCPURL:            cfg.Interactive.MCPURL,
+			Command:   cfg.Dsh.BridgeCommand,
+			Args:      cfg.Dsh.BridgeArgs,
+			Dir:       cfg.Dsh.BridgeDir,
+			DSHPatch:  cfg.Dsh.DSHPatch,
+			Provider:  route.Provider,
+			API:       route.API,
+			BaseURL:   route.BaseURL,
+			APIKeyEnv: route.APIKeyEnv,
+			Model:     route.Model,
+			MCPURL:    cfg.Dsh.MCPURL,
 		})
 		if projectSvc != nil {
 			interactiveSvc.SetProjectService(projectSvc)
@@ -747,7 +750,7 @@ func main() {
 	}
 	// Apply authorization policy after selecting the runtime-backed service so
 	// enabling the bridge cannot silently drop admin-only access control.
-	interactiveSvc.SetAdminOnly(cfg.Interactive.AdminOnly)
+	interactiveSvc.SetAdminOnly(cfg.Dsh.AdminOnly)
 	if projectMemoryStore != nil {
 		interactiveSvc.SetProjectMemory(projectMemoryStore)
 	}

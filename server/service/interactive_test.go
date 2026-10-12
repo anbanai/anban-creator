@@ -54,6 +54,25 @@ func (interactiveCommandFailingRuntimeFactory) Start(context.Context, string, st
 	return &interactiveTestRuntime{commandErr: errors.New("bridge failed to initialize")}, nil
 }
 
+type interactiveExitAfterStartRuntimeFactory struct{}
+
+func (interactiveExitAfterStartRuntimeFactory) Start(_ context.Context, _ string, _ string, _ string, emit func(string, any)) (Runtime, error) {
+	return &interactiveExitAfterStartRuntime{emit: emit}, nil
+}
+
+type interactiveExitAfterStartRuntime struct {
+	emit func(string, any)
+}
+
+func (r *interactiveExitAfterStartRuntime) Command(_ context.Context, method string, _ any) error {
+	if method == "session/start" {
+		r.emit("runtime.exit", map[string]any{"error": "bridge exited after session/start"})
+	}
+	return nil
+}
+
+func (interactiveExitAfterStartRuntime) Close() error { return nil }
+
 type retryInteractiveMemory struct {
 	failWrites bool
 }
@@ -300,6 +319,44 @@ func TestInteractiveRuntimeInitializationFailureIncludesBridgeError(t *testing.T
 	message, _ := data["message"].(string)
 	if !ok || !strings.Contains(message, "bridge failed to initialize") {
 		t.Fatalf("session.error data = %#v, want bridge diagnostic", history[0].Data)
+	}
+}
+
+func TestInteractiveRuntimeExitAfterStartResponseIsReplayable(t *testing.T) {
+	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, interactiveExitAfterStartRuntimeFactory{}, []InteractiveAgent{{
+		ID: "project-creator", DisplayName: "Project Creator", Available: true, Intents: []string{"create-project"},
+	}})
+	svc.SetEnabled(true)
+	svc.tombstoneTTL = time.Minute
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		status, statusErr := svc.SessionState("user-1", sess.ID)
+		if statusErr != nil {
+			t.Fatalf("SessionState() error = %v", statusErr)
+		}
+		if status == "error" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	history, _, closeEvents, err := svc.Events("user-1", sess.ID, 0)
+	if err != nil {
+		t.Fatalf("Events() error = %v, want replayable failed session", err)
+	}
+	defer closeEvents()
+	if len(history) != 1 || history[0].Type != "session.error" {
+		t.Fatalf("replayed history = %#v, want one session.error event", history)
+	}
+	data, ok := history[0].Data.(map[string]any)
+	message, _ := data["message"].(string)
+	if !ok || !strings.Contains(message, "bridge exited after session/start") {
+		t.Fatalf("session.error data = %#v, want bridge exit diagnostic", history[0].Data)
 	}
 }
 

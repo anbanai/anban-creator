@@ -292,6 +292,15 @@ func TestServerDeploymentInjectsSidecarURLs(t *testing.T) {
 		"value: \"true\"",
 		"name: ANBAN_ILINK_BASE_URL",
 		"value: http://sidecar-ilink:18070",
+		"name: ANBAN_INTERACTIVE_BRIDGE_DIR",
+		"value: /app/runtime-dsh",
+		"name: ANBAN_INTERACTIVE_DSH_PATCH",
+		"value: /app/harness/dsh/project-creator.patch.yml",
+		"name: ANBAN_INTERACTIVE_MCP_URL",
+		"value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443/mcp",
+		"name: NODE_EXTRA_CA_CERTS",
+		"value: /var/run/secrets/anban-internal-ca/ca.crt",
+		"sessionAffinity: ClientIP",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("server deployment missing %q", want)

@@ -1,10 +1,11 @@
 import { HarnessClient, type HarnessNotification } from "@deepseek-ai/dsh-sdk-client";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 
 type JsonRecord = Record<string, unknown>;
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export interface InteractiveCommand {
   id?: string | number;
@@ -36,6 +37,50 @@ export interface InteractiveRuntimeClient {
   close(): Promise<void>;
 }
 
+export interface InteractiveRouteConfig {
+  provider: string;
+  model: string;
+  api: string;
+  baseURL: string;
+  apiKeyEnv: string;
+}
+
+export function parseInteractiveRouteArgs(argv = process.argv.slice(2)): InteractiveRouteConfig {
+  const values = new Map<string, string>();
+  for (let index = 0; index < argv.length; index += 1) {
+    const key = argv[index];
+    if (!key.startsWith("--")) continue;
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) throw new Error(`${key} requires a value`);
+    values.set(key, value.trim());
+    index += 1;
+  }
+  const read = (key: string): string => {
+    const value = values.get(key)?.trim() ?? "";
+    if (!value) throw new Error(`${key} is required`);
+    return value;
+  };
+  return {
+    provider: read("--provider"), model: read("--model"), api: read("--route-api"),
+    baseURL: read("--base-url"), apiKeyEnv: read("--api-key-env"),
+  };
+}
+
+function yamlQuote(value: string): string {
+  return JSON.stringify(value);
+}
+
+export function writeDshRouteSettings(dshHome: string, route: InteractiveRouteConfig): string {
+  mkdirSync(dshHome, { recursive: true, mode: 0o700 });
+  const model = `        - id: ${yamlQuote(route.model)}\n          contextWindow: 262144\n          maxTokens: 32768`;
+  const body = route.provider === "deepseek-official"
+    ? ["llm-deepseek:", `  apiKeyEnv: ${yamlQuote(route.apiKeyEnv)}`, `  baseURL: ${yamlQuote(route.baseURL)}`, "  models:", model].join("\n") + "\n"
+    : ["llm-pi-ai:", "  providers:", `    ${route.provider}:`, `      apiKeyEnv: ${yamlQuote(route.apiKeyEnv)}`, `      api: ${yamlQuote(route.api)}`, `      baseURL: ${yamlQuote(route.baseURL)}`, "      models:", model].join("\n") + "\n";
+  const path = resolve(dshHome, "settings.yaml");
+  writeFileSync(path, body, { encoding: "utf8", mode: 0o600 });
+  return path;
+}
+
 /** Fail closed when an older DSH runtime cannot drive interactive sessions. */
 export function assertInteractiveRuntimeCapabilities(value: unknown): asserts value is {
   capabilities: InteractiveRuntimeCapabilities;
@@ -55,9 +100,16 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function redactInteractiveSecrets(message: string, token = process.env.ANBAN_INTERACTIVE_RUNTIME_TOKEN ?? ""): string {
-  if (!token) return message;
-  return message.split(token).join("[redacted]");
+export function redactInteractiveSecrets(
+  message: string,
+  token = process.env.ANBAN_INTERACTIVE_RUNTIME_TOKEN ?? "",
+  additionalSecrets: readonly string[] = [],
+): string {
+  let redacted = message;
+  for (const secret of [token, ...additionalSecrets]) {
+    if (secret) redacted = redacted.split(secret).join("[redacted]");
+  }
+  return redacted;
 }
 
 export function resolveInteractivePatchPath(raw = process.env.ANBAN_INTERACTIVE_DSH_PATCH, cwd = process.cwd()): string {
@@ -185,21 +237,42 @@ export class InteractiveBridge {
   private closeTask: Promise<void> | undefined;
   private commandQueue: Promise<unknown> = Promise.resolve();
   private closed = false;
+  private readonly route: InteractiveRouteConfig;
 
   constructor(
     private readonly write: (event: StableBridgeEvent) => void,
     private readonly clientFactory?: () => InteractiveRuntimeClient,
     private readonly rootSessionId = process.env.ANBAN_INTERACTIVE_SESSION_ID?.trim() ?? "",
-  ) {}
+    route?: InteractiveRouteConfig,
+  ) {
+    this.route = route ?? (clientFactory ? {
+      provider: "deepseek-official", model: "deepseek-flash", api: "deepseek-messages",
+      baseURL: "https://api.deepseek.com/anthropic", apiKeyEnv: "DEEPSEEK_API_KEY",
+    } : parseInteractiveRouteArgs());
+  }
+
+  redact(message: string): string {
+    const providerSecret = ENV_NAME_PATTERN.test(this.route.apiKeyEnv)
+      ? process.env[this.route.apiKeyEnv]?.trim() ?? ""
+      : "";
+    return redactInteractiveSecrets(message, process.env.ANBAN_INTERACTIVE_RUNTIME_TOKEN ?? "", [providerSecret]);
+  }
+
+  private redactEvent(event: StableBridgeEvent): StableBridgeEvent {
+    if (!isRecord(event.data) || typeof event.data.message !== "string") return event;
+    return { ...event, data: { ...event.data, message: this.redact(event.data.message) } };
+  }
 
   private async ensureRuntime(): Promise<void> {
     if (this.closed) throw new Error("interactive bridge is closed");
     if (this.runtimeReady) return this.runtimeReady;
     this.runtimeReady = (async () => {
+      const route = this.route;
       const client = this.clientFactory?.() ?? (() => {
         const dshHome = process.env.ANBAN_INTERACTIVE_DSH_HOME?.trim();
         if (!dshHome) throw new Error("ANBAN_INTERACTIVE_DSH_HOME is required");
         const patchPath = resolveInteractivePatchPath();
+        writeDshRouteSettings(dshHome, route);
         return new HarnessClient({
           dshHome,
           profile: "sdk",
@@ -216,8 +289,8 @@ export class InteractiveBridge {
       client.start();
       const initializeResult = await client.initialize({
         cwd: process.cwd(),
-        provider: process.env.ANBAN_INTERACTIVE_PROVIDER?.trim() || "deepseek-official",
-        model: process.env.ANBAN_INTERACTIVE_MODEL?.trim() || "deepseek-v4-flash",
+        provider: route.provider,
+        model: route.model,
       });
       assertInteractiveRuntimeCapabilities(initializeResult);
       if (!this.rootSessionId) throw new Error("ANBAN_INTERACTIVE_SESSION_ID is required");
@@ -225,7 +298,7 @@ export class InteractiveBridge {
       void this.forwardNotifications();
       this.write({ event: "session.status", data: { status: "starting" } });
     })().catch(async (error: unknown) => {
-      this.write({ event: "session.error", data: { message: redactInteractiveSecrets(error instanceof Error ? error.message : String(error)) } });
+      this.write({ event: "session.error", data: { message: this.redact(error instanceof Error ? error.message : String(error)) } });
       await this.closeRuntime();
       throw error;
     });
@@ -238,11 +311,11 @@ export class InteractiveBridge {
     try {
       for (;;) {
         const notification = await subscription.next();
-        for (const event of mapHarnessNotification(notification, this.rootSessionId)) this.write(event);
+        for (const event of mapHarnessNotification(notification, this.rootSessionId)) this.write(this.redactEvent(event));
       }
     } catch (error) {
       if (!this.closed) {
-        this.write({ event: "session.error", data: { message: redactInteractiveSecrets(error instanceof Error ? error.message : String(error)) } });
+        this.write({ event: "session.error", data: { message: this.redact(error instanceof Error ? error.message : String(error)) } });
       }
     }
   }
@@ -316,7 +389,7 @@ export async function runInteractiveBridge(): Promise<void> {
         const result = await bridge.command(command);
         if (command.id !== undefined) process.stdout.write(`${JSON.stringify({ id: command.id, result })}\n`);
       } catch (error) {
-        if (command.id !== undefined) process.stdout.write(`${JSON.stringify({ id: command.id, error: redactInteractiveSecrets(error instanceof Error ? error.message : String(error)) })}\n`);
+        if (command.id !== undefined) process.stdout.write(`${JSON.stringify({ id: command.id, error: bridge.redact(error instanceof Error ? error.message : String(error)) })}\n`);
       }
       if (command.method === "shutdown") break;
     }
