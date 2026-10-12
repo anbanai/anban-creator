@@ -94,14 +94,14 @@ dsh:
   bridge_dir: "${ANBAN_INTERACTIVE_BRIDGE_DIR:-./runtime-dsh}"
   dsh_patch: "${ANBAN_INTERACTIVE_DSH_PATCH:-./harness/dsh/project-creator.patch.yml}"
   mcp_url: "${ANBAN_INTERACTIVE_MCP_URL:-https://creator.anbanai.com/mcp}"
-  route: "effective"
+  route: "deepseek"
   routes:
-    effective:
+    deepseek:
       provider: "deepseek-official"
       api: "deepseek-messages"
       base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
       api_key_env: "DEEPSEEK_API_KEY"
-      model: "deepseek-flash"
+      model: "deepseek-v4-flash"
 
 model_providers:
   moonshot:
@@ -313,7 +313,7 @@ billing_runtime:
   admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"
 
 claude:
-  profiles:
+  execution_profiles:
     effective:
       description: "适合日常创作和批量任务，成本最低"
       provider: "deepseek"

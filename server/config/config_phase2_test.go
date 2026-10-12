@@ -95,7 +95,7 @@ func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 		t.Fatalf("NewConfig(config.example.yaml): %v", err)
 	}
 	if len(cfg.ModelRoutes.ImageGeneration.Capabilities) != 2 || len(cfg.Claude.ExecutionProfiles) != 3 {
-		t.Fatalf("catalog sizes: image_capabilities=%d profiles=%d", len(cfg.ModelRoutes.ImageGeneration.Capabilities), len(cfg.Claude.ExecutionProfiles))
+		t.Fatalf("catalog sizes: image_capabilities=%d execution_profiles=%d", len(cfg.ModelRoutes.ImageGeneration.Capabilities), len(cfg.Claude.ExecutionProfiles))
 	}
 	professional := cfg.ModelRoutes.ImageGeneration.Capabilities["professional"]
 	if professional.ResponseFormat != "b64_json" {

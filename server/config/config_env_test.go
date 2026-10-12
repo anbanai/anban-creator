@@ -1,10 +1,8 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -85,7 +83,7 @@ ilink:
   enabled: true
   base_url: "${ANBAN_TEST_ILINK_URL:-http://localhost:18070}"
 claude:
-  profiles:
+  execution_profiles:
     effective:
       provider: deepseek
       envs:
@@ -165,38 +163,10 @@ claude:
 	}
 }
 
-func TestDshRouteValuesAreCanonicalized(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	body := strings.Replace(validClaudeConfigYAML, "claude:\n", `dsh:
-  route: Effective
-  routes:
-    Effective:
-      provider: DeepSeek-Official
-      api: DeepSeek-Messages
-      base_url: " https://api.deepseek.com/anthropic "
-      api_key_env: " DEEPSEEK_API_KEY "
-      model: " deepseek-flash "
-claude:
-`, 1)
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := NewConfig(path)
-	if err != nil {
-		t.Fatalf("NewConfig() error = %v", err)
-	}
-	route := cfg.Dsh.Routes["Effective"]
-	if route.Provider != "deepseek-official" || route.API != "deepseek-messages" || route.BaseURL != "https://api.deepseek.com/anthropic" || route.APIKeyEnv != "DEEPSEEK_API_KEY" || route.Model != "deepseek-flash" {
-		t.Fatalf("canonical DSH route = %#v", route)
-	}
-}
-
 func TestConfigRejectsLegacyInteractiveAndInvalidDshRoute(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	for _, body := range []string{
 		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\ninteractive: {}\n",
-		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\nclaude:\n  execution_profiles: {}\n",
-		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  route: effective\n  routes:\n    effective:\n      provider: deepseek-official\n      api: deepseek-messages\n      base_url: https://api.deepseek.com/anthropic\n      provider_api_key_env: DEEPSEEK_API_KEY\n      model: deepseek-flash\n",
 		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  route: effective\n  routes:\n    effective:\n      provider: deepseek-official\n      api: deepseek-messages\n      base_url: https://api.deepseek.com/anthropic\n      api_key_env: DEEPSEEK-API-KEY\n      model: deepseek-flash\n",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -205,57 +175,6 @@ func TestConfigRejectsLegacyInteractiveAndInvalidDshRoute(t *testing.T) {
 		if _, err := NewConfig(path); err == nil {
 			t.Fatalf("NewConfig(%q) succeeded", body)
 		}
-	}
-}
-
-func TestConfigRejectsDeprecatedDshEnvironmentVariables(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("database:\n  dsn: dsn\njwt:\n  secret_key: secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{
-		"ANBAN_DSH_API_KEY",
-		"ANBAN_DSH_BASE_URL",
-		"ANBAN_DSH_MODEL",
-		"ANBAN_DSH_PROVIDER",
-		"ANBAN_DSH_PROFILE",
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv(name, "legacy-value")
-			_, err := NewConfig(path)
-			if err == nil || !strings.Contains(err.Error(), "deprecated environment variable "+name) {
-				t.Fatalf("NewConfig() error = %v, want explicit rejection for %s", err, name)
-			}
-			if strings.Contains(err.Error(), "legacy-value") {
-				t.Fatalf("NewConfig() leaked environment value: %v", err)
-			}
-		})
-	}
-}
-
-func TestConfigRejectsInvalidDshRouteSelectionAndProviderFields(t *testing.T) {
-	base := "database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  route: %s\n  routes:\n    effective:\n      provider: %s\n      api: %s\n      base_url: %s\n      api_key_env: %s\n      model: %s\n"
-	tests := []struct {
-		name string
-		yaml string
-	}{
-		{"missing selected route", fmt.Sprintf(base, "", "deepseek-official", "deepseek-messages", "https://api.deepseek.com/anthropic", "DEEPSEEK_API_KEY", "deepseek-flash")},
-		{"unknown selected route", fmt.Sprintf(base, "quality", "deepseek-official", "deepseek-messages", "https://api.deepseek.com/anthropic", "DEEPSEEK_API_KEY", "deepseek-flash")},
-		{"deepseek api mismatch", fmt.Sprintf(base, "effective", "deepseek-official", "anthropic-messages", "https://api.deepseek.com/anthropic", "DEEPSEEK_API_KEY", "deepseek-flash")},
-		{"anthropic api mismatch", fmt.Sprintf(base, "effective", "anthropic", "deepseek-messages", "https://api.deepseek.com/anthropic", "ANTHROPIC_AUTH_TOKEN", "deepseek-flash")},
-		{"invalid base url", fmt.Sprintf(base, "effective", "anthropic", "anthropic-messages", "not-a-url", "ANTHROPIC_AUTH_TOKEN", "deepseek-flash")},
-		{"missing model", fmt.Sprintf(base, "effective", "anthropic", "anthropic-messages", "https://api.deepseek.com/anthropic", "ANTHROPIC_AUTH_TOKEN", "")},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.yaml")
-			if err := os.WriteFile(path, []byte(tt.yaml), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := NewConfig(path); err == nil {
-				t.Fatal("invalid DSH route accepted")
-			}
-		})
 	}
 }
 

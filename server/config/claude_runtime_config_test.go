@@ -17,7 +17,7 @@ database:
 jwt:
   secret_key: test-secret
 claude:
-  profiles:
+  execution_profiles:
     quality:
       provider: moonshot
       description: flagship
@@ -136,8 +136,8 @@ func TestClaudeConfigAllowsOptionalProfileEnvsToBeOmitted(t *testing.T) {
 func TestClaudeConfigRejectsObsoleteProfileSchema(t *testing.T) {
 	tests := []struct{ name, old, replacement, wantPath string }{
 		{name: "providers", old: "claude:\n", replacement: "claude:\n  providers: {}\n", wantPath: `unknown claude config field "providers"`},
-		{name: "models", old: "      envs:\n", replacement: "      models: {}\n      envs:\n", wantPath: "claude.profiles.quality.models"},
-		{name: "claude controls", old: "      envs:\n", replacement: "      claude: {}\n      envs:\n", wantPath: "claude.profiles.quality.claude"},
+		{name: "models", old: "      envs:\n", replacement: "      models: {}\n      envs:\n", wantPath: "claude.execution_profiles.quality.models"},
+		{name: "claude controls", old: "      envs:\n", replacement: "      claude: {}\n      envs:\n", wantPath: "claude.execution_profiles.quality.claude"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,7 +152,7 @@ func TestClaudeConfigRejectsObsoleteProfileSchema(t *testing.T) {
 func TestClaudeProfileConfigRejectsUnknownEnvWithFullPath(t *testing.T) {
 	body := strings.Replace(validClaudeConfigYAML, "        ANTHROPIC_MODEL:", "        PATH: \"/tmp\"\n        ANTHROPIC_MODEL:", 1)
 	_, err := loadClaudeConfigYAML(t, body)
-	if err == nil || !strings.Contains(err.Error(), "claude.profiles.quality.envs.PATH") {
+	if err == nil || !strings.Contains(err.Error(), "claude.execution_profiles.quality.envs.PATH") {
 		t.Fatalf("NewConfig() error = %v", err)
 	}
 }
@@ -160,7 +160,7 @@ func TestClaudeProfileConfigRejectsUnknownEnvWithFullPath(t *testing.T) {
 func TestClaudeProfileConfigRequiresStringEnvValues(t *testing.T) {
 	body := strings.Replace(validClaudeConfigYAML, "        MAX_THINKING_TOKENS: \"0\"", "        MAX_THINKING_TOKENS: 0", 1)
 	_, err := loadClaudeConfigYAML(t, body)
-	if err == nil || !strings.Contains(err.Error(), "claude.profiles.quality.envs.MAX_THINKING_TOKENS") {
+	if err == nil || !strings.Contains(err.Error(), "claude.execution_profiles.quality.envs.MAX_THINKING_TOKENS") {
 		t.Fatalf("NewConfig() error = %v", err)
 	}
 }
@@ -168,7 +168,7 @@ func TestClaudeProfileConfigRequiresStringEnvValues(t *testing.T) {
 func TestClaudeProfileConfigReportsInvalidEnvPath(t *testing.T) {
 	body := strings.Replace(validClaudeConfigYAML, "https://api.moonshot.cn/anthropic", "http://api.moonshot.cn/anthropic", 1)
 	_, err := loadClaudeConfigYAML(t, body)
-	if err == nil || !strings.Contains(err.Error(), "claude.profiles.quality.envs") {
+	if err == nil || !strings.Contains(err.Error(), "claude.execution_profiles.quality.envs") {
 		t.Fatalf("NewConfig() error = %v", err)
 	}
 }

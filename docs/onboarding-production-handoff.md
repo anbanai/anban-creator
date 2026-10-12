@@ -25,7 +25,7 @@
 
 ## Server 配置
 
-默认复用现有服务端配置：如果 `/app/conf/config.yaml` 没有 `onboarding:` 段，且 `claude.profiles.effective` 是完整的 DeepSeek 官方配置，访谈使用其中的 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`（支持已有模型别名映射），并把官方 `/anthropic` 地址转换为同域的 Chat Completions 根地址。无需新建 Secret、修改 ConfigMap 或把密钥交给前端。仍使用每日 60/1000 的 Redis 限额。
+默认复用现有服务端配置：如果 `/app/conf/config.yaml` 没有 `onboarding:` 段，且 `claude.execution_profiles.effective` 是完整的 DeepSeek 官方配置，访谈使用其中的 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`（支持已有模型别名映射），并把官方 `/anthropic` 地址转换为同域的 Chat Completions 根地址。无需新建 Secret、修改 ConfigMap 或把密钥交给前端。仍使用每日 60/1000 的 Redis 限额。
 
 仅当要显式关闭、改用独立供应商、修改配额或启用服务器语音识别时，将 `server/config.example.yaml` 中完整 `onboarding:` 段合入实际挂载的 `/app/conf/config.yaml`。显式配置始终优先，`enabled: false` 不会被继承逻辑重新打开。**独立配置的环境变量仍需 YAML 引用才生效。** 不完整配置、其他供应商或非官方代理地址不会被猜测转换或静默换服务。
 

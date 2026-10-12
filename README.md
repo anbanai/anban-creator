@@ -175,7 +175,7 @@ configured.
 
 The application recognizes exactly three Agent product IDs: `effective`,
 `balanced`, and `quality`. Their provider, model, and Claude Code settings live
-only under each `claude.profiles.<id>.envs` map. The checked-in
+only under each `claude.execution_profiles.<id>.envs` map. The checked-in
 configuration uses DeepSeek, Zhipu, and Moonshot, so set
 `ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL` plus `ANBAN_DEEPSEEK_API_KEY`,
 `ANBAN_ZHIPU_ANTHROPIC_BASE_URL` plus `ANBAN_ZHIPU_API_KEY`, and
@@ -185,32 +185,6 @@ model, and the Opus/Fable/Sonnet/Haiku model variables. The remaining Claude
 control variables are optional and may be removed to use provider defaults.
 Invalid or incomplete configured profiles fail closed; execution never falls
 back to another profile or model.
-
-DSH interactive sessions have an independent route table under `dsh.routes`.
-`dsh.route` selects one route for the next session; it does not read or modify
-`claude.profiles`. A route declares its provider, wire API, endpoint, model,
-and the environment-variable name used by DSH for its credential:
-
-```yaml
-dsh:
-  enabled: true
-  route: effective
-  routes:
-    effective:
-      provider: anthropic
-      api: anthropic-messages
-      base_url: https://api.deepseek.com/anthropic
-      api_key_env: ANTHROPIC_AUTH_TOKEN
-      model: deepseek-flash
-```
-
-The Bridge starts the official DSH runtime as `dsh --profile sdk`, writes the
-selected route into temporary DSH settings using the official `apiKeyEnv`,
-`api`, `baseURL`, and `models` fields, and calls `initialize({ provider,
-model })`. It passes only `DSH_HOME`, the selected credential variable, and
-the documented `ANBAN_INTERACTIVE_*` Bridge protocol variables to the child.
-`ANBAN_INTERACTIVE_*` variables are internal transport settings; they are not
-DSH provider configuration.
 
 Deployments may select different Anthropic-compatible models by changing the
 profile `envs` values and the corresponding `model_usage_aliases` plus provider
@@ -228,12 +202,6 @@ Anthropic-compatible Base URLs as non-secret values. Configure the
 remaining `server/config.yaml` environment references through the deployment's
 Secret/config injection. Do not put credentials directly in manifests or
 config files.
-
-For DSH, expose the official credential names referenced by the selected
-`dsh.routes.<route>.api_key_env` (for example `DEEPSEEK_API_KEY` or
-`ANTHROPIC_AUTH_TOKEN`) from the same Secret. The Server keeps those names
-independent from the Claude `ANBAN_*` variables and forwards only the selected
-one to each DSH child process.
 
 ### Agent profile migration runbook
 
