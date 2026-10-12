@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
@@ -1119,6 +1120,32 @@ func TestPublicExecutionDiagnosticSummarizesRuntimeRootCodes(t *testing.T) {
 	}
 }
 
+func TestPublicExecutionDiagnosticProjectsRuntimeFailureEvidence(t *testing.T) {
+	execution := &model.TaskExecution{
+		Diagnostics: datatypes.JSON(`{"reason":"runtime_failed","runtime_reason":"Error","message":"bootstrap returned HTTP 426: agent_pack_catalog_mismatch: agent runtime Catalog does not match Server Catalog","exit_code":1}`),
+	}
+	diagnostic := publicExecutionDiagnostic(execution, &agent.ExecutionResult{Success: false, RootErrorCode: "runtime_failed"})
+	if diagnostic == nil || diagnostic.Code != "agent_pack_catalog_mismatch" || diagnostic.Stage != "bootstrap" || !diagnostic.Recoverable {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if diagnostic.Summary != "Agent 运行镜像与 Server 的 Agent Pack Catalog 不一致，请重新构建并部署同一版本的 Server 与 Agent 镜像后重试。" {
+		t.Fatalf("diagnostic summary = %q", diagnostic.Summary)
+	}
+	if strings.Contains(diagnostic.Summary, "426") || strings.Contains(diagnostic.Summary, "Catalog does not match") {
+		t.Fatalf("diagnostic leaked raw runtime evidence: %#v", diagnostic)
+	}
+}
+
+func TestPublicExecutionDiagnosticKeepsUnknownRuntimeFailurePrivate(t *testing.T) {
+	execution := &model.TaskExecution{
+		Diagnostics: datatypes.JSON(`{"reason":"runtime_failed","runtime_reason":"ImagePullBackOff","message":"private registry details"}`),
+	}
+	diagnostic := publicExecutionDiagnostic(execution, &agent.ExecutionResult{Success: false, RootErrorCode: "runtime_failed"})
+	if diagnostic != nil {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestPublicExecutionDiagnosticSummarizesUnknownProviderFailure(t *testing.T) {
 	execution := &model.TaskExecution{Provider: "minimax"}
 	result := &agent.ExecutionResult{
@@ -2080,6 +2107,21 @@ func TestReconcileExecutionFailurePersistsMachineReadableRootCause(t *testing.T)
 	}
 	if foundTask.ErrorMessage != "execution_identity_unavailable" {
 		t.Fatalf("error_message = %q", foundTask.ErrorMessage)
+	}
+}
+
+func TestReconcileExecutionFailurePublishesCatalogMismatchDiagnostic(t *testing.T) {
+	svc, repo, task, execution := setupCloudCompletionTest(t, false, false)
+	diagnostics := []byte(`{"reason":"runtime_failed","runtime_reason":"Error","message":"bootstrap returned HTTP 426: agent_pack_catalog_mismatch: agent runtime Catalog does not match Server Catalog","exit_code":1}`)
+	if err := svc.ReconcileExecutionFailure(context.Background(), execution.ID, model.TaskExecutionFailed, "runtime_failed", diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	found, err := repo.Tasks().FindByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Outcome == nil || found.Outcome.Diagnostic == nil || found.Outcome.Diagnostic.Code != "agent_pack_catalog_mismatch" {
+		t.Fatalf("task outcome = %#v", found.Outcome)
 	}
 }
 

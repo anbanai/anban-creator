@@ -105,6 +105,7 @@ export const taskErrorLabels: Record<string, { title: string; message: string; r
   execution_identity_unavailable: { title: '执行环境未建立', message: '执行环境未建立，暂时无法生成或结算图片。', recovery: '修复执行环境后可从“图片生成”阶段继续。' },
   execution_identity_required: { title: '执行环境未建立', message: '执行环境未建立，暂时无法生成或结算图片。', recovery: '修复执行环境后可从“图片生成”阶段继续。' },
   execution_identity_mismatch: { title: '执行身份不匹配', message: '当前执行身份与作品不匹配，请重新启动该作品。' },
+  agent_pack_catalog_mismatch: { title: '运行镜像版本不一致', message: 'Agent 运行镜像与 Server 的 Agent Pack Catalog 不一致，请重新部署同一版本后重试。', recovery: '重新构建并部署 Server 与对应 Agent Pack 镜像，再创建新的任务。' },
 }
 
 export const providerDiagnosticLabels: Record<string, string> = {
@@ -133,6 +134,11 @@ export function taskFailurePresentation(task: Pick<Task, 'error_message'> & Part
       message: diagnostic.summary,
       recovery: '已保留文件可查看或下载；继续执行会复用可用上下文。',
     }
+  }
+  if (diagnostic?.code) {
+    const mapped = taskErrorLabels[diagnostic.code]
+    if (mapped) return { code: diagnostic.code, ...mapped, raw: task.error_message?.trim() }
+    if (diagnostic.summary) return { code: diagnostic.code, title: '执行失败', message: diagnostic.summary, raw: task.error_message?.trim() }
   }
   const raw = task.error_message?.trim()
   if (!raw) return null

@@ -1486,6 +1486,9 @@ func publicExecutionDiagnostic(execution *model.TaskExecution, result *agent.Exe
 	if execution == nil || result == nil {
 		return nil
 	}
+	if diagnostic := publicRuntimeDiagnostic(execution); diagnostic != nil {
+		return diagnostic
+	}
 	if code := artifactFailureCode(result); code != "" {
 		summary := "产物上传失败，已成功上传的文件已保留。"
 		if code == "artifact_manifest_failed" {
@@ -1527,6 +1530,38 @@ func publicExecutionDiagnostic(execution *model.TaskExecution, result *agent.Exe
 		Stage: safePublicDiagnosticStage(result.FailureStage), ContentDirection: direction, Recoverable: result.Recoverable,
 		ResumePoint: safePublicDiagnosticStage(result.ResumeFrom), RequestID: safePublicRequestID(result.RequestID), Summary: summary,
 	}
+}
+
+// publicRuntimeDiagnostic projects a small, allow-listed subset of runtime
+// reconciler evidence into the task outcome. The raw Diagnostics JSON stays
+// private because it may contain provider/container details; the known Catalog
+// mismatch is safe to expose because it has a controlled repair path.
+func publicRuntimeDiagnostic(execution *model.TaskExecution) *model.ExecutionDiagnostic {
+	if execution == nil || len(execution.Diagnostics) == 0 {
+		return nil
+	}
+	var evidence struct {
+		Reason        string `json:"reason"`
+		RuntimeReason string `json:"runtime_reason"`
+		Message       string `json:"message"`
+	}
+	if err := json.Unmarshal(execution.Diagnostics, &evidence); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(evidence.Reason) != "runtime_failed" {
+		return nil
+	}
+	message := strings.ToLower(strings.TrimSpace(evidence.Message))
+	if strings.Contains(message, "agent_pack_catalog_mismatch") ||
+		strings.Contains(message, "catalog does not match server catalog") {
+		return &model.ExecutionDiagnostic{
+			Code:        "agent_pack_catalog_mismatch",
+			Stage:       "bootstrap",
+			Recoverable: true,
+			Summary:     "Agent 运行镜像与 Server 的 Agent Pack Catalog 不一致，请重新构建并部署同一版本的 Server 与 Agent 镜像后重试。",
+		}
+	}
+	return nil
 }
 
 // publicPlatformDiagnostic maps a runtime-owned root error code to a controlled
@@ -1770,6 +1805,7 @@ func (s *TaskService) TerminalizeCurrentExecution(ctx context.Context, execution
 			return nil
 		}
 		execution.Status, execution.TerminalReason, execution.Result = status, reason, encoded
+		execution.Diagnostics = diagnostics
 		execution.FinalizationStatus = model.TaskExecutionFinalizationTerminal
 	}
 	return s.finalizeTaskFromExecution(ctx, task, execution)

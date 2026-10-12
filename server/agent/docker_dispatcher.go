@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/volume"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -41,6 +42,7 @@ type dockerEngine interface {
 	VolumeCreate(context.Context, volume.CreateOptions) (volume.Volume, error)
 	VolumeRemove(context.Context, string, bool) error
 	ContainerInspect(context.Context, string) (containertypes.InspectResponse, error)
+	ContainerLogs(context.Context, string, containertypes.LogsOptions) (io.ReadCloser, error)
 	ContainerCreate(context.Context, *containertypes.Config, *containertypes.HostConfig, *networktypes.NetworkingConfig, *ocispec.Platform, string) (containertypes.CreateResponse, error)
 	CopyToContainer(context.Context, string, string, io.Reader, containertypes.CopyToContainerOptions) error
 	ContainerStart(context.Context, string, containertypes.StartOptions) error
@@ -447,7 +449,39 @@ func (d *DockerDispatcher) Inspect(ctx context.Context, execution *model.TaskExe
 	if err := verifyDockerExecutionContainer(inspected, execution); err != nil {
 		return nil, err
 	}
-	return inspectDockerContainer(inspected), nil
+	state := inspectDockerContainer(inspected)
+	if state.Phase == RuntimePhaseFailed && strings.TrimSpace(state.Message) == "" {
+		state.Message = d.failedContainerLogTail(ctx, inspected.ID)
+	}
+	return state, nil
+}
+
+const dockerRuntimeLogTailBytes = 16 << 10
+
+func (d *DockerDispatcher) failedContainerLogTail(ctx context.Context, containerID string) string {
+	if d == nil || d.engine == nil || strings.TrimSpace(containerID) == "" {
+		return ""
+	}
+	logs, err := d.engine.ContainerLogs(ctx, containerID, containertypes.LogsOptions{ShowStdout: true, ShowStderr: true, Tail: "128"})
+	if err != nil || logs == nil {
+		return ""
+	}
+	defer logs.Close()
+	raw, err := io.ReadAll(io.LimitReader(logs, dockerRuntimeLogTailBytes*2))
+	if err != nil {
+		return ""
+	}
+	var decoded bytes.Buffer
+	if _, err := stdcopy.StdCopy(&decoded, &decoded, bytes.NewReader(raw)); err != nil {
+		// TTY-enabled containers expose an unframed stream; keep that as a
+		// fallback while normal Docker multiplexed logs are decoded above.
+		decoded.Write(raw)
+	}
+	text := decoded.String()
+	if len(text) > dockerRuntimeLogTailBytes {
+		text = text[len(text)-dockerRuntimeLogTailBytes:]
+	}
+	return strings.TrimSpace(text)
 }
 
 func inspectDockerContainer(inspected containertypes.InspectResponse) *RuntimeExecutionState {

@@ -848,6 +848,9 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 		if !strings.Contains(body, "COPY harness/ /anbanai/") {
 			t.Fatalf("deploy/docker/%s must package the runtime catalog for startup verification", name)
 		}
+		if !strings.Contains(body, "X-Anban-Agent-Pack-Catalog-Digest") {
+			t.Fatalf("deploy/docker/%s must fail the image build when bootstrap Catalog digest support is missing", name)
+		}
 	}
 
 	server := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.server"))

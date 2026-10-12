@@ -64,6 +64,28 @@ describe('taskFailurePresentation', () => {
   it('maps completion report failures to a recoverable result message', () => {
     expect(taskFailurePresentation({ error_message: 'completion_report_failed' })?.title).toBe('结果提交失败（可恢复）')
   })
+
+  it('shows the server-owned Catalog mismatch diagnostic instead of generic runtime_failed', () => {
+    expect(taskFailurePresentation({
+      error_message: 'runtime_failed',
+      outcome: {
+        core_delivery: { status: 'none' },
+        visual: { status: 'not_requested' },
+        review: { status: 'unavailable' },
+        publication: { status: 'not_requested' },
+        warnings: [],
+        diagnostic: {
+          code: 'agent_pack_catalog_mismatch',
+          recoverable: true,
+          summary: 'Agent 运行镜像与 Server 的 Agent Pack Catalog 不一致，请重新构建并部署同一版本的 Server 与 Agent 镜像后重试。',
+        },
+      },
+    })).toMatchObject({
+      code: 'agent_pack_catalog_mismatch',
+      title: '运行镜像版本不一致',
+      recovery: '重新构建并部署 Server 与对应 Agent Pack 镜像，再创建新的任务。',
+    })
+  })
 })
 
 

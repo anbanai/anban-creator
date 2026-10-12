@@ -554,6 +554,24 @@ func TestDockerInspectMapsContainerStates(t *testing.T) {
 	}
 }
 
+func TestDockerInspectReadsFailedContainerLogsWhenStateHasNoError(t *testing.T) {
+	engine := newFakeDockerEngine()
+	execution := dockerDispatcherTestExecution()
+	containerID := engine.containerID
+	engine.containers[dockerRuntimeContainerName(execution.ID)] = dockerIdentityInspect(execution, containerID, &containertypes.State{
+		Status: containertypes.StateExited, ExitCode: 1,
+	})
+	engine.containerLogs[containerID] = []byte("bootstrap returned HTTP 426: agent_pack_catalog_mismatch: agent runtime Catalog does not match Server Catalog\n")
+
+	state, err := newDockerDispatcherForTest(t, engine, dockerDispatcherTestTokens(t)).Inspect(context.Background(), execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(state.Message, "agent_pack_catalog_mismatch") {
+		t.Fatalf("state message = %q", state.Message)
+	}
+}
+
 func TestDockerDeleteStopsAndRemovesOnlyOwnedContainer(t *testing.T) {
 	engine := newFakeDockerEngine()
 	execution := dockerDispatcherTestExecution()
@@ -739,6 +757,7 @@ type fakeDockerEngine struct {
 	images                      map[string]imageTypes.InspectResponse
 	volumes                     map[string]volume.Volume
 	containers                  map[string]containertypes.InspectResponse
+	containerLogs               map[string][]byte
 	calls                       []string
 	containerID                 string
 	createdConfig               *containertypes.Config
@@ -774,7 +793,7 @@ func newFakeDockerEngine() *fakeDockerEngine {
 			dockerDispatcherTestImages()["wechat-article"]:             image,
 			"registry.example.com/creator-agent-montage@sha256:parent": image,
 		},
-		volumes: map[string]volume.Volume{}, containers: map[string]containertypes.InspectResponse{},
+		volumes: map[string]volume.Volume{}, containers: map[string]containertypes.InspectResponse{}, containerLogs: map[string][]byte{},
 		containerID:                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		allDispatchCallsHadDeadline: true,
 	}
@@ -859,6 +878,10 @@ func (e *fakeDockerEngine) ContainerInspect(ctx context.Context, name string) (c
 		return containertypes.InspectResponse{}, errdefs.NotFound(errors.New("container not found"))
 	}
 	return got, nil
+}
+
+func (e *fakeDockerEngine) ContainerLogs(_ context.Context, containerID string, _ containertypes.LogsOptions) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(e.containerLogs[containerID])), nil
 }
 
 func (e *fakeDockerEngine) ContainerCreate(ctx context.Context, config *containertypes.Config, hostConfig *containertypes.HostConfig, _ *networktypes.NetworkingConfig, _ *ocispec.Platform, name string) (containertypes.CreateResponse, error) {
@@ -1037,6 +1060,7 @@ var _ interface {
 	VolumeCreate(context.Context, volume.CreateOptions) (volume.Volume, error)
 	VolumeRemove(context.Context, string, bool) error
 	ContainerInspect(context.Context, string) (containertypes.InspectResponse, error)
+	ContainerLogs(context.Context, string, containertypes.LogsOptions) (io.ReadCloser, error)
 	ContainerCreate(context.Context, *containertypes.Config, *containertypes.HostConfig, *networktypes.NetworkingConfig, *ocispec.Platform, string) (containertypes.CreateResponse, error)
 	CopyToContainer(context.Context, string, string, io.Reader, containertypes.CopyToContainerOptions) error
 	ContainerStart(context.Context, string, containertypes.StartOptions) error
