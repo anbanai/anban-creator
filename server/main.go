@@ -617,6 +617,9 @@ func main() {
 
 	if repo != nil {
 		planHandler = handler.NewPlanHandler(planSvc, log)
+		planHandler.SetPlanExecutor(func(ctx context.Context, planID string) (bool, error) {
+			return scheduler.TriggerPlanNowWithRedis(ctx, repo, taskSvc, planID, log, rdb)
+		})
 		planHandler.SetScheduleRecommendationService(service.NewScheduleRecommendationService(repo, billingBundle.Products.CatalogID, billingBundle.Products.TaskTimePricing, log))
 		planHandler.SetReferenceAssetService(referenceAssetSvc)
 		if store != nil {
@@ -834,7 +837,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, cfg, log)
+		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, cfg, log, rdb)
 		startAnalyticsRebuildRecovery(ctx, repo, asynqClient, log)
 	}
 
@@ -1414,7 +1417,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, cfg *config.Config, log *zerolog.Logger) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, cfg *config.Config, log *zerolog.Logger, rdb *redis.Client) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1448,7 +1451,8 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 			return taskSvc.HandleExecutionFromPayload(ctx, taskID, userID)
 		},
 		func(ctx context.Context, planID string) error {
-			return scheduler.TriggerPlanNow(ctx, repo, taskSvc, planID, log)
+			_, err := scheduler.TriggerPlanNowWithRedis(ctx, repo, taskSvc, planID, log, rdb)
+			return err
 		},
 		seednoteCaptureHandler,
 		wechatCaptureHandler,

@@ -25,4 +25,7 @@ export const plansApi = {
   resume: (id: string) =>
     unwrap<void>(http.post(`/plans/${id}/resume`)),
 
+  execute: (id: string) =>
+    unwrap<void>(http.post(`/plans/${id}/execute`)),
+
 }

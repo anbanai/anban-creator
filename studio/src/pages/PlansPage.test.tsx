@@ -7,8 +7,8 @@ import { mockAgentPackCatalog, mockPlans, mockProjects } from '@/test/mocks/hand
 import type { Plan } from '@/types'
 
 
-const harness = vi.hoisted(() => ({ error: vi.fn(), upload: vi.fn() }))
-vi.mock('sonner', () => ({ toast: { error: harness.error, success: vi.fn() } }))
+const harness = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), upload: vi.fn() }))
+vi.mock('sonner', () => ({ toast: { error: harness.error, success: harness.success } }))
 vi.mock('@/lib/direct-upload', async () => ({
   ...await vi.importActual<typeof import('@/lib/direct-upload')>('@/lib/direct-upload'),
   uploadToOSS: harness.upload,
@@ -17,7 +17,7 @@ vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
   return { ...actual, api: { ...actual.api,
     projects: { ...actual.api.projects, list: vi.fn(), platformConfigs: vi.fn() },
-    plans: { ...actual.api.plans, list: vi.fn(), create: vi.fn(), update: vi.fn(), pause: vi.fn(), resume: vi.fn(), delete: vi.fn(), scheduleRecommendation: vi.fn() },
+    plans: { ...actual.api.plans, list: vi.fn(), create: vi.fn(), update: vi.fn(), pause: vi.fn(), resume: vi.fn(), execute: vi.fn(), delete: vi.fn(), scheduleRecommendation: vi.fn() },
     agentPacks: { ...actual.api.agentPacks, list: vi.fn() },
     agentProfiles: { ...actual.api.agentProfiles, list: vi.fn() },
     imageCapabilities: { ...actual.api.imageCapabilities, list: vi.fn() },
@@ -45,6 +45,7 @@ beforeEach(() => {
   vi.mocked(api.plans.list).mockResolvedValue({ items: [], total: 0 })
   vi.mocked(api.plans.create).mockResolvedValue(mockPlans.items[0])
   vi.mocked(api.plans.update).mockResolvedValue(mockPlans.items[0])
+  vi.mocked(api.plans.execute).mockResolvedValue(undefined)
   vi.mocked(api.plans.scheduleRecommendation).mockResolvedValue({ time: '12:07', timezone: 'Asia/Shanghai', granularity_minutes: 15, load_balanced: true })
   vi.mocked(api.agentPacks.list).mockResolvedValue(mockAgentPackCatalog)
   vi.mocked(api.agentProfiles.list).mockResolvedValue([{ id: 'effective', display_name: '性价比', provider: 'deepseek', model_name: 'deepseek-flash', description: '日常创作', min_tier: 'free', available: true }])
@@ -179,12 +180,26 @@ describe('PlansPage multi-output plans', () => {
     const edit = activeCard.getByRole('button', { name: '编辑排期：活跃排期' })
     const tasks = activeCard.getByRole('link', { name: '查看作品：活跃排期' })
     const pause = activeCard.getByRole('button', { name: '暂停排期：活跃排期' })
+    const execute = activeCard.getByRole('button', { name: '立即执行：活跃排期' })
     const remove = activeCard.getByRole('button', { name: '删除排期：活跃排期' })
     expect(edit).toHaveClass('size-11', 'hover:bg-muted')
     expect(tasks).toHaveClass('size-11')
     expect(pause).toHaveClass('size-11')
+    expect(execute).toHaveTextContent('立即执行')
+    expect(within(screen.getByTestId('plan-card-paused-plan')).queryByRole('button', { name: '立即执行：暂停排期' })).not.toBeInTheDocument()
     expect(remove).toHaveClass('size-11')
     expect(activeCard.queryByText('更多')).not.toBeInTheDocument()
+  })
+
+  it('executes an active plan and refreshes the plan list', async () => {
+    const plan: Plan = { ...mockPlans.items[0], id: 'execute-plan', title: '立即排期', prompt: '立即内容', status: 'active' }
+    vi.mocked(api.plans.list).mockResolvedValue({ items: [plan], total: 1 })
+    render(<PlansPage />)
+
+    const card = await screen.findByTestId('plan-card-execute-plan')
+    fireEvent.click(within(card).getByRole('button', { name: '立即执行：立即排期' }))
+    await waitFor(() => expect(api.plans.execute).toHaveBeenCalledWith(plan.id))
+    expect(harness.success).toHaveBeenCalledWith('排期已开始执行')
   })
 
   it('shows the most recent generated task outcome on each plan', async () => {

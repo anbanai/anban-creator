@@ -357,6 +357,7 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Delete("/plans/:id", svc.PlanHandler.Delete)
 		apiV1.Post("/plans/:id/pause", svc.PlanHandler.Pause)
 		apiV1.Post("/plans/:id/resume", svc.PlanHandler.Resume)
+		apiV1.Post("/plans/:id/execute", svc.PlanHandler.Execute)
 	}
 
 	// ---------------------------------------------------------------------------

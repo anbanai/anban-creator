@@ -377,6 +377,10 @@ export const handlers = [
     return HttpResponse.json({ code: 0, msg: 'ok', data: null })
   }),
 
+  http.post('/api/v1/plans/:id/execute', async () => {
+    return HttpResponse.json({ code: 0, msg: 'ok', data: null })
+  }),
+
   http.delete('/api/v1/plans/:id', async () => {
     return HttpResponse.json({ code: 0, msg: 'ok', data: null })
   }),

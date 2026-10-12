@@ -24,6 +24,7 @@ import (
 type PlanHandler struct {
 	service                 *service.PlanService
 	logger                  *zerolog.Logger
+	executePlan             func(context.Context, string) (bool, error)
 	imageCapabilityRoutes   config.ImageGenerationRoutesConfig
 	repo                    repository.Repository
 	store                   storage.Provider
@@ -37,6 +38,11 @@ func (h *PlanHandler) SetReferenceAssetService(referenceAssets *service.Referenc
 
 func (h *PlanHandler) SetScheduleRecommendationService(recommendations *service.ScheduleRecommendationService) {
 	h.scheduleRecommendations = recommendations
+}
+
+// SetPlanExecutor wires the scheduler capability used by the explicit execute action.
+func (h *PlanHandler) SetPlanExecutor(executor func(context.Context, string) (bool, error)) {
+	h.executePlan = executor
 }
 
 func (h *PlanHandler) ScheduleRecommendation(c fiber.Ctx) error {
@@ -648,4 +654,41 @@ func (h *PlanHandler) Resume(c fiber.Ctx) error {
 	}
 
 	return Success(c, fiber.Map{"message": "plan resumed"})
+}
+
+// Execute handles POST /api/v1/plans/:id/execute.
+func (h *PlanHandler) Execute(c fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return Error(c, fiber.StatusBadRequest, "plan id is required")
+	}
+
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+
+	plan, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return Error(c, fiber.StatusNotFound, "plan not found")
+	}
+	if plan.UserID != userID {
+		return Forbidden(c, "you do not have access to this plan")
+	}
+	if plan.Status != model.PlanStatusActive {
+		return Error(c, fiber.StatusConflict, "only active plans can be executed")
+	}
+	if h.executePlan == nil {
+		return Error(c, fiber.StatusServiceUnavailable, "plan execution unavailable")
+	}
+	triggered, err := h.executePlan(c.Context(), id)
+	if err != nil {
+		h.logger.Error().Err(err).Str("plan_id", id).Msg("execute plan failed")
+		return Error(c, fiber.StatusInternalServerError, "failed to execute plan")
+	}
+	if !triggered {
+		return Error(c, fiber.StatusConflict, "plan execution is already in progress or the plan is no longer active")
+	}
+
+	return Success(c, fiber.Map{"message": "plan execution started"})
 }

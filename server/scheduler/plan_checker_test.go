@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -214,6 +216,106 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 	if updated.NextRunAt == nil || !updated.NextRunAt.After(originalNextRun) {
 		t.Fatalf("next_run_at = %v, want after %v", updated.NextRunAt, originalNextRun)
 	}
+}
+
+func TestTriggerPlanNowWithRedisSkipsConcurrentExecution(t *testing.T) {
+	repo, taskSvc, enqueuer, logger := setupPlanCheckerTest(t)
+	ctx := context.Background()
+	miniRedis := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: miniRedis.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	userID, projectID, planID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if err := repo.Users().Create(ctx, &model.User{ID: userID, Email: userID + "@example.com", Password: "hashed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	nextRun := time.Now().Add(time.Hour).Truncate(time.Second)
+	plan := &model.Plan{ID: planID, UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Status: model.PlanStatusActive, CronExpr: "0 * * * *", NextRunAt: &nextRun}
+	if err := repo.Plans().Create(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlanEntries().Create(ctx, &model.PlanEntry{ID: uuid.NewString(), PlanID: planID, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective", Status: model.PlanEntryStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	blocking := &blockingPlanEnqueuer{recordingEnqueuer: enqueuer, started: started, release: release}
+	taskSvc = service.NewTaskService(repo, blocking, nil, logger, "", nil, nil)
+	profiles, err := service.NewAgentProfileRegistry([]service.AgentExecutionProfile{{ID: "effective", DisplayName: "Cost effective", Provider: "deepseek", Protocol: "anthropic", Envs: map[string]string{model.ClaudeEnvBaseURL: "https://anthropic.example.com", model.ClaudeEnvAuthToken: "scheduler-test-token", model.ClaudeEnvModel: "deepseek-v4-pro", "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro", "ANTHROPIC_DEFAULT_FABLE_MODEL": "deepseek-v4-pro", "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-pro", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-pro"}, ModelUsageAliases: map[string]string{"deepseek-v4-pro": "deepseek-v4-pro"}, MinTier: model.TierFree, Available: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskSvc.SetAgentProfileRegistry(profiles)
+	taskSvc.SetImageCapabilityResolver(service.NewImageCapabilityResolver(repo, &config.Config{ModelRoutes: config.ModelRoutesConfig{ImageGeneration: config.ImageGenerationRoutesConfig{DefaultCapability: "standard", Capabilities: map[string]config.ImageGenerationRouteConfig{"standard": {Provider: "openai-test", Model: "image-test", BaseURL: "https://images.invalid/v1", APIKey: "test-secret", Timeout: time.Minute, BillingSKU: "image.standard", Enabled: true, MinTier: string(model.TierFree)}}}}}))
+	taskSvc.SetReferenceAssetService(service.NewReferenceAssetService(repo, nil, time.Now))
+
+	type triggerResult struct {
+		triggered bool
+		err       error
+	}
+	firstDone := make(chan triggerResult, 1)
+	go func() {
+		triggered, err := TriggerPlanNowWithRedis(ctx, repo, taskSvc, planID, logger, rdb)
+		firstDone <- triggerResult{triggered: triggered, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first trigger did not reach enqueue")
+	}
+	secondDone := make(chan triggerResult, 1)
+	go func() {
+		triggered, err := TriggerPlanNowWithRedis(ctx, repo, taskSvc, planID, logger, rdb)
+		secondDone <- triggerResult{triggered: triggered, err: err}
+	}()
+	second := <-secondDone
+	if second.err != nil {
+		t.Fatalf("second trigger: %v", second.err)
+	}
+	if second.triggered {
+		t.Fatal("second trigger acquired the per-plan lock")
+	}
+	close(release)
+	first := <-firstDone
+	if first.err != nil {
+		t.Fatalf("first trigger: %v", first.err)
+	}
+	if !first.triggered {
+		t.Fatal("first trigger did not run")
+	}
+	if len(enqueuer.items) != 1 {
+		t.Fatalf("enqueued %d tasks, want one", len(enqueuer.items))
+	}
+}
+
+type blockingPlanEnqueuer struct {
+	*recordingEnqueuer
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (e *blockingPlanEnqueuer) Enqueue(taskType string, payload []byte) error {
+	e.recordingEnqueuer.Enqueue(taskType, payload)
+	e.block()
+	return nil
+}
+
+func (e *blockingPlanEnqueuer) EnqueueUnique(taskType string, payload []byte, uniqueKey string) (bool, error) {
+	created, err := e.recordingEnqueuer.EnqueueUnique(taskType, payload, uniqueKey)
+	e.block()
+	return created, err
+}
+
+func (e *blockingPlanEnqueuer) block() {
+	select {
+	case e.started <- struct{}{}:
+	default:
+	}
+	<-e.release
 }
 
 func TestTriggerPlanNowRejectsInvalidReferenceBeforeTaskCreation(t *testing.T) {

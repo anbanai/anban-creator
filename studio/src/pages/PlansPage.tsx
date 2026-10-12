@@ -272,6 +272,15 @@ export default function PlansPage() {
     onSuccess: () => { toast.success('排期已恢复'); void queryClient.invalidateQueries({ queryKey: ['plans'] }) },
     onError: (error) => toast.error(getApiErrorMessage(error, '恢复排期失败')),
   })
+  const executeMutation = useMutation({
+    mutationFn: (id: string) => api.plans.execute(id),
+    onSuccess: () => {
+      toast.success('排期已开始执行')
+      void queryClient.invalidateQueries({ queryKey: ['plans'] })
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error, '立即执行排期失败')),
+  })
 
   const resetModal = useCallback(() => {
     recommendationRequestRef.current += 1
@@ -447,6 +456,20 @@ export default function PlansPage() {
                 </TooltipTrigger>
                 <TooltipContent>查看作品</TooltipContent>
               </Tooltip>
+              {plan.status === 'active' ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="min-h-11 gap-1.5"
+                  aria-label={`立即执行：${planLabel}`}
+                  loading={executeMutation.isPending && executeMutation.variables === plan.id}
+                  disabled={executeMutation.isPending}
+                  onClick={() => void executeMutation.mutateAsync(plan.id)}
+                >
+                  <Play className="size-3.5" />立即执行
+                </Button>
+              ) : null}
               {plan.status === 'active' ? (
                 <Tooltip>
                   <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`暂停排期：${planLabel}`} onClick={() => void pauseMutation.mutateAsync(plan.id)} />}>

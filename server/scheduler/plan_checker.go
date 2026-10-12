@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog"
@@ -18,6 +20,21 @@ import (
 
 const planCheckerLockKey = "plan_checker:lock"
 const planCheckerLockTTL = 55 * time.Second
+const planTriggerLockTTL = 10 * time.Minute
+
+var planTriggerLockReleaseScript = redis.NewScript(`
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+end
+return 0
+`)
+
+var planTriggerLockRefreshScript = redis.NewScript(`
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("pexpire", KEYS[1], ARGV[2])
+end
+return 0
+`)
 
 // checkInterval is how often the plan checker runs.
 const checkInterval = 1 * time.Minute
@@ -66,7 +83,7 @@ func tryAcquireAndCheck(ctx context.Context, repo repository.Repository, taskSvc
 		defer rdb.Del(ctx, planCheckerLockKey)
 	}
 
-	checkAndTriggerPlans(ctx, repo, taskSvc, logger)
+	checkAndTriggerPlans(ctx, repo, taskSvc, logger, rdb)
 	syncProjectRunningCounts(ctx, repo, taskSvc, logger)
 	reapStuckTasks(ctx, repo, taskSvc, logger)
 }
@@ -150,7 +167,7 @@ func reapStuckTasks(ctx context.Context, repo repository.Repository, taskSvc *se
 
 // checkAndTriggerPlans queries all active plans that are due and creates
 // tasks for each one, then advances their next_run_at to the next cron occurrence.
-func checkAndTriggerPlans(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger) {
+func checkAndTriggerPlans(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, logger *zerolog.Logger, rdb *redis.Client) {
 	now := time.Now()
 
 	plans, err := repo.Plans().ListDue(ctx, now)
@@ -166,8 +183,11 @@ func checkAndTriggerPlans(ctx context.Context, repo repository.Repository, taskS
 	logger.Info().Int("count", len(plans)).Msg("found due plans, triggering tasks")
 
 	for _, plan := range plans {
-		if err := triggerPlan(ctx, repo, taskSvc, plan, logger); err != nil {
+		triggered, err := triggerPlanWithRedis(ctx, repo, taskSvc, plan, logger, rdb)
+		if err != nil {
 			logger.Error().Err(err).Str("plan_id", plan.ID).Msg("failed to trigger due plan")
+		} else if !triggered {
+			logger.Debug().Str("plan_id", plan.ID).Msg("plan trigger already in progress")
 		}
 	}
 }
@@ -175,24 +195,135 @@ func checkAndTriggerPlans(ctx context.Context, repo repository.Repository, taskS
 // TriggerPlanNow creates a task from an active plan and advances its next run
 // time. It is used by explicit async plan trigger jobs.
 func TriggerPlanNow(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, planID string, logger *zerolog.Logger) error {
+	_, err := triggerPlanNowWithRedis(ctx, repo, taskSvc, planID, logger, nil)
+	return err
+}
+
+// TriggerPlanNowWithRedis runs an active plan once and uses a per-plan Redis
+// lock to prevent duplicate task creation from concurrent requests or the
+// scheduler. The bool is false when another trigger owns the lock or the plan
+// became inactive before the trigger started.
+func TriggerPlanNowWithRedis(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, planID string, logger *zerolog.Logger, rdb *redis.Client) (bool, error) {
+	return triggerPlanNowWithRedis(ctx, repo, taskSvc, planID, logger, rdb)
+}
+
+func acquirePlanTriggerLock(ctx context.Context, rdb *redis.Client, planID string) (func(), bool, error) {
+	if rdb == nil {
+		return func() {}, true, nil
+	}
+
+	lockKey := "plan:trigger:" + planID
+	lockToken := uuid.NewString()
+	acquired, err := rdb.SetNX(ctx, lockKey, lockToken, planTriggerLockTTL).Result()
+	if err != nil {
+		return nil, false, fmt.Errorf("acquire plan trigger lock: %w", err)
+	}
+	if !acquired {
+		return nil, false, nil
+	}
+
+	stopRenewal := make(chan struct{})
+	renewalDone := make(chan struct{})
+	var releaseOnce sync.Once
+	go func() {
+		defer close(renewalDone)
+		ticker := time.NewTicker(planTriggerLockTTL / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				renewCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, _ = planTriggerLockRefreshScript.Run(renewCtx, rdb, []string{lockKey}, lockToken, int64(planTriggerLockTTL/time.Millisecond)).Result()
+				cancel()
+			case <-stopRenewal:
+				return
+			}
+		}
+	}()
+
+	return func() {
+		releaseOnce.Do(func() {
+			close(stopRenewal)
+			<-renewalDone
+			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, _ = planTriggerLockReleaseScript.Run(releaseCtx, rdb, []string{lockKey}, lockToken).Result()
+			cancel()
+		})
+	}, true, nil
+}
+
+func triggerPlanNowWithRedis(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, planID string, logger *zerolog.Logger, rdb *redis.Client) (bool, error) {
 	planID = strings.TrimSpace(planID)
 	if planID == "" {
-		return fmt.Errorf("plan_id is required")
+		return false, fmt.Errorf("plan_id is required")
 	}
 
 	plan, err := repo.Plans().FindByID(ctx, planID)
 	if err != nil {
-		return fmt.Errorf("find plan %s: %w", planID, err)
+		return false, fmt.Errorf("find plan %s: %w", planID, err)
 	}
 	if plan.Status != model.PlanStatusActive {
 		logger.Info().
 			Str("plan_id", plan.ID).
 			Str("status", plan.Status).
 			Msg("skipping inactive plan trigger")
-		return nil
+		return false, nil
 	}
 
-	return triggerPlan(ctx, repo, taskSvc, plan, logger)
+	release, acquired, err := acquirePlanTriggerLock(ctx, rdb, plan.ID)
+	if err != nil {
+		return false, err
+	}
+	if !acquired {
+		return false, nil
+	}
+	defer release()
+
+	plan, err = repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		return false, fmt.Errorf("reload plan %s: %w", planID, err)
+	}
+	if plan.Status != model.PlanStatusActive {
+		logger.Info().
+			Str("plan_id", plan.ID).
+			Str("status", plan.Status).
+			Msg("skipping inactive plan trigger")
+		return false, nil
+	}
+
+	if err := triggerPlan(ctx, repo, taskSvc, plan, logger); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func triggerPlanWithRedis(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, plan *model.Plan, logger *zerolog.Logger, rdb *redis.Client) (bool, error) {
+	if plan == nil {
+		return false, fmt.Errorf("plan is required")
+	}
+	if plan.Status != model.PlanStatusActive {
+		return false, nil
+	}
+	release, acquired, err := acquirePlanTriggerLock(ctx, rdb, plan.ID)
+	if err != nil {
+		return false, err
+	}
+	if !acquired {
+		return false, nil
+	}
+	defer release()
+
+	plan, err = repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil {
+		return false, fmt.Errorf("reload plan %s: %w", plan.ID, err)
+	}
+	if plan.Status != model.PlanStatusActive {
+		return false, nil
+	}
+	if err := triggerPlan(ctx, repo, taskSvc, plan, logger); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func triggerPlan(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, plan *model.Plan, logger *zerolog.Logger) error {

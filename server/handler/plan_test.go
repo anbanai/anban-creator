@@ -235,6 +235,95 @@ func TestPlanHandlerScheduleRecommendation(t *testing.T) {
 	}
 }
 
+func TestPlanHandlerExecuteOnlyRunsOwnedActivePlans(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID, projectID := uuid.NewString(), uuid.NewString()
+	seedPlanHandlerUser(t, repo, userID)
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	activeID, pausedID := uuid.NewString(), uuid.NewString()
+	for _, plan := range []*model.Plan{
+		{ID: activeID, UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Status: model.PlanStatusActive, CronExpr: "0 9 * * *"},
+		{ID: pausedID, UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Status: model.PlanStatusPaused, CronExpr: "0 9 * * *"},
+	} {
+		if err := repo.Plans().Create(ctx, plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	logger := zerolog.New(io.Discard)
+	h := NewPlanHandler(newHandlerPlanService(t, repo, &logger), &logger)
+	var executed []string
+	h.SetPlanExecutor(func(_ context.Context, planID string) (bool, error) {
+		executed = append(executed, planID)
+		return true, nil
+	})
+	app := fiber.New()
+	app.Post("/plans/:id/execute", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Execute(c)
+	})
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/plans/"+activeID+"/execute", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("active status/body = %d/%s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+	if len(executed) != 1 || executed[0] != activeID {
+		t.Fatalf("executed = %#v, want only active plan %q", executed, activeID)
+	}
+
+	resp, err = app.Test(httptest.NewRequest(http.MethodPost, "/plans/"+pausedID+"/execute", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("paused status = %d, want %d", resp.StatusCode, fiber.StatusConflict)
+	}
+	if len(executed) != 1 {
+		t.Fatalf("paused plan invoked executor: %#v", executed)
+	}
+}
+
+func TestPlanHandlerExecuteReportsWhenPlanBecameInactive(t *testing.T) {
+	db := setupTaskHandlerTestDB(t)
+	repo := repository.New(db)
+	ctx := t.Context()
+	userID, projectID, planID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	seedPlanHandlerUser(t, repo, userID)
+	if err := repo.Projects().Create(ctx, &model.Project{ID: projectID, UserID: userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Plans().Create(ctx, &model.Plan{ID: planID, UserID: userID, ProjectID: projectID, ExecutionProfile: "effective", Status: model.PlanStatusActive, CronExpr: "0 9 * * *"}); err != nil {
+		t.Fatal(err)
+	}
+	logger := zerolog.New(io.Discard)
+	h := NewPlanHandler(newHandlerPlanService(t, repo, &logger), &logger)
+	h.SetPlanExecutor(func(context.Context, string) (bool, error) { return false, nil })
+	app := fiber.New()
+	app.Post("/plans/:id/execute", func(c fiber.Ctx) error {
+		c.Locals("user_id", userID)
+		return h.Execute(c)
+	})
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/plans/"+planID+"/execute", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusConflict)
+	}
+}
+
 // TestCreatePlanSharedImageSettingsPersist verifies the plan handler→service→
 // model→DB round-trip persists an explicit `false` for both article image
 // toggles. Same regression guard as TestCreateTask_ArticleImageTogglesPersist
