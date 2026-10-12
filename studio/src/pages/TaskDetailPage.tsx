@@ -715,33 +715,57 @@ export default function TaskDetailPage() {
             </Tooltip>
           )}
           {canCancel && (
-            <Button
-              variant="destructive"
-              size="sm"
-              className="min-h-11"
-              loading={cancelMutation.isPending}
-              onClick={() => setShowCancelDialog(true)}
-            >
-              {cancelMutation.isPending ? null : <Ban className="h-4 w-4" aria-hidden="true" />}
-              取消作品
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="destructive"
+                    size="icon-md"
+                    aria-label="取消作品"
+                    loading={cancelMutation.isPending}
+                    onClick={() => setShowCancelDialog(true)}
+                  />
+                }
+              >
+                {!cancelMutation.isPending ? <Ban className="size-4" aria-hidden="true" /> : null}
+              </TooltipTrigger>
+              <TooltipContent>取消作品</TooltipContent>
+            </Tooltip>
           )}
           {canClone ? (
-            <Button variant="outline" size="sm" className="min-h-11" onClick={openCloneDialog}>
-              <RefreshCw className="h-4 w-4" />
-              {task.type === 'hypit' ? '再次改编' : '克隆作品'}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-md"
+                    aria-label={task.type === 'hypit' ? '再次改编' : '克隆作品'}
+                    onClick={openCloneDialog}
+                  />
+                }
+              >
+                <RefreshCw className="size-4" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent>{task.type === 'hypit' ? '再次改编' : '克隆作品'}</TooltipContent>
+            </Tooltip>
           ) : null}
           {canClone ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11 text-destructive hover:bg-destructive/5 hover:text-destructive"
-              onClick={() => setShowDeleteDialog(true)}
-            >
-              <Trash2 className="h-4 w-4" />
-              删除作品
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-md"
+                    className="text-destructive hover:bg-destructive/5 hover:text-destructive"
+                    aria-label="删除作品"
+                    onClick={() => setShowDeleteDialog(true)}
+                  />
+                }
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent>删除作品</TooltipContent>
+            </Tooltip>
           ) : null}
         </div>
       </div>
