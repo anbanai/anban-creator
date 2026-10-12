@@ -77,6 +77,15 @@ spec:
               value: "true"
             - name: ANBAN_ILINK_BASE_URL
               value: http://sidecar-ilink:18070
+            # The interactive Bridge uses the TLS Service URL so Node can
+            # validate the Server with the mounted internal CA. ClientIP
+            # affinity keeps a session's MCP requests on one Server replica.
+            - name: ANBAN_INTERACTIVE_BRIDGE_DIR
+              value: /app/runtime-dsh
+            - name: ANBAN_INTERACTIVE_DSH_PATCH
+              value: /app/harness/dsh/project-creator.patch.yml
+            - name: ANBAN_INTERACTIVE_MCP_URL
+              value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443/mcp
             - name: ANBAN_AGENT_EXECUTOR
               value: kubernetes
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL
@@ -86,6 +95,8 @@ spec:
             - name: ANBAN_SERVER_TLS_KEY_FILE
               value: /var/run/secrets/anban-server-tls/tls.key
             - name: SSL_CERT_FILE
+              value: /var/run/secrets/anban-internal-ca/ca.crt
+            - name: NODE_EXTRA_CA_CERTS
               value: /var/run/secrets/anban-internal-ca/ca.crt
             - name: ANBAN_AGENT_NAMESPACE
               value: ${namespace}
@@ -225,6 +236,7 @@ metadata:
 spec:
   selector:
     app: ${micro_service_name}
+  sessionAffinity: ClientIP
   ports:
     - name: https-8443
       port: 8443

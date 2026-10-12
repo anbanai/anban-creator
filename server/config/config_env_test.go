@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -67,7 +66,15 @@ jwt:
   refresh_expiry: "168h"
 redis:
   addr: "${ANBAN_TEST_REDIS:-localhost:6379}"
-interactive:
+dsh:
+  route: effective
+  routes:
+    effective:
+      provider: deepseek-official
+      api: deepseek-messages
+      base_url: https://api.deepseek.com/anthropic
+      api_key_env: DEEPSEEK_API_KEY
+      model: deepseek-flash
   bridge_dir: ./runtime-dsh
   dsh_patch: ./harness/dsh/project-creator.patch.yml
 seednote:
@@ -144,81 +151,30 @@ claude:
 		t.Fatal("explicit disable must prevent inheritance")
 	}
 	wantBridgeDir := filepath.Join(dir, "runtime-dsh")
-	if cfg.Interactive.BridgeDir != wantBridgeDir {
-		t.Errorf("interactive.bridge_dir = %q, want %q", cfg.Interactive.BridgeDir, wantBridgeDir)
+	if cfg.Dsh.BridgeDir != wantBridgeDir {
+		t.Errorf("dsh.bridge_dir = %q, want %q", cfg.Dsh.BridgeDir, wantBridgeDir)
 	}
 	wantPatch := filepath.Join(dir, "harness/dsh/project-creator.patch.yml")
-	if cfg.Interactive.DSHPatch != wantPatch {
-		t.Errorf("interactive.dsh_patch = %q, want %q", cfg.Interactive.DSHPatch, wantPatch)
+	if cfg.Dsh.DSHPatch != wantPatch {
+		t.Errorf("dsh.dsh_patch = %q, want %q", cfg.Dsh.DSHPatch, wantPatch)
 	}
-	if cfg.Interactive.ProviderAPIKeyEnv != "DEEPSEEK_API_KEY" {
-		t.Errorf("interactive.provider_api_key_env = %q, want DEEPSEEK_API_KEY", cfg.Interactive.ProviderAPIKeyEnv)
-	}
-}
-
-func TestDisabledInteractiveRuntimeDoesNotValidateProviderCredentialSelector(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	yaml := `
-database:
-  dsn: "dsn"
-jwt:
-  secret_key: "secret"
-interactive:
-  enabled: false
-  provider_api_key_env: "DEEPSEEK-API-KEY"
-claude:
-  executor: docker
-  execution_token_secret: "0123456789abcdef0123456789abcdef"
-  runtime_images:
-    wechat-article: creator-agent-wechat-article:latest
-    wechat-picture: creator-agent-wechat-picture:latest
-    seednote: creator-agent-seednote:latest
-    montage: creator-agent-montage:latest
-    moments: creator-agent-moments:latest
-    ecommerce: creator-agent-ecommerce:latest
-    profile-analysis: creator-agent-profile-analysis:latest
-    feedback-analysis: creator-agent-feedback-analysis:latest
-    whiteboard-animation: creator-agent-whiteboard-animation:latest
-    hypit: creator-agent-hypit:latest
-`
-	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
-		t.Fatalf("write temp config: %v", err)
-	}
-	if _, err := NewConfig(path); err != nil {
-		t.Fatalf("disabled interactive runtime must not reject provider_api_key_env: %v", err)
+	if cfg.Dsh.Routes["effective"].APIKeyEnv != "DEEPSEEK_API_KEY" {
+		t.Errorf("dsh.routes.effective.api_key_env = %q, want DEEPSEEK_API_KEY", cfg.Dsh.Routes["effective"].APIKeyEnv)
 	}
 }
 
-func TestEnabledInteractiveRuntimeRejectsInvalidProviderCredentialSelector(t *testing.T) {
+func TestConfigRejectsLegacyInteractiveAndInvalidDshRoute(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	yaml := `
-database:
-  dsn: "dsn"
-jwt:
-  secret_key: "secret"
-interactive:
-  enabled: true
-  provider_api_key_env: "DEEPSEEK-API-KEY"
-claude:
-  executor: docker
-  execution_token_secret: "0123456789abcdef0123456789abcdef"
-  runtime_images:
-    wechat-article: creator-agent-wechat-article:latest
-    wechat-picture: creator-agent-wechat-picture:latest
-    seednote: creator-agent-seednote:latest
-    montage: creator-agent-montage:latest
-    moments: creator-agent-moments:latest
-    ecommerce: creator-agent-ecommerce:latest
-    profile-analysis: creator-agent-profile-analysis:latest
-    feedback-analysis: creator-agent-feedback-analysis:latest
-    whiteboard-animation: creator-agent-whiteboard-animation:latest
-    hypit: creator-agent-hypit:latest
-`
-	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
-		t.Fatalf("write temp config: %v", err)
-	}
-	if _, err := NewConfig(path); err == nil || !strings.Contains(err.Error(), "interactive.provider_api_key_env must be a valid environment variable name") {
-		t.Fatalf("enabled interactive runtime error = %v", err)
+	for _, body := range []string{
+		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\ninteractive: {}\n",
+		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  route: effective\n  routes:\n    effective:\n      provider: deepseek-official\n      api: deepseek-messages\n      base_url: https://api.deepseek.com/anthropic\n      api_key_env: DEEPSEEK-API-KEY\n      model: deepseek-flash\n",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewConfig(path); err == nil {
+			t.Fatalf("NewConfig(%q) succeeded", body)
+		}
 	}
 }
 

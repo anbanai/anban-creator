@@ -62,9 +62,9 @@ func TestExecRuntimeFactoryPassesOnlyConfiguredProviderCredential(t *testing.T) 
 	output := filepath.Join(t.TempDir(), "env.txt")
 	script := "printf '%s\\n%s\\n%s\\n%s\\n' \"${ANBAN_DATABASE_DSN-}\" \"${ANBAN_JWT_SECRET_KEY-}\" \"${DEEPSEEK_API_KEY-}\" \"$HOME\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
-		Command:           "sh",
-		Args:              []string{"-c", script, "bridge", output},
-		ProviderAPIKeyEnv: "DEEPSEEK_API_KEY",
+		Command:   "sh",
+		Args:      []string{"-c", script, "bridge", output},
+		APIKeyEnv: "DEEPSEEK_API_KEY",
 	}
 	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
 	if err != nil {
@@ -104,9 +104,9 @@ func TestExecRuntimeFactoryMapsServerDeepSeekCredentialForDSH(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "env.txt")
 	script := "printf '%s\\n' \"${DEEPSEEK_API_KEY-}\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
-		Command:           "sh",
-		Args:              []string{"-c", script, "bridge", output},
-		ProviderAPIKeyEnv: "DEEPSEEK_API_KEY",
+		Command:   "sh",
+		Args:      []string{"-c", script, "bridge", output},
+		APIKeyEnv: "DEEPSEEK_API_KEY",
 	}
 	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
 	if err != nil {
@@ -125,6 +125,37 @@ func TestExecRuntimeFactoryMapsServerDeepSeekCredentialForDSH(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(data)); got != "server-provider-secret" {
 		t.Fatalf("DSH provider credential = %q, want deployment credential", got)
+	}
+}
+
+func TestExecRuntimeFactoryPassesNodeExtraCACertsToBridge(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bridge process test uses a POSIX shell")
+	}
+	t.Setenv("NODE_EXTRA_CA_CERTS", "/var/run/secrets/anban-internal-ca/ca.crt")
+	output := filepath.Join(t.TempDir(), "env.txt")
+	script := "printf '%s\\n' \"${NODE_EXTRA_CA_CERTS-}\" > \"$1\"; read line"
+	factory := ExecRuntimeFactory{
+		Command:   "sh",
+		Args:      []string{"-c", script, "bridge", output},
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+	}
+	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	deadline := time.Now().Add(time.Second)
+	var data []byte
+	for time.Now().Before(deadline) {
+		data, _ = os.ReadFile(output)
+		if len(data) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := strings.TrimSpace(string(data)); got != "/var/run/secrets/anban-internal-ca/ca.crt" {
+		t.Fatalf("NODE_EXTRA_CA_CERTS = %q, want mounted internal CA path", got)
 	}
 }
 
@@ -229,5 +260,43 @@ func TestExecRuntimeCommandHonorsContextCancellation(t *testing.T) {
 	err = rt.Command(ctx, "session/start", map[string]any{})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Command() error = %v, want context deadline", err)
+	}
+}
+
+func TestExecRuntimeCommandIncludesProcessExitDiagnostics(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bridge process test uses a POSIX shell")
+	}
+	factory := ExecRuntimeFactory{
+		Command: "sh",
+		Args:    []string{"-c", `read line; printf '%s\n' 'fatal bridge initialization' >&2; exit 7`, "bridge"},
+	}
+	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	if err := rt.Command(context.Background(), "session/start", map[string]any{}); err == nil || !strings.Contains(err.Error(), "fatal bridge initialization") || !strings.Contains(err.Error(), "exit status 7") {
+		t.Fatalf("Command() error = %v, want process stderr and exit status", err)
+	}
+}
+
+func TestExecRuntimeCommandRedactsSecretsFromDiagnostics(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bridge process test uses a POSIX shell")
+	}
+	t.Setenv("DEEPSEEK_API_KEY", "provider-secret")
+	factory := ExecRuntimeFactory{
+		Command:   "sh",
+		Args:      []string{"-c", `read line; printf '%s %s\n' "$ANBAN_INTERACTIVE_RUNTIME_TOKEN" "$DEEPSEEK_API_KEY" >&2; exit 7`, "bridge"},
+		APIKeyEnv: "DEEPSEEK_API_KEY",
+	}
+	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	if err := rt.Command(context.Background(), "session/start", map[string]any{}); err == nil || strings.Contains(err.Error(), "runtime-secret") || strings.Contains(err.Error(), "provider-secret") || !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatalf("Command() error = %v, want redacted diagnostic", err)
 	}
 }
