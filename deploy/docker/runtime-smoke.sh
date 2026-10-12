@@ -334,7 +334,7 @@ montage:
   max_assets: 1
   timeout_minutes: 10
 claude:
-  execution_profiles:
+  profiles:
     effective:
       description: "Runtime smoke DeepSeek Flash"
       provider: "deepseek"

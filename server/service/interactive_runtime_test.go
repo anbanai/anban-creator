@@ -59,8 +59,9 @@ func TestExecRuntimeFactoryPassesOnlyConfiguredProviderCredential(t *testing.T) 
 	t.Setenv("ANBAN_DATABASE_DSN", "mysql://root:server-secret@db/anban")
 	t.Setenv("ANBAN_JWT_SECRET_KEY", "server-jwt-secret")
 	t.Setenv("DEEPSEEK_API_KEY", "provider-secret")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "unselected-provider-secret")
 	output := filepath.Join(t.TempDir(), "env.txt")
-	script := "printf '%s\\n%s\\n%s\\n%s\\n' \"${ANBAN_DATABASE_DSN-}\" \"${ANBAN_JWT_SECRET_KEY-}\" \"${DEEPSEEK_API_KEY-}\" \"$HOME\" > \"$1\"; read line"
+	script := "printf '%s\\n%s\\n%s\\n%s\\n%s\\n' \"${ANBAN_DATABASE_DSN-}\" \"${ANBAN_JWT_SECRET_KEY-}\" \"${DEEPSEEK_API_KEY-}\" \"${ANTHROPIC_AUTH_TOKEN-}\" \"$HOME\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
 		Command:   "sh",
 		Args:      []string{"-c", script, "bridge", output},
@@ -82,25 +83,17 @@ func TestExecRuntimeFactoryPassesOnlyConfiguredProviderCredential(t *testing.T) 
 		time.Sleep(10 * time.Millisecond)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
-	if len(lines) != 4 || lines[0] != "" || lines[1] != "" || lines[2] != "provider-secret" || lines[3] == "" {
+	if len(lines) != 5 || lines[0] != "" || lines[1] != "" || lines[2] != "provider-secret" || lines[3] != "" || lines[4] == "" {
 		t.Fatalf("bridge environment = %#v, want only configured provider credential and isolated home", lines)
 	}
 }
 
-func TestExecRuntimeFactoryMapsServerDeepSeekCredentialForDSH(t *testing.T) {
+func TestExecRuntimeFactoryDoesNotMapServerDeepSeekCredentialForDSH(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bridge process test uses a POSIX shell")
 	}
 	t.Setenv("ANBAN_DEEPSEEK_API_KEY", "server-provider-secret")
-	previousKey, hadPreviousKey := os.LookupEnv("DEEPSEEK_API_KEY")
 	_ = os.Unsetenv("DEEPSEEK_API_KEY")
-	t.Cleanup(func() {
-		if hadPreviousKey {
-			_ = os.Setenv("DEEPSEEK_API_KEY", previousKey)
-		} else {
-			_ = os.Unsetenv("DEEPSEEK_API_KEY")
-		}
-	})
 	output := filepath.Join(t.TempDir(), "env.txt")
 	script := "printf '%s\\n' \"${DEEPSEEK_API_KEY-}\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
@@ -123,8 +116,8 @@ func TestExecRuntimeFactoryMapsServerDeepSeekCredentialForDSH(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := strings.TrimSpace(string(data)); got != "server-provider-secret" {
-		t.Fatalf("DSH provider credential = %q, want deployment credential", got)
+	if got := strings.TrimSpace(string(data)); got != "" {
+		t.Fatalf("DSH credential unexpectedly mapped from Server variable: %q", got)
 	}
 }
 

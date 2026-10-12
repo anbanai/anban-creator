@@ -1,5 +1,58 @@
 # Studio 更新发布
 
+## Claude 与 DSH 独立模型配置
+
+Claude 托管 Agent 和 DSH 交互会话使用两套独立的模型路由。Claude 只读取
+`claude.profiles`；DSH 只读取 `dsh.routes` 和当前的 `dsh.route`。修改一方
+不会隐式修改另一方。两套配置可以引用同一个 Kubernetes Secret，但字段和
+校验保持独立。
+
+```yaml
+claude:
+  profiles:
+    effective:
+      provider: deepseek
+      envs:
+        ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+        ANTHROPIC_AUTH_TOKEN: ${ANBAN_DEEPSEEK_API_KEY}
+        ANTHROPIC_MODEL: deepseek-flash
+
+dsh:
+  enabled: true
+  route: effective
+  routes:
+    effective:
+      provider: anthropic
+      api: anthropic-messages
+      base_url: https://api.deepseek.com/anthropic
+      api_key_env: ANTHROPIC_AUTH_TOKEN
+      model: deepseek-flash
+```
+
+`api_key_env` is an Anban configuration reference, not a secret value and not a
+new variable invented by the Bridge. The Bridge maps it to DSH's official
+`apiKeyEnv` field, writes `api`, `baseURL`, and `models` into temporary
+per-session DSH settings, and starts the fixed official runtime profile:
+`dsh --profile sdk`. `provider` and `model` are also sent through the official
+SDK `initialize({ provider, model })` handshake.
+
+The DSH child receives only `DSH_HOME`, the selected credential variable (for
+example `DEEPSEEK_API_KEY` or `ANTHROPIC_AUTH_TOKEN`), and the internal
+`ANBAN_INTERACTIVE_*` Bridge protocol variables for the session, MCP URL,
+runtime token, patch, initial context, and temporary home. The latter are
+Anban transport variables, not DSH provider settings. Do not configure the
+removed `interactive:` block, `provider_api_key_env`, or `ANBAN_DSH_API_KEY`,
+`ANBAN_DSH_BASE_URL`, `ANBAN_DSH_MODEL`, `ANBAN_DSH_PROVIDER`, or
+`ANBAN_DSH_PROFILE` names. The Server rejects startup when any of these legacy
+`ANBAN_DSH_*` variables is present, so remove stale deployment entries before
+switching to `dsh.routes`.
+
+For Kubernetes, project the official credential names used by your selected
+route from the same provider Secret. The checked-in Deployment exposes
+`DEEPSEEK_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the existing
+`deepseek-api-key` Secret key; add or change the corresponding Secret mapping
+when a route uses a different provider.
+
 当前先恢复为一个固定的 Studio Deployment（例如 `creator-studio-web-base`），沿用原有 ACS 更新流程。`version_switch` 固定为 `base`；它用于资源名、Pod 标签和日志，不影响 Nginx。Deployment selector 只匹配稳定的 `app` 标签，不能加 `version`，否则会尝试修改已有 Deployment 的不可变 selector。
 
 ## 当前更新流程

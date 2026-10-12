@@ -87,6 +87,15 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	if c.Routes == nil {
 		c.Routes = map[string]DshRouteConfig{}
+	} else {
+		for name, route := range c.Routes {
+			route.Provider = strings.ToLower(strings.TrimSpace(route.Provider))
+			route.API = strings.ToLower(strings.TrimSpace(route.API))
+			route.BaseURL = strings.TrimSpace(route.BaseURL)
+			route.APIKeyEnv = strings.TrimSpace(route.APIKeyEnv)
+			route.Model = strings.TrimSpace(route.Model)
+			c.Routes[name] = route
+		}
 	}
 	return nil
 }
@@ -590,7 +599,7 @@ type ModelRuntimeConfig struct {
 
 // ClaudeConfig owns managed Agent dispatch and selectable execution profiles.
 type ClaudeConfig struct {
-	ExecutionProfiles                 map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
+	ExecutionProfiles                 map[string]ClaudeExecutionProfileConfig `yaml:"profiles" json:"profiles"`
 	Executor                          string                                  `yaml:"executor"` // "docker" or "kubernetes"
 	RuntimeImages                     RuntimeImages                           `yaml:"runtime_images"`
 	RuntimeDiagnosticRetentionSeconds int                                     `yaml:"runtime_diagnostic_retention_seconds"`
@@ -616,7 +625,7 @@ type ClaudeExecutionProfileConfig struct {
 
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"execution_profiles": true, "executor": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
+		"profiles": true, "executor": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
 		"execution_token_secret": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "project_memory": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
@@ -649,16 +658,16 @@ func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 }
 
 func validateClaudeNestedFields(value *yaml.Node) error {
-	profiles := yamlMappingValue(value, "execution_profiles")
+	profiles := yamlMappingValue(value, "profiles")
 	if profiles == nil {
 		return nil
 	}
 	if profiles.Kind != yaml.MappingNode {
-		return fmt.Errorf("claude.execution_profiles must be a mapping")
+		return fmt.Errorf("claude.profiles must be a mapping")
 	}
 	for i := 0; i < len(profiles.Content); i += 2 {
 		name, profile := profiles.Content[i].Value, profiles.Content[i+1]
-		path := "claude.execution_profiles." + name
+		path := "claude.profiles." + name
 		if err := validateYAMLMappingFields(profile, path, map[string]bool{
 			"provider": true, "description": true, "envs": true, "model_usage_aliases": true,
 		}); err != nil {
@@ -733,9 +742,9 @@ func (c ClaudeConfig) Validate() error {
 		errs = append(errs, "claude.runtime_diagnostic_retention_seconds must be positive")
 	}
 	for name, profile := range c.ExecutionProfiles {
-		path := "claude.execution_profiles." + name
+		path := "claude.profiles." + name
 		if strings.TrimSpace(name) == "" {
-			errs = append(errs, "claude.execution_profiles contains an empty profile name")
+			errs = append(errs, "claude.profiles contains an empty profile name")
 		}
 		if err := model.ValidateClaudeProfileEnvs(profile.Envs, true); err != nil {
 			errs = append(errs, path+".envs: "+err.Error())
@@ -983,6 +992,9 @@ func NewConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
+	if err := rejectDeprecatedDshEnvironment(); err != nil {
+		return nil, err
+	}
 
 	data = expandEnvVars(data)
 	if err := rejectDeprecatedConfigKeys(data); err != nil {
@@ -1018,6 +1030,25 @@ func NewConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// rejectDeprecatedDshEnvironment prevents stale pre-route variables from
+// appearing to configure DSH. DSH credentials and routing now come only from
+// dsh.routes; silently accepting the old variables makes deployment mistakes
+// difficult to diagnose.
+func rejectDeprecatedDshEnvironment() error {
+	for _, name := range []string{
+		"ANBAN_DSH_API_KEY",
+		"ANBAN_DSH_BASE_URL",
+		"ANBAN_DSH_MODEL",
+		"ANBAN_DSH_PROVIDER",
+		"ANBAN_DSH_PROFILE",
+	} {
+		if _, ok := os.LookupEnv(name); ok {
+			return fmt.Errorf("deprecated environment variable %s is no longer supported; configure dsh.routes and its api_key_env instead", name)
+		}
+	}
+	return nil
 }
 
 func rejectDeprecatedConfigKeys(data []byte) error {
