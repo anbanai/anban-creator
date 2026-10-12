@@ -891,6 +891,11 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 	if strings.Contains(release, "org.anban.agent.pack.catalog-digest") || strings.Contains(release, "Catalog label mismatch") {
 		t.Fatal("release manifest must not depend on image metadata labels for runtime verification")
 	}
+
+	deployment := readTextFile(t, filepath.Join(root, "server/Deployment.yaml"))
+	if strings.Contains(deployment, "${catalog_digest}") || strings.Contains(deployment, "agent-pack-catalog-digest") {
+		t.Fatal("cloud-rendered Server Deployment must not require an undeclared Catalog digest variable")
+	}
 }
 
 func TestDockerfileInventoryIsCentralized(t *testing.T) {

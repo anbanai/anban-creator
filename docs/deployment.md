@@ -47,4 +47,5 @@ docker build -f deploy/docker/Dockerfile.agent-seednote -t "$IMAGE" .
 `make agent-pack-check` 校验 Server 与 Harness 的生成 Catalog 一致。发布
 manifest 仍记录 Catalog digest 作为审计信息；Runtime 启动时会计算镜像内
 Catalog digest，并与 Server bootstrap 返回的 digest 比较，发现漂移则拒绝
-执行。这样云效只需使用普通 `docker build`，运行时一致性校验仍然保留。
+执行。Server Deployment 模板不依赖 Catalog digest 变量，因此云效可以直
+接渲染 `server/Deployment.yaml`，运行时一致性校验仍然保留。

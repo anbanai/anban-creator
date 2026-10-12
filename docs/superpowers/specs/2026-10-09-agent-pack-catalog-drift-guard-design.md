@@ -47,9 +47,11 @@ silently ignoring the new header.
 
 CI runs `make agent-pack-check`. Dockerfiles package the generated Catalog
 without requiring a manually supplied build argument or OCI label. Local and
-CI image targets run the Catalog check before building. Production manifests
-record the Catalog SHA-256 for audit, while runtime bootstrap compares the
-Server's embedded Catalog with the Catalog shipped in each Agent image.
+CI image targets run the Catalog check before building. The release manifest
+records the Catalog SHA-256 for audit, while runtime bootstrap compares the
+Server's embedded Catalog with the Catalog shipped in each Agent image. The
+cloud-rendered Server Deployment template does not require the release digest
+as an extra template variable.
 Production documentation requires the Server and all managed Agent images to be
 built from one source revision and deployed using immutable image references.
 

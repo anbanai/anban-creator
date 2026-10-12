@@ -174,8 +174,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if len(serverDocs) < 2 {
 		t.Fatalf("server deployment manifest has %d documents, want PVC and Deployment", len(serverDocs))
 	}
-	if !strings.Contains(serverDocs[1], "annotations:\n    anban.ai/agent-pack-catalog-digest: ${catalog_digest}") {
-		t.Fatal("release catalog digest must remain available as a Deployment audit annotation")
+	if strings.Contains(serverDocs[1], "catalog_digest") || strings.Contains(serverDocs[1], "agent-pack-catalog-digest") {
+		t.Fatal("server Deployment template must not require the release Catalog digest as a cloud template variable")
 	}
 	if strings.Contains(serverDocs[1], "name: ANBAN_AGENT_PACK_CATALOG_DIGEST") {
 		t.Fatal("Server runtime must use its embedded Catalog digest instead of a deployment environment setting")

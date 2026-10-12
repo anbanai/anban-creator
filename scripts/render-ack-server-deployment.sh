@@ -83,7 +83,7 @@ for profile in wechat_article wechat_picture seednote montage moments ecommerce 
   fi
 done
 
-export image_repo catalog_digest
+export image_repo
 export wechat_article_agent_image_repo wechat_picture_agent_image_repo
 export seednote_agent_image_repo montage_agent_image_repo moments_agent_image_repo
 export ecommerce_agent_image_repo profile_analysis_agent_image_repo

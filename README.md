@@ -59,7 +59,8 @@ generated Server and Harness Catalog files are current. Then run
 release manifest records the Catalog digest for audit and validates every image
 reference. Use
 `scripts/render-ack-server-deployment.sh --manifest release/agent-runtime-manifest.json`
-to inject that immutable image set and the audit digest into the ACK template.
+to inject that immutable image set into the ACK template. The manifest remains
+the release audit record for the Catalog digest.
 The runtime bootstrap still compares the Server's embedded Catalog digest with
 the Catalog shipped in each Agent image; no Docker build argument or image label
 is required.
