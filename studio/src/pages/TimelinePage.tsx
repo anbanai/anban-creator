@@ -196,12 +196,10 @@ export default function TimelinePage() {
   return (
     <div className="space-y-6">
       <PageHeader title="时间线" description="按日期查看排期与作品的执行情况。">
-        <Tooltip>
-          <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label="刷新时间线" onClick={() => refetch()} />}>
-            <RefreshCw className="size-4" />
-          </TooltipTrigger>
-          <TooltipContent>刷新时间线</TooltipContent>
-        </Tooltip>
+        <Button variant="secondary" size="sm" className="min-h-11" onClick={() => refetch()}>
+          <RefreshCw className="h-3.5 w-3.5" />
+          刷新
+        </Button>
       </PageHeader>
 
       {/* Filter Bar */}

@@ -616,7 +616,7 @@ function ProfileLabPage() {
                     <div className="grid gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto]">
                       <Input aria-label={`${label}新字段名称`} value={newKeys[key] ?? ''} onChange={(event) => { setDirtyDimensions((current) => new Set([...current, key])); setNewKeys((current) => ({ ...current, [key]: event.target.value })) }} placeholder="新字段" />
                       <Input aria-label={`${label}新字段内容`} value={newValues[key] ?? ''} onChange={(event) => { setDirtyDimensions((current) => new Set([...current, key])); setNewValues((current) => ({ ...current, [key]: event.target.value })) }} placeholder="补充内容" />
-                      <Button type="button" variant="ghost" size="icon-md" aria-label={`添加${label}字段`} title={`添加${label}字段`} onClick={() => {
+                      <Button type="button" variant="outline" size="icon" aria-label={`添加${label}字段`} onClick={() => {
                         const field = newKeys[key]?.trim()
                         if (!field) return
                         if (field in contentDraft) { toast.error('字段已存在，请直接编辑已有内容'); return }

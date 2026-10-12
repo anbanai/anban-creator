@@ -13,7 +13,6 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -703,10 +702,10 @@ function FilePreviewInline({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {canPreview && <Tooltip><TooltipTrigger render={<Button size="icon-md" variant="ghost" className="min-h-11 min-w-11" onClick={onClick} aria-label={`预览 ${file.file_name}`} />}><Eye className="size-4" /></TooltipTrigger><TooltipContent>预览</TooltipContent></Tooltip>}
-          <Tooltip><TooltipTrigger render={<Button size="icon-md" variant="ghost" className="min-h-11 min-w-11" onClick={handleDownload} disabled={downloading || !canDownload} aria-label={`下载 ${file.file_name}`} />}>
-            {downloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-          </TooltipTrigger><TooltipContent>{canDownload ? '下载' : '仅支持预览'}</TooltipContent></Tooltip>
+          {canPreview && <Button size="sm" variant="ghost" className="min-h-11" onClick={onClick} aria-label={`预览 ${file.file_name}`}><Eye className="size-3.5" /><span className="hidden sm:inline">预览</span></Button>}
+          <Button size="icon-md" variant="ghost" className="min-h-11 min-w-11" onClick={handleDownload} disabled={downloading || !canDownload} aria-label={`下载 ${file.file_name}`} title={canDownload ? '下载' : '仅支持预览'}>
+            {downloading ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+          </Button>
         </div>
       </div>
     )

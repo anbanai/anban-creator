@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { api } from "@/lib/api"
@@ -80,12 +79,9 @@ export default function TrendsPage() {
 
   return <div className="mx-auto w-full max-w-6xl space-y-6 pb-10">
     <PageHeader title="热点雷达" description="聚合微博、抖音、知乎等平台的创作热点。">
-      <Tooltip>
-        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label="刷新热点" onClick={() => refresh.mutate(activePlatforms)} disabled={refresh.isPending || activePlatforms.length === 0} />}>
-          <RefreshCw className={refresh.isPending ? "size-4 animate-spin" : "size-4"} />
-        </TooltipTrigger>
-        <TooltipContent>刷新热点</TooltipContent>
-      </Tooltip>
+      <Button variant="outline" onClick={() => refresh.mutate(activePlatforms)} disabled={refresh.isPending || activePlatforms.length === 0}>
+        <RefreshCw className={refresh.isPending ? "animate-spin" : ""} />刷新热点
+      </Button>
     </PageHeader>
 
     <section className="space-y-3" aria-label="热点筛选">
@@ -121,12 +117,7 @@ export default function TrendsPage() {
           <CardTitle className="flex items-center gap-2"><Flame className="size-4 text-orange-500" />{group.label}</CardTitle>
           <div className="flex items-center gap-2">
             {group.stale && <Badge variant="outline">暂时沿用上次结果</Badge>}
-            <Tooltip>
-              <TooltipTrigger render={<Button size="icon-md" variant="ghost" aria-label={"刷新" + group.label} onClick={() => refresh.mutate([group.platform])} disabled={refresh.isPending} />}>
-                <RefreshCw className="size-4" />
-              </TooltipTrigger>
-              <TooltipContent>{"刷新" + group.label}</TooltipContent>
-            </Tooltip>
+            <Button size="icon-xs" variant="ghost" aria-label={"刷新" + group.label} title={"刷新" + group.label} onClick={() => refresh.mutate([group.platform])} disabled={refresh.isPending}><RefreshCw /></Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-1 pt-3">
@@ -140,19 +131,14 @@ export default function TrendsPage() {
               </div>
               <div className="flex shrink-0 gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                 <Popover open={saveTarget === itemKey} onOpenChange={(open) => setSaveTarget(open ? itemKey : null)}>
-                  <PopoverTrigger render={<Button size="icon-md" variant="ghost" aria-label="收藏热点" title="收藏热点"><BookmarkPlus className="size-4" /></Button>} />
+                  <PopoverTrigger render={<Button size="icon-xs" variant="ghost" aria-label="收藏" title="收藏热点"><BookmarkPlus /></Button>} />
                   <PopoverContent align="end" className="w-80">
                     <div className="space-y-1"><PopoverTitle>收藏到创作项目</PopoverTitle><PopoverDescription>选择一个创作项目，之后可在选题池继续创作。</PopoverDescription></div>
                     <ProjectContextControl mode="select" projects={projects} value={projectId || null} onValueChange={(id) => setProjectId(id || "")} loading={projectsQuery.isLoading} placeholder="选择目标创作项目" ariaLabel="收藏目标创作项目" />
                     <Button size="sm" className="w-full" disabled={!projectId || save.isPending} onClick={() => projectId && save.mutate({ projectId, title: item.title })}>确认收藏</Button>
                   </PopoverContent>
                 </Popover>
-                <Tooltip>
-                  <TooltipTrigger render={<Button size="icon-md" variant="ghost" aria-label="做内容" title="围绕热点做内容" onClick={() => useContent(item)} />}>
-                    <WandSparkles className="size-4" />
-                  </TooltipTrigger>
-                  <TooltipContent>围绕热点做内容</TooltipContent>
-                </Tooltip>
+                <Button size="icon-xs" variant="ghost" aria-label="做内容" title="围绕热点做内容" onClick={() => useContent(item)}><WandSparkles /></Button>
               </div>
             </div>
           })}
