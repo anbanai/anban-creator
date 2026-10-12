@@ -118,9 +118,6 @@ type InteractiveSession struct {
 	pendingQuestions            map[string]InteractiveQuestion
 	busy                        bool
 	committing                  bool
-	runtimeStarted              bool
-	runtimeExitPending          bool
-	runtimeExitData             any
 	runtime                     Runtime
 	cancel                      context.CancelFunc
 	runtimeTokenHash            string
@@ -496,16 +493,6 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 		s.closeSession(sess.ID, false)
 		return
 	}
-	sess.mu.Lock()
-	sess.runtimeStarted = true
-	pendingExit := sess.runtimeExitPending
-	pendingExitData := sess.runtimeExitData
-	sess.runtimeExitPending = false
-	sess.runtimeExitData = nil
-	sess.mu.Unlock()
-	if pendingExit {
-		s.runtimeEvent(sess.ID, "runtime.exit", pendingExitData)
-	}
 }
 func (s *InteractiveService) expire(id string) {
 	s.closeSession(id, true)
@@ -815,35 +802,7 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 				}
 			}
 		}
-	case "session.ready":
-		sess.mu.Lock()
-		if !sess.Closed {
-			sess.Status = "running"
-		}
-		sess.mu.Unlock()
 	case "runtime.exit":
-		sess.mu.Lock()
-		if sess.Closed {
-			sess.mu.Unlock()
-			return
-		}
-		if !sess.runtimeStarted {
-			sess.runtimeExitPending = true
-			sess.runtimeExitData = data
-			sess.mu.Unlock()
-			return
-		}
-		sess.mu.Unlock()
-		if message := interactiveRuntimeExitMessage(data); message != "" {
-			sess.mu.Lock()
-			if !sess.Closed {
-				sess.Status = "error"
-			}
-			sess.mu.Unlock()
-			s.emit(sess, "session.error", map[string]any{"status": "runtime_failed", "message": message})
-			s.closeSession(id, false)
-			return
-		}
 		s.expire(id)
 	case "session.error":
 		// A bridge error means the one-shot runtime can no longer make progress.
@@ -1588,16 +1547,14 @@ func (s *InteractiveService) sessionClosed(id string) bool {
 }
 
 type ExecRuntimeFactory struct {
-	Command   string
-	Args      []string
-	Dir       string
-	DSHPatch  string
-	Provider  string
-	API       string
-	BaseURL   string
-	APIKeyEnv string
-	Model     string
-	MCPURL    string
+	Command           string
+	Args              []string
+	Dir               string
+	DSHPatch          string
+	Provider          string
+	ProviderAPIKeyEnv string
+	Model             string
+	MCPURL            string
 }
 
 func (f ExecRuntimeFactory) Start(ctx context.Context, sessionID, _ string, runtimeToken string, emit func(string, any)) (Runtime, error) {
@@ -1633,19 +1590,19 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, 
 			return nil, fmt.Errorf("write interactive initial context: %w", err)
 		}
 	}
-	args := append([]string(nil), f.Args...)
-	args = append(args, "--provider", f.Provider, "--model", f.Model, "--route-api", f.API, "--base-url", f.BaseURL, "--api-key-env", f.APIKeyEnv)
-	cmd := exec.CommandContext(ctx, f.Command, args...)
+	cmd := exec.CommandContext(ctx, f.Command, f.Args...)
 	if f.Dir != "" {
 		cmd.Dir = f.Dir
 	}
-	cmd.Env = interactiveRuntimeEnvironment(dshHome, f.APIKeyEnv)
+	cmd.Env = interactiveRuntimeEnvironment(dshHome, f.ProviderAPIKeyEnv)
 	cmd.Env = append(cmd.Env,
 		"ANBAN_INTERACTIVE_SESSION_ID="+sessionID,
 		"ANBAN_INTERACTIVE_RUNTIME_TOKEN="+runtimeToken,
 		"ANBAN_INTERACTIVE_DSH_HOME="+dshHome,
 		"ANBAN_INTERACTIVE_DSH_PATCH="+f.DSHPatch,
 		"ANBAN_INTERACTIVE_INITIAL_CONTEXT_FILE="+initialContextFile,
+		"ANBAN_INTERACTIVE_PROVIDER="+f.Provider,
+		"ANBAN_INTERACTIVE_MODEL="+f.Model,
 		"ANBAN_INTERACTIVE_MCP_URL="+f.MCPURL,
 	)
 	stdin, e := cmd.StdinPipe()
@@ -1667,29 +1624,15 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, 
 		_ = os.RemoveAll(dshHome)
 		return nil, e
 	}
-	stderrTail := &interactiveTailBuffer{limit: 16 * 1024}
-	redactions := []string{runtimeToken}
-	if providerSecret := interactiveProviderCredential(f.APIKeyEnv); providerSecret != "" {
-		redactions = append(redactions, providerSecret)
-	}
-	r := &execRuntime{cmd: cmd, in: stdin, done: make(chan struct{}), pending: map[uint64]chan error{}, cleanup: func() { _ = os.RemoveAll(dshHome) }, redactions: redactions}
-	stdoutDone := make(chan error, 1)
-	stderrDone := make(chan error, 1)
-	go func() { _, copyErr := io.Copy(stderrTail, stderr); stderrDone <- copyErr }()
-	go func() { stdoutDone <- r.read(stdout, emit) }()
-	go func() {
-		waitErr := cmd.Wait()
-		stdoutErr := <-stdoutDone
-		stderrErr := <-stderrDone
-		terminalErr := interactiveRuntimeExitError(waitErr, stdoutErr, stderrErr, stderrTail.String(), r.redactions...)
-		r.finish(terminalErr)
-		emit("runtime.exit", interactiveRuntimeExitDetails(cmd, waitErr, stdoutErr, stderrErr, stderrTail.String(), r.redactions...))
-	}()
+	r := &execRuntime{cmd: cmd, in: stdin, done: make(chan struct{}), pending: map[uint64]chan error{}, cleanup: func() { _ = os.RemoveAll(dshHome) }}
+	go io.Copy(io.Discard, stderr)
+	go r.read(stdout, emit)
+	go func() { err := cmd.Wait(); r.finish(err); emit("runtime.exit", map[string]any{}) }()
 	return r, nil
 }
 
 func interactiveRuntimeEnvironment(dshHome, providerAPIKeyEnv string) []string {
-	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR", "NODE_EXTRA_CA_CERTS"}
+	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR"}
 	env := make([]string, 0, len(keys)+5)
 	for _, key := range keys {
 		if value, ok := os.LookupEnv(key); ok {
@@ -1711,17 +1654,6 @@ func interactiveRuntimeEnvironment(dshHome, providerAPIKeyEnv string) []string {
 		}
 	}
 	return env
-}
-
-func interactiveProviderCredential(providerAPIKeyEnv string) string {
-	if !validInteractiveEnvName(providerAPIKeyEnv) {
-		return ""
-	}
-	value, ok := os.LookupEnv(providerAPIKeyEnv)
-	if (!ok || value == "") && providerAPIKeyEnv == "DEEPSEEK_API_KEY" {
-		value, _ = os.LookupEnv("ANBAN_DEEPSEEK_API_KEY")
-	}
-	return value
 }
 
 func validInteractiveEnvName(name string) bool {
@@ -1750,100 +1682,6 @@ type execRuntime struct {
 	pending     map[uint64]chan error
 	cleanup     func()
 	cleanupOnce sync.Once
-	redactions  []string
-}
-
-type interactiveTailBuffer struct {
-	mu    sync.Mutex
-	limit int
-	data  []byte
-}
-
-func (b *interactiveTailBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.limit > 0 {
-		b.data = append(b.data, p...)
-		if len(b.data) > b.limit {
-			b.data = append([]byte(nil), b.data[len(b.data)-b.limit:]...)
-		}
-	}
-	return len(p), nil
-}
-func (b *interactiveTailBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return string(append([]byte(nil), b.data...))
-}
-func redactInteractiveRuntimeDiagnostic(value string, secrets ...string) string {
-	for _, secret := range secrets {
-		if secret != "" {
-			value = strings.ReplaceAll(value, secret, "[redacted]")
-		}
-	}
-	return value
-}
-func interactiveRuntimeExitError(waitErr, stdoutErr, stderrErr error, stderrTail string, secrets ...string) error {
-	parts := make([]string, 0, 4)
-	if waitErr != nil {
-		parts = append(parts, waitErr.Error())
-	}
-	if stdoutErr != nil {
-		parts = append(parts, fmt.Sprintf("stdout: %v", stdoutErr))
-	}
-	if stderrErr != nil {
-		parts = append(parts, fmt.Sprintf("stderr read: %v", stderrErr))
-	}
-	if trimmed := strings.TrimSpace(stderrTail); trimmed != "" {
-		parts = append(parts, "stderr: "+trimmed)
-	}
-	if len(parts) == 0 {
-		return errors.New("interactive runtime exited before responding")
-	}
-	return errors.New("interactive runtime exited before responding: " + redactInteractiveRuntimeDiagnostic(strings.Join(parts, "; "), secrets...))
-}
-func interactiveRuntimeExitDetails(cmd *exec.Cmd, waitErr, stdoutErr, stderrErr error, stderrTail string, secrets ...string) map[string]any {
-	details := map[string]any{}
-	if cmd != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() != 0 {
-		details["exit_code"] = cmd.ProcessState.ExitCode()
-	}
-	if waitErr != nil {
-		details["error"] = redactInteractiveRuntimeDiagnostic(waitErr.Error(), secrets...)
-	}
-	if stdoutErr != nil {
-		details["stdout_error"] = redactInteractiveRuntimeDiagnostic(stdoutErr.Error(), secrets...)
-	}
-	if stderrErr != nil {
-		details["stderr_error"] = redactInteractiveRuntimeDiagnostic(stderrErr.Error(), secrets...)
-	}
-	if trimmed := strings.TrimSpace(stderrTail); trimmed != "" {
-		details["stderr"] = redactInteractiveRuntimeDiagnostic(trimmed, secrets...)
-	}
-	return details
-}
-func interactiveRuntimeExitMessage(data any) string {
-	fields, ok := data.(map[string]any)
-	if !ok {
-		return ""
-	}
-	parts := make([]string, 0, 4)
-	for _, key := range []string{"error", "stdout_error", "stderr_error", "stderr"} {
-		if value, _ := fields[key].(string); strings.TrimSpace(value) != "" {
-			switch key {
-			case "stdout_error":
-				value = "stdout: " + value
-			case "stderr_error":
-				value = "stderr read: " + value
-			case "stderr":
-				value = "stderr: " + value
-			}
-			parts = append(parts, value)
-		}
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "interactive runtime exited before responding: " + strings.Join(parts, "; ")
 }
 
 func (r *execRuntime) Command(ctx context.Context, method string, params any) error {
@@ -1919,7 +1757,7 @@ func (r *execRuntime) finish(err error) {
 	}
 }
 
-func bridgeResponseError(value any, secrets ...string) error {
+func bridgeResponseError(value any) error {
 	if value == nil {
 		return nil
 	}
@@ -1927,13 +1765,13 @@ func bridgeResponseError(value any, secrets ...string) error {
 		if strings.TrimSpace(message) == "" {
 			return errors.New("interactive bridge returned an empty error")
 		}
-		return errors.New(redactInteractiveRuntimeDiagnostic(message, secrets...))
+		return errors.New(message)
 	}
 	b, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("interactive bridge error: %v", value)
 	}
-	return errors.New(redactInteractiveRuntimeDiagnostic(string(b), secrets...))
+	return errors.New(string(b))
 }
 
 func (r *execRuntime) deliverResponse(id uint64, err error) {
@@ -1969,7 +1807,7 @@ func interactiveResponseID(value any) (uint64, bool) {
 	return 0, false
 }
 
-func (r *execRuntime) read(out io.Reader, emit func(string, any)) error {
+func (r *execRuntime) read(out io.Reader, emit func(string, any)) {
 	sc := bufio.NewScanner(out)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -1982,10 +1820,14 @@ func (r *execRuntime) read(out io.Reader, emit func(string, any)) error {
 			continue
 		}
 		if id, ok := interactiveResponseID(m["id"]); ok {
-			r.deliverResponse(id, bridgeResponseError(m["error"], r.redactions...))
+			r.deliverResponse(id, bridgeResponseError(m["error"]))
 		}
 	}
-	return sc.Err()
+	if err := sc.Err(); err != nil {
+		r.finish(fmt.Errorf("interactive bridge output: %w", err))
+	} else {
+		r.finish(nil)
+	}
 }
 func (r *execRuntime) Close() error {
 	r.mu.Lock()

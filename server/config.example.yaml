@@ -86,22 +86,17 @@ search:
 
 # Optional interactive Project Creator runtime. Sessions are process-local and
 # are discarded when the runtime exits or its lease expires.
-dsh:
+interactive:
   enabled: false
   admin_only: false
   bridge_command: "node"
   bridge_args: ["dist/interactive-bridge.js"]
   bridge_dir: "${ANBAN_INTERACTIVE_BRIDGE_DIR:-./runtime-dsh}"
   dsh_patch: "${ANBAN_INTERACTIVE_DSH_PATCH:-./harness/dsh/project-creator.patch.yml}"
+  provider: "deepseek-official"
+  provider_api_key_env: "DEEPSEEK_API_KEY"
+  model: "deepseek-v4-flash"
   mcp_url: "${ANBAN_INTERACTIVE_MCP_URL:-https://creator.anbanai.com/mcp}"
-  route: "deepseek"
-  routes:
-    deepseek:
-      provider: "deepseek-official"
-      api: "deepseek-messages"
-      base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
-      api_key_env: "DEEPSEEK_API_KEY"
-      model: "deepseek-v4-flash"
 
 model_providers:
   moonshot:

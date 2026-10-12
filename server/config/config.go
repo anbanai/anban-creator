@@ -50,110 +50,22 @@ type Config struct {
 	Ilink              IlinkConfig                     `yaml:"ilink"`
 	Trends             TrendsConfig                    `yaml:"trends"`
 	Search             SearchConfig                    `yaml:"search"`
-	Dsh                DshConfig                       `yaml:"dsh"`
+	Interactive        InteractiveConfig               `yaml:"interactive"`
 }
 
-// DshConfig owns the independent DSH interactive runtime configuration.
-type DshConfig struct {
-	Enabled       bool                      `yaml:"enabled"`
-	AdminOnly     bool                      `yaml:"admin_only"`
-	BridgeCommand string                    `yaml:"bridge_command"`
-	BridgeArgs    []string                  `yaml:"bridge_args"`
-	BridgeDir     string                    `yaml:"bridge_dir"`
-	DSHPatch      string                    `yaml:"dsh_patch"`
-	MCPURL        string                    `yaml:"mcp_url"`
-	Route         string                    `yaml:"route"`
-	Routes        map[string]DshRouteConfig `yaml:"routes"`
-}
-
-type DshRouteConfig struct {
-	Provider  string `yaml:"provider"`
-	API       string `yaml:"api"`
-	BaseURL   string `yaml:"base_url"`
-	APIKeyEnv string `yaml:"api_key_env"`
-	Model     string `yaml:"model"`
-}
-
-func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
-	if err := validateYAMLMappingFields(value, "dsh", map[string]bool{
-		"enabled": true, "admin_only": true, "bridge_command": true, "bridge_args": true,
-		"bridge_dir": true, "dsh_patch": true, "mcp_url": true, "route": true, "routes": true,
-	}); err != nil {
-		return err
-	}
-	type plain DshConfig
-	if err := value.Decode((*plain)(c)); err != nil {
-		return err
-	}
-	if c.Routes == nil {
-		c.Routes = map[string]DshRouteConfig{}
-	}
-	return nil
-}
-
-func (c *DshRouteConfig) UnmarshalYAML(value *yaml.Node) error {
-	if err := validateYAMLMappingFields(value, "dsh route", map[string]bool{
-		"provider": true, "api": true, "base_url": true, "api_key_env": true, "model": true,
-	}); err != nil {
-		return err
-	}
-	type plain DshRouteConfig
-	return value.Decode((*plain)(c))
-}
-
-func (c DshConfig) Validate() error {
-	var errs []string
-	if len(c.Routes) == 0 {
-		if c.Enabled || strings.TrimSpace(c.Route) != "" {
-			errs = append(errs, "dsh.routes must contain at least one route")
-		}
-		return joinConfigErrors(errs)
-	}
-	selected := strings.TrimSpace(c.Route)
-	if selected == "" {
-		errs = append(errs, "dsh.route is required when dsh.routes is configured")
-	} else if _, ok := c.Routes[selected]; !ok {
-		errs = append(errs, fmt.Sprintf("dsh.route %q is not configured in dsh.routes", selected))
-	}
-	for name, route := range c.Routes {
-		path := "dsh.routes." + name
-		provider := strings.ToLower(strings.TrimSpace(route.Provider))
-		if provider != "deepseek-official" && provider != "anthropic" {
-			errs = append(errs, path+".provider must be deepseek-official or anthropic")
-		}
-		api := strings.ToLower(strings.TrimSpace(route.API))
-		if provider == "deepseek-official" && api != "deepseek-messages" {
-			errs = append(errs, path+".api must be deepseek-messages for deepseek-official")
-		}
-		if provider == "anthropic" && api != "anthropic-messages" {
-			errs = append(errs, path+".api must be anthropic-messages for anthropic")
-		}
-		if err := validateDshBaseURL(route.BaseURL); err != nil {
-			errs = append(errs, path+".base_url "+err.Error())
-		}
-		if !interactiveProviderAPIKeyEnvPattern.MatchString(strings.TrimSpace(route.APIKeyEnv)) {
-			errs = append(errs, path+".api_key_env must be a valid environment variable name")
-		}
-		if strings.TrimSpace(route.Model) == "" {
-			errs = append(errs, path+".model is required")
-		}
-	}
-	return joinConfigErrors(errs)
-}
-
-func validateDshBaseURL(raw string) error {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return fmt.Errorf("must be an absolute HTTP(S) URL without credentials, query, or fragment")
-	}
-	return nil
-}
-
-func joinConfigErrors(errs []string) error {
-	if len(errs) == 0 {
-		return nil
-	}
-	return fmt.Errorf("%s", strings.Join(errs, "; "))
+// InteractiveConfig gates process-local conversational sessions. No executable
+// or model is selectable from a browser request.
+type InteractiveConfig struct {
+	Enabled           bool     `yaml:"enabled"`
+	AdminOnly         bool     `yaml:"admin_only"`
+	BridgeCommand     string   `yaml:"bridge_command"`
+	BridgeArgs        []string `yaml:"bridge_args"`
+	BridgeDir         string   `yaml:"bridge_dir"`
+	DSHPatch          string   `yaml:"dsh_patch"`
+	Provider          string   `yaml:"provider"`
+	ProviderAPIKeyEnv string   `yaml:"provider_api_key_env"`
+	Model             string   `yaml:"model"`
+	MCPURL            string   `yaml:"mcp_url"`
 }
 
 type TrendsConfig struct {
@@ -1059,7 +971,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"ilink":           true,
 		"trends":          true,
 		"search":          true,
-		"dsh":             true,
+		"interactive":     true,
 		"onboarding":      true,
 	}
 	for key := range top {
@@ -1142,14 +1054,14 @@ func (c *Config) applyDefaults() {
 	}
 	applySearchDefaults(&c.Search.Custom, "https://open.feedcoopapi.com/search_api/web_search")
 	applySearchDefaults(&c.Search.Global, "https://open.feedcoopapi.com/search_api/global_search")
-	if c.Dsh.BridgeDir == "" {
-		c.Dsh.BridgeDir = "./runtime-dsh"
+	if c.Interactive.BridgeDir == "" {
+		c.Interactive.BridgeDir = "./runtime-dsh"
 	}
-	if c.Dsh.DSHPatch == "" {
-		c.Dsh.DSHPatch = "./harness/dsh/project-creator.patch.yml"
+	if c.Interactive.DSHPatch == "" {
+		c.Interactive.DSHPatch = "./harness/dsh/project-creator.patch.yml"
 	}
-	if c.Dsh.Routes == nil {
-		c.Dsh.Routes = map[string]DshRouteConfig{}
+	if c.Interactive.ProviderAPIKeyEnv == "" {
+		c.Interactive.ProviderAPIKeyEnv = "DEEPSEEK_API_KEY"
 	}
 	if c.Claude.RuntimeImages == nil {
 		c.Claude.RuntimeImages = RuntimeImages{}
@@ -1643,11 +1555,11 @@ func (c *Config) AgentServerURL() string {
 // applyDefaults (and after ${VAR} expansion in NewConfig) so that values
 // supplied via the environment are also resolved.
 func (c *Config) resolvePaths(rootConfigDir string) {
-	if c.Dsh.BridgeDir != "" && !filepath.IsAbs(c.Dsh.BridgeDir) {
-		c.Dsh.BridgeDir = filepath.Join(rootConfigDir, c.Dsh.BridgeDir)
+	if c.Interactive.BridgeDir != "" && !filepath.IsAbs(c.Interactive.BridgeDir) {
+		c.Interactive.BridgeDir = filepath.Join(rootConfigDir, c.Interactive.BridgeDir)
 	}
-	if c.Dsh.DSHPatch != "" && !filepath.IsAbs(c.Dsh.DSHPatch) {
-		c.Dsh.DSHPatch = filepath.Join(rootConfigDir, c.Dsh.DSHPatch)
+	if c.Interactive.DSHPatch != "" && !filepath.IsAbs(c.Interactive.DSHPatch) {
+		c.Interactive.DSHPatch = filepath.Join(rootConfigDir, c.Interactive.DSHPatch)
 	}
 	if c.BillingRuntime.ConfigDir != "" && !filepath.IsAbs(c.BillingRuntime.ConfigDir) {
 		c.BillingRuntime.ConfigDir = filepath.Join(rootConfigDir, c.BillingRuntime.ConfigDir)
@@ -1711,8 +1623,11 @@ func (c *Config) Validate() error {
 		return err
 	}
 	var errs []string
-	if err := c.Dsh.Validate(); err != nil {
-		errs = append(errs, err.Error())
+	// The interactive Project Creator runtime is optional and disabled by
+	// default. Its provider credential selector must not make an unrelated
+	// Server deployment fail validation while the runtime is disabled.
+	if c.Interactive.Enabled && !interactiveProviderAPIKeyEnvPattern.MatchString(c.Interactive.ProviderAPIKeyEnv) {
+		errs = append(errs, "interactive.provider_api_key_env must be a valid environment variable name")
 	}
 	if c.Trends.TTL <= 0 {
 		errs = append(errs, "trends.ttl must be positive")

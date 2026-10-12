@@ -6,10 +6,8 @@ import {
   resolveInteractivePatchPath,
   assertInteractiveRuntimeCapabilities,
   InteractiveBridge,
-  parseInteractiveRouteArgs,
-  writeDshRouteSettings,
 } from "../src/interactive-bridge.js";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("interactive bridge protocol", () => {
@@ -155,11 +153,6 @@ describe("interactive bridge protocol", () => {
     expect(redactInteractiveSecrets("token=secret-value", "secret-value")).toBe("token=[redacted]");
   });
 
-  test("redacts provider credentials from bridge diagnostics", () => {
-    expect(redactInteractiveSecrets("provider=provider-secret", "runtime-secret", ["provider-secret"]))
-      .toBe("provider=[redacted]");
-  });
-
   test("resolves an explicit DSH patch independently of the process cwd", () => {
     const dir = `/tmp/anban-interactive-bridge-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     mkdirSync(dir, { recursive: true });
@@ -182,19 +175,5 @@ describe("interactive bridge protocol", () => {
       .toThrow("interactive runtime does not support session/answer");
     expect(() => assertInteractiveRuntimeCapabilities({ capabilities: { sessionStart: true, sessionAnswer: true } }))
       .not.toThrow();
-  });
-
-  test("parses server-owned route arguments and writes isolated DSH settings", () => {
-    const route = parseInteractiveRouteArgs([
-      "--provider", "deepseek-official", "--model", "deepseek-v4-flash",
-      "--route-api", "deepseek-messages", "--base-url", "https://api.deepseek.com/anthropic",
-      "--api-key-env", "DEEPSEEK_API_KEY",
-    ]);
-    const home = `/tmp/anban-dsh-route-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const path = writeDshRouteSettings(home, route);
-    const text = readFileSync(path, "utf8");
-    expect(text).toContain('apiKeyEnv: "DEEPSEEK_API_KEY"');
-    expect(text).toContain('baseURL: "https://api.deepseek.com/anthropic"');
-    expect(text).toContain('id: "deepseek-v4-flash"');
   });
 });
