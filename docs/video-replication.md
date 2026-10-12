@@ -125,11 +125,17 @@ commit。v0.2.17 的 TokenDance Provider 仍要求 MiniMax 查询响应包含
 
 本次只完成本地升级验证；未部署或启用业务，真实 Provider 任务的端到端验收仍未完成。
 
-## Hypit v0.3.0 架构升级（2026-10-09）
+## Hypit v0.3.1 架构升级（2026-10-12）
 
-构建默认源码升级到 Hypit `v0.3.0`，固定 commit 为
-`ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1`。Dockerfile、Make 默认值和本地
+构建默认源码升级到 Hypit `v0.3.1`，固定 commit 为
+`8efbac03ed10929b0f4a3c79fe2b3f77b6479daf`。Dockerfile、Make 默认值和本地
 smoke 校验使用同一个不可变 commit。该版本为破坏性架构变更，与 v0.2.x 不兼容：
+
+v0.3.1 延续 v0.3.0 的运行时 Profile 和 Provider 结构；官方迁移说明中关于
+视频域 SDK 独立 npm 包的变更只影响项目组件源码与依赖，不影响本镜像内置的
+官方 CLI、`provider-html-local` 或 Anban 的运行时 Profile。镜像在构建阶段显式以
+`/opt/hypit` 作为 `--project`，避免 CLI 因源码仓库未位于带有
+`hypit.project: true` 的项目目录而拒绝准备外部程序。
 
 - 渲染 Provider 从 `@hypit/provider-hyperframes-local`（endpoint
   `hyperframes.local`）迁移为 `@hypit/provider-html-local`（endpoint
@@ -147,7 +153,7 @@ smoke 校验使用同一个不可变 commit。该版本为破坏性架构变更�
   CLI 命令 `check` / `plan` / `build` / `builds` / `get` 及 `builds --json` 的
   `.builds[].id`。
 - 兼容性：历史任务冻结快照中的旧 endpoint / `use` 名（`hyperframes.local`、
-  `@hypit/provider-media-local`、`@hypit/provider-hyperframes-local`）在 v0.3.0
+  `@hypit/provider-media-local`、`@hypit/provider-hyperframes-local`）在 v0.3.1
   镜像上无法激活，再次改编前须按当前 Profile 重新解析；无法重新解析的旧任务保持
   关闭或改用上一 digest 镜像回滚。
 
@@ -157,7 +163,7 @@ smoke 校验使用同一个不可变 commit。该版本为破坏性架构变更�
 
 托管 Runner 不把第三方 Provider 的原始错误文本作为公共错误协议。它先按结构化 HTTP 状态和受限文本模式，将失败归入固定类别：`provider_content_policy`、`provider_authentication`、`provider_rate_limited`、`provider_timeout`、`provider_unavailable`、`provider_invalid_request`、`provider_protocol_error` 或 `provider_unknown`。未知错误降级为 `provider_unknown`；原始响应、凭据、URL 和未登记的供应商代码不会进入任务结果。
 
-协议错误覆盖响应缺字段、类型错误、Schema / JSON 解析失败和协议不匹配。Hypit v0.2.17 引入、v0.3.0 仍保留的 MiniMax/TokenDance `TOKENDANCE_ERROR: TokenDance task must be an object` 会归类为 `provider_protocol_error`，安全细节代码为 `tokendance_task_shape_invalid`。这表示网关响应与 Hypit Provider 契约不一致，不表示用户项目内容本身有问题。v0.2.17 同时改进了网络层错误原因，未改变该 MiniMax 查询响应契约。
+协议错误覆盖响应缺字段、类型错误、Schema / JSON 解析失败和协议不匹配。Hypit v0.2.17 引入、v0.3.1 仍保留的 MiniMax/TokenDance `TOKENDANCE_ERROR: TokenDance task must be an object` 会归类为 `provider_protocol_error`，安全细节代码为 `tokendance_task_shape_invalid`。这表示网关响应与 Hypit Provider 契约不一致，不表示用户项目内容本身有问题。v0.2.17 同时改进了网络层错误原因，未改变该 MiniMax 查询响应契约。
 
 Hypit 对超时、协议错误和未知远端错误保留官方 Results，并从 `inspect_results` 恢复；鉴权错误从 `review_configuration` 恢复；无效请求从 `repair_project` 恢复。限流和暂时不可用错误可以在确认远端状态后重试，但不会绕过 Server 的幂等和扣费状态。新增 Provider 时只应增加内部匹配规则、固定白名单细节和对应测试，不应透传供应商原文。
 

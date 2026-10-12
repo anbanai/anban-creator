@@ -2,7 +2,7 @@
 # Local rendering only: no hosted generation account is used.
 set -euo pipefail
 image="${1:-creator-agent-hypit:latest}"
-revision="${2:-ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1}"
+revision="${2:-8efbac03ed10929b0f4a3c79fe2b3f77b6479daf}"
 docker info >/dev/null
 docker run --rm -i --platform linux/amd64 --init --cpus 4 --memory 8g \
   --read-only --network none -e HOME=/workspace/.anban-runtime-home \

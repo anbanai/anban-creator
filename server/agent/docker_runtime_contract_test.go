@@ -807,6 +807,15 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	}
 }
 
+func TestHypitRuntimePreparesProgramsWithExplicitProjectRoot(t *testing.T) {
+	path := filepath.Join(repositoryRoot(t), "deploy", "docker", "Dockerfile.agent-hypit")
+	body := readTextFile(t, path)
+	want := "hypit programs prepare --project /opt/hypit --runtime /tmp/runtime-profile.json --endpoint html.local"
+	if !strings.Contains(body, want) {
+		t.Fatalf("%s must pass the official source root explicitly to Hypit project discovery", path)
+	}
+}
+
 func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, name := range []string{
@@ -1186,9 +1195,9 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 		body := readTextFile(t, filepath.Join(root, filepath.FromSlash(configPath)))
 		for _, want := range []string{
 			"executor: \"${ANBAN_AGENT_EXECUTOR}\"",
-			"wechat-article: \"${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE:-creator-agent-wechat-article:latest}\"",
-			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}\"",
-			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}\"",
+			"wechat-article: \"${ANBAN_AGENT_IMAGE_WECHAT_ARTICLE}\"",
+			"seednote: \"${ANBAN_AGENT_IMAGE_SEEDNOTE}\"",
+			"montage: \"${ANBAN_AGENT_IMAGE_MONTAGE}\"",
 			"network: \"${ANBAN_AGENT_DOCKER_NETWORK:-creator-runtime-network}\"",
 			"pids_limit: 512",
 		} {
@@ -1238,26 +1247,30 @@ func TestDockerRuntimeContract(t *testing.T) {
 			t.Fatal("docker-compose.yml has no server service")
 		}
 		for name, want := range map[string]string{
-			"ANBAN_AGENT_EXECUTOR":                "docker",
-			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":    "creator-agent-wechat-article:latest",
-			"ANBAN_AGENT_IMAGE_SEEDNOTE":          "creator-agent-seednote:latest",
-			"ANBAN_AGENT_IMAGE_MONTAGE":           "creator-agent-montage:latest",
-			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":  "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}",
-			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS": "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}",
-			"ANBAN_AGENT_DOCKER_NETWORK":          "creator-runtime-network",
-			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":  "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
-			"ANBAN_BILLING_ADMIN_API_KEY":         "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
-			"ANBAN_JWT_SECRET_KEY":                "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
-			"ANBAN_OSS_ENDPOINT":                  "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
-			"ANBAN_OSS_ACCESS_KEY_ID":             "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
-			"ANBAN_OSS_ACCESS_KEY_SECRET":         "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
-			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":   "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
-			"ANBAN_DEEPSEEK_API_KEY":              "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
-			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":   "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
-			"ANBAN_MOONSHOT_API_KEY":              "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
-			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":      "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
-			"ANBAN_ZHIPU_API_KEY":                 "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
-			"MOONSHOT_API_KEY":                    "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
+			"ANBAN_AGENT_EXECUTOR":                   "docker",
+			"ANBAN_AGENT_IMAGE_WECHAT_ARTICLE":       "creator-agent-wechat-article:latest",
+			"ANBAN_AGENT_IMAGE_SEEDNOTE":             "creator-agent-seednote:latest",
+			"ANBAN_AGENT_IMAGE_MONTAGE":              "creator-agent-montage:latest",
+			"ANBAN_AGENT_IMAGE_MOMENTS":              "creator-agent-moments:latest",
+			"ANBAN_AGENT_IMAGE_ECOMMERCE":            "creator-agent-ecommerce:latest",
+			"ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS":     "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}",
+			"ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS":    "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}",
+			"ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION": "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}",
+			"ANBAN_AGENT_IMAGE_HYPIT":                "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}",
+			"ANBAN_AGENT_DOCKER_NETWORK":             "creator-runtime-network",
+			"ANBAN_AGENT_EXECUTION_TOKEN_SECRET":     "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET:?ANBAN_AGENT_EXECUTION_TOKEN_SECRET is required}",
+			"ANBAN_BILLING_ADMIN_API_KEY":            "${ANBAN_BILLING_ADMIN_API_KEY:?ANBAN_BILLING_ADMIN_API_KEY is required}",
+			"ANBAN_JWT_SECRET_KEY":                   "${ANBAN_JWT_SECRET_KEY:?ANBAN_JWT_SECRET_KEY is required}",
+			"ANBAN_OSS_ENDPOINT":                     "${ANBAN_OSS_ENDPOINT:?ANBAN_OSS_ENDPOINT is required}",
+			"ANBAN_OSS_ACCESS_KEY_ID":                "${ANBAN_OSS_ACCESS_KEY_ID:?ANBAN_OSS_ACCESS_KEY_ID is required}",
+			"ANBAN_OSS_ACCESS_KEY_SECRET":            "${ANBAN_OSS_ACCESS_KEY_SECRET:?ANBAN_OSS_ACCESS_KEY_SECRET is required}",
+			"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL":      "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}",
+			"ANBAN_DEEPSEEK_API_KEY":                 "${ANBAN_DEEPSEEK_API_KEY:?ANBAN_DEEPSEEK_API_KEY is required}",
+			"ANBAN_MOONSHOT_ANTHROPIC_BASE_URL":      "${ANBAN_MOONSHOT_ANTHROPIC_BASE_URL:-https://api.moonshot.cn/anthropic}",
+			"ANBAN_MOONSHOT_API_KEY":                 "${ANBAN_MOONSHOT_API_KEY:?ANBAN_MOONSHOT_API_KEY is required}",
+			"ANBAN_ZHIPU_ANTHROPIC_BASE_URL":         "${ANBAN_ZHIPU_ANTHROPIC_BASE_URL:-https://open.bigmodel.cn/api/anthropic}",
+			"ANBAN_ZHIPU_API_KEY":                    "${ANBAN_ZHIPU_API_KEY:?ANBAN_ZHIPU_API_KEY is required}",
+			"MOONSHOT_API_KEY":                       "${MOONSHOT_API_KEY:?MOONSHOT_API_KEY is required}",
 		} {
 			if got := server.Environment[name]; got != want {
 				t.Errorf("server environment %s = %q, want %q", name, got, want)

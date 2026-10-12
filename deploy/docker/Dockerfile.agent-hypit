@@ -9,7 +9,7 @@ RUN npm run build && npm prune --omit=dev && test -d node_modules/@anthropic-ai/
 FROM node:24-bookworm-slim
 
 ARG HYPIT_REPO=https://github.com/hypit-ai/hypit.git
-ARG HYPIT_REF=ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1
+ARG HYPIT_REF=8efbac03ed10929b0f4a3c79fe2b3f77b6479daf
 ARG PNPM_VERSION=10.33.0
 ARG UV_VERSION=0.10.4
 
@@ -73,7 +73,7 @@ RUN browser_version="$(node -p "require('./packages/provider-html-local/package.
     && find "$browser_cache" -name chrome_crashpad_handler -exec chmod 0755 {} + \
     && rm /tmp/chrome.zip
 COPY deploy/docker/hypit-build-profile.json /tmp/runtime-profile.json
-RUN (hypit programs prepare --runtime /tmp/runtime-profile.json --endpoint html.local || { cat /home/node/.cache/hypit/html-rasterizer/chrome/.hypit-html-browser-program/install.log; exit 1; }) \
+RUN (hypit programs prepare --project /opt/hypit --runtime /tmp/runtime-profile.json --endpoint html.local || { cat /home/node/.cache/hypit/html-rasterizer/chrome/.hypit-html-browser-program/install.log; exit 1; }) \
     && hypit --version \
     && sha256sum --quiet -c /opt/hypit/.anban-source-files.sha256 \
     && rm -rf /tmp/runtime-profile.json /tmp/.hypit-build /home/node/.cache/uv \

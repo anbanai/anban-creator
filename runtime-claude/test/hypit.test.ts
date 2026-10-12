@@ -389,7 +389,7 @@ test.skipIf(!hasMedia)(
           commands.push(args);
           return '{"ok":true}';
         },
-        revision: async () => "ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1",
+        revision: async () => "8efbac03ed10929b0f4a3c79fe2b3f77b6479daf",
       };
       const receipt = await finalizeHypit(
         root,
