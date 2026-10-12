@@ -8,12 +8,13 @@ interface ProjectSelectorProps {
   platform?: string
   excludePlatforms?: string[]
   disabled?: boolean
+  includeArchived?: boolean
 }
 
-export function ProjectSelector({ value, onChange, platform, excludePlatforms = [], disabled = false }: ProjectSelectorProps) {
+export function ProjectSelector({ value, onChange, platform, excludePlatforms = [], disabled = false, includeArchived = false }: ProjectSelectorProps) {
   const { data: projects = [], isLoading } = useQuery({
-    queryKey: ['projects', 'active', platform],
-    queryFn: () => api.projects.list({ status: 'active', platform }),
+    queryKey: ['projects', includeArchived ? 'all' : 'active', platform],
+    queryFn: () => api.projects.list({ status: includeArchived ? undefined : 'active', platform }),
   })
 
   const visibleProjects = projects.filter((ch) => !excludePlatforms.includes(ch.platform ?? ''))

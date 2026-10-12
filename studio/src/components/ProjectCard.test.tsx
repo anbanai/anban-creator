@@ -75,6 +75,20 @@ describe('ProjectCard', () => {
     expect(screen.queryByRole('button', { name: /创建作品/ })).not.toBeInTheDocument()
   })
 
+  it('links each work count to the matching project and status', () => {
+    render(<ProjectCard project={project()} stats={{ ...stats, running_tasks: 1, pending_tasks: 2 }} />)
+    expect(screen.getByRole('link', { name: '查看公众号创作项目的全部作品（10）' })).toHaveAttribute('href', '/tasks?project_id=project-1')
+    expect(screen.getByRole('link', { name: '查看公众号创作项目的已完成作品（8）' })).toHaveAttribute('href', '/tasks?project_id=project-1&status=completed')
+    expect(screen.getByRole('link', { name: '查看公众号创作项目的失败作品（2）' })).toHaveAttribute('href', '/tasks?project_id=project-1&status=failed')
+    expect(screen.getByRole('link', { name: '1 个运行中' })).toHaveAttribute('href', '/tasks?project_id=project-1&status=running')
+    expect(screen.getByRole('link', { name: '2 个待执行' })).toHaveAttribute('href', '/tasks?project_id=project-1&status=pending')
+  })
+
+  it('keeps the work list accessible for archived projects before stats arrive', () => {
+    render(<ProjectCard project={project({ id: 'archived-project', status: 'archived' })} />)
+    expect(screen.getByRole('link', { name: '查看作品：公众号创作项目' })).toHaveAttribute('href', '/tasks?project_id=archived-project')
+  })
+
   it.each(['moments', 'ecommerce'] as const)('keeps legacy %s projects in their basic settings flow', (platform) => {
     render(<ProjectCard project={project({ platform, agent_ids: null, name: '公众号项目' })} onProfile={vi.fn()} onEdit={vi.fn()} />)
     expect(screen.queryByRole('button', { name: '人设画像：公众号项目' })).not.toBeInTheDocument()

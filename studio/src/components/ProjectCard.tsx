@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, MessageSquare, Pause, Play, RefreshCw, RotateCcw, SquarePen, UserRound } from 'lucide-react'
@@ -49,6 +50,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
   const queryClient = useQueryClient()
   const platform = project.platform
   const isArchived = project.status === 'archived'
+  const worksHref = `/tasks?${new URLSearchParams({ project_id: project.id })}`
   const unusedTopics = stats?.unused_topics
   const completionRate = stats && stats.total_tasks > 0
     ? Math.round((stats.completed_tasks / stats.total_tasks) * 100)
@@ -133,18 +135,21 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
               <MetricStrip
                 testId="project-overview-strip"
                 metrics={[
-                  { label: '作品', value: stats.total_tasks },
-                  { label: '已完成', value: stats.completed_tasks },
-                  { label: '失败', value: stats.failed_tasks },
+                  { label: '作品', value: stats.total_tasks, to: worksHref, ariaLabel: `查看${project.name}的全部作品（${stats.total_tasks}）` },
+                  { label: '已完成', value: stats.completed_tasks, to: `${worksHref}&status=completed`, ariaLabel: `查看${project.name}的已完成作品（${stats.completed_tasks}）` },
+                  { label: '失败', value: stats.failed_tasks, to: `${worksHref}&status=failed`, ariaLabel: `查看${project.name}的失败作品（${stats.failed_tasks}）` },
                 ]}
               />
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="创作项目活动">
-                {stats.running_tasks > 0 && <span>{stats.running_tasks} 个运行中</span>}
-                {stats.pending_tasks > 0 && <span>{stats.pending_tasks} 个待执行</span>}
+                {stats.running_tasks > 0 && <Link className="underline underline-offset-4 hover:text-foreground" to={`${worksHref}&status=running`}>{stats.running_tasks} 个运行中</Link>}
+                {stats.pending_tasks > 0 && <Link className="underline underline-offset-4 hover:text-foreground" to={`${worksHref}&status=pending`}>{stats.pending_tasks} 个待执行</Link>}
               </div>
             </div>
           </div>
         )}
+        <Link to={worksHref} aria-label={`查看作品：${project.name}`} className="mt-2 inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          查看作品 <span aria-hidden="true">→</span>
+        </Link>
         {feedbackEnabled && (
           <div className="mt-3 border-t border-border pt-3">
             {!feedbackOpen ? (
