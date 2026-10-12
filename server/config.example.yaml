@@ -85,7 +85,14 @@ search:
     max_web_results: 10
 
 # Optional interactive Project Creator runtime. Sessions are process-local and
-# are discarded when the runtime exits or its lease expires.
+# are discarded when the runtime exits or its lease expires. DSH routing is
+# independent from claude.profiles: changing dsh.route never changes the
+# managed Claude Agent model configuration.
+#
+# api_key_env is only the name of the credential variable that DSH reads. Put
+# the corresponding value in the deployment Secret/environment; never put the
+# secret itself in this file. The Bridge starts the official DSH runtime as
+# `dsh --profile sdk` and passes provider/model through initialize().
 dsh:
   enabled: false
   admin_only: false
@@ -96,11 +103,22 @@ dsh:
   mcp_url: "${ANBAN_INTERACTIVE_MCP_URL:-https://creator.anbanai.com/mcp}"
   route: "effective"
   routes:
+    # DeepSeek's official adapter. This route uses the DSH-native
+    # llm-deepseek configuration and DEEPSEEK_API_KEY.
     effective:
       provider: "deepseek-official"
       api: "deepseek-messages"
       base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
       api_key_env: "DEEPSEEK_API_KEY"
+      model: "deepseek-flash"
+    # Anthropic Messages through an Anthropic-compatible gateway. This route
+    # uses DSH's official llm-pi-ai fields (apiKeyEnv, api, baseURL, models).
+    # Select it with dsh.route: quality when this route is desired.
+    quality:
+      provider: "anthropic"
+      api: "anthropic-messages"
+      base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
+      api_key_env: "ANTHROPIC_AUTH_TOKEN"
       model: "deepseek-flash"
 
 model_providers:
