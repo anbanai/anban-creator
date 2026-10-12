@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1172,6 +1173,44 @@ func TestTaskService_CloneClonesCompletedTask(t *testing.T) {
 	}
 	if len(foundSrc.InputAttachments.Data()) != 3 {
 		t.Fatalf("source resume inputs were mutated: %#v", foundSrc.InputAttachments.Data())
+	}
+}
+
+func TestTaskServiceCloneAcceptsWechatPictureAgentInput(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	source := &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: model.TaskTypeWechatPicture, AgentID: model.AgentIDWechatPicture,
+		Channel: model.ChannelWechatPicture, TaskKind: model.TaskKindContentGeneration,
+		ExecutionProfile: "effective", Status: model.TaskStatusCompleted,
+		Prompt: "picture topic", ImageRatio: "16:9", ImageCapabilityKey: "standard",
+	}
+	source.SetAgentInput(map[string]any{
+		"picture_image_count":      5,
+		"picture_image_count_mode": "up_to",
+		"picture_publish_draft":    true,
+	})
+	freezeTestTaskImageCapability(t, source, "standard", testImageCapabilityRoute("image.standard"))
+	if err := repo.Tasks().Create(ctx, source); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+
+	clones, err := svc.Clone(ctx, source.ID, CloneTaskParams{ExecutionProfile: source.ExecutionProfile})
+	if err != nil {
+		t.Fatalf("Clone WeChat picture task: %v", err)
+	}
+	if len(clones) != 1 {
+		t.Fatalf("clones = %d, want 1", len(clones))
+	}
+	got := clones[0].AgentInput.Data()
+	if fmt.Sprint(got["picture_image_count"]) != "5" {
+		t.Fatalf("clone agent_input = %#v, want picture composer input", got)
+	}
+	if got["picture_image_count_mode"] != "up_to" || got["picture_publish_draft"] != true {
+		t.Fatalf("clone agent_input = %#v, want picture composer input", got)
 	}
 }
 

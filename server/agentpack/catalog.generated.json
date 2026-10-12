@@ -1507,7 +1507,7 @@
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -1633,10 +1633,36 @@
           "mime_type": "application/json"
         }
       ],
+      "schemas": {
+        "task_input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "picture_image_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "description": "Total image count including the cover."
+            },
+            "picture_image_count_mode": {
+              "type": "string",
+              "enum": [
+                "up_to",
+                "exact"
+              ],
+              "description": "Whether the requested image count is an upper bound or exact."
+            },
+            "picture_publish_draft": {
+              "type": "boolean",
+              "description": "Whether the Server should create a WeChat draft after delivery."
+            }
+          }
+        }
+      },
       "ui": {
         "renderer": "custom:wechat-picture"
       },
-      "digest": "8d51d94eb183f1c24a2fb90b761e890f2f4777f170960efb2b3552f8a9401d90"
+      "digest": "cbc24b93044d2d51dc89ff96ef4858fe6b20d6bfb1f7e7528eed302be9361589"
     },
     {
       "id": "whiteboard-animation",

@@ -1159,6 +1159,24 @@ func TestEmbeddedCatalogResolvesCurrentManagedRoutes(t *testing.T) {
 	}
 }
 
+func TestEmbeddedWechatPicturePackAcceptsComposerInput(t *testing.T) {
+	pack, ok := Default().ForTaskType("wechat-picture")
+	if !ok {
+		t.Fatal("embedded Catalog has no wechat-picture route")
+	}
+	input := map[string]any{
+		"picture_image_count":      float64(5),
+		"picture_image_count_mode": "up_to",
+		"picture_publish_draft":    true,
+	}
+	if err := ValidateTaskInput(pack, input); err != nil {
+		t.Fatalf("ValidateTaskInput(%#v) = %v, want accepted composer input", input, err)
+	}
+	if err := ValidateTaskInput(pack, map[string]any{"unknown": true}); err == nil {
+		t.Fatal("ValidateTaskInput accepted an undeclared wechat-picture field")
+	}
+}
+
 func TestCheckRepositoryDetectsGeneratedDrift(t *testing.T) {
 	root := writePackFixture(t, validFixtureManifest)
 	catalogPath := filepath.Join(t.TempDir(), "catalog.generated.json")
