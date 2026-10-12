@@ -457,18 +457,22 @@ export default function PlansPage() {
                 <TooltipContent>查看作品</TooltipContent>
               </Tooltip>
               {plan.status === 'active' ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="min-h-11 gap-1.5"
-                  aria-label={`立即执行：${planLabel}`}
-                  loading={executeMutation.isPending && executeMutation.variables === plan.id}
-                  disabled={executeMutation.isPending}
-                  onClick={() => void executeMutation.mutateAsync(plan.id)}
-                >
-                  <Play className="size-3.5" />立即执行
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-md"
+                      aria-label={`立即执行：${planLabel}`}
+                      loading={executeMutation.isPending && executeMutation.variables === plan.id}
+                      disabled={executeMutation.isPending}
+                      onClick={() => void executeMutation.mutateAsync(plan.id)}
+                    />}
+                  >
+                    <Play className="size-4" />
+                  </TooltipTrigger>
+                  <TooltipContent>立即执行</TooltipContent>
+                </Tooltip>
               ) : null}
               {plan.status === 'active' ? (
                 <Tooltip>
