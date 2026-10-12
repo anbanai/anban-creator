@@ -53,6 +53,14 @@ type BillingRepository interface {
 	LockEntryBySource(ctx context.Context, sourceType, sourceID string) (*model.BillingWalletEntry, error)
 	ListEntriesByUser(ctx context.Context, userID string, offset, limit int) ([]model.BillingWalletEntry, error)
 	CountEntriesByUser(ctx context.Context, userID string) (int64, error)
+	ListEntries(ctx context.Context, userID, eventKind string, offset, limit int) ([]model.BillingWalletEntry, error)
+	CountEntries(ctx context.Context, userID, eventKind string) (int64, error)
+
+	CreateTopUpOperation(ctx context.Context, operation *model.BillingTopUpOperation) error
+	FindTopUpOperationByKey(ctx context.Context, scope, key string) (*model.BillingTopUpOperation, error)
+	UpdateTopUpOperation(ctx context.Context, operation *model.BillingTopUpOperation) error
+	ListTopUpOperations(ctx context.Context, filter BillingTopUpOperationFilter, offset, limit int) ([]model.BillingTopUpOperation, error)
+	CountTopUpOperations(ctx context.Context, filter BillingTopUpOperationFilter) (int64, error)
 
 	CreateCatalogVersion(ctx context.Context, catalog *model.BillingCatalogVersion) error
 	FindCatalogVersion(ctx context.Context, catalogID string) (*model.BillingCatalogVersion, error)
@@ -107,6 +115,14 @@ type BillingRepository interface {
 	FindReferralIssue(ctx context.Context, inviteeUserID, programID string) (*model.BillingReferralIssue, error)
 	UpdateReferralIssue(ctx context.Context, issue *model.BillingReferralIssue) error
 	CountIssuedReferrals(ctx context.Context, inviterUserID, programID string) (int64, error)
+}
+
+type BillingTopUpOperationFilter struct {
+	UserID           string
+	Status           string
+	ExternalSourceID string
+	From             time.Time
+	To               time.Time
 }
 
 type BillingOutstandingDebtCharge struct {
@@ -327,6 +343,88 @@ func (r *billingRepository) CountEntriesByUser(ctx context.Context, userID strin
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.BillingWalletEntry{}).Where("user_id = ?", userID).Count(&count).Error
 	return count, err
+}
+
+func (r *billingRepository) ListEntries(ctx context.Context, userID, eventKind string, offset, limit int) ([]model.BillingWalletEntry, error) {
+	var entries []model.BillingWalletEntry
+	query := r.db.WithContext(ctx).Model(&model.BillingWalletEntry{}).Order("created_at DESC, id DESC").Offset(offset).Limit(limit)
+	if userID != "" {
+		query = query.Where("user_id = ?", userID)
+	}
+	if eventKind != "" {
+		query = query.Where("event_kind = ?", eventKind)
+	}
+	return entries, query.Find(&entries).Error
+}
+
+func (r *billingRepository) CountEntries(ctx context.Context, userID, eventKind string) (int64, error) {
+	var count int64
+	query := r.db.WithContext(ctx).Model(&model.BillingWalletEntry{})
+	if userID != "" {
+		query = query.Where("user_id = ?", userID)
+	}
+	if eventKind != "" {
+		query = query.Where("event_kind = ?", eventKind)
+	}
+	return count, query.Count(&count).Error
+}
+
+func (r *billingRepository) CreateTopUpOperation(ctx context.Context, operation *model.BillingTopUpOperation) error {
+	return r.db.WithContext(ctx).Create(operation).Error
+}
+
+func (r *billingRepository) FindTopUpOperationByKey(ctx context.Context, scope, key string) (*model.BillingTopUpOperation, error) {
+	var operation model.BillingTopUpOperation
+	if err := r.db.WithContext(ctx).Where("idempotency_scope = ? AND idempotency_key = ?", scope, key).First(&operation).Error; err != nil {
+		return nil, err
+	}
+	return &operation, nil
+}
+
+func (r *billingRepository) UpdateTopUpOperation(ctx context.Context, operation *model.BillingTopUpOperation) error {
+	return r.db.WithContext(ctx).Save(operation).Error
+}
+
+func (r *billingRepository) ListTopUpOperations(ctx context.Context, filter BillingTopUpOperationFilter, offset, limit int) ([]model.BillingTopUpOperation, error) {
+	var operations []model.BillingTopUpOperation
+	query := r.db.WithContext(ctx).Model(&model.BillingTopUpOperation{}).Order("created_at DESC, id DESC").Offset(offset).Limit(limit)
+	if filter.UserID != "" {
+		query = query.Where("user_id = ?", filter.UserID)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	if filter.ExternalSourceID != "" {
+		query = query.Where("external_source_id LIKE ?", "%"+filter.ExternalSourceID+"%")
+	}
+	if !filter.From.IsZero() {
+		query = query.Where("created_at >= ?", filter.From)
+	}
+	if !filter.To.IsZero() {
+		query = query.Where("created_at < ?", filter.To)
+	}
+	return operations, query.Find(&operations).Error
+}
+
+func (r *billingRepository) CountTopUpOperations(ctx context.Context, filter BillingTopUpOperationFilter) (int64, error) {
+	var count int64
+	query := r.db.WithContext(ctx).Model(&model.BillingTopUpOperation{})
+	if filter.UserID != "" {
+		query = query.Where("user_id = ?", filter.UserID)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	if filter.ExternalSourceID != "" {
+		query = query.Where("external_source_id LIKE ?", "%"+filter.ExternalSourceID+"%")
+	}
+	if !filter.From.IsZero() {
+		query = query.Where("created_at >= ?", filter.From)
+	}
+	if !filter.To.IsZero() {
+		query = query.Where("created_at < ?", filter.To)
+	}
+	return count, query.Count(&count).Error
 }
 
 func (r *billingRepository) CreateCatalogVersion(ctx context.Context, catalog *model.BillingCatalogVersion) error {

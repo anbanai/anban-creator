@@ -102,6 +102,29 @@ func TestProfileLabProjectSetupMigration(t *testing.T) {
 	}
 }
 
+func TestAdminBillingTopUpOperationMigrationIsAdditiveAndReplaySafe(t *testing.T) {
+	raw, err := os.ReadFile("20261012_admin_billing_topup_operations.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"create table if not exists `billing_topup_operations`",
+		"add column if not exists `replay_of_id` char(36) null",
+		"information_schema.statistics",
+		"drop index `idx_billing_topup_operation_source`",
+		"create index `idx_billing_topup_operation_source`",
+		"unique key `idx_billing_topup_operation_key`",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Errorf("admin billing migration missing %q", fragment)
+		}
+	}
+	if strings.Contains(sql, "drop table") || strings.Contains(sql, "delete from") {
+		t.Fatal("admin billing migration must preserve audit rows")
+	}
+}
+
 func TestTaskFixedSKUBillingMigration(t *testing.T) {
 	raw, err := os.ReadFile("20260911_task_fixed_sku_billing.sql")
 	if err != nil {

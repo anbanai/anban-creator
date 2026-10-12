@@ -1407,7 +1407,9 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 		AdminAPIKey:   cfg.BillingRuntime.AdminAPIKey,
 		InviteBaseURL: "https://creator.anbanai.com/register?invite=",
 	}, log)
-	adminHandler := handler.NewBillingAdminHandler(margin)
+	adminHandler := handler.NewBillingAdminHandler(margin, handler.BillingAdminHandlerOptions{
+		Repo: repo, Referrals: referrals, CatalogID: bundle.Products.CatalogID,
+	})
 	return &billingRuntimeServices{Catalog: catalog, Wallet: wallet, Referrals: referrals, Handler: billingHandler, Worker: worker, Cost: cost, Margin: margin, AdminHandler: adminHandler}, nil
 }
 

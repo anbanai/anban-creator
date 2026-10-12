@@ -67,6 +67,7 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	FindByOpenID(ctx context.Context, openID string) (*model.User, error)
 	FindByInviteCode(ctx context.Context, code string) (*model.User, error)
+	Search(ctx context.Context, query string, limit int) ([]*model.User, error)
 	Create(ctx context.Context, user *model.User) error
 	Update(ctx context.Context, user *model.User) error
 	IncrementInviteCount(ctx context.Context, userID string, maxCount int) (bool, error)

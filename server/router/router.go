@@ -262,6 +262,11 @@ func NewRouter(svc *Services) *fiber.App {
 			app.Get("/api/admin/billing/costs", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Costs)
 			app.Get("/api/admin/billing/margins", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Margins)
 			app.Get("/api/admin/billing/reconciliation", adminBillingLimiter, svc.BillingHandler.AdminAuth, svc.BillingAdminHandler.Reconciliation)
+			adminStudioBilling := apiV1.Group("/admin/billing", adminBillingLimiter)
+			adminStudioBilling.Get("/users", svc.BillingAdminHandler.Users)
+			adminStudioBilling.Post("/topups", svc.BillingAdminHandler.TopUp)
+			adminStudioBilling.Get("/topups", svc.BillingAdminHandler.TopUpOperations)
+			adminStudioBilling.Get("/entries", svc.BillingAdminHandler.Entries)
 		}
 	}
 

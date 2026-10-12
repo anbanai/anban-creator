@@ -111,3 +111,62 @@ export interface BillingReferral {
   issue_id?: string
   issued_at?: string
 }
+
+export interface AdminBillingUser {
+  id: string
+  email: string
+  nickname: string
+  tier: string
+  is_admin: boolean
+  wallet: BillingWallet
+}
+
+export type AdminTopUpStatus = 'pending' | 'succeeded' | 'failed' | 'replayed'
+
+export interface AdminTopUpOperation {
+  id: string
+  user_id: string
+  admin_user_id: string
+  credits: number
+  external_source_type: string
+  external_source_id: string
+  status: AdminTopUpStatus
+  original_status?: AdminTopUpStatus
+  replay_of_id?: string
+  error_code?: string
+  error_message?: string
+  entry_id?: string
+  paid_credits_added: number
+  debt_repaid_credits: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AdminWalletEntry {
+  id: string
+  user_id: string
+  event_kind: BillingWalletEventKind
+  paid_delta: number
+  promotional_delta: number
+  debt_delta: number
+  catalog_id?: string
+  source_type?: string
+  source_id?: string
+  resource_type?: string
+  resource_id?: string
+  created_at: string
+}
+
+export interface AdminTopUpOperations {
+  items: AdminTopUpOperation[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface AdminWalletEntries {
+  items: AdminWalletEntry[]
+  total: number
+  offset: number
+  limit: number
+}

@@ -135,6 +135,12 @@ export type {
   ScheduleRecommendation,
   BillingReferralProgram,
   BillingReferral,
+  AdminBillingUser,
+  AdminTopUpStatus,
+  AdminTopUpOperation,
+  AdminWalletEntry,
+  AdminTopUpOperations,
+  AdminWalletEntries,
 } from './billing'
 
 // API Key

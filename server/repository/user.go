@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -80,6 +81,23 @@ func (r *userRepository) FindByInviteCode(ctx context.Context, code string) (*mo
 		return nil, err
 	}
 	return &user, nil
+}
+
+func (r *userRepository) Search(ctx context.Context, query string, limit int) ([]*model.User, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	query = strings.TrimSpace(query)
+	users := make([]*model.User, 0, limit)
+	db := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Limit(limit)
+	if query != "" {
+		like := "%" + query + "%"
+		db = db.Where("id LIKE ? OR email LIKE ? OR nickname LIKE ?", like, like, like)
+	}
+	if err := db.Find(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
 }
 
 func (r *userRepository) Create(ctx context.Context, user *model.User) error {

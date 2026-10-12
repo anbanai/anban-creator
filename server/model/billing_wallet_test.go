@@ -357,6 +357,7 @@ func TestBillingAutoMigrateCreatesExactTablesAndIndexes(t *testing.T) {
 		"billing_settlement_outbox",
 		"billing_sku_tier_prices",
 		"billing_skus",
+		"billing_topup_operations",
 		"billing_wallet_accounts",
 		"billing_wallet_entries",
 	}

@@ -62,6 +62,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&BillingWalletAccount{},
 		&BillingCreditLot{},
 		&BillingWalletEntry{},
+		&BillingTopUpOperation{},
 		&BillingCatalogVersion{},
 		&BillingSKU{},
 		&BillingSKUTierPrice{},

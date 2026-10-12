@@ -29,6 +29,15 @@ const (
 	BillingWalletEventKindExpiry        BillingWalletEventKind = "expiry"
 )
 
+type BillingTopUpOperationStatus string
+
+const (
+	BillingTopUpOperationStatusPending   BillingTopUpOperationStatus = "pending"
+	BillingTopUpOperationStatusSucceeded BillingTopUpOperationStatus = "succeeded"
+	BillingTopUpOperationStatusFailed    BillingTopUpOperationStatus = "failed"
+	BillingTopUpOperationStatusReplayed  BillingTopUpOperationStatus = "replayed"
+)
+
 type BillingChargeKind string
 
 const (
@@ -193,6 +202,34 @@ type BillingWalletEntry struct {
 }
 
 func (BillingWalletEntry) TableName() string { return "billing_wallet_entries" }
+
+// BillingTopUpOperation is the server-owned audit record for an administrator
+// initiated top-up request. It exists even when the wallet mutation fails.
+type BillingTopUpOperation struct {
+	ID          string `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID      string `gorm:"type:char(36);index;not null" json:"user_id"`
+	AdminUserID string `gorm:"type:char(36);index;not null" json:"admin_user_id"`
+	// Credits intentionally has no positive-value check: failed audit rows must
+	// preserve invalid administrator input such as zero or negative credits.
+	Credits            int64                       `gorm:"not null" json:"credits"`
+	ExternalSourceType string                      `gorm:"type:varchar(40);index:idx_billing_topup_operation_source,priority:1;not null" json:"external_source_type"`
+	ExternalSourceID   string                      `gorm:"type:varchar(128);index:idx_billing_topup_operation_source,priority:2;not null" json:"external_source_id"`
+	CatalogID          string                      `gorm:"type:varchar(128);not null" json:"catalog_id"`
+	RequestFingerprint string                      `gorm:"type:char(64);not null" json:"request_fingerprint"`
+	IdempotencyScope   string                      `gorm:"type:varchar(80);uniqueIndex:idx_billing_topup_operation_key,priority:1;not null" json:"idempotency_scope"`
+	IdempotencyKey     string                      `gorm:"type:varchar(128);uniqueIndex:idx_billing_topup_operation_key,priority:2;not null" json:"idempotency_key"`
+	Status             BillingTopUpOperationStatus `gorm:"type:varchar(20);index;not null" json:"status"`
+	ReplayOfID         string                      `gorm:"type:char(36);index" json:"replay_of_id,omitempty"`
+	ErrorCode          string                      `gorm:"type:varchar(80)" json:"error_code,omitempty"`
+	ErrorMessage       string                      `gorm:"type:varchar(255)" json:"error_message,omitempty"`
+	EntryID            string                      `gorm:"type:char(36);index" json:"entry_id,omitempty"`
+	PaidCreditsAdded   int64                       `gorm:"not null;default:0" json:"paid_credits_added"`
+	DebtRepaidCredits  int64                       `gorm:"not null;default:0" json:"debt_repaid_credits"`
+	CreatedAt          time.Time                   `gorm:"index" json:"created_at"`
+	UpdatedAt          time.Time                   `json:"updated_at"`
+}
+
+func (BillingTopUpOperation) TableName() string { return "billing_topup_operations" }
 
 // BillingCatalogVersion is an immutable published retail-catalog snapshot.
 type BillingCatalogVersion struct {
