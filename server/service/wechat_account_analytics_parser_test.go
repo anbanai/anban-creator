@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 
@@ -181,5 +182,36 @@ func TestParseWechatAccountAnalyticsWorkbookRejectsNegativeAndUnsupportedData(t 
 	}
 	if _, err := ParseWechatAccountAnalyticsWorkbook(unsupportedBuf.Bytes(), time.FixedZone("Asia/Shanghai", 8*60*60)); err == nil {
 		t.Fatal("unsupported workbook should fail preview")
+	}
+}
+
+func TestParseWechatAccountAnalyticsWorkbookExplainsContentAnalyticsExport(t *testing.T) {
+	file := xlsx.NewFile()
+	sheet, err := file.AddSheet("数据来源概况")
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := sheet.AddRow()
+	for _, value := range []string{"内容标题", "发表日期", "阅读人数", "分享人数", "阅读后关注人数", "送达人数", "送达完成率", "阅读完成率", "内容url"} {
+		header.AddCell().SetString(value)
+	}
+	data := sheet.AddRow()
+	for _, value := range []string{"文章", "20261010", "1", "0", "0", "1", "1", "1", "https://example.com"} {
+		data.AddCell().SetString(value)
+	}
+	var buf bytes.Buffer
+	if err := file.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ParseWechatAccountAnalyticsWorkbook(buf.Bytes(), time.FixedZone("Asia/Shanghai", 8*60*60))
+	if err == nil {
+		t.Fatal("content analytics export should be rejected by account parser")
+	}
+	if !errors.Is(err, ErrWechatAccountAnalyticsWorkbookUnsupported) {
+		t.Fatalf("error = %q, want unsupported workbook sentinel", err)
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("公众号内容分析报表")) || !bytes.Contains([]byte(err.Error()), []byte("导入单篇内容")) {
+		t.Fatalf("error = %q, want actionable content-import guidance", err)
 	}
 }

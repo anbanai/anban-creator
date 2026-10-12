@@ -98,6 +98,9 @@ func ParseWechatAccountAnalyticsWorkbook(data []byte, location *time.Location) (
 	}
 	headerIndex, columns := findWechatAccountHeader(rows)
 	if headerIndex < 0 {
+		if contentHeaderIndex, _ := findWechatHeader(rows); contentHeaderIndex >= 0 {
+			return nil, fmt.Errorf("%w: 检测到公众号内容分析报表，请在“内容表现”区域使用“导入单篇内容”；账号导入需要账号每日统计表", ErrWechatAccountAnalyticsWorkbookUnsupported)
+		}
 		return nil, fmt.Errorf("%w: date and account metric headers were not found", ErrWechatAccountAnalyticsWorkbookUnsupported)
 	}
 	if len(rows)-headerIndex-1 > MaxWechatAnalyticsImportRows {
