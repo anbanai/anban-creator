@@ -39,10 +39,10 @@ The shared scheduler configuration is:
   to mint short-lived workload tokens.
 
 The Server never builds missing runtime images. `make docker-up` builds the
-configured local Agent images before starting Compose; direct `docker compose` users
-must build or pull them first. Production deployments should publish and select
-immutable image digests so a persisted execution can always resume with the
-same runtime identity.
+Server and configured local Agent images from the same checkout before starting
+Compose; direct `docker compose` users must build or pull them first. Production
+deployments should publish and select immutable image digests so a persisted
+execution can always resume with the same runtime identity.
 
 The Docker executor requires access to a Docker daemon. Compose mounts
 `/var/run/docker.sock` into the Server and uses the host socket group through
@@ -73,7 +73,7 @@ cp .env.example .env
 # Fill every required value in .env before starting Compose.
 
 # Start infra and services with Docker Compose
-# (builds all three managed runtime images before startup)
+# (builds the Server and managed runtime images before startup)
 make docker-up
 
 # Or run server and web separately during development

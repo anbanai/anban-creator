@@ -1222,7 +1222,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"docker-up: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
+		"docker-up: docker-server-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
 		"DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)",
 		"DOCKER_GID=\"$(DOCKER_SOCKET_GID)\" docker compose up -d",
 	} {

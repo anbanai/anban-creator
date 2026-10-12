@@ -189,9 +189,11 @@ web-build:
 # Agent Pack revision without requiring a Docker build argument.
 docker-agent-build-check: agent-pack-check
 
-# Build all one-shot task runtimes, then start the Compose services. Runtime
-# containers are launched on demand by the server and are not Compose services.
-docker-up: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
+# Build the Server and all one-shot task runtimes from this checkout, then
+# start the Compose services. Runtime containers are launched on demand by the
+# Server and are not Compose services; rebuilding the Server here keeps its
+# embedded Agent Pack Catalog aligned with the images just built.
+docker-up: docker-server-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
 	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
