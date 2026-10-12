@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { readFile } from "node:fs/promises";
 
-import { bootstrap, executionProfileFingerprint, resolveAgentPackForTaskType, validateAgentPackCatalog, validateAgentPackCatalogDigest, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
+import { bootstrap, executionProfileFingerprint, readAgentPackCatalogWithDigest, resolveAgentPackForTaskType, validateAgentPackCatalog, validateAgentPackCatalogDigest, validateBootstrapResponse, type AgentPackCatalog, type BootstrapResponse } from "../src/bootstrap.js";
 import type { JobConfig } from "../src/config.js";
 
 const tokenFor = (claims: Record<string, string>) => `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
@@ -96,8 +96,10 @@ describe("validateBootstrapResponse", () => {
         workloadTokenFile: "/token",
         allowHTTPServer: false,
       };
-      await expect(bootstrap(config, "workload-token")).rejects.toThrow("HTTP 503");
+      const catalogPath = new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname;
+      await expect(bootstrap(config, "workload-token", undefined, catalogPath)).rejects.toThrow("HTTP 503");
       expect(request?.headers.get("X-Anban-Agent-Contract-Version")).toBe("6");
+      expect(request?.headers.get("X-Anban-Agent-Pack-Catalog-Digest")).toBe((await readAgentPackCatalogWithDigest(catalogPath)).digest);
       expect(request?.body).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
@@ -119,7 +121,7 @@ describe("validateBootstrapResponse", () => {
         workloadTokenFile: "/token",
         allowHTTPServer: false,
       };
-      await expect(bootstrap(config, "workload-token")).rejects.toThrow(
+      await expect(bootstrap(config, "workload-token", undefined, new URL("../../harness/agent-pack-catalog.json", import.meta.url).pathname)).rejects.toThrow(
         "bootstrap returned HTTP 426: agent_runtime_upgrade_required: agent runtime contract upgrade required",
       );
     } finally {

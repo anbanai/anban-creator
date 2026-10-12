@@ -199,10 +199,15 @@ export async function readWorkloadToken(path: string): Promise<string> {
   return token;
 }
 
-export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal): Promise<ResolvedBootstrapResponse> {
+export async function bootstrap(config: JobConfig, token: string, signal?: AbortSignal, catalogPath = DEFAULT_AGENT_PACK_CATALOG_PATH): Promise<ResolvedBootstrapResponse> {
+  const localCatalog = await readAgentPackCatalogWithDigest(catalogPath);
   const response = await fetch(`${config.serverURL}/api/v1/agent/bootstrap`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION) },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Anban-Agent-Contract-Version": String(AGENT_RUNTIME_CONTRACT_VERSION),
+      "X-Anban-Agent-Pack-Catalog-Digest": localCatalog.digest,
+    },
     signal,
     redirect: "error",
   });
@@ -217,7 +222,6 @@ export async function bootstrap(config: JobConfig, token: string, signal?: Abort
   if (envelope.code !== 0 || !envelope.data) throw new Error("bootstrap request rejected");
   try {
     const data = validateBootstrapResponse(config.executionID, envelope.data);
-    const localCatalog = await readAgentPackCatalogWithDigest();
     validateAgentPackCatalogDigest(data, localCatalog.digest);
     const pack = validateAgentPackCatalog(data, localCatalog.catalog);
     return { ...data, resolved_agent_pack: pack };
