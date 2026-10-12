@@ -6,6 +6,8 @@ import { resolve } from "node:path";
 
 type JsonRecord = Record<string, unknown>;
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const PROVIDER_REGISTRATION_RETRIES = 20;
+const PROVIDER_REGISTRATION_RETRY_MS = 50;
 
 export interface InteractiveCommand {
   id?: string | number;
@@ -46,12 +48,14 @@ export interface InteractiveRouteConfig {
 }
 
 export function parseInteractiveRouteArgs(argv = process.argv.slice(2)): InteractiveRouteConfig {
+  const supported = new Set(["--provider", "--model", "--route-api", "--base-url", "--api-key-env"]);
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
-    if (!key.startsWith("--")) continue;
+    if (!key.startsWith("--")) throw new Error(`unsupported interactive bridge argument: ${key}`);
+    if (!supported.has(key)) throw new Error(`unsupported interactive bridge argument: ${key}`);
     const value = argv[index + 1];
-    if (value === undefined || value.startsWith("--")) throw new Error(`${key} requires a value`);
+    if (value === undefined || value.startsWith("--") || value.trim() === "") throw new Error(`${key} requires a value`);
     values.set(key, value.trim());
     index += 1;
   }
@@ -60,10 +64,15 @@ export function parseInteractiveRouteArgs(argv = process.argv.slice(2)): Interac
     if (!value) throw new Error(`${key} is required`);
     return value;
   };
-  return {
+  const route = {
     provider: read("--provider"), model: read("--model"), api: read("--route-api"),
     baseURL: read("--base-url"), apiKeyEnv: read("--api-key-env"),
   };
+  if (!ENV_NAME_PATTERN.test(route.apiKeyEnv)) throw new Error("--api-key-env must be a valid environment variable name");
+  if (route.provider !== "deepseek-official" && route.provider !== "anthropic") {
+    throw new Error(`unsupported DSH provider: ${route.provider}`);
+  }
+  return route;
 }
 
 function yamlQuote(value: string): string {
@@ -71,6 +80,12 @@ function yamlQuote(value: string): string {
 }
 
 export function writeDshRouteSettings(dshHome: string, route: InteractiveRouteConfig): string {
+  if (route.provider !== "deepseek-official" && route.provider !== "anthropic") {
+    throw new Error(`unsupported DSH provider: ${route.provider}`);
+  }
+  if (!ENV_NAME_PATTERN.test(route.apiKeyEnv)) {
+    throw new Error("api_key_env must be a valid environment variable name");
+  }
   mkdirSync(dshHome, { recursive: true, mode: 0o700 });
   const model = `        - id: ${yamlQuote(route.model)}\n          contextWindow: 262144\n          maxTokens: 32768`;
   const body = route.provider === "deepseek-official"
@@ -79,6 +94,23 @@ export function writeDshRouteSettings(dshHome: string, route: InteractiveRouteCo
   const path = resolve(dshHome, "settings.yaml");
   writeFileSync(path, body, { encoding: "utf8", mode: 0o600 });
   return path;
+}
+
+async function initializeRuntimeClient(
+  client: InteractiveRuntimeClient,
+  route: InteractiveRouteConfig,
+): Promise<unknown> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await client.initialize({ cwd: process.cwd(), provider: route.provider, model: route.model });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes(`no adapter registered for provider "${route.provider}"`) || attempt >= PROVIDER_REGISTRATION_RETRIES) {
+        throw error;
+      }
+      await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, PROVIDER_REGISTRATION_RETRY_MS));
+    }
+  }
 }
 
 /** Fail closed when an older DSH runtime cannot drive interactive sessions. */
@@ -287,11 +319,7 @@ export class InteractiveBridge {
       }
       this.client = client;
       client.start();
-      const initializeResult = await client.initialize({
-        cwd: process.cwd(),
-        provider: route.provider,
-        model: route.model,
-      });
+      const initializeResult = await initializeRuntimeClient(client, route);
       assertInteractiveRuntimeCapabilities(initializeResult);
       if (!this.rootSessionId) throw new Error("ANBAN_INTERACTIVE_SESSION_ID is required");
       this.subscription = client.subscribeSessionTree(this.rootSessionId);

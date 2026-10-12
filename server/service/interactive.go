@@ -1688,7 +1688,7 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, 
 	return r, nil
 }
 
-func interactiveRuntimeEnvironment(dshHome, providerAPIKeyEnv string) []string {
+func interactiveRuntimeEnvironment(dshHome, credentialEnv string) []string {
 	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR", "NODE_EXTRA_CA_CERTS"}
 	env := make([]string, 0, len(keys)+5)
 	for _, key := range keys {
@@ -1697,29 +1697,22 @@ func interactiveRuntimeEnvironment(dshHome, providerAPIKeyEnv string) []string {
 		}
 	}
 	env = append(env, "HOME="+dshHome, "USERPROFILE="+dshHome)
-	if validInteractiveEnvName(providerAPIKeyEnv) {
-		value, ok := os.LookupEnv(providerAPIKeyEnv)
-		// Server deployments keep the provider credential under the
-		// ANBAN_* namespace. The DSH DeepSeek adapter, however, intentionally
-		// reads DEEPSEEK_API_KEY. Bridge that deployment name at the process
-		// boundary without exposing the Server's full environment.
-		if (!ok || value == "") && providerAPIKeyEnv == "DEEPSEEK_API_KEY" {
-			value, ok = os.LookupEnv("ANBAN_DEEPSEEK_API_KEY")
-		}
+	if validInteractiveEnvName(credentialEnv) {
+		value, ok := os.LookupEnv(credentialEnv)
 		if ok {
-			env = append(env, providerAPIKeyEnv+"="+value)
+			env = append(env, credentialEnv+"="+value)
 		}
 	}
 	return env
 }
 
-func interactiveProviderCredential(providerAPIKeyEnv string) string {
-	if !validInteractiveEnvName(providerAPIKeyEnv) {
+func interactiveProviderCredential(credentialEnv string) string {
+	if !validInteractiveEnvName(credentialEnv) {
 		return ""
 	}
-	value, ok := os.LookupEnv(providerAPIKeyEnv)
-	if (!ok || value == "") && providerAPIKeyEnv == "DEEPSEEK_API_KEY" {
-		value, _ = os.LookupEnv("ANBAN_DEEPSEEK_API_KEY")
+	value, ok := os.LookupEnv(credentialEnv)
+	if !ok {
+		return ""
 	}
 	return value
 }

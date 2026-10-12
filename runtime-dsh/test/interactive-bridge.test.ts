@@ -197,4 +197,47 @@ describe("interactive bridge protocol", () => {
     expect(text).toContain('baseURL: "https://api.deepseek.com/anthropic"');
     expect(text).toContain('id: "deepseek-v4-flash"');
   });
+
+  test("writes anthropic routes through the official llm-pi-ai fields", () => {
+    const route = {
+      provider: "anthropic",
+      model: "deepseek-flash",
+      api: "anthropic-messages",
+      baseURL: "https://api.deepseek.com/anthropic",
+      apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
+    };
+    const home = `/tmp/anban-dsh-anthropic-route-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const text = readFileSync(writeDshRouteSettings(home, route), "utf8");
+    expect(text).toContain("llm-pi-ai:");
+    expect(text).toContain("    anthropic:");
+    expect(text).toContain('apiKeyEnv: "ANTHROPIC_AUTH_TOKEN"');
+    expect(text).toContain('api: "anthropic-messages"');
+    expect(text).toContain('baseURL: "https://api.deepseek.com/anthropic"');
+    expect(text).toContain('id: "deepseek-flash"');
+  });
+
+  test("retries only the transient provider-registration handshake failure", async () => {
+    let attempts = 0;
+    const client = {
+      start: () => undefined,
+      initialize: async () => {
+        attempts += 1;
+        if (attempts < 2) throw new Error('no adapter registered for provider "anthropic"');
+        return { capabilities: { sessionStart: true, sessionAnswer: true } };
+      },
+      request: async () => ({}),
+      subscribeSessionTree: () => ({ next: async () => { throw new Error("closed"); }, close: () => undefined }),
+      close: async () => undefined,
+    };
+    const bridge = new InteractiveBridge(() => undefined, () => client, "root", {
+      provider: "anthropic",
+      model: "deepseek-flash",
+      api: "anthropic-messages",
+      baseURL: "https://api.deepseek.com/anthropic",
+      apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
+    });
+    await bridge.command({ method: "session/prompt", params: { sessionId: "root" } });
+    expect(attempts).toBe(2);
+    await bridge.dispose();
+  });
 });

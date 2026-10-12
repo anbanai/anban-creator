@@ -131,7 +131,7 @@ func TestRuntimeSmokeGeneratedServerConfigUsesProfileEnvs(t *testing.T) {
 			t.Errorf("runtime smoke config missing %q", required)
 		}
 	}
-	profilesStart := strings.Index(text, "  execution_profiles:\n")
+	profilesStart := strings.Index(text, "  profiles:\n")
 	if profilesStart < 0 {
 		t.Fatal("runtime smoke execution profile block is missing")
 	}
