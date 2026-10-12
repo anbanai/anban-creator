@@ -20,7 +20,6 @@ HYPIT_SOURCE_REF ?= ff7582a3ff5f5320d5e11e1a11aa76d14f84fea1
 OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git
 OPENMONTAGE_SOURCE_REF ?= 9327439db69021ab4b0e2776729bf3b58fdb5a87
 SERVER_IMAGE := anban-creator-server:latest
-AGENT_PACK_CATALOG_DIGEST := $(shell sha256sum server/agentpack/catalog.generated.json 2>/dev/null | awk '{print $$1}')
 SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest
 SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest
 SIDECAR_ILINK_REPO ?= https://github.com/lich0821/wcfLink.git
@@ -42,7 +41,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images \
         agent-runtime-release-manifest
 
-.PHONY: docker-runtime-smoke docker-hypit-smoke
+.PHONY: docker-runtime-smoke docker-hypit-smoke docker-agent-build-check
 
 # Default target
 all: server-build
@@ -186,10 +185,14 @@ web-build:
 # Docker targets
 # ---------------------------------------------------------------------------
 
+# Keep image contents and the embedded Server catalog on the same generated
+# Agent Pack revision without requiring a Docker build argument.
+docker-agent-build-check: agent-pack-check
+
 # Build all one-shot task runtimes, then start the Compose services. Runtime
 # containers are launched on demand by the server and are not Compose services.
 docker-up: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image
-	@ANBAN_AGENT_PACK_CATALOG_DIGEST="$(AGENT_PACK_CATALOG_DIGEST)" DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
+	@DOCKER_GID="$(DOCKER_SOCKET_GID)" docker compose up -d
 
 # Stop infrastructure services
 docker-down:
@@ -200,57 +203,57 @@ docker-logs:
 	@docker compose logs -f
 
 # Build the minimal Article Agent image.
-docker-wechat-article-agent-image:
-	@test -n "$(AGENT_PACK_CATALOG_DIGEST)" && docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .
+docker-wechat-article-agent-image: docker-agent-build-check
+	docker build -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .
 
 # Build the WeChat picture Agent image.
-docker-wechat-picture-agent-image:
-	@test -n "$(AGENT_PACK_CATALOG_DIGEST)" && docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .
+docker-wechat-picture-agent-image: docker-agent-build-check
+	docker build -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .
 
 # Build the independent Seednote workflow image.
-docker-seednote-agent-image:
+docker-seednote-agent-image: docker-agent-build-check
 	@echo "Building $(SEEDNOTE_AGENT_IMAGE)..." && \
-	docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) . && \
 	echo "Image build complete: $(SEEDNOTE_AGENT_IMAGE)"
 
 # Build the dedicated Montage Agent with its pinned OpenMontage runtime.
-docker-montage-agent-image:
+docker-montage-agent-image: docker-agent-build-check
 	@echo "Building $(MONTAGE_AGENT_IMAGE)..." && \
-	docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-montage \
+	docker build -f deploy/docker/Dockerfile.agent-montage \
 		--build-arg OPENMONTAGE_REPO="$(OPENMONTAGE_SOURCE_REPO)" \
 		--build-arg OPENMONTAGE_REF="$(OPENMONTAGE_SOURCE_REF)" \
 		-t $(MONTAGE_AGENT_IMAGE) . && \
 		echo "Image build complete: $(MONTAGE_AGENT_IMAGE)"
 
 # Build the Moments Agent image.
-docker-moments-agent-image:
-	@docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .
+docker-moments-agent-image: docker-agent-build-check
+	@docker build -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .
 
 # Build the Ecommerce Agent image.
-docker-ecommerce-agent-image:
-	@docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .
+docker-ecommerce-agent-image: docker-agent-build-check
+	@docker build -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .
 
 # Build the minimal dedicated Profile Analysis Agent runtime.
-docker-profile-analysis-agent-image:
+docker-profile-analysis-agent-image: docker-agent-build-check
 	@echo "Building $(PROFILE_ANALYSIS_AGENT_IMAGE)..." && \
-	docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-profile-analysis -t $(PROFILE_ANALYSIS_AGENT_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.agent-profile-analysis -t $(PROFILE_ANALYSIS_AGENT_IMAGE) . && \
 	echo "Image build complete: $(PROFILE_ANALYSIS_AGENT_IMAGE)"
 
 # Build the minimal Feedback Analysis Agent runtime without media or publishing tools.
-docker-feedback-analysis-agent-image:
+docker-feedback-analysis-agent-image: docker-agent-build-check
 	@echo "Building $(FEEDBACK_ANALYSIS_AGENT_IMAGE)..." && \
-	docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-feedback-analysis -t $(FEEDBACK_ANALYSIS_AGENT_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.agent-feedback-analysis -t $(FEEDBACK_ANALYSIS_AGENT_IMAGE) . && \
 	echo "Image build complete: $(FEEDBACK_ANALYSIS_AGENT_IMAGE)"
 
-docker-whiteboard-animation-agent-image:
-	docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-whiteboard-animation \
+docker-whiteboard-animation-agent-image: docker-agent-build-check
+	docker build -f deploy/docker/Dockerfile.agent-whiteboard-animation \
 		--build-arg WHITEBOARD_ANIMATION_REPO=https://github.com/geeklee/srt-whiteboard-animation.git \
 		--build-arg WHITEBOARD_ANIMATION_REF=696a7243c0e6ffb6827676e539c2ca5ebae2bf6b \
 		-t $(WHITEBOARD_ANIMATION_AGENT_IMAGE) .
 
 # Build official source and prepare its tools without modifying upstream code.
-docker-hypit-agent-image:
-	docker build --platform linux/amd64 --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-hypit \
+docker-hypit-agent-image: docker-agent-build-check
+	docker build --platform linux/amd64 -f deploy/docker/Dockerfile.agent-hypit \
 		--build-arg HYPIT_REPO="$(HYPIT_SOURCE_REPO)" \
 		--build-arg HYPIT_REF="$(HYPIT_SOURCE_REF)" \
 		-t $(HYPIT_AGENT_IMAGE) .
@@ -263,10 +266,10 @@ docker-runtime-smoke:
 	@deploy/docker/runtime-smoke.sh
 
 # Build the anban-creator-server Docker image
-docker-server-image:
+docker-server-image: docker-agent-build-check
 	@git submodule update --init --recursive
 	@echo "Building $(SERVER_IMAGE)..." && \
-	docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.server -t $(SERVER_IMAGE) . && \
+	docker build -f deploy/docker/Dockerfile.server -t $(SERVER_IMAGE) . && \
 	echo "Image build complete: $(SERVER_IMAGE)"
 
 docker-sidecar-ilink-image:

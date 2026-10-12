@@ -29,6 +29,14 @@ func TestClaudeConfigRejectsExecutionProfileEnvDefaults(t *testing.T) {
 	}
 }
 
+func TestClaudeConfigRejectsCatalogDigestRuntimeSetting(t *testing.T) {
+	body := strings.Replace(validClaudeConfigYAML, "claude:\n", "claude:\n  agent_pack_catalog_digest: \""+strings.Repeat("a", 64)+"\"\n", 1)
+	_, err := loadClaudeConfigYAML(t, body)
+	if err == nil || !strings.Contains(err.Error(), `unknown claude config field "agent_pack_catalog_digest"`) {
+		t.Fatalf("NewConfig() error = %v, want removed runtime setting rejection", err)
+	}
+}
+
 func TestConfigExampleLoadsAsCompleteConfiguration(t *testing.T) {
 	raw, err := os.ReadFile("../config.example.yaml")
 	if err != nil {

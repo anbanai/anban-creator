@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/model"
 )
@@ -17,7 +16,6 @@ func baseKubernetesConfigForTest() Config {
 	claude := validClaudeConfigForTest()
 	claude.Executor = "kubernetes"
 	claude.AgentServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
-	claude.AgentPackCatalogDigest = agentpack.CatalogDigest()
 	claude.ExecutionTokenSecret = "0123456789abcdef0123456789abcdef"
 	claude.RuntimeImages = RuntimeImages{
 		"wechat-article":                  "registry.example.com/creator-agent-wechat-article@sha256:" + strings.Repeat("a", 64),
@@ -138,15 +136,6 @@ func TestValidateKubernetesRejectsMutableRuntimeImageReferences(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), `claude.runtime_images.wechat-picture must use an immutable image digest`) {
 		t.Fatalf("Validate() error = %v, want immutable image digest rejection", err)
-	}
-}
-
-func TestValidateRejectsCatalogDigestDrift(t *testing.T) {
-	cfg := baseKubernetesConfigForTest()
-	cfg.Claude.AgentPackCatalogDigest = strings.Repeat("a", 64)
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "claude.agent_pack_catalog_digest must equal the embedded Agent Pack Catalog digest") {
-		t.Fatalf("Validate() error = %v, want Catalog digest rejection", err)
 	}
 }
 

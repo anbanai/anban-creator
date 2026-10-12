@@ -174,9 +174,11 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if len(serverDocs) < 2 {
 		t.Fatalf("server deployment manifest has %d documents, want PVC and Deployment", len(serverDocs))
 	}
-	if strings.Contains(serverDocs[1], "labels:\n    anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest}") ||
-		strings.Contains(serverDocs[1], "labels:\r\n    anban.ai/agent-pack-catalog-digest: ${agent_pack_catalog_digest}") {
-		t.Fatal("full catalog digest must not be used as a Kubernetes label value; keep it in annotations/env")
+	if !strings.Contains(serverDocs[1], "annotations:\n    anban.ai/agent-pack-catalog-digest: ${catalog_digest}") {
+		t.Fatal("release catalog digest must remain available as a Deployment audit annotation")
+	}
+	if strings.Contains(serverDocs[1], "name: ANBAN_AGENT_PACK_CATALOG_DIGEST") {
+		t.Fatal("Server runtime must use its embedded Catalog digest instead of a deployment environment setting")
 	}
 	if !strings.Contains(serverDocs[0], "kind: PersistentVolumeClaim") || !strings.Contains(serverDocs[0], "storage: 20Gi") || !strings.Contains(serverDocs[0], "ReadWriteMany") {
 		t.Fatalf("server deployment must declare the shared 20Gi RWX project memory PVC")

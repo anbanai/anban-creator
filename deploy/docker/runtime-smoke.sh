@@ -467,7 +467,7 @@ runtime_smoke_main() {
   [[ -n "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-}" ]] || fail "missing required configuration: ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL"
   [[ -n "${ANBAN_DEEPSEEK_API_KEY:-}" ]] || fail "missing required configuration: ANBAN_DEEPSEEK_API_KEY"
   local command_name deadline registration catalog top_up_body top_up
-  for command_name in curl jq mktemp; do
+  for command_name in curl jq make mktemp; do
     require_command "$command_name"
   done
   docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
@@ -486,7 +486,7 @@ runtime_smoke_main() {
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-  AGENT_PACK_CATALOG_DIGEST="$(sha256sum "$REPO_ROOT/server/agentpack/catalog.generated.json" | awk '{print $1}')"
+  make -C "$REPO_ROOT" agent-pack-check
   WECHAT_ARTICLE_RUNTIME_IMAGE=creator-agent-wechat-article:latest
   WECHAT_PICTURE_RUNTIME_IMAGE=creator-agent-wechat-picture:latest
   SEEDNOTE_RUNTIME_IMAGE=creator-agent-seednote:latest
@@ -499,12 +499,12 @@ runtime_smoke_main() {
   MONTAGE_DOCKERFILE=Dockerfile.agent-montage
   MOMENTS_DOCKERFILE=Dockerfile.agent-moments
   ECOMMERCE_DOCKERFILE=Dockerfile.agent-ecommerce
-  docker build --build-arg "ANBAN_AGENT_PACK_CATALOG_DIGEST=$AGENT_PACK_CATALOG_DIGEST" -f "$REPO_ROOT/deploy/docker/$WECHAT_ARTICLE_DOCKERFILE" -t "$WECHAT_ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build --build-arg "ANBAN_AGENT_PACK_CATALOG_DIGEST=$AGENT_PACK_CATALOG_DIGEST" -f "$REPO_ROOT/deploy/docker/$WECHAT_PICTURE_DOCKERFILE" -t "$WECHAT_PICTURE_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build --build-arg "ANBAN_AGENT_PACK_CATALOG_DIGEST=$AGENT_PACK_CATALOG_DIGEST" -f "$REPO_ROOT/deploy/docker/$MOMENTS_DOCKERFILE" -t "$MOMENTS_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build --build-arg "ANBAN_AGENT_PACK_CATALOG_DIGEST=$AGENT_PACK_CATALOG_DIGEST" -f "$REPO_ROOT/deploy/docker/$ECOMMERCE_DOCKERFILE" -t "$ECOMMERCE_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build --build-arg "ANBAN_AGENT_PACK_CATALOG_DIGEST=$AGENT_PACK_CATALOG_DIGEST" -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
-  docker build --build-arg "ANBAN_AGENT_PACK_CATALOG_DIGEST=$AGENT_PACK_CATALOG_DIGEST" -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$WECHAT_ARTICLE_DOCKERFILE" -t "$WECHAT_ARTICLE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$WECHAT_PICTURE_DOCKERFILE" -t "$WECHAT_PICTURE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$MOMENTS_DOCKERFILE" -t "$MOMENTS_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$ECOMMERCE_DOCKERFILE" -t "$ECOMMERCE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$SEEDNOTE_DOCKERFILE" -t "$SEEDNOTE_RUNTIME_IMAGE" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/deploy/docker/$MONTAGE_DOCKERFILE" -t "$MONTAGE_RUNTIME_IMAGE" "$REPO_ROOT"
 
   SMOKE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/anban-runtime-smoke.XXXXXX")"
   COMPOSE_PROJECT="anban-runtime-smoke-$(date +%s)-$$"

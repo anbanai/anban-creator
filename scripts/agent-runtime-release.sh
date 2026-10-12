@@ -6,7 +6,6 @@ repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 catalog_path=${AGENT_PACK_CATALOG_PATH:-"$repository_root/server/agentpack/catalog.generated.json"}
 runtime_catalog_path=${AGENT_RUNTIME_CATALOG_PATH:-"$repository_root/harness/agent-pack-catalog.json"}
 manifest_path=${AGENT_RUNTIME_RELEASE_MANIFEST:-"$repository_root/release/agent-runtime-manifest.json"}
-catalog_label=${AGENT_PACK_CATALOG_LABEL:-org.anban.agent.pack.catalog-digest}
 
 usage() {
   cat >&2 <<'EOF'
@@ -83,12 +82,6 @@ for entry in "${image_entries[@]}"; do
   image=${entry#*=}
   if [[ ! "$image" =~ @sha256:[0-9a-f]{64}$ ]]; then
     echo "$profile image must use image@sha256:<64 lowercase hex characters>: $image" >&2
-    exit 1
-  fi
-
-  label=$(docker image inspect --format "{{index .Config.Labels \"$catalog_label\"}}" "$image" 2>/dev/null || true)
-  if [[ "$label" != "$catalog_digest" ]]; then
-    echo "$profile image Catalog label mismatch: image=$label catalog=$catalog_digest ref=$image" >&2
     exit 1
   fi
 

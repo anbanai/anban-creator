@@ -12,8 +12,7 @@ the two generated Catalog files match.
 ## Goals
 
 - Fail CI when generated Agent Pack outputs are stale.
-- Fail Server or Agent image builds when their generated Catalog snapshots
-  differ.
+- Fail CI before image publication when generated Agent Pack outputs are stale.
 - Detect an Agent image Catalog mismatch before the Server returns task
   prompts, credentials, or bootstrap files.
 - Preserve the execution-scoped frozen Pack identity check in the Agent; it
@@ -46,12 +45,13 @@ Adding the required digest header increments the managed runtime contract
 version. Older Server and Agent binaries therefore fail closed instead of
 silently ignoring the new header.
 
-CI runs `make agent-pack-check`. Server and Agent Dockerfiles compare the
-generated Server Catalog and Harness Catalog before producing images and label
-the resulting images with the common Catalog SHA-256. Local image targets run
-the Catalog check before building. Production documentation requires the
-Server and all managed Agent images to be built from one source revision and
-deployed using immutable image references.
+CI runs `make agent-pack-check`. Dockerfiles package the generated Catalog
+without requiring a manually supplied build argument or OCI label. Local and
+CI image targets run the Catalog check before building. Production manifests
+record the Catalog SHA-256 for audit, while runtime bootstrap compares the
+Server's embedded Catalog with the Catalog shipped in each Agent image.
+Production documentation requires the Server and all managed Agent images to be
+built from one source revision and deployed using immutable image references.
 
 ## Scope and boundaries
 
@@ -72,9 +72,9 @@ deployed using immutable image references.
 - `server/handler/agent.go`: reject missing or mismatched Catalog digests
   before workload verification; test matching, missing, and mismatched values,
   including response code and safe diagnostics.
-- Dockerfiles and Make targets: compare the two generated Catalog files and
-  attach the shared digest label; add repository contract tests covering every
-  runtime Dockerfile.
+- Dockerfiles and Make targets: package the Catalog without a required build
+  argument or label; add repository contract tests covering every runtime
+  Dockerfile.
 - `.github/workflows/ci.yml`: run the generated Catalog drift check before
   compiling/testing the Server.
 - Deployment docs: describe same-revision image publication, immutable image
@@ -94,8 +94,7 @@ update, start a new task to refresh its frozen Pack identity.
 ## Acceptance criteria
 
 - CI fails on generated Catalog drift.
-- Every managed runtime image build fails if the Server and Harness Catalog
-  files differ.
+- `make agent-pack-check` fails if the Server and Harness Catalog files differ.
 - A matching Agent Catalog reaches normal bootstrap; a missing or different
   digest is rejected before workload verification and bootstrap data creation.
 - The Agent still rejects a frozen Pack identity that differs from its local

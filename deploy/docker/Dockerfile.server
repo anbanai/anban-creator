@@ -2,14 +2,12 @@ FROM golang:alpine AS builder
 
 WORKDIR /build/server
 
-ARG ANBAN_AGENT_PACK_CATALOG_DIGEST
 
 COPY server/go.mod server/go.sum ./
 RUN go mod download
 
 COPY server ./
 RUN set -eux; \
-    test "$(sha256sum agentpack/catalog.generated.json | awk '{print $1}')" = "$ANBAN_AGENT_PACK_CATALOG_DIGEST"; \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
 
 RUN apk add --no-cache nodejs npm python3 make g++
@@ -21,8 +19,6 @@ RUN npm run build && npm prune --omit=dev
 
 FROM alpine:latest
 
-ARG ANBAN_AGENT_PACK_CATALOG_DIGEST
-LABEL org.anban.agent.pack.catalog-digest="$ANBAN_AGENT_PACK_CATALOG_DIGEST"
 
 RUN set -eux; \
     apk add --no-cache ca-certificates ffmpeg tzdata; \

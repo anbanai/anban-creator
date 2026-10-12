@@ -31,3 +31,20 @@ kubectl -n "$namespace" rollout status deployment/creator-studio-web-base --time
 ## 后续改进
 
 要让新旧 Pod 始终提供同一份 hash 资源，可把 `/assets/` 发布到共享 OSS/CDN：先上传新资源，再发布引用它们的 HTML，并按保留期清理旧资源。接入前需要确定 Studio 专用的 OSS 桶或 CDN 域名及流水线发布权限。
+
+## Agent Pack Catalog 与云效构建
+
+云效构建 Agent 或 Server 镜像时不需要配置
+`ANBAN_AGENT_PACK_CATALOG_DIGEST` Build Arg，也不需要写入 Catalog OCI
+label。构建前在同一提交上运行：
+
+```bash
+make agent-pack-generate
+make agent-pack-check
+docker build -f deploy/docker/Dockerfile.agent-seednote -t "$IMAGE" .
+```
+
+`make agent-pack-check` 校验 Server 与 Harness 的生成 Catalog 一致。发布
+manifest 仍记录 Catalog digest 作为审计信息；Runtime 启动时会计算镜像内
+Catalog digest，并与 Server bootstrap 返回的 digest 比较，发现漂移则拒绝
+执行。这样云效只需使用普通 `docker build`，运行时一致性校验仍然保留。

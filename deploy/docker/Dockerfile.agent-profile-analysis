@@ -22,13 +22,10 @@ RUN set -eux; \
 
 COPY --from=builder /app/runtime-claude/node_modules /app/runtime-claude/node_modules
 COPY --from=builder /app/runtime-claude/dist /app/runtime-claude/dist
-ARG ANBAN_AGENT_PACK_CATALOG_DIGEST
 COPY harness/ /anbanai/
-LABEL org.anban.agent.pack.catalog-digest="$ANBAN_AGENT_PACK_CATALOG_DIGEST"
 COPY deploy/docker/anban-agent-launcher /usr/local/bin/anban
 
 RUN set -eux; \
-    test "$(sha256sum /anbanai/agent-pack-catalog.json | awk '{print $1}')" = "$ANBAN_AGENT_PACK_CATALOG_DIGEST"; \
     if [ -n "$(find /anbanai -type l -print -quit)" ]; then echo >&2 "/anbanai must not contain symlinks"; exit 1; fi; \
     chown -R root:root /anbanai /app/runtime-claude; \
     chmod -R a=rX /anbanai /app/runtime-claude; \

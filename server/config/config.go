@@ -504,7 +504,6 @@ type ModelRuntimeConfig struct {
 type ClaudeConfig struct {
 	ExecutionProfiles                 map[string]ClaudeExecutionProfileConfig `yaml:"execution_profiles" json:"execution_profiles"`
 	Executor                          string                                  `yaml:"executor"` // "docker" or "kubernetes"
-	AgentPackCatalogDigest            string                                  `yaml:"agent_pack_catalog_digest"`
 	RuntimeImages                     RuntimeImages                           `yaml:"runtime_images"`
 	RuntimeDiagnosticRetentionSeconds int                                     `yaml:"runtime_diagnostic_retention_seconds"`
 	runtimeDiagnosticRetentionSet     bool                                    `yaml:"-"`
@@ -529,7 +528,7 @@ type ClaudeExecutionProfileConfig struct {
 
 func (c *ClaudeConfig) UnmarshalYAML(value *yaml.Node) error {
 	known := map[string]bool{
-		"execution_profiles": true, "executor": true, "agent_pack_catalog_digest": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
+		"execution_profiles": true, "executor": true, "runtime_images": true, "runtime_diagnostic_retention_seconds": true,
 		"execution_token_secret": true, "plugin_dir": true,
 		"sandbox": true, "docker": true, "kubernetes": true, "project_memory": true, "max_turns": true,
 		"task_log_dir": true, "agent_server_url": true,
@@ -673,11 +672,6 @@ func (c ClaudeConfig) Validate() error {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images.%s must use an immutable image digest (image@sha256:<64 hex>) when claude.executor is \"kubernetes\"", profile))
 		}
 	}
-	if digest := strings.TrimSpace(c.AgentPackCatalogDigest); digest == "" && c.Executor == "kubernetes" {
-		errs = append(errs, fmt.Sprintf("claude.agent_pack_catalog_digest is required when claude.executor is \"kubernetes\" (expected %s)", agentpack.CatalogDigest()))
-	} else if digest != "" && (!agentPackCatalogDigestPattern.MatchString(digest) || digest != agentpack.CatalogDigest()) {
-		errs = append(errs, fmt.Sprintf("claude.agent_pack_catalog_digest must equal the embedded Agent Pack Catalog digest %s", agentpack.CatalogDigest()))
-	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
@@ -685,7 +679,6 @@ func (c ClaudeConfig) Validate() error {
 }
 
 var immutableRuntimeImagePattern = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
-var agentPackCatalogDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var interactiveProviderAPIKeyEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func imageForProfile(images RuntimeImages, profile string) string {

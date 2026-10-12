@@ -807,7 +807,7 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	}
 }
 
-func TestCatalogDigestIsEnforcedAtImageBuildBoundary(t *testing.T) {
+func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, name := range []string{
 		"Dockerfile.agent-ecommerce",
@@ -822,22 +822,31 @@ func TestCatalogDigestIsEnforcedAtImageBuildBoundary(t *testing.T) {
 		"Dockerfile.agent-whiteboard-animation",
 	} {
 		body := readTextFile(t, filepath.Join(root, "deploy/docker", name))
-		for _, want := range []string{
+		for _, forbidden := range []string{
 			"ARG ANBAN_AGENT_PACK_CATALOG_DIGEST",
-			"LABEL org.anban.agent.pack.catalog-digest=\"$ANBAN_AGENT_PACK_CATALOG_DIGEST\"",
-			"sha256sum /anbanai/agent-pack-catalog.json",
+			"LABEL org.anban.agent.pack.catalog-digest=",
+			"ANBAN_AGENT_PACK_CATALOG_DIGEST",
 		} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("deploy/docker/%s missing Catalog digest build check %q", name, want)
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("deploy/docker/%s retains build-time Catalog digest dependency %q", name, forbidden)
 			}
+		}
+		if !strings.Contains(body, "COPY harness/ /anbanai/") {
+			t.Fatalf("deploy/docker/%s must package the runtime catalog for startup verification", name)
 		}
 	}
 
 	server := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.server"))
-	for _, want := range []string{
+	for _, forbidden := range []string{
 		"ARG ANBAN_AGENT_PACK_CATALOG_DIGEST",
-		"LABEL org.anban.agent.pack.catalog-digest=\"$ANBAN_AGENT_PACK_CATALOG_DIGEST\"",
-		"sha256sum agentpack/catalog.generated.json",
+		"LABEL org.anban.agent.pack.catalog-digest=",
+		"ANBAN_AGENT_PACK_CATALOG_DIGEST",
+	} {
+		if strings.Contains(server, forbidden) {
+			t.Fatalf("deploy/docker/Dockerfile.server retains build-time Catalog digest dependency %q", forbidden)
+		}
+	}
+	for _, want := range []string{
 		"harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js",
 	} {
 		if !strings.Contains(server, want) {
@@ -846,13 +855,41 @@ func TestCatalogDigestIsEnforcedAtImageBuildBoundary(t *testing.T) {
 	}
 
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
-	for _, want := range []string{
-		"ANBAN_AGENT_PACK_CATALOG_DIGEST: ${ANBAN_AGENT_PACK_CATALOG_DIGEST:?ANBAN_AGENT_PACK_CATALOG_DIGEST is required}",
-		"ANBAN_AGENT_PACK_CATALOG_DIGEST: \"${ANBAN_AGENT_PACK_CATALOG_DIGEST:?ANBAN_AGENT_PACK_CATALOG_DIGEST is required}\"",
+	for _, forbidden := range []string{
+		"ANBAN_AGENT_PACK_CATALOG_DIGEST",
+		"AGENT_PACK_CATALOG_DIGEST",
 	} {
-		if !strings.Contains(compose, want) {
-			t.Fatalf("docker-compose.yml missing Catalog digest contract %q", want)
+		if strings.Contains(compose, forbidden) {
+			t.Fatalf("docker-compose.yml retains Catalog digest configuration dependency %q", forbidden)
 		}
+	}
+
+	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+	if !strings.Contains(makefile, "docker-agent-build-check: agent-pack-check") {
+		t.Fatal("Makefile must run agent-pack-check before managed image builds")
+	}
+	for _, forbidden := range []string{"AGENT_PACK_CATALOG_DIGEST", "--build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST"} {
+		if strings.Contains(makefile, forbidden) {
+			t.Fatalf("Makefile retains manual Catalog digest build dependency %q", forbidden)
+		}
+	}
+
+	smoke := readTextFile(t, filepath.Join(root, "deploy/docker/runtime-smoke.sh"))
+	if !strings.Contains(smoke, "make -C \"$REPO_ROOT\" agent-pack-check") {
+		t.Fatal("runtime smoke must validate the generated Catalog before building images")
+	}
+	if strings.Contains(smoke, "ANBAN_AGENT_PACK_CATALOG_DIGEST") || strings.Contains(smoke, "AGENT_PACK_CATALOG_DIGEST") {
+		t.Fatal("runtime smoke builds must not need a Catalog digest build argument")
+	}
+
+	release := readTextFile(t, filepath.Join(root, "scripts/agent-runtime-release.sh"))
+	for _, want := range []string{"catalog_digest", "Agent Pack Catalog files differ", "RepoDigest"} {
+		if !strings.Contains(release, want) {
+			t.Fatalf("release manifest script missing Catalog audit contract %q", want)
+		}
+	}
+	if strings.Contains(release, "org.anban.agent.pack.catalog-digest") || strings.Contains(release, "Catalog label mismatch") {
+		t.Fatal("release manifest must not depend on image metadata labels for runtime verification")
 	}
 }
 
@@ -1032,12 +1069,12 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-ecommerce-agent-image:",
 		"docker-wechat-article-agent-image:",
 		"docker-wechat-picture-agent-image:",
-		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
-		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .",
-		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .",
-		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .",
-		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
-		"docker build --build-arg ANBAN_AGENT_PACK_CATALOG_DIGEST=$(AGENT_PACK_CATALOG_DIGEST) -f deploy/docker/Dockerfile.agent-montage",
+		"docker build -f deploy/docker/Dockerfile.agent-wechat-article -t $(WECHAT_ARTICLE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-wechat-picture -t $(WECHAT_PICTURE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-moments -t $(MOMENTS_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-ecommerce -t $(ECOMMERCE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-seednote -t $(SEEDNOTE_AGENT_IMAGE) .",
+		"docker build -f deploy/docker/Dockerfile.agent-montage",
 		"--build-arg OPENMONTAGE_REPO=\"$(OPENMONTAGE_SOURCE_REPO)\"",
 		"--build-arg OPENMONTAGE_REF=\"$(OPENMONTAGE_SOURCE_REF)\"",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",

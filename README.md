@@ -53,13 +53,16 @@ the execution token secret from a Kubernetes Secret.
 
 For an ACK release, build and push the Server and every managed Agent image
 from the same checkout, then resolve each pushed image to an immutable digest.
-Run `make agent-runtime-release-manifest` with those digest references before
-rendering `server/Deployment.yaml`; it verifies both Catalog copies and every
-image's `org.anban.agent.pack.catalog-digest` OCI label, then records the exact
-image set in `release/agent-runtime-manifest.json`. Use
+Run `make agent-pack-generate && make agent-pack-check` before building so the
+generated Server and Harness Catalog files are current. Then run
+`make agent-runtime-release-manifest` with the pushed digest references. The
+release manifest records the Catalog digest for audit and validates every image
+reference. Use
 `scripts/render-ack-server-deployment.sh --manifest release/agent-runtime-manifest.json`
-to inject that set into the ACK template. The render step rejects mutable tags,
-missing images, a different Server digest, or a missing Catalog digest.
+to inject that immutable image set and the audit digest into the ACK template.
+The runtime bootstrap still compares the Server's embedded Catalog digest with
+the Catalog shipped in each Agent image; no Docker build argument or image label
+is required.
 
 ## Quick Start
 
