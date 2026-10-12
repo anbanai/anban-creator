@@ -13,6 +13,7 @@ RUN set -eux; \
 RUN apk add --no-cache nodejs npm python3 make g++
 WORKDIR /build/runtime-dsh
 COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./
+COPY runtime-dsh/vendor/ ./vendor/
 RUN npm ci
 COPY runtime-dsh/ ./
 RUN npm run build && npm prune --omit=dev

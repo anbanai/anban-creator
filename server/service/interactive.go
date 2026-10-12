@@ -469,7 +469,10 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 		rt, e = s.factory.Start(ctx, sess.ID, sess.AgentID, runtimeToken, emit)
 	}
 	if e != nil {
-		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": "interactive runtime failed to start"})
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{
+			"status":  "runtime_failed",
+			"message": fmt.Sprintf("interactive runtime failed to start: %v", e),
+		})
 		s.closeSession(sess.ID, false)
 		return
 	}
@@ -483,7 +486,10 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	sess.mu.Unlock()
 	if e = rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID, "initialContext": sess.initialContext}); e != nil {
 		_ = rt.Close()
-		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": "interactive runtime failed to initialize"})
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{
+			"status":  "runtime_failed",
+			"message": fmt.Sprintf("interactive runtime failed to initialize: %v", e),
+		})
 		s.closeSession(sess.ID, false)
 		return
 	}
@@ -1635,7 +1641,15 @@ func interactiveRuntimeEnvironment(dshHome, providerAPIKeyEnv string) []string {
 	}
 	env = append(env, "HOME="+dshHome, "USERPROFILE="+dshHome)
 	if validInteractiveEnvName(providerAPIKeyEnv) {
-		if value, ok := os.LookupEnv(providerAPIKeyEnv); ok {
+		value, ok := os.LookupEnv(providerAPIKeyEnv)
+		// Server deployments keep the provider credential under the
+		// ANBAN_* namespace. The DSH DeepSeek adapter, however, intentionally
+		// reads DEEPSEEK_API_KEY. Bridge that deployment name at the process
+		// boundary without exposing the Server's full environment.
+		if (!ok || value == "") && providerAPIKeyEnv == "DEEPSEEK_API_KEY" {
+			value, ok = os.LookupEnv("ANBAN_DEEPSEEK_API_KEY")
+		}
+		if ok {
 			env = append(env, providerAPIKeyEnv+"="+value)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,6 +46,12 @@ type interactiveFailingRuntimeFactory struct{}
 
 func (interactiveFailingRuntimeFactory) Start(context.Context, string, string, string, func(string, any)) (Runtime, error) {
 	return nil, errors.New("bridge failed to start")
+}
+
+type interactiveCommandFailingRuntimeFactory struct{}
+
+func (interactiveCommandFailingRuntimeFactory) Start(context.Context, string, string, string, func(string, any)) (Runtime, error) {
+	return &interactiveTestRuntime{commandErr: errors.New("bridge failed to initialize")}, nil
 }
 
 type retryInteractiveMemory struct {
@@ -255,6 +262,44 @@ func TestInteractiveRuntimeStartFailureIsReplayableOverSSE(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("failed session event stream did not close")
+	}
+}
+
+func TestInteractiveRuntimeInitializationFailureIncludesBridgeError(t *testing.T) {
+	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, interactiveCommandFailingRuntimeFactory{}, []InteractiveAgent{{
+		ID: "project-creator", DisplayName: "Project Creator", Available: true, Intents: []string{"create-project"},
+	}})
+	svc.SetEnabled(true)
+	svc.tombstoneTTL = time.Minute
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		status, statusErr := svc.SessionStatus("user-1", sess.ID)
+		if errors.Is(statusErr, ErrInteractiveSessionClosed) || status == "error" {
+			break
+		}
+		if statusErr != nil {
+			t.Fatalf("SessionStatus() error = %v", statusErr)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	history, _, closeEvents, err := svc.Events("user-1", sess.ID, 0)
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	defer closeEvents()
+	if len(history) != 1 {
+		t.Fatalf("replayed history = %#v, want one session.error event", history)
+	}
+	data, ok := history[0].Data.(map[string]any)
+	message, _ := data["message"].(string)
+	if !ok || !strings.Contains(message, "bridge failed to initialize") {
+		t.Fatalf("session.error data = %#v, want bridge diagnostic", history[0].Data)
 	}
 }
 

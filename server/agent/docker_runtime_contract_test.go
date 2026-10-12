@@ -493,6 +493,11 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 			t.Fatalf("%s missing minimal server runtime contract %q", path, want)
 		}
 	}
+	if vendorIndex := strings.Index(body, "COPY runtime-dsh/vendor/ ./vendor/"); vendorIndex < 0 {
+		t.Fatal("server Dockerfile must copy runtime-dsh vendor packages before npm ci")
+	} else if npmIndex := strings.Index(body, "RUN npm ci"); npmIndex < vendorIndex {
+		t.Fatal("server Dockerfile must copy runtime-dsh vendor packages before npm ci")
+	}
 	for _, forbidden := range []string{
 		"ghcr.io/openhands/agent-server",
 		"./agent",

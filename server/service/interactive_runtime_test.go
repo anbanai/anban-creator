@@ -87,6 +87,47 @@ func TestExecRuntimeFactoryPassesOnlyConfiguredProviderCredential(t *testing.T) 
 	}
 }
 
+func TestExecRuntimeFactoryMapsServerDeepSeekCredentialForDSH(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bridge process test uses a POSIX shell")
+	}
+	t.Setenv("ANBAN_DEEPSEEK_API_KEY", "server-provider-secret")
+	previousKey, hadPreviousKey := os.LookupEnv("DEEPSEEK_API_KEY")
+	_ = os.Unsetenv("DEEPSEEK_API_KEY")
+	t.Cleanup(func() {
+		if hadPreviousKey {
+			_ = os.Setenv("DEEPSEEK_API_KEY", previousKey)
+		} else {
+			_ = os.Unsetenv("DEEPSEEK_API_KEY")
+		}
+	})
+	output := filepath.Join(t.TempDir(), "env.txt")
+	script := "printf '%s\\n' \"${DEEPSEEK_API_KEY-}\" > \"$1\"; read line"
+	factory := ExecRuntimeFactory{
+		Command:           "sh",
+		Args:              []string{"-c", script, "bridge", output},
+		ProviderAPIKeyEnv: "DEEPSEEK_API_KEY",
+	}
+	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	deadline := time.Now().Add(time.Second)
+	var data []byte
+	for time.Now().Before(deadline) {
+		data, _ = os.ReadFile(output)
+		if len(data) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := strings.TrimSpace(string(data)); got != "server-provider-secret" {
+		t.Fatalf("DSH provider credential = %q, want deployment credential", got)
+	}
+}
+
 func TestExecRuntimeFactoryUsesAnIsolatedHomePerSession(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bridge process test uses a POSIX shell")
