@@ -668,7 +668,8 @@ func (c ClaudeConfig) Validate() error {
 		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile-analysis" && profile != "feedback-analysis" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
-		if c.Executor == "kubernetes" && !immutableRuntimeImageReference(imageForProfile(c.RuntimeImages, profile)) {
+		image := imageForProfile(c.RuntimeImages, profile)
+		if c.Executor == "kubernetes" && image != "" && !immutableRuntimeImageReference(image) {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images.%s must use an immutable image digest (image@sha256:<64 hex>) when claude.executor is \"kubernetes\"", profile))
 		}
 	}
@@ -1078,26 +1079,28 @@ func (c *Config) applyDefaults() {
 	if c.Claude.RuntimeImages == nil {
 		c.Claude.RuntimeImages = RuntimeImages{}
 	}
-	if strings.TrimSpace(c.Claude.RuntimeImages["wechat-article"]) == "" {
-		c.Claude.RuntimeImages["wechat-article"] = "creator-agent-wechat-article:latest"
-	}
-	if strings.TrimSpace(c.Claude.RuntimeImages["wechat-picture"]) == "" {
-		c.Claude.RuntimeImages["wechat-picture"] = "creator-agent-wechat-picture:latest"
-	}
-	if strings.TrimSpace(c.Claude.RuntimeImages["moments"]) == "" {
-		c.Claude.RuntimeImages["moments"] = "creator-agent-moments:latest"
-	}
-	if strings.TrimSpace(c.Claude.RuntimeImages["ecommerce"]) == "" {
-		c.Claude.RuntimeImages["ecommerce"] = "creator-agent-ecommerce:latest"
-	}
-	if strings.TrimSpace(c.Claude.RuntimeImages["profile-analysis"]) == "" {
-		c.Claude.RuntimeImages["profile-analysis"] = "creator-agent-profile-analysis:latest"
-	}
-	if strings.TrimSpace(c.Claude.RuntimeImages["feedback-analysis"]) == "" {
-		c.Claude.RuntimeImages["feedback-analysis"] = "creator-agent-feedback-analysis:latest"
-	}
-	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation]) == "" {
-		c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation] = "creator-agent-whiteboard-animation:latest"
+	if c.Claude.Executor != "kubernetes" {
+		if strings.TrimSpace(c.Claude.RuntimeImages["wechat-article"]) == "" {
+			c.Claude.RuntimeImages["wechat-article"] = "creator-agent-wechat-article:latest"
+		}
+		if strings.TrimSpace(c.Claude.RuntimeImages["wechat-picture"]) == "" {
+			c.Claude.RuntimeImages["wechat-picture"] = "creator-agent-wechat-picture:latest"
+		}
+		if strings.TrimSpace(c.Claude.RuntimeImages["moments"]) == "" {
+			c.Claude.RuntimeImages["moments"] = "creator-agent-moments:latest"
+		}
+		if strings.TrimSpace(c.Claude.RuntimeImages["ecommerce"]) == "" {
+			c.Claude.RuntimeImages["ecommerce"] = "creator-agent-ecommerce:latest"
+		}
+		if strings.TrimSpace(c.Claude.RuntimeImages["profile-analysis"]) == "" {
+			c.Claude.RuntimeImages["profile-analysis"] = "creator-agent-profile-analysis:latest"
+		}
+		if strings.TrimSpace(c.Claude.RuntimeImages["feedback-analysis"]) == "" {
+			c.Claude.RuntimeImages["feedback-analysis"] = "creator-agent-feedback-analysis:latest"
+		}
+		if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation]) == "" {
+			c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation] = "creator-agent-whiteboard-animation:latest"
+		}
 	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080
@@ -1635,7 +1638,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 	var errs []string
-	if !interactiveProviderAPIKeyEnvPattern.MatchString(c.Interactive.ProviderAPIKeyEnv) {
+	// The interactive Project Creator runtime is optional and disabled by
+	// default. Its provider credential selector must not make an unrelated
+	// Server deployment fail validation while the runtime is disabled.
+	if c.Interactive.Enabled && !interactiveProviderAPIKeyEnvPattern.MatchString(c.Interactive.ProviderAPIKeyEnv) {
 		errs = append(errs, "interactive.provider_api_key_env must be a valid environment variable name")
 	}
 	if c.Trends.TTL <= 0 {
