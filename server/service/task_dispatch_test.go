@@ -1158,6 +1158,60 @@ func TestDispatchCatalogMismatchStartsFreshRuntimeFromCurrentSelection(t *testin
 	}
 }
 
+func TestDispatchCatalogMismatchHypitRefreshesCurrentRuntimeImage(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{
+		Profile: model.PlatformHypit, Image: "registry/hypit@sha256:current",
+	}
+	task.Type = model.PlatformHypit
+	task.AgentID = model.AgentIDHypit
+	task.Channel = model.ChannelHypit
+	task.TaskKind = model.PlatformHypit
+	task.HypitRuntimeSnapshot = datatypes.JSON(`{"image":"registry/hypit@sha256:old"}`)
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	parent := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
+		RuntimeProfile: model.PlatformHypit, RuntimeImage: "registry/hypit@sha256:old",
+		Diagnostics: datatypes.JSON(`{"reason":"runtime_failed","message":"bootstrap returned HTTP 426: agent_pack_catalog_mismatch: agent runtime Catalog does not match Server Catalog"}`),
+	}
+	if err := applyAgentPackIdentity(parent, model.AgentIDHypit); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	task.CurrentExecutionID = &parent.ID
+	task.SetInputAttachments([]model.EntryAttachment{{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue"}})
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	current := mustCurrentExecution(t, repo, task.ID)
+	if current.ParentExecutionID != parent.ID || current.ResumeSessionID != "" {
+		t.Fatalf("catalog mismatch Hypit recovery lineage = parent %q session %q", current.ParentExecutionID, current.ResumeSessionID)
+	}
+	if current.RuntimeProfile != dispatcher.runtimeSelection.Profile || current.RuntimeImage != dispatcher.runtimeSelection.Image {
+		t.Fatalf("catalog mismatch Hypit runtime = %q %q, want current %q %q", current.RuntimeProfile, current.RuntimeImage, dispatcher.runtimeSelection.Profile, dispatcher.runtimeSelection.Image)
+	}
+}
+
+func TestCatalogMismatchResultTextRequiresRuntimeFailureReason(t *testing.T) {
+	execution := &model.TaskExecution{TerminalReason: "completed"}
+	message := "bootstrap returned HTTP 426: agent_pack_catalog_mismatch"
+	if isAgentPackCatalogMismatchExecution(execution, message) {
+		t.Fatal("ordinary terminal result was treated as a runtime Catalog mismatch")
+	}
+	execution.TerminalReason = "runtime_failed"
+	if !isAgentPackCatalogMismatchExecution(execution, message) {
+		t.Fatal("runtime failure Catalog mismatch was not recognized")
+	}
+}
+
 func TestResumeExecutionReusesParentRuntimeImage(t *testing.T) {
 	svc, repo, _, dispatcher, task := setupDispatchTest(t)
 	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{Profile: "wechat-article", Image: "registry/content@sha256:new"}

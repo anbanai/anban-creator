@@ -394,7 +394,7 @@ func (s *TaskService) createCurrentExecution(ctx context.Context, task *model.Ta
 				runtimeKey = dispatchTask.Type
 			}
 			runtime = s.runtimeDispatcher.ResolveRuntime(runtimeKey)
-			if model.IsHypitPlatform(dispatchTask.Type) {
+			if model.IsHypitPlatform(dispatchTask.Type) && !refreshRuntime {
 				if snap := readHypitSnapshot(dispatchTask); snap.Image != "" {
 					runtime.Image = snap.Image
 					runtime.Profile = model.PlatformHypit
@@ -587,7 +587,7 @@ func isAgentPackCatalogMismatchExecution(execution *model.TaskExecution, resultE
 	if execution == nil {
 		return false
 	}
-	if isAgentPackCatalogMismatchMessage(resultError) {
+	if strings.TrimSpace(execution.TerminalReason) == "runtime_failed" && isAgentPackCatalogMismatchMessage(resultError) {
 		return true
 	}
 	var evidence struct {
