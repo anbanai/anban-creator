@@ -203,6 +203,16 @@ function textOccurrences(container: HTMLElement, text: string) {
   return Math.max(0, (container.textContent?.split(text).length ?? 1) - 1)
 }
 
+// Existing process-detail assertions now opt in to the collapsed history.
+async function expandExecutionHistory(expandStages = true) {
+  fireEvent.click(await screen.findByRole('button', { name: '展开执行过程' }))
+  await waitFor(() => expect(screen.queryByText('正在加载产物…')).not.toBeInTheDocument())
+  const list = screen.queryByRole('list', { name: '执行阶段' })
+  if (list && expandStages) for (const button of within(list).queryAllByRole('button', { expanded: false })) {
+    if (!(button as HTMLButtonElement).disabled) fireEvent.click(button)
+  }
+}
+
 async function openTaskDetails(tab?: '概览' | '配置' | '素材' | '日志') {
   fireEvent.click(await screen.findByRole('button', { name: '打开作品概览' }))
   expect(await screen.findByRole('heading', { name: '作品详情' })).toBeInTheDocument()
@@ -235,6 +245,37 @@ async function openCloneDialog() {
 }
 
 describe('TaskDetailPage', () => {
+  it('puts the finished article before collapsed history and keeps process files out of the result', async () => {
+    mockTask(taskWith({ status: 'completed' }))
+    vi.mocked(api.tasks.files).mockResolvedValue([
+      { id: 'article', task_id: 'task-1', state: 'delivered', role: 'html', file_name: 'article.html', mime_type: 'text/html', file_size: 100, url: '', is_deliverable: true, created_at: '' },
+      { id: 'research', task_id: 'task-1', state: 'delivered', role: 'topic', file_name: 'research.md', mime_type: 'text/markdown', file_size: 100, url: '', is_deliverable: false, created_at: '' },
+    ])
+    render(<TaskDetailPage />)
+    const result = await screen.findByRole('region', { name: '最终作品' })
+    expect(within(result).getByText('排版后的完整文章')).toBeVisible()
+    expect(within(result).getByRole('button', { name: '查看作品' })).toBeEnabled()
+    expect(result.compareDocumentPosition(screen.getByRole('heading', { name: '执行进展' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole('list', { name: '执行阶段' })).not.toBeInTheDocument()
+    expect(screen.queryByText('research.md')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '展开执行过程' }))
+    expect(screen.getByRole('list', { name: '执行阶段' })).toBeVisible()
+    expect(within(result).queryByText('research.md')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '收起执行过程' }))
+    expect(result).toBeVisible()
+  })
+
+  it('shows the result when a running task completes without opening the history', async () => {
+    const running = taskWith({ status: 'running' })
+    const completed = taskWith({ status: 'completed' })
+    vi.mocked(api.tasks.files).mockResolvedValue([{ id: 'article', task_id: 'task-1', state: 'delivered', role: 'content', file_name: 'content.md', mime_type: 'text/markdown', file_size: 100, url: '', is_deliverable: true, created_at: '' }])
+    const { queryClient } = renderWithCachedTasks(running)
+    expect(screen.queryByRole('region', { name: '最终作品' })).not.toBeInTheDocument()
+    await act(async () => { queryClient.setQueryData(['task', running.id], completed) })
+    expect(await screen.findByRole('region', { name: '最终作品' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '展开执行过程' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     routeState.taskId = 'task-1'
@@ -350,6 +391,7 @@ describe('TaskDetailPage', () => {
     }))
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory(false)
 
     fireEvent.click(await screen.findByRole('button', { name: '完成创作，已完成' }))
     expect(screen.getByLabelText('内容验收结果')).toHaveTextContent('有警告')
@@ -432,7 +474,9 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const progressSection = (await screen.findByRole('button', { name: '正在写作正文，进行中' })).closest('section') as HTMLElement
+    const progressSection = await screen.findByLabelText('最新进展')
+    expect(screen.getByRole('button', { name: '展开执行过程' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('list', { name: '执行阶段' })).not.toBeInTheDocument()
     expect(within(progressSection).getByText('正在优化标题与段落结构')).toBeInTheDocument()
     expect(within(progressSection).queryByText('Using tool: Read')).not.toBeInTheDocument()
     expect(within(progressSection).queryByText(/%/)).not.toBeInTheDocument()
@@ -1032,6 +1076,7 @@ describe('TaskDetailPage', () => {
     }))
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     expect(await screen.findByText('正在写作正文')).toBeInTheDocument()
     expect(screen.queryByText('未生成素材使用结论，仅展示作品输入。')).not.toBeInTheDocument()
@@ -1064,6 +1109,7 @@ describe('TaskDetailPage', () => {
     }))
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     await screen.findByRole('button', { name: '完成创作，已完成' })
     expect(screen.getByRole('heading', { name: '执行进展' })).toBeInTheDocument()
@@ -1105,6 +1151,7 @@ describe('TaskDetailPage', () => {
     }])
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     await screen.findByRole('button', { name: '预览 article.html' })
     const review = await screen.findByText('内容验收')
@@ -1153,6 +1200,7 @@ describe('TaskDetailPage', () => {
     ])
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     const taskStatus = await screen.findByText('已完成', { selector: '[data-testid="status-pill"] span' })
     expect(taskStatus).toBeInTheDocument()
@@ -1187,6 +1235,7 @@ describe('TaskDetailPage', () => {
       url: '', is_deliverable: false, created_at: '2026-09-20T00:54:05Z',
     })))
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
     expect(await screen.findByRole('heading', { name: '产物上传失败' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '选题研究，进度未确认' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '选题研究，失败' })).not.toBeInTheDocument()
@@ -1231,6 +1280,7 @@ describe('TaskDetailPage', () => {
     vi.mocked(api.tasks.files).mockResolvedValue(files)
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     const outcome = await screen.findByRole('alert', { name: '作品结果提醒' })
     expect(outcome).toHaveTextContent('仍可查看 2 项产物')
@@ -1306,6 +1356,7 @@ describe('TaskDetailPage', () => {
     ])
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     const deliverables = await screen.findByRole('heading', { name: '交付成果 (1)' })
     const previewOnly = await screen.findByLabelText('仅支持预览')
@@ -1337,6 +1388,7 @@ describe('TaskDetailPage', () => {
     }])
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     const generatedHeading = await screen.findByText('交付成果 (1)')
     const analyticsHeading = await screen.findByText('种草笔记数据')
@@ -1378,6 +1430,7 @@ describe('TaskDetailPage', () => {
     }])
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     const draftStatus = await screen.findByRole('button', { name: '创建公众号草稿，已完成' })
     const deliveryHeading = await screen.findByText('交付成果 (1)')
@@ -1430,6 +1483,7 @@ describe('TaskDetailPage', () => {
     }])
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     await screen.findByText('交付成果 (1)')
     expect(screen.getAllByRole('button', { name: /下载交付成果|整包下载/ })).toHaveLength(1)
@@ -1488,6 +1542,7 @@ describe('TaskDetailPage', () => {
     ])
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     expect(await screen.findByText('交付成果 (1)')).toBeInTheDocument()
     expect(screen.queryByText('交付已锁定')).not.toBeInTheDocument()
@@ -1595,6 +1650,7 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({ id: 'task-1', status: 'running' }))
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     await screen.findByRole('button', { name: '完成创作，进行中' })
     expect(screen.queryByText(/%/)).not.toBeInTheDocument()
@@ -1630,6 +1686,7 @@ describe('TaskDetailPage', () => {
     mockTask(taskWith({ id: 'task-1', type: 'wechat-article', status: 'running' }))
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     await screen.findByRole('button', { name: '完成创作，进行中' })
     expect(screen.queryByRole('link', { name: '查看内容分析' })).not.toBeInTheDocument()
@@ -1888,6 +1945,7 @@ describe('TaskDetailPage', () => {
     }))
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
@@ -1943,6 +2001,7 @@ describe('TaskDetailPage', () => {
     }))
 
     render(<TaskDetailPage />)
+    await expandExecutionHistory()
 
     expect(await screen.findByRole('button', { name: '完成创作，失败' })).toBeInTheDocument()
     expect(screen.getByText('服务端没有返回失败详情，可继续执行并补充说明。')).toBeInTheDocument()

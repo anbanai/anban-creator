@@ -19,7 +19,7 @@ export function TaskResults({task, files}: {task:Task;files:TaskFile[]}) {
   const {main,other,historical}=selectResultFiles(files,task.lifecycle?.execution_id)
   if(!main.length && !other.length) return null
   const publication=task.outcome?.publication
-  return <section aria-label="最终作品" className="rounded-xl border border-primary/20 bg-card p-5 sm:p-7 space-y-5">
+  return <section id="task-results" aria-label="最终作品" className="scroll-mt-6 rounded-xl border border-primary/20 bg-card p-5 sm:p-7 space-y-5">
     <div><p className="text-xs text-muted-foreground mb-2">先看作品，再看创作过程</p><h2 className="text-xl font-semibold">{historical ? '已保留的作品' : '你的作品'}</h2><p className="text-sm text-muted-foreground mt-2">{task.status==='completed' ? '内容已生成，请预览并检查后再使用。' : '这里是已交付的内容，当前任务状态见上方提示。'}</p></div>
     {main.length > 0 ? <FilePreviewGallery previewTitle="作品预览" files={main} taskId={task.id} taskType={task.type} renderTrigger={(file,open)=><div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-muted/40 p-4">
       <div className="flex items-center gap-3"><FileText className="size-7 text-primary"/><div><h3 className="font-medium">{file.mime_type.startsWith('video/') ? '最终视频' : file.mime_type==='text/html' ? '排版后的完整文章' : '完整正文'}{main.length>1 ? ` · ${main.indexOf(file)+1}` : ''}</h3><p className="text-xs text-muted-foreground mt-1">打开即可阅读、复制或下载</p></div></div>

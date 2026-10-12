@@ -20,6 +20,7 @@ import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
 import { TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
+import { TaskResults } from '@/components/tasks/TaskResults'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
@@ -756,12 +757,13 @@ export default function TaskDetailPage() {
           filesLoading={filesLoading}
           filesError={filesError}
           onResume={() => setShowResumeDialog(true)}
-          onOpenMaterials={() => openTaskDetails('materials')}
+          onOpenMaterials={() => document.getElementById('task-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
         />
       )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
+          <TaskResults task={{ ...task, lifecycle: displayLifecycle }} files={files ?? []} />
           <TaskExecutionRail
             key={task.id}
             taskId={task.id}
@@ -773,6 +775,7 @@ export default function TaskDetailPage() {
             onOpenLogs={() => openTaskDetails('logs')}
             onResume={canResume ? () => setShowResumeDialog(true) : undefined}
             showFailureSummary={false}
+            collapsible
             files={files}
             taskType={task.type}
             filesLoading={filesLoading}
