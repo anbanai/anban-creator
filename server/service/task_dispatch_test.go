@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -1120,6 +1121,40 @@ func TestDispatchAutocompactThrashingStartsFreshClaudeSessionAndRuntime(t *testi
 	}
 	if current.RuntimeProfile != model.TaskTypeWechatArticle || current.RuntimeImage != "registry/content@sha256:current" {
 		t.Fatalf("resumed runtime = %q %q, want current deployed runtime", current.RuntimeProfile, current.RuntimeImage)
+	}
+}
+
+func TestDispatchCatalogMismatchStartsFreshRuntimeFromCurrentSelection(t *testing.T) {
+	svc, repo, _, dispatcher, task := setupDispatchTest(t)
+	dispatcher.runtimeSelection = serverconfig.RuntimeImageSelection{
+		Profile: "wechat-article", Image: "registry/content@sha256:current",
+	}
+	parent := &model.TaskExecution{
+		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "kubernetes", Status: model.TaskExecutionFailed,
+		RuntimeProfile: model.TaskTypeWechatArticle, RuntimeImage: "registry/content@sha256:old",
+		Diagnostics: datatypes.JSON(`{"reason":"runtime_failed","message":"bootstrap returned HTTP 426: agent_pack_catalog_mismatch: agent runtime Catalog does not match Server Catalog"}`),
+	}
+	if err := applyAgentPackIdentity(parent, task.Type); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskExecutions().Create(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	task.CurrentExecutionID = &parent.ID
+	task.SetInputAttachments([]model.EntryAttachment{{Role: model.EntryAttachmentRoleResumeLatest, Text: "continue"}})
+	if err := repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.HandleExecutionFromPayload(context.Background(), task.ID, task.UserID); err != nil {
+		t.Fatal(err)
+	}
+	current := mustCurrentExecution(t, repo, task.ID)
+	if current.ParentExecutionID != parent.ID || current.ResumeSessionID != "" {
+		t.Fatalf("catalog mismatch recovery lineage = parent %q session %q", current.ParentExecutionID, current.ResumeSessionID)
+	}
+	if current.RuntimeProfile != dispatcher.runtimeSelection.Profile || current.RuntimeImage != dispatcher.runtimeSelection.Image {
+		t.Fatalf("catalog mismatch runtime = %q %q, want current %q %q", current.RuntimeProfile, current.RuntimeImage, dispatcher.runtimeSelection.Profile, dispatcher.runtimeSelection.Image)
 	}
 }
 

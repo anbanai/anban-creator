@@ -553,6 +553,13 @@ func resumeExecutionLineage(ctx context.Context, repo repository.Repository, tas
 		// currently deployed image and Agent Pack without resuming an old session.
 		return parent, "", true, nil
 	}
+	if isAgentPackCatalogMismatchExecution(parent, "") {
+		// Catalog mismatch happens before the Agent session starts. Reusing the
+		// frozen runtime image would deterministically repeat the bootstrap 426;
+		// keep the task workspace and lineage, but bind the retry to the current
+		// Server-selected runtime and Pack.
+		return parent, "", true, nil
+	}
 	if len(parent.Result) == 0 {
 		return parent, "", false, nil
 	}
@@ -566,11 +573,38 @@ func resumeExecutionLineage(ctx context.Context, repo repository.Repository, tas
 		// a workflow/config fix can take effect on resume.
 		return parent, "", true, nil
 	}
+	if isAgentPackCatalogMismatchExecution(parent, result.Error) {
+		return parent, "", true, nil
+	}
 	return parent, strings.TrimSpace(result.SessionID), false, nil
 }
 
 func isAutocompactThrashingError(message string) bool {
 	return strings.HasPrefix(strings.TrimSpace(message), autocompactThrashingErrorPrefix)
+}
+
+func isAgentPackCatalogMismatchExecution(execution *model.TaskExecution, resultError string) bool {
+	if execution == nil {
+		return false
+	}
+	if isAgentPackCatalogMismatchMessage(resultError) {
+		return true
+	}
+	var evidence struct {
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+	}
+	if len(execution.Diagnostics) > 0 && json.Unmarshal(execution.Diagnostics, &evidence) == nil &&
+		strings.TrimSpace(evidence.Reason) == "runtime_failed" && isAgentPackCatalogMismatchMessage(evidence.Message) {
+		return true
+	}
+	return false
+}
+
+func isAgentPackCatalogMismatchMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(message, "agent_pack_catalog_mismatch") ||
+		strings.Contains(message, "catalog does not match server catalog")
 }
 
 func taskHasResumeInput(task *model.Task) bool {
