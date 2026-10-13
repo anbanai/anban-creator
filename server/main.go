@@ -732,16 +732,16 @@ func main() {
 	if cfg.Dsh.Enabled && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{
-			Command:   cfg.Dsh.BridgeCommand,
-			Args:      cfg.Dsh.BridgeArgs,
-			Dir:       cfg.Dsh.BridgeDir,
-			DSHPatch:  cfg.Dsh.DSHPatch,
-			Provider:  route.Provider,
-			API:       route.API,
-			BaseURL:   route.BaseURL,
-			APIKeyEnv: route.APIKeyEnv,
-			Model:     route.Model,
-			MCPURL:    cfg.Dsh.MCPURL,
+			Command:  cfg.Dsh.BridgeCommand,
+			Args:     cfg.Dsh.BridgeArgs,
+			Dir:      cfg.Dsh.BridgeDir,
+			DSHPatch: cfg.Dsh.DSHPatch,
+			Provider: route.Provider,
+			API:      route.API,
+			BaseURL:  route.BaseURL,
+			APIKey:   route.APIKey,
+			Model:    route.Model,
+			MCPURL:   cfg.Dsh.MCPURL,
 		})
 		if projectSvc != nil {
 			interactiveSvc.SetProjectService(projectSvc)

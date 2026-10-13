@@ -189,7 +189,7 @@ back to another profile or model.
 DSH interactive sessions have an independent route table under `dsh.routes`.
 `dsh.route` selects one route for the next session; it does not read or modify
 `claude.profiles`. A route declares its provider, wire API, endpoint, model,
-and the environment-variable name used by DSH for its credential:
+and the credential value using the same `${...}` expansion as Claude:
 
 ```yaml
 dsh:
@@ -200,17 +200,19 @@ dsh:
       provider: anthropic
       api: anthropic-messages
       base_url: https://api.deepseek.com/anthropic
-      api_key_env: ANTHROPIC_AUTH_TOKEN
+      api_key: "${ANBAN_DEEPSEEK_API_KEY}"
       model: deepseek-flash
 ```
 
 The Bridge starts the official DSH runtime as `dsh --profile sdk`, writes the
 selected route into temporary DSH settings using the official `apiKeyEnv`,
 `api`, `baseURL`, and `models` fields, and calls `initialize({ provider,
-model })`. It passes only `DSH_HOME`, the selected credential variable, and
-the documented `ANBAN_INTERACTIVE_*` Bridge protocol variables to the child.
-`ANBAN_INTERACTIVE_*` variables are internal transport settings; they are not
-DSH provider configuration.
+model })`. `api_key` uses the same `${...}` expansion as Claude's `envs`; the
+resolved value is placed in an isolated per-session internal variable. The
+child receives only `DSH_HOME`, the internal
+`ANBAN_INTERACTIVE_PROVIDER_API_KEY` provider-key variable, and the
+documented `ANBAN_INTERACTIVE_*` Bridge protocol variables. Those variables are
+internal transport settings; they are not user-facing DSH provider settings.
 
 Deployments may select different Anthropic-compatible models by changing the
 profile `envs` values and the corresponding `model_usage_aliases` plus provider
@@ -229,11 +231,9 @@ remaining `server/config.yaml` environment references through the deployment's
 Secret/config injection. Do not put credentials directly in manifests or
 config files.
 
-For DSH, expose the official credential names referenced by the selected
-`dsh.routes.<route>.api_key_env` (for example `DEEPSEEK_API_KEY` or
-`ANTHROPIC_AUTH_TOKEN`) from the same Secret. The Server keeps those names
-independent from the Claude `ANBAN_*` variables and forwards only the selected
-one to each DSH child process.
+For DSH, reuse the existing `ANBAN_*` environment references used by Claude in
+the route's `api_key` value. No additional DSH credential variable or Secret
+mapping is required.
 
 ### Agent profile migration runbook
 

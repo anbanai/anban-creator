@@ -89,10 +89,10 @@ search:
 # independent from claude.profiles: changing dsh.route never changes the
 # managed Claude Agent model configuration.
 #
-# api_key_env is only the name of the credential variable that DSH reads. Put
-# the corresponding value in the deployment Secret/environment; never put the
-# secret itself in this file. The Bridge starts the official DSH runtime as
-# `dsh --profile sdk` and passes provider/model through initialize().
+# api_key follows Claude's envs style: use ${...} to expand the value from the
+# existing Server environment. No separate DSH credential-variable mapping is
+# required. The Bridge starts the official DSH runtime as `dsh --profile sdk`
+# and passes provider/model through initialize().
 dsh:
   enabled: false
   admin_only: false
@@ -104,12 +104,12 @@ dsh:
   route: "effective"
   routes:
     # DeepSeek's official adapter. This route uses the DSH-native
-    # llm-deepseek configuration and DEEPSEEK_API_KEY.
+    # llm-deepseek configuration and the same existing credential as Claude.
     effective:
       provider: "deepseek-official"
       api: "deepseek-messages"
       base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
-      api_key_env: "DEEPSEEK_API_KEY"
+      api_key: "${ANBAN_DEEPSEEK_API_KEY}"
       model: "deepseek-flash"
     # Anthropic Messages through an Anthropic-compatible gateway. This route
     # uses DSH's official llm-pi-ai fields (apiKeyEnv, api, baseURL, models).
@@ -118,7 +118,7 @@ dsh:
       provider: "anthropic"
       api: "anthropic-messages"
       base_url: "${ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
-      api_key_env: "ANTHROPIC_AUTH_TOKEN"
+      api_key: "${ANBAN_DEEPSEEK_API_KEY}"
       model: "deepseek-flash"
 
 model_providers:

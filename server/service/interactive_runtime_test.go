@@ -52,20 +52,20 @@ func TestExecRuntimeFactoryPassesInteractiveCredentialsToBridge(t *testing.T) {
 	}
 }
 
-func TestExecRuntimeFactoryPassesOnlyConfiguredProviderCredential(t *testing.T) {
+func TestExecRuntimeFactoryPassesDirectProviderCredentialToBridge(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bridge process test uses a POSIX shell")
 	}
 	t.Setenv("ANBAN_DATABASE_DSN", "mysql://root:server-secret@db/anban")
 	t.Setenv("ANBAN_JWT_SECRET_KEY", "server-jwt-secret")
-	t.Setenv("DEEPSEEK_API_KEY", "provider-secret")
+	t.Setenv("DEEPSEEK_API_KEY", "server-env-secret-must-not-leak")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "unselected-provider-secret")
 	output := filepath.Join(t.TempDir(), "env.txt")
-	script := "printf '%s\\n%s\\n%s\\n%s\\n%s\\n' \"${ANBAN_DATABASE_DSN-}\" \"${ANBAN_JWT_SECRET_KEY-}\" \"${DEEPSEEK_API_KEY-}\" \"${ANTHROPIC_AUTH_TOKEN-}\" \"$HOME\" > \"$1\"; read line"
+	script := "printf '%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n' \"${ANBAN_DATABASE_DSN-}\" \"${ANBAN_JWT_SECRET_KEY-}\" \"${DEEPSEEK_API_KEY-}\" \"${ANTHROPIC_AUTH_TOKEN-}\" \"${ANBAN_INTERACTIVE_PROVIDER_API_KEY-}\" \"$HOME\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
-		Command:   "sh",
-		Args:      []string{"-c", script, "bridge", output},
-		APIKeyEnv: "DEEPSEEK_API_KEY",
+		Command: "sh",
+		Args:    []string{"-c", script, "bridge", output},
+		APIKey:  "provider-secret",
 	}
 	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
 	if err != nil {
@@ -83,23 +83,23 @@ func TestExecRuntimeFactoryPassesOnlyConfiguredProviderCredential(t *testing.T) 
 		time.Sleep(10 * time.Millisecond)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
-	if len(lines) != 5 || lines[0] != "" || lines[1] != "" || lines[2] != "provider-secret" || lines[3] != "" || lines[4] == "" {
-		t.Fatalf("bridge environment = %#v, want only configured provider credential and isolated home", lines)
+	if len(lines) != 6 || lines[0] != "" || lines[1] != "" || lines[2] != "" || lines[3] != "" || lines[4] != "provider-secret" || lines[5] == "" {
+		t.Fatalf("bridge environment = %#v, want only internal direct provider credential and isolated home", lines)
 	}
 }
 
-func TestExecRuntimeFactoryDoesNotMapServerDeepSeekCredentialForDSH(t *testing.T) {
+func TestExecRuntimeFactoryDoesNotMapServerCredentialNamesForDSH(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bridge process test uses a POSIX shell")
 	}
 	t.Setenv("ANBAN_DEEPSEEK_API_KEY", "server-provider-secret")
 	_ = os.Unsetenv("DEEPSEEK_API_KEY")
 	output := filepath.Join(t.TempDir(), "env.txt")
-	script := "printf '%s\\n' \"${DEEPSEEK_API_KEY-}\" > \"$1\"; read line"
+	script := "printf '%s\\n%s\\n' \"${DEEPSEEK_API_KEY-}\" \"${ANBAN_INTERACTIVE_PROVIDER_API_KEY-}\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
-		Command:   "sh",
-		Args:      []string{"-c", script, "bridge", output},
-		APIKeyEnv: "DEEPSEEK_API_KEY",
+		Command: "sh",
+		Args:    []string{"-c", script, "bridge", output},
+		APIKey:  "direct-configured-secret",
 	}
 	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
 	if err != nil {
@@ -116,8 +116,9 @@ func TestExecRuntimeFactoryDoesNotMapServerDeepSeekCredentialForDSH(t *testing.T
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := strings.TrimSpace(string(data)); got != "" {
-		t.Fatalf("DSH credential unexpectedly mapped from Server variable: %q", got)
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(lines) != 2 || lines[0] != "" || lines[1] != "direct-configured-secret" {
+		t.Fatalf("DSH credential environment = %#v, want only internal direct credential", lines)
 	}
 }
 
@@ -129,9 +130,9 @@ func TestExecRuntimeFactoryPassesNodeExtraCACertsToBridge(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "env.txt")
 	script := "printf '%s\\n' \"${NODE_EXTRA_CA_CERTS-}\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
-		Command:   "sh",
-		Args:      []string{"-c", script, "bridge", output},
-		APIKeyEnv: "DEEPSEEK_API_KEY",
+		Command: "sh",
+		Args:    []string{"-c", script, "bridge", output},
+		APIKey:  "direct-configured-secret",
 	}
 	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
 	if err != nil {
@@ -278,18 +279,17 @@ func TestExecRuntimeCommandRedactsSecretsFromDiagnostics(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bridge process test uses a POSIX shell")
 	}
-	t.Setenv("DEEPSEEK_API_KEY", "provider-secret")
 	factory := ExecRuntimeFactory{
-		Command:   "sh",
-		Args:      []string{"-c", `read line; printf '%s %s\n' "$ANBAN_INTERACTIVE_RUNTIME_TOKEN" "$DEEPSEEK_API_KEY" >&2; exit 7`, "bridge"},
-		APIKeyEnv: "DEEPSEEK_API_KEY",
+		Command: "sh",
+		Args:    []string{"-c", `read line; printf '%s %s\n' "$ANBAN_INTERACTIVE_RUNTIME_TOKEN" "$ANBAN_INTERACTIVE_PROVIDER_API_KEY" >&2; exit 7`, "bridge"},
+		APIKey:  "direct-configured-secret",
 	}
 	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	t.Cleanup(func() { _ = rt.Close() })
-	if err := rt.Command(context.Background(), "session/start", map[string]any{}); err == nil || strings.Contains(err.Error(), "runtime-secret") || strings.Contains(err.Error(), "provider-secret") || !strings.Contains(err.Error(), "[redacted]") {
+	if err := rt.Command(context.Background(), "session/start", map[string]any{}); err == nil || strings.Contains(err.Error(), "runtime-secret") || strings.Contains(err.Error(), "direct-configured-secret") || !strings.Contains(err.Error(), "[redacted]") {
 		t.Fatalf("Command() error = %v, want redacted diagnostic", err)
 	}
 }

@@ -188,14 +188,18 @@ describe("interactive bridge protocol", () => {
     const route = parseInteractiveRouteArgs([
       "--provider", "deepseek-official", "--model", "deepseek-v4-flash",
       "--route-api", "deepseek-messages", "--base-url", "https://api.deepseek.com/anthropic",
-      "--api-key-env", "DEEPSEEK_API_KEY",
     ]);
     const home = `/tmp/anban-dsh-route-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const path = writeDshRouteSettings(home, route);
     const text = readFileSync(path, "utf8");
-    expect(text).toContain('apiKeyEnv: "DEEPSEEK_API_KEY"');
+    expect(text).toContain('apiKeyEnv: "ANBAN_INTERACTIVE_PROVIDER_API_KEY"');
     expect(text).toContain('baseURL: "https://api.deepseek.com/anthropic"');
     expect(text).toContain('id: "deepseek-v4-flash"');
+    expect(() => parseInteractiveRouteArgs([
+      "--provider", "deepseek-official", "--model", "deepseek-v4-flash",
+      "--route-api", "deepseek-messages", "--base-url", "https://api.deepseek.com/anthropic",
+      "--api-key-env", "DEEPSEEK_API_KEY",
+    ])).toThrow("unsupported interactive bridge argument");
   });
 
   test("writes anthropic routes through the official llm-pi-ai fields", () => {
@@ -204,13 +208,12 @@ describe("interactive bridge protocol", () => {
       model: "deepseek-flash",
       api: "anthropic-messages",
       baseURL: "https://api.deepseek.com/anthropic",
-      apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
     };
     const home = `/tmp/anban-dsh-anthropic-route-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const text = readFileSync(writeDshRouteSettings(home, route), "utf8");
     expect(text).toContain("llm-pi-ai:");
     expect(text).toContain("    anthropic:");
-    expect(text).toContain('apiKeyEnv: "ANTHROPIC_AUTH_TOKEN"');
+    expect(text).toContain('apiKeyEnv: "ANBAN_INTERACTIVE_PROVIDER_API_KEY"');
     expect(text).toContain('api: "anthropic-messages"');
     expect(text).toContain('baseURL: "https://api.deepseek.com/anthropic"');
     expect(text).toContain('id: "deepseek-flash"');
@@ -234,7 +237,6 @@ describe("interactive bridge protocol", () => {
       model: "deepseek-flash",
       api: "anthropic-messages",
       baseURL: "https://api.deepseek.com/anthropic",
-      apiKeyEnv: "ANTHROPIC_AUTH_TOKEN",
     });
     await bridge.command({ method: "session/prompt", params: { sessionId: "root" } });
     expect(attempts).toBe(2);

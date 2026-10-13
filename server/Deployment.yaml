@@ -145,16 +145,6 @@ spec:
                 secretKeyRef:
                   name: anban-agent-profile-providers
                   key: deepseek-api-key
-            - name: DEEPSEEK_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: anban-agent-profile-providers
-                  key: deepseek-api-key
-            - name: ANTHROPIC_AUTH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: anban-agent-profile-providers
-                  key: deepseek-api-key
             - name: ANBAN_MOONSHOT_ANTHROPIC_BASE_URL
               value: https://api.moonshot.cn/anthropic
             - name: ANBAN_MOONSHOT_API_KEY

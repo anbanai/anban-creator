@@ -25,33 +25,31 @@ dsh:
       provider: anthropic
       api: anthropic-messages
       base_url: https://api.deepseek.com/anthropic
-      api_key_env: ANTHROPIC_AUTH_TOKEN
+      api_key: "${ANBAN_DEEPSEEK_API_KEY}"
       model: deepseek-flash
 ```
 
-`api_key_env` is an Anban configuration reference, not a secret value and not a
-new variable invented by the Bridge. The Bridge maps it to DSH's official
-`apiKeyEnv` field, writes `api`, `baseURL`, and `models` into temporary
-per-session DSH settings, and starts the fixed official runtime profile:
-`dsh --profile sdk`. `provider` and `model` are also sent through the official
-SDK `initialize({ provider, model })` handshake.
+`api_key` uses the same `${...}` configuration expansion as Claude's `envs`.
+The Server resolves it once when loading the configuration, then injects it into
+the isolated DSH child through an internal per-session variable. The Bridge maps
+that internal variable to DSH's official `apiKeyEnv` field, writes `api`,
+`baseURL`, and `models` into temporary per-session DSH settings, and starts the
+fixed official runtime profile: `dsh --profile sdk`. `provider` and `model` are
+also sent through the official SDK `initialize({ provider, model })` handshake.
 
-The DSH child receives only `DSH_HOME`, the selected credential variable (for
-example `DEEPSEEK_API_KEY` or `ANTHROPIC_AUTH_TOKEN`), and the internal
-`ANBAN_INTERACTIVE_*` Bridge protocol variables for the session, MCP URL,
-runtime token, patch, initial context, and temporary home. The latter are
-Anban transport variables, not DSH provider settings. Do not configure the
-removed `interactive:` block, `provider_api_key_env`, or `ANBAN_DSH_API_KEY`,
-`ANBAN_DSH_BASE_URL`, `ANBAN_DSH_MODEL`, `ANBAN_DSH_PROVIDER`, or
-`ANBAN_DSH_PROFILE` names. The Server rejects startup when any of these legacy
-`ANBAN_DSH_*` variables is present, so remove stale deployment entries before
-switching to `dsh.routes`.
+The DSH child receives only `DSH_HOME`, the internal per-session
+`ANBAN_INTERACTIVE_PROVIDER_API_KEY` provider-key variable, and the internal
+`ANBAN_INTERACTIVE_*` Bridge protocol variables for the session, MCP URL, runtime
+token, patch, initial context, and temporary home.
+Do not configure the removed `interactive:` block, `provider_api_key_env`,
+`api_key_env`, or `ANBAN_DSH_API_KEY`, `ANBAN_DSH_BASE_URL`,
+`ANBAN_DSH_MODEL`, `ANBAN_DSH_PROVIDER`, or `ANBAN_DSH_PROFILE` names. The
+Server rejects startup when any of these legacy `ANBAN_DSH_*` variables is
+present, so remove stale deployment entries before switching to `dsh.routes`.
 
-For Kubernetes, project the official credential names used by your selected
-route from the same provider Secret. The checked-in Deployment exposes
-`DEEPSEEK_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the existing
-`deepseek-api-key` Secret key; add or change the corresponding Secret mapping
-when a route uses a different provider.
+For Kubernetes or Compose, keep using the existing `ANBAN_*` environment
+references already used by Claude. No additional DSH credential variable or
+Secret mapping is required.
 
 当前先恢复为一个固定的 Studio Deployment（例如 `creator-studio-web-base`），沿用原有 ACS 更新流程。`version_switch` 固定为 `base`；它用于资源名、Pod 标签和日志，不影响 Nginx。Deployment selector 只匹配稳定的 `app` 标签，不能加 `version`，否则会尝试修改已有 Deployment 的不可变 selector。
 

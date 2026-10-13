@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 
 type JsonRecord = Record<string, unknown>;
-const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const DSH_PROVIDER_API_KEY_ENV = "ANBAN_INTERACTIVE_PROVIDER_API_KEY";
 const PROVIDER_REGISTRATION_RETRIES = 20;
 const PROVIDER_REGISTRATION_RETRY_MS = 50;
 
@@ -44,11 +44,10 @@ export interface InteractiveRouteConfig {
   model: string;
   api: string;
   baseURL: string;
-  apiKeyEnv: string;
 }
 
 export function parseInteractiveRouteArgs(argv = process.argv.slice(2)): InteractiveRouteConfig {
-  const supported = new Set(["--provider", "--model", "--route-api", "--base-url", "--api-key-env"]);
+  const supported = new Set(["--provider", "--model", "--route-api", "--base-url"]);
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
@@ -66,9 +65,8 @@ export function parseInteractiveRouteArgs(argv = process.argv.slice(2)): Interac
   };
   const route = {
     provider: read("--provider"), model: read("--model"), api: read("--route-api"),
-    baseURL: read("--base-url"), apiKeyEnv: read("--api-key-env"),
+    baseURL: read("--base-url"),
   };
-  if (!ENV_NAME_PATTERN.test(route.apiKeyEnv)) throw new Error("--api-key-env must be a valid environment variable name");
   if (route.provider !== "deepseek-official" && route.provider !== "anthropic") {
     throw new Error(`unsupported DSH provider: ${route.provider}`);
   }
@@ -83,14 +81,11 @@ export function writeDshRouteSettings(dshHome: string, route: InteractiveRouteCo
   if (route.provider !== "deepseek-official" && route.provider !== "anthropic") {
     throw new Error(`unsupported DSH provider: ${route.provider}`);
   }
-  if (!ENV_NAME_PATTERN.test(route.apiKeyEnv)) {
-    throw new Error("api_key_env must be a valid environment variable name");
-  }
   mkdirSync(dshHome, { recursive: true, mode: 0o700 });
   const model = `        - id: ${yamlQuote(route.model)}\n          contextWindow: 262144\n          maxTokens: 32768`;
   const body = route.provider === "deepseek-official"
-    ? ["llm-deepseek:", `  apiKeyEnv: ${yamlQuote(route.apiKeyEnv)}`, `  baseURL: ${yamlQuote(route.baseURL)}`, "  models:", model].join("\n") + "\n"
-    : ["llm-pi-ai:", "  providers:", `    ${route.provider}:`, `      apiKeyEnv: ${yamlQuote(route.apiKeyEnv)}`, `      api: ${yamlQuote(route.api)}`, `      baseURL: ${yamlQuote(route.baseURL)}`, "      models:", model].join("\n") + "\n";
+    ? ["llm-deepseek:", `  apiKeyEnv: ${yamlQuote(DSH_PROVIDER_API_KEY_ENV)}`, `  baseURL: ${yamlQuote(route.baseURL)}`, "  models:", model].join("\n") + "\n"
+    : ["llm-pi-ai:", "  providers:", `    ${route.provider}:`, `      apiKeyEnv: ${yamlQuote(DSH_PROVIDER_API_KEY_ENV)}`, `      api: ${yamlQuote(route.api)}`, `      baseURL: ${yamlQuote(route.baseURL)}`, "      models:", model].join("\n") + "\n";
   const path = resolve(dshHome, "settings.yaml");
   writeFileSync(path, body, { encoding: "utf8", mode: 0o600 });
   return path;
@@ -279,14 +274,12 @@ export class InteractiveBridge {
   ) {
     this.route = route ?? (clientFactory ? {
       provider: "deepseek-official", model: "deepseek-flash", api: "deepseek-messages",
-      baseURL: "https://api.deepseek.com/anthropic", apiKeyEnv: "DEEPSEEK_API_KEY",
+      baseURL: "https://api.deepseek.com/anthropic",
     } : parseInteractiveRouteArgs());
   }
 
   redact(message: string): string {
-    const providerSecret = ENV_NAME_PATTERN.test(this.route.apiKeyEnv)
-      ? process.env[this.route.apiKeyEnv]?.trim() ?? ""
-      : "";
+    const providerSecret = process.env[DSH_PROVIDER_API_KEY_ENV]?.trim() ?? "";
     return redactInteractiveSecrets(message, process.env.ANBAN_INTERACTIVE_RUNTIME_TOKEN ?? "", [providerSecret]);
   }
 

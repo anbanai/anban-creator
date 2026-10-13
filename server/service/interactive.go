@@ -1588,16 +1588,16 @@ func (s *InteractiveService) sessionClosed(id string) bool {
 }
 
 type ExecRuntimeFactory struct {
-	Command   string
-	Args      []string
-	Dir       string
-	DSHPatch  string
-	Provider  string
-	API       string
-	BaseURL   string
-	APIKeyEnv string
-	Model     string
-	MCPURL    string
+	Command  string
+	Args     []string
+	Dir      string
+	DSHPatch string
+	Provider string
+	API      string
+	BaseURL  string
+	APIKey   string
+	Model    string
+	MCPURL   string
 }
 
 func (f ExecRuntimeFactory) Start(ctx context.Context, sessionID, _ string, runtimeToken string, emit func(string, any)) (Runtime, error) {
@@ -1634,12 +1634,12 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, 
 		}
 	}
 	args := append([]string(nil), f.Args...)
-	args = append(args, "--provider", f.Provider, "--model", f.Model, "--route-api", f.API, "--base-url", f.BaseURL, "--api-key-env", f.APIKeyEnv)
+	args = append(args, "--provider", f.Provider, "--model", f.Model, "--route-api", f.API, "--base-url", f.BaseURL)
 	cmd := exec.CommandContext(ctx, f.Command, args...)
 	if f.Dir != "" {
 		cmd.Dir = f.Dir
 	}
-	cmd.Env = interactiveRuntimeEnvironment(dshHome, f.APIKeyEnv)
+	cmd.Env = interactiveRuntimeEnvironment(dshHome, f.APIKey)
 	cmd.Env = append(cmd.Env,
 		"ANBAN_INTERACTIVE_SESSION_ID="+sessionID,
 		"ANBAN_INTERACTIVE_RUNTIME_TOKEN="+runtimeToken,
@@ -1669,7 +1669,7 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, 
 	}
 	stderrTail := &interactiveTailBuffer{limit: 16 * 1024}
 	redactions := []string{runtimeToken}
-	if providerSecret := interactiveProviderCredential(f.APIKeyEnv); providerSecret != "" {
+	if providerSecret := interactiveProviderCredential(f.APIKey); providerSecret != "" {
 		redactions = append(redactions, providerSecret)
 	}
 	r := &execRuntime{cmd: cmd, in: stdin, done: make(chan struct{}), pending: map[uint64]chan error{}, cleanup: func() { _ = os.RemoveAll(dshHome) }, redactions: redactions}
@@ -1688,7 +1688,9 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, 
 	return r, nil
 }
 
-func interactiveRuntimeEnvironment(dshHome, credentialEnv string) []string {
+const interactiveProviderAPIKeyEnv = "ANBAN_INTERACTIVE_PROVIDER_API_KEY"
+
+func interactiveRuntimeEnvironment(dshHome, providerAPIKey string) []string {
 	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR", "NODE_EXTRA_CA_CERTS"}
 	env := make([]string, 0, len(keys)+5)
 	for _, key := range keys {
@@ -1697,38 +1699,14 @@ func interactiveRuntimeEnvironment(dshHome, credentialEnv string) []string {
 		}
 	}
 	env = append(env, "HOME="+dshHome, "USERPROFILE="+dshHome)
-	if validInteractiveEnvName(credentialEnv) {
-		value, ok := os.LookupEnv(credentialEnv)
-		if ok {
-			env = append(env, credentialEnv+"="+value)
-		}
+	if providerAPIKey != "" {
+		env = append(env, interactiveProviderAPIKeyEnv+"="+providerAPIKey)
 	}
 	return env
 }
 
-func interactiveProviderCredential(credentialEnv string) string {
-	if !validInteractiveEnvName(credentialEnv) {
-		return ""
-	}
-	value, ok := os.LookupEnv(credentialEnv)
-	if !ok {
-		return ""
-	}
-	return value
-}
-
-func validInteractiveEnvName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for index, char := range name {
-		letter := char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' || char == '_'
-		digit := char >= '0' && char <= '9'
-		if !letter && !(index > 0 && digit) {
-			return false
-		}
-	}
-	return true
+func interactiveProviderCredential(providerAPIKey string) string {
+	return providerAPIKey
 }
 
 type execRuntime struct {

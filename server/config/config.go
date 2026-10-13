@@ -67,11 +67,11 @@ type DshConfig struct {
 }
 
 type DshRouteConfig struct {
-	Provider  string `yaml:"provider"`
-	API       string `yaml:"api"`
-	BaseURL   string `yaml:"base_url"`
-	APIKeyEnv string `yaml:"api_key_env"`
-	Model     string `yaml:"model"`
+	Provider string `yaml:"provider"`
+	API      string `yaml:"api"`
+	BaseURL  string `yaml:"base_url"`
+	APIKey   string `yaml:"api_key" json:"-"`
+	Model    string `yaml:"model"`
 }
 
 func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -92,7 +92,6 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 			route.Provider = strings.ToLower(strings.TrimSpace(route.Provider))
 			route.API = strings.ToLower(strings.TrimSpace(route.API))
 			route.BaseURL = strings.TrimSpace(route.BaseURL)
-			route.APIKeyEnv = strings.TrimSpace(route.APIKeyEnv)
 			route.Model = strings.TrimSpace(route.Model)
 			c.Routes[name] = route
 		}
@@ -102,7 +101,7 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 
 func (c *DshRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := validateYAMLMappingFields(value, "dsh route", map[string]bool{
-		"provider": true, "api": true, "base_url": true, "api_key_env": true, "model": true,
+		"provider": true, "api": true, "base_url": true, "api_key": true, "model": true,
 	}); err != nil {
 		return err
 	}
@@ -140,14 +139,30 @@ func (c DshConfig) Validate() error {
 		if err := validateDshBaseURL(route.BaseURL); err != nil {
 			errs = append(errs, path+".base_url "+err.Error())
 		}
-		if !interactiveProviderAPIKeyEnvPattern.MatchString(strings.TrimSpace(route.APIKeyEnv)) {
-			errs = append(errs, path+".api_key_env must be a valid environment variable name")
+		if err := validateDshAPIKey(route.APIKey, c.Enabled && name == selected); err != nil {
+			errs = append(errs, path+".api_key "+err.Error())
 		}
 		if strings.TrimSpace(route.Model) == "" {
 			errs = append(errs, path+".model is required")
 		}
 	}
 	return joinConfigErrors(errs)
+}
+
+func validateDshAPIKey(value string, required bool) error {
+	if strings.TrimSpace(value) == "" {
+		if !required {
+			return nil
+		}
+		return fmt.Errorf("is required")
+	}
+	if strings.ContainsAny(value, "\x00\r\n") {
+		return fmt.Errorf("contains a forbidden control character")
+	}
+	if len(value) > 16*1024 {
+		return fmt.Errorf("exceeds 16384 bytes")
+	}
+	return nil
 }
 
 func validateDshBaseURL(raw string) error {
@@ -772,8 +787,6 @@ func (c ClaudeConfig) Validate() error {
 	return nil
 }
 
-var interactiveProviderAPIKeyEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
 // DockerConfig holds Docker executor settings for container-based task execution.
 type DockerConfig struct {
 	Network             string `yaml:"network"`
@@ -1045,7 +1058,7 @@ func rejectDeprecatedDshEnvironment() error {
 		"ANBAN_DSH_PROFILE",
 	} {
 		if _, ok := os.LookupEnv(name); ok {
-			return fmt.Errorf("deprecated environment variable %s is no longer supported; configure dsh.routes and its api_key_env instead", name)
+			return fmt.Errorf("deprecated environment variable %s is no longer supported; configure dsh.routes and its api_key instead", name)
 		}
 	}
 	return nil

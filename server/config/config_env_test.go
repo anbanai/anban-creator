@@ -75,7 +75,7 @@ dsh:
       provider: deepseek-official
       api: deepseek-messages
       base_url: https://api.deepseek.com/anthropic
-      api_key_env: DEEPSEEK_API_KEY
+      api_key: ${ANBAN_TEST_DEEPSEEK_KEY}
       model: deepseek-flash
   bridge_dir: ./runtime-dsh
   dsh_patch: ./harness/dsh/project-creator.patch.yml
@@ -160,8 +160,8 @@ claude:
 	if cfg.Dsh.DSHPatch != wantPatch {
 		t.Errorf("dsh.dsh_patch = %q, want %q", cfg.Dsh.DSHPatch, wantPatch)
 	}
-	if cfg.Dsh.Routes["effective"].APIKeyEnv != "DEEPSEEK_API_KEY" {
-		t.Errorf("dsh.routes.effective.api_key_env = %q, want DEEPSEEK_API_KEY", cfg.Dsh.Routes["effective"].APIKeyEnv)
+	if cfg.Dsh.Routes["effective"].APIKey != "existing-server-only-key" {
+		t.Errorf("dsh.routes.effective.api_key = %q, want expanded API key", cfg.Dsh.Routes["effective"].APIKey)
 	}
 }
 
@@ -174,7 +174,7 @@ func TestDshRouteValuesAreCanonicalized(t *testing.T) {
       provider: DeepSeek-Official
       api: DeepSeek-Messages
       base_url: " https://api.deepseek.com/anthropic "
-      api_key_env: " DEEPSEEK_API_KEY "
+      api_key: " direct-api-key "
       model: " deepseek-flash "
 claude:
 `, 1)
@@ -186,7 +186,7 @@ claude:
 		t.Fatalf("NewConfig() error = %v", err)
 	}
 	route := cfg.Dsh.Routes["Effective"]
-	if route.Provider != "deepseek-official" || route.API != "deepseek-messages" || route.BaseURL != "https://api.deepseek.com/anthropic" || route.APIKeyEnv != "DEEPSEEK_API_KEY" || route.Model != "deepseek-flash" {
+	if route.Provider != "deepseek-official" || route.API != "deepseek-messages" || route.BaseURL != "https://api.deepseek.com/anthropic" || route.APIKey != " direct-api-key " || route.Model != "deepseek-flash" {
 		t.Fatalf("canonical DSH route = %#v", route)
 	}
 }
@@ -198,6 +198,7 @@ func TestConfigRejectsLegacyInteractiveAndInvalidDshRoute(t *testing.T) {
 		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\nclaude:\n  execution_profiles: {}\n",
 		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  route: effective\n  routes:\n    effective:\n      provider: deepseek-official\n      api: deepseek-messages\n      base_url: https://api.deepseek.com/anthropic\n      provider_api_key_env: DEEPSEEK_API_KEY\n      model: deepseek-flash\n",
 		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  route: effective\n  routes:\n    effective:\n      provider: deepseek-official\n      api: deepseek-messages\n      base_url: https://api.deepseek.com/anthropic\n      api_key_env: DEEPSEEK-API-KEY\n      model: deepseek-flash\n",
+		"database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  route: effective\n  routes:\n    effective:\n      provider: deepseek-official\n      api: deepseek-messages\n      base_url: https://api.deepseek.com/anthropic\n      api_key: \"\"\n      model: deepseek-flash\n",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -234,17 +235,18 @@ func TestConfigRejectsDeprecatedDshEnvironmentVariables(t *testing.T) {
 }
 
 func TestConfigRejectsInvalidDshRouteSelectionAndProviderFields(t *testing.T) {
-	base := "database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  route: %s\n  routes:\n    effective:\n      provider: %s\n      api: %s\n      base_url: %s\n      api_key_env: %s\n      model: %s\n"
+	base := "database:\n  dsn: dsn\njwt:\n  secret_key: secret\ndsh:\n  enabled: true\n  route: %s\n  routes:\n    effective:\n      provider: %s\n      api: %s\n      base_url: %s\n      api_key: %s\n      model: %s\n"
 	tests := []struct {
 		name string
 		yaml string
 	}{
-		{"missing selected route", fmt.Sprintf(base, "", "deepseek-official", "deepseek-messages", "https://api.deepseek.com/anthropic", "DEEPSEEK_API_KEY", "deepseek-flash")},
-		{"unknown selected route", fmt.Sprintf(base, "quality", "deepseek-official", "deepseek-messages", "https://api.deepseek.com/anthropic", "DEEPSEEK_API_KEY", "deepseek-flash")},
-		{"deepseek api mismatch", fmt.Sprintf(base, "effective", "deepseek-official", "anthropic-messages", "https://api.deepseek.com/anthropic", "DEEPSEEK_API_KEY", "deepseek-flash")},
-		{"anthropic api mismatch", fmt.Sprintf(base, "effective", "anthropic", "deepseek-messages", "https://api.deepseek.com/anthropic", "ANTHROPIC_AUTH_TOKEN", "deepseek-flash")},
-		{"invalid base url", fmt.Sprintf(base, "effective", "anthropic", "anthropic-messages", "not-a-url", "ANTHROPIC_AUTH_TOKEN", "deepseek-flash")},
-		{"missing model", fmt.Sprintf(base, "effective", "anthropic", "anthropic-messages", "https://api.deepseek.com/anthropic", "ANTHROPIC_AUTH_TOKEN", "")},
+		{"missing selected route", fmt.Sprintf(base, "", "deepseek-official", "deepseek-messages", "https://api.deepseek.com/anthropic", "direct-api-key", "deepseek-flash")},
+		{"unknown selected route", fmt.Sprintf(base, "quality", "deepseek-official", "deepseek-messages", "https://api.deepseek.com/anthropic", "direct-api-key", "deepseek-flash")},
+		{"deepseek api mismatch", fmt.Sprintf(base, "effective", "deepseek-official", "anthropic-messages", "https://api.deepseek.com/anthropic", "direct-api-key", "deepseek-flash")},
+		{"anthropic api mismatch", fmt.Sprintf(base, "effective", "anthropic", "deepseek-messages", "https://api.deepseek.com/anthropic", "direct-api-key", "deepseek-flash")},
+		{"invalid base url", fmt.Sprintf(base, "effective", "anthropic", "anthropic-messages", "not-a-url", "direct-api-key", "deepseek-flash")},
+		{"missing api key", fmt.Sprintf(base, "effective", "anthropic", "anthropic-messages", "https://api.deepseek.com/anthropic", "", "deepseek-flash")},
+		{"missing model", fmt.Sprintf(base, "effective", "anthropic", "anthropic-messages", "https://api.deepseek.com/anthropic", "direct-api-key", "")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -256,6 +258,28 @@ func TestConfigRejectsInvalidDshRouteSelectionAndProviderFields(t *testing.T) {
 				t.Fatal("invalid DSH route accepted")
 			}
 		})
+	}
+}
+
+func TestDisabledDshAllowsUnsetRouteAPIKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := strings.Replace(validClaudeConfigYAML, "claude:\n", `dsh:
+  enabled: false
+  route: effective
+  routes:
+    effective:
+      provider: deepseek-official
+      api: deepseek-messages
+      base_url: https://api.deepseek.com/anthropic
+      api_key: ""
+      model: deepseek-flash
+claude:
+`, 1)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewConfig(path); err != nil {
+		t.Fatalf("disabled DSH rejected an unset route API key: %v", err)
 	}
 }
 
