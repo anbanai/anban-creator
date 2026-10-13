@@ -8,9 +8,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { toast } from 'sonner'
+import { RotateCcw, Trash2 } from 'lucide-react'
 import { getApiErrorMessage } from '@/lib/http-client'
 import type { Project, TopicPool } from '@/types'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 interface TopicPoolDialogProps {
   project: Project
@@ -142,24 +144,19 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
                   </div>
                   <div className="flex gap-1">
                     {topic.status === 'used' && (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        disabled={resetMutation.isPending}
-                        onClick={() => resetMutation.mutate(topic.id)}
-                      >
-                        重置
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label="重置" disabled={resetMutation.isPending} onClick={() => resetMutation.mutate(topic.id)} />}>
+                          <RotateCcw className="size-4" />
+                        </TooltipTrigger>
+                        <TooltipContent>重置选题</TooltipContent>
+                      </Tooltip>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => deleteMutation.mutate(topic.id)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      删除
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label="删除" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate(topic.id)} className="text-destructive hover:bg-destructive/10 hover:text-destructive" />}>
+                        <Trash2 className="size-4" />
+                      </TooltipTrigger>
+                      <TooltipContent>删除选题</TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
               ))}

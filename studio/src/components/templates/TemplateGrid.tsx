@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
@@ -209,30 +210,25 @@ export function TemplateGrid() {
                   </div>
                   <div className="flex justify-end gap-1 border-t border-border pt-2">
                     {template.image_analysis?.can_retry ? (
-                      <Button type="button" variant="ghost" size="icon-sm" title="重试识别" aria-label={`重试识别 ${template.name}`} onClick={() => void retryAnalysis(template)}>
-                        <RefreshCw className={retryMutation.isPending ? 'animate-spin' : ''} />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`重试识别 ${template.name}`} onClick={() => void retryAnalysis(template)} />}>
+                          <RefreshCw className={retryMutation.isPending ? 'size-4 animate-spin' : 'size-4'} />
+                        </TooltipTrigger>
+                        <TooltipContent>重试识别</TooltipContent>
+                      </Tooltip>
                     ) : null}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`编辑 ${template.name}`}
-                      title="编辑模板"
-                      onClick={() => openEdit(template)}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`删除 ${template.name}`}
-                      title="删除模板"
-                      onClick={() => setDeletingTemplate(template)}
-                    >
-                      <Trash2 />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`编辑 ${template.name}`} onClick={() => openEdit(template)} />}>
+                        <Pencil className="size-4" />
+                      </TooltipTrigger>
+                      <TooltipContent>编辑模板</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`删除 ${template.name}`} onClick={() => setDeletingTemplate(template)} />}>
+                        <Trash2 className="size-4" />
+                      </TooltipTrigger>
+                      <TooltipContent>删除模板</TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
               </article>

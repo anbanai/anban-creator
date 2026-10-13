@@ -7,6 +7,7 @@ import { Brain, FileText, ImageOff, Loader2, Pencil, RefreshCw, Save, X } from '
 import { projectsApi } from '@/lib/api/projects'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
 
 interface ProjectMemoryDialogProps {
@@ -101,19 +102,18 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
             <span aria-hidden="true">·</span>
             <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的创作项目上下文'}</span>
           </DialogDescription>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            className="absolute right-12 top-3"
-            aria-label="刷新记忆"
-            disabled={query.isFetching}
-            onClick={() => void query.refetch()}
-          >
-            <RefreshCw className={query.isFetching ? 'animate-spin' : ''} />
-          </Button>
-          <DialogClose render={<Button variant="ghost" size="icon-sm" className="absolute right-3 top-3" aria-label="关闭创作项目记忆" />}>
-            <X />
-          </DialogClose>
+          <Tooltip>
+            <TooltipTrigger render={<Button variant="outline" size="icon-md" className="absolute right-14 top-2" aria-label="刷新记忆" disabled={query.isFetching} onClick={() => void query.refetch()} />}>
+              <RefreshCw className={query.isFetching ? 'size-4 animate-spin' : 'size-4'} />
+            </TooltipTrigger>
+            <TooltipContent>刷新记忆</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger render={<DialogClose render={<Button variant="ghost" size="icon-md" className="absolute right-2 top-2" aria-label="关闭创作项目记忆" />} />}>
+              <X className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>关闭</TooltipContent>
+          </Tooltip>
         </DialogHeader>
 
         {query.isLoading ? (

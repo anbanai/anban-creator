@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Upload, X } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 import { uploadToOSS, type DirectUploadPurpose } from '@/lib/direct-upload'
 import { referenceSelectionFromUpload } from '@/lib/reference-image'
@@ -194,15 +195,12 @@ export function ReferenceAssetUpload({
             alt={imageAlt}
             className="h-32 w-32 rounded-lg border object-cover"
           />
-          <button
-            type="button"
-            aria-label="移除参考图"
-            onClick={handleClear}
-            disabled={uploading || disabled}
-            className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-foreground disabled:opacity-50"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger render={<button type="button" aria-label="移除参考图" onClick={handleClear} disabled={uploading || disabled} className="absolute -right-2 -top-2 flex size-11 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm ring-1 ring-border transition-colors hover:text-foreground disabled:opacity-50" />}>
+              <X className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>移除参考图</TooltipContent>
+          </Tooltip>
           {uploading ? (
             <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/40">
               <Loader2 className="h-5 w-5 animate-spin text-white" />

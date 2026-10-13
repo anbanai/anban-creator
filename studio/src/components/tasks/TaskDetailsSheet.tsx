@@ -35,6 +35,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatFullDateTimeCN, progressStageLabel, providerDiagnosticLabels, statusBadgeVariant, taskFailurePresentation, taskStatusLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 import type { Project, Task, TaskBillingChargeDetail, TaskFile } from '@/types'
@@ -300,30 +301,19 @@ function TaskLogDetails({
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">{logs.length} 条</span>
         <div className="flex items-center gap-1">
-          <Button
-            size="xs"
-            variant="ghost"
-            className="min-h-11 min-w-11"
-            aria-pressed={autoScrollLogs}
-            aria-label={autoScrollLogs ? '暂停自动跟随' : '开启自动跟随'}
-            onClick={onToggleAutoScroll}
-          >
-            {autoScrollLogs
-              ? <Pause aria-hidden="true" />
-              : <Play aria-hidden="true" />}
-            <span className="sr-only">{autoScrollLogs ? '自动跟随中' : '跟随已暂停'}</span>
-          </Button>
-          <Button
-            size="xs"
-            variant="ghost"
-            className="min-h-11 min-w-11"
-            aria-label="复制日志"
-            disabled={logs.length === 0}
-            onClick={onCopyLogs}
-          >
-            <Copy aria-hidden="true" />
-            <span className="sr-only">复制</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger render={<Button size="icon-md" variant="ghost" aria-pressed={autoScrollLogs} aria-label={autoScrollLogs ? '暂停自动跟随' : '开启自动跟随'} onClick={onToggleAutoScroll} />}>
+              {autoScrollLogs ? <Pause aria-hidden="true" className="size-4" /> : <Play aria-hidden="true" className="size-4" />}
+              <span className="sr-only">{autoScrollLogs ? '自动跟随中' : '跟随已暂停'}</span>
+            </TooltipTrigger>
+            <TooltipContent>{autoScrollLogs ? '暂停自动跟随' : '开启自动跟随'}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger render={<Button size="icon-md" variant="ghost" aria-label="复制日志" disabled={logs.length === 0} onClick={onCopyLogs} />}>
+              <Copy aria-hidden="true" className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>复制日志</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
@@ -333,15 +323,12 @@ function TaskLogDetails({
           <AlertTitle>日志连接中断</AlertTitle>
           <AlertDescription className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span className="min-w-0 break-words">{sseError}</span>
-            <Button
-              size="xs"
-              variant="ghost"
-              className="min-h-11 min-w-11 shrink-0 self-start sm:self-auto"
-              onClick={onReconnectLogs}
-            >
-              <RefreshCw aria-hidden="true" />
-              <span className="sr-only">重新连接</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="shrink-0 self-start sm:self-auto" aria-label="重新连接" onClick={onReconnectLogs} />}>
+                <RefreshCw aria-hidden="true" className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent>重新连接日志</TooltipContent>
+            </Tooltip>
           </AlertDescription>
         </Alert>
       ) : null}

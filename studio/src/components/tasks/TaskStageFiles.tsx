@@ -48,11 +48,12 @@ export function TaskFileDownloads({ taskId, files }: { taskId: string; files: Ta
   }
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={<Button size="icon-md" variant="ghost" loading={!!downloading} disabled={!!downloading} aria-label="下载产物" title="下载产物" />}
-      >
-          {downloading ? null : <Download className="size-3.5" aria-hidden="true" />}
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger render={<DropdownMenuTrigger render={<Button size="icon-md" variant="ghost" loading={!!downloading} disabled={!!downloading} aria-label="下载产物" />} />}>
+          {downloading ? null : <Download className="size-4" aria-hidden="true" />}
+        </TooltipTrigger>
+        <TooltipContent>下载产物</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuItem disabled={!!downloading} onClick={() => void download('delivered')}>
           <FileDown className="size-4" />下载交付成果

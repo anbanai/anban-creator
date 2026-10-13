@@ -16,6 +16,7 @@ import type { CreateProjectRequest, ProfileDimension, Project, ProjectProfile, P
 import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { profileLabAgents as agents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
 import { queryKeys } from '@/lib/query-keys'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const dimensions = [
   ['identity', '定位'], ['style', '风格'], ['audience', '受众'],
@@ -616,14 +617,14 @@ function ProfileLabPage() {
                     <div className="grid gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto]">
                       <Input aria-label={`${label}新字段名称`} value={newKeys[key] ?? ''} onChange={(event) => { setDirtyDimensions((current) => new Set([...current, key])); setNewKeys((current) => ({ ...current, [key]: event.target.value })) }} placeholder="新字段" />
                       <Input aria-label={`${label}新字段内容`} value={newValues[key] ?? ''} onChange={(event) => { setDirtyDimensions((current) => new Set([...current, key])); setNewValues((current) => ({ ...current, [key]: event.target.value })) }} placeholder="补充内容" />
-                      <Button type="button" variant="outline" size="icon" aria-label={`添加${label}字段`} onClick={() => {
+                      <Tooltip><TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`添加${label}字段`} onClick={() => {
                         const field = newKeys[key]?.trim()
                         if (!field) return
                         if (field in contentDraft) { toast.error('字段已存在，请直接编辑已有内容'); return }
                         editDimension(key, { ...contentDraft, [field]: newValues[key] ?? '' })
                         setNewKeys((current) => ({ ...current, [key]: '' }))
                         setNewValues((current) => ({ ...current, [key]: '' }))
-                      }}><Plus /></Button>
+                      }} />}><Plus className="size-4" /></TooltipTrigger><TooltipContent>添加{label}字段</TooltipContent></Tooltip>
                     </div>
                     <Button type="button" size="sm" variant="secondary" disabled={saveProfileDimension.isPending || stale || profileQuery.isError} onClick={() => saveDimension(key)}><Check />保存{label}</Button>
                     <div className="border-t border-border pt-3 text-xs leading-5">

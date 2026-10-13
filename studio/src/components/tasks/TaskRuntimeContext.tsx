@@ -22,6 +22,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { cn } from '@/lib/utils'
 import { contentTypeDisplayName, progressStageLabel, taskFailurePresentation } from '@/lib/labels'
 import { ProjectIdentity, resolveProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type RuntimeStatus = 'ready' | 'starting' | 'failed' | 'recoverable' | 'unknown'
 type ContextKey = 'profile' | 'execution' | 'artifacts' | 'connectivity'
@@ -120,20 +121,17 @@ function makeItems(task: Task, project: Project | undefined, files: TaskFile[], 
 function CopyValue({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-md"
-      aria-label={copied ? '已复制' : '复制'}
-      onClick={() => {
+    <Tooltip>
+      <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={copied ? '已复制' : '复制'} onClick={() => {
         void navigator.clipboard.writeText(value).then(() => {
           setCopied(true)
           window.setTimeout(() => setCopied(false), 1200)
         })
-      }}
-    >
-      <Clipboard className="size-3.5" />
-    </Button>
+      }} />}>
+        <Clipboard className="size-4" />
+      </TooltipTrigger>
+      <TooltipContent>{copied ? '已复制' : '复制'}</TooltipContent>
+    </Tooltip>
   )
 }
 

@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { Search, X } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 interface SearchInputProps {
   value: string
@@ -25,14 +26,12 @@ export function SearchInput({ value, onChange, placeholder = '搜索...', classN
         onChange={(e) => onChange(e.target.value)}
       />
       {value && (
-        <button
-          type="button"
-          aria-label="清空搜索"
-          className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-lg text-muted-foreground hover:text-foreground"
-          onClick={() => { onChange(''); inputRef.current?.focus() }}
-        >
-          <X aria-hidden="true" className="size-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger render={<button type="button" aria-label="清空搜索" className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-muted-foreground hover:text-foreground" onClick={() => { onChange(''); inputRef.current?.focus() }} />}>
+            <X aria-hidden="true" className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent>清空搜索</TooltipContent>
+        </Tooltip>
       )}
     </div>
   )

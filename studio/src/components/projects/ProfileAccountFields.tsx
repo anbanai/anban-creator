@@ -1,6 +1,7 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { ProjectProfileSetup } from '@/types'
 
 type Account = ProjectProfileSetup['platform_accounts'][number]
@@ -25,7 +26,7 @@ export function ProfileAccountFields({ accounts, onChange }: { accounts: Account
       return <fieldset key={index} className="grid gap-3 border border-border p-3 sm:grid-cols-2">
         <legend className="px-1 text-xs text-muted-foreground">账号 {index + 1}</legend>
         <label className="space-y-1.5 text-sm"><span>平台</span><select aria-label={`账号 ${index + 1} 平台`} value={account.platform} onChange={(event) => change(index, { platform: event.target.value as Account['platform'] })} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">{platforms.map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select></label>
-        <div className="flex items-center justify-between gap-2"><span className="border border-border px-1.5 py-1 font-mono text-[10px]">{account.profile_url.trim() ? '[用户确认]' : '[待补充]'}</span><Button type="button" variant="ghost" size="icon" onClick={() => onChange(accounts.filter((_, i) => i !== index))} aria-label={`删除账号 ${index + 1}`}><Trash2 /></Button></div>
+        <div className="flex items-center justify-between gap-2"><span className="border border-border px-1.5 py-1 font-mono text-[10px]">{account.profile_url.trim() ? '[用户确认]' : '[待补充]'}</span><Tooltip><TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => onChange(accounts.filter((_, i) => i !== index))} aria-label={`删除账号 ${index + 1}`} />}><Trash2 className="size-4" /></TooltipTrigger><TooltipContent>删除账号</TooltipContent></Tooltip></div>
         <label className="space-y-1.5 text-sm sm:col-span-2"><span>主页链接 · {label}{suffix}</span><Input type="url" aria-label={`主页链接 · ${label}${suffix}`} value={account.profile_url} onChange={(event) => change(index, { profile_url: event.target.value })} placeholder="https://…" maxLength={500} /></label>
         <label className="space-y-1.5 text-sm"><span>{nameLabel}</span><Input aria-label={`${nameLabel}${suffix}`} value={account.account_name ?? ''} onChange={(event) => change(index, { account_name: event.target.value })} placeholder="选填" maxLength={100} /></label>
         <label className="space-y-1.5 text-sm"><span>{followerLabel}</span><Input aria-label={`${followerLabel}${suffix}`} value={account.follower_range ?? ''} onChange={(event) => change(index, { follower_range: event.target.value })} placeholder="例如：1万–5万" maxLength={50} /></label>

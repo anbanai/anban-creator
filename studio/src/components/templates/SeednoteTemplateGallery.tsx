@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { cn } from '@/lib/utils'
@@ -99,10 +100,12 @@ export function SeednoteTemplateGallery({ platform, onApply, className }: Seedno
             <EmptyDescription>请检查网络后重试。</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Button type="button" variant="outline" size="sm" onClick={() => void query.refetch()}>
-              <RefreshCw data-icon="inline-start" />
-              重新加载
-            </Button>
+            <Tooltip>
+              <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label="重新加载" onClick={() => void query.refetch()} />}>
+                <RefreshCw className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent>重新加载</TooltipContent>
+            </Tooltip>
           </EmptyContent>
         </Empty>
       ) : templates.length === 0 ? (

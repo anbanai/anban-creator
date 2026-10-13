@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/common/button'
 import { Badge } from '@/components/ui/badge'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import type { IlinkBindCodeResult, IlinkStatus } from '@/lib/api/ilink'
 
@@ -108,9 +109,12 @@ export default function IlinkBindingSection() {
               添加平台微信助手后，可直接发消息创建作品，并及时接收作品成功或失败提醒。
             </p>
           </div>
-          <Button aria-label="刷新微信绑定状态" variant="secondary" size="sm" onClick={() => refetch()} disabled={isFetching}>
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger render={<Button aria-label="刷新微信绑定状态" variant="ghost" size="icon-md" onClick={() => refetch()} disabled={isFetching} />}>
+              <RefreshCw className={`size-4 ${isFetching ? 'animate-spin' : ''}`} />
+            </TooltipTrigger>
+            <TooltipContent>刷新微信绑定状态</TooltipContent>
+          </Tooltip>
         </div>
 
         {isLoading ? (
@@ -171,9 +175,12 @@ function BindCodePanel({ bindCode, onCopy }: { bindCode: string; onCopy: () => v
         <p className="text-xs text-muted-foreground">把绑定码发送给微信助手</p>
         <p className="font-mono text-xl font-semibold tracking-normal">{bindCode}</p>
       </div>
-      <Button variant="secondary" size="sm" onClick={onCopy}>
-        <Copy className="h-3.5 w-3.5" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label="复制绑定码" onClick={onCopy} />}>
+          <Copy className="size-4" />
+        </TooltipTrigger>
+        <TooltipContent>复制绑定码</TooltipContent>
+      </Tooltip>
     </div>
   )
 }
