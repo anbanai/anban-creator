@@ -34,7 +34,7 @@ export default function WechatAccountImportHistory({ project, onClose, onRevoked
   const revoke = useMutation({
     mutationFn: (batchId: string) => wechatAccountAnalyticsImportApi.revoke(project.id, batchId),
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['wechat-account-analytics', project.id] })
+      await client.invalidateQueries({ queryKey: ['wechat-account-analytics', project.id], refetchType: 'none' })
       setTarget(undefined)
       onRevoked?.()
     },

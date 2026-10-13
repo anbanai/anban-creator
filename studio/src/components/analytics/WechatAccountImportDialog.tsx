@@ -71,7 +71,7 @@ export default function WechatAccountImportDialog({ project, onClose, onImported
     }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['wechat-account-analytics', project.id] })
-      await client.invalidateQueries({ queryKey: ['content-analytics', project.id] })
+      await client.invalidateQueries({ queryKey: ['content-analytics', project.id], refetchType: 'none' })
       onImported?.({ count: preview?.rows.length ?? 0, date: maxDate(preview) })
       onClose()
     },

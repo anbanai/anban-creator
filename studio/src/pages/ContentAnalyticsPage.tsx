@@ -267,7 +267,15 @@ export default function ContentAnalyticsPage() {
     update({ agent: agentID, platform: analyticsPlatformForAgent(agentID), content: undefined, metric: undefined, view: undefined, type: undefined, sort: undefined, direction: undefined, page: undefined }, false)
   }
   function changeSeednoteView(next: SeednoteAnalyticsViewKey) { update({ view: next, metric: undefined, page: undefined }) }
-  function refresh() { void queryClient.invalidateQueries({ queryKey: ['content-analytics', project?.id] }); return queryClient.invalidateQueries({ queryKey: ['wechat-account-analytics', project?.id] }) }
+  async function refresh() {
+    if (!project) return
+    // Imports advance the shared analytics revision. Stop the old list
+    // request before refreshing the overview so it cannot refetch with a
+    // stale expected_revision while React switches to the new revision key.
+    await queryClient.cancelQueries({ queryKey: ['content-analytics', project.id] })
+    await queryClient.refetchQueries({ queryKey: ['content-analytics', project.id, contentId ? 'detail' : 'overview'] })
+    return queryClient.invalidateQueries({ queryKey: ['wechat-account-analytics', project.id] })
+  }
   function sortBy(key: string) { update({ sort: key, direction: sort === key && direction === 'desc' ? 'asc' : 'desc', page: undefined }) }
   function openContentImport(initialUpload?: InitialContentImportUpload) {
     setAccountImportOpen(false)

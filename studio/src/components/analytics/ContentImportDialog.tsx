@@ -45,8 +45,8 @@ function TargetPicker({ platform, projectId, rowNumber, target, label, disabled,
   </Popover>
 }
 
-export async function invalidateContentAnalytics(client: ReturnType<typeof useQueryClient>, projectId: string) {
-  await client.invalidateQueries({ predicate: ({ queryKey }) => queryKey[1] === projectId && /^(content-analytics|wechat-import|seednote-import)/.test(String(queryKey[0])) })
+export async function invalidateContentAnalytics(client: ReturnType<typeof useQueryClient>, projectId: string, refetchType: 'active' | 'none' = 'active') {
+  await client.invalidateQueries({ predicate: ({ queryKey }) => queryKey[1] === projectId && /^(content-analytics|wechat-import|seednote-import)/.test(String(queryKey[0])), refetchType })
 }
 
 export interface InitialContentImportUpload {
@@ -98,7 +98,7 @@ export default function ContentImportDialog({ project, platform, onClose, onImpo
   }, [initialUpload])
   const importMutation = useMutation({
     mutationFn: () => contentAnalyticsApi.import(project, { metric_basis: 'cumulative', idempotency_key: idempotencyKey, upload_id: uploadId, selections: selected.map((source_row) => ({ source_row, target: targets[source_row] })), data_as_of_at: new Date(`${asOf}:00+08:00`).toISOString(), timezone: 'Asia/Shanghai', client_file_modified_at: file ? new Date(file.lastModified).toISOString() : undefined }, platform),
-    onSuccess: async (result) => { await invalidateContentAnalytics(client, project.id); onImported?.(result); onClose() },
+    onSuccess: async (result) => { await invalidateContentAnalytics(client, project.id, 'none'); onImported?.(result); onClose() },
   })
   const busy = previewMutation.isPending || importMutation.isPending
   function selectFile(nextFile?: File) {
