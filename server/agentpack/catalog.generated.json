@@ -919,10 +919,10 @@
     },
     {
       "id": "project-creator",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
-      "display_name": "Project Creator",
-      "description": "通过对话收集六维项目画像并提交临时项目草稿。",
+      "display_name": "画像模式",
+      "description": "通过对话收集六维项目画像，创建或更新项目画像。",
       "agent": {
         "name": "project-creator",
         "max_turns": 120

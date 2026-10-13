@@ -498,7 +498,7 @@ export default function ChatPage() {
         </Card>
       ) : !selectedAgent ? (
         <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center py-8">
-          <div className="mb-8 max-w-xl"><p className="text-xs font-medium uppercase tracking-[0.16em] text-primary">Project Creator</p><h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">从一段对话开始，建立你的创作底座</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">选择一个 Agent。选定后会自动启动会话，你可以随时补充或修改。</p></div>
+          <div className="mb-8 max-w-xl"><p className="text-xs font-medium uppercase tracking-[0.16em] text-primary">画像模式</p><h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">从一段对话开始，建立你的创作底座</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">选择一个 Agent。选定后会自动启动会话，你可以随时补充或修改。</p></div>
           <div className="grid gap-3 sm:grid-cols-2">
             {selectableAgents.map((agent) => <button key={agent.id} type="button" className="group rounded-xl border border-border bg-card p-5 text-left transition hover:border-primary/60 hover:shadow-sm" onClick={() => selectAgent(agent)}><div className="flex items-center justify-between"><span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"><Sparkles className="size-4" /></span><ArrowRight className="size-4 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" /></div><p className="mt-5 font-medium">{agent.display_name}</p><p className="mt-1 text-sm leading-5 text-muted-foreground">{agent.description}</p></button>)}
           </div>

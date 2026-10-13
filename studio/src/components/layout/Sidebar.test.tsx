@@ -47,7 +47,7 @@ function renderAuthenticatedShell(initialPath = '/') {
           <main>
             <Routes>
               <Route path="/" element={<h1>首页</h1>} />
-              <Route path="/projects" element={<h1>创作项目页</h1>} />
+              <Route path="/projects" element={<h1>项目页</h1>} />
               <Route path="/tasks" element={<h1>作品页</h1>} />
               <Route path="/settings" element={<h1>设置页</h1>} />
               <Route path="/plugins" element={<h1>插件页</h1>} />
@@ -78,7 +78,7 @@ describe('Sidebar', () => {
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
       'AI助手',
       '新手引导',
-      '创作项目',
+      '项目',
       '作品',
       '排期',
       '钱包',
@@ -117,7 +117,7 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: '收起侧边栏' }))
     fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     const drawer = await screen.findByRole('dialog', { name: '导航菜单' })
-    expect(within(drawer).getByRole('link', { name: '创作项目' })).toHaveTextContent('创作项目')
+    expect(within(drawer).getByRole('link', { name: '项目' })).toHaveTextContent('项目')
     fireEvent.click(within(drawer).getByRole('button', { name: '关闭菜单' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
@@ -178,9 +178,9 @@ describe('Sidebar', () => {
   it('navigates from the authenticated shell without breaking external stores or tooltips', async () => {
     renderAuthenticatedShell()
 
-    fireEvent.click(screen.getByRole('link', { name: '创作项目' }))
+    fireEvent.click(screen.getByRole('link', { name: '项目' }))
 
-    expect(await screen.findByRole('heading', { name: '创作项目页' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '项目页' })).toBeInTheDocument()
   })
 
   it('closes the mobile drawer after account navigation', async () => {

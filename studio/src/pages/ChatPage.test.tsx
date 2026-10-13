@@ -32,7 +32,7 @@ vi.mock('@/lib/interactive-events', async () => {
 
 const agent = {
   id: 'project-creator',
-  display_name: 'Project Creator',
+  display_name: '画像模式',
   description: '创建创作项目',
   available: true,
 }
@@ -83,11 +83,11 @@ describe('ChatPage', () => {
     vi.useRealTimers()
   })
 
-  it('defaults the project creation route to Project Creator and starts a session', async () => {
+  it('defaults the project creation route to 画像模式 and starts a session', async () => {
     renderChat('/projects/create')
 
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'create-project'))
-    expect(screen.getByRole('button', { name: /Project Creator/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
   })
 
   it('starts an existing project update session with its project context', async () => {

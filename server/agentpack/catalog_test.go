@@ -977,7 +977,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if !ok {
 		t.Fatal("project-creator Pack missing")
 	}
-	if creator.DisplayName != "Project Creator" || creator.Interaction == nil || !creator.Interaction.UserQuestions {
+	if creator.DisplayName != "画像模式" || creator.Interaction == nil || !creator.Interaction.UserQuestions {
 		t.Fatalf("project-creator metadata = %#v", creator)
 	}
 	if creator.Channel != "" || len(creator.Bindings.TaskKinds) != 0 || len(creator.Surfaces) != 1 || creator.Surfaces[0] != "plugin" {

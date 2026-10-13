@@ -434,7 +434,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="创作项目" description="管理品牌与创作方向、素材和风格，可用于不同类型的作品。">
+      <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，可用于不同类型的作品。">
         <Button variant="outline" onClick={openCreate}>
           <Plus className="h-4 w-4" />
           使用表单创建

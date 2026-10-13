@@ -14,7 +14,7 @@ describe('navigation IA', () => {
     expect(mvpNavItems.map((item) => item.label)).toEqual([
       'AI助手',
       '新手引导',
-      '创作项目',
+      '项目',
       '作品',
       '排期',
       '钱包',
