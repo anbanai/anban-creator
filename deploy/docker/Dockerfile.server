@@ -38,8 +38,10 @@ COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/econo
 COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml
 COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml
 COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml
+COPY --from=builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
+RUN node --input-type=module -e "import('/app/runtime-dsh/dist/dsh-bridge.js')"
 COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml
 COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js
