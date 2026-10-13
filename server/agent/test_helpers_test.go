@@ -28,7 +28,7 @@ func repositoryRoot(t *testing.T) string {
 func TestReleaseBuildsAgentRunnerAssets(t *testing.T) {
 	body := readRepoFile(t, filepath.Join(repositoryRoot(t), ".github", "workflows", "release.yml"))
 	for _, want := range []string{
-		"node-version: \"22\"",
+		"node-version: \"24.21.0\"",
 		"npm ci",
 		"npm run typecheck",
 		"npm run test",

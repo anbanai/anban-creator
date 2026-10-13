@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -87,5 +88,35 @@ func TestRuntimePackageDependencyBoundaries(t *testing.T) {
 	}
 	if strings.Contains(string(dshPackage), "@anthropic-ai/") || strings.Contains(string(dshPackage), "claude-agent") {
 		t.Fatal("runtime-dsh must not declare Claude runtime dependencies")
+	}
+}
+
+func TestDshRuntimeUsesPinnedNodeLts(t *testing.T) {
+	root := repositoryRoot(t)
+	packageBody := readTextFile(t, filepath.Join(root, "runtime-dsh", "package.json"))
+	var manifest struct {
+		Engines map[string]string `json:"engines"`
+	}
+	if err := json.Unmarshal([]byte(packageBody), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Engines["node"] != ">=24.21.0 <25" {
+		t.Fatalf("runtime-dsh Node engine = %q, want >=24.21.0 <25", manifest.Engines["node"])
+	}
+
+	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.server"))
+	for _, want := range []string{
+		"FROM node:24.21.0-alpine3.24 AS dsh-builder",
+		"FROM node:24.21.0-alpine3.24",
+		`RUN test "$(node --version)" = "v24.21.0"`,
+	} {
+		if !strings.Contains(dockerfile, want) {
+			t.Fatalf("server Dockerfile missing pinned DSH Node LTS contract %q", want)
+		}
+	}
+
+	ci := readTextFile(t, filepath.Join(root, ".github/workflows/ci.yml"))
+	if !strings.Contains(ci, "node-version: \"24.21.0\"") {
+		t.Fatal("CI must test TypeScript runtimes with the pinned Node LTS")
 	}
 }
