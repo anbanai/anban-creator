@@ -5,7 +5,7 @@ import type { AnalyticsCandidate, AnalyticsImportPayload, AnalyticsPreview, Anal
 export type AnalyticsPlatform = 'wechat' | 'seednote'
 export type MetricBasis = 'cumulative'
 export interface AnalyticsMetric { key: string; label: string; color: string; kind: 'count' | 'rate' | 'duration' | 'duration_hours'; summary: boolean; available?: boolean; format: (value: number) => string }
-export interface AnalyticsContentTag { dimension: string; value: string; display_name: string }
+export interface AnalyticsContentTag { dimension: string; value: string; display_name: string; group?: string; confidence?: number; evidence_available?: boolean; analytics_visible?: boolean; taxonomy_version?: string }
 export interface AnalyticsContent { id: string; title: string; content_type: string; status?: string; url?: string; date?: string; last_stat_date?: string; tags?: AnalyticsContentTag[]; metrics: Record<string, number | null> }
 export interface AnalyticsParams { platform?: AnalyticsPlatform; from: string; to: string; granularity: 'day' | 'week' | 'month'; metric_basis: MetricBasis; expected_revision?: number; content_type?: string }
 export interface AnalyticsBreakdownItem { name: string; value: number }

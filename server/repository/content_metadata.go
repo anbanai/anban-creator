@@ -59,7 +59,7 @@ func (r *contentMetadataRepository) ListTagsByTaskIDs(ctx context.Context, taskI
 	}
 	if r.db.Migrator().HasTable((&model.ContentMetadataReport{}).TableName()) && r.db.Migrator().HasTable((&model.ContentTagAssignment{}).TableName()) {
 		var reports []model.ContentMetadataReport
-		if err := r.db.WithContext(ctx).Where("task_id IN ?", taskIDs).Order("updated_at DESC, created_at DESC, id DESC").Find(&reports).Error; err != nil {
+		if err := r.db.WithContext(ctx).Where("task_id IN ? AND taxonomy_version = ?", taskIDs, model.ContentTaxonomyVersion).Order("updated_at DESC, created_at DESC, id DESC").Find(&reports).Error; err != nil {
 			return nil, err
 		}
 		latest := make(map[string]model.ContentMetadataReport, len(reports))
@@ -81,7 +81,7 @@ func (r *contentMetadataRepository) ListTagsByTaskIDs(ctx context.Context, taskI
 				taskByReport[report.ID] = taskID
 			}
 			var assignments []*model.ContentTagAssignment
-			if err := r.db.WithContext(ctx).Where("report_id IN ?", reportIDs).Order("dimension ASC, display_name ASC, id ASC").Find(&assignments).Error; err != nil {
+			if err := r.db.WithContext(ctx).Where("report_id IN ? AND (taxonomy_version = ? OR taxonomy_version = '') AND label_status = ?", reportIDs, model.ContentTaxonomyVersion, model.ContentTagCanonical).Order("dimension ASC, display_name ASC, id ASC").Find(&assignments).Error; err != nil {
 				return nil, err
 			}
 			for _, assignment := range assignments {
@@ -89,31 +89,6 @@ func (r *contentMetadataRepository) ListTagsByTaskIDs(ctx context.Context, taskI
 					result[taskID] = append(result[taskID], assignment)
 				}
 			}
-		}
-	}
-	// Content origin is a server-owned fact. Keep the derived label visible for
-	// historical content whose metadata hook ran before tagging was introduced.
-	if r.db.Migrator().HasTable((&model.Task{}).TableName()) && r.db.Migrator().HasColumn((&model.Task{}).TableName(), "content_origin") {
-		var tasks []model.Task
-		if err := r.db.WithContext(ctx).Select("id, content_origin").Where("id IN ?", taskIDs).Find(&tasks).Error; err != nil {
-			return nil, err
-		}
-		for _, task := range tasks {
-			if task.ContentOrigin != model.ContentOriginHotSearch {
-				continue
-			}
-			originTag := &model.ContentTagAssignment{
-				Dimension: "source_relation", CanonicalValue: "hot_search", DisplayName: "热搜",
-				LabelStatus: model.ContentTagCanonical, Confidence: 1, Primary: true,
-			}
-			filtered := make([]*model.ContentTagAssignment, 0, len(result[task.ID])+1)
-			filtered = append(filtered, originTag)
-			for _, tag := range result[task.ID] {
-				if tag == nil || tag.Dimension != "source_relation" {
-					filtered = append(filtered, tag)
-				}
-			}
-			result[task.ID] = filtered
 		}
 	}
 	return result, nil

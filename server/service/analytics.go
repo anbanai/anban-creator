@@ -53,9 +53,14 @@ type AnalyticsContentView struct {
 	Tags         []AnalyticsContentTag `json:"tags,omitempty"`
 }
 type AnalyticsContentTag struct {
-	Dimension   string `json:"dimension"`
-	Value       string `json:"value"`
-	DisplayName string `json:"display_name"`
+	Dimension         string  `json:"dimension"`
+	Value             string  `json:"value"`
+	DisplayName       string  `json:"display_name"`
+	Group             string  `json:"group"`
+	Confidence        float64 `json:"confidence"`
+	EvidenceAvailable bool    `json:"evidence_available"`
+	AnalyticsVisible  bool    `json:"analytics_visible"`
+	TaxonomyVersion   string  `json:"taxonomy_version"`
 }
 type AnalyticsOverview struct {
 	Revision    int64                `json:"revision"`
@@ -441,7 +446,7 @@ func analyticsContentTags(assignments []*model.ContentTagAssignment) []Analytics
 			continue
 		}
 		seen[key] = struct{}{}
-		tags = append(tags, AnalyticsContentTag{Dimension: assignment.Dimension, Value: assignment.CanonicalValue, DisplayName: label})
+		tags = append(tags, AnalyticsContentTag{Dimension: assignment.Dimension, Value: assignment.CanonicalValue, DisplayName: label, Group: assignment.TagGroup, Confidence: assignment.Confidence, EvidenceAvailable: len(assignment.Evidence) > 0, AnalyticsVisible: assignment.AnalyticsVisible, TaxonomyVersion: assignment.TaxonomyVersion})
 	}
 	return tags
 }
