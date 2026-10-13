@@ -67,7 +67,7 @@ export default function TasksPage() {
   const shouldCreate = createIntent.shouldCreate
 
   const [statusFilter, setStatusFilter] = useState(initialStatus)
-  const [projectFilter, setProjectFilter] = useState('')
+  const projectFilter = searchParams.get('project_id') || ''
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [createDialogIntent, setCreateDialogIntent] = useState<{ projectId?: string; type?: TaskType }>({})
@@ -80,18 +80,19 @@ export default function TasksPage() {
     setStatusFilter((current) => (current === nextStatus ? current : nextStatus))
   }, [searchParams])
 
-  const { data: projects = [], isLoading: projectsLoading } = useQuery({
-    queryKey: ['projects', 'active'],
-    queryFn: () => api.projects.list({ status: 'active' }),
+  const { data: allProjects = [], isLoading: projectsLoading } = useQuery({
+    queryKey: ['projects', 'all', undefined],
+    queryFn: () => api.projects.list({ status: undefined, platform: undefined }),
   })
+  const projects = useMemo(() => allProjects.filter((project) => project.status === 'active'), [allProjects])
 
   const projectMap = useMemo(() => {
     const map: Record<string, Project> = {}
-    for (const ch of projects) {
+    for (const ch of allProjects) {
       map[ch.id] = ch
     }
     return map
-  }, [projects])
+  }, [allProjects])
 
   // Resolve create intent after project prerequisites are known.
   useEffect(() => {
@@ -467,7 +468,13 @@ export default function TasksPage() {
         <div className="w-full sm:w-48">
           <ProjectSelector
             value={projectFilter}
-            onChange={(id) => setProjectFilter(id)}
+            includeArchived
+            onChange={(id) => setSearchParams((current) => {
+              const next = new URLSearchParams(current)
+              if (id) next.set('project_id', id)
+              else next.delete('project_id')
+              return next
+            }, { replace: true })}
           />
         </div>
 
@@ -486,8 +493,8 @@ export default function TasksPage() {
           <p role="status">{loadedRangeLabel}{searchFilter.trim() ? ` · 匹配 ${filteredTasks.length} 个` : ''}</p>
           {(statusFilter !== 'all' || projectFilter || searchFilter) && (
             <Button variant="ghost" size="sm" className="min-h-11" onClick={() => {
-              setStatusFilter('all'); setProjectFilter(''); setSearchFilter('')
-              setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('status'); return next }, { replace: true })
+              setStatusFilter('all'); setSearchFilter('')
+              setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('status'); next.delete('project_id'); return next }, { replace: true })
             }}>清空筛选</Button>
           )}
         </div>

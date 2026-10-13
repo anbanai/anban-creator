@@ -275,6 +275,28 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.projects.list).mockResolvedValue([fixtures.project as Project])
   })
 
+  it('keeps the project shortcut filter across status changes and pagination, then clears it', async () => {
+    const items = Array.from({ length: 20 }, (_, index) => ({ ...fixtures.failedTask, id: `project-task-${index}` })) as Task[]
+    vi.mocked(api.tasks.list).mockResolvedValue({ items, total: 21 })
+    renderTasksPage('/tasks?project_id=project-1&status=failed')
+    await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: 'project-1', status: 'failed' })))
+    expect(screen.getByRole('button', { name: '失败' })).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选创作项目' })).toHaveTextContent('公众号创作项目'))
+    fireEvent.click(screen.getByRole('button', { name: '继续加载' }))
+    await waitFor(() => expect(api.tasks.listBefore).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: 'project-1', status: 'failed' })))
+    fireEvent.click(screen.getByRole('button', { name: '已完成' }))
+    await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: 'project-1', status: 'completed' })))
+    fireEvent.click(screen.getByRole('button', { name: '清空筛选' }))
+    await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: undefined, status: undefined })))
+  })
+
+  it('shows the archived project selected when opening its work shortcut', async () => {
+    vi.mocked(api.projects.list).mockImplementation(async (params) => params?.status === 'active' ? [] : [{ ...fixtures.project, status: 'archived' } as Project])
+    renderTasksPage('/tasks?project_id=project-1&status=completed')
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选创作项目' })).toHaveTextContent('公众号创作项目'))
+    expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ project_id: 'project-1', status: 'completed' }))
+  })
+
   it('keeps the plan filter across pagination and can return to all tasks', async () => {
     const items = Array.from({ length: 20 }, (_, index) => ({ ...fixtures.failedTask, id: `plan-task-${index}` })) as Task[]
     vi.mocked(api.tasks.list).mockResolvedValue({ items, total: 21 })

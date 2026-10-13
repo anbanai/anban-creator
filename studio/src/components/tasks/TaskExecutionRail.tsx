@@ -138,6 +138,8 @@ export interface TaskExecutionRailProps {
   onRetryFiles?: () => void
   /** The parent can render one consolidated terminal failure callout above the rail. */
   showFailureSummary?: boolean
+  /** Keep the full history behind an explicit disclosure on the detail page. */
+  collapsible?: boolean
 }
 
 export function TaskExecutionRail({
@@ -155,6 +157,7 @@ export function TaskExecutionRail({
   filesError,
   onRetryFiles,
   showFailureSummary = true,
+  collapsible = false,
 }: TaskExecutionRailProps) {
   const queryClient = useQueryClient()
   const stages = lifecycle?.stages ?? []
@@ -174,6 +177,8 @@ export function TaskExecutionRail({
   const groupedFiles = useMemo(() => groupTaskStageFiles(files, lifecycle, workflow), [files, lifecycle, workflow])
   const expandedStages = automaticallyExpandedStageIds(stages, status, currentStage)
   const expansionScope = `${taskId}:${lifecycle?.execution_id ?? ''}`
+  const [openScope, setOpenScope] = useState<string | null>(null)
+  const historyOpen = !collapsible || openScope === expansionScope
   const [expansion, setExpansion] = useState<{ scope: string; stages: Record<string, boolean> }>({ scope: expansionScope, stages: {} })
   const manualExpansion = expansion.scope === expansionScope ? expansion.stages : {}
   const fileProps = { taskId, taskType }
@@ -192,7 +197,8 @@ export function TaskExecutionRail({
       </section>}
     </>
   )
-  const heading = <RailHeading onOpenLogs={onOpenLogs} taskId={taskId} files={files} stages={stages} />
+  const heading = <RailHeading onOpenLogs={onOpenLogs} taskId={taskId} files={files} stages={stages}
+    disclosure={collapsible ? { open: historyOpen, onToggle: () => setOpenScope(historyOpen ? null : expansionScope) } : undefined} />
 
   const publicationQuery = useQuery({
     queryKey: ['wechat-publication', taskId],
@@ -283,7 +289,8 @@ export function TaskExecutionRail({
           </div>
         </div>
         }
-        {fileFallback}
+        <div id="task-execution-history">{historyOpen && fileFallback}</div>
+        {!historyOpen && filesError && <p role="alert" className="px-4 pt-3 text-sm">作品文件暂时加载失败<Button variant="ghost" onClick={onRetryFiles}>重新加载</Button></p>}
       </section>
     )
   }
@@ -293,6 +300,22 @@ export function TaskExecutionRail({
       <div className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
       {heading}
       {infrastructureError}
+      {collapsible && currentStage && (
+        <div aria-label="最新进展" className="mx-4 mt-4 space-y-2 rounded-lg bg-muted/30 p-3 sm:mx-5">
+          <p className="text-xs text-muted-foreground">{currentStage.state === 'active' ? '正在进行' : '最新进展'}</p>
+          <p className="text-sm font-medium">{currentStage.title} · {lifecycleStatePresentation[currentStage.state].label}</p>
+          {currentStage.latest_update && (status !== 'failed' || currentStage.latest_update !== failure?.message) && <p className="text-sm text-muted-foreground break-words">{currentStage.latest_update}</p>}
+          {!historyOpen && currentStage.source === 'server' && <>
+            <PublicationStageActions stage={currentStage} publication={publication} outcome={outcome} pending={publicationActionPending}
+              onPublish={() => setConfirmPublish(true)} onRetryPublish={() => retryPublish.mutate()}
+              onReconcile={() => reconcile.mutate()} onRecoverDraft={() => recoverDraft.mutate()} />
+            {currentStage.kind === 'publication' && publication?.status === 'needs_selection' && <CandidatePicker publication={publication} pending={selectArticle.isPending} onSelect={(articleId) => selectArticle.mutate(articleId)} />}
+          </>}
+        </div>
+      )}
+      {!historyOpen && filesLoading && <p role="status" className="px-4 pt-3 text-sm text-muted-foreground">正在加载作品…</p>}
+      {!historyOpen && filesError && <p role="alert" className="px-4 pt-3 text-sm">作品文件暂时加载失败<Button variant="ghost" onClick={onRetryFiles}>重新加载</Button></p>}
+      <div id="task-execution-history">{historyOpen && <>
       <ol className="mx-4 mt-5 sm:mx-5" aria-label="执行阶段">
         {stages.map((stage, index) => {
           const unconfirmed = infrastructureFailure && stage.source === 'agent' && (stage.state === 'active' || stage.state === 'pending')
@@ -301,7 +324,7 @@ export function TaskExecutionRail({
             : lifecycleStatePresentation[stage.state]
           const Icon = presentation.icon
           const stageFiles = groupedFiles.byStage.get(stage.id) ?? []
-          const isExpanded = manualExpansion[stage.id] ?? (expandedStages.has(stage.id) || stageFiles.length > 0)
+          const isExpanded = manualExpansion[stage.id] ?? (expandedStages.has(stage.id) || (!collapsible && stageFiles.length > 0))
           const canExpand = stageFiles.length > 0 || (stage.state !== 'pending' && Boolean(
             stage.goal || stage.latest_update || stage.id === lastWorkStageId || stage.source === 'server',
           ))
@@ -361,7 +384,7 @@ export function TaskExecutionRail({
 
                 {isExpanded && (
                   <div id={`stage-${stage.id}-content`} className="mt-3 min-w-0 space-y-3 pb-1 text-sm">
-                    {stage.latest_update && !duplicatesFailure && <p className="break-words text-xs leading-relaxed text-muted-foreground">{stage.latest_update}</p>}
+                    {stage.latest_update && !duplicatesFailure && (!collapsible || stage.id !== currentStage?.id) && <p className="break-words text-xs leading-relaxed text-muted-foreground">{stage.latest_update}</p>}
                     {showFailureSummary && isTerminalRecoveryPoint && status === 'failed' && <FailureSummary failure={failure} />}
                     {isTerminalRecoveryPoint && status === 'cancelled' && stage.state !== 'cancelled' && (
                       <p className="text-xs text-muted-foreground">执行已停止，可从已有上下文继续。</p>
@@ -383,6 +406,7 @@ export function TaskExecutionRail({
         })}
       </ol>
       {fileFallback}
+      </>}</div>
       {publicationActionFailed && (
         <p className="mx-4 mt-3 flex items-center gap-2 text-xs text-destructive" role="alert">
           <AlertTriangle className="size-3.5" />公众号操作失败，请稍后重试。
@@ -405,7 +429,7 @@ export function TaskExecutionRail({
   )
 }
 
-function RailHeading({ onOpenLogs, taskId, files, stages }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[] }) {
+function RailHeading({ onOpenLogs, taskId, files, stages, disclosure }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[]; disclosure?: { open: boolean; onToggle: () => void } }) {
   const completed = stages.filter((stage) => stage.state === 'complete').length
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 pb-4 sm:px-5">
@@ -415,6 +439,10 @@ function RailHeading({ onOpenLogs, taskId, files, stages }: { onOpenLogs: () => 
         {files.length > 0 && <span className="text-xs text-muted-foreground">{files.length} 个产物</span>}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
+        {disclosure && <Button variant="ghost" size="sm" className="min-h-11" aria-expanded={disclosure.open} aria-controls="task-execution-history" onClick={disclosure.onToggle}>
+          {disclosure.open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+          {disclosure.open ? '收起执行过程' : '展开执行过程'}
+        </Button>}
         <TaskFileDownloads taskId={taskId} files={files} />
         <Tooltip>
           <TooltipTrigger render={<Button size="icon-md" variant="ghost" onClick={onOpenLogs} aria-label="查看完整日志" />}>

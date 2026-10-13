@@ -45,6 +45,39 @@ const lifecycle: TaskLifecycle = {
 }
 
 describe('TaskExecutionRail', () => {
+  it('keeps history collapsed while the latest step updates, and resets disclosure for another execution', () => {
+    const props = { taskId: 'task-1', status: 'running' as const, onOpenLogs: vi.fn(), collapsible: true }
+    const { rerender } = render(<TaskExecutionRail {...props} lifecycle={lifecycle} />)
+    expect(screen.getByLabelText('最新进展')).toHaveTextContent('正在收束文章结构')
+    expect(screen.queryByRole('list', { name: '执行阶段' })).not.toBeInTheDocument()
+    const next = { ...lifecycle, revision: 8, stages: lifecycle.stages.map(stage => stage.id === 'writing'
+      ? { ...stage, state: 'complete' as const }
+      : stage.id === 'review' ? { ...stage, state: 'active' as const, latest_update: '正在检查质量' } : stage) }
+    rerender(<TaskExecutionRail {...props} lifecycle={next} />)
+    expect(screen.getByLabelText('最新进展')).toHaveTextContent('正在检查质量')
+    expect(screen.getByRole('button', { name: '展开执行过程' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(screen.getByRole('button', { name: '展开执行过程' }))
+    expect(screen.getByRole('list', { name: '执行阶段' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '质量复核，进行中' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: '研究素材，已完成' })).toHaveAttribute('aria-expanded', 'false')
+    rerender(<TaskExecutionRail {...props} lifecycle={{ ...next, execution_id: 'execution-2' }} />)
+    expect(screen.queryByRole('list', { name: '执行阶段' })).not.toBeInTheDocument()
+  })
+
+  it('keeps publication confirmation accessible while history is collapsed and never auto-publishes', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({ id: 'pub', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'drafted' })
+    render(<TaskExecutionRail taskId="task-1" status="completed" collapsible onOpenLogs={vi.fn()} lifecycle={{ ...lifecycle, stages: [
+      { ...lifecycle.stages[0], state: 'complete' },
+      { id: 'publish', title: '正式发布', source: 'server', kind: 'publication', state: 'pending' },
+    ] }} />)
+    fireEvent.click(await screen.findByRole('button', { name: '正式发布' }))
+    expect(screen.getByRole('dialog')).toBeVisible()
+    expect(api.tasks.publishWechat).not.toHaveBeenCalled()
+    expect(screen.queryByRole('list', { name: '执行阶段' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认发布' }))
+    await waitFor(() => expect(api.tasks.publishWechat).toHaveBeenCalledWith('task-1'))
+  })
+
   it('shows artifacts inside their stage and preserves an explicit collapse across live updates', () => {
     const files = [{ id: 'file', task_id: 'task-1', state: 'delivered' as const, role: 'topic', file_name: 'research.md', mime_type: 'text/markdown', file_size: 100, url: '', created_at: '' }]
     const props = { taskId: 'task-1', status: 'running' as const, onOpenLogs: vi.fn(), files }
