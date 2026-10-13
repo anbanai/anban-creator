@@ -6,7 +6,7 @@ import (
 	"gorm.io/datatypes"
 )
 
-const ContentTaxonomyVersion = "1.0"
+const ContentTaxonomyVersion = "2.0"
 
 const (
 	ContentMetadataPending   = "pending"
@@ -14,6 +14,7 @@ const (
 	ContentMetadataFailed    = "failed"
 	ContentTagCanonical      = "canonical"
 	ContentTagCandidate      = "candidate"
+	ContentTagDiagnostic     = "diagnostic"
 	// ContentOriginHotSearch is a Server-owned provenance marker for content
 	// created from a hot-search source. It is surfaced as a canonical metadata
 	// tag without being mixed into user-authored tags.
@@ -21,10 +22,9 @@ const (
 )
 
 var ContentTagDimensions = map[string]struct{}{
-	"industry": {}, "topic": {}, "audience": {}, "intent": {}, "funnel_stage": {},
-	"format": {}, "narrative_hook": {}, "tone": {}, "value_proposition": {},
-	"media_shape": {}, "source_relation": {}, "evidence_level": {}, "visual_style": {}, "risk": {}, "performance": {},
+	"domain": {}, "topic": {}, "audience": {}, "content_goal": {}, "format": {}, "tone": {}, "value_proposition": {}, "source_relation": {}, "evidence_level": {}, "risk": {}, "media_form": {}, "content_type": {}, "platform": {}, "artifact_role": {}, "performance": {}, "presentation_device": {}, "funnel_stage": {},
 }
+var ContentTagGroups = map[string]string{"domain": "content_fact", "topic": "content_fact", "audience": "content_fact", "content_goal": "strategy_signal", "format": "editorial_structure", "tone": "editorial_structure", "presentation_device": "editorial_structure", "funnel_stage": "strategy_signal", "value_proposition": "strategy_signal", "source_relation": "source_risk", "evidence_level": "source_risk", "risk": "source_risk", "media_form": "media_performance", "content_type": "media_performance", "platform": "media_performance", "artifact_role": "media_performance", "performance": "media_performance"}
 
 type ContentTagDefaultVocabulary struct {
 	Value       string
@@ -33,6 +33,9 @@ type ContentTagDefaultVocabulary struct {
 }
 
 var ContentTagDefaultVocabularies = map[string][]ContentTagDefaultVocabulary{
+	"domain":            {{Value: "tea", DisplayName: "茶叶", Aliases: []string{"茶", "茶饮", "茶叶"}}, {Value: "software", DisplayName: "软件", Aliases: []string{"软件", "saas", "人工智能"}}, {Value: "education", DisplayName: "教育", Aliases: []string{"教育", "课程", "学习"}}, {Value: "beauty", DisplayName: "美妆", Aliases: []string{"美妆", "护肤"}}},
+	"topic":             {{Value: "tea_brewing", DisplayName: "泡茶", Aliases: []string{"泡茶", "冲泡"}}, {Value: "autumn_tea", DisplayName: "秋季饮茶", Aliases: []string{"秋季饮茶"}}},
+	"content_goal":      {{Value: "awareness", DisplayName: "认知"}, {Value: "education", DisplayName: "教育"}, {Value: "evaluation", DisplayName: "评估"}, {Value: "conversion", DisplayName: "转化"}},
 	"industry":          {{Value: "tea", DisplayName: "茶叶", Aliases: []string{"茶", "茶饮", "茶叶"}}, {Value: "software", DisplayName: "软件", Aliases: []string{"软件", "saas", "人工智能"}}, {Value: "beauty", DisplayName: "美妆", Aliases: []string{"美妆", "护肤"}}},
 	"audience":          {{Value: "beginner", DisplayName: "新手", Aliases: []string{"新手", "入门", "小白"}}, {Value: "professional", DisplayName: "专业人士", Aliases: []string{"专业人士", "从业者"}}},
 	"intent":            {{Value: "education", DisplayName: "教育", Aliases: []string{"教程", "指南"}}, {Value: "conversion", DisplayName: "转化", Aliases: []string{"购买", "下单"}}, {Value: "discovery", DisplayName: "种草", Aliases: []string{"发现", "种草"}}},
@@ -45,7 +48,11 @@ var ContentTagDefaultVocabularies = map[string][]ContentTagDefaultVocabulary{
 	"source_relation":   {{Value: "original", DisplayName: "原创"}, {Value: "adapted", DisplayName: "改编"}, {Value: "hot_search", DisplayName: "热搜"}},
 	"evidence_level":    {{Value: "cited_or_data_supported", DisplayName: "引用或数据支持"}, {Value: "experience_based", DisplayName: "经验支持"}},
 	"visual_style":      {{Value: "illustration", DisplayName: "插画"}, {Value: "mixed_visual", DisplayName: "混合视觉"}},
-	"risk":              {{Value: "none_detected", DisplayName: "未发现风险"}, {Value: "distribution_or_lead_risk", DisplayName: "导流风险"}},
+	"risk":              {{Value: "distribution_or_lead_risk", DisplayName: "导流风险"}},
+	"media_form":        {{Value: "article", DisplayName: "文章"}, {Value: "graphic_text", DisplayName: "图文"}, {Value: "image", DisplayName: "图片"}, {Value: "video", DisplayName: "视频"}, {Value: "commerce_asset", DisplayName: "电商素材"}},
+	"content_type":      {{Value: "wechat-article", DisplayName: "公众号文章"}, {Value: "seednote", DisplayName: "种草笔记"}},
+	"platform":          {{Value: "wechat", DisplayName: "微信公众号"}, {Value: "seednote", DisplayName: "种草平台"}},
+	"artifact_role":     {{Value: "final", DisplayName: "最终交付"}, {Value: "draft", DisplayName: "草稿"}, {Value: "html", DisplayName: "HTML"}},
 	"performance":       {{Value: "viral", DisplayName: "爆款", Aliases: []string{"爆款", "爆文", "爆款内容"}}},
 }
 
@@ -57,6 +64,10 @@ type ContentMetadataReport struct {
 	TaggingStatus   string         `gorm:"type:varchar(20);not null;default:pending;index" json:"tagging_status"`
 	FeedbackStatus  string         `gorm:"type:varchar(20);not null;default:pending;index" json:"feedback_status"`
 	TaxonomyVersion string         `gorm:"type:varchar(32);not null" json:"taxonomy_version"`
+	ContentSubject  string         `gorm:"type:varchar(255);not null;default:'';index" json:"content_subject"`
+	ArtifactRole    string         `gorm:"type:varchar(80);not null;default:''" json:"artifact_role"`
+	Platform        string         `gorm:"type:varchar(40);not null;default:''" json:"platform"`
+	ContentType     string         `gorm:"type:varchar(80);not null;default:''" json:"content_type"`
 	SourceDigest    string         `gorm:"type:char(64)" json:"source_digest,omitempty"`
 	RawMetadata     datatypes.JSON `gorm:"type:json;not null" json:"-"`
 	ErrorMessage    string         `gorm:"type:text" json:"error_message,omitempty"`
@@ -66,18 +77,24 @@ type ContentMetadataReport struct {
 }
 
 type ContentTagAssignment struct {
-	ID             string         `gorm:"type:char(36);primaryKey" json:"id"`
-	ReportID       string         `gorm:"type:char(36);not null;index:idx_content_tag_report_dimension,priority:1" json:"report_id"`
-	Dimension      string         `gorm:"type:varchar(40);not null;index:idx_content_tag_report_dimension,priority:2" json:"dimension"`
-	Value          string         `gorm:"type:varchar(160);not null" json:"value"`
-	DisplayName    string         `gorm:"type:varchar(160);not null;default:''" json:"display_name,omitempty"`
-	CanonicalValue string         `gorm:"type:varchar(160);not null;index" json:"canonical_value"`
-	LabelStatus    string         `gorm:"type:varchar(20);not null" json:"label_status"`
-	Confidence     float64        `gorm:"not null;default:0" json:"confidence"`
-	Primary        bool           `gorm:"not null;default:false" json:"primary"`
-	Evidence       datatypes.JSON `gorm:"type:json" json:"evidence,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID               string         `gorm:"type:char(36);primaryKey" json:"id"`
+	ReportID         string         `gorm:"type:char(36);not null;index:idx_content_tag_report_dimension,priority:1" json:"report_id"`
+	Dimension        string         `gorm:"type:varchar(40);not null;index:idx_content_tag_report_dimension,priority:2" json:"dimension"`
+	Value            string         `gorm:"type:varchar(160);not null" json:"value"`
+	DisplayName      string         `gorm:"type:varchar(160);not null;default:''" json:"display_name,omitempty"`
+	CanonicalValue   string         `gorm:"type:varchar(160);not null;index" json:"canonical_value"`
+	LabelStatus      string         `gorm:"type:varchar(20);not null" json:"label_status"`
+	Confidence       float64        `gorm:"not null;default:0" json:"confidence"`
+	Primary          bool           `gorm:"not null;default:false" json:"primary"`
+	Evidence         datatypes.JSON `gorm:"type:json" json:"evidence,omitempty"`
+	ContentSubject   string         `gorm:"type:varchar(255);not null;default:'';index" json:"content_subject"`
+	ArtifactRole     string         `gorm:"type:varchar(80);not null;default:''" json:"artifact_role"`
+	TagGroup         string         `gorm:"type:varchar(40);not null;default:'';index" json:"tag_group"`
+	Source           string         `gorm:"type:varchar(40);not null;default:'agent'" json:"source"`
+	AnalyticsVisible bool           `gorm:"not null;default:false;index" json:"analytics_visible"`
+	TaxonomyVersion  string         `gorm:"type:varchar(32);not null;default:'2.0';index" json:"taxonomy_version"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 type ContentTagVocabulary struct {
