@@ -20,7 +20,7 @@ func TestContentMetadataModelsMigrateAndPersist(t *testing.T) {
 	if err := db.Create(report).Error; err != nil {
 		t.Fatal(err)
 	}
-	tag := &ContentTagAssignment{ID: "tag-1", ReportID: report.ID, Dimension: "industry", Value: "茶叶", CanonicalValue: "tea", LabelStatus: ContentTagCanonical, Confidence: 0.91, Evidence: datatypes.JSON([]byte(`{"file":"output/content.md"}`))}
+	tag := &ContentTagAssignment{ID: "tag-1", ReportID: report.ID, Dimension: "domain", Value: "茶叶", CanonicalValue: "tea", LabelStatus: ContentTagCanonical, Confidence: 0.91, AnalyticsVisible: true, TaxonomyVersion: ContentTaxonomyVersion, Evidence: datatypes.JSON([]byte(`[{"source_file":"output/content.md","line_start":1,"line_end":1,"quote":"茶叶","evidence_kind":"explicit_topic"}]`))}
 	if err := db.Create(tag).Error; err != nil {
 		t.Fatal(err)
 	}

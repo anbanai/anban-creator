@@ -285,6 +285,24 @@ describe('server analytics queries', () => {
     expect(detail?.querySelectorAll('[data-content-tag]')).toHaveLength(2)
     expect(detail?.querySelectorAll('[data-content-tag] button')).toHaveLength(0)
   })
+  it('shows an evidence notice for a selected content item without tags', async () => {
+    vi.mocked(contentAnalyticsApi.detail).mockResolvedValue({
+      ...summary,
+      content: { ...content, tags: undefined },
+    })
+    window.history.replaceState(null, '', '/content-analytics?account=notes&content=canonical-1')
+    render(<ContentAnalyticsPage />)
+
+    const heading = await screen.findByRole('heading', { name: '服务器内容' })
+    expect(heading.closest('section')).toHaveTextContent('暂无足够证据标注')
+  })
+  it('shows an evidence notice for a listed content item without tags', async () => {
+    vi.mocked(contentAnalyticsApi.contents).mockResolvedValue({ revision: 4, items: [{ ...content, tags: undefined }], total: 1, offset: 0, limit: 25 })
+    render(<ContentAnalyticsPage />)
+
+    const tagRow = await screen.findByTestId('content-tags-row-canonical-1')
+    expect(tagRow).toHaveTextContent('暂无足够证据标注')
+  })
   it('reads observation history only after explicitly opening it', async () => {
     window.history.replaceState(null, '', '/content-analytics?account=notes&content=canonical-1')
     render(<ContentAnalyticsPage />)

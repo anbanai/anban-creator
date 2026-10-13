@@ -23,9 +23,24 @@ const (
 
 var ContentTagDimensions = map[string]struct{}{
 	"domain": {}, "topic": {}, "audience": {}, "content_goal": {}, "format": {}, "tone": {}, "value_proposition": {}, "source_relation": {}, "evidence_level": {}, "risk": {}, "media_form": {}, "content_type": {}, "platform": {}, "artifact_role": {}, "performance": {}, "presentation_device": {}, "funnel_stage": {},
-	"industry": {}, "intent": {}, "narrative_hook": {}, "media_shape": {}, "visual_style": {},
 }
-var ContentTagGroups = map[string]string{"domain": "content_fact", "topic": "content_fact", "audience": "content_fact", "content_goal": "strategy_signal", "format": "editorial_structure", "tone": "editorial_structure", "presentation_device": "editorial_structure", "funnel_stage": "strategy_signal", "value_proposition": "strategy_signal", "source_relation": "source_risk", "evidence_level": "source_risk", "risk": "source_risk", "media_form": "media_performance", "content_type": "media_performance", "platform": "media_performance", "artifact_role": "media_performance", "performance": "media_performance"}
+var ContentTagGroups = map[string]string{
+	"domain": "content_fact", "topic": "content_fact", "audience": "content_fact",
+	"content_goal": "strategy_signal", "format": "editorial_structure", "tone": "editorial_structure",
+	"presentation_device": "editorial_structure", "funnel_stage": "strategy_signal", "value_proposition": "strategy_signal",
+	"source_relation": "source_risk", "evidence_level": "source_risk", "risk": "source_risk",
+	"media_form": "media_performance", "content_type": "media_performance", "platform": "media_performance",
+	"artifact_role": "media_performance", "performance": "media_performance",
+}
+
+// ContentTagDimensionLimits keeps noisy multi-value output from becoming an
+// accidental taxonomy. A zero value means the dimension is not accepted.
+var ContentTagDimensionLimits = map[string]int{
+	"domain": 2, "topic": 3, "audience": 2, "content_goal": 1, "format": 2,
+	"tone": 2, "value_proposition": 3, "source_relation": 1, "evidence_level": 2,
+	"risk": 3, "media_form": 1, "content_type": 1, "platform": 1, "artifact_role": 1,
+	"performance": 1, "presentation_device": 3, "funnel_stage": 1,
+}
 
 type ContentTagDefaultVocabulary struct {
 	Value       string
@@ -34,27 +49,23 @@ type ContentTagDefaultVocabulary struct {
 }
 
 var ContentTagDefaultVocabularies = map[string][]ContentTagDefaultVocabulary{
-	"domain":            {{Value: "tea", DisplayName: "茶叶", Aliases: []string{"茶", "茶饮", "茶叶"}}, {Value: "software", DisplayName: "软件", Aliases: []string{"软件", "saas", "人工智能"}}, {Value: "education", DisplayName: "教育", Aliases: []string{"教育", "课程", "学习"}}, {Value: "beauty", DisplayName: "美妆", Aliases: []string{"美妆", "护肤"}}},
-	"topic":             {{Value: "tea_brewing", DisplayName: "泡茶", Aliases: []string{"泡茶", "冲泡"}}, {Value: "autumn_tea", DisplayName: "秋季饮茶", Aliases: []string{"秋季饮茶"}}},
-	"content_goal":      {{Value: "awareness", DisplayName: "认知"}, {Value: "education", DisplayName: "教育"}, {Value: "evaluation", DisplayName: "评估"}, {Value: "conversion", DisplayName: "转化"}},
-	"industry":          {{Value: "tea", DisplayName: "茶叶", Aliases: []string{"茶", "茶饮", "茶叶"}}, {Value: "software", DisplayName: "软件", Aliases: []string{"软件", "saas", "人工智能"}}, {Value: "beauty", DisplayName: "美妆", Aliases: []string{"美妆", "护肤"}}},
-	"audience":          {{Value: "beginner", DisplayName: "新手", Aliases: []string{"新手", "入门", "小白"}}, {Value: "professional", DisplayName: "专业人士", Aliases: []string{"专业人士", "从业者"}}},
-	"intent":            {{Value: "education", DisplayName: "教育", Aliases: []string{"教程", "指南"}}, {Value: "conversion", DisplayName: "转化", Aliases: []string{"购买", "下单"}}, {Value: "discovery", DisplayName: "种草", Aliases: []string{"发现", "种草"}}},
-	"funnel_stage":      {{Value: "awareness", DisplayName: "认知"}, {Value: "evaluation", DisplayName: "评估"}, {Value: "purchase", DisplayName: "购买"}},
-	"format":            {{Value: "tutorial", DisplayName: "教程"}, {Value: "listicle", DisplayName: "清单"}, {Value: "review_compare", DisplayName: "测评对比"}, {Value: "story_case", DisplayName: "故事案例"}},
-	"narrative_hook":    {{Value: "rhetorical_question", DisplayName: "反问"}, {Value: "pain_point", DisplayName: "痛点"}, {Value: "numbered_promise", DisplayName: "数字承诺"}, {Value: "scenario", DisplayName: "场景"}},
-	"tone":              {{Value: "professional", DisplayName: "专业"}, {Value: "humorous", DisplayName: "幽默"}, {Value: "sharp", DisplayName: "犀利"}, {Value: "empathetic", DisplayName: "共情"}},
-	"value_proposition": {{Value: "cost_saving", DisplayName: "省钱"}, {Value: "efficiency", DisplayName: "效率"}, {Value: "risk_avoidance", DisplayName: "避坑"}, {Value: "emotional_value", DisplayName: "情绪价值"}},
-	"media_shape":       {{Value: "text_visual", DisplayName: "图文"}, {Value: "multimedia", DisplayName: "多媒体"}, {Value: "video", DisplayName: "视频"}, {Value: "commerce_visual", DisplayName: "电商视觉"}},
-	"source_relation":   {{Value: "original", DisplayName: "原创"}, {Value: "adapted", DisplayName: "改编"}, {Value: "hot_search", DisplayName: "热搜"}},
-	"evidence_level":    {{Value: "cited_or_data_supported", DisplayName: "引用或数据支持"}, {Value: "experience_based", DisplayName: "经验支持"}},
-	"visual_style":      {{Value: "illustration", DisplayName: "插画"}, {Value: "mixed_visual", DisplayName: "混合视觉"}},
-	"risk":              {{Value: "distribution_or_lead_risk", DisplayName: "导流风险"}},
-	"media_form":        {{Value: "article", DisplayName: "文章"}, {Value: "graphic_text", DisplayName: "图文"}, {Value: "image", DisplayName: "图片"}, {Value: "video", DisplayName: "视频"}, {Value: "commerce_asset", DisplayName: "电商素材"}},
-	"content_type":      {{Value: "wechat-article", DisplayName: "公众号文章"}, {Value: "seednote", DisplayName: "种草笔记"}},
-	"platform":          {{Value: "wechat", DisplayName: "微信公众号"}, {Value: "seednote", DisplayName: "种草平台"}},
-	"artifact_role":     {{Value: "final", DisplayName: "最终交付"}, {Value: "draft", DisplayName: "草稿"}, {Value: "html", DisplayName: "HTML"}},
-	"performance":       {{Value: "viral", DisplayName: "爆款", Aliases: []string{"爆款", "爆文", "爆款内容"}}},
+	"domain":              {{Value: "tea", DisplayName: "茶叶", Aliases: []string{"茶", "茶饮", "茶叶"}}, {Value: "software", DisplayName: "软件", Aliases: []string{"软件", "saas", "人工智能"}}, {Value: "education", DisplayName: "教育", Aliases: []string{"教育", "课程", "学习"}}, {Value: "beauty", DisplayName: "美妆", Aliases: []string{"美妆", "护肤"}}},
+	"topic":               {{Value: "tea_brewing", DisplayName: "泡茶", Aliases: []string{"泡茶", "冲泡"}}, {Value: "autumn_tea", DisplayName: "秋季饮茶", Aliases: []string{"秋季饮茶"}}},
+	"content_goal":        {{Value: "awareness", DisplayName: "认知"}, {Value: "education", DisplayName: "教育"}, {Value: "evaluation", DisplayName: "评估"}, {Value: "conversion", DisplayName: "转化"}},
+	"audience":            {{Value: "beginner", DisplayName: "新手", Aliases: []string{"新手", "入门", "小白"}}, {Value: "professional", DisplayName: "专业人士", Aliases: []string{"专业人士", "从业者"}}},
+	"funnel_stage":        {{Value: "awareness", DisplayName: "认知"}, {Value: "evaluation", DisplayName: "评估"}, {Value: "purchase", DisplayName: "购买"}},
+	"format":              {{Value: "tutorial", DisplayName: "教程"}, {Value: "listicle", DisplayName: "清单"}, {Value: "review_compare", DisplayName: "测评对比"}, {Value: "story_case", DisplayName: "故事案例"}},
+	"presentation_device": {{Value: "rhetorical_question", DisplayName: "反问"}, {Value: "numbered_promise", DisplayName: "数字承诺"}, {Value: "scenario_opening", DisplayName: "场景开场"}},
+	"tone":                {{Value: "professional", DisplayName: "专业"}, {Value: "humorous", DisplayName: "幽默"}, {Value: "sharp", DisplayName: "犀利"}, {Value: "empathetic", DisplayName: "共情"}},
+	"value_proposition":   {{Value: "cost_saving", DisplayName: "省钱"}, {Value: "efficiency", DisplayName: "效率"}, {Value: "risk_avoidance", DisplayName: "避坑"}, {Value: "emotional_value", DisplayName: "情绪价值"}},
+	"source_relation":     {{Value: "original", DisplayName: "原创"}, {Value: "adapted", DisplayName: "改编"}, {Value: "hot_search", DisplayName: "热搜"}},
+	"evidence_level":      {{Value: "cited_or_data_supported", DisplayName: "引用或数据支持"}, {Value: "experience_based", DisplayName: "经验支持"}},
+	"risk":                {{Value: "distribution_or_lead_risk", DisplayName: "导流风险"}},
+	"media_form":          {{Value: "article", DisplayName: "文章"}, {Value: "graphic_text", DisplayName: "图文"}, {Value: "image", DisplayName: "图片"}, {Value: "video", DisplayName: "视频"}, {Value: "commerce_asset", DisplayName: "电商素材"}},
+	"content_type":        {{Value: "wechat-article", DisplayName: "公众号文章"}, {Value: "wechat-picture", DisplayName: "公众号贴图"}, {Value: "seednote", DisplayName: "种草笔记"}},
+	"platform":            {{Value: "wechat", DisplayName: "微信公众号"}, {Value: "seednote", DisplayName: "种草平台"}},
+	"artifact_role":       {{Value: "final", DisplayName: "最终交付"}, {Value: "final_markdown", DisplayName: "最终 Markdown"}, {Value: "content", DisplayName: "内容"}, {Value: "copywriting", DisplayName: "文案"}, {Value: "final_video", DisplayName: "最终视频"}, {Value: "draft", DisplayName: "草稿"}, {Value: "html", DisplayName: "HTML"}},
+	"performance":         {{Value: "viral", DisplayName: "爆款", Aliases: []string{"爆款", "爆文", "爆款内容"}}},
 }
 
 type ContentMetadataReport struct {

@@ -197,7 +197,7 @@ func TestCompleteCloudExecutionCurrentAttemptAndDuplicate(t *testing.T) {
 	foundTask, _ := repo.Tasks().FindByID(context.Background(), task.ID)
 	foundExecution, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
-	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 6 {
+	if foundTask.Status != model.TaskStatusCompleted || foundExecution.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 7 {
 		t.Fatalf("task=%s execution=%s files=%d", foundTask.Status, foundExecution.FinalizationStatus, len(files))
 	}
 }
@@ -230,8 +230,8 @@ func TestCompleteCloudExecutionUsesValidatedCoreArtifactsAfterProviderPolicyFail
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 6 {
-		t.Fatalf("delivered files=%d, want 6", len(files))
+	if len(files) != 7 {
+		t.Fatalf("delivered files=%d, want 7", len(files))
 	}
 	var stored agent.ExecutionResult
 	if err := json.Unmarshal(foundExecution.Result, &stored); err != nil {
@@ -1610,7 +1610,7 @@ func TestCompleteCloudExecutionConcurrentDuplicate(t *testing.T) {
 	}
 	found, _ := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
 	files, _ := repo.TaskFiles().FindByTaskID(context.Background(), task.ID)
-	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 6 {
+	if found.FinalizationStatus != model.TaskExecutionFinalizationDone || len(files) != 7 {
 		t.Fatalf("finalization=%s files=%d", found.FinalizationStatus, len(files))
 	}
 }

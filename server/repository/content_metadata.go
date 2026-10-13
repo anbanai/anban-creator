@@ -62,14 +62,12 @@ func (r *contentMetadataRepository) ListTagsByTaskIDs(ctx context.Context, taskI
 		if err := r.db.WithContext(ctx).Where("task_id IN ? AND taxonomy_version = ?", taskIDs, model.ContentTaxonomyVersion).Order("updated_at DESC, created_at DESC, id DESC").Find(&reports).Error; err != nil {
 			return nil, err
 		}
+		// Reports are ordered newest first. A failed or pending re-run must not
+		// resurrect semantic tags from an older execution; only the current
+		// report's Server-owned tags may remain visible after such a re-run.
 		latest := make(map[string]model.ContentMetadataReport, len(reports))
 		for _, report := range reports {
-			if _, exists := latest[report.TaskID]; exists {
-				continue
-			}
-			// A failed or still-pending retry must not hide the last completed
-			// tagging result from analytics readers.
-			if report.TaggingStatus == model.ContentMetadataSucceeded || (report.TaggingStatus == "" && report.Status == model.ContentMetadataSucceeded) {
+			if _, exists := latest[report.TaskID]; !exists {
 				latest[report.TaskID] = report
 			}
 		}
@@ -81,11 +79,15 @@ func (r *contentMetadataRepository) ListTagsByTaskIDs(ctx context.Context, taskI
 				taskByReport[report.ID] = taskID
 			}
 			var assignments []*model.ContentTagAssignment
-			if err := r.db.WithContext(ctx).Where("report_id IN ? AND (taxonomy_version = ? OR taxonomy_version = '') AND label_status = ?", reportIDs, model.ContentTaxonomyVersion, model.ContentTagCanonical).Order("dimension ASC, display_name ASC, id ASC").Find(&assignments).Error; err != nil {
+			if err := r.db.WithContext(ctx).Where("report_id IN ? AND taxonomy_version = ? AND label_status = ? AND analytics_visible = ?", reportIDs, model.ContentTaxonomyVersion, model.ContentTagCanonical, true).Order("dimension ASC, display_name ASC, id ASC").Find(&assignments).Error; err != nil {
 				return nil, err
 			}
 			for _, assignment := range assignments {
 				if taskID, ok := taskByReport[assignment.ReportID]; ok {
+					report := latest[taskID]
+					if report.TaggingStatus != model.ContentMetadataSucceeded && assignment.Source != "server" {
+						continue
+					}
 					result[taskID] = append(result[taskID], assignment)
 				}
 			}

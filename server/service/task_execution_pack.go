@@ -133,7 +133,14 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 		return fmt.Errorf("marshal Agent Pack required artifact contract: %w", err)
 	}
 	execution.AgentPackRequiredArtifactContract = datatypes.JSON(requiredArtifactContract)
-	taggingContract, err := json.Marshal(pack.Tagging)
+	var taggingContract []byte
+	if isContentTaskKind(execution.TaskKind) && pack.Tagging != nil && pack.Tagging.Enabled {
+		taggingContract, err = json.Marshal(pack.Tagging)
+	} else if isContentTaskKind(execution.TaskKind) {
+		return fmt.Errorf("content task kind %q requires an enabled Pack tagging contract", execution.TaskKind)
+	} else {
+		taggingContract = []byte("null")
+	}
 	if err != nil {
 		return fmt.Errorf("marshal Agent Pack tagging contract: %w", err)
 	}
@@ -183,12 +190,29 @@ func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
 		return false
 	}
 	dataOnlyProfile := execution.TaskKind == model.TaskKindProfileAnalysis
+	taggingComplete := true
+	if isContentTaskKind(execution.TaskKind) {
+		taggingComplete = len(execution.AgentPackTaggingContract) > 0 && string(execution.AgentPackTaggingContract) != "null"
+		if taggingComplete {
+			_, taggingErr := resolveFrozenExecutionTaggingContract(execution)
+			taggingComplete = taggingErr == nil
+		}
+	}
 	return strings.TrimSpace(execution.AgentPackID) != "" &&
 		strings.TrimSpace(execution.AgentPackVersion) != "" &&
 		strings.TrimSpace(execution.AgentPackDigest) != "" &&
-		(dataOnlyProfile || (len(execution.AgentPackDeliveryContract) > 0 && len(execution.AgentPackRequiredArtifactContract) > 0 && len(execution.AgentPackTaggingContract) > 0)) &&
+		(dataOnlyProfile || (len(execution.AgentPackDeliveryContract) > 0 && len(execution.AgentPackRequiredArtifactContract) > 0 && taggingComplete)) &&
 		strings.TrimSpace(execution.RuntimeAdapter) != "" &&
 		strings.TrimSpace(execution.RuntimeProfile) != ""
+}
+
+func isContentTaskKind(taskKind string) bool {
+	switch strings.TrimSpace(taskKind) {
+	case model.TaskTypeViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis:
+		return false
+	default:
+		return strings.TrimSpace(taskKind) != ""
+	}
 }
 
 func resolveFrozenExecutionRequiredArtifactContract(execution *model.TaskExecution) ([]agentpack.ArtifactSpec, error) {

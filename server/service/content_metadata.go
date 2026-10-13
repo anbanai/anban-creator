@@ -65,6 +65,17 @@ type contentMetadataTag struct {
 	Confidence     float64         `json:"confidence,omitempty"`
 	Primary        bool            `json:"primary,omitempty"`
 	Evidence       json.RawMessage `json:"evidence,omitempty"`
+	artifactRole   string
+	source         string
+	labelStatusSet bool
+}
+
+type contentTagEvidence struct {
+	SourceFile   string `json:"source_file"`
+	LineStart    int    `json:"line_start"`
+	LineEnd      int    `json:"line_end"`
+	Quote        string `json:"quote"`
+	EvidenceKind string `json:"evidence_kind"`
 }
 
 func (s *ContentMetadataService) Submit(ctx context.Context, input ContentMetadataInput) (*model.ContentMetadataReport, error) {
@@ -84,22 +95,25 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 	if err := json.Unmarshal(input.RawMetadata, &payload); err != nil {
 		return nil, fmt.Errorf("decode metadata: %w", err)
 	}
-	v2 := payload.SchemaVersion == "2.0" || payload.TaxonomyVersion == "2.0"
-	if v2 {
-		payload.Tags = nil
-		for _, subject := range payload.Subjects {
-			if subject.ArtifactRole == "" {
-				return nil, fmt.Errorf("artifact_role is required")
+	if payload.SchemaVersion != model.ContentTaxonomyVersion || payload.TaxonomyVersion != model.ContentTaxonomyVersion {
+		return nil, fmt.Errorf("schema_version and taxonomy_version must be %s", model.ContentTaxonomyVersion)
+	}
+	payload.Tags = nil
+	for _, subject := range payload.Subjects {
+		if strings.TrimSpace(subject.ArtifactRole) == "" {
+			return nil, fmt.Errorf("artifact_role is required")
+		}
+		for _, tag := range subject.Tags {
+			tag.Dimension = strings.TrimSpace(tag.Dimension)
+			if tag.Value == "" {
+				tag.Value = tag.CanonicalValue
 			}
-			for _, tag := range subject.Tags {
-				if tag.Value == "" {
-					tag.Value = tag.CanonicalValue
-				}
-				if tag.Dimension == "performance" || tag.Dimension == "content_type" || tag.Dimension == "platform" || tag.Dimension == "artifact_role" || tag.Dimension == "media_form" {
-					return nil, fmt.Errorf("server-owned tag dimension %q cannot be submitted by Agent", tag.Dimension)
-				}
-				payload.Tags = append(payload.Tags, tag)
+			if tag.Dimension == "performance" || tag.Dimension == "content_type" || tag.Dimension == "platform" || tag.Dimension == "artifact_role" || tag.Dimension == "media_form" {
+				return nil, fmt.Errorf("server-owned tag dimension %q cannot be submitted by Agent", tag.Dimension)
 			}
+			tag.artifactRole = strings.TrimSpace(subject.ArtifactRole)
+			tag.labelStatusSet = strings.TrimSpace(tag.LabelStatus) != ""
+			payload.Tags = append(payload.Tags, tag)
 		}
 	}
 	if payload.TaskID != "" && strings.TrimSpace(payload.TaskID) != input.TaskID {
@@ -116,8 +130,17 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 		if strings.TrimSpace(tag.Value) == "" {
 			return nil, fmt.Errorf("tag value is required")
 		}
-		if v2 && len(tag.Evidence) == 0 {
+		if len(tag.Evidence) == 0 {
 			return nil, fmt.Errorf("semantic tag %q requires evidence", tag.Dimension)
+		}
+		var evidence []contentTagEvidence
+		if err := json.Unmarshal(tag.Evidence, &evidence); err != nil || len(evidence) == 0 {
+			return nil, fmt.Errorf("semantic tag %q requires structured evidence", tag.Dimension)
+		}
+		for _, item := range evidence {
+			if strings.TrimSpace(item.SourceFile) == "" || item.LineStart < 1 || item.LineEnd < item.LineStart || strings.TrimSpace(item.Quote) == "" || strings.TrimSpace(item.EvidenceKind) == "" {
+				return nil, fmt.Errorf("semantic tag %q has invalid evidence location", tag.Dimension)
+			}
 		}
 		if tag.Confidence < 0 || tag.Confidence > 1 {
 			return nil, fmt.Errorf("tag confidence must be between 0 and 1")
@@ -125,16 +148,16 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 		if tag.LabelStatus == "" {
 			tag.LabelStatus = model.ContentTagCandidate
 		}
-		if tag.LabelStatus != model.ContentTagCanonical && tag.LabelStatus != model.ContentTagCandidate {
+		if tag.LabelStatus != model.ContentTagCanonical && tag.LabelStatus != model.ContentTagCandidate && tag.LabelStatus != model.ContentTagDiagnostic {
 			return nil, fmt.Errorf("invalid tag label_status %q", tag.LabelStatus)
 		}
 	}
 	version := strings.TrimSpace(input.TaxonomyVersion)
 	if version == "" {
 		version = payload.TaxonomyVersion
-		if version == "" {
-			version = model.ContentTaxonomyVersion
-		}
+	}
+	if version != model.ContentTaxonomyVersion {
+		return nil, fmt.Errorf("unsupported taxonomy version %q", version)
 	}
 	if strings.TrimSpace(input.SourceDigest) == "" {
 		input.SourceDigest = strings.TrimSpace(payload.SourceDigest)
@@ -143,19 +166,100 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 	if err != nil || task == nil {
 		return nil, fmt.Errorf("task not found")
 	}
-	if execution, err := s.repo.TaskExecutions().FindByID(ctx, input.ExecutionID); err != nil || execution.TaskID != input.TaskID {
+	execution, executionErr := s.repo.TaskExecutions().FindByID(ctx, input.ExecutionID)
+	if executionErr != nil || execution == nil || execution.TaskID != input.TaskID {
 		return nil, fmt.Errorf("execution does not belong to task")
+	}
+	if !isContentTask(task, execution) {
+		if isKnownContentTaskType(task.Type) {
+			return nil, fmt.Errorf("content task type %q requires a valid frozen tagging contract", task.Type)
+		}
+		return nil, fmt.Errorf("task type %q is not a content subject", task.Type)
 	}
 	if userID := strings.TrimSpace(input.AuthenticatedUserID); userID != "" && task.UserID != userID {
 		return nil, fmt.Errorf("task does not belong to authenticated user")
 	}
-	if writeTags && v2 {
-		payload.Tags = append(payload.Tags, serverDerivedTags(task)...)
+	providedArtifactRoles := make([]string, 0, len(payload.Subjects))
+	for _, subject := range payload.Subjects {
+		if role := strings.TrimSpace(subject.ArtifactRole); role != "" {
+			providedArtifactRoles = append(providedArtifactRoles, role)
+		}
+	}
+	artifactRoles := append([]string(nil), providedArtifactRoles...)
+	// A missing or failed content-tags.json is still a valid completion-metadata
+	// handoff: Server-owned tags must be persisted while semantic tagging stays
+	// visibly incomplete. Derive the subject role from the frozen Pack contract
+	// instead of inventing the retired `final` role.
+	if len(artifactRoles) == 0 && len(execution.AgentPackTaggingContract) > 0 && string(execution.AgentPackTaggingContract) != "null" {
+		var contract struct {
+			SubjectRoles []string `json:"subject_roles"`
+		}
+		if err := json.Unmarshal(execution.AgentPackTaggingContract, &contract); err != nil {
+			return nil, fmt.Errorf("decode frozen tagging contract: %w", err)
+		}
+		for _, role := range contract.SubjectRoles {
+			if role = strings.TrimSpace(role); role != "" {
+				artifactRoles = append(artifactRoles, role)
+			}
+		}
+	}
+	artifactRole := "final"
+	if len(artifactRoles) > 0 {
+		artifactRole = artifactRoles[0]
+	}
+	if len(execution.AgentPackTaggingContract) > 0 && string(execution.AgentPackTaggingContract) != "null" {
+		var contract struct {
+			SubjectRoles []string `json:"subject_roles"`
+		}
+		if err := json.Unmarshal(execution.AgentPackTaggingContract, &contract); err != nil {
+			return nil, fmt.Errorf("decode frozen tagging contract: %w", err)
+		}
+		if len(artifactRoles) == 0 {
+			return nil, fmt.Errorf("frozen tagging contract has no subject role")
+		}
+		for _, artifactRole := range artifactRoles {
+			allowed := false
+			for _, role := range contract.SubjectRoles {
+				if strings.TrimSpace(role) == artifactRole {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return nil, fmt.Errorf("artifact_role %q is not declared by the frozen tagging contract", artifactRole)
+			}
+		}
+	}
+	if writeTags {
+		payload.Tags = append(payload.Tags, serverDerivedTags(task, artifactRole)...)
 	}
 	if writeTags && task.ContentOrigin == model.ContentOriginHotSearch {
 		payload.Tags = withServerContentOriginTag(payload.Tags)
 	}
-	report := &model.ContentMetadataReport{ID: uuid.NewString(), TaskID: input.TaskID, ExecutionID: input.ExecutionID, Status: model.ContentMetadataPending, TaggingStatus: model.ContentMetadataPending, FeedbackStatus: model.ContentMetadataPending, TaxonomyVersion: version, ContentSubject: input.TaskID, ArtifactRole: "final", Platform: task.Channel, ContentType: task.Type, SourceDigest: strings.TrimSpace(input.SourceDigest), RawMetadata: datatypes.JSON(input.RawMetadata), Attempts: 1}
+	if len(execution.AgentPackDeliveryContract) > 0 {
+		var delivery []struct {
+			Role string `json:"role"`
+		}
+		if err := json.Unmarshal(execution.AgentPackDeliveryContract, &delivery); err != nil {
+			return nil, fmt.Errorf("decode frozen delivery contract: %w", err)
+		}
+		if len(artifactRoles) == 0 {
+			artifactRoles = []string{artifactRole}
+		}
+		for _, artifactRole := range artifactRoles {
+			allowed := false
+			for _, item := range delivery {
+				if strings.TrimSpace(item.Role) == artifactRole {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return nil, fmt.Errorf("artifact_role %q is not declared by the frozen delivery contract", artifactRole)
+			}
+		}
+	}
+	report := &model.ContentMetadataReport{ID: uuid.NewString(), TaskID: input.TaskID, ExecutionID: input.ExecutionID, Status: model.ContentMetadataPending, TaggingStatus: model.ContentMetadataPending, FeedbackStatus: model.ContentMetadataPending, TaxonomyVersion: model.ContentTaxonomyVersion, ContentSubject: input.TaskID, ArtifactRole: artifactRole, Platform: serverPlatform(task), ContentType: task.Type, SourceDigest: strings.TrimSpace(input.SourceDigest), RawMetadata: datatypes.JSON(input.RawMetadata), Attempts: 1}
 	if existing, findErr := s.repo.ContentMetadata().FindByTaskExecution(ctx, input.TaskID, input.ExecutionID); findErr == nil && existing != nil {
 		report.ID = existing.ID
 		report.Attempts = existing.Attempts + 1
@@ -168,6 +272,12 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 	}
 	if report.TaggingStatus == model.ContentMetadataPending && payload.TaggingStatus != "" {
 		report.TaggingStatus = payload.TaggingStatus
+	}
+	if writeTags && len(payload.Subjects) == 0 {
+		// A content artifact cannot claim successful semantic tagging without a
+		// subject entry. The completion hook uses an empty list for missing or
+		// invalid tagging output, which must remain visibly failed.
+		report.TaggingStatus = model.ContentMetadataFailed
 	}
 	if report.FeedbackStatus == model.ContentMetadataPending && payload.FeedbackStatus != "" {
 		report.FeedbackStatus = payload.FeedbackStatus
@@ -184,8 +294,21 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 		}
 		if writeTags {
 			tags := make([]*model.ContentTagAssignment, 0, len(payload.Tags))
+			counts := make(map[string]int)
 			for _, tag := range payload.Tags {
+				dimension := strings.TrimSpace(tag.Dimension)
 				canonical, labelStatus, displayName, err := normalizeTag(ctx, tx.ContentMetadata(), tag, version)
+				if tag.labelStatusSet && tag.LabelStatus == model.ContentTagDiagnostic {
+					labelStatus = model.ContentTagDiagnostic
+				} else if tag.labelStatusSet && tag.LabelStatus == model.ContentTagCandidate && canonical != "" {
+					labelStatus = model.ContentTagCandidate
+				}
+				if isServerOwnedDimension(dimension) && tag.source == "server" {
+					canonical = normalizeTagValue(tag.Value)
+					labelStatus = model.ContentTagCanonical
+					displayName = serverTagDisplayName(dimension, canonical)
+					err = nil
+				}
 				if err != nil {
 					return err
 				}
@@ -193,18 +316,41 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 				if len(evidence) == 0 {
 					evidence = datatypes.JSON([]byte(`{}`))
 				}
-				dimension := strings.TrimSpace(tag.Dimension)
-				visible := labelStatus == model.ContentTagCanonical
-				source := "agent"
-				if dimension == "content_type" || dimension == "platform" || dimension == "artifact_role" || dimension == "media_form" || dimension == "performance" {
+				counts[dimension]++
+				if limit := model.ContentTagDimensionLimits[dimension]; limit > 0 && counts[dimension] > limit {
+					return fmt.Errorf("too many tags for dimension %q", dimension)
+				}
+				for _, existing := range tags {
+					if existing.Dimension == dimension && existing.CanonicalValue != "" && existing.CanonicalValue == canonical {
+						return fmt.Errorf("duplicate tag %q for dimension %q", canonical, dimension)
+					}
+				}
+				source := tag.source
+				if source == "" {
+					source = "agent"
+				}
+				if isServerOwnedDimension(dimension) {
 					source = "server"
 				}
-				tags = append(tags, &model.ContentTagAssignment{ID: uuid.NewString(), ReportID: report.ID, Dimension: dimension, Value: strings.TrimSpace(tag.Value), DisplayName: displayName, CanonicalValue: canonical, LabelStatus: labelStatus, Confidence: tag.Confidence, Primary: tag.Primary, Evidence: evidence, ContentSubject: report.ContentSubject, ArtifactRole: report.ArtifactRole, TagGroup: model.ContentTagGroups[dimension], Source: source, AnalyticsVisible: visible, TaxonomyVersion: version})
+				visible := labelStatus == model.ContentTagCanonical && (source == "server" || payload.TaggingStatus == model.ContentMetadataSucceeded)
+				assignmentRole := report.ArtifactRole
+				if strings.TrimSpace(tag.artifactRole) != "" {
+					assignmentRole = strings.TrimSpace(tag.artifactRole)
+				}
+				tags = append(tags, &model.ContentTagAssignment{ID: uuid.NewString(), ReportID: report.ID, Dimension: dimension, Value: strings.TrimSpace(tag.Value), DisplayName: displayName, CanonicalValue: canonical, LabelStatus: labelStatus, Confidence: tag.Confidence, Primary: tag.Primary, Evidence: evidence, ContentSubject: report.ContentSubject, ArtifactRole: assignmentRole, TagGroup: model.ContentTagGroups[dimension], Source: source, AnalyticsVisible: visible, TaxonomyVersion: version})
 			}
 			if err := tx.ContentMetadata().ReplaceTags(ctx, report.ID, tags); err != nil {
 				return err
 			}
-			report.TaggingStatus = model.ContentMetadataSucceeded
+			if payload.TaggingStatus == model.ContentMetadataSucceeded {
+				if taggingSubjectsComplete(execution.AgentPackTaggingContract, payload.Subjects) {
+					report.TaggingStatus = model.ContentMetadataSucceeded
+				} else {
+					report.TaggingStatus = model.ContentMetadataFailed
+				}
+			} else if payload.TaggingStatus == model.ContentMetadataFailed || payload.TaggingStatus == "" {
+				report.TaggingStatus = model.ContentMetadataFailed
+			}
 		}
 		if writeFeedback {
 			if payload.Feedback != nil {
@@ -246,6 +392,31 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 	return report, nil
 }
 
+func taggingSubjectsComplete(rawContract datatypes.JSON, subjects []contentMetadataSubject) bool {
+	if len(rawContract) == 0 || string(rawContract) == "null" {
+		return true
+	}
+	var contract struct {
+		SubjectRoles []string `json:"subject_roles"`
+	}
+	if err := json.Unmarshal(rawContract, &contract); err != nil {
+		return false
+	}
+	provided := make(map[string]struct{}, len(subjects))
+	for _, subject := range subjects {
+		provided[strings.TrimSpace(subject.ArtifactRole)] = struct{}{}
+		if len(subject.Tags) == 0 && len(subject.OmittedDimensions) == 0 {
+			return false
+		}
+	}
+	for _, role := range contract.SubjectRoles {
+		if _, ok := provided[strings.TrimSpace(role)]; !ok {
+			return false
+		}
+	}
+	return len(contract.SubjectRoles) > 0
+}
+
 func withServerContentOriginTag(tags []contentMetadataTag) []contentMetadataTag {
 	const dimension = "source_relation"
 	const value = "hot_search"
@@ -263,9 +434,10 @@ func withServerContentOriginTag(tags []contentMetadataTag) []contentMetadataTag 
 		Confidence:  1,
 		Primary:     true,
 		Evidence:    json.RawMessage(`{"source":"server_task_content_origin"}`),
+		source:      "server",
 	})
 }
-func serverDerivedTags(task *model.Task) []contentMetadataTag {
+func serverDerivedTags(task *model.Task, artifactRole string) []contentMetadataTag {
 	p := task.Channel
 	if strings.HasPrefix(p, "wechat") {
 		p = model.PlatformWechat
@@ -273,15 +445,85 @@ func serverDerivedTags(task *model.Task) []contentMetadataTag {
 	if p == "" {
 		p = model.PlatformForChannel(task.Type)
 	}
-	mf := "article"
-	if strings.Contains(task.Type, "picture") {
-		mf = "image"
-	}
-	if task.Type == model.PlatformSeednote {
-		mf = "graphic_text"
-	}
+	mf := serverMediaForm(task.Type)
 	e := json.RawMessage(`{"source":"server"}`)
-	return []contentMetadataTag{{Dimension: "content_type", Value: task.Type, LabelStatus: model.ContentTagCanonical, Confidence: 1, Evidence: e}, {Dimension: "platform", Value: p, LabelStatus: model.ContentTagCanonical, Confidence: 1, Evidence: e}, {Dimension: "artifact_role", Value: "final", LabelStatus: model.ContentTagCanonical, Confidence: 1, Evidence: e}, {Dimension: "media_form", Value: mf, LabelStatus: model.ContentTagCanonical, Confidence: 1, Evidence: e}}
+	return []contentMetadataTag{{Dimension: "content_type", Value: task.Type, LabelStatus: model.ContentTagCanonical, Confidence: 1, Evidence: e, source: "server"}, {Dimension: "platform", Value: p, LabelStatus: model.ContentTagCanonical, Confidence: 1, Evidence: e, source: "server"}, {Dimension: "artifact_role", Value: artifactRole, LabelStatus: model.ContentTagCanonical, Confidence: 1, Evidence: e, source: "server"}, {Dimension: "media_form", Value: mf, LabelStatus: model.ContentTagCanonical, Confidence: 1, Evidence: e, source: "server"}}
+}
+
+func isContentTask(task *model.Task, execution *model.TaskExecution) bool {
+	if task == nil || execution == nil {
+		return false
+	}
+	switch strings.TrimSpace(task.TaskKind) {
+	case model.TaskKindViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis:
+		return false
+	}
+	switch strings.TrimSpace(task.Type) {
+	case model.TaskTypeViralAnalysis, model.TaskTypeProfileAnalysis, model.TaskKindFeedbackAnalysis:
+		return false
+	}
+	// Future content Packs are identified by the frozen Server-owned tagging
+	// contract rather than a hard-coded platform enum. Non-content Packs never
+	// carry this contract.
+	tagging, err := resolveFrozenExecutionTaggingContract(execution)
+	return err == nil && tagging != nil
+}
+
+func isKnownContentTaskType(taskType string) bool {
+	switch taskType {
+	case model.TaskTypeWechatArticle, model.TaskTypeWechatPicture, model.PlatformSeednote,
+		model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage,
+		model.PlatformWhiteboardAnimation, model.PlatformHypit:
+		return true
+	default:
+		return false
+	}
+}
+
+func isServerOwnedDimension(dimension string) bool {
+	switch dimension {
+	case "content_type", "platform", "artifact_role", "media_form", "performance":
+		return true
+	default:
+		return false
+	}
+}
+
+func serverMediaForm(taskType string) string {
+	switch taskType {
+	case model.TaskTypeWechatPicture:
+		return "image"
+	case model.PlatformSeednote, model.PlatformMoments:
+		return "graphic_text"
+	case model.PlatformEcommerce:
+		return "commerce_asset"
+	case model.PlatformMontage, model.PlatformHypit, model.PlatformWhiteboardAnimation:
+		return "video"
+	default:
+		return "article"
+	}
+}
+
+func serverTagDisplayName(dimension, value string) string {
+	for _, vocabulary := range model.ContentTagDefaultVocabularies[dimension] {
+		if vocabulary.Value == value {
+			return vocabulary.DisplayName
+		}
+	}
+	return value
+}
+
+func serverPlatform(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	if p := strings.TrimSpace(task.Channel); p != "" {
+		if strings.HasPrefix(p, "wechat") {
+			return model.PlatformWechat
+		}
+		return p
+	}
+	return model.PlatformForChannel(task.Type)
 }
 
 func normalizeTag(ctx context.Context, repo repository.ContentMetadataRepository, tag contentMetadataTag, version string) (string, string, string, error) {
@@ -316,14 +558,15 @@ func normalizeTag(ctx context.Context, repo repository.ContentMetadataRepository
 		if !matched {
 			continue
 		}
-		aliases, _ := json.Marshal(vocabulary.Aliases)
-		entry := &model.ContentTagVocabulary{ID: uuid.NewString(), Dimension: dimension, Value: vocabulary.Value, DisplayName: vocabulary.DisplayName, Status: model.ContentTagCanonical, Aliases: datatypes.JSON(aliases), TaxonomyVersion: version}
-		if err := repo.UpsertVocabulary(ctx, entry); err != nil {
-			return "", "", "", err
-		}
+		// Defaults are a server-owned registry used for validation only. Unknown
+		// or newly proposed values must be explicitly reviewed and inserted into
+		// the vocabulary table; submission never mutates the formal vocabulary.
 		return vocabulary.Value, model.ContentTagCanonical, vocabulary.DisplayName, nil
 	}
-	return "", "", "", fmt.Errorf("unknown controlled vocabulary value %q for dimension %q", tag.Value, dimension)
+	// Unknown values are retained as private diagnostics so an operator can
+	// review and register them later. They never become canonical or visible to
+	// analytics, and submission remains useful for the Server-owned tags.
+	return "", model.ContentTagDiagnostic, strings.TrimSpace(tag.Value), nil
 }
 
 func normalizeTagValue(value string) string {

@@ -102,7 +102,7 @@ func TestSeednoteCompletionDistinguishesUploadFailureFromMissingGeneration(t *te
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(files) != 10 {
+				if len(files) != 11 {
 					t.Fatalf("retained=%d", len(files))
 				}
 				for _, f := range files {

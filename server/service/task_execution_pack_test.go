@@ -128,3 +128,26 @@ func TestApplyAgentPackIdentityRejectsUnknownManagedTaskType(t *testing.T) {
 		t.Fatal("unknown task type accepted")
 	}
 }
+
+func TestApplyAgentPackIdentityRejectsContentTaskWithoutTaggingContract(t *testing.T) {
+	pack, ok := agentpack.Default().Pack("wechat-article")
+	if !ok {
+		t.Fatal("wechat-article Pack missing")
+	}
+	// Keep the test tied to the actual Pack lookup path while exercising the
+	// fail-closed guard through a temporary catalog entry is not possible here;
+	// the frozen contract validator covers the same malformed snapshot boundary.
+	if pack.Tagging == nil || !pack.Tagging.Enabled {
+		t.Fatal("wechat-article Pack must have an enabled tagging contract")
+	}
+	invalid := &model.TaskExecution{
+		TaskKind:    model.TaskTypeWechatArticle,
+		AgentPackID: "wechat-article", AgentPackVersion: pack.Version, AgentPackDigest: pack.Digest,
+		AgentPackDeliveryContract:         datatypes.JSON(`[{"role":"final_markdown","path":"output/final.md","mime_type":"text/markdown"}]`),
+		AgentPackRequiredArtifactContract: datatypes.JSON(`[{"role":"final_markdown","path":"output/final.md","mime_type":"text/markdown","required":true}]`),
+		AgentPackTaggingContract:          datatypes.JSON(`null`), RuntimeAdapter: "standard", RuntimeProfile: "wechat-article",
+	}
+	if hasCompleteAgentPackIdentity(invalid) {
+		t.Fatal("content execution with null tagging contract was accepted")
+	}
+}

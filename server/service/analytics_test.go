@@ -38,7 +38,7 @@ func TestAnalyticsContentsExposeLatestContentTags(t *testing.T) {
 	if err := db.Model(&model.AnalyticsContent{}).Where("id = ?", "content-1").Update("task_id", "task-1").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&model.ContentTagAssignment{ID: "tag-1", ReportID: "report-1", Dimension: "source_relation", CanonicalValue: "hot_search", DisplayName: "热搜", LabelStatus: model.ContentTagCanonical}).Error; err != nil {
+	if err := db.Create(&model.ContentTagAssignment{ID: "tag-1", ReportID: "report-1", Dimension: "source_relation", CanonicalValue: "hot_search", DisplayName: "热搜", LabelStatus: model.ContentTagCanonical, AnalyticsVisible: true, TaxonomyVersion: model.ContentTaxonomyVersion}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -66,8 +66,8 @@ func TestAnalyticsContentsExposeHotSearchTagFromTaskOriginWithoutMetadataReport(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || len(page.Items[0].Tags) != 1 || page.Items[0].Tags[0].DisplayName != "热搜" {
-		t.Fatalf("content tags = %#v", page.Items)
+	if len(page.Items) != 1 || len(page.Items[0].Tags) != 0 {
+		t.Fatalf("content tags = %#v, want no tags without a formal v2 report", page.Items)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestAnalyticsContentTagsReplaceLegacySourceTagForHotSearchTask(t *testing.T
 	if err := db.Create(&model.ContentMetadataReport{ID: "report-hot-legacy", TaskID: "task-hot-legacy", ExecutionID: "execution-hot-legacy", Status: model.ContentMetadataSucceeded, TaggingStatus: model.ContentMetadataSucceeded, FeedbackStatus: model.ContentMetadataSucceeded, TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: datatypes.JSON([]byte(`{"tags":[]}`))}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&model.ContentTagAssignment{ID: "tag-hot-legacy", ReportID: "report-hot-legacy", Dimension: "source_relation", CanonicalValue: "adapted", DisplayName: "改编", LabelStatus: model.ContentTagCanonical}).Error; err != nil {
+	if err := db.Create(&model.ContentTagAssignment{ID: "tag-hot-legacy", ReportID: "report-hot-legacy", Dimension: "source_relation", CanonicalValue: "adapted", DisplayName: "改编", LabelStatus: model.ContentTagCanonical, AnalyticsVisible: true, TaxonomyVersion: model.ContentTaxonomyVersion}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,7 +92,7 @@ func TestAnalyticsContentTagsReplaceLegacySourceTagForHotSearchTask(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || len(page.Items[0].Tags) != 1 || page.Items[0].Tags[0].DisplayName != "热搜" {
+	if len(page.Items) != 1 || len(page.Items[0].Tags) != 1 || page.Items[0].Tags[0].DisplayName != "改编" {
 		t.Fatalf("content tags = %#v", page.Items)
 	}
 }
@@ -112,12 +112,12 @@ func TestAnalyticsDetailExposesHotSearchTagFromTaskOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Content.Tags) != 1 || detail.Content.Tags[0].DisplayName != "热搜" {
+	if len(detail.Content.Tags) != 0 {
 		t.Fatalf("detail tags = %#v", detail.Content.Tags)
 	}
 }
 
-func TestAnalyticsContentsKeepLastSuccessfulTagsWhenLaterMetadataRetryFails(t *testing.T) {
+func TestAnalyticsContentsDropSemanticTagsWhenLatestMetadataRetryFails(t *testing.T) {
 	s, db := analyticsFixture(t)
 	count := int64(4)
 	analyticsWrite(t, s, "observation-retry", "content-retry", "2026-02-01", "cumulative", "batch-retry", 200, &count)
@@ -128,7 +128,7 @@ func TestAnalyticsContentsKeepLastSuccessfulTagsWhenLaterMetadataRetryFails(t *t
 	if err := db.Create(&model.ContentMetadataReport{ID: "report-retry-ok", TaskID: "task-retry", ExecutionID: "execution-ok", Status: model.ContentMetadataSucceeded, TaggingStatus: model.ContentMetadataSucceeded, FeedbackStatus: model.ContentMetadataSucceeded, TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: datatypes.JSON([]byte(`{"tags":[]}`)), CreatedAt: old, UpdatedAt: old}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&model.ContentTagAssignment{ID: "tag-retry-ok", ReportID: "report-retry-ok", Dimension: "performance", CanonicalValue: "viral", DisplayName: "爆款", LabelStatus: model.ContentTagCanonical}).Error; err != nil {
+	if err := db.Create(&model.ContentTagAssignment{ID: "tag-retry-ok", ReportID: "report-retry-ok", Dimension: "performance", CanonicalValue: "viral", DisplayName: "爆款", LabelStatus: model.ContentTagCanonical, AnalyticsVisible: true, TaxonomyVersion: model.ContentTaxonomyVersion}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&model.ContentMetadataReport{ID: "report-retry-failed", TaskID: "task-retry", ExecutionID: "execution-failed", Status: model.ContentMetadataFailed, TaggingStatus: model.ContentMetadataFailed, FeedbackStatus: model.ContentMetadataFailed, TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: datatypes.JSON([]byte(`{"tags":[]}`)), CreatedAt: time.Now(), UpdatedAt: time.Now()}).Error; err != nil {
@@ -139,7 +139,7 @@ func TestAnalyticsContentsKeepLastSuccessfulTagsWhenLaterMetadataRetryFails(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || len(page.Items[0].Tags) != 1 || page.Items[0].Tags[0].DisplayName != "爆款" {
+	if len(page.Items) != 1 || len(page.Items[0].Tags) != 0 {
 		t.Fatalf("content tags = %#v", page.Items)
 	}
 }

@@ -189,7 +189,11 @@ func (f *managedCompletionFixture) assertTerminal(t *testing.T, taskStatus, exec
 func TestCompleteCloudExecutionPublishesSeednoteDeliverables(t *testing.T) {
 	f := newManagedCompletionFixture(t, model.PlatformSeednote)
 	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
-		f.addPendingFile(t, name, 1, "fixture")
+		body := "fixture"
+		if name == "content-tags.json" {
+			body = `{}`
+		}
+		f.addPendingFile(t, name, 1, body)
 	}
 
 	if err := f.complete(t, &agent.ExecutionResult{Success: true, RemoteArtifacts: true}); err != nil {
@@ -202,7 +206,11 @@ func TestCompleteCloudExecutionRejectsDeliveryImageWithForgedMIME(t *testing.T) 
 	f := newManagedCompletionFixture(t, model.PlatformSeednote)
 	var cover *model.TaskFile
 	for _, name := range seednoteCompletionArtifactNamesForTest(true, false) {
-		file := f.addPendingFile(t, name, 1, "fixture")
+		body := "fixture"
+		if name == "content-tags.json" {
+			body = `{}`
+		}
+		file := f.addPendingFile(t, name, 1, body)
 		if name == "cover.png" {
 			cover = file
 		}
@@ -227,6 +235,7 @@ func TestCompleteCloudExecutionRejectsDeliveryImageWithForgedMIME(t *testing.T) 
 func TestCompleteCloudExecutionFinalizesMontageDeliverables(t *testing.T) {
 	f := newManagedCompletionFixture(t, model.PlatformMontage)
 	f.addPendingFile(t, "final.mp4", 1024, validTestMP4())
+	f.addPendingFile(t, "content-tags.json", 2, `{}`)
 	f.addPendingFile(t, "montage-project.json", 2, `{}`)
 	f.addPendingFile(t, "cover.png", 1024, "image")
 	f.addPendingFile(t, "delivery-manifest.json", 2, `{}`)
@@ -255,6 +264,7 @@ func TestManagedCompletionRejectsMissingMontageDeliverables(t *testing.T) {
 				body string
 			}{
 				{name: "final.mp4", size: 1024, body: validTestMP4()},
+				{name: "content-tags.json", size: 2, body: `{}`},
 				{name: "montage-project.json", size: 2, body: `{}`},
 				{name: "cover.png", size: 1024, body: "image"},
 				{name: "delivery-manifest.json", size: 2, body: `{}`},
@@ -545,7 +555,7 @@ func TestReconcileResumedExecutionFailureKeepsChargeForPriorPublishedDelivery(t 
 		t.Fatalf("prior published delivery allowed task charge reversal: %v", err)
 	}
 	files, err := billing.repo.TaskFiles().FindByTaskID(ctx, task.ID)
-	if err != nil || len(files) != 4 || files[0].State != model.TaskFileStateDelivered {
+	if err != nil || len(files) != 5 || files[0].State != model.TaskFileStateDelivered {
 		t.Fatalf("prior published delivery=%#v err=%v", files, err)
 	}
 }

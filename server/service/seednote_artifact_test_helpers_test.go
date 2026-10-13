@@ -2,6 +2,7 @@ package service
 
 func seednoteCompletionArtifactNamesForTest(hasContentImage, hasTailImage bool) []string {
 	names := []string{
+		"content-tags.json",
 		"content.md",
 		"request-analysis.json",
 		"request-analysis.md",

@@ -300,47 +300,6 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
-	if requiresContentTagging(manifest) {
-		if manifest.Tagging == nil || !manifest.Tagging.Enabled {
-			return fmt.Errorf("content Pack requires enabled tagging contract")
-		}
-		if strings.TrimSpace(manifest.Tagging.Profile) == "" {
-			return fmt.Errorf("tagging.profile is required")
-		}
-		if err := validateOutputArtifactPath(manifest.Tagging.RequiredArtifact); err != nil {
-			return fmt.Errorf("tagging.required_artifact: %w", err)
-		}
-		foundRequired := false
-		for _, artifact := range manifest.Artifacts {
-			if artifact.Path == manifest.Tagging.RequiredArtifact && artifact.Required {
-				foundRequired = true
-				break
-			}
-		}
-		if !foundRequired {
-			return fmt.Errorf("tagging.required_artifact %q must be a required artifact", manifest.Tagging.RequiredArtifact)
-		}
-		if len(manifest.Tagging.SubjectRoles) == 0 {
-			return fmt.Errorf("tagging.subject_roles must not be empty")
-		}
-		roles := make(map[string]bool)
-		for _, artifacts := range manifest.DeliveryByTaskType {
-			for _, delivery := range artifacts {
-				roles[strings.TrimSpace(delivery.Role)] = true
-			}
-		}
-		for _, delivery := range manifest.Delivery {
-			roles[strings.TrimSpace(delivery.Role)] = true
-		}
-		for _, role := range manifest.Tagging.SubjectRoles {
-			role = strings.TrimSpace(role)
-			if role == "" || !roles[role] {
-				return fmt.Errorf("tagging subject role %q is not declared in delivery", role)
-			}
-		}
-	} else if manifest.Tagging != nil {
-		return fmt.Errorf("non-content Pack must not declare tagging")
-	}
 	schemaRefs := []struct {
 		ref       string
 		extension bool
@@ -404,6 +363,9 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
+	// Validate the ordinary managed delivery contract before Pack-specific
+	// tagging details so malformed delivery definitions fail with their direct
+	// contract error rather than an incidental subject-role error.
 	if manifest.Kind == KindManaged && !interactive {
 		for _, taskKind := range manifest.Bindings.TaskKinds {
 			allowsProfileData := taskKind == "profile_analysis" && manifest.hasRequiredDataDelivery("profile_result")
@@ -419,6 +381,47 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
+	if requiresContentTagging(manifest) {
+		if manifest.Tagging == nil || !manifest.Tagging.Enabled {
+			return fmt.Errorf("content Pack requires enabled tagging contract")
+		}
+		if strings.TrimSpace(manifest.Tagging.Profile) == "" {
+			return fmt.Errorf("tagging.profile is required")
+		}
+		if err := validateOutputArtifactPath(manifest.Tagging.RequiredArtifact); err != nil {
+			return fmt.Errorf("tagging.required_artifact: %w", err)
+		}
+		foundRequired := false
+		for _, artifact := range manifest.Artifacts {
+			if artifact.Path == manifest.Tagging.RequiredArtifact && artifact.Required {
+				foundRequired = true
+				break
+			}
+		}
+		if !foundRequired {
+			return fmt.Errorf("tagging.required_artifact %q must be a required artifact", manifest.Tagging.RequiredArtifact)
+		}
+		if len(manifest.Tagging.SubjectRoles) == 0 {
+			return fmt.Errorf("tagging.subject_roles must not be empty")
+		}
+		roles := make(map[string]bool)
+		for _, artifacts := range manifest.DeliveryByTaskType {
+			for _, delivery := range artifacts {
+				roles[strings.TrimSpace(delivery.Role)] = true
+			}
+		}
+		for _, delivery := range manifest.Delivery {
+			roles[strings.TrimSpace(delivery.Role)] = true
+		}
+		for _, role := range manifest.Tagging.SubjectRoles {
+			role = strings.TrimSpace(role)
+			if role == "" || !roles[role] {
+				return fmt.Errorf("tagging subject role %q is not declared in delivery", role)
+			}
+		}
+	} else if manifest.Tagging != nil {
+		return fmt.Errorf("non-content Pack must not declare tagging")
+	}
 	return nil
 }
 
@@ -426,12 +429,25 @@ func requiresContentTagging(manifest *Manifest) bool {
 	if manifest == nil || manifest.ID == "" {
 		return false
 	}
-	switch manifest.ID {
-	case "wechat-article", "seednote", "ecommerce", "moments", "montage", "hypit", "wechat-picture", "whiteboard-animation":
-		return true
-	default:
-		return false
+	// Plugin Packs do not bind task kinds, so their explicit tagging declaration
+	// is the content contract signal. Managed Packs are inferred from their
+	// ordinary product task bindings below, which makes missing declarations
+	// fail closed for newly added content Packs.
+	if manifest.Kind == KindPlugin {
+		return hasSurface(manifest.Surfaces, "task")
 	}
+	for _, taskKind := range manifest.Bindings.TaskKinds {
+		switch strings.TrimSpace(taskKind) {
+		case "profile_analysis", "feedback_analysis", "viral_analysis":
+			continue
+		default:
+			// Any ordinary product/task binding is a content Pack unless it is
+			// explicitly one of the non-content analysis kinds above. This keeps
+			// newly added content Packs fail-closed when tagging is omitted.
+			return true
+		}
+	}
+	return false
 }
 
 func hasSurface(surfaces []string, wanted string) bool {

@@ -201,6 +201,7 @@ const (
 	FileRoleImageManifest = "image_manifest"
 	FileRoleDraftPackage  = "draft_package"
 	FileRoleReview        = "review"
+	FileRoleContentTags   = "content_tags"
 )
 
 // Project status constants.

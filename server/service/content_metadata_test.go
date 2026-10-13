@@ -7,9 +7,43 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func newContentMetadataFixture(t *testing.T, name, taskType string) (repository.Repository, *gorm.DB, *ContentMetadataService, *model.Task, *model.TaskExecution) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+name+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Task{}, &model.TaskExecution{}, &model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	task := &model.Task{ID: name + "-task", UserID: "user-1", ProjectID: "project-1", Type: taskType, Status: model.TaskStatusCompleted}
+	if err := repo.Tasks().Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	role := "final"
+	if taskType == model.TaskTypeWechatPicture {
+		role = "content"
+	}
+	execution := contentMetadataTestExecution(name+"-execution", task.ID, role)
+	if err := repo.TaskExecutions().Create(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	return repo, db, NewContentMetadataService(repo, nil), task, execution
+}
+
+func contentMetadataTestExecution(id, taskID, role string) *model.TaskExecution {
+	return &model.TaskExecution{
+		ID: id, TaskID: taskID, Attempt: 1, Status: model.TaskExecutionSucceeded,
+		AgentPackTaggingContract:  datatypes.JSON(`{"enabled":true,"profile":"generic-content","required_artifact":"output/content-tags.json","subject_roles":["` + role + `"]}`),
+		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"` + role + `","path":"output/final.md","mime_type":"text/markdown"}]`),
+	}
+}
 
 func TestContentMetadataServiceSubmitIsIdempotentPerExecution(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:content-metadata-service?mode=memory&cache=shared"), &gorm.Config{})
@@ -24,10 +58,10 @@ func TestContentMetadataServiceSubmitIsIdempotentPerExecution(t *testing.T) {
 	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-1", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-1", TaskID: "task-1", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+	if err := repo.TaskExecutions().Create(context.Background(), contentMetadataTestExecution("exec-1", "task-1", "final")); err != nil {
 		t.Fatal(err)
 	}
-	input := ContentMetadataInput{TaskID: "task-1", ExecutionID: "exec-1", TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: []byte(`{"task_type":"article","tags":[{"dimension":"industry","value":"茶叶","confidence":0.9}],"feedback":{"scores":{"quality":8},"summary":"ok"}}`)}
+	input := ContentMetadataInput{TaskID: "task-1", ExecutionID: "exec-1", TaxonomyVersion: model.ContentTaxonomyVersion, RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","task_type":"article","tagging_status":"succeeded","subjects":[{"artifact_role":"final","tags":[{"dimension":"domain","value":"茶叶","confidence":0.9,"evidence":[{"source_file":"output/04-article-final.md","line_start":1,"line_end":2,"quote":"茶叶","evidence_kind":"explicit_topic"}]}]}],"feedback":{"scores":{"quality":8},"summary":"ok"}}`)}
 	first, err := svc.Submit(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -76,15 +110,15 @@ func TestContentMetadataServiceAddsHotSearchOriginAndKeepsViralCategorySeparate(
 			t.Fatal(err)
 		}
 		executionID := "exec-" + strings.TrimPrefix(task.ID, "task-")
-		if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{ID: executionID, TaskID: task.ID, Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+		if err := repo.TaskExecutions().Create(ctx, contentMetadataTestExecution(executionID, task.ID, "final")); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	for _, input := range []ContentMetadataInput{
-		{TaskID: "task-hot", ExecutionID: "exec-hot", RawMetadata: []byte(`{"tags":[{"dimension":"source_relation","value":"adapted","confidence":0.9}]}`)},
-		{TaskID: "task-plain", ExecutionID: "exec-plain", RawMetadata: []byte(`{"tags":[]}`)},
-		{TaskID: "task-viral", ExecutionID: "exec-viral", RawMetadata: []byte(`{"tags":[{"dimension":"performance","value":"爆款","confidence":0.9}]}`)},
+		{TaskID: "task-hot", ExecutionID: "exec-hot", RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":[{"artifact_role":"final","tags":[{"dimension":"source_relation","value":"adapted","confidence":0.9,"evidence":[{"source_file":"output/final.md","line_start":1,"line_end":1,"quote":"改编","evidence_kind":"source_relation"}]}]}]}`)},
+		{TaskID: "task-plain", ExecutionID: "exec-plain", RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":[{"artifact_role":"final","tags":[],"omitted_dimensions":["domain"]}]}`)},
+		{TaskID: "task-viral", ExecutionID: "exec-viral", RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":[{"artifact_role":"final","tags":[]}]}`)},
 	} {
 		if _, err := svc.Submit(ctx, input); err != nil {
 			t.Fatalf("Submit(%s): %v", input.TaskID, err)
@@ -92,7 +126,7 @@ func TestContentMetadataServiceAddsHotSearchOriginAndKeepsViralCategorySeparate(
 	}
 
 	var hotTag model.ContentTagAssignment
-	if err := db.Joins("JOIN content_metadata_reports ON content_metadata_reports.id = content_tag_assignments.report_id").Where("content_metadata_reports.task_id = ?", "task-hot").First(&hotTag).Error; err != nil {
+	if err := db.Joins("JOIN content_metadata_reports ON content_metadata_reports.id = content_tag_assignments.report_id").Where("content_metadata_reports.task_id = ? AND content_tag_assignments.canonical_value = ?", "task-hot", "hot_search").First(&hotTag).Error; err != nil {
 		t.Fatal(err)
 	}
 	if hotTag.Dimension != "source_relation" || hotTag.CanonicalValue != "hot_search" || hotTag.DisplayName != "热搜" {
@@ -113,11 +147,8 @@ func TestContentMetadataServiceAddsHotSearchOriginAndKeepsViralCategorySeparate(
 		t.Fatalf("plain task source tags = %d, want 0", plainTagCount)
 	}
 	var viralTag model.ContentTagAssignment
-	if err := db.Joins("JOIN content_metadata_reports ON content_metadata_reports.id = content_tag_assignments.report_id").Where("content_metadata_reports.task_id = ?", "task-viral").First(&viralTag).Error; err != nil {
-		t.Fatal(err)
-	}
-	if viralTag.Dimension != "performance" || viralTag.CanonicalValue != "viral" || viralTag.DisplayName != "爆款" {
-		t.Fatalf("viral category tag = %#v", viralTag)
+	if err := db.Where("report_id IN (SELECT id FROM content_metadata_reports WHERE task_id = ?) AND dimension = ?", "task-viral", "performance").First(&viralTag).Error; err == nil {
+		t.Fatal("agent performance tag must not be persisted")
 	}
 }
 
@@ -134,7 +165,7 @@ func TestContentMetadataServiceRejectsUnknownDimension(t *testing.T) {
 	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-invalid", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-invalid", TaskID: "task-invalid", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+	if err := repo.TaskExecutions().Create(context.Background(), contentMetadataTestExecution("exec-invalid", "task-invalid", "final")); err != nil {
 		t.Fatal(err)
 	}
 	_, err = svc.Submit(context.Background(), ContentMetadataInput{TaskID: "task-invalid", ExecutionID: "exec-invalid", RawMetadata: []byte(`{"tags":[{"dimension":"unknown","value":"x"}]}`)})
@@ -152,7 +183,7 @@ func TestContentMetadataServiceNormalizesVocabularyAliasAndPersistsDisplayName(t
 		t.Fatal(err)
 	}
 	aliasJSON := []byte(`["茶饮"]`)
-	if err := db.Create(&model.ContentTagVocabulary{ID: "vocab-1", Dimension: "industry", Value: "tea", DisplayName: "茶叶", Status: model.ContentTagCanonical, Aliases: aliasJSON, TaxonomyVersion: model.ContentTaxonomyVersion}).Error; err != nil {
+	if err := db.Create(&model.ContentTagVocabulary{ID: "vocab-1", Dimension: "domain", Value: "tea", DisplayName: "茶叶", Status: model.ContentTagCanonical, Aliases: aliasJSON, TaxonomyVersion: model.ContentTaxonomyVersion}).Error; err != nil {
 		t.Fatal(err)
 	}
 	svc := NewContentMetadataService(repository.New(db), nil)
@@ -160,15 +191,15 @@ func TestContentMetadataServiceNormalizesVocabularyAliasAndPersistsDisplayName(t
 	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-vocab", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-vocab", TaskID: "task-vocab", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+	if err := repo.TaskExecutions().Create(context.Background(), contentMetadataTestExecution("exec-vocab", "task-vocab", "final")); err != nil {
 		t.Fatal(err)
 	}
-	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: "task-vocab", ExecutionID: "exec-vocab", RawMetadata: []byte(`{"tags":[{"dimension":"industry","value":"茶饮","confidence":0.9}]}`)})
+	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: "task-vocab", ExecutionID: "exec-vocab", RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":[{"artifact_role":"final","tags":[{"dimension":"domain","value":"茶饮","confidence":0.9,"evidence":[{"source_file":"output/final.md","line_start":1,"line_end":1,"quote":"茶饮","evidence_kind":"explicit_topic"}]}]}]}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var tag model.ContentTagAssignment
-	if err := db.First(&tag, "report_id = ?", report.ID).Error; err != nil {
+	if err := db.Where("report_id = ? AND dimension = ?", report.ID, "domain").First(&tag).Error; err != nil {
 		t.Fatal(err)
 	}
 	if tag.CanonicalValue != "tea" || tag.DisplayName != "茶叶" || tag.LabelStatus != model.ContentTagCanonical {
@@ -188,12 +219,161 @@ func TestContentMetadataServiceRejectsForeignAuthenticatedUser(t *testing.T) {
 	if err := repo.Tasks().Create(context.Background(), &model.Task{ID: "task-owned", UserID: "owner-1", ProjectID: "project-1", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.TaskExecutions().Create(context.Background(), &model.TaskExecution{ID: "exec-owned", TaskID: "task-owned", Attempt: 1, Status: model.TaskExecutionSucceeded}); err != nil {
+	if err := repo.TaskExecutions().Create(context.Background(), contentMetadataTestExecution("exec-owned", "task-owned", "final")); err != nil {
 		t.Fatal(err)
 	}
 	svc := NewContentMetadataService(repo, nil)
-	_, err = svc.Submit(context.Background(), ContentMetadataInput{AuthenticatedUserID: "owner-2", TaskID: "task-owned", ExecutionID: "exec-owned", RawMetadata: []byte(`{"tags":[]}`)})
+	_, err = svc.Submit(context.Background(), ContentMetadataInput{AuthenticatedUserID: "owner-2", TaskID: "task-owned", ExecutionID: "exec-owned", RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":[{"artifact_role":"final","tags":[],"omitted_dimensions":["domain"]}]}`)})
 	if err == nil {
 		t.Fatal("expected foreign user rejection")
+	}
+}
+
+func TestContentMetadataServiceKeepsUnknownVocabularyDiagnosticAndOutOfAnalytics(t *testing.T) {
+	_, db, svc, task, execution := newContentMetadataFixture(t, "content-metadata-unknown", model.TaskTypeWechatArticle)
+	metadata := []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":[{"artifact_role":"final","tags":[{"dimension":"domain","value":"space-tourism","confidence":0.6,"evidence":[{"source_file":"output/final.md","line_start":1,"line_end":1,"quote":"太空旅行","evidence_kind":"explicit_topic"}]}]}]}`)
+	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tag model.ContentTagAssignment
+	if err := db.Where("report_id = ? AND dimension = ?", report.ID, "domain").First(&tag).Error; err != nil {
+		t.Fatal(err)
+	}
+	if tag.LabelStatus != model.ContentTagDiagnostic || tag.CanonicalValue != "" || tag.AnalyticsVisible {
+		t.Fatalf("unknown tag = %#v", tag)
+	}
+	var vocabularyCount int64
+	if err := db.Model(&model.ContentTagVocabulary{}).Where("dimension = ? AND value = ?", "domain", "space-tourism").Count(&vocabularyCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if vocabularyCount != 0 {
+		t.Fatalf("unknown value entered vocabulary: %d", vocabularyCount)
+	}
+}
+
+func TestContentMetadataServiceRejectsWhitespacePaddedServerOwnedDimension(t *testing.T) {
+	_, _, svc, task, execution := newContentMetadataFixture(t, "content-metadata-server-owned-whitespace", model.TaskTypeWechatArticle)
+	metadata := []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":[{"artifact_role":"final","tags":[{"dimension":" performance ","value":"viral","confidence":0.9,"evidence":[{"source_file":"output/final.md","line_start":1,"line_end":1,"quote":"爆款","evidence_kind":"performance"}]}]}]}`)
+	if _, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: metadata}); err == nil || !strings.Contains(err.Error(), "server-owned") {
+		t.Fatalf("error = %v, want server-owned dimension rejection", err)
+	}
+}
+
+func TestContentMetadataServiceDoesNotMarkMissingRequiredSubjectSucceeded(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		subjects string
+		want     string
+	}{
+		{name: "missing subject", subjects: `[]`, want: model.ContentMetadataFailed},
+		{name: "empty subject without omissions", subjects: `[{"artifact_role":"final","tags":[]}]`, want: model.ContentMetadataFailed},
+		{name: "explicit omissions", subjects: `[{"artifact_role":"final","tags":[],"omitted_dimensions":["domain"]}]`, want: model.ContentMetadataSucceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, svc, task, execution := newContentMetadataFixture(t, "content-metadata-missing-succeeded-"+strings.ReplaceAll(tc.name, " ", "-"), model.TaskTypeWechatArticle)
+			metadata := []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":` + tc.subjects + `}`)
+			report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: metadata})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.TaggingStatus != tc.want {
+				t.Fatalf("tagging status = %q, want %q", report.TaggingStatus, tc.want)
+			}
+		})
+	}
+}
+
+func TestContentMetadataServiceUsesDisplayNamesForPictureAndPackRoles(t *testing.T) {
+	_, db, svc, task, execution := newContentMetadataFixture(t, "content-metadata-picture-labels", model.TaskTypeWechatPicture)
+	metadata := []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"failed","subjects":[]}`)
+	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tags []model.ContentTagAssignment
+	if err := db.Where("report_id = ?", report.ID).Find(&tags).Error; err != nil {
+		t.Fatal(err)
+	}
+	labels := map[string]string{}
+	for _, tag := range tags {
+		labels[tag.Dimension] = tag.DisplayName
+	}
+	if labels["content_type"] != "公众号贴图" || labels["artifact_role"] != "内容" {
+		t.Fatalf("server tag display names = %#v", labels)
+	}
+}
+
+func TestContentMetadataServiceMissingSubjectsKeepsServerTagsAndFailedStatus(t *testing.T) {
+	_, db, svc, task, execution := newContentMetadataFixture(t, "content-metadata-missing", model.TaskTypeWechatArticle)
+	execution.AgentPackTaggingContract = datatypes.JSON(`{"enabled":true,"profile":"generic-content","required_artifact":"output/content-tags.json","subject_roles":["final_markdown"]}`)
+	execution.AgentPackDeliveryContract = datatypes.JSON(`[{"role":"final_markdown","path":"output/04-article-final.md","mime_type":"text/markdown"}]`)
+	if err := db.Save(execution).Error; err != nil {
+		t.Fatal(err)
+	}
+	metadata := []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"failed","subjects":[],"tagging_diagnostic":"tagging_missing"}`)
+	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.TaggingStatus != model.ContentMetadataFailed {
+		t.Fatalf("tagging status = %q", report.TaggingStatus)
+	}
+	var tags []model.ContentTagAssignment
+	if err := db.Where("report_id = ?", report.ID).Find(&tags).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != 4 {
+		t.Fatalf("server tags = %d, want 4", len(tags))
+	}
+	for _, tag := range tags {
+		if tag.Source != "server" || tag.LabelStatus != model.ContentTagCanonical || !tag.AnalyticsVisible {
+			t.Fatalf("server-derived tag = %#v", tag)
+		}
+		if tag.ArtifactRole != "final_markdown" {
+			t.Fatalf("artifact role = %q", tag.ArtifactRole)
+		}
+	}
+}
+
+func TestContentMetadataServiceRejectsNonContentSubject(t *testing.T) {
+	_, _, svc, task, execution := newContentMetadataFixture(t, "content-metadata-analysis", model.TaskTypeViralAnalysis)
+	_, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"succeeded","subjects":[]}`)})
+	if err == nil || !strings.Contains(err.Error(), "not a content subject") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestContentMetadataServiceRejectsKnownContentWithoutFrozenTaggingContract(t *testing.T) {
+	_, db, svc, task, execution := newContentMetadataFixture(t, "content-metadata-no-contract", model.TaskTypeWechatArticle)
+	if err := db.Model(execution).Updates(map[string]any{"agent_pack_tagging_contract": nil, "agent_pack_delivery_contract": nil}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"failed","subjects":[]}`)})
+	if err == nil || !strings.Contains(err.Error(), "requires a valid frozen tagging contract") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestContentMetadataServiceAcceptsFutureContentTypeFromFrozenTaggingContract(t *testing.T) {
+	_, db, svc, task, execution := newContentMetadataFixture(t, "content-metadata-future", "future-platform")
+	execution.AgentPackTaggingContract = datatypes.JSON(`{"enabled":true,"profile":"generic-content","required_artifact":"output/content-tags.json","subject_roles":["final"]}`)
+	execution.AgentPackDeliveryContract = datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`)
+	if err := db.Save(execution).Error; err != nil {
+		t.Fatal(err)
+	}
+	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","tagging_status":"failed","subjects":[]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ContentType != "future-platform" || report.TaggingStatus != model.ContentMetadataFailed {
+		t.Fatalf("future content report = %#v", report)
+	}
+	var count int64
+	if err := db.Model(&model.ContentTagAssignment{}).Where("report_id = ? AND source = ?", report.ID, "server").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 4 {
+		t.Fatalf("future content server tags = %d, want 4", count)
 	}
 }

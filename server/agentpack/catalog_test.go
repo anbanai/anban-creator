@@ -57,10 +57,19 @@ artifacts:
     path: output/final.md
     mime_type: text/markdown
     required: true
+  - role: content_tags
+    path: output/content-tags.json
+    mime_type: application/json
+    required: true
 delivery:
   - role: final
     path: output/final.md
     mime_type: text/markdown
+tagging:
+  enabled: true
+  profile: generic-content
+  required_artifact: output/content-tags.json
+  subject_roles: [final]
 `)
 
 	catalog, err := LoadCatalog(root)
@@ -126,6 +135,15 @@ tagging:
 `)
 	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "subject role") {
 		t.Fatalf("LoadCatalog error = %v, want subject role validation", err)
+	}
+}
+
+func TestLoadCatalogRequiresTaggingForNewTaskPack(t *testing.T) {
+	manifest := strings.ReplaceAll(validFixtureManifest, "id: demo-pack", "id: future-content")
+	manifest = strings.Replace(manifest, "tagging:\n  enabled: true\n  profile: generic-content\n  required_artifact: output/content-tags.json\n  subject_roles: [final]\n", "", 1)
+	root := writePackFixture(t, manifest)
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "content Pack requires enabled tagging contract") {
+		t.Fatalf("LoadCatalog error = %v, want missing tagging contract failure", err)
 	}
 }
 
@@ -395,7 +413,7 @@ func TestLoadCatalogDoesNotAllowProfileDataDeliveryForOtherTaskKinds(t *testing.
 	manifest := strings.Replace(validFixtureManifest, "task_kinds: [demo-task]", "task_kinds: [article]", 1)
 	manifest = strings.Replace(manifest, "plan_task_kind: demo-task", "plan_task_kind: article", 1)
 	manifest = strings.Replace(manifest, "demo-task: task.demo", "article: task.article", 1)
-	manifest = strings.Replace(manifest, "artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n    required: true\ndelivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n", "artifacts: []\ndelivery: []\ndata_delivery:\n  - role: profile_result\n    type: database\n    required: true\n", 1)
+	manifest = strings.Replace(manifest, "artifacts:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n    required: true\n  - role: content_tags\n    path: output/content-tags.json\n    mime_type: application/json\n    required: true\ndelivery:\n  - role: final\n    path: output/final.md\n    mime_type: text/markdown\n", "artifacts: []\ndelivery: []\ndata_delivery:\n  - role: profile_result\n    type: database\n    required: true\n", 1)
 	root := writePackFixture(t, manifest)
 	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "requires a non-empty delivery contract") {
 		t.Fatalf("LoadCatalog error = %v, want profile data delivery restricted to profile_analysis", err)
@@ -433,7 +451,7 @@ artifacts:
 	}
 	pack := catalog.Packs[0]
 	defaultArtifacts := pack.ArtifactsForTaskType("demo-task")
-	if len(defaultArtifacts) != 1 || defaultArtifacts[0].Path != "output/final.md" {
+	if len(defaultArtifacts) != 2 || defaultArtifacts[0].Path != "output/final.md" || defaultArtifacts[1].Path != "output/content-tags.json" {
 		t.Fatalf("default artifacts = %#v", defaultArtifacts)
 	}
 	viralArtifacts := pack.ArtifactsForTaskType("viral-analysis")
@@ -1611,10 +1629,19 @@ artifacts:
     path: output/final.md
     mime_type: text/markdown
     required: true
+  - role: content_tags
+    path: output/content-tags.json
+    mime_type: application/json
+    required: true
 delivery:
   - role: final
     path: output/final.md
     mime_type: text/markdown
+tagging:
+  enabled: true
+  profile: generic-content
+  required_artifact: output/content-tags.json
+  subject_roles: [final]
 `
 
 const validDSHComposition = `

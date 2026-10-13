@@ -31,13 +31,18 @@ func addDurableArticleDelivery(t *testing.T, repo repository.Repository, store *
 	t.Helper()
 	for _, spec := range []struct {
 		path, mimeType, role string
+		body                 []byte
 	}{
 		{path: "output/04-article-final.md", mimeType: "text/markdown", role: model.FileRoleFinalMarkdown},
 		{path: "output/05-article.html", mimeType: "text/html", role: model.FileRoleHTML},
 		{path: "output/draft.json", mimeType: "application/json", role: model.FileRoleDraftPackage},
 		{path: "output/final-review.md", mimeType: "text/markdown", role: model.FileRoleReview},
+		{path: "output/content-tags.json", mimeType: "application/json", role: model.FileRoleContentTags, body: []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","status":"succeeded","subjects":[]}`)},
 	} {
-		body := validTaskDeliveryFixtureBody(spec.path, spec.mimeType)
+		body := spec.body
+		if body == nil {
+			body = validTaskDeliveryFixtureBody(spec.path, spec.mimeType)
+		}
 		objectKey := buildTaskMCPArtifactStoragePrefix(task, executionID) + spec.path
 		store.files[objectKey] = body
 		if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{
