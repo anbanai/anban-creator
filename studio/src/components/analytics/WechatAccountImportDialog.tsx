@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { uploadToOSS } from '@/lib/direct-upload'
 import { wechatAccountAnalyticsImportApi, type WechatAccountAnalyticsPreview } from '@/lib/api/wechat-account-analytics-import'
+import { getApiErrorMessage } from '@/lib/http-client'
 import type { Project } from '@/types'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 
@@ -26,7 +27,11 @@ function maxDate(preview?: WechatAccountAnalyticsPreview) {
   return preview?.rows.reduce((latest, row) => row.stat_date > latest ? row.stat_date : latest, '') || ''
 }
 
-export default function WechatAccountImportDialog({ project, onClose, onImported }: { project: Project; onClose: () => void; onImported?: (result: { count: number; date: string }) => void }) {
+function isContentAnalyticsWorkbookError(error: unknown) {
+  return getApiErrorMessage(error, '').includes('公众号内容分析报表')
+}
+
+export default function WechatAccountImportDialog({ project, onClose, onImported, onContentImportRequested }: { project: Project; onClose: () => void; onImported?: (result: { count: number; date: string }) => void; onContentImportRequested?: (handoff: { file: File; uploadId: string }) => void }) {
   const client = useQueryClient()
   const [file, setFile] = useState<File>()
   const [uploadId, setUploadId] = useState('')
@@ -35,16 +40,26 @@ export default function WechatAccountImportDialog({ project, onClose, onImported
   const [asOf] = useState(() => currentBeijingDateTimeLocal())
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadedSessionId = useRef('')
   useEffect(() => { setIdempotencyKey(crypto.randomUUID()) }, [uploadId, file, asOf])
 
   const previewMutation = useMutation({
-    mutationFn: async (nextFile: File) => {
+    mutationFn: async ({ nextFile }: { nextFile: File }) => {
       const upload = await uploadToOSS({ purpose: 'wechat_analytics_import', file: nextFile })
+      uploadedSessionId.current = upload.uploadSessionId
+      setUploadId(upload.uploadSessionId)
       const result = await wechatAccountAnalyticsImportApi.preview(project.id, { upload_id: upload.uploadSessionId, timezone: 'Asia/Shanghai' })
       return { result, id: upload.uploadSessionId }
     },
     onSuccess: ({ result, id }) => { setPreview(result); setUploadId(id) },
-    onError: (err) => setError(err instanceof Error ? err.message : '文件解析失败，请重试'),
+    onError: (err, variables) => {
+      if (isContentAnalyticsWorkbookError(err) && variables?.nextFile && uploadedSessionId.current && onContentImportRequested) {
+        setError('')
+        onContentImportRequested({ file: variables.nextFile, uploadId: uploadedSessionId.current })
+        return
+      }
+      setError(getApiErrorMessage(err, '文件解析失败，请重试'))
+    },
   })
   const importMutation = useMutation({
     mutationFn: () => wechatAccountAnalyticsImportApi.import(project.id, {
@@ -72,7 +87,8 @@ export default function WechatAccountImportDialog({ project, onClose, onImported
     setError(''); setPreview(undefined); setUploadId(''); previewMutation.reset(); importMutation.reset()
     if (!/\.xlsx?$/i.test(nextFile.name)) { setFile(undefined); setError('请选择 .xls 或 .xlsx 文件'); return }
     if (nextFile.size > 20 * 1024 * 1024) { setFile(undefined); setError('文件不能超过 20 MB'); return }
-    setFile(nextFile); previewMutation.mutate(nextFile)
+    uploadedSessionId.current = ''
+    setFile(nextFile); previewMutation.mutate({ nextFile })
   }
 
   const filePicker = <input ref={fileInputRef} id="wechat-account-import-file" aria-label="选择账号统计文件" className="sr-only" type="file" accept=".xls,.xlsx" disabled={busy} onChange={(event) => { selectFile(event.target.files?.[0]); event.currentTarget.value = '' }} />
@@ -81,7 +97,7 @@ export default function WechatAccountImportDialog({ project, onClose, onImported
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
       {!file ? <label htmlFor="wechat-account-import-file" className={`flex min-h-36 cursor-pointer items-center justify-center gap-4 rounded-xl border-2 border-dashed p-8 transition-colors hover:border-primary hover:bg-primary/[0.03] focus-within:ring-2 focus-within:ring-ring ${busy ? 'pointer-events-none opacity-60' : ''}`}><FileSpreadsheet className="size-8 shrink-0 text-primary" /><span className="min-w-0"><span className="block text-base font-medium">选择微信公众平台导出表格</span><span className="mt-1 block text-sm text-muted-foreground">账号每日数据 · .xls / .xlsx · 最大 20 MB</span></span>{filePicker}</label> : <label htmlFor="wechat-account-import-file" className={`flex cursor-pointer items-center gap-3 rounded-lg border bg-muted/20 px-4 py-3 transition-colors hover:border-primary focus-within:ring-2 focus-within:ring-ring ${busy ? 'pointer-events-none opacity-60' : ''}`}><FileCheck2 className="size-5 shrink-0 text-primary" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span>{preview && !previewMutation.isPending ? <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><CheckCircle2 className="size-3.5 text-emerald-600" />文件已解析 · {preview.rows.length} 个日期</span> : <span className="mt-0.5 block text-xs text-muted-foreground">{previewMutation.isPending ? '正在解析…' : '等待解析'}</span>}</span>{filePicker}</label>}
       {previewMutation.isPending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />正在解析账号统计表格…</p>}
-      {(error || previewMutation.isError || importMutation.isError) && <div role="alert" className="text-sm text-destructive">{error || '操作失败，请重试'}<Button variant="ghost" disabled={!file || busy} onClick={() => file && previewMutation.mutate(file)}>重新解析</Button></div>}
+      {(error || previewMutation.isError || importMutation.isError) && <div role="alert" className="text-sm text-destructive">{error || '操作失败，请重试'}<Button variant="ghost" disabled={!file || busy} onClick={() => file && previewMutation.mutate({ nextFile: file })}>重新解析</Button></div>}
       {preview && <>
         <div className="grid gap-3 sm:grid-cols-4"><div className="rounded-lg border px-4 py-3"><p className="text-xs text-muted-foreground">报告类型</p><p className="mt-1 text-sm font-semibold">{preview.report_type || '—'}</p></div><div className="rounded-lg border px-4 py-3"><p className="text-xs text-muted-foreground">日期范围</p><p className="mt-1 text-sm font-semibold tabular-nums">{preview.date_from && preview.date_to ? `${preview.date_from} 至 ${preview.date_to}` : '—'}</p></div><div className="rounded-lg border px-4 py-3"><p className="text-xs text-muted-foreground">有效日期</p><p className="mt-1 text-lg font-semibold tabular-nums">{validRows.length}</p></div><div className="rounded-lg border px-4 py-3"><p className="text-xs text-muted-foreground">来源明细</p><p className="mt-1 text-lg font-semibold tabular-nums">{preview.sources.length ? `${preview.sources.length} 条` : '未提供'}</p></div></div>
         {preview.supported_fields?.length ? <p className="text-xs text-muted-foreground">已识别字段：{preview.supported_fields.join('、')}</p> : null}

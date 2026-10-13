@@ -49,7 +49,12 @@ export async function invalidateContentAnalytics(client: ReturnType<typeof useQu
   await client.invalidateQueries({ predicate: ({ queryKey }) => queryKey[1] === projectId && /^(content-analytics|wechat-import|seednote-import)/.test(String(queryKey[0])) })
 }
 
-export default function ContentImportDialog({ project, platform, onClose, onImported }: { project: Project; platform: AnalyticsPlatform; onClose: () => void; onImported?: (result: { count: number; date: string }) => void }) {
+export interface InitialContentImportUpload {
+  file: File
+  uploadId: string
+}
+
+export default function ContentImportDialog({ project, platform, onClose, onImported, initialUpload }: { project: Project; platform: AnalyticsPlatform; onClose: () => void; onImported?: (result: { count: number; date: string }) => void; initialUpload?: InitialContentImportUpload }) {
   const client = useQueryClient()
   const [file, setFile] = useState<File>()
   const [uploadId, setUploadId] = useState('')
@@ -64,8 +69,8 @@ export default function ContentImportDialog({ project, platform, onClose, onImpo
   const [page, setPage] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const previewMutation = useMutation({
-    mutationFn: async (nextFile: File) => {
-      const upload = await uploadToOSS({ purpose: platform === 'wechat' ? 'wechat_analytics_import' : 'seednote_analytics_import', file: nextFile })
+    mutationFn: async ({ nextFile, uploadId: existingUploadId }: { nextFile: File; uploadId?: string }) => {
+      const upload = existingUploadId ? { uploadSessionId: existingUploadId } : await uploadToOSS({ purpose: platform === 'wechat' ? 'wechat_analytics_import' : 'seednote_analytics_import', file: nextFile })
       const result = await contentAnalyticsApi.preview(project, upload.uploadSessionId, platform)
       return { result, id: upload.uploadSessionId }
     },
@@ -77,6 +82,20 @@ export default function ContentImportDialog({ project, platform, onClose, onImpo
       setSelected(matches.map((row) => row.source_row))
     },
   })
+  useEffect(() => {
+    if (!initialUpload) return
+    setError('')
+    setPreview(undefined)
+    setTargets({})
+    setLabels({})
+    setSelected([])
+    setPage(0)
+    setFile(initialUpload.file)
+    setUploadId(initialUpload.uploadId)
+    previewMutation.mutate({ nextFile: initialUpload.file, uploadId: initialUpload.uploadId })
+    // The handoff upload is created by the account importer and must be previewed once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialUpload])
   const importMutation = useMutation({
     mutationFn: () => contentAnalyticsApi.import(project, { metric_basis: 'cumulative', idempotency_key: idempotencyKey, upload_id: uploadId, selections: selected.map((source_row) => ({ source_row, target: targets[source_row] })), data_as_of_at: new Date(`${asOf}:00+08:00`).toISOString(), timezone: 'Asia/Shanghai', client_file_modified_at: file ? new Date(file.lastModified).toISOString() : undefined }, platform),
     onSuccess: async (result) => { await invalidateContentAnalytics(client, project.id); onImported?.(result); onClose() },
@@ -88,7 +107,7 @@ export default function ContentImportDialog({ project, platform, onClose, onImpo
     const validExtension = platform === 'wechat' ? /\.xlsx?$/i : /\.xlsx$/i
     if (!validExtension.test(nextFile.name)) { setFile(undefined); setError(platform === 'wechat' ? '请选择 .xls 或 .xlsx 文件' : '请选择 .xlsx 文件'); return }
     if (nextFile.size > 20 * 1024 * 1024) { setFile(undefined); setError('文件不能超过 20 MB'); return }
-    setFile(nextFile); previewMutation.mutate(nextFile)
+    setFile(nextFile); previewMutation.mutate({ nextFile })
   }
   const rows = preview?.rows ?? []
   const readyRows = rows.filter((row) => targets[row.source_row] && !row.parse_error && row.match_status !== 'invalid')
@@ -98,11 +117,11 @@ export default function ContentImportDialog({ project, platform, onClose, onImpo
   const validTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(asOf) && Number.isFinite(Date.parse(`${asOf}:00+08:00`))
   const filePicker = <input ref={fileInputRef} id="content-import-file" aria-label="选择导入文件" className="sr-only" type="file" accept={platform === 'wechat' ? '.xls,.xlsx' : '.xlsx'} disabled={busy} onChange={(event) => { selectFile(event.target.files?.[0]); event.currentTarget.value = '' }} />
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose() }}><DialogContent className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 max-sm:top-0 max-sm:left-0 max-sm:h-dvh max-sm:max-h-dvh max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-none sm:max-w-5xl" closeButtonDisabled={busy}>
-    <DialogHeader className="shrink-0 border-b px-6 py-5"><DialogTitle>导入分析数据</DialogTitle><DialogDescription className="flex items-center gap-2"><ProjectIdentity project={project} compact /> · {platform === 'wechat' ? '公众号' : '种草笔记'} · {preview ? '检查并导入' : '选择文件'}</DialogDescription></DialogHeader>
+    <DialogHeader className="shrink-0 border-b px-6 py-5"><DialogTitle>{platform === 'wechat' ? '导入公众号内容累计数据' : '导入分析数据'}</DialogTitle><DialogDescription className="flex items-center gap-2"><ProjectIdentity project={project} compact /> · {platform === 'wechat' ? '每篇内容累计数据' : '种草笔记'} · {preview ? '检查并导入' : '选择文件'}</DialogDescription></DialogHeader>
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
       {!file ? <label htmlFor="content-import-file" className={`flex min-h-36 cursor-pointer items-center justify-center gap-4 rounded-xl border-2 border-dashed p-8 transition-colors hover:border-primary hover:bg-primary/[0.03] focus-within:ring-2 focus-within:ring-ring ${busy ? 'pointer-events-none opacity-60' : ''}`}><FileSpreadsheet className="size-8 shrink-0 text-primary" /><span className="min-w-0"><span className="block text-base font-medium">选择官方导出表格</span><span className="mt-1 block text-sm text-muted-foreground">{platform === 'wechat' ? '.xls / .xlsx' : '.xlsx'} · 最大 20 MB</span></span>{filePicker}</label> : <label htmlFor="content-import-file" className={`flex cursor-pointer items-center gap-3 rounded-lg border bg-muted/20 px-4 py-3 transition-colors hover:border-primary focus-within:ring-2 focus-within:ring-ring ${busy ? 'pointer-events-none opacity-60' : ''}`}><FileCheck2 className="size-5 shrink-0 text-primary" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{file.name}</span>{preview && !previewMutation.isPending ? <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><CheckCircle2 className="size-3.5 text-emerald-600" />文件已解析 · {preview.total_rows} 条</span> : <span className="mt-0.5 block text-xs text-muted-foreground">{previewMutation.isPending ? '正在解析…' : '等待解析'}</span>}</span>{filePicker}</label>}
       {previewMutation.isPending && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />正在解析并匹配当前账号内容…</p>}
-      {previewMutation.isError && <div role="alert" className="text-sm text-destructive">{previewMutation.error.message}<Button variant="ghost" disabled={!file || busy} onClick={() => file && previewMutation.mutate(file)}>重新解析</Button></div>}
+      {previewMutation.isError && <div role="alert" className="text-sm text-destructive">{previewMutation.error.message}<Button variant="ghost" disabled={!file || busy} onClick={() => file && previewMutation.mutate({ nextFile: file })}>重新解析</Button></div>}
       {preview && <>
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm"><p>共 <strong>{preview.total_rows}</strong> 条 · 已选 <strong className="text-primary">{selected.length}</strong> 条 · 跳过 {preview.total_rows - selected.length} 条</p><span className="text-xs text-muted-foreground">只导入已匹配且通过校验的内容</span></div>
         <p className="text-xs leading-relaxed text-muted-foreground">未匹配的内容可手动选择当前账号内任意状态的内容。未选择的行直接跳过，关联不会改变发布状态。</p>

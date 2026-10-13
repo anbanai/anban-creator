@@ -81,6 +81,14 @@ describe('统一导入确认', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认导入 1 条' }))
     await waitFor(() => expect(contentAnalyticsApi.import).toHaveBeenCalledWith(wechat, expect.objectContaining({ metric_basis: 'cumulative' }), 'wechat'))
   })
+
+  it('reuses an upload handed off from the account importer', async () => {
+    const file = new File(['fixture'], 'total.xls')
+    render(<ContentImportDialog project={{ ...project, platform: 'wechat' } as Project} platform="wechat" initialUpload={{ file, uploadId: 'upload-1' }} onClose={vi.fn()} />)
+    await screen.findByText('已识别内容', { selector: 'p' })
+    expect(uploadToOSS).not.toHaveBeenCalled()
+    expect(contentAnalyticsApi.preview).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1', platform: 'wechat' }), 'upload-1', 'wechat')
+  })
   it('imports latest cumulative Seednote values with the default date', async () => {
     render(<ContentImportDialog project={project} platform="seednote" onClose={vi.fn()} />)
     await upload()

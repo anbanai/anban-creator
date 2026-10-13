@@ -36,6 +36,35 @@ describe('server analytics queries', () => {
     expect(screen.getByRole('button', { name: '导入分析数据' })).not.toHaveTextContent('导入分析数据')
   })
 
+  it('separates cumulative content imports from account-day imports for WeChat', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat')
+    render(<ContentAnalyticsPage />)
+
+    expect((await screen.findAllByRole('button', { name: '导入公众号内容累计数据' })).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByRole('button', { name: '导入公众号账号统计' })).toBeInTheDocument()
+  })
+
+  it('shows cumulative content totals alongside account daily analytics', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    vi.mocked(contentAnalyticsApi.overview).mockResolvedValue({
+      ...summary,
+      metric_basis: 'cumulative',
+      totals: { read_users: 88, share_users: 12 },
+      series: [{ date: '2026-10-10', read_users: 88, share_users: 12 }],
+      coverage: { contents: 30 },
+    })
+    window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat')
+    render(<ContentAnalyticsPage />)
+
+    const panel = await screen.findByRole('region', { name: '内容累计总览' })
+    await waitFor(() => expect(contentAnalyticsApi.overview).toHaveBeenCalled())
+    expect(panel).toHaveTextContent('统计口径：累计')
+    expect(panel).toHaveTextContent('阅读人数')
+    expect(panel).toHaveTextContent('88')
+    expect(panel).toHaveTextContent('30 篇内容')
+  })
+
   it('switches analytics data with the project Agent icons', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ id: 'shared', platform: '', name: '通用创作项目', agent_ids: ['seednote', 'wechat-article'] } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=shared&platform=seednote')
