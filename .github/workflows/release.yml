@@ -39,7 +39,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version: "24.21.0"
           cache: pnpm
           cache-dependency-path: harness/pnpm-lock.yaml
 
@@ -248,7 +248,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version: "24.21.0"
           cache: pnpm
           cache-dependency-path: harness/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
@@ -354,7 +354,7 @@ jobs:
           npm run build
           cd ..
           tar -czf bin/anban-runtime-dsh-${{ steps.version.outputs.VERSION }}.tar.gz \
-            -C runtime-dsh package.json package-lock.json dist
+            -C runtime-dsh package.json package-lock.json vendor dist
 
           chmod +x bin/anban-creator-server-linux-* bin/anban-creator-server-darwin-* 2>/dev/null || true
           echo "${{ steps.version.outputs.RELEASE_TAG }}" > bin/version.txt
@@ -371,7 +371,7 @@ jobs:
       - name: Restore release Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24"
+          node-version: "24.21.0"
           registry-url: https://registry.npmjs.org
 
       - name: Download exact DSH release artifact
