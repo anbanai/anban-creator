@@ -465,18 +465,20 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	path := filepath.Join(root, "deploy/docker/Dockerfile.server")
 	body := readTextFile(t, path)
 	for _, want := range []string{
-		"FROM alpine:latest",
+		"FROM node:24.21.0-alpine3.24",
 		"apk add --no-cache ca-certificates ffmpeg tzdata",
 		"WORKDIR /build/server",
+		"FROM node:24.21.0-alpine3.24 AS dsh-builder",
 		"WORKDIR /build/runtime-dsh",
-		"apk add --no-cache nodejs npm python3 make g++",
+		"RUN apk add --no-cache python3 make g++",
 		"COPY server/go.mod server/go.sum ./",
 		"COPY server ./",
 		"COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./",
 		"COPY runtime-dsh/ ./",
-		"COPY --from=builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor",
-		"COPY --from=builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules",
-		"COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist",
+		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor",
+		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules",
+		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist",
+		`RUN test "$(node --version)" = "v24.21.0"`,
 		`RUN node --input-type=module -e "import('/app/runtime-dsh/dist/dsh-bridge.js')"`,
 		"go build -ldflags=\"-s -w\" -o /anban-creator-server .",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
@@ -772,7 +774,7 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
-			from: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
+			from: []string{"FROM golang:alpine AS builder", "FROM node:24.21.0-alpine3.24 AS dsh-builder", "FROM node:24.21.0-alpine3.24"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.studio"),

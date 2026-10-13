@@ -10,7 +10,9 @@ COPY server ./
 RUN set -eux; \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
 
-RUN apk add --no-cache nodejs npm python3 make g++
+FROM node:24.21.0-alpine3.24 AS dsh-builder
+
+RUN apk add --no-cache python3 make g++
 WORKDIR /build/runtime-dsh
 COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./
 COPY runtime-dsh/vendor/ ./vendor/
@@ -18,12 +20,11 @@ RUN npm ci
 COPY runtime-dsh/ ./
 RUN npm run build && npm prune --omit=dev
 
-FROM alpine:latest
+FROM node:24.21.0-alpine3.24
 
 
 RUN set -eux; \
     apk add --no-cache ca-certificates ffmpeg tzdata; \
-    apk add --no-cache nodejs; \
     addgroup -S -g 1000 anban; \
     adduser -S -D -u 1000 -G anban -h /home/anban anban; \
     mkdir -p \
@@ -38,9 +39,10 @@ COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/econo
 COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml
 COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml
 COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml
-COPY --from=builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor
-COPY --from=builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
-COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
+RUN test "$(node --version)" = "v24.21.0"
+COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor
+COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
+COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
 RUN node --input-type=module -e "import('/app/runtime-dsh/dist/dsh-bridge.js')"
 COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml
 COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
