@@ -36,11 +36,12 @@ type deploymentDoc struct {
 			Spec struct {
 				ServiceAccountName string `yaml:"serviceAccountName"`
 				InitContainers     []struct {
-					Name         string   `yaml:"name"`
-					Image        string   `yaml:"image"`
-					Command      []string `yaml:"command"`
-					Args         []string `yaml:"args"`
-					VolumeMounts []struct {
+					Name            string   `yaml:"name"`
+					Image           string   `yaml:"image"`
+					ImagePullPolicy string   `yaml:"imagePullPolicy"`
+					Command         []string `yaml:"command"`
+					Args            []string `yaml:"args"`
+					VolumeMounts    []struct {
 						Name      string `yaml:"name"`
 						MountPath string `yaml:"mountPath"`
 					} `yaml:"volumeMounts"`
@@ -56,8 +57,10 @@ type deploymentDoc struct {
 					} `yaml:"securityContext"`
 				} `yaml:"initContainers"`
 				Containers []struct {
-					Name string `yaml:"name"`
-					Env  []struct {
+					Name            string `yaml:"name"`
+					Image           string `yaml:"image"`
+					ImagePullPolicy string `yaml:"imagePullPolicy"`
+					Env             []struct {
 						Name      string `yaml:"name"`
 						Value     string `yaml:"value"`
 						ValueFrom *struct {
@@ -200,6 +203,9 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if memoryInit.Name != "project-memory-init" || memoryInit.Image != "${image_repo}" {
 		t.Fatalf("project memory initializer identity = %#v", memoryInit)
 	}
+	if memoryInit.ImagePullPolicy != "Always" {
+		t.Fatalf("project memory initializer imagePullPolicy = %q, want Always", memoryInit.ImagePullPolicy)
+	}
 	initScript := strings.Join(append(memoryInit.Command, memoryInit.Args...), " ")
 	for _, want := range []string{"mkdir -p /memory/projects", "chown 1000:1000 /memory /memory/projects", "chmod 0750 /memory /memory/projects"} {
 		if !strings.Contains(initScript, want) {
@@ -252,6 +258,9 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		}
 	}
 	container := deployment.Spec.Template.Spec.Containers[0]
+	if container.Image != "${image_repo}" || container.ImagePullPolicy != "Always" {
+		t.Fatalf("server image/pull policy = %q/%q, want ${image_repo}/Always", container.Image, container.ImagePullPolicy)
+	}
 	configMounts := 0
 	for _, mount := range container.VolumeMounts {
 		if mount.MountPath == "/app/conf" {

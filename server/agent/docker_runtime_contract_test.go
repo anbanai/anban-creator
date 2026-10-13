@@ -475,6 +475,14 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"COPY server ./",
 		"COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./",
 		"COPY runtime-dsh/ ./",
+		"RUN npm ci --install-links=true",
+		"npm prune --omit=dev --install-links=true",
+		"&& test -d node_modules/@deepseek-ai/dsh-sdk-client",
+		"&& test ! -L node_modules/@deepseek-ai/dsh-sdk-client",
+		"&& test -d node_modules/@deepseek-ai/dsh-sdk-protocol",
+		"&& test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol",
+		"&& test -d node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
+		"&& test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
 		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor",
 		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules",
 		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist",
@@ -495,6 +503,11 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("%s missing minimal server runtime contract %q", path, want)
 		}
+	}
+	pruneIndex := strings.Index(body, "npm prune --omit=dev --install-links=true")
+	sdkAssertionIndex := strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-client")
+	if pruneIndex < 0 || sdkAssertionIndex < pruneIndex {
+		t.Fatal("server Dockerfile must verify the installed DSH SDK packages after production dependencies are pruned")
 	}
 	for _, forbidden := range []string{
 		"addgroup -S -g 1000 anban",

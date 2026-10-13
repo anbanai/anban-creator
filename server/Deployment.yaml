@@ -40,6 +40,7 @@ spec:
       initContainers:
         - name: project-memory-init
           image: ${image_repo}
+          imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -174,6 +175,7 @@ spec:
                 optional: true
           name: ${micro_service_name}-${version_switch}
           image: ${image_repo}
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           resources:

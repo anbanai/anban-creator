@@ -16,9 +16,16 @@ RUN apk add --no-cache python3 make g++
 WORKDIR /build/runtime-dsh
 COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./
 COPY runtime-dsh/vendor/ ./vendor/
-RUN npm ci
+RUN npm ci --install-links=true
 COPY runtime-dsh/ ./
-RUN npm run build && npm prune --omit=dev
+RUN npm run build \
+    && npm prune --omit=dev --install-links=true \
+    && test -d node_modules/@deepseek-ai/dsh-sdk-client \
+    && test ! -L node_modules/@deepseek-ai/dsh-sdk-client \
+    && test -d node_modules/@deepseek-ai/dsh-sdk-protocol \
+    && test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol \
+    && test -d node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server \
+    && test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server
 
 FROM node:24.21.0-alpine3.24
 

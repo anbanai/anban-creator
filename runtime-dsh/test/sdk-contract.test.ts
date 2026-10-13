@@ -29,7 +29,8 @@ describe("vendored DSH interactive SDK contract", () => {
       versions.add(metadata.version);
       expect(packageJSON.dependencies[name]).toBe(`file:vendor/${name}`);
       const lockEntry = lockJSON.packages[`node_modules/${name}`];
-      expect(lockEntry).toMatchObject({ resolved: `vendor/${name}`, link: true });
+      expect(lockEntry).toMatchObject({ resolved: `file:vendor/${name}`, version: metadata.version });
+      expect(lockEntry?.link).not.toBe(true);
       expect(existsSync(join(packageDir, "lib", "index.js"))).toBe(true);
     }
     expect(versions.size).toBe(1);
