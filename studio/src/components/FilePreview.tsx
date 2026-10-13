@@ -550,21 +550,19 @@ export function FilePreviewGallery({
                   </span>
                 </div>
                 {/* Prev arrow */}
-                <button
-                  onClick={goPrev}
-                  aria-label="上一张"
-                  className="absolute left-2 top-1/2 z-50 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger render={<button type="button" onClick={goPrev} aria-label="上一张" className="absolute left-2 top-1/2 z-50 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:bg-black/70 hover:text-white" />}>
+                    <ChevronLeft className="h-5 w-5" />
+                  </TooltipTrigger>
+                  <TooltipContent>上一张</TooltipContent>
+                </Tooltip>
                 {/* Next arrow */}
-                <button
-                  onClick={goNext}
-                  aria-label="下一张"
-                  className="absolute right-2 top-1/2 z-50 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:bg-black/70 hover:text-white"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger render={<button type="button" onClick={goNext} aria-label="下一张" className="absolute right-2 top-1/2 z-50 flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:bg-black/70 hover:text-white" />}>
+                    <ChevronRight className="h-5 w-5" />
+                  </TooltipTrigger>
+                  <TooltipContent>下一张</TooltipContent>
+                </Tooltip>
               </>
             )}
           </FilePreviewModalContent>

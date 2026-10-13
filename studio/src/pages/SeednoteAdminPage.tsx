@@ -18,6 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
@@ -68,14 +69,12 @@ export default function SeednoteAdminPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="种草笔记账号" description="管理种草笔记数据研究所使用的后台会话。">
-        <Button
-          variant="outline"
-          onClick={() => void statusQuery.refetch()}
-          disabled={statusQuery.isFetching}
-        >
-          {statusQuery.isFetching ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-          刷新
-        </Button>
+        <Tooltip>
+          <TooltipTrigger render={<Button variant="ghost" size="icon-md" aria-label="刷新种草笔记登录状态" onClick={() => void statusQuery.refetch()} disabled={statusQuery.isFetching} />}>
+            {statusQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          </TooltipTrigger>
+          <TooltipContent>刷新登录状态</TooltipContent>
+        </Tooltip>
       </PageHeader>
 
       {statusQuery.isError && (
