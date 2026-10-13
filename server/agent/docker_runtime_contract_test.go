@@ -478,9 +478,12 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts",
 		"npm prune --omit=dev --install-links=true --strict-allow-scripts",
 		"rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
-		"cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/",
-		"cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/",
-		"cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/",
+		"mkdir -p node_modules/@deepseek-ai/dsh-sdk-client",
+		"mkdir -p node_modules/@deepseek-ai/dsh-sdk-protocol",
+		"mkdir -p node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
+		"cp -a vendor/@deepseek-ai/dsh-sdk-client/. node_modules/@deepseek-ai/dsh-sdk-client/",
+		"cp -a vendor/@deepseek-ai/dsh-sdk-protocol/. node_modules/@deepseek-ai/dsh-sdk-protocol/",
+		"cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server/. node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/",
 		"test -f node_modules/node-pty/build/Release/pty.node",
 		"test -x node_modules/node-pty/build/Release/spawn-helper",
 		"&& test -d node_modules/@deepseek-ai/dsh-sdk-client",
@@ -515,9 +518,9 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	pruneIndex := strings.Index(body, "npm prune --omit=dev --install-links=true --strict-allow-scripts")
 	cleanupIndex := strings.Index(body, "rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server")
 	materializeIndexes := []int{
-		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/"),
-		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/"),
-		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/"),
+		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-client/. node_modules/@deepseek-ai/dsh-sdk-client/"),
+		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-protocol/. node_modules/@deepseek-ai/dsh-sdk-protocol/"),
+		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server/. node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/"),
 	}
 	assertionIndexes := []int{
 		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-client"),
