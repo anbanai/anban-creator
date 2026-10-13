@@ -486,15 +486,22 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml",
 		"COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml",
 		"COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml",
-		"addgroup -S -g 1000 anban",
-		"adduser -S -D -u 1000 -G anban -h /home/anban anban",
+		"FROM node:24.21.0-alpine3.24",
+		"USER 1000:1000",
 		"/app/data/project-memory/projects",
 		"chown -R 1000:1000 /app/data",
-		"USER 1000:1000",
 		`CMD ["/app/anban-creator-server", "-config", "/app/conf/config.yaml"]`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("%s missing minimal server runtime contract %q", path, want)
+		}
+	}
+	for _, forbidden := range []string{
+		"addgroup -S -g 1000 anban",
+		"adduser -S -D -u 1000 -G anban -h /home/anban anban",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("server Dockerfile must reuse the Node image's pre-created UID/GID 1000 account; found %q", forbidden)
 		}
 	}
 	if vendorIndex := strings.Index(body, "COPY runtime-dsh/vendor/ ./vendor/"); vendorIndex < 0 {

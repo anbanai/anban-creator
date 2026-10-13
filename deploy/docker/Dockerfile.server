@@ -25,8 +25,6 @@ FROM node:24.21.0-alpine3.24
 
 RUN set -eux; \
     apk add --no-cache ca-certificates ffmpeg tzdata; \
-    addgroup -S -g 1000 anban; \
-    adduser -S -D -u 1000 -G anban -h /home/anban anban; \
     mkdir -p \
       /app/data/files \
       /app/data/workspace \
