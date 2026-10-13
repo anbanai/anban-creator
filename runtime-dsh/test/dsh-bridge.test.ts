@@ -5,14 +5,14 @@ import {
   redactInteractiveSecrets,
   resolveInteractivePatchPath,
   assertInteractiveRuntimeCapabilities,
-  InteractiveBridge,
+  DshBridge,
   parseInteractiveRouteArgs,
   writeDshRouteSettings,
-} from "../src/interactive-bridge.js";
+} from "../src/dsh-bridge.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-describe("interactive bridge protocol", () => {
+describe("DSH bridge protocol", () => {
   test("forwards the runtime ready notification as the single ready event", () => {
     expect(mapHarnessNotification({
       method: "session.ready",
@@ -42,7 +42,7 @@ describe("interactive bridge protocol", () => {
       params: { sessionId: "s", callId: "c", answer: { answers: [] } },
     });
     expect(() => parseInteractiveCommand('{"method":"unknown","params":{}}')).toThrow(
-      "unsupported interactive bridge method",
+      "unsupported DSH bridge method",
     );
   });
 
@@ -115,7 +115,7 @@ describe("interactive bridge protocol", () => {
       subscribeSessionTree: () => ({ next: async () => { throw new Error("closed"); }, close: () => undefined }),
       close: async () => undefined,
     };
-    const bridge = new InteractiveBridge(() => undefined, () => client, "root");
+    const bridge = new DshBridge(() => undefined, () => client, "root");
     await expect(bridge.command({ method: "session/prompt", params: { sessionId: "other" } }))
       .rejects.toThrow("must target the configured interactive session");
     await expect(bridge.command({ method: "session/start", params: { sessionId: "root", presetId: "profile-analysis" } }))
@@ -139,7 +139,7 @@ describe("interactive bridge protocol", () => {
       subscribeSessionTree: () => ({ next: async () => { throw new Error("closed"); }, close: () => undefined }),
       close: async () => undefined,
     };
-    const bridge = new InteractiveBridge(() => undefined, () => client, "root");
+    const bridge = new DshBridge(() => undefined, () => client, "root");
     const answer = bridge.command({ method: "session/answer", params: { sessionId: "root" } });
     const prompt = bridge.command({ method: "session/prompt", params: { sessionId: "root" } });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -161,7 +161,7 @@ describe("interactive bridge protocol", () => {
   });
 
   test("resolves an explicit DSH patch independently of the process cwd", () => {
-    const dir = `/tmp/anban-interactive-bridge-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const dir = `/tmp/anban-dsh-bridge-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     mkdirSync(dir, { recursive: true });
     const patch = join(dir, "project-creator.patch.yml");
     writeFileSync(patch, "- insert: []\n");
@@ -170,7 +170,7 @@ describe("interactive bridge protocol", () => {
   });
 
   test("requires a configured DSH patch", () => {
-    expect(() => resolveInteractivePatchPath(undefined, "/tmp")).toThrow("ANBAN_INTERACTIVE_DSH_PATCH is required");
+    expect(() => resolveInteractivePatchPath(undefined, "/tmp")).toThrow("ANBAN_DSH_BRIDGE_PATCH is required");
   });
 
   test("fails closed when the runtime does not advertise interactive methods", () => {
@@ -192,14 +192,14 @@ describe("interactive bridge protocol", () => {
     const home = `/tmp/anban-dsh-route-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const path = writeDshRouteSettings(home, route);
     const text = readFileSync(path, "utf8");
-    expect(text).toContain('apiKeyEnv: "ANBAN_INTERACTIVE_PROVIDER_API_KEY"');
+    expect(text).toContain('apiKeyEnv: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY"');
     expect(text).toContain('baseURL: "https://api.deepseek.com/anthropic"');
     expect(text).toContain('id: "deepseek-v4-flash"');
     expect(() => parseInteractiveRouteArgs([
       "--provider", "deepseek-official", "--model", "deepseek-v4-flash",
       "--route-api", "deepseek-messages", "--base-url", "https://api.deepseek.com/anthropic",
       "--api-key-env", "DEEPSEEK_API_KEY",
-    ])).toThrow("unsupported interactive bridge argument");
+    ])).toThrow("unsupported DSH bridge argument");
   });
 
   test("writes anthropic routes through the official llm-pi-ai fields", () => {
@@ -213,7 +213,7 @@ describe("interactive bridge protocol", () => {
     const text = readFileSync(writeDshRouteSettings(home, route), "utf8");
     expect(text).toContain("llm-pi-ai:");
     expect(text).toContain("    anthropic:");
-    expect(text).toContain('apiKeyEnv: "ANBAN_INTERACTIVE_PROVIDER_API_KEY"');
+    expect(text).toContain('apiKeyEnv: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY"');
     expect(text).toContain('api: "anthropic-messages"');
     expect(text).toContain('baseURL: "https://api.deepseek.com/anthropic"');
     expect(text).toContain('id: "deepseek-flash"');
@@ -232,7 +232,7 @@ describe("interactive bridge protocol", () => {
       subscribeSessionTree: () => ({ next: async () => { throw new Error("closed"); }, close: () => undefined }),
       close: async () => undefined,
     };
-    const bridge = new InteractiveBridge(() => undefined, () => client, "root", {
+    const bridge = new DshBridge(() => undefined, () => client, "root", {
       provider: "anthropic",
       model: "deepseek-flash",
       api: "anthropic-messages",

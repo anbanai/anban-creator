@@ -80,11 +80,11 @@ spec:
             # The interactive Bridge uses the TLS Service URL so Node can
             # validate the Server with the mounted internal CA. ClientIP
             # affinity keeps a session's MCP requests on one Server replica.
-            - name: ANBAN_INTERACTIVE_BRIDGE_DIR
+            - name: ANBAN_DSH_BRIDGE_DIR
               value: /app/runtime-dsh
-            - name: ANBAN_INTERACTIVE_DSH_PATCH
+            - name: ANBAN_DSH_BRIDGE_PATCH
               value: /app/harness/dsh/project-creator.patch.yml
-            - name: ANBAN_INTERACTIVE_MCP_URL
+            - name: ANBAN_DSH_BRIDGE_MCP_URL
               value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443/mcp
             - name: ANBAN_AGENT_EXECUTOR
               value: kubernetes

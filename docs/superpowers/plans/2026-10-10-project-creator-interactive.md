@@ -84,15 +84,15 @@
 **Files:**
 - Create: `server/mcp/interactive_tools.go`
 - Modify: `server/mcp/mcp.go`
-- Create: `runtime-dsh/src/interactive-bridge.ts`
-- Test: `server/mcp/interactive_tools_test.go`, `runtime-dsh/test/interactive-bridge.test.ts`
+- Create: `runtime-dsh/src/dsh-bridge.ts`
+- Test: `server/mcp/interactive_tools_test.go`, `runtime-dsh/test/dsh-bridge.test.ts`
 
 **Interfaces:** authenticated interactive runtime calls `stage_project_creator_draft` without browser-provided `session_id` or token; Bridge supports `session/start`, `session/prompt`, `session/answer`, and `shutdown`.
 
 - [x] Resolve runtime bearer credentials only in Server MCP authentication and inject Session identity into context.
 - [x] Deny execution JWTs and unauthenticated calls to the interactive staging capability.
 - [x] Convert DSH events to stable Anban events and close the Runtime with the Session.
-- [x] Run `bun test test/interactive-bridge.test.ts`, `bun run typecheck`, and targeted Go tests in `runtime-dsh`.
+- [x] Run `bun test test/dsh-bridge.test.ts`, `bun run typecheck`, and targeted Go tests in `runtime-dsh`.
 
 ### Task 5: Studio chat workspace and responsive UX
 

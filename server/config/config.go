@@ -1050,15 +1050,22 @@ func NewConfig(path string) (*Config, error) {
 // dsh.routes; silently accepting the old variables makes deployment mistakes
 // difficult to diagnose.
 func rejectDeprecatedDshEnvironment() error {
-	for _, name := range []string{
-		"ANBAN_DSH_API_KEY",
-		"ANBAN_DSH_BASE_URL",
-		"ANBAN_DSH_MODEL",
-		"ANBAN_DSH_PROVIDER",
-		"ANBAN_DSH_PROFILE",
-	} {
-		if _, ok := os.LookupEnv(name); ok {
-			return fmt.Errorf("deprecated environment variable %s is no longer supported; configure dsh.routes and its api_key instead", name)
+	deprecated := []struct {
+		name string
+		hint string
+	}{
+		{name: "ANBAN_DSH_API_KEY", hint: "configure dsh.routes and its api_key instead"},
+		{name: "ANBAN_DSH_BASE_URL", hint: "configure dsh.routes and its base_url instead"},
+		{name: "ANBAN_DSH_MODEL", hint: "configure dsh.routes and its model instead"},
+		{name: "ANBAN_DSH_PROVIDER", hint: "configure dsh.routes and its provider instead"},
+		{name: "ANBAN_DSH_PROFILE", hint: "configure dsh.route instead"},
+		{name: "ANBAN_INTERACTIVE_BRIDGE_DIR", hint: "use ANBAN_DSH_BRIDGE_DIR in the dsh.bridge_dir placeholder instead"},
+		{name: "ANBAN_INTERACTIVE_DSH_PATCH", hint: "use ANBAN_DSH_BRIDGE_PATCH in the dsh.dsh_patch placeholder instead"},
+		{name: "ANBAN_INTERACTIVE_MCP_URL", hint: "use ANBAN_DSH_BRIDGE_MCP_URL in the dsh.mcp_url placeholder instead"},
+	}
+	for _, item := range deprecated {
+		if _, ok := os.LookupEnv(item.name); ok {
+			return fmt.Errorf("deprecated environment variable %s is no longer supported; %s", item.name, item.hint)
 		}
 	}
 	return nil

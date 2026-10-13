@@ -16,7 +16,7 @@ func TestExecRuntimeFactoryPassesInteractiveCredentialsToBridge(t *testing.T) {
 		t.Skip("bridge process test uses a POSIX shell")
 	}
 	output := filepath.Join(t.TempDir(), "env.txt")
-	script := "printf '%s\\n%s\\n%s\\n%s\\n' \"$ANBAN_INTERACTIVE_SESSION_ID\" \"$ANBAN_INTERACTIVE_RUNTIME_TOKEN\" \"$ANBAN_INTERACTIVE_DSH_PATCH\" \"$ANBAN_INTERACTIVE_DSH_HOME\" > \"$1\"; read line"
+	script := "printf '%s\\n%s\\n%s\\n%s\\n' \"$ANBAN_DSH_BRIDGE_SESSION_ID\" \"$ANBAN_DSH_BRIDGE_RUNTIME_TOKEN\" \"$ANBAN_DSH_BRIDGE_PATCH\" \"$ANBAN_DSH_BRIDGE_HOME\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
 		Command:  "sh",
 		Args:     []string{"-c", script, "bridge", output},
@@ -60,8 +60,9 @@ func TestExecRuntimeFactoryPassesDirectProviderCredentialToBridge(t *testing.T) 
 	t.Setenv("ANBAN_JWT_SECRET_KEY", "server-jwt-secret")
 	t.Setenv("DEEPSEEK_API_KEY", "server-env-secret-must-not-leak")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "unselected-provider-secret")
+	t.Setenv("ANBAN_INTERACTIVE_PROVIDER_API_KEY", "legacy-provider-secret-must-not-leak")
 	output := filepath.Join(t.TempDir(), "env.txt")
-	script := "printf '%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n' \"${ANBAN_DATABASE_DSN-}\" \"${ANBAN_JWT_SECRET_KEY-}\" \"${DEEPSEEK_API_KEY-}\" \"${ANTHROPIC_AUTH_TOKEN-}\" \"${ANBAN_INTERACTIVE_PROVIDER_API_KEY-}\" \"$HOME\" > \"$1\"; read line"
+	script := "printf '%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n' \"${ANBAN_DATABASE_DSN-}\" \"${ANBAN_JWT_SECRET_KEY-}\" \"${DEEPSEEK_API_KEY-}\" \"${ANTHROPIC_AUTH_TOKEN-}\" \"${ANBAN_INTERACTIVE_PROVIDER_API_KEY-}\" \"${ANBAN_DSH_BRIDGE_PROVIDER_API_KEY-}\" \"$HOME\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
 		Command: "sh",
 		Args:    []string{"-c", script, "bridge", output},
@@ -83,7 +84,7 @@ func TestExecRuntimeFactoryPassesDirectProviderCredentialToBridge(t *testing.T) 
 		time.Sleep(10 * time.Millisecond)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
-	if len(lines) != 6 || lines[0] != "" || lines[1] != "" || lines[2] != "" || lines[3] != "" || lines[4] != "provider-secret" || lines[5] == "" {
+	if len(lines) != 7 || lines[0] != "" || lines[1] != "" || lines[2] != "" || lines[3] != "" || lines[4] != "" || lines[5] != "provider-secret" || lines[6] == "" {
 		t.Fatalf("bridge environment = %#v, want only internal direct provider credential and isolated home", lines)
 	}
 }
@@ -95,7 +96,7 @@ func TestExecRuntimeFactoryDoesNotMapServerCredentialNamesForDSH(t *testing.T) {
 	t.Setenv("ANBAN_DEEPSEEK_API_KEY", "server-provider-secret")
 	_ = os.Unsetenv("DEEPSEEK_API_KEY")
 	output := filepath.Join(t.TempDir(), "env.txt")
-	script := "printf '%s\\n%s\\n' \"${DEEPSEEK_API_KEY-}\" \"${ANBAN_INTERACTIVE_PROVIDER_API_KEY-}\" > \"$1\"; read line"
+	script := "printf '%s\\n%s\\n' \"${DEEPSEEK_API_KEY-}\" \"${ANBAN_DSH_BRIDGE_PROVIDER_API_KEY-}\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
 		Command: "sh",
 		Args:    []string{"-c", script, "bridge", output},
@@ -161,7 +162,7 @@ func TestExecRuntimeFactoryUsesAnIsolatedHomePerSession(t *testing.T) {
 		output := filepath.Join(t.TempDir(), "env.txt")
 		factory := ExecRuntimeFactory{
 			Command: "sh",
-			Args:    []string{"-c", "printf '%s\\n' \"$ANBAN_INTERACTIVE_DSH_HOME\" > \"$1\"; read line", "bridge", output},
+			Args:    []string{"-c", "printf '%s\\n' \"$ANBAN_DSH_BRIDGE_HOME\" > \"$1\"; read line", "bridge", output},
 		}
 		rt, err := factory.Start(context.Background(), sessionID, "project-creator", "runtime-secret", nil)
 		if err != nil {
@@ -281,7 +282,7 @@ func TestExecRuntimeCommandRedactsSecretsFromDiagnostics(t *testing.T) {
 	}
 	factory := ExecRuntimeFactory{
 		Command: "sh",
-		Args:    []string{"-c", `read line; printf '%s %s\n' "$ANBAN_INTERACTIVE_RUNTIME_TOKEN" "$ANBAN_INTERACTIVE_PROVIDER_API_KEY" >&2; exit 7`, "bridge"},
+		Args:    []string{"-c", `read line; printf '%s %s\n' "$ANBAN_DSH_BRIDGE_RUNTIME_TOKEN" "$ANBAN_DSH_BRIDGE_PROVIDER_API_KEY" >&2; exit 7`, "bridge"},
 		APIKey:  "direct-configured-secret",
 	}
 	rt, err := factory.Start(context.Background(), "session-1", "project-creator", "runtime-secret", nil)

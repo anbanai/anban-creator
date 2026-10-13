@@ -24,7 +24,7 @@
 **Files:**
 - Rename: `agent-ts/` -> `runtime-claude/`
 - Create: `runtime-dsh/package.json`, `runtime-dsh/package-lock.json`, `runtime-dsh/tsconfig.json`
-- Move: `runtime-claude/src/interactive-bridge.ts` and its test to `runtime-dsh/`
+- Move: the DSH Bridge source and its test from `runtime-claude/` to `runtime-dsh/`
 - Modify: both package manifests and lockfiles
 
 - [x] Move the one-shot runtime tree and isolate the DSH Bridge tree.

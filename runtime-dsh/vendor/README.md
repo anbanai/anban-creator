@@ -5,7 +5,7 @@ These three packages are built from DeepSeek Harness commit
 because the published `0.2.1-alpha.2` packages do not contain the interactive
 `session/start` and `session/answer` protocol. The upstream commit is the
 source of truth; this copy should be removed once an equivalent released SDK
-is available and the interactive bridge has been verified against it.
+is available and the DSH bridge has been verified against it.
 
 Only the package runtime JavaScript and declaration files are tracked. Build
 metadata and source maps are intentionally omitted. The package versions stay

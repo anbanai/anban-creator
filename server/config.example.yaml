@@ -97,10 +97,10 @@ dsh:
   enabled: false
   admin_only: false
   bridge_command: "node"
-  bridge_args: ["dist/interactive-bridge.js"]
-  bridge_dir: "${ANBAN_INTERACTIVE_BRIDGE_DIR:-./runtime-dsh}"
-  dsh_patch: "${ANBAN_INTERACTIVE_DSH_PATCH:-./harness/dsh/project-creator.patch.yml}"
-  mcp_url: "${ANBAN_INTERACTIVE_MCP_URL:-https://creator.anbanai.com/mcp}"
+  bridge_args: ["dist/dsh-bridge.js"]
+  bridge_dir: "${ANBAN_DSH_BRIDGE_DIR:-./runtime-dsh}"
+  dsh_patch: "${ANBAN_DSH_BRIDGE_PATCH:-./harness/dsh/project-creator.patch.yml}"
+  mcp_url: "${ANBAN_DSH_BRIDGE_MCP_URL:-https://creator.anbanai.com/mcp}"
   route: "effective"
   routes:
     # DeepSeek's official adapter. This route uses the DSH-native

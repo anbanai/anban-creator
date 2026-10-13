@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 
 type JsonRecord = Record<string, unknown>;
-const DSH_PROVIDER_API_KEY_ENV = "ANBAN_INTERACTIVE_PROVIDER_API_KEY";
+const DSH_BRIDGE_PROVIDER_API_KEY_ENV = "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY";
 const PROVIDER_REGISTRATION_RETRIES = 20;
 const PROVIDER_REGISTRATION_RETRY_MS = 50;
 
@@ -51,8 +51,8 @@ export function parseInteractiveRouteArgs(argv = process.argv.slice(2)): Interac
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
-    if (!key.startsWith("--")) throw new Error(`unsupported interactive bridge argument: ${key}`);
-    if (!supported.has(key)) throw new Error(`unsupported interactive bridge argument: ${key}`);
+    if (!key.startsWith("--")) throw new Error(`unsupported DSH bridge argument: ${key}`);
+    if (!supported.has(key)) throw new Error(`unsupported DSH bridge argument: ${key}`);
     const value = argv[index + 1];
     if (value === undefined || value.startsWith("--") || value.trim() === "") throw new Error(`${key} requires a value`);
     values.set(key, value.trim());
@@ -84,8 +84,8 @@ export function writeDshRouteSettings(dshHome: string, route: InteractiveRouteCo
   mkdirSync(dshHome, { recursive: true, mode: 0o700 });
   const model = `        - id: ${yamlQuote(route.model)}\n          contextWindow: 262144\n          maxTokens: 32768`;
   const body = route.provider === "deepseek-official"
-    ? ["llm-deepseek:", `  apiKeyEnv: ${yamlQuote(DSH_PROVIDER_API_KEY_ENV)}`, `  baseURL: ${yamlQuote(route.baseURL)}`, "  models:", model].join("\n") + "\n"
-    : ["llm-pi-ai:", "  providers:", `    ${route.provider}:`, `      apiKeyEnv: ${yamlQuote(DSH_PROVIDER_API_KEY_ENV)}`, `      api: ${yamlQuote(route.api)}`, `      baseURL: ${yamlQuote(route.baseURL)}`, "      models:", model].join("\n") + "\n";
+    ? ["llm-deepseek:", `  apiKeyEnv: ${yamlQuote(DSH_BRIDGE_PROVIDER_API_KEY_ENV)}`, `  baseURL: ${yamlQuote(route.baseURL)}`, "  models:", model].join("\n") + "\n"
+    : ["llm-pi-ai:", "  providers:", `    ${route.provider}:`, `      apiKeyEnv: ${yamlQuote(DSH_BRIDGE_PROVIDER_API_KEY_ENV)}`, `      api: ${yamlQuote(route.api)}`, `      baseURL: ${yamlQuote(route.baseURL)}`, "      models:", model].join("\n") + "\n";
   const path = resolve(dshHome, "settings.yaml");
   writeFileSync(path, body, { encoding: "utf8", mode: 0o600 });
   return path;
@@ -129,7 +129,7 @@ function isRecord(value: unknown): value is JsonRecord {
 
 export function redactInteractiveSecrets(
   message: string,
-  token = process.env.ANBAN_INTERACTIVE_RUNTIME_TOKEN ?? "",
+  token = process.env.ANBAN_DSH_BRIDGE_RUNTIME_TOKEN ?? "",
   additionalSecrets: readonly string[] = [],
 ): string {
   let redacted = message;
@@ -139,9 +139,9 @@ export function redactInteractiveSecrets(
   return redacted;
 }
 
-export function resolveInteractivePatchPath(raw = process.env.ANBAN_INTERACTIVE_DSH_PATCH, cwd = process.cwd()): string {
+export function resolveInteractivePatchPath(raw = process.env.ANBAN_DSH_BRIDGE_PATCH, cwd = process.cwd()): string {
   const value = raw?.trim() ?? "";
-  if (!value) throw new Error("ANBAN_INTERACTIVE_DSH_PATCH is required");
+  if (!value) throw new Error("ANBAN_DSH_BRIDGE_PATCH is required");
   const path = resolve(cwd, value);
   if (!existsSync(path) || !statSync(path).isFile()) {
     throw new Error(`interactive DSH patch does not exist: ${path}`);
@@ -154,20 +154,20 @@ export function parseInteractiveCommand(line: string): InteractiveCommand {
   try {
     value = JSON.parse(line);
   } catch {
-    throw new Error("interactive bridge input is not valid JSON");
+    throw new Error("DSH bridge input is not valid JSON");
   }
   if (!isRecord(value) || typeof value.method !== "string") {
-    throw new Error("interactive bridge command requires a method");
+    throw new Error("DSH bridge command requires a method");
   }
   const methods = new Set(["session/start", "session/prompt", "session/answer", "shutdown"]);
   if (!methods.has(value.method)) {
-    throw new Error(`unsupported interactive bridge method: ${value.method}`);
+    throw new Error(`unsupported DSH bridge method: ${value.method}`);
   }
   if (value.id !== undefined && typeof value.id !== "string" && typeof value.id !== "number") {
-    throw new Error("interactive bridge request id is invalid");
+    throw new Error("DSH bridge request id is invalid");
   }
   const params = value.params === undefined ? {} : value.params;
-  if (!isRecord(params)) throw new Error("interactive bridge params must be an object");
+  if (!isRecord(params)) throw new Error("DSH bridge params must be an object");
   return { id: value.id as string | number | undefined, method: value.method as InteractiveCommand["method"], params };
 }
 
@@ -257,7 +257,7 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
   return [];
 }
 
-export class InteractiveBridge {
+export class DshBridge {
   private client: InteractiveRuntimeClient | undefined;
   private subscription: { next(): Promise<HarnessNotification>; close(): void } | undefined;
   private runtimeReady: Promise<void> | undefined;
@@ -269,7 +269,7 @@ export class InteractiveBridge {
   constructor(
     private readonly write: (event: StableBridgeEvent) => void,
     private readonly clientFactory?: () => InteractiveRuntimeClient,
-    private readonly rootSessionId = process.env.ANBAN_INTERACTIVE_SESSION_ID?.trim() ?? "",
+    private readonly rootSessionId = process.env.ANBAN_DSH_BRIDGE_SESSION_ID?.trim() ?? "",
     route?: InteractiveRouteConfig,
   ) {
     this.route = route ?? (clientFactory ? {
@@ -279,8 +279,8 @@ export class InteractiveBridge {
   }
 
   redact(message: string): string {
-    const providerSecret = process.env[DSH_PROVIDER_API_KEY_ENV]?.trim() ?? "";
-    return redactInteractiveSecrets(message, process.env.ANBAN_INTERACTIVE_RUNTIME_TOKEN ?? "", [providerSecret]);
+    const providerSecret = process.env[DSH_BRIDGE_PROVIDER_API_KEY_ENV]?.trim() ?? "";
+    return redactInteractiveSecrets(message, process.env.ANBAN_DSH_BRIDGE_RUNTIME_TOKEN ?? "", [providerSecret]);
   }
 
   private redactEvent(event: StableBridgeEvent): StableBridgeEvent {
@@ -289,13 +289,13 @@ export class InteractiveBridge {
   }
 
   private async ensureRuntime(): Promise<void> {
-    if (this.closed) throw new Error("interactive bridge is closed");
+    if (this.closed) throw new Error("DSH bridge is closed");
     if (this.runtimeReady) return this.runtimeReady;
     this.runtimeReady = (async () => {
       const route = this.route;
       const client = this.clientFactory?.() ?? (() => {
-        const dshHome = process.env.ANBAN_INTERACTIVE_DSH_HOME?.trim();
-        if (!dshHome) throw new Error("ANBAN_INTERACTIVE_DSH_HOME is required");
+        const dshHome = process.env.ANBAN_DSH_BRIDGE_HOME?.trim();
+        if (!dshHome) throw new Error("ANBAN_DSH_BRIDGE_HOME is required");
         const patchPath = resolveInteractivePatchPath();
         writeDshRouteSettings(dshHome, route);
         return new HarnessClient({
@@ -308,13 +308,13 @@ export class InteractiveBridge {
       })();
       if (this.closed) {
         await client.close();
-        throw new Error("interactive bridge is closed");
+        throw new Error("DSH bridge is closed");
       }
       this.client = client;
       client.start();
       const initializeResult = await initializeRuntimeClient(client, route);
       assertInteractiveRuntimeCapabilities(initializeResult);
-      if (!this.rootSessionId) throw new Error("ANBAN_INTERACTIVE_SESSION_ID is required");
+      if (!this.rootSessionId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID is required");
       this.subscription = client.subscribeSessionTree(this.rootSessionId);
       void this.forwardNotifications();
       this.write({ event: "session.status", data: { status: "starting" } });
@@ -342,7 +342,7 @@ export class InteractiveBridge {
   }
 
   private validateCommand(command: InteractiveCommand): void {
-    if (!this.rootSessionId) throw new Error("ANBAN_INTERACTIVE_SESSION_ID is required");
+    if (!this.rootSessionId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID is required");
     if (command.method === "shutdown") return;
     const sessionId = command.params.sessionId;
     if (sessionId !== this.rootSessionId) {
@@ -391,8 +391,8 @@ export class InteractiveBridge {
   }
 }
 
-export async function runInteractiveBridge(): Promise<void> {
-  const bridge = new InteractiveBridge((event) => {
+export async function runDshBridge(): Promise<void> {
+  const bridge = new DshBridge((event) => {
     process.stdout.write(`${JSON.stringify(event)}\n`);
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -421,7 +421,7 @@ export async function runInteractiveBridge(): Promise<void> {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  runInteractiveBridge().catch((error: unknown) => {
+  runDshBridge().catch((error: unknown) => {
     process.stderr.write(`${redactInteractiveSecrets(error instanceof Error ? error.message : String(error))}\n`);
     process.exitCode = 1;
   });

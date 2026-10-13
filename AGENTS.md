@@ -174,7 +174,7 @@ task execution, artifact delivery, billing, resume, or completion logic.
 
 Important files:
 
-- `runtime-dsh/src/interactive-bridge.ts`: DSH session command and event adapter.
+- `runtime-dsh/src/dsh-bridge.ts`: DSH session command and event adapter.
 
 ### Server App Packages
 

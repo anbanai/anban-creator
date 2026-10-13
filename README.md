@@ -210,8 +210,8 @@ selected route into temporary DSH settings using the official `apiKeyEnv`,
 model })`. `api_key` uses the same `${...}` expansion as Claude's `envs`; the
 resolved value is placed in an isolated per-session internal variable. The
 child receives only `DSH_HOME`, the internal
-`ANBAN_INTERACTIVE_PROVIDER_API_KEY` provider-key variable, and the
-documented `ANBAN_INTERACTIVE_*` Bridge protocol variables. Those variables are
+`ANBAN_DSH_BRIDGE_PROVIDER_API_KEY` provider-key variable, and the
+documented `ANBAN_DSH_BRIDGE_*` Bridge protocol variables. Those variables are
 internal transport settings; they are not user-facing DSH provider settings.
 
 Deployments may select different Anthropic-compatible models by changing the

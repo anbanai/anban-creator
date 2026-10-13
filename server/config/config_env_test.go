@@ -220,6 +220,9 @@ func TestConfigRejectsDeprecatedDshEnvironmentVariables(t *testing.T) {
 		"ANBAN_DSH_MODEL",
 		"ANBAN_DSH_PROVIDER",
 		"ANBAN_DSH_PROFILE",
+		"ANBAN_INTERACTIVE_BRIDGE_DIR",
+		"ANBAN_INTERACTIVE_DSH_PATCH",
+		"ANBAN_INTERACTIVE_MCP_URL",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, "legacy-value")

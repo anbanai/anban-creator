@@ -1639,14 +1639,14 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, 
 	if f.Dir != "" {
 		cmd.Dir = f.Dir
 	}
-	cmd.Env = interactiveRuntimeEnvironment(dshHome, f.APIKey)
+	cmd.Env = dshBridgeRuntimeEnvironment(dshHome, f.APIKey)
 	cmd.Env = append(cmd.Env,
-		"ANBAN_INTERACTIVE_SESSION_ID="+sessionID,
-		"ANBAN_INTERACTIVE_RUNTIME_TOKEN="+runtimeToken,
-		"ANBAN_INTERACTIVE_DSH_HOME="+dshHome,
-		"ANBAN_INTERACTIVE_DSH_PATCH="+f.DSHPatch,
-		"ANBAN_INTERACTIVE_INITIAL_CONTEXT_FILE="+initialContextFile,
-		"ANBAN_INTERACTIVE_MCP_URL="+f.MCPURL,
+		"ANBAN_DSH_BRIDGE_SESSION_ID="+sessionID,
+		"ANBAN_DSH_BRIDGE_RUNTIME_TOKEN="+runtimeToken,
+		"ANBAN_DSH_BRIDGE_HOME="+dshHome,
+		"ANBAN_DSH_BRIDGE_PATCH="+f.DSHPatch,
+		"ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE="+initialContextFile,
+		"ANBAN_DSH_BRIDGE_MCP_URL="+f.MCPURL,
 	)
 	stdin, e := cmd.StdinPipe()
 	if e != nil {
@@ -1688,9 +1688,9 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, runtimeToken, 
 	return r, nil
 }
 
-const interactiveProviderAPIKeyEnv = "ANBAN_INTERACTIVE_PROVIDER_API_KEY"
+const dshBridgeProviderAPIKeyEnv = "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY"
 
-func interactiveRuntimeEnvironment(dshHome, providerAPIKey string) []string {
+func dshBridgeRuntimeEnvironment(dshHome, providerAPIKey string) []string {
 	keys := []string{"PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR", "NODE_EXTRA_CA_CERTS"}
 	env := make([]string, 0, len(keys)+5)
 	for _, key := range keys {
@@ -1700,7 +1700,7 @@ func interactiveRuntimeEnvironment(dshHome, providerAPIKey string) []string {
 	}
 	env = append(env, "HOME="+dshHome, "USERPROFILE="+dshHome)
 	if providerAPIKey != "" {
-		env = append(env, interactiveProviderAPIKeyEnv+"="+providerAPIKey)
+		env = append(env, dshBridgeProviderAPIKeyEnv+"="+providerAPIKey)
 	}
 	return env
 }
@@ -1880,7 +1880,7 @@ func (r *execRuntime) finish(err error) {
 	close(r.done)
 	r.mu.Unlock()
 	if err == nil {
-		err = errors.New("interactive bridge closed before responding")
+		err = errors.New("DSH bridge closed before responding")
 	}
 	for _, response := range pending {
 		select {
@@ -1896,13 +1896,13 @@ func bridgeResponseError(value any, secrets ...string) error {
 	}
 	if message, ok := value.(string); ok {
 		if strings.TrimSpace(message) == "" {
-			return errors.New("interactive bridge returned an empty error")
+			return errors.New("DSH bridge returned an empty error")
 		}
 		return errors.New(redactInteractiveRuntimeDiagnostic(message, secrets...))
 	}
 	b, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("interactive bridge error: %v", value)
+		return fmt.Errorf("DSH bridge error: %v", value)
 	}
 	return errors.New(redactInteractiveRuntimeDiagnostic(string(b), secrets...))
 }

@@ -82,7 +82,7 @@ func TestRuntimePackageDependencyBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(claudePackage), "@deepseek-ai/") || strings.Contains(string(claudePackage), "interactive-bridge") {
+	if strings.Contains(string(claudePackage), "@deepseek-ai/") || strings.Contains(string(claudePackage), "dsh-bridge") {
 		t.Fatal("runtime-claude must not declare DSH or interactive Bridge dependencies")
 	}
 	if strings.Contains(string(dshPackage), "@anthropic-ai/") || strings.Contains(string(dshPackage), "claude-agent") {

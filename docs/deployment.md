@@ -38,8 +38,8 @@ fixed official runtime profile: `dsh --profile sdk`. `provider` and `model` are
 also sent through the official SDK `initialize({ provider, model })` handshake.
 
 The DSH child receives only `DSH_HOME`, the internal per-session
-`ANBAN_INTERACTIVE_PROVIDER_API_KEY` provider-key variable, and the internal
-`ANBAN_INTERACTIVE_*` Bridge protocol variables for the session, MCP URL, runtime
+`ANBAN_DSH_BRIDGE_PROVIDER_API_KEY` provider-key variable, and the internal
+`ANBAN_DSH_BRIDGE_*` Bridge protocol variables for the session, MCP URL, runtime
 token, patch, initial context, and temporary home.
 Do not configure the removed `interactive:` block, `provider_api_key_env`,
 `api_key_env`, or `ANBAN_DSH_API_KEY`, `ANBAN_DSH_BASE_URL`,
