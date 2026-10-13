@@ -6,9 +6,10 @@ import { fileURLToPath } from "node:url";
 const runtimeDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJSON = JSON.parse(readFileSync(join(runtimeDir, "package.json"), "utf8")) as {
   dependencies: Record<string, string>;
+  allowScripts?: Record<string, boolean>;
 };
 const lockJSON = JSON.parse(readFileSync(join(runtimeDir, "package-lock.json"), "utf8")) as {
-  packages: Record<string, { resolved?: string; link?: boolean }>;
+  packages: Record<string, { resolved?: string; link?: boolean; version?: string }>;
 };
 
 const sdkPackages = [
@@ -18,6 +19,22 @@ const sdkPackages = [
 ] as const;
 
 describe("vendored DSH interactive SDK contract", () => {
+  test("allows only pinned install scripts required by the Linux DSH runtime", () => {
+    const approvals = packageJSON.allowScripts ?? {};
+    expect(approvals["@deepseek-ai/dsh-subprocess-local@0.2.1-alpha.2"]).toBe(true);
+    expect(approvals["node-pty@1.2.0-beta.15"]).toBe(true);
+    expect(approvals["koffi@3.1.1"]).toBe(true);
+    expect(approvals["@google/genai"]).toBe(false);
+    expect(approvals.protobufjs).toBe(false);
+  });
+
+  test("keeps vulnerable ZIP parsing versions out of the DSH dependency tree", () => {
+    const fflatePackages = Object.entries(lockJSON.packages)
+      .filter(([path]) => path === "node_modules/fflate" || path.endsWith("/node_modules/fflate"));
+    expect(fflatePackages.length).toBeGreaterThan(0);
+    expect(fflatePackages.every(([, metadata]) => metadata.version === "0.8.3")).toBe(true);
+  });
+
   test("keeps all interactive SDK packages local and versioned together", () => {
     const versions = new Set<string>();
     for (const name of sdkPackages) {
