@@ -7,7 +7,6 @@ import {
   ArrowRight,
   Check,
   ChevronDown,
-  CircleHelp,
   Loader2,
   MessageSquare,
   RotateCcw,
@@ -21,20 +20,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Checkbox } from '@/components/ui/checkbox'
 import { api } from '@/lib/api'
 import type {
   InteractiveAgent,
   InteractiveDraft,
-  InteractiveQuestion,
-  InteractiveOption,
 } from '@/lib/api/interactive'
 import { streamInteractiveSession } from '@/lib/interactive-events'
 import { useAuth } from '@/contexts/AuthContext'
+import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer, type DshQuestionOption } from '@/components/dsh-user-questions/DshQuestionComposer'
 
 type Message = { id: string; role: 'assistant' | 'user'; text: string }
-type QuestionCard = InteractiveQuestion & { callId: string; answers?: AnswerValue[] }
-type AnswerValue = { id: string; selected: string[]; custom?: string }
+type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
 type RunState = 'idle' | 'starting' | 'running' | 'waiting_answer' | 'error' | 'expired' | 'closed'
 type JsonRecord = Record<string, unknown>
 
@@ -101,13 +97,13 @@ function normalizeDraft(raw: JsonRecord): InteractiveDraft {
   }
 }
 
-function parseQuestion(value: unknown): InteractiveQuestion | null {
+function parseQuestion(value: unknown): DshQuestion | null {
   if (!isRecord(value)) return null
   const id = stringValue(value.id)
   const question = stringValue(value.question)
   if (!id || !question) return null
   const options = Array.isArray(value.options)
-    ? value.options.flatMap((option): InteractiveOption[] => {
+    ? value.options.flatMap((option): DshQuestionOption[] => {
       if (!isRecord(option)) return []
       const label = stringValue(option.label)
       return label ? [{ label, description: stringValue(option.description) }] : []
@@ -124,9 +120,9 @@ function parseQuestion(value: unknown): InteractiveQuestion | null {
   }
 }
 
-function parseAnswers(value: unknown): AnswerValue[] {
+function parseAnswers(value: unknown): DshQuestionAnswer['answers'] {
   if (!Array.isArray(value)) return []
-  return value.flatMap((answer): AnswerValue[] => {
+  return value.flatMap((answer): DshQuestionAnswer['answers'] => {
     if (!isRecord(answer)) return []
     const id = stringValue(answer.id)
     if (!id) return []
@@ -176,7 +172,7 @@ export default function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [runState, setRunState] = useState<RunState>('idle')
   const [messages, setMessages] = useState<Message[]>([])
-  const [questions, setQuestions] = useState<QuestionCard[]>([])
+  const [questionBatches, setQuestionBatches] = useState<QuestionBatch[]>([])
   const [draft, setDraft] = useState<InteractiveDraft | null>(null)
   const [composer, setComposer] = useState('')
   const [streamError, setStreamError] = useState<string | null>(null)
@@ -205,7 +201,7 @@ export default function ChatPage() {
   const agents = agentsQuery.data ?? []
   const selectableAgents = agents.filter((agent) => agent.available !== false)
   const activeAgent = selectableAgents.find((agent) => agent.id === selectedAgent)
-  const pendingQuestions = questions.filter((question) => !question.answers)
+  const pendingQuestions = questionBatches.filter((batch) => !batch.answers)
   const dirty = Boolean(sessionId && !committed)
 
   useNavigationWarning(dirty, committedRef, isProjectUpdate ? '当前项目画像更新尚未完成，离开后将丢失，确定离开吗？' : '当前创作项目创建尚未完成，离开后将丢失，确定离开吗？')
@@ -219,7 +215,7 @@ export default function ChatPage() {
     setSessionId(null)
     setRunState('idle')
     setMessages([])
-    setQuestions([])
+    setQuestionBatches([])
     setDraft(null)
     setSessionProject(null)
     confirmationTokenRef.current = null
@@ -261,15 +257,21 @@ export default function ChatPage() {
         break
       case 'question.opened':
         setRunState('waiting_answer')
-        setQuestions((items) => [...items, ...(Array.isArray(data.questions) ? data.questions.flatMap((value) => {
-          const question = parseQuestion(value)
-          return question ? [{ ...question, callId: stringValue(data.call_id) ?? stringValue(data.callId) ?? '' }] : []
-        }) : [])])
+        {
+          const callId = stringValue(data.call_id) ?? stringValue(data.callId) ?? ''
+          const questions = Array.isArray(data.questions) ? data.questions.flatMap((value) => {
+            const question = parseQuestion(value)
+            return question ? [question] : []
+          }) : []
+          setQuestionBatches((batches) => batches.some((batch) => batch.callId === callId)
+            ? batches
+            : [...batches, { callId, questions }])
+        }
         break
       case 'question.answered':
-        setQuestions((items) => items.map((question) => question.callId === (stringValue(data.call_id) ?? stringValue(data.callId) ?? '')
-          ? { ...question, answers: parseAnswers(data.answers ?? data.answer) }
-          : question))
+        setQuestionBatches((batches) => batches.map((batch) => batch.callId === (stringValue(data.call_id) ?? stringValue(data.callId) ?? '')
+          ? { ...batch, answers: parseAnswers(data.answers ?? data.answer) }
+          : batch))
         setRunState('running')
         break
       case 'draft.updated':
@@ -414,18 +416,16 @@ export default function ChatPage() {
     })
   }
 
-  const submitAnswers = async (question: QuestionCard, answers: AnswerValue[]) => {
-    if (!sessionId || question.answers) return
+  const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer) => {
+    if (batch.answers) return
+    if (!sessionId || runState === 'expired' || runState === 'closed' || runState === 'error') {
+      throw new Error('会话已结束，请重新开始后再回答。')
+    }
     hasInputRef.current = true
-    const updatedQuestions = questions.map((item) => item === question ? { ...item, answers } : item)
-    setQuestions(updatedQuestions)
-    const callQuestions = updatedQuestions.filter((item) => item.callId === question.callId)
-    if (callQuestions.some((item) => !item.answers)) return
-    const allAnswers = callQuestions.flatMap((item) => item.answers ?? [])
-    await api.interactive.answer(sessionId, question.callId, allAnswers).catch((error) => {
-      setQuestions((items) => items.map((item) => item.callId === question.callId ? { ...item, answers: undefined } : item))
-      setStreamError(error instanceof Error ? error.message : '答案发送失败')
-    })
+    await api.interactive.answer(sessionId, batch.callId, answer.answers)
+    setQuestionBatches((batches) => batches.map((item) => item.callId === batch.callId
+      ? { ...item, answers: answer.answers }
+      : item))
   }
 
   const commitProject = async () => {
@@ -509,7 +509,7 @@ export default function ChatPage() {
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6" aria-live="polite">
               {messages.length === 0 && runState === 'starting' && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />正在准备对话…</div>}
               {messages.map((message) => <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <MessageSquare className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>)}
-              {questions.map((question) => <QuestionCardView key={`${question.callId}:${question.id}`} question={question} disabled={!sessionId || Boolean(question.answers) || runState === 'starting'} onSubmit={(answers) => void submitAnswers(question, answers)} />)}
+              {questionBatches.map((batch) => <DshQuestionComposer key={batch.callId} questions={batch.questions} answers={batch.answers} submitted={Boolean(batch.answers)} disabled={!sessionId || runState === 'starting' || runState === 'expired' || runState === 'closed' || runState === 'error'} onSubmit={(answer) => submitAnswers(batch, answer)} />)}
               {draft?.ready && <ConfirmCard draft={draft} isProjectUpdate={isProjectUpdate} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />}
               {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>会话需要重新开始</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}<Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button></AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
@@ -521,15 +521,6 @@ export default function ChatPage() {
       )}
     </div>
   )
-}
-
-function QuestionCardView({ question, disabled, onSubmit }: { question: QuestionCard; disabled: boolean; onSubmit: (answers: AnswerValue[]) => void }) {
-  const [selected, setSelected] = useState<string[]>([])
-  const [custom, setCustom] = useState('')
-  const options = question.options ?? []
-  const multi = question.multiSelect ?? question.multi_select ?? false
-  const toggle = (label: string) => setSelected((value) => multi ? value.includes(label) ? value.filter((item) => item !== label) : [...value, label] : [label])
-  return <Card className="border-primary/20 bg-primary/[0.025]"><CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div><CardTitle className="text-sm">{question.header || '需要你的判断'}</CardTitle><CardDescription className="mt-1 leading-5">{question.question}</CardDescription></div>{question.answers ? <Badge variant="secondary"><Check className="size-3" />已回答</Badge> : <CircleHelp className="size-4 shrink-0 text-primary" />}</div>{question.detail && <p className="text-xs leading-5 text-muted-foreground">{question.detail}</p>}</CardHeader><CardContent className="space-y-3">{options.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{options.map((option: InteractiveOption) => <label key={option.label} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition ${selected.includes(option.label) || question.answers?.some((answer) => answer.selected.includes(option.label)) ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'} ${disabled ? 'cursor-default opacity-70' : ''}`}><Checkbox checked={selected.includes(option.label) || Boolean(question.answers?.some((answer) => answer.selected.includes(option.label)))} disabled={disabled} onCheckedChange={() => toggle(option.label)} aria-label={option.label} /><span><span className="block text-sm font-medium">{option.label}</span>{option.description && <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{option.description}</span>}</span></label>)}</div>}<Textarea value={question.answers?.[0]?.custom ?? custom} onChange={(event) => { if (!multi) setSelected([]); setCustom(event.target.value) }} disabled={disabled} placeholder="也可以补充说明（可选）" className="min-h-16" aria-label={`${question.header || '问题'}补充说明`} />{!question.answers && <Button size="sm" onClick={() => onSubmit([{ id: question.id, selected, ...(custom.trim() ? { custom: custom.trim() } : {}) }])} disabled={disabled || (selected.length === 0 && !custom.trim())}><Check className="size-4" />提交回答</Button>}</CardContent></Card>
 }
 
 function ProgressRail({ draft }: { draft: InteractiveDraft | null }) {

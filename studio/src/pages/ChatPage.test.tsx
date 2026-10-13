@@ -110,14 +110,15 @@ describe('ChatPage', () => {
     renderChat()
 
     await waitFor(() => expect(screen.getByText('选择平台')).toBeInTheDocument())
-    const checkbox = screen.getAllByRole('checkbox')[0]
-    fireEvent.click(checkbox)
+    const radio = screen.getByRole('radio', { name: '微信' })
+    fireEvent.click(radio)
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
     await waitFor(() => expect(screen.getByRole('textbox', { name: '问题补充说明' })).toBeDisabled())
     rejectAnswer?.(new Error('answer failed'))
     await waitFor(() => expect(screen.getByText('选择平台')).toBeInTheDocument())
     await waitFor(() => expect(screen.getByRole('button', { name: '提交回答' })).toBeInTheDocument())
     expect(screen.getByText('answer failed')).toBeInTheDocument()
+    expect(screen.queryByText('会话需要重新开始')).not.toBeInTheDocument()
   })
 
   it('clears a single-select option when the user enters custom text', async () => {
@@ -127,10 +128,41 @@ describe('ChatPage', () => {
     renderChat()
 
     await waitFor(() => expect(screen.getByText('选择平台')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('checkbox', { name: /微信/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /微信/ }))
     fireEvent.change(screen.getByRole('textbox', { name: '问题补充说明' }), { target: { value: '小红书' } })
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
     await waitFor(() => expect(interactiveMocks.answer).toHaveBeenCalledWith('session-1', 'call-single', [{ id: 'choice', selected: [], custom: '小红书' }]))
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+  })
+
+  it('keeps earlier question batches reviewable when the agent opens another batch', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'question.opened', data: JSON.stringify({ call_id: 'call-first', questions: [{ id: 'first', question: '第一批问题', options: [{ label: '第一批答案' }] }] }) },
+      { event: 'question.opened', data: JSON.stringify({ call_id: 'call-second', questions: [{ id: 'second', question: '第二批问题', options: [{ label: '第二批答案' }] }] }) },
+    ], signal))
+    renderChat()
+
+    await waitFor(() => expect(screen.getByText('第一批问题')).toBeInTheDocument())
+    expect(screen.getByText('第二批问题')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: '第一批答案' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '提交回答' })[0])
+
+    await waitFor(() => expect(interactiveMocks.answer).toHaveBeenCalledWith('session-1', 'call-first', [{ id: 'first', selected: ['第一批答案'] }]))
+    expect(screen.getByText('第一批问题')).toBeInTheDocument()
+    expect(screen.getByText('第二批问题')).toBeInTheDocument()
+  })
+
+  it('disables unanswered cards after the temporary session closes', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'question.opened', data: JSON.stringify({ call_id: 'call-ended', questions: [{ id: 'choice', question: '会话结束前的问题', options: [{ label: '回答' }] }] }) },
+      { event: 'session.status', data: JSON.stringify({ status: 'closed' }) },
+    ], signal))
+    renderChat()
+
+    expect(await screen.findByText('会话已结束，重新开始后才能继续回答。')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '回答' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '提交回答' })).toBeDisabled()
+    expect(interactiveMocks.answer).not.toHaveBeenCalled()
   })
 
   it('retries a failed ready draft commit with the same token and idempotency key', async () => {
