@@ -71,7 +71,7 @@ vi.mock('@/lib/api', async () => {
         stats: vi.fn().mockResolvedValue({ 'ch-1': mockProjectDetail.stats }),
         platformConfigs: vi.fn().mockResolvedValue(mockPlatformConfigs),
         create: vi.fn(),
-        getChannelConfig: vi.fn().mockResolvedValue({ id: "channel-1", project_id: "ch-1", channel: "wechat-article", config: { wechat_app_id: "wx-test" } }),
+        getChannelConfig: vi.fn().mockResolvedValue({ id: "channel-1", project_id: "ch-1", channel: "wechat-article", secret_configured: true, config: { wechat_app_id: "wx-test" } }),
         upsertChannelConfig: vi.fn().mockResolvedValue({}),
         get: vi.fn(),
         update: vi.fn(),
@@ -120,8 +120,8 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.platformConfigs).mockResolvedValue(mockPlatformConfigs)
     vi.mocked(api.projects.create).mockReset()
     vi.mocked(api.projects.get).mockReset()
-    vi.mocked(api.projects.getChannelConfig).mockReset().mockResolvedValue({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', config: { wechat_app_id: 'wx-test' } })
-    vi.mocked(api.projects.upsertChannelConfig).mockReset().mockResolvedValue({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', config: {} })
+    vi.mocked(api.projects.getChannelConfig).mockReset().mockResolvedValue({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', secret_configured: true, config: { wechat_app_id: 'wx-test' } })
+    vi.mocked(api.projects.upsertChannelConfig).mockReset().mockResolvedValue({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', secret_configured: true, config: {} })
     vi.mocked(api.projects.update).mockReset()
 		vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
     vi.mocked(api.montageCapabilities.list).mockReset().mockResolvedValue({

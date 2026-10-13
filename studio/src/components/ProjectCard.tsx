@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { MetricStrip, ProgressRing, StatusPill } from '@/components/workspace'
-import { creationObjectLabels, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
+import { supportsProfileLab } from '@/lib/project-capabilities'
 
 function profileStatusLabel(project: Project) {
   switch (project.profile?.initialization_status) {
@@ -57,7 +57,6 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
   const feedbackEnabled = platform === '' || platform === 'wechat' || platform === 'seednote'
-  const objectLabels = projectAgentIDs(project).map((id) => creationObjectLabels[id] ?? id)
   const editLabel = supportsProfileLab(project) ? '编辑创作项目' : '编辑项目'
   const feedbackQuery = useQuery({
     queryKey: ['project-feedback', project.id],
@@ -112,14 +111,13 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
         </div>
       </div>
       <div className="mt-auto pt-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border pb-3 text-xs">
-          <span aria-label="创作对象" className="min-w-0 text-muted-foreground">
-            {objectLabels.length ? objectLabels.join(' · ') : '尚未选择创作对象'}
-          </span>
-          {supportsProfileLab(project) && <span data-profile-status={project.profile?.initialization_status ?? 'not_started'} className="shrink-0 text-muted-foreground">
-            {profileStatusLabel(project)}
-          </span>}
-        </div>
+        {supportsProfileLab(project) && (
+          <div className="mb-3 flex justify-end border-b border-border pb-3 text-xs">
+            <span data-profile-status={project.profile?.initialization_status ?? 'not_started'} className="shrink-0 text-muted-foreground">
+              {profileStatusLabel(project)}
+            </span>
+          </div>
+        )}
         {stats && (
           <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border pt-3">
             {completionRate === null ? (
@@ -236,12 +234,12 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
             </TooltipTrigger>
             <TooltipContent>{unusedTopics === undefined ? '选题池' : `选题池：剩余 ${unusedTopics} 个`}</TooltipContent>
           </Tooltip>
-          {onChannelConfig && (
+          {onChannelConfig && (project.platform === 'wechat' || project.agent_ids?.some((id) => id === 'wechat-article' || id === 'wechat-picture')) && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onChannelConfig(project)} aria-label={`渠道配置：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onChannelConfig(project)} aria-label={`平台设置：${project.name}`} />}>
                 <Settings2 />
               </TooltipTrigger>
-              <TooltipContent>渠道配置</TooltipContent>
+              <TooltipContent>平台设置</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>

@@ -404,13 +404,39 @@ func taggingSubjectsComplete(rawContract datatypes.JSON, subjects []contentMetad
 	}
 	provided := make(map[string]struct{}, len(subjects))
 	for _, subject := range subjects {
-		provided[strings.TrimSpace(subject.ArtifactRole)] = struct{}{}
+		role := strings.TrimSpace(subject.ArtifactRole)
+		if role == "" {
+			return false
+		}
+		provided[role] = struct{}{}
+		tagDimensions := make(map[string]struct{}, len(subject.Tags))
+		for _, tag := range subject.Tags {
+			tagDimensions[strings.TrimSpace(tag.Dimension)] = struct{}{}
+		}
+		omittedDimensions := make(map[string]struct{}, len(subject.OmittedDimensions))
+		for _, omitted := range subject.OmittedDimensions {
+			dimension := strings.TrimSpace(omitted)
+			if _, ok := model.ContentTagDimensions[dimension]; !ok || isServerOwnedDimension(dimension) {
+				return false
+			}
+			if _, duplicate := omittedDimensions[dimension]; duplicate {
+				return false
+			}
+			if _, tagged := tagDimensions[dimension]; tagged {
+				return false
+			}
+			omittedDimensions[dimension] = struct{}{}
+		}
 		if len(subject.Tags) == 0 && len(subject.OmittedDimensions) == 0 {
 			return false
 		}
 	}
 	for _, role := range contract.SubjectRoles {
-		if _, ok := provided[strings.TrimSpace(role)]; !ok {
+		role = strings.TrimSpace(role)
+		if role == "" {
+			return false
+		}
+		if _, ok := provided[role]; !ok {
 			return false
 		}
 	}

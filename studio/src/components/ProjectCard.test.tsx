@@ -75,6 +75,11 @@ describe('ProjectCard', () => {
     expect(screen.queryByRole('button', { name: /创建作品/ })).not.toBeInTheDocument()
   })
 
+  it('does not expose WeChat platform settings for non-WeChat projects', () => {
+    render(<ProjectCard project={project({ platform: 'seednote', agent_ids: ['seednote'] })} onChannelConfig={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /平台设置/ })).not.toBeInTheDocument()
+  })
+
   it.each(['moments', 'ecommerce'] as const)('keeps legacy %s projects in their basic settings flow', (platform) => {
     render(<ProjectCard project={project({ platform, agent_ids: null, name: '公众号项目' })} onProfile={vi.fn()} onEdit={vi.fn()} />)
     expect(screen.queryByRole('button', { name: '人设画像：公众号项目' })).not.toBeInTheDocument()
@@ -91,7 +96,7 @@ describe('ProjectCard', () => {
     expect(screen.getByTestId('project-overview-strip')).toHaveTextContent('2')
   })
 
-  it('shows selected creation objects and the applied profile lifecycle status', () => {
+  it('uses the project identity icons instead of repeating creation object labels', () => {
     render(<ProjectCard project={project({
       agent_ids: ['wechat-article', 'hypit', 'whiteboard-animation'],
       profile: {
@@ -107,7 +112,11 @@ describe('ProjectCard', () => {
       },
     })} />)
 
-    expect(screen.getByLabelText('创作对象')).toHaveTextContent('公众号文章 · 视频复刻 · 白板视频')
+    expect(screen.getByRole('img', { name: '公众号文章' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '视频复刻' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '白板动画' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('创作对象')).not.toBeInTheDocument()
+    expect(screen.queryByText('公众号文章', { exact: true })).not.toBeInTheDocument()
     expect(screen.getByText('画像分析中')).toBeInTheDocument()
   })
 
@@ -142,7 +151,7 @@ describe('ProjectCard', () => {
     render(<ProjectCard project={project()} onChannelConfig={onChannelConfig} onEdit={onEdit} onProfile={onProfile} onArchive={vi.fn()} />)
 
     expect(screen.queryByText('更多')).not.toBeInTheDocument()
-    const channelConfig = screen.getByRole('button', { name: '渠道配置：公众号创作项目' })
+    const channelConfig = screen.getByRole('button', { name: '平台设置：公众号创作项目' })
     const edit = screen.getByRole('button', { name: '编辑创作项目：公众号创作项目' })
     const profile = screen.getByRole('button', { name: '人设画像：公众号创作项目' })
     const memory = screen.getByRole('button', { name: '创作项目记忆：公众号创作项目' })

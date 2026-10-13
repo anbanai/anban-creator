@@ -12,8 +12,17 @@ export interface ProjectChannelConfig {
   id: string
   project_id: string
   channel: string
+  secret_configured: boolean
   /** Server redacts credential-like keys before returning this object. */
   config: Record<string, unknown>
+}
+
+export interface WechatPlatformConfig {
+  project_id: string
+  platform: 'wechat'
+  app_id: string
+  secret_configured: boolean
+  credentials_conflict: boolean
 }
 
 export interface Project {

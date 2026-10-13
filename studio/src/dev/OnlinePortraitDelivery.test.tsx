@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import { portraitToProjectProfile } from '@/lib/portrait-project-handoff'
 import type { PortraitCandidate } from '@/lib/portrait-chat-contract'
 import type { ProjectProfile } from '@/types'
-vi.mock('@/lib/api',()=>({api:{auth:{me:vi.fn()},projects:{create:vi.fn(),getAccountProfile:vi.fn(),confirmAccountProfile:vi.fn(),listChannelConfigs:vi.fn()},agentProfiles:{list:vi.fn()},billing:{catalog:vi.fn(),wallet:vi.fn()},tasks:{create:vi.fn(),get:vi.fn()}}}))
+vi.mock('@/lib/api',()=>({api:{auth:{me:vi.fn()},projects:{create:vi.fn(),getAccountProfile:vi.fn(),confirmAccountProfile:vi.fn(),getWechatPlatformConfig:vi.fn()},agentProfiles:{list:vi.fn()},billing:{catalog:vi.fn(),wallet:vi.fn()},tasks:{create:vi.fn(),get:vi.fn()}}}))
 const text='我做花艺，面向上班族，用公众号分享；第一篇讲周末插花。'
 const fact={text,certainty:'stated' as const,evidence:[{messageId:'u-1',quote:text}]}
 const candidate:PortraitCandidate={reply:'请核对',name:null,summary:null,facets:{identity:fact,audience:fact,platforms:fact,style:null,preferences:null,experience:null},creationIdea:fact}
@@ -21,7 +21,7 @@ beforeEach(()=>{
   vi.mocked(api.projects.create).mockResolvedValue({project:{id:'p-1'}} as never)
   vi.mocked(api.projects.getAccountProfile).mockResolvedValue(current)
   vi.mocked(api.projects.confirmAccountProfile).mockResolvedValue(confirmed)
-  vi.mocked(api.projects.listChannelConfigs).mockResolvedValue([{id:'c-1',project_id:'p-1',channel:'wechat-article',config:{wechat_app_id:'wx-test'}}])
+  vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({project_id:'p-1',platform:'wechat',app_id:'wx-test',secret_configured:true,credentials_conflict:false})
   vi.mocked(api.tasks.create).mockResolvedValue({id:'t-1',status:'pending'} as never)
   vi.mocked(api.tasks.get).mockResolvedValue({id:'t-1',status:'completed'} as never)
 })
@@ -48,15 +48,23 @@ describe('online project and task delivery',()=>{
   it('blocks missing WeChat configuration before billing admission and allows retry after binding',async()=>{
     render(<OnlinePortraitDelivery candidate={candidate} messages={messages}/>);await save()
     vi.mocked(api.projects.getAccountProfile).mockResolvedValue(confirmed)
-    vi.mocked(api.projects.listChannelConfigs).mockResolvedValue([])
+    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({project_id:'p-1',platform:'wechat',app_id:'',secret_configured:false,credentials_conflict:false})
     fireEvent.click(screen.getByRole('button',{name:'生成第一篇作品'}))
-    expect(await screen.findByRole('alert')).toHaveTextContent('绑定公众号')
+    expect(await screen.findByRole('alert')).toHaveTextContent('绑定微信账号')
     expect(api.tasks.create).not.toHaveBeenCalled()
     expect(JSON.parse(sessionStorage.getItem('anban:portrait-online:user-1')!).phase).toBe('saved')
-    vi.mocked(api.projects.listChannelConfigs).mockResolvedValue([{id:'c-1',project_id:'p-1',channel:'wechat-article',config:{wechat_app_id:'wx-test'}}])
+    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({project_id:'p-1',platform:'wechat',app_id:'wx-test',secret_configured:true,credentials_conflict:false})
     fireEvent.click(screen.getByRole('button',{name:'生成第一篇作品'}))
     await screen.findByRole('link',{name:'查看进度与作品'})
     expect(api.tasks.create).toHaveBeenCalledTimes(1)
+  })
+  it('blocks an AppID with no AppSecret before billing admission',async()=>{
+    render(<OnlinePortraitDelivery candidate={candidate} messages={messages}/>);await save()
+    vi.mocked(api.projects.getAccountProfile).mockResolvedValue(confirmed)
+    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({project_id:'p-1',platform:'wechat',app_id:'wx-test',secret_configured:false,credentials_conflict:false})
+    fireEvent.click(screen.getByRole('button',{name:'生成第一篇作品'}))
+    expect(await screen.findByRole('alert')).toHaveTextContent('完整绑定微信账号')
+    expect(api.tasks.create).not.toHaveBeenCalled()
   })
   it('waits for explicit save and generation, shows actual task identity, and submits only one bounded task',async()=>{
     render(<OnlinePortraitDelivery candidate={candidate} messages={messages}/>)

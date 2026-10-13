@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -51,6 +52,107 @@ func TestProjectConfigResponseRedactsSecrets(t *testing.T) {
 	nested, ok := redacted["nested"].(map[string]any)
 	if !ok || nested["access_token"] != nil || nested["label"] != "kept" {
 		t.Fatalf("nested secrets were not redacted: %#v", redacted)
+	}
+}
+
+func TestProjectChannelConfigResponseReportsSecretPresenceWithoutExposingSecret(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		config     map[string]any
+		configured bool
+	}{
+		{name: "secret configured", config: map[string]any{"wechat_app_id": "wx-app", "wechat_secret": "private-value"}, configured: true},
+		{name: "secret missing", config: map[string]any{"wechat_app_id": "wx-app"}, configured: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := projectChannelConfigResponse(&model.ProjectChannelConfig{
+				ID: "config-id", ProjectID: "project-id", Channel: model.ChannelArticle,
+				Config: datatypes.NewJSONType(tc.config),
+			})
+			encoded, err := json.Marshal(response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(encoded, &body); err != nil {
+				t.Fatal(err)
+			}
+			if body["secret_configured"] != tc.configured {
+				t.Fatalf("secret_configured = %#v, want %v", body["secret_configured"], tc.configured)
+			}
+			if strings.Contains(string(encoded), "private-value") || strings.Contains(string(encoded), "wechat_secret") {
+				t.Fatalf("channel config response exposed secret material: %s", encoded)
+			}
+		})
+	}
+}
+
+func TestWechatPlatformConfigHandlerSharesCredentialsAndRedactsSecret(t *testing.T) {
+	app, repo, _ := setupProjectHandlerTest(t)
+	userID := uuid.NewString()
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "Account", Status: model.ProjectStatusActive}
+	if err := repo.Projects().Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+
+	response := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID+"/platform-configs/wechat", userID, map[string]any{
+		"app_id": "wx-shared", "secret": "private-secret",
+	})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("save status = %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "private-secret") || strings.Contains(string(body), "wechat_secret") {
+		t.Fatalf("platform config response exposed secret: %s", body)
+	}
+
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		config, getErr := repo.ProjectChannelConfigs().Get(t.Context(), project.ID, channel)
+		if getErr != nil {
+			t.Fatalf("read %s config: %v", channel, getErr)
+		}
+		values := config.Config.Data()
+		if values["wechat_app_id"] != "wx-shared" || values["wechat_secret"] != "private-secret" {
+			t.Fatalf("%s config = %#v", channel, values)
+		}
+	}
+
+	response = doRequest(t, app, http.MethodGet, "/api/v1/projects/"+project.ID+"/platform-configs/wechat", userID, nil)
+	body, err = io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), `"app_id":"wx-shared"`) || !strings.Contains(string(body), `"secret_configured":true`) || strings.Contains(string(body), "private-secret") {
+		t.Fatalf("platform config read status/body = %d/%s", response.StatusCode, body)
+	}
+}
+
+func TestWechatPlatformConfigHandlerRejectsIncompleteCredentialsAsBadRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{name: "missing AppID", body: map[string]any{"secret": "private-secret"}},
+		{name: "missing AppSecret", body: map[string]any{"app_id": "wx-app"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, repo, _ := setupProjectHandlerTest(t)
+			userID := uuid.NewString()
+			project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "Account", Status: model.ProjectStatusActive}
+			if err := repo.Projects().Create(t.Context(), project); err != nil {
+				t.Fatal(err)
+			}
+			response := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID+"/platform-configs/wechat", userID, tc.body)
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("save status/body = %d/%#v, want bad request", response.StatusCode, decodeBody(t, response))
+			}
+		})
 	}
 }
 
@@ -225,6 +327,8 @@ func newProjectHandlerTestApp(repo repository.Repository, store *projectReferenc
 	app.Get("/api/v1/projects/:id", injectUser, h.Get)
 	app.Post("/api/v1/projects", injectUser, h.Create)
 	app.Put("/api/v1/projects/:id", injectUser, h.Update)
+	app.Get("/api/v1/projects/:id/platform-configs/wechat", injectUser, h.GetWechatPlatformConfig)
+	app.Put("/api/v1/projects/:id/platform-configs/wechat", injectUser, h.UpsertWechatPlatformConfig)
 	return app
 }
 
@@ -442,6 +546,15 @@ func TestProjectHandlerCreateHonorsProfileAnalysisSkip(t *testing.T) {
 	}
 	project := data["project"].(map[string]any)
 	projectID := project["id"].(string)
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		config, err := repo.ProjectChannelConfigs().Get(t.Context(), projectID, channel)
+		if err != nil {
+			t.Fatalf("read %s config: %v", channel, err)
+		}
+		if values := config.Config.Data(); values["wechat_app_id"] != "wx-test" || values["wechat_secret"] != "secret" {
+			t.Fatalf("created %s config = %#v", channel, values)
+		}
+	}
 	tasks, err := repo.Tasks().FindByUserID(t.Context(), userID, projectID, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -1734,7 +1847,7 @@ func TestProjectHandlerMemoryPreviewBoundsSerializedResponse(t *testing.T) {
 	}
 }
 
-func TestProjectWechatCredentialUpdatePreservesOmittedSecret(t *testing.T) {
+func TestProjectWechatCredentialUpdateRequiresSecretWhenAppIDChanges(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
 	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: "Account", Status: model.ProjectStatusActive}
@@ -1749,18 +1862,50 @@ func TestProjectWechatCredentialUpdatePreservesOmittedSecret(t *testing.T) {
 	resp := doRequest(t, app, http.MethodPut, "/api/v1/projects/"+project.ID, userID, map[string]any{"wechat_app_id": "new-app"})
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status/body = %d/%s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status/body = %d/%s, want missing replacement secret to be rejected", resp.StatusCode, body)
 	}
-	config, err := repo.ProjectChannelConfigs().Get(t.Context(), project.ID, model.ChannelArticle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if config.Config.Data()["wechat_app_id"] != "new-app" || config.Config.Data()["wechat_secret"] != "saved-secret" {
-		t.Fatalf("credential update discarded omitted fields")
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		config, err := repo.ProjectChannelConfigs().Get(t.Context(), project.ID, channel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.Config.Data()["wechat_app_id"] != "old-app" || config.Config.Data()["wechat_secret"] != "saved-secret" {
+			t.Fatalf("rejected credential update changed %s config: %#v", channel, config.Config.Data())
+		}
 	}
 	if strings.Contains(string(body), "saved-secret") || strings.Contains(string(body), "agent_config") {
 		t.Fatalf("project response exposed private configuration: %s", body)
+	}
+}
+
+func TestProjectCreateRejectsPartialWechatCredentialsWithoutPersistingProject(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		field string
+		value string
+	}{
+		{name: "AppID without secret", field: "wechat_app_id", value: "wx-app"},
+		{name: "secret without AppID", field: "wechat_secret", value: "private-secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, repo, _ := setupProjectHandlerTest(t)
+			userID := uuid.NewString()
+			body := map[string]any{"platform": model.PlatformWechat, "name": "Incomplete account"}
+			body[tc.field] = tc.value
+			resp := doRequest(t, app, http.MethodPost, "/api/v1/projects", userID, body)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("create status/body = %d/%#v, want incomplete credentials rejected", resp.StatusCode, decodeBody(t, resp))
+			}
+			projects, err := repo.Projects().ListByUserID(t.Context(), userID, repository.ProjectListOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(projects) != 0 {
+				t.Fatalf("partial WeChat credentials persisted %d projects", len(projects))
+			}
+		})
 	}
 }
 

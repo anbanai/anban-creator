@@ -82,11 +82,11 @@ export default function PortraitDelivery({ candidate, messages, sessionId, produ
       if(user.id!==account.id) throw new Error('登录账号发生变化，请重新检查连接。')
       if(current.status!=='confirmed'||current.version!==receipt.profileVersion) throw new Error('线上画像版本已变化，请先核对项目，不使用旧版本生成。')
       if(type==='wechat-article') {
-        const channels=await api.projects.listChannelConfigs(receipt.projectId)
-        const appId=channels.find(channel=>channel.channel==='wechat-article')?.config.wechat_app_id
+        const platform=await api.projects.getWechatPlatformConfig(receipt.projectId)
+        const appId=platform.credentials_conflict ? '' : platform.app_id
         // Secrets are redacted by Server. This detects missing configuration,
         // but cannot certify credentials or WeChat permissions are valid.
-        if(typeof appId!=='string'||!appId.trim()) throw new Error('请先在项目的「渠道配置」中绑定公众号，再回来生成。现有公众号流程需要读取历史文章；本次尚未提交任务或扣费。')
+        if(typeof appId!=='string'||!appId.trim()||!platform.secret_configured) throw new Error('请先在项目的「平台设置」中完整绑定微信账号，再回来生成。现有公众号流程需要读取历史文章；本次尚未提交任务或扣费。')
       }
       const cost=taskCostFor(catalog,type,profile)
       if(cost===undefined||cost!==taskCostFor(account.catalog,type,profile)||cost>wallet.balance) {
@@ -112,7 +112,7 @@ export default function PortraitDelivery({ candidate, messages, sessionId, produ
     {error&&<p className="portrait-error" role="alert">{error}</p>}
     {receipt?.portraitKey!==key&&receipt&&<p role="status">画像有了新的补充。保存后会更新同一个项目；若线上已有其他修改，会提示你核对。</p>}
     {receipt?.projectId&&<p>项目{saved?'及画像已保存':'已创建，画像尚待保存'}：<a target="_blank" rel="noreferrer" href={`/projects?edit=${encodeURIComponent(receipt.projectId)}`}>{production ? '查看项目' : '查看线上项目'}</a></p>}
-    {saved&&type==='wechat-article'&&<p>公众号创作需要先绑定公众号，用于读取历史文章。<a href="/projects" target="_blank" rel="noreferrer">打开项目列表</a>，在本项目的「渠道配置」中设置。密钥仅在现有配置页填写。</p>}
+    {saved&&type==='wechat-article'&&<p>公众号创作需要先绑定公众号，用于读取历史文章。<a href="/projects" target="_blank" rel="noreferrer">打开项目列表</a>，在本项目的「平台设置」中设置。密钥仅在设置页填写。</p>}
     {!receipt?.taskId && <p><label>这次想创作什么？<textarea aria-label="这次想创作什么" value={idea} maxLength={1800} rows={3} disabled={busy||receipt?.phase==='task_creating'} onChange={event=>{setIdea(event.target.value);onIdeaChange?.(event.target.value)}} placeholder="例如：写一篇给新手看的养花指南，也可以先描述一个大致想法。" /></label></p>}
     {!saved&&<button className="portrait-primary" disabled={!account||!receipt||busy||receipt.phase==='creating'||!canSave} onClick={()=>void save()}>{busy?'正在保存…':receipt?.projectId?'保存更新后的画像':'保存当前画像并继续'}</button>}
     {receipt?.phase==='creating'&&!busy&&<p>项目创建结果需要核对，已暂停重复提交。<a href="/projects" target="_blank" rel="noreferrer">打开项目列表</a></p>}

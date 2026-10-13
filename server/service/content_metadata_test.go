@@ -269,6 +269,10 @@ func TestContentMetadataServiceDoesNotMarkMissingRequiredSubjectSucceeded(t *tes
 		{name: "missing subject", subjects: `[]`, want: model.ContentMetadataFailed},
 		{name: "empty subject without omissions", subjects: `[{"artifact_role":"final","tags":[]}]`, want: model.ContentMetadataFailed},
 		{name: "explicit omissions", subjects: `[{"artifact_role":"final","tags":[],"omitted_dimensions":["domain"]}]`, want: model.ContentMetadataSucceeded},
+		{name: "blank omission", subjects: `[{"artifact_role":"final","tags":[],"omitted_dimensions":[" "]}]`, want: model.ContentMetadataFailed},
+		{name: "unknown omission", subjects: `[{"artifact_role":"final","tags":[],"omitted_dimensions":["typo"]}]`, want: model.ContentMetadataFailed},
+		{name: "server-owned omission", subjects: `[{"artifact_role":"final","tags":[],"omitted_dimensions":["media_form"]}]`, want: model.ContentMetadataFailed},
+		{name: "duplicate omission", subjects: `[{"artifact_role":"final","tags":[],"omitted_dimensions":["domain","domain"]}]`, want: model.ContentMetadataFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, svc, task, execution := newContentMetadataFixture(t, "content-metadata-missing-succeeded-"+strings.ReplaceAll(tc.name, " ", "-"), model.TaskTypeWechatArticle)

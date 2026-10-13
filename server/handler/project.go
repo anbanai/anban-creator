@@ -244,6 +244,12 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	if errors.Is(err, service.ErrProjectUpdateConflict) {
 		return Error(c, fiber.StatusConflict, "project reference changed concurrently; retry the update")
 	}
+	if errors.Is(err, service.ErrProjectChannelCredentialsConflict) {
+		return Error(c, fiber.StatusConflict, err.Error())
+	}
+	if errors.Is(err, service.ErrInvalidWechatPlatformConfig) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
 	if errors.Is(err, service.ErrProjectMontageDefaults) || errors.Is(err, service.ErrHypitInput) || errors.Is(err, service.ErrProjectNameRequired) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
@@ -341,6 +347,19 @@ type projectConfigResponse struct {
 	Config    map[string]any `json:"config"`
 }
 
+type projectChannelConfigResponseBody struct {
+	ID               string         `json:"id"`
+	ProjectID        string         `json:"project_id"`
+	Channel          string         `json:"channel"`
+	SecretConfigured bool           `json:"secret_configured"`
+	Config           map[string]any `json:"config"`
+}
+
+type wechatPlatformConfigRequest struct {
+	AppID  string `json:"app_id"`
+	Secret string `json:"secret"`
+}
+
 type projectConfigRequest struct {
 	Config map[string]any `json:"config"`
 }
@@ -379,8 +398,14 @@ func redactedProjectConfig(value map[string]any) map[string]any {
 	return redacted
 }
 
-func projectChannelConfigResponse(config *model.ProjectChannelConfig) projectConfigResponse {
-	return projectConfigResponse{ID: config.ID, ProjectID: config.ProjectID, Channel: config.Channel, Config: redactedProjectConfig(config.Config.Data())}
+func projectChannelConfigResponse(config *model.ProjectChannelConfig) projectChannelConfigResponseBody {
+	values := config.Config.Data()
+	secret, _ := values["wechat_secret"].(string)
+	return projectChannelConfigResponseBody{
+		ID: config.ID, ProjectID: config.ProjectID, Channel: config.Channel,
+		SecretConfigured: strings.TrimSpace(secret) != "",
+		Config:           redactedProjectConfig(values),
+	}
 }
 
 func (h *ProjectHandler) respondProjectConfigError(c fiber.Ctx, err error) error {
@@ -391,6 +416,12 @@ func (h *ProjectHandler) respondProjectConfigError(c fiber.Ctx, err error) error
 		return Forbidden(c, "you do not have access to this project")
 	}
 	if errors.Is(err, service.ErrInvalidProjectChannel) {
+		return Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	if errors.Is(err, service.ErrProjectChannelCredentialsConflict) {
+		return Error(c, fiber.StatusConflict, err.Error())
+	}
+	if errors.Is(err, service.ErrInvalidWechatPlatformConfig) {
 		return Error(c, fiber.StatusBadRequest, err.Error())
 	}
 	h.logger.Error().Err(err).Msg("project config operation failed")
@@ -459,15 +490,16 @@ func (req *projectRequest) toProject() *model.Project {
 	return p
 }
 
-func (req *projectRequest) wechatChannelConfig() map[string]any {
-	config := map[string]any{}
-	if appID := strings.TrimSpace(req.WechatAppID); appID != "" {
-		config["wechat_app_id"] = appID
+func projectRequestSupportsWechat(platform string, agentIDs []string) bool {
+	if platform == model.PlatformWechat {
+		return true
 	}
-	if secret := strings.TrimSpace(req.WechatSecret); secret != "" {
-		config["wechat_secret"] = secret
+	for _, agentID := range agentIDs {
+		if agentID == model.AgentIDArticle || agentID == model.AgentIDWechatPicture {
+			return true
+		}
 	}
-	return config
+	return false
 }
 
 func rejectProjectAgentConfig(body []byte) error {
@@ -611,6 +643,12 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if req.Platform != "" && model.IsAdminOnlyProjectPlatform(req.Platform) && !projectUserIsAdmin(c) {
 		return Forbidden(c, "project platform is currently available to administrators only")
 	}
+	wechatAppIDConfigured := strings.TrimSpace(req.WechatAppID) != ""
+	wechatSecretConfigured := strings.TrimSpace(req.WechatSecret) != ""
+	if wechatAppIDConfigured != wechatSecretConfigured ||
+		((wechatAppIDConfigured || wechatSecretConfigured) && !projectRequestSupportsWechat(req.Platform, req.AgentIDs)) {
+		return h.respondProjectConfigError(c, service.ErrInvalidWechatPlatformConfig)
+	}
 
 	// Validate required fields per platform.
 	pc := model.GetPlatformConfig(req.Platform)
@@ -679,8 +717,8 @@ func (h *ProjectHandler) Create(c fiber.Ctx) error {
 	if err := h.populateProjectAgentIDs(c.Context(), []*model.Project{created}); err != nil {
 		return Error(c, fiber.StatusInternalServerError, "failed to derive project Agent IDs")
 	}
-	if ch.Platform == model.PlatformWechat && (strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != "") {
-		if _, configErr := h.service.UpsertChannelConfig(c.Context(), userID, ch.ID, model.ChannelArticle, req.wechatChannelConfig()); configErr != nil {
+	if wechatAppIDConfigured {
+		if _, configErr := h.service.UpsertWechatPlatformConfig(c.Context(), userID, ch.ID, req.WechatAppID, req.WechatSecret); configErr != nil {
 			return h.respondProjectConfigError(c, configErr)
 		}
 	}
@@ -814,7 +852,7 @@ func (h *ProjectHandler) ListChannelConfigs(c fiber.Ctx) error {
 	if err != nil {
 		return h.respondProjectConfigError(c, err)
 	}
-	result := make([]projectConfigResponse, 0, len(configs))
+	result := make([]projectChannelConfigResponseBody, 0, len(configs))
 	for _, config := range configs {
 		result = append(result, projectChannelConfigResponse(config))
 	}
@@ -861,6 +899,37 @@ func (h *ProjectHandler) DeleteChannelConfig(c fiber.Ctx) error {
 		return h.respondProjectConfigError(c, err)
 	}
 	return Success(c, fiber.Map{"deleted": true})
+}
+
+func (h *ProjectHandler) GetWechatPlatformConfig(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	config, err := h.service.GetWechatPlatformConfig(c.Context(), userID, c.Params("id"))
+	if err != nil {
+		return h.respondProjectConfigError(c, err)
+	}
+	return Success(c, config)
+}
+
+func (h *ProjectHandler) UpsertWechatPlatformConfig(c fiber.Ctx) error {
+	userID := GetUserID(c)
+	if userID == "" {
+		return Error(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	var req wechatPlatformConfigRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return Error(c, fiber.StatusBadRequest, "invalid WeChat platform config body")
+	}
+	config, err := h.service.UpsertWechatPlatformConfig(c.Context(), userID, c.Params("id"), req.AppID, req.Secret)
+	if err != nil {
+		if errors.Is(err, service.ErrProjectChannelCredentialsConflict) {
+			return Error(c, fiber.StatusConflict, err.Error())
+		}
+		return h.respondProjectConfigError(c, err)
+	}
+	return Success(c, config)
 }
 
 // Memory handles GET /projects/:id/memory.
@@ -1613,14 +1682,26 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 	}
 	req.AvatarURL = rewriteFinalizedUploadURL(req.AvatarURL, rewrites)
 	ch.AvatarURL = req.AvatarURL
+	hasWechatCredentials := strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != ""
+	if hasWechatCredentials && targetPlatform != model.PlatformWechat {
+		return h.respondProjectConfigError(c, service.ErrInvalidWechatPlatformConfig)
+	}
 
 	var updated *model.Project
 	if req.ReferenceImageSet {
-		updated, err = h.service.Update(c.Context(), userID, projectID, ch)
+		if hasWechatCredentials {
+			updated, err = h.service.UpdateWithWechatPlatformConfig(c.Context(), userID, projectID, ch, req.WechatAppID, req.WechatSecret, "", false)
+		} else {
+			updated, err = h.service.Update(c.Context(), userID, projectID, ch)
+		}
 	} else {
 		const maxReferenceCASAttempts = 3
 		for attempt := 0; attempt < maxReferenceCASAttempts; attempt++ {
-			updated, err = h.service.UpdateIfReferenceImageAssetID(c.Context(), userID, projectID, ch, targetReferenceAssetID)
+			if hasWechatCredentials {
+				updated, err = h.service.UpdateWithWechatPlatformConfig(c.Context(), userID, projectID, ch, req.WechatAppID, req.WechatSecret, targetReferenceAssetID, true)
+			} else {
+				updated, err = h.service.UpdateIfReferenceImageAssetID(c.Context(), userID, projectID, ch, targetReferenceAssetID)
+			}
 			if !errors.Is(err, service.ErrProjectUpdateConflict) {
 				break
 			}
@@ -1647,12 +1728,6 @@ func (h *ProjectHandler) Update(c fiber.Ctx) error {
 		h.logger.Error().Err(err).Str("project_id", updated.ID).Msg("derive project Agent IDs after update failed")
 		return Error(c, fiber.StatusInternalServerError, "failed to derive project Agent IDs")
 	}
-	if updated.Platform == model.PlatformWechat && (strings.TrimSpace(req.WechatAppID) != "" || strings.TrimSpace(req.WechatSecret) != "") {
-		if _, configErr := h.service.UpsertChannelConfig(c.Context(), userID, projectID, model.ChannelArticle, req.wechatChannelConfig()); configErr != nil {
-			return h.respondProjectConfigError(c, configErr)
-		}
-	}
-
 	h.service.SanitizeProjectForResponse(updated)
 	h.signProjectURLs(c.Context(), updated)
 	updated.ReferenceImage = referenceView

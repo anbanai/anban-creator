@@ -305,6 +305,8 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/projects/:id/channel-configs/:channel", svc.ProjectHandler.GetChannelConfig)
 		apiV1.Put("/projects/:id/channel-configs/:channel", svc.ProjectHandler.UpsertChannelConfig)
 		apiV1.Delete("/projects/:id/channel-configs/:channel", svc.ProjectHandler.DeleteChannelConfig)
+		apiV1.Get("/projects/:id/platform-configs/wechat", svc.ProjectHandler.GetWechatPlatformConfig)
+		apiV1.Put("/projects/:id/platform-configs/wechat", svc.ProjectHandler.UpsertWechatPlatformConfig)
 		if svc.FeedbackDashboardHandler != nil {
 			apiV1.Get("/projects/:id/feedback", svc.FeedbackDashboardHandler.Get)
 			apiV1.Post("/projects/:id/feedback/rerun", svc.FeedbackDashboardHandler.Rerun)

@@ -26,8 +26,11 @@ func TestArticlePackHasOnlyCoreDeliveryRequirements(t *testing.T) {
 	if !strings.Contains(pack, "path: output/draft.json, mime_type: application/json, required: true") {
 		t.Fatal("article pack must require the article delivery package")
 	}
-	if got := strings.Count(pack, "required: true"); got != 3 {
-		t.Fatalf("required artifacts = %d, want exactly 3", got)
+	if !strings.Contains(pack, "path: output/content-tags.json, mime_type: application/json, required: true") {
+		t.Fatal("article pack must require the Taxonomy v2 content tag artifact")
+	}
+	if got := strings.Count(pack, "required: true"); got != 4 {
+		t.Fatalf("required artifacts = %d, want 3 delivery artifacts plus content tags", got)
 	}
 }
 

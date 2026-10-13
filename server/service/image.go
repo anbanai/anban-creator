@@ -517,7 +517,7 @@ func (s *ImageService) UploadImage(
 	if wechatCfg.AppID == "" || wechatCfg.Secret == "" {
 		return nil, &image.ProcessorError{
 			Message:  "wechat credentials not configured for task channel, cannot upload image",
-			HintText: "请先在项目对应的公众号渠道配置中填写 WeChat App ID 和 Secret",
+			HintText: "请先在项目对应的微信平台设置中填写 WeChat App ID 和 Secret",
 		}
 	}
 	// Uploading existing bytes needs only channel credentials and compression

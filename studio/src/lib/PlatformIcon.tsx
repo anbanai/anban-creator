@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import { useCallback } from 'react'
-import { BookOpen, Flame, Images, MessageCircle, ShoppingBag, Signature, PenLine } from 'lucide-react'
+import { BookOpen, Flame, Images, MessageCircle, MessagesSquare, ShoppingBag, Signature, PenLine } from 'lucide-react'
 import { motion, useAnimation, useReducedMotion, type Variants } from 'motion/react'
 
 type PlatformIconComponent = ComponentType<{ className?: string }>
@@ -138,7 +138,7 @@ function VideoReplicationIcon(props: { className?: string }) {
 // writing) and `wechat-picture` (multi-image) task types with distinct glyphs.
 export const platformIcon: Record<string, PlatformIconComponent> = {
   seednote: BookOpen,
-  wechat: Signature,
+  wechat: MessagesSquare,
   'wechat-article': Signature,
   'wechat-picture': Images,
   moments: MessageCircle,

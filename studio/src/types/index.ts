@@ -19,6 +19,7 @@ export type {
   ProjectPlatform,
   ProjectStatus,
   ProjectChannelConfig,
+  WechatPlatformConfig,
   Project,
   ProjectStats,
   ProjectDetail,

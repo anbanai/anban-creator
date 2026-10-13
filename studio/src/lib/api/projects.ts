@@ -15,6 +15,7 @@ import type {
   Task,
   FeedbackDashboard,
   ProjectChannelConfig,
+  WechatPlatformConfig,
 } from '@/types'
 
 export const projectsApi = {
@@ -77,6 +78,12 @@ export const projectsApi = {
 
   deleteChannelConfig: (id: string, channel: string) =>
     unwrap<void>(http.delete(`/projects/${id}/channel-configs/${encodeURIComponent(channel)}`)),
+
+  getWechatPlatformConfig: (id: string) =>
+    unwrap<WechatPlatformConfig>(http.get(`/projects/${id}/platform-configs/wechat`)),
+
+  upsertWechatPlatformConfig: (id: string, data: { app_id: string; secret?: string }) =>
+    unwrap<WechatPlatformConfig>(http.put(`/projects/${id}/platform-configs/wechat`, data)),
 
   platformConfigs: () =>
     unwrap<PlatformConfig[]>(http.get('/projects/platform-configs')),

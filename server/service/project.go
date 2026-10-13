@@ -30,6 +30,8 @@ var (
 	ErrInvalidProjectChannel             = errors.New("invalid project channel")
 	ErrProjectNameRequired               = errors.New("project name is required")
 	ErrProjectProfileSetup               = errors.New("invalid project profile setup")
+	ErrProjectChannelCredentialsConflict = errors.New("文章与贴图的微信账号配置不一致，请重新填写 AppSecret 后统一账号")
+	ErrInvalidWechatPlatformConfig       = errors.New("微信 AppID 和 AppSecret 配置无效")
 )
 
 var supportedProjectChannels = map[string]struct{}{
@@ -97,6 +99,14 @@ type ProjectService struct {
 	hypitCapabilities   *HypitCapabilityService
 	montageCapabilities *MontageCapabilityService
 	imageAnalyses       *ImageAnalysisService
+}
+
+type WechatPlatformConfig struct {
+	ProjectID           string `json:"project_id"`
+	Platform            string `json:"platform"`
+	AppID               string `json:"app_id"`
+	SecretConfigured    bool   `json:"secret_configured"`
+	CredentialsConflict bool   `json:"credentials_conflict"`
 }
 
 type ProjectMemoryLifecycle interface {
@@ -873,6 +883,170 @@ func (s *ProjectService) ListChannelConfigs(ctx context.Context, userID, project
 	return s.repo.ProjectChannelConfigs().List(ctx, projectID)
 }
 
+func (s *ProjectService) GetWechatPlatformConfig(ctx context.Context, userID, projectID string) (*WechatPlatformConfig, error) {
+	project, err := s.ownedProject(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	supported, err := supportsWechatPlatformForProject(ctx, s.repo, project)
+	if err != nil {
+		return nil, fmt.Errorf("derive project WeChat capability: %w", err)
+	}
+	if !supported {
+		return nil, ErrInvalidWechatPlatformConfig
+	}
+	article, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, model.ChannelArticle)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	picture, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, model.ChannelWechatPicture)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	appID, secret, conflict := compareWechatChannelCredentials(article, picture)
+	return &WechatPlatformConfig{
+		ProjectID:           projectID,
+		Platform:            model.PlatformWechat,
+		AppID:               appID,
+		SecretConfigured:    secret != "",
+		CredentialsConflict: conflict,
+	}, nil
+}
+
+func compareWechatChannelCredentials(article, picture *model.ProjectChannelConfig) (appID, secret string, conflict bool) {
+	configs := []*model.ProjectChannelConfig{article, picture}
+	var firstAppID string
+	for _, config := range configs {
+		if config == nil {
+			continue
+		}
+		values := config.Config.Data()
+		currentAppID, _ := values["wechat_app_id"].(string)
+		currentAppID = strings.TrimSpace(currentAppID)
+		currentSecret, _ := values["wechat_secret"].(string)
+		currentSecret = strings.TrimSpace(currentSecret)
+		if (currentAppID == "") != (currentSecret == "") {
+			conflict = true
+		}
+		if currentAppID != "" && firstAppID == "" {
+			firstAppID = currentAppID
+		} else if currentAppID != "" && firstAppID != currentAppID {
+			conflict = true
+		}
+		if currentSecret != "" {
+			if secret == "" {
+				secret = currentSecret
+			} else if secret != currentSecret {
+				conflict = true
+			}
+		}
+	}
+	if conflict {
+		return "", secret, true
+	}
+	return firstAppID, secret, false
+}
+
+func (s *ProjectService) UpsertWechatPlatformConfig(ctx context.Context, userID, projectID, appID, secret string) (*WechatPlatformConfig, error) {
+	appID = strings.TrimSpace(appID)
+	secret = strings.TrimSpace(secret)
+	if appID == "" {
+		return nil, ErrInvalidWechatPlatformConfig
+	}
+	project, err := s.ownedProject(ctx, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	supported, err := supportsWechatPlatformForProject(ctx, s.repo, project)
+	if err != nil {
+		return nil, fmt.Errorf("derive project WeChat capability: %w", err)
+	}
+	if !supported {
+		return nil, ErrInvalidWechatPlatformConfig
+	}
+	err = s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		return upsertWechatPlatformConfigTx(ctx, tx, projectID, appID, secret)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("upsert WeChat platform config: %w", err)
+	}
+	return s.GetWechatPlatformConfig(ctx, userID, projectID)
+}
+
+func upsertWechatPlatformConfigTx(ctx context.Context, tx repository.Repository, projectID, appID, secret string) error {
+	appID = strings.TrimSpace(appID)
+	secret = strings.TrimSpace(secret)
+	channels := []string{model.ChannelArticle, model.ChannelWechatPicture}
+	existing := make([]*model.ProjectChannelConfig, len(channels))
+	for index, channel := range channels {
+		config, err := tx.ProjectChannelConfigs().Get(ctx, projectID, channel)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		existing[index] = config
+	}
+	_, existingSecret, conflict := compareWechatChannelCredentials(existing[0], existing[1])
+	if conflict && secret == "" {
+		return ErrProjectChannelCredentialsConflict
+	}
+	existingAppID, _, _ := compareWechatChannelCredentials(existing[0], existing[1])
+	if appID == "" {
+		appID = existingAppID
+	}
+	if appID == "" {
+		return ErrInvalidWechatPlatformConfig
+	}
+	if existingAppID != "" && existingAppID != appID && secret == "" {
+		return ErrInvalidWechatPlatformConfig
+	}
+	if secret == "" {
+		secret = existingSecret
+	}
+	if secret == "" {
+		return ErrInvalidWechatPlatformConfig
+	}
+	incoming := map[string]any{"wechat_app_id": appID, "wechat_secret": secret}
+	for index, channel := range channels {
+		values := map[string]any{}
+		if existing[index] != nil {
+			values = existing[index].Config.Data()
+		}
+		row := &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: channel}
+		row.Config = datatypes.NewJSONType(mergeChannelConfig(values, incoming))
+		if err := tx.ProjectChannelConfigs().Upsert(ctx, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func supportsWechatPlatform(project *model.Project) bool {
+	if project == nil {
+		return false
+	}
+	if project.Platform == model.PlatformWechat {
+		return true
+	}
+	for _, agentID := range project.AgentIDs {
+		if agentID == model.AgentIDArticle || agentID == model.AgentIDWechatPicture {
+			return true
+		}
+	}
+	return false
+}
+
+func supportsWechatPlatformForProject(ctx context.Context, repo repository.Repository, project *model.Project) (bool, error) {
+	if project == nil || project.AgentIDs != nil || project.Platform == model.PlatformWechat {
+		return supportsWechatPlatform(project), nil
+	}
+	agentIDs, err := repo.Projects().ListAgentIDsByProjectIDs(ctx, []string{project.ID})
+	if err != nil {
+		return false, err
+	}
+	project.AgentIDs = agentIDs[project.ID]
+	return supportsWechatPlatform(project), nil
+}
+
 func (s *ProjectService) UpsertChannelConfig(ctx context.Context, userID, projectID, channel string, config map[string]any) (*model.ProjectChannelConfig, error) {
 	channel = strings.TrimSpace(channel)
 	if !validProjectChannel(channel) {
@@ -884,10 +1058,28 @@ func (s *ProjectService) UpsertChannelConfig(ctx context.Context, userID, projec
 	// Connector-specific validation is intentionally centralized here. Until a
 	// connector publishes a schema, the channel whitelist is the minimum valid
 	// contract and unknown keys remain opaque server-owned configuration.
-	if existing, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel); err == nil {
+	var existing *model.ProjectChannelConfig
+	_, secretWasSubmitted := config["wechat_secret"]
+	if row, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel); err == nil {
+		existing = row
 		config = mergeChannelConfig(existing.Config.Data(), config)
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
+	}
+	if isWechatCredentialChannel(channel) {
+		appID := strings.TrimSpace(mapStringValue(config, "wechat_app_id"))
+		secret := strings.TrimSpace(mapStringValue(config, "wechat_secret"))
+		previousAppID := ""
+		if existing != nil {
+			previousAppID = strings.TrimSpace(mapStringValue(existing.Config.Data(), "wechat_app_id"))
+		}
+		if previousAppID != "" && appID != previousAppID && (!secretWasSubmitted || secret == "") {
+			return nil, ErrInvalidWechatPlatformConfig
+		}
+		if _, err := s.UpsertWechatPlatformConfig(ctx, userID, projectID, appID, secret); err != nil {
+			return nil, err
+		}
+		return s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel)
 	}
 	row := &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: projectID, Channel: channel}
 	row.Config = datatypes.NewJSONType(config)
@@ -904,12 +1096,36 @@ func (s *ProjectService) DeleteChannelConfig(ctx context.Context, userID, projec
 	if _, err := s.ownedProject(ctx, userID, projectID); err != nil {
 		return err
 	}
+	if isWechatCredentialChannel(channel) {
+		return s.repo.WithTx(ctx, func(tx repository.Repository) error {
+			for _, wechatChannel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+				if err := tx.ProjectChannelConfigs().Delete(ctx, projectID, wechatChannel); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
 	return s.repo.ProjectChannelConfigs().Delete(ctx, projectID, channel)
+}
+
+func isWechatCredentialChannel(channel string) bool {
+	return channel == model.ChannelArticle || channel == model.ChannelWechatPicture
 }
 
 // Update updates mutable fields on a project owned by the user.
 func (s *ProjectService) Update(ctx context.Context, userID, projectID string, ch *model.Project) (*model.Project, error) {
-	return s.update(ctx, userID, projectID, ch, "", false)
+	return s.update(ctx, userID, projectID, ch, "", false, nil)
+}
+
+func (s *ProjectService) UpdateWithWechatPlatformConfig(ctx context.Context, userID, projectID string, ch *model.Project, appID, secret string, expectedReferenceAssetID string, enforceReferenceCAS bool) (*model.Project, error) {
+	credentials := &wechatPlatformCredentials{appID: appID, secret: secret}
+	return s.update(ctx, userID, projectID, ch, expectedReferenceAssetID, enforceReferenceCAS, credentials)
+}
+
+type wechatPlatformCredentials struct {
+	appID  string
+	secret string
 }
 
 // SetFeedbackPaused changes only the periodic feedback switch. Keeping this
@@ -939,10 +1155,10 @@ func (s *ProjectService) SetFeedbackPaused(ctx context.Context, userID, projectI
 }
 
 func (s *ProjectService) UpdateIfReferenceImageAssetID(ctx context.Context, userID, projectID string, ch *model.Project, expectedID string) (*model.Project, error) {
-	return s.update(ctx, userID, projectID, ch, expectedID, true)
+	return s.update(ctx, userID, projectID, ch, expectedID, true, nil)
 }
 
-func (s *ProjectService) update(ctx context.Context, userID, projectID string, ch *model.Project, expectedReferenceAssetID string, enforceReferenceCAS bool) (*model.Project, error) {
+func (s *ProjectService) update(ctx context.Context, userID, projectID string, ch *model.Project, expectedReferenceAssetID string, enforceReferenceCAS bool, credentials *wechatPlatformCredentials) (*model.Project, error) {
 	var existing *model.Project
 	var queued *model.ImageAnalysisJob
 	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
@@ -959,6 +1175,18 @@ func (s *ProjectService) update(ctx context.Context, userID, projectID string, c
 		before := *current
 		if err := s.applyProjectUpdate(current, ch); err != nil {
 			return err
+		}
+		if credentials != nil {
+			supported, err := supportsWechatPlatformForProject(ctx, tx, current)
+			if err != nil {
+				return fmt.Errorf("derive project WeChat capability: %w", err)
+			}
+			if !supported {
+				return ErrInvalidWechatPlatformConfig
+			}
+			if err := upsertWechatPlatformConfigTx(ctx, tx, projectID, credentials.appID, credentials.secret); err != nil {
+				return err
+			}
 		}
 		if s.imageAnalyses != nil {
 			queued, err = s.imageAnalyses.updateProjectTx(ctx, tx, &before, current)
