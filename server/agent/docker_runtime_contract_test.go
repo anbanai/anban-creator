@@ -477,6 +477,10 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"COPY runtime-dsh/ ./",
 		"RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts",
 		"npm prune --omit=dev --install-links=true --strict-allow-scripts",
+		"rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
+		"cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/",
+		"cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/",
+		"cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/",
 		"test -f node_modules/node-pty/build/Release/pty.node",
 		"test -x node_modules/node-pty/build/Release/spawn-helper",
 		"&& test -d node_modules/@deepseek-ai/dsh-sdk-client",
@@ -509,9 +513,29 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		}
 	}
 	pruneIndex := strings.Index(body, "npm prune --omit=dev --install-links=true --strict-allow-scripts")
-	sdkAssertionIndex := strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-client")
-	if pruneIndex < 0 || sdkAssertionIndex < pruneIndex {
+	cleanupIndex := strings.Index(body, "rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server")
+	materializeIndexes := []int{
+		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/"),
+		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/"),
+		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/"),
+	}
+	assertionIndexes := []int{
+		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-client"),
+		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol"),
+		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server"),
+	}
+	if pruneIndex < 0 || cleanupIndex < pruneIndex {
 		t.Fatal("server Dockerfile must verify the installed DSH SDK packages after production dependencies are pruned")
+	}
+	for _, index := range materializeIndexes {
+		if index < cleanupIndex {
+			t.Fatal("server Dockerfile must materialize every vendored DSH SDK package after cleanup")
+		}
+	}
+	for _, index := range assertionIndexes {
+		if index < materializeIndexes[2] {
+			t.Fatal("server Dockerfile must verify every DSH SDK package after all packages are materialized")
+		}
 	}
 	ptyWorkdirIndex := strings.Index(body, "WORKDIR /app/runtime-dsh\nRUN node --input-type=module -e \"import * as pty from 'node-pty'")
 	ptySmokeIndex := strings.Index(body, "node-pty-smoke")
