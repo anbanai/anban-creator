@@ -23,6 +23,7 @@ const (
 
 var ContentTagDimensions = map[string]struct{}{
 	"domain": {}, "topic": {}, "audience": {}, "content_goal": {}, "format": {}, "tone": {}, "value_proposition": {}, "source_relation": {}, "evidence_level": {}, "risk": {}, "media_form": {}, "content_type": {}, "platform": {}, "artifact_role": {}, "performance": {}, "presentation_device": {}, "funnel_stage": {},
+	"industry": {}, "intent": {}, "narrative_hook": {}, "media_shape": {}, "visual_style": {},
 }
 var ContentTagGroups = map[string]string{"domain": "content_fact", "topic": "content_fact", "audience": "content_fact", "content_goal": "strategy_signal", "format": "editorial_structure", "tone": "editorial_structure", "presentation_device": "editorial_structure", "funnel_stage": "strategy_signal", "value_proposition": "strategy_signal", "source_relation": "source_risk", "evidence_level": "source_risk", "risk": "source_risk", "media_form": "media_performance", "content_type": "media_performance", "platform": "media_performance", "artifact_role": "media_performance", "performance": "media_performance"}
 
