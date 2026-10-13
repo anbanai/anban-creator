@@ -16,10 +16,12 @@ RUN apk add --no-cache python3 make g++
 WORKDIR /build/runtime-dsh
 COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./
 COPY runtime-dsh/vendor/ ./vendor/
-RUN npm ci --install-links=true
+RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts
 COPY runtime-dsh/ ./
 RUN npm run build \
-    && npm prune --omit=dev --install-links=true \
+    && npm prune --omit=dev --install-links=true --strict-allow-scripts \
+    && test -f node_modules/node-pty/build/Release/pty.node \
+    && test -x node_modules/node-pty/build/Release/spawn-helper \
     && test -d node_modules/@deepseek-ai/dsh-sdk-client \
     && test ! -L node_modules/@deepseek-ai/dsh-sdk-client \
     && test -d node_modules/@deepseek-ai/dsh-sdk-protocol \
@@ -49,6 +51,9 @@ COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime
 COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
 COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
 RUN node --input-type=module -e "import('/app/runtime-dsh/dist/dsh-bridge.js')"
+USER 1000:1000
+WORKDIR /app/runtime-dsh
+RUN node --input-type=module -e "import * as pty from 'node-pty'; const child = pty.spawn('/bin/sh', ['-c', 'exit 0'], { cwd: '/app', cols: 80, rows: 24, env: process.env }); await new Promise((resolve, reject) => { const timeout = setTimeout(() => { child.kill(); reject(new Error('node-pty smoke timed out')); }, 5000); child.onExit(({ exitCode }) => { clearTimeout(timeout); if (exitCode !== 0) reject(new Error('node-pty smoke failed')); else resolve(); }); }); console.log('node-pty-smoke')"
 COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml
 COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js

@@ -475,8 +475,10 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"COPY server ./",
 		"COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./",
 		"COPY runtime-dsh/ ./",
-		"RUN npm ci --install-links=true",
-		"npm prune --omit=dev --install-links=true",
+		"RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts",
+		"npm prune --omit=dev --install-links=true --strict-allow-scripts",
+		"test -f node_modules/node-pty/build/Release/pty.node",
+		"test -x node_modules/node-pty/build/Release/spawn-helper",
 		"&& test -d node_modules/@deepseek-ai/dsh-sdk-client",
 		"&& test ! -L node_modules/@deepseek-ai/dsh-sdk-client",
 		"&& test -d node_modules/@deepseek-ai/dsh-sdk-protocol",
@@ -488,6 +490,8 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist",
 		`RUN test "$(node --version)" = "v24.21.0"`,
 		`RUN node --input-type=module -e "import('/app/runtime-dsh/dist/dsh-bridge.js')"`,
+		"WORKDIR /app/runtime-dsh",
+		`node-pty-smoke`,
 		"go build -ldflags=\"-s -w\" -o /anban-creator-server .",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
 		"COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/economics.yaml",
@@ -504,10 +508,15 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 			t.Fatalf("%s missing minimal server runtime contract %q", path, want)
 		}
 	}
-	pruneIndex := strings.Index(body, "npm prune --omit=dev --install-links=true")
+	pruneIndex := strings.Index(body, "npm prune --omit=dev --install-links=true --strict-allow-scripts")
 	sdkAssertionIndex := strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-client")
 	if pruneIndex < 0 || sdkAssertionIndex < pruneIndex {
 		t.Fatal("server Dockerfile must verify the installed DSH SDK packages after production dependencies are pruned")
+	}
+	ptyWorkdirIndex := strings.Index(body, "WORKDIR /app/runtime-dsh\nRUN node --input-type=module -e \"import * as pty from 'node-pty'")
+	ptySmokeIndex := strings.Index(body, "node-pty-smoke")
+	if ptyWorkdirIndex < 0 || ptySmokeIndex < ptyWorkdirIndex {
+		t.Fatal("server Dockerfile must run the node-pty smoke test from the DSH runtime directory")
 	}
 	for _, forbidden := range []string{
 		"addgroup -S -g 1000 anban",
@@ -519,7 +528,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	}
 	if vendorIndex := strings.Index(body, "COPY runtime-dsh/vendor/ ./vendor/"); vendorIndex < 0 {
 		t.Fatal("server Dockerfile must copy runtime-dsh vendor packages before npm ci")
-	} else if npmIndex := strings.Index(body, "RUN npm ci"); npmIndex < vendorIndex {
+	} else if npmIndex := strings.Index(body, "npm ci --install-links=true --strict-allow-scripts"); npmIndex < vendorIndex {
 		t.Fatal("server Dockerfile must copy runtime-dsh vendor packages before npm ci")
 	}
 	for _, forbidden := range []string{
