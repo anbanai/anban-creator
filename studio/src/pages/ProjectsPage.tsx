@@ -4,7 +4,7 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Inbox } from 'lucide-react'
+import { Bot, FilePlus2, Inbox } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { FieldHint } from '@/components/common/FieldHint'
@@ -435,13 +435,13 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，可用于不同类型的作品。">
-        <Button variant="outline" onClick={openCreate}>
-          <Plus className="h-4 w-4" />
-          使用表单创建
+        <Button variant="outline" aria-label="使用表单创建" onClick={openCreate}>
+          <FilePlus2 className="h-4 w-4" />
+          表单创建
         </Button>
-        <Button onClick={openCreator}>
-          <Plus className="h-4 w-4" />
-          智能创建创作项目
+        <Button aria-label="智能创建创作项目" onClick={openCreator}>
+          <Bot className="h-4 w-4" />
+          AI 创建
         </Button>
       </PageHeader>
 

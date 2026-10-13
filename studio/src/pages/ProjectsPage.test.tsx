@@ -99,6 +99,23 @@ describe('ProjectsPage', () => {
     await screen.findByRole('heading', { name: '项目' })
     expect(screen.queryByRole('navigation', { name: '工作区导航' })).not.toBeInTheDocument()
   })
+  it('separates form and AI project creation with distinct labeled actions', async () => {
+    render(<ProjectsPage />)
+
+    const formAction = await screen.findByRole('button', { name: '使用表单创建' })
+    const aiAction = screen.getByRole('button', { name: '智能创建创作项目' })
+    expect(formAction.querySelector('svg')).toBeInTheDocument()
+    expect(aiAction.querySelector('svg')).toBeInTheDocument()
+    expect(formAction).toHaveTextContent('表单创建')
+    expect(aiAction).toHaveTextContent('AI 创建')
+
+    fireEvent.click(formAction)
+    expect(await screen.findByRole('dialog', { name: '新建创作项目' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    fireEvent.click(aiAction)
+    await waitFor(() => expect(window.location.pathname).toBe('/chat'))
+    expect(new URLSearchParams(window.location.search)).toEqual(new URLSearchParams('agent=project-creator&intent=create-project'))
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')

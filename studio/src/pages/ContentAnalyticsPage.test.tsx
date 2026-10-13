@@ -285,7 +285,7 @@ describe('server analytics queries', () => {
     expect(detail?.querySelectorAll('[data-content-tag]')).toHaveLength(2)
     expect(detail?.querySelectorAll('[data-content-tag] button')).toHaveLength(0)
   })
-  it('shows an evidence notice for a selected content item without tags', async () => {
+  it('hides the tag section for a selected content item without tags', async () => {
     vi.mocked(contentAnalyticsApi.detail).mockResolvedValue({
       ...summary,
       content: { ...content, tags: undefined },
@@ -294,14 +294,15 @@ describe('server analytics queries', () => {
     render(<ContentAnalyticsPage />)
 
     const heading = await screen.findByRole('heading', { name: '服务器内容' })
-    expect(heading.closest('section')).toHaveTextContent('暂无足够证据标注')
+    expect(heading.closest('section')).not.toHaveTextContent('暂无足够证据标注')
+    expect(heading.closest('section')?.querySelector('[aria-label="内容标签"]')).not.toBeInTheDocument()
   })
-  it('shows an evidence notice for a listed content item without tags', async () => {
+  it('hides the tag row for a listed content item without tags', async () => {
     vi.mocked(contentAnalyticsApi.contents).mockResolvedValue({ revision: 4, items: [{ ...content, tags: undefined }], total: 1, offset: 0, limit: 25 })
     render(<ContentAnalyticsPage />)
 
-    const tagRow = await screen.findByTestId('content-tags-row-canonical-1')
-    expect(tagRow).toHaveTextContent('暂无足够证据标注')
+    await screen.findByRole('button', { name: '服务器内容' })
+    expect(screen.queryByTestId('content-tags-row-canonical-1')).not.toBeInTheDocument()
   })
   it('reads observation history only after explicitly opening it', async () => {
     window.history.replaceState(null, '', '/content-analytics?account=notes&content=canonical-1')
