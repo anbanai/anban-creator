@@ -300,6 +300,47 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 			}
 		}
 	}
+	if requiresContentTagging(manifest) {
+		if manifest.Tagging == nil || !manifest.Tagging.Enabled {
+			return fmt.Errorf("content Pack requires enabled tagging contract")
+		}
+		if strings.TrimSpace(manifest.Tagging.Profile) == "" {
+			return fmt.Errorf("tagging.profile is required")
+		}
+		if err := validateOutputArtifactPath(manifest.Tagging.RequiredArtifact); err != nil {
+			return fmt.Errorf("tagging.required_artifact: %w", err)
+		}
+		foundRequired := false
+		for _, artifact := range manifest.Artifacts {
+			if artifact.Path == manifest.Tagging.RequiredArtifact && artifact.Required {
+				foundRequired = true
+				break
+			}
+		}
+		if !foundRequired {
+			return fmt.Errorf("tagging.required_artifact %q must be a required artifact", manifest.Tagging.RequiredArtifact)
+		}
+		if len(manifest.Tagging.SubjectRoles) == 0 {
+			return fmt.Errorf("tagging.subject_roles must not be empty")
+		}
+		roles := make(map[string]bool)
+		for _, artifacts := range manifest.DeliveryByTaskType {
+			for _, delivery := range artifacts {
+				roles[strings.TrimSpace(delivery.Role)] = true
+			}
+		}
+		for _, delivery := range manifest.Delivery {
+			roles[strings.TrimSpace(delivery.Role)] = true
+		}
+		for _, role := range manifest.Tagging.SubjectRoles {
+			role = strings.TrimSpace(role)
+			if role == "" || !roles[role] {
+				return fmt.Errorf("tagging subject role %q is not declared in delivery", role)
+			}
+		}
+	} else if manifest.Tagging != nil {
+		return fmt.Errorf("non-content Pack must not declare tagging")
+	}
 	schemaRefs := []struct {
 		ref       string
 		extension bool
@@ -379,6 +420,18 @@ func validateManifest(pluginRoot string, manifest *Manifest) error {
 		}
 	}
 	return nil
+}
+
+func requiresContentTagging(manifest *Manifest) bool {
+	if manifest == nil || manifest.ID == "" {
+		return false
+	}
+	switch manifest.ID {
+	case "wechat-article", "seednote", "ecommerce", "moments", "montage", "hypit", "wechat-picture", "whiteboard-animation":
+		return true
+	default:
+		return false
+	}
 }
 
 func hasSurface(surfaces []string, wanted string) bool {

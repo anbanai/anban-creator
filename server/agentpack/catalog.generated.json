@@ -36,6 +36,12 @@
       },
       "artifacts": [
         {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
           "role": "product_bible",
           "path": "output/product-bible.md",
           "mime_type": "text/markdown",
@@ -142,7 +148,19 @@
       "ui": {
         "renderer": "custom:ecommerce"
       },
-      "digest": "e80632720cdf338b07091c56f393b5086c68e4f092ddcb07b1f41699f1dd7eca"
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "copywriting"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "1886fee8d7efcb24b82db59561ce41c6a08c35cece3f7c8242d5717f9049909a"
     },
     {
       "id": "feedback-analysis",
@@ -263,6 +281,12 @@
         "hypit": "task.hypit"
       },
       "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
         {
           "role": "final_video",
           "path": "output/final.mp4",
@@ -398,7 +422,19 @@
       "ui": {
         "renderer": "custom:hypit"
       },
-      "digest": "2663f2b528afa1be18fdd652c2a24656bcdaa3b988779f964c47e37b4f04f6c1"
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_video"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "7d3326b9fccf30d3c69571fb257fbaa45402faeb79244e9908ce721d22fd345a"
     },
     {
       "id": "moments",
@@ -431,6 +467,12 @@
         "moments": "task.moments"
       },
       "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
         {
           "role": "analysis",
           "path": "output/material-analysis.md",
@@ -489,7 +531,19 @@
       "ui": {
         "renderer": "custom:moments"
       },
-      "digest": "b30b5184c99c03a59c8b4f6367c8dacd92d863bea86c73620a196fd26ddab1b1"
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_markdown"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "1d23c4f3806150b52c5d85ebeb58cd253b4b676e74afb36cf4976aafe14b72a4"
     },
     {
       "id": "montage",
@@ -529,6 +583,12 @@
         "montage": "task.montage"
       },
       "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
         {
           "role": "final_video",
           "path": "output/final.mp4",
@@ -605,7 +665,19 @@
       "ui": {
         "renderer": "custom:montage"
       },
-      "digest": "6b9e1cdb96fc0b02d80e1627f7e78c2d6e1f9c7eafee7873ff3a6db5264baebc"
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_video"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "ff3069f5d7394d7721cf025eddd3e9659d07db9533daa62abe2539c8682e1047"
     },
     {
       "id": "profile-analysis",
@@ -1057,7 +1129,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "494674cb527eeabb388cfb2af939b607121e5af5f4775fa346e107e73d18fb12"
+      "digest": "3f08a1895b15c632d62ba3844d4d2f42157b67f9ee00542c282b250149b8c7df"
     },
     {
       "id": "seednote",
@@ -1079,7 +1151,8 @@
           "topic-evaluator",
           "seednote-viral-analysis",
           "seednote-writing",
-          "seednote-visual-design"
+          "seednote-visual-design",
+          "content-tagging"
         ],
         "max_turns": 20
       },
@@ -1109,6 +1182,12 @@
         "viral_analysis": "task.viral_analysis"
       },
       "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
         {
           "role": "topic_analysis",
           "path": "output/topic-analysis.md",
@@ -1279,7 +1358,19 @@
       "ui": {
         "renderer": "custom:seednote"
       },
-      "digest": "2855b193437d732716ca4ee21621b65faa7797a704ec061db776149672c04eaf"
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_markdown"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "23cf96f9fa343d29422a60fb92b89a59742933eb27c9264023f8c5ad399e702c"
     },
     {
       "id": "wechat-article",
@@ -1299,6 +1390,7 @@
           "article-visual-design",
           "article-cover-design",
           "article-research",
+          "content-tagging",
           "trending-topics",
           "trend-rider",
           "topic-evaluator",
@@ -1331,6 +1423,12 @@
         "content_generation": "task.wechat_article"
       },
       "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
         {
           "role": "research",
           "path": "output/01-research.md",
@@ -1501,7 +1599,19 @@
       "ui": {
         "renderer": "custom:article"
       },
-      "digest": "426265853dc8176c0c19178b1727897f51bc13d5be675ac7d5cec2c1e45d0d29"
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_markdown"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "5c81a99f0e5e60ad92ba5ac0c8c68b3ef8577c5343a7ee6ebccb143f50a46ddc"
     },
     {
       "id": "wechat-picture",
@@ -1544,6 +1654,12 @@
         "content_generation": "task.wechat_picture"
       },
       "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
         {
           "role": "research",
           "path": "output/topic-analysis.md",
@@ -1662,7 +1778,19 @@
       "ui": {
         "renderer": "custom:wechat-picture"
       },
-      "digest": "cbc24b93044d2d51dc89ff96ef4858fe6b20d6bfb1f7e7528eed302be9361589"
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "content"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "8a2dd1e5c966824a7843b20cc7fb890708654870680f5deb0ff18f483e2f8e0e"
     },
     {
       "id": "whiteboard-animation",
@@ -1701,6 +1829,12 @@
         "whiteboard-animation": "task.whiteboard-animation"
       },
       "artifacts": [
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
         {
           "role": "final_video",
           "path": "output/final.mp4",
@@ -1803,7 +1937,19 @@
       "ui": {
         "renderer": "custom:whiteboard-animation"
       },
-      "digest": "d38ff3e48f586184dcc099a14b774c6b7de73947ce531628d8caeaba8fc761f4"
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_video"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "b1b9b3073dd19d0cecbbd8020071c759a5e21018895df445e6f904bcea58e831"
     }
   ]
 }

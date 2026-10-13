@@ -133,6 +133,11 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 		return fmt.Errorf("marshal Agent Pack required artifact contract: %w", err)
 	}
 	execution.AgentPackRequiredArtifactContract = datatypes.JSON(requiredArtifactContract)
+	taggingContract, err := json.Marshal(pack.Tagging)
+	if err != nil {
+		return fmt.Errorf("marshal Agent Pack tagging contract: %w", err)
+	}
+	execution.AgentPackTaggingContract = datatypes.JSON(taggingContract)
 	execution.RuntimeAdapter = pack.Runtime.Adapter
 	execution.RuntimeProfile = pack.Runtime.Profile
 	return nil
@@ -150,9 +155,27 @@ func inheritAgentPackIdentity(target, source *model.TaskExecution) bool {
 	target.AgentPackDigest = source.AgentPackDigest
 	target.AgentPackDeliveryContract = append(datatypes.JSON(nil), source.AgentPackDeliveryContract...)
 	target.AgentPackRequiredArtifactContract = append(datatypes.JSON(nil), source.AgentPackRequiredArtifactContract...)
+	target.AgentPackTaggingContract = append(datatypes.JSON(nil), source.AgentPackTaggingContract...)
 	target.RuntimeAdapter = source.RuntimeAdapter
 	target.RuntimeProfile = source.RuntimeProfile
 	return true
+}
+
+func resolveFrozenExecutionTaggingContract(execution *model.TaskExecution) (*agentpack.TaggingSpec, error) {
+	if execution == nil || len(execution.AgentPackTaggingContract) == 0 {
+		return nil, ErrAgentPackContractMismatch
+	}
+	if string(execution.AgentPackTaggingContract) == "null" {
+		return nil, nil
+	}
+	var tagging agentpack.TaggingSpec
+	if err := json.Unmarshal(execution.AgentPackTaggingContract, &tagging); err != nil {
+		return nil, fmt.Errorf("%w: decode frozen tagging contract", ErrAgentPackContractMismatch)
+	}
+	if !tagging.Enabled || strings.TrimSpace(tagging.Profile) == "" || strings.TrimSpace(tagging.RequiredArtifact) == "" || len(tagging.SubjectRoles) == 0 {
+		return nil, fmt.Errorf("%w: invalid frozen tagging contract", ErrAgentPackContractMismatch)
+	}
+	return &tagging, nil
 }
 
 func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
@@ -163,7 +186,7 @@ func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
 	return strings.TrimSpace(execution.AgentPackID) != "" &&
 		strings.TrimSpace(execution.AgentPackVersion) != "" &&
 		strings.TrimSpace(execution.AgentPackDigest) != "" &&
-		(dataOnlyProfile || (len(execution.AgentPackDeliveryContract) > 0 && len(execution.AgentPackRequiredArtifactContract) > 0)) &&
+		(dataOnlyProfile || (len(execution.AgentPackDeliveryContract) > 0 && len(execution.AgentPackRequiredArtifactContract) > 0 && len(execution.AgentPackTaggingContract) > 0)) &&
 		strings.TrimSpace(execution.RuntimeAdapter) != "" &&
 		strings.TrimSpace(execution.RuntimeProfile) != ""
 }

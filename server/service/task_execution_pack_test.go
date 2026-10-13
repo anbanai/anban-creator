@@ -22,7 +22,7 @@ func TestApplyAgentPackIdentityFreezesDeliveryAndRequiredArtifacts(t *testing.T)
 		taskType  string
 		wantPaths []string
 	}{
-		{name: "seednote", taskType: model.PlatformSeednote, wantPaths: []string{"output/content.md", "output/image-plan.md"}},
+		{name: "seednote", taskType: model.PlatformSeednote, wantPaths: []string{"output/content-tags.json", "output/content.md", "output/image-plan.md"}},
 		{name: "viral analysis", taskType: model.TaskTypeViralAnalysis, wantPaths: []string{"output/source-analysis.md", "output/viral-template.json"}},
 	}
 	for _, tt := range tests {
@@ -47,6 +47,9 @@ func TestApplyAgentPackIdentityFreezesDeliveryAndRequiredArtifacts(t *testing.T)
 			if delivery, err := resolveFrozenExecutionDeliveryContract(execution); err != nil || len(delivery) == 0 {
 				t.Fatalf("frozen delivery contract = %#v, %v", delivery, err)
 			}
+			if len(execution.AgentPackTaggingContract) == 0 {
+				t.Fatal("frozen tagging contract is empty")
+			}
 		})
 	}
 }
@@ -64,6 +67,7 @@ func TestInheritAgentPackIdentityCopiesFrozenContracts(t *testing.T) {
 		AgentPackID: "wechat-article", AgentPackVersion: "2.0.0", AgentPackDigest: "digest",
 		AgentPackDeliveryContract:         datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown"}]`),
 		AgentPackRequiredArtifactContract: datatypes.JSON(`[{"role":"final","path":"output/final.md","mime_type":"text/markdown","required":true}]`),
+		AgentPackTaggingContract:          datatypes.JSON(`{"enabled":true,"profile":"generic-content","required_artifact":"output/content-tags.json","subject_roles":["final"]}`),
 		RuntimeAdapter:                    "standard", RuntimeProfile: "wechat",
 	}
 	target := &model.TaskExecution{}

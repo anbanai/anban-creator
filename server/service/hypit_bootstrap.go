@@ -346,18 +346,19 @@ type hypitPackSnapshot struct {
 	Digest   string          `json:"digest"`
 	Delivery json.RawMessage `json:"delivery"`
 	Required json.RawMessage `json:"required"`
+	Tagging  json.RawMessage `json:"tagging"`
 	Adapter  string          `json:"adapter"`
 	Profile  string          `json:"profile"`
 }
 
 func freezeHypitPack(ex *model.TaskExecution) *hypitPackSnapshot {
-	return &hypitPackSnapshot{ID: ex.AgentPackID, Version: ex.AgentPackVersion, Digest: ex.AgentPackDigest, Delivery: append(json.RawMessage(nil), ex.AgentPackDeliveryContract...), Required: append(json.RawMessage(nil), ex.AgentPackRequiredArtifactContract...), Adapter: ex.RuntimeAdapter, Profile: ex.RuntimeProfile}
+	return &hypitPackSnapshot{ID: ex.AgentPackID, Version: ex.AgentPackVersion, Digest: ex.AgentPackDigest, Delivery: append(json.RawMessage(nil), ex.AgentPackDeliveryContract...), Required: append(json.RawMessage(nil), ex.AgentPackRequiredArtifactContract...), Tagging: append(json.RawMessage(nil), ex.AgentPackTaggingContract...), Adapter: ex.RuntimeAdapter, Profile: ex.RuntimeProfile}
 }
 func (p *hypitPackSnapshot) execution() *model.TaskExecution {
 	if p == nil {
 		return nil
 	}
-	return &model.TaskExecution{AgentPackID: p.ID, AgentPackVersion: p.Version, AgentPackDigest: p.Digest, AgentPackDeliveryContract: datatypes.JSON(p.Delivery), AgentPackRequiredArtifactContract: datatypes.JSON(p.Required), RuntimeAdapter: p.Adapter, RuntimeProfile: p.Profile}
+	return &model.TaskExecution{AgentPackID: p.ID, AgentPackVersion: p.Version, AgentPackDigest: p.Digest, AgentPackDeliveryContract: datatypes.JSON(p.Delivery), AgentPackRequiredArtifactContract: datatypes.JSON(p.Required), AgentPackTaggingContract: datatypes.JSON(p.Tagging), RuntimeAdapter: p.Adapter, RuntimeProfile: p.Profile}
 }
 
 func (s *TaskService) hypitAdmissionCapabilities(ctx context.Context, p CreateManualParams) (*HypitCapabilityService, error) {

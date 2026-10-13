@@ -41,9 +41,21 @@ type Manifest struct {
 	SchemaFiles         SchemaRefs                `yaml:"schemas" json:"-"`
 	Schemas             *SchemaDocuments          `yaml:"-" json:"schemas,omitempty"`
 	UI                  UISpec                    `yaml:"ui" json:"ui,omitempty"`
+	Tagging             *TaggingSpec              `yaml:"tagging,omitempty" json:"tagging,omitempty"`
 	Digest              string                    `yaml:"-" json:"digest"`
 
 	dir string
+}
+
+// TaggingSpec declares the evidence-backed content metadata artifact produced
+// by a content Pack. It is intentionally absent for analysis and interactive
+// Packs whose subjects are not content artifacts.
+type TaggingSpec struct {
+	Enabled          bool     `yaml:"enabled" json:"enabled"`
+	Profile          string   `yaml:"profile" json:"profile"`
+	RequiredArtifact string   `yaml:"required_artifact" json:"required_artifact"`
+	SubjectRoles     []string `yaml:"subject_roles" json:"subject_roles"`
+	Extensions       []string `yaml:"extensions,omitempty" json:"extensions,omitempty"`
 }
 
 // InteractionSpec declares capabilities that are only available to a

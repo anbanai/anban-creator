@@ -33,9 +33,12 @@ type TaskExecution struct {
 	// AgentPackRequiredArtifactContract freezes the complete set of artifacts
 	// that must be present and valid before this execution can succeed.
 	AgentPackRequiredArtifactContract datatypes.JSON `gorm:"type:json" json:"-"`
-	RuntimeAdapter                    string         `gorm:"type:varchar(40)" json:"runtime_adapter,omitempty"`
-	RuntimeProfile                    string         `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
-	RuntimeImage                      string         `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
+	// AgentPackTaggingContract freezes the Pack-owned semantic tagging contract
+	// used to validate the task's content-tags artifact on resume.
+	AgentPackTaggingContract datatypes.JSON `gorm:"type:json" json:"-"`
+	RuntimeAdapter           string         `gorm:"type:varchar(40)" json:"runtime_adapter,omitempty"`
+	RuntimeProfile           string         `gorm:"type:varchar(40)" json:"runtime_profile,omitempty"`
+	RuntimeImage             string         `gorm:"type:varchar(512)" json:"runtime_image,omitempty"`
 
 	ExecutionProfile   string            `gorm:"type:varchar(40);not null;index" json:"execution_profile"`
 	Provider           string            `gorm:"type:varchar(80);not null;index" json:"provider"`

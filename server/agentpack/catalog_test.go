@@ -90,6 +90,45 @@ delivery:
 	}
 }
 
+func TestLoadCatalogValidatesTaggingContract(t *testing.T) {
+	root := writePackFixture(t, `
+id: wechat-article
+version: 1.0.0
+kind: managed
+display_name: Demo Pack
+description: Demo managed workflow
+agent:
+  name: demo
+  claude_source: agent.claude.md
+  codex_source: agent.codex.toml
+  skills: [demo-skill]
+  max_turns: 60
+channel: wechat-article
+bindings:
+  task_kinds: [demo-task]
+runtime:
+  profile: wechat
+  adapter: standard
+  max_turns: 40
+surfaces: [task]
+billing_operations:
+  demo-task: task.demo
+artifacts:
+  - {role: final_markdown, path: output/final.md, mime_type: text/markdown, required: true}
+  - {role: content_tags, path: output/content-tags.json, mime_type: application/json, required: true}
+delivery:
+  - {role: final_markdown, path: output/final.md, mime_type: text/markdown}
+tagging:
+  enabled: true
+  profile: generic-content
+  required_artifact: output/content-tags.json
+  subject_roles: [missing]
+`)
+	if _, err := LoadCatalog(root); err == nil || !strings.Contains(err.Error(), "subject role") {
+		t.Fatalf("LoadCatalog error = %v, want subject role validation", err)
+	}
+}
+
 func TestLoadCatalogRequiresPlanTaskKindForPlanSurface(t *testing.T) {
 	manifest := strings.Replace(validFixtureManifest, "plan_task_kind: demo-task\n", "", 1)
 	root := writePackFixture(t, manifest)
@@ -194,7 +233,7 @@ func TestRequiredArtifactsForTaskTypeResolvesTaskSpecificArtifactContract(t *tes
 	if err != nil {
 		t.Fatalf("seednote required artifacts: %v", err)
 	}
-	if got := artifactPaths(seednote); !slices.Equal(got, []string{"output/content.md", "output/image-plan.md"}) {
+	if got := artifactPaths(seednote); !slices.Equal(got, []string{"output/content-tags.json", "output/content.md", "output/image-plan.md"}) {
 		t.Fatalf("seednote required artifacts = %v", got)
 	}
 
@@ -973,6 +1012,31 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if len(catalog.Packs) != 11 {
 		t.Fatalf("Pack count = %d, want 11", len(catalog.Packs))
 	}
+	contentPacks := []string{"wechat-article", "seednote", "ecommerce", "moments", "montage", "hypit", "wechat-picture", "whiteboard-animation"}
+	for _, id := range contentPacks {
+		pack, ok := catalog.Pack(id)
+		if !ok {
+			t.Errorf("content Pack %q missing", id)
+			continue
+		}
+		if pack.Tagging == nil || !pack.Tagging.Enabled {
+			t.Errorf("content Pack %q must enable tagging", id)
+			continue
+		}
+		if pack.Tagging.Profile != "generic-content" || pack.Tagging.RequiredArtifact != "output/content-tags.json" {
+			t.Errorf("content Pack %q tagging = %#v", id, pack.Tagging)
+		}
+	}
+	for _, id := range []string{"feedback-analysis", "profile-analysis", "project-creator"} {
+		pack, ok := catalog.Pack(id)
+		if !ok {
+			t.Errorf("non-content Pack %q missing", id)
+			continue
+		}
+		if pack.Tagging != nil {
+			t.Errorf("non-content Pack %q must not declare tagging: %#v", id, pack.Tagging)
+		}
+	}
 	creator, ok := catalog.Pack("project-creator")
 	if !ok {
 		t.Fatal("project-creator Pack missing")
@@ -1023,6 +1087,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 		t.Fatal("montage Pack missing")
 	} else {
 		wantRequiredArtifacts := []string{
+			"output/content-tags.json",
 			"output/final.mp4",
 			"output/montage-project.json",
 			"output/cover.png",
