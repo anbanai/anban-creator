@@ -469,7 +469,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	}
 	for _, want := range []string{
 		"FROM node:24.21.0-alpine3.24",
-		"apk add --no-cache ca-certificates ffmpeg tzdata",
+		"apk add --no-cache ca-certificates docker-cli ffmpeg tzdata",
 		"WORKDIR /build/server",
 		"COPY server/go.mod server/go.sum ./",
 		`RUN test "$(node --version)" = "v24.21.0"`,

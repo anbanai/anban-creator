@@ -19,12 +19,12 @@ RUN set -eux; \
 
 FROM node:24.21.0-alpine3.24
 RUN apk add --no-cache ca-certificates tzdata
-RUN addgroup -S -g 1000 anban && adduser -S -D -u 1000 -G anban anban
 WORKDIR /app
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
 COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
+COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js
 RUN node --input-type=module -e "await import('/app/harness/dsh/plugins/project-creator-restrictions.js'); await import('/app/harness/dsh/plugins/project-creator-context.js')"

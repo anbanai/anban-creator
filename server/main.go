@@ -731,11 +731,15 @@ func main() {
 	}
 	if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "container") {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
-		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ContainerRuntimeFactory{
+		dshFactory := service.ContainerRuntimeFactory{
 			Config: cfg.Dsh, ProjectMemoryRoot: cfg.Claude.ProjectMemory.RootDir,
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
-		})
+		}
+		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
+			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH containers")
+		}
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
 		if projectSvc != nil {
 			interactiveSvc.SetProjectService(projectSvc)
 		}

@@ -78,15 +78,8 @@ spec:
               value: "true"
             - name: ANBAN_ILINK_BASE_URL
               value: http://sidecar-ilink:18070
-            # The interactive Bridge uses the TLS Service URL so Node can
-            # validate the Server with the mounted internal CA. ClientIP
-            # affinity keeps a session's MCP requests on one Server replica.
-            - name: ANBAN_DSH_BRIDGE_DIR
-              value: /app/runtime-dsh
-            - name: ANBAN_DSH_BRIDGE_PATCH
-              value: /app/harness/dsh/project-creator.patch.yml
-            - name: ANBAN_DSH_BRIDGE_MCP_URL
-              value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443/mcp
+            # Interactive DSH sessions are launched as isolated workloads by
+            # the Server; the Server image does not embed the DSH runtime.
             - name: ANBAN_AGENT_EXECUTOR
               value: kubernetes
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL

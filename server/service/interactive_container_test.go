@@ -14,7 +14,7 @@ func TestContainerRuntimeFactoryUsesHardenedSessionSpec(t *testing.T) {
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "args")
 	script := filepath.Join(dir, "docker-fake.sh")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" > " + argsFile + "\nwhile IFS= read -r line; do case \"$line\" in *\\\"id\\\":1*) printf '%s\\n' '{\"id\":1,\"result\":{}}' ;; *shutdown*) exit 0 ;; esac; done\n"
+	body := "#!/bin/sh\nif [ \"$1\" = image ] && [ \"$2\" = inspect ]; then printf '%s\\n' 'sha256:" + strings.Repeat("b", 64) + "'; exit 0; fi\nprintf '%s\\n' \"$*\" > " + argsFile + "\nwhile IFS= read -r line; do case \"$line\" in *\\\"id\\\":1*) printf '%s\\n' '{\"id\":1,\"result\":{}}' ;; *shutdown*) exit 0 ;; esac; done\n"
 	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}

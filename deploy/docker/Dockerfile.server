@@ -14,7 +14,7 @@ FROM node:24.21.0-alpine3.24
 
 
 RUN set -eux; \
-    apk add --no-cache ca-certificates ffmpeg tzdata; \
+    apk add --no-cache ca-certificates docker-cli ffmpeg tzdata; \
     mkdir -p \
       /app/data/files \
       /app/data/workspace \
