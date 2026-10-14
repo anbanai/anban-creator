@@ -488,12 +488,10 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	sess.runtime = rt
 	sess.mu.Unlock()
 	if e = rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID, "initialContext": sess.initialContext}); e != nil {
-		_ = rt.Close()
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{
 			"status":  "runtime_failed",
 			"message": fmt.Sprintf("interactive runtime failed to initialize: %v", e),
 		})
-		s.closeSession(sess.ID, false)
 		return
 	}
 	sess.mu.Lock()

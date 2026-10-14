@@ -54,6 +54,35 @@ func (interactiveCommandFailingRuntimeFactory) Start(context.Context, string, st
 	return &interactiveTestRuntime{commandErr: errors.New("bridge failed to initialize")}, nil
 }
 
+type interactiveShutdownAckRuntimeFactory struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f interactiveShutdownAckRuntimeFactory) Start(_ context.Context, _ string, _ string, _ string, emit func(string, any)) (Runtime, error) {
+	return &interactiveShutdownAckRuntime{emit: emit, started: f.started, release: f.release}, nil
+}
+
+type interactiveShutdownAckRuntime struct {
+	emit    func(string, any)
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *interactiveShutdownAckRuntime) Command(_ context.Context, method string, _ any) error {
+	if method == "session/start" {
+		close(r.started)
+		<-r.release
+		return errors.New("bridge failed to initialize")
+	}
+	return nil
+}
+
+func (r *interactiveShutdownAckRuntime) Close() error {
+	r.emit("session.closed", map[string]any{})
+	return nil
+}
+
 type interactiveExitAfterStartRuntimeFactory struct{}
 
 func (interactiveExitAfterStartRuntimeFactory) Start(_ context.Context, _ string, _ string, _ string, emit func(string, any)) (Runtime, error) {
@@ -319,6 +348,57 @@ func TestInteractiveRuntimeInitializationFailureIncludesBridgeError(t *testing.T
 	message, _ := data["message"].(string)
 	if !ok || !strings.Contains(message, "bridge failed to initialize") {
 		t.Fatalf("session.error data = %#v, want bridge diagnostic", history[0].Data)
+	}
+}
+
+func TestInteractiveRuntimeInitializationFailureDoesNotExposeShutdownAck(t *testing.T) {
+	factory := interactiveShutdownAckRuntimeFactory{started: make(chan struct{}), release: make(chan struct{})}
+	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, factory, []InteractiveAgent{{
+		ID: "project-creator", DisplayName: "Project Creator", Available: true, Intents: []string{"create-project"},
+	}})
+	svc.SetEnabled(true)
+	svc.tombstoneTTL = time.Minute
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(factory.release) }) }
+	defer release()
+	select {
+	case <-factory.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for session/start")
+	}
+
+	history, events, closeEvents, err := svc.Events("user-1", sess.ID, 0)
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	defer closeEvents()
+	if len(history) != 0 {
+		t.Fatalf("initial event history = %#v, want no events before session/start fails", history)
+	}
+
+	release()
+	select {
+	case event, ok := <-events:
+		if !ok {
+			t.Fatal("event stream closed before reporting the startup failure")
+		}
+		if event.Type != "session.error" {
+			t.Fatalf("first event = %q, want session.error before the Bridge shutdown acknowledgement", event.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for startup failure")
+	}
+	select {
+	case event, ok := <-events:
+		if ok {
+			t.Fatalf("unexpected event after startup failure: %q", event.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("event stream remained open after startup failure")
 	}
 }
 
