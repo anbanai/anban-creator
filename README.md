@@ -287,7 +287,7 @@ control variables are optional and may be removed to use provider defaults.
 Invalid or incomplete configured profiles fail closed; execution never falls
 back to another profile or model.
 
-DSH interactive sessions run in one isolated container per session and have an independent route table under `dsh.routes`.
+DSH interactive sessions run in one isolated workload per session and have an independent route table under `dsh.routes`. Use `executor: kubernetes` with a digest-pinned image on ACK; the Server creates a non-restarting Pod and attaches through `pods/exec`. Use `executor: container` for local Docker development.
 `dsh.route` selects one route for the next session; it does not read or modify
 `claude.profiles`. A route declares its provider, wire API, endpoint, model,
 and the credential value using the same `${...}` expansion as Claude:

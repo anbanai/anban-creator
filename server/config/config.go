@@ -57,27 +57,33 @@ type Config struct {
 type DshConfig struct {
 	Enabled   bool `yaml:"enabled"`
 	AdminOnly bool `yaml:"admin_only"`
-	// Executor is "container" in deployed environments. "process" is an
-	// explicit local-development escape hatch and is never selected implicitly.
-	Executor            string                    `yaml:"executor"`
-	Image               string                    `yaml:"image"`
-	DockerBinary        string                    `yaml:"docker_binary"`
-	Network             string                    `yaml:"network"`
-	ProjectMemoryVolume string                    `yaml:"project_memory_volume"`
-	ProjectMemoryMount  string                    `yaml:"project_memory_mount"`
-	ServerURL           string                    `yaml:"server_url"`
-	ServerInstanceID    string                    `yaml:"server_instance_id"`
-	CPUCores            int64                     `yaml:"cpu_cores"`
-	MemoryMB            int64                     `yaml:"memory_mb"`
-	PidsLimit           int64                     `yaml:"pids_limit"`
-	TimeoutSec          int                       `yaml:"timeout_sec"`
-	BridgeCommand       string                    `yaml:"bridge_command"`
-	BridgeArgs          []string                  `yaml:"bridge_args"`
-	BridgeDir           string                    `yaml:"bridge_dir"`
-	DSHPatch            string                    `yaml:"dsh_patch"`
-	MCPURL              string                    `yaml:"mcp_url"`
-	Route               string                    `yaml:"route"`
-	Routes              map[string]DshRouteConfig `yaml:"routes"`
+	// Executor is "container" for local Docker and "kubernetes" for ACK.
+	// "process" is an explicit local-development escape hatch and is never
+	// selected implicitly.
+	Executor                     string                    `yaml:"executor"`
+	Image                        string                    `yaml:"image"`
+	DockerBinary                 string                    `yaml:"docker_binary"`
+	Network                      string                    `yaml:"network"`
+	ProjectMemoryVolume          string                    `yaml:"project_memory_volume"`
+	ProjectMemoryMount           string                    `yaml:"project_memory_mount"`
+	KubernetesNamespace          string                    `yaml:"kubernetes_namespace"`
+	KubernetesServiceAccount     string                    `yaml:"kubernetes_service_account"`
+	KubernetesImagePullSecret    string                    `yaml:"kubernetes_image_pull_secret"`
+	KubernetesProjectMemoryClaim string                    `yaml:"kubernetes_project_memory_claim"`
+	KubernetesProjectMemoryMount string                    `yaml:"kubernetes_project_memory_mount"`
+	ServerURL                    string                    `yaml:"server_url"`
+	ServerInstanceID             string                    `yaml:"server_instance_id"`
+	CPUCores                     int64                     `yaml:"cpu_cores"`
+	MemoryMB                     int64                     `yaml:"memory_mb"`
+	PidsLimit                    int64                     `yaml:"pids_limit"`
+	TimeoutSec                   int                       `yaml:"timeout_sec"`
+	BridgeCommand                string                    `yaml:"bridge_command"`
+	BridgeArgs                   []string                  `yaml:"bridge_args"`
+	BridgeDir                    string                    `yaml:"bridge_dir"`
+	DSHPatch                     string                    `yaml:"dsh_patch"`
+	MCPURL                       string                    `yaml:"mcp_url"`
+	Route                        string                    `yaml:"route"`
+	Routes                       map[string]DshRouteConfig `yaml:"routes"`
 }
 
 type DshRouteConfig struct {
@@ -94,6 +100,8 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 		"bridge_dir": true, "dsh_patch": true, "mcp_url": true, "route": true, "routes": true,
 		"executor": true, "image": true, "docker_binary": true, "network": true,
 		"project_memory_volume": true, "project_memory_mount": true, "server_url": true,
+		"kubernetes_namespace": true, "kubernetes_service_account": true, "kubernetes_image_pull_secret": true,
+		"kubernetes_project_memory_claim": true, "kubernetes_project_memory_mount": true,
 		"server_instance_id": true, "cpu_cores": true, "memory_mb": true, "pids_limit": true,
 		"timeout_sec": true,
 	}); err != nil {
@@ -130,8 +138,8 @@ func (c *DshRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 func (c DshConfig) Validate() error {
 	var errs []string
 	executor := strings.ToLower(strings.TrimSpace(c.Executor))
-	if c.Enabled && executor != "container" && executor != "process" {
-		errs = append(errs, "dsh.executor must be container or process when dsh.enabled is true")
+	if c.Enabled && executor != "container" && executor != "kubernetes" && executor != "process" {
+		errs = append(errs, "dsh.executor must be container, kubernetes, or process when dsh.enabled is true")
 	}
 	if executor == "container" {
 		if strings.TrimSpace(c.Image) == "" {
@@ -154,6 +162,30 @@ func (c DshConfig) Validate() error {
 		}
 		if strings.TrimSpace(c.ServerInstanceID) == "" {
 			errs = append(errs, "dsh.server_instance_id is required for container executor")
+		}
+	}
+	if executor == "kubernetes" {
+		if strings.TrimSpace(c.Image) == "" || !dshImageDigestRe.MatchString(strings.TrimSpace(c.Image)) {
+			errs = append(errs, "dsh.image must be an immutable digest for kubernetes executor")
+		}
+		if strings.TrimSpace(c.KubernetesNamespace) == "" {
+			errs = append(errs, "dsh.kubernetes_namespace is required for kubernetes executor")
+		}
+		if strings.TrimSpace(c.KubernetesServiceAccount) == "" {
+			errs = append(errs, "dsh.kubernetes_service_account is required for kubernetes executor")
+		}
+		if strings.TrimSpace(c.KubernetesProjectMemoryClaim) == "" {
+			errs = append(errs, "dsh.kubernetes_project_memory_claim is required for kubernetes executor")
+		}
+		mount := strings.TrimSpace(c.KubernetesProjectMemoryMount)
+		if mount == "" || !filepath.IsAbs(mount) {
+			errs = append(errs, "dsh.kubernetes_project_memory_mount must be an absolute path")
+		}
+		if c.CPUCores <= 0 || c.MemoryMB <= 0 || c.TimeoutSec <= 0 {
+			errs = append(errs, "dsh kubernetes resource limits must be positive")
+		}
+		if strings.TrimSpace(c.ServerURL) == "" || strings.TrimSpace(c.ServerInstanceID) == "" {
+			errs = append(errs, "dsh.server_url and dsh.server_instance_id are required for kubernetes executor")
 		}
 	}
 	if len(c.Routes) == 0 {
@@ -1198,6 +1230,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 // expanded, so a literal '$' in a value (e.g. a password) is never touched.
 // Submatch 1 = variable name; submatch 2 = default text (nil when no :-group).
 var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}`)
+var dshImageDigestRe = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
 
 // expandEnvVars replaces ${VAR} / ${VAR:-default} occurrences in the raw config
 // text using the process environment. A referenced variable that is unset (or
@@ -1258,6 +1291,21 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Dsh.ProjectMemoryMount == "" {
 		c.Dsh.ProjectMemoryMount = "/workspace/project"
+	}
+	if c.Dsh.KubernetesNamespace == "" {
+		c.Dsh.KubernetesNamespace = c.Claude.Kubernetes.Namespace
+	}
+	if c.Dsh.KubernetesServiceAccount == "" {
+		c.Dsh.KubernetesServiceAccount = c.Claude.Kubernetes.ServiceAccount
+	}
+	if c.Dsh.KubernetesImagePullSecret == "" {
+		c.Dsh.KubernetesImagePullSecret = c.Claude.Kubernetes.ImagePullSecret
+	}
+	if c.Dsh.KubernetesProjectMemoryClaim == "" {
+		c.Dsh.KubernetesProjectMemoryClaim = c.Claude.Kubernetes.ProjectMemoryClaim
+	}
+	if c.Dsh.KubernetesProjectMemoryMount == "" {
+		c.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
 	}
 	if c.Dsh.CPUCores == 0 {
 		c.Dsh.CPUCores = 1

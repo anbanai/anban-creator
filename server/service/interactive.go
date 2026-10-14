@@ -2005,7 +2005,10 @@ func (r *execRuntime) Close() error {
 	case <-r.done:
 		return nil
 	case <-time.After(3 * time.Second):
-		err := r.cmd.Process.Kill()
+		var err error
+		if r.cmd != nil && r.cmd.Process != nil {
+			err = r.cmd.Process.Kill()
+		}
 		if r.cleanup != nil {
 			r.cleanupOnce.Do(r.cleanup)
 		}

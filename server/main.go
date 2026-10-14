@@ -744,6 +744,29 @@ func main() {
 			interactiveSvc.SetProjectService(projectSvc)
 		}
 		interactiveSvc.SetEnabled(true)
+	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "kubernetes") {
+		restConfig, err := rest.InClusterConfig()
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to load Kubernetes in-cluster config for DSH")
+		}
+		kubeClient, err := kubernetes.NewForConfig(restConfig)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to create Kubernetes client for DSH")
+		}
+		route := cfg.Dsh.Routes[cfg.Dsh.Route]
+		dshFactory := service.KubernetesRuntimeFactory{
+			Config: cfg.Dsh, Kube: kubeClient, REST: restConfig,
+			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
+			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
+		}
+		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
+			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH pods")
+		}
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
+		if projectSvc != nil {
+			interactiveSvc.SetProjectService(projectSvc)
+		}
+		interactiveSvc.SetEnabled(true)
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "process") && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{

@@ -137,8 +137,11 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if !roleAllows(role, "pods", "get", "list", "watch") || !roleAllows(role, "pods/log", "get", "list", "watch") {
 		t.Fatalf("Role must allow Pod and log reads: %#v", role.Rules)
 	}
-	if roleAllows(role, "pods", "create") || roleAllows(role, "pods/exec", "create") {
-		t.Fatalf("Role must not allow Pod creation or exec: %#v", role.Rules)
+	if !roleAllows(role, "pods", "create", "delete") || !roleAllows(role, "pods/exec", "create") {
+		t.Fatalf("Role must allow interactive DSH Pod creation, deletion, and exec: %#v", role.Rules)
+	}
+	if !roleAllows(role, "secrets", "get", "list", "create", "delete") {
+		t.Fatalf("Role must allow per-session DSH Secret lifecycle: %#v", role.Rules)
 	}
 	clusterRole := parsedDocs[3]
 	if !roleAllows(clusterRole, "tokenreviews", "create") || len(clusterRole.Rules) != 1 || !containsString(clusterRole.Rules[0].APIGroups, "authentication.k8s.io") {
