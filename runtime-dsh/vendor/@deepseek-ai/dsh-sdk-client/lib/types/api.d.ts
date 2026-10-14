@@ -48,11 +48,18 @@ export declare class DeepSeekHarness implements AsyncDisposable {
     start(): Promise<void>;
     /**
      * Open a session handle (no wire traffic; the runtime creates the session
-     * on its first prompt).
+     * on its first prompt or working-directory operation).
      * @param sessionId - explicit id to reuse; omitted mints a fresh one.
      * @returns the session handle.
      */
     session(sessionId?: string): HarnessSession;
+    /**
+     * Start the runtime and restore a persisted session without sending input.
+     * The configured Harness home must contain its history; missing or occupied sessions reject.
+     * @param sessionId - exact persisted identity to continue.
+     * @returns a handle ready to run new prompts on the restored history.
+     */
+    resumeSession(sessionId: string): Promise<HarnessSession>;
     /**
      * Run one prompt on a fresh (or named) session.
      * @param input - prompt text, or content blocks sent verbatim.
@@ -93,6 +100,17 @@ export declare class HarnessSession {
      */
     constructor(harness: DeepSeekHarness, id: string);
     /**
+     * Read the effective directory and recover a missing directory to the Session origin.
+     * @returns the absolute directory used by new independent operations.
+     */
+    getWorkingDirectory(): Promise<string>;
+    /**
+     * Change the effective directory without moving existing processes or changing permissions.
+     * @param path - absolute or Session-current-directory-relative directory.
+     * @returns the validated absolute directory.
+     */
+    setWorkingDirectory(path: string): Promise<string>;
+    /**
      * Queue one prompt, then observe the whole session through its next idle.
      * @param input - prompt text, or content blocks sent verbatim.
      * @param options - optional per-notification observer.
@@ -107,6 +125,12 @@ export declare class HarnessSession {
  * @returns the content blocks to send.
  */
 export declare function normalizeInput(input: string | SdkPromptContentBlock[]): SdkPromptContentBlock[];
+/**
+ * Validate the event envelope and assistant/turn fields consumed by SDK readers.
+ * @param value - the raw `session.event` event payload.
+ * @returns the event, or throws a protocol error for malformed consumed fields.
+ */
+export declare function validatedSessionEvent(value: unknown): SessionEvent;
 /**
  * Extract the concatenated text of the last assistant message.
  * @param events - the activity interval's `session.event` payloads in wire order.

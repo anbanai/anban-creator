@@ -5,12 +5,12 @@
  * @module @deepseek-ai/dsh-sdk-jsonrpc-server/server
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { InitializeParams, InitializeResult, JsonRpcTransportPeer, SessionAnswerParams, SessionAnswerResult, SessionPromptParams, SessionPromptResult, SessionStartParams, SessionStartReceipt } from '@deepseek-ai/dsh-sdk-protocol';
+import type { InitializeParams, InitializeResult, JsonRpcTransportPeer, SessionPromptParams, SessionPromptResult, SessionResumeParams, SessionWaitParams, SessionWorkingDirectoryParams, SessionWorkingDirectorySetParams, SessionWorkingDirectoryResult } from '@deepseek-ai/dsh-sdk-protocol';
 /** Deployment-specific status mapping for SDK turn and subagent outcomes. */
 export interface HarnessSdkJsonRpcServerOptions {
     /** Report max-token termination as an accepted result instead of an infrastructure error. */
     maxTokensAsSuccess?: boolean;
-    /** Register a headless user-question answerer for interactive runtimes only. */
+    /** Bridge user questions through explicit session/answer requests. */
     interactiveQuestions?: boolean;
 }
 /**
@@ -30,7 +30,6 @@ export declare class HarnessSdkJsonRpcServer {
     private llmFiber;
     private readonly sessions;
     private readonly sessionCreations;
-    private readonly pendingQuestions;
     private readonly disposers;
     private shutdownTask;
     private shuttingDown;
@@ -42,6 +41,8 @@ export declare class HarnessSdkJsonRpcServer {
      * @returns server identity for the handshake.
      */
     initialize(params: InitializeParams): Promise<InitializeResult>;
+    start(params: { sessionId: string; presetId: string }): Promise<{ sessionId: string; presetId: string }>;
+    answer(params: { sessionId: string; callId: string; answer: { answers: Array<{ id: string; selected: string[]; custom?: string }> } }): Promise<{ accepted: true }>;
     /**
      * Queue one identified prompt without assigning later activity to it.
      * @param params - target session and user content.
@@ -49,23 +50,38 @@ export declare class HarnessSdkJsonRpcServer {
      */
     prompt(params: SessionPromptParams): Promise<SessionPromptResult>;
     /**
-     * Create an empty session and bind one pre-registered DSH preset before any
-     * model turn can start. Preset documents and plugin paths never cross this
-     * protocol boundary.
+     * Restore a persisted session and repair its interrupted final turn without sending input.
+     * Uses the initialized model route while preserving the stored session identity and directory.
+     * Rejects missing, unreadable, or already owned sessions; never creates a replacement.
+     * @param params - persisted session identity in the configured persistence store.
+     * @returns an empty result after the Agent is ready for prompts.
      */
-    start(params: SessionStartParams): Promise<SessionStartReceipt>;
+    resume(params: SessionResumeParams): Promise<Record<string, never>>;
     /**
-     * Answer exactly one live root Agent question through DSH's existing
-     * userQuestions service, preserving its call ownership and answer checks.
+     * Wait for an existing owned Agent and its managed descendants to finish.
+     * The response follows all Session notifications emitted during the wait.
+     * Rejects a live Agent failure that has no subsequent durable terminal.
+     * @param params - the SDK-owned session to observe without creating one.
+     * @returns an empty result after the root stays idle across the descendant check.
      */
-    answer(params: SessionAnswerParams): Promise<SessionAnswerResult>;
-    private questionKey;
-    private cloneAnswer;
-    private validateAnswer;
-    private handleHeadlessQuestion;
+    wait(params: SessionWaitParams): Promise<Record<string, never>>;
     private assertLiveAgent;
     /**
+     * Read a Session's effective directory, recovering a missing directory to its origin.
+     * @param params - target Session; an unknown id creates it.
+     * @returns the absolute effective directory.
+     */
+    getWorkingDirectory(params: SessionWorkingDirectoryParams): Promise<SessionWorkingDirectoryResult>;
+    /**
+     * Change a Session's directory and queue its model-visible transition.
+     * @param params - target Session and absolute or current-directory-relative path.
+     * @returns the validated absolute directory; origin and permissions are unchanged.
+     */
+    setWorkingDirectory(params: SessionWorkingDirectorySetParams): Promise<SessionWorkingDirectoryResult>;
+    private workingDirectoryAgent;
+    /**
      * Dispose server-owned agents, adapter, and subscriptions to quiescence.
+     * Managed descendants drain before the root Agent handles and adapter are released.
      * The surrounding context remains running.
      * @returns empty JSON-RPC result.
      */
@@ -80,6 +96,7 @@ export declare class HarnessSdkJsonRpcServer {
      */
     handleRequest(method: string, params: Record<string, unknown> | undefined): Promise<unknown>;
     private getOrCreateSession;
+    private openSession;
     private createSession;
     private hasAdapterFor;
 }

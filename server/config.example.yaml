@@ -96,6 +96,18 @@ search:
 dsh:
   enabled: false
   admin_only: false
+  executor: "${ANBAN_DSH_EXECUTOR:-container}"
+  image: "${ANBAN_DSH_IMAGE:-creator-dsh-runtime:latest}"
+  docker_binary: "docker"
+  network: "${ANBAN_DSH_NETWORK:-creator-runtime-network}"
+  project_memory_volume: "${ANBAN_DSH_PROJECT_MEMORY_VOLUME:-creator-project-memory}"
+  project_memory_mount: "/workspace/project"
+  server_url: "${ANBAN_DSH_SERVER_URL:-http://server:8080}"
+  server_instance_id: "${HOSTNAME:-local}"
+  cpu_cores: 1
+  memory_mb: 1024
+  pids_limit: 256
+  timeout_sec: 1800
   bridge_command: "node"
   bridge_args: ["dist/dsh-bridge.js"]
   bridge_dir: "${ANBAN_DSH_BRIDGE_DIR:-./runtime-dsh}"

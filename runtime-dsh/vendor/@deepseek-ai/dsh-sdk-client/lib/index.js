@@ -421,17 +421,17 @@ var HarnessClient = class {
 		const result = await this.request("initialize", { ...params }, this.runtime.initializeTimeoutMs);
 		if (!isRecord(result) || !isRecord(result.serverInfo) || typeof result.serverInfo.name !== "string" || typeof result.serverInfo.version !== "string") throw new SdkProtocolError(`initialize returned no server identity: ${JSON.stringify(result)}`);
 		const advertised = isRecord(result.capabilities) ? result.capabilities : void 0;
-		const capabilities = advertised && {
-			...typeof advertised.sessionStart === "boolean" ? { sessionStart: advertised.sessionStart } : {},
-			...typeof advertised.sessionAnswer === "boolean" ? { sessionAnswer: advertised.sessionAnswer } : {}
-		};
-		return {
-			serverInfo: {
-				name: result.serverInfo.name,
-				version: result.serverInfo.version
-			},
-			...capabilities ? { capabilities } : {}
-		};
+		return { serverInfo: { name: result.serverInfo.name, version: result.serverInfo.version }, ...advertised === void 0 ? {} : { capabilities: advertised } };
+	}
+	async startSession(sessionId, presetId) {
+		const result = await this.request("session/start", { sessionId, presetId });
+		if (!isRecord(result) || result.sessionId !== sessionId || result.presetId !== presetId) throw new SdkProtocolError(`session/start returned an invalid receipt: ${JSON.stringify(result)}`);
+		return { sessionId, presetId };
+	}
+	async answerSession(sessionId, callId, answer) {
+		const result = await this.request("session/answer", { sessionId, callId, answer });
+		if (!isRecord(result) || result.accepted !== true) throw new SdkProtocolError(`session/answer was not accepted: ${JSON.stringify(result)}`);
+		return { accepted: true };
 	}
 	/**
 	* Queue one prompt and return its durable inbox identity.
@@ -448,28 +448,38 @@ var HarnessClient = class {
 		if (!isRecord(result) || typeof result.messageId !== "string") throw new SdkProtocolError(`session/prompt returned no message id: ${JSON.stringify(result)}`);
 		return result.messageId;
 	}
-	/** Create a blank session and bind one registered preset before prompting. */
-	async startSession(sessionId, presetId) {
-		const params = {
-			sessionId,
-			presetId
-		};
-		const result = await this.request("session/start", { ...params });
-		if (!isRecord(result) || result.sessionId !== sessionId || result.presetId !== presetId) throw new SdkProtocolError(`session/start returned an invalid receipt: ${JSON.stringify(result)}`);
-		return {
-			sessionId,
-			presetId
-		};
+	/**
+	* Restore persisted history without sending a prompt; failures propagate without creating a session.
+	* @param sessionId - persisted identity in this runtime's configured persistence store.
+	* @returns after the session is ready for prompts.
+	*/
+	async resumeSession(sessionId) {
+		await this.request("session/resume", { sessionId });
 	}
-	/** Answer a pending root-agent AskUserQuestion call. */
-	async answerSession(sessionId, callId, answer) {
-		const params = {
+	/**
+	* Read a Session's effective working directory, recovering it if missing.
+	* @param sessionId - target Session; an unknown id creates it.
+	* @returns the absolute effective directory.
+	*/
+	getWorkingDirectory(sessionId) {
+		return this.workingDirectoryRequest("session/working-directory/get", { sessionId });
+	}
+	/**
+	* Change a Session's effective directory without changing origin or permissions.
+	* @param sessionId - target Session; an unknown id creates it.
+	* @param path - absolute or Session-current-directory-relative path.
+	* @returns the validated absolute directory.
+	*/
+	setWorkingDirectory(sessionId, path) {
+		return this.workingDirectoryRequest("session/working-directory/set", {
 			sessionId,
-			callId,
-			answer
-		};
-		const result = await this.request("session/answer", { ...params });
-		if (!isRecord(result) || result.accepted !== true) throw new SdkProtocolError(`session/answer was not accepted: ${JSON.stringify(result)}`);
+			path
+		});
+	}
+	async workingDirectoryRequest(method, params) {
+		const result = await this.request(method, params);
+		if (!isRecord(result) || typeof result.cwd !== "string") throw new SdkProtocolError(`${method} returned no working directory: ${JSON.stringify(result)}`);
+		return result.cwd;
 	}
 	/**
 	* Send one JSON-RPC request and await its result.
@@ -713,12 +723,23 @@ var DeepSeekHarness = class {
 	}
 	/**
 	* Open a session handle (no wire traffic; the runtime creates the session
-	* on its first prompt).
+	* on its first prompt or working-directory operation).
 	* @param sessionId - explicit id to reuse; omitted mints a fresh one.
 	* @returns the session handle.
 	*/
 	session(sessionId) {
 		return new HarnessSession(this, sessionId ?? `session-${randomUUID().replaceAll("-", "")}`);
+	}
+	/**
+	* Start the runtime and restore a persisted session without sending input.
+	* The configured Harness home must contain its history; missing or occupied sessions reject.
+	* @param sessionId - exact persisted identity to continue.
+	* @returns a handle ready to run new prompts on the restored history.
+	*/
+	async resumeSession(sessionId) {
+		await this.start();
+		await this.client.resumeSession(sessionId);
+		return new HarnessSession(this, sessionId);
 	}
 	/**
 	* Run one prompt on a fresh (or named) session.
@@ -759,6 +780,23 @@ var HarnessSession = class {
 	constructor(harness, id) {
 		this.harness = harness;
 		this.id = id;
+	}
+	/**
+	* Read the effective directory and recover a missing directory to the Session origin.
+	* @returns the absolute directory used by new independent operations.
+	*/
+	async getWorkingDirectory() {
+		await this.harness.start();
+		return this.harness.client.getWorkingDirectory(this.id);
+	}
+	/**
+	* Change the effective directory without moving existing processes or changing permissions.
+	* @param path - absolute or Session-current-directory-relative directory.
+	* @returns the validated absolute directory.
+	*/
+	async setWorkingDirectory(path) {
+		await this.harness.start();
+		return this.harness.client.setWorkingDirectory(this.id, path);
 	}
 	/**
 	* Queue one prompt, then observe the whole session through its next idle.
@@ -837,7 +875,11 @@ function validatedTurnEndReason(value) {
 	}
 	return value;
 }
-/** Validate the fields in a wire `session.event` envelope before returning the typed result. */
+/**
+* Validate the event envelope and assistant/turn fields consumed by SDK readers.
+* @param value - the raw `session.event` event payload.
+* @returns the event, or throws a protocol error for malformed consumed fields.
+*/
 function validatedSessionEvent(value) {
 	if (!isRecord(value) || typeof value.type !== "string") throw new SdkProtocolError(`session.event carried no event envelope: ${JSON.stringify(value)}`);
 	if (value.type === "assistant/message") {
@@ -872,4 +914,4 @@ function finalResponse(events) {
 	return "";
 }
 //#endregion
-export { DeepSeekHarness, HarnessClient, HarnessSession, JsonRpcResponseError, RequestTimeoutError, SdkProtocolError, TransportClosedError };
+export { DeepSeekHarness, HarnessClient, HarnessSession, JsonRpcResponseError, RequestTimeoutError, SdkProtocolError, TransportClosedError, validatedSessionEvent };

@@ -729,7 +729,18 @@ func main() {
 	if projectSvc != nil {
 		interactiveSvc.SetProjectService(projectSvc)
 	}
-	if cfg.Dsh.Enabled && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
+	if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "container") {
+		route := cfg.Dsh.Routes[cfg.Dsh.Route]
+		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ContainerRuntimeFactory{
+			Config: cfg.Dsh, ProjectMemoryRoot: cfg.Claude.ProjectMemory.RootDir,
+			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
+			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
+		})
+		if projectSvc != nil {
+			interactiveSvc.SetProjectService(projectSvc)
+		}
+		interactiveSvc.SetEnabled(true)
+	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "process") && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{
 			Command:  cfg.Dsh.BridgeCommand,

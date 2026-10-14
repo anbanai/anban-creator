@@ -55,15 +55,29 @@ type Config struct {
 
 // DshConfig owns the independent DSH interactive runtime configuration.
 type DshConfig struct {
-	Enabled       bool                      `yaml:"enabled"`
-	AdminOnly     bool                      `yaml:"admin_only"`
-	BridgeCommand string                    `yaml:"bridge_command"`
-	BridgeArgs    []string                  `yaml:"bridge_args"`
-	BridgeDir     string                    `yaml:"bridge_dir"`
-	DSHPatch      string                    `yaml:"dsh_patch"`
-	MCPURL        string                    `yaml:"mcp_url"`
-	Route         string                    `yaml:"route"`
-	Routes        map[string]DshRouteConfig `yaml:"routes"`
+	Enabled   bool `yaml:"enabled"`
+	AdminOnly bool `yaml:"admin_only"`
+	// Executor is "container" in deployed environments. "process" is an
+	// explicit local-development escape hatch and is never selected implicitly.
+	Executor            string                    `yaml:"executor"`
+	Image               string                    `yaml:"image"`
+	DockerBinary        string                    `yaml:"docker_binary"`
+	Network             string                    `yaml:"network"`
+	ProjectMemoryVolume string                    `yaml:"project_memory_volume"`
+	ProjectMemoryMount  string                    `yaml:"project_memory_mount"`
+	ServerURL           string                    `yaml:"server_url"`
+	ServerInstanceID    string                    `yaml:"server_instance_id"`
+	CPUCores            int64                     `yaml:"cpu_cores"`
+	MemoryMB            int64                     `yaml:"memory_mb"`
+	PidsLimit           int64                     `yaml:"pids_limit"`
+	TimeoutSec          int                       `yaml:"timeout_sec"`
+	BridgeCommand       string                    `yaml:"bridge_command"`
+	BridgeArgs          []string                  `yaml:"bridge_args"`
+	BridgeDir           string                    `yaml:"bridge_dir"`
+	DSHPatch            string                    `yaml:"dsh_patch"`
+	MCPURL              string                    `yaml:"mcp_url"`
+	Route               string                    `yaml:"route"`
+	Routes              map[string]DshRouteConfig `yaml:"routes"`
 }
 
 type DshRouteConfig struct {
@@ -78,6 +92,10 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := validateYAMLMappingFields(value, "dsh", map[string]bool{
 		"enabled": true, "admin_only": true, "bridge_command": true, "bridge_args": true,
 		"bridge_dir": true, "dsh_patch": true, "mcp_url": true, "route": true, "routes": true,
+		"executor": true, "image": true, "docker_binary": true, "network": true,
+		"project_memory_volume": true, "project_memory_mount": true, "server_url": true,
+		"server_instance_id": true, "cpu_cores": true, "memory_mb": true, "pids_limit": true,
+		"timeout_sec": true,
 	}); err != nil {
 		return err
 	}
@@ -111,6 +129,33 @@ func (c *DshRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 
 func (c DshConfig) Validate() error {
 	var errs []string
+	executor := strings.ToLower(strings.TrimSpace(c.Executor))
+	if c.Enabled && executor != "container" && executor != "process" {
+		errs = append(errs, "dsh.executor must be container or process when dsh.enabled is true")
+	}
+	if executor == "container" {
+		if strings.TrimSpace(c.Image) == "" {
+			errs = append(errs, "dsh.image is required for container executor")
+		}
+		if strings.TrimSpace(c.Network) == "" {
+			errs = append(errs, "dsh.network is required for container executor")
+		}
+		if strings.TrimSpace(c.ProjectMemoryVolume) == "" {
+			errs = append(errs, "dsh.project_memory_volume is required for container executor")
+		}
+		if strings.TrimSpace(c.ProjectMemoryMount) == "" || !filepath.IsAbs(c.ProjectMemoryMount) {
+			errs = append(errs, "dsh.project_memory_mount must be an absolute path")
+		}
+		if c.CPUCores <= 0 || c.MemoryMB <= 0 || c.PidsLimit <= 0 || c.TimeoutSec <= 0 {
+			errs = append(errs, "dsh container resource limits must be positive")
+		}
+		if strings.TrimSpace(c.ServerURL) == "" {
+			errs = append(errs, "dsh.server_url is required for container executor")
+		}
+		if strings.TrimSpace(c.ServerInstanceID) == "" {
+			errs = append(errs, "dsh.server_instance_id is required for container executor")
+		}
+	}
 	if len(c.Routes) == 0 {
 		if c.Enabled || strings.TrimSpace(c.Route) != "" {
 			errs = append(errs, "dsh.routes must contain at least one route")
@@ -1196,6 +1241,45 @@ func (c *Config) applyDefaults() {
 	if c.Dsh.BridgeDir == "" {
 		c.Dsh.BridgeDir = "./runtime-dsh"
 	}
+	if c.Dsh.Executor == "" {
+		c.Dsh.Executor = "container"
+	}
+	if c.Dsh.Image == "" {
+		c.Dsh.Image = "creator-dsh-runtime:latest"
+	}
+	if c.Dsh.DockerBinary == "" {
+		c.Dsh.DockerBinary = "docker"
+	}
+	if c.Dsh.Network == "" {
+		c.Dsh.Network = c.Claude.Docker.Network
+	}
+	if c.Dsh.ProjectMemoryVolume == "" {
+		c.Dsh.ProjectMemoryVolume = c.Claude.Docker.ProjectMemoryVolume
+	}
+	if c.Dsh.ProjectMemoryMount == "" {
+		c.Dsh.ProjectMemoryMount = "/workspace/project"
+	}
+	if c.Dsh.CPUCores == 0 {
+		c.Dsh.CPUCores = 1
+	}
+	if c.Dsh.MemoryMB == 0 {
+		c.Dsh.MemoryMB = 1024
+	}
+	if c.Dsh.PidsLimit == 0 {
+		c.Dsh.PidsLimit = 256
+	}
+	if c.Dsh.TimeoutSec == 0 {
+		c.Dsh.TimeoutSec = 1800
+	}
+	if c.Dsh.ServerURL == "" {
+		c.Dsh.ServerURL = c.AgentServerURL()
+	}
+	if c.Dsh.ServerInstanceID == "" {
+		c.Dsh.ServerInstanceID = strings.TrimSpace(os.Getenv("HOSTNAME"))
+		if c.Dsh.ServerInstanceID == "" {
+			c.Dsh.ServerInstanceID = "local"
+		}
+	}
 	if c.Dsh.DSHPatch == "" {
 		c.Dsh.DSHPatch = "./harness/dsh/project-creator.patch.yml"
 	}
@@ -1360,6 +1444,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Claude.Docker.ProjectMemoryVolume == "" {
 		c.Claude.Docker.ProjectMemoryVolume = "creator-project-memory"
+	}
+	if c.Dsh.ProjectMemoryVolume == "" {
+		c.Dsh.ProjectMemoryVolume = c.Claude.Docker.ProjectMemoryVolume
+	}
+	if c.Dsh.Network == "" {
+		c.Dsh.Network = c.Claude.Docker.Network
 	}
 	if c.Claude.Docker.CPUCores == 0 && !c.Claude.Docker.cpuCoresSet {
 		c.Claude.Docker.CPUCores = 2

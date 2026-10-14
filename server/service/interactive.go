@@ -131,6 +131,7 @@ type InteractiveSession struct {
 	ProfileVersion        int64
 	initialContext        string
 	memoryExpected        string
+	leaseScope            string
 }
 type interactiveWatcher struct {
 	ch     chan InteractiveEvent
@@ -146,6 +147,22 @@ type RuntimeFactory interface {
 
 type RuntimeFactoryWithContext interface {
 	StartWithContext(context.Context, string, string, string, string, func(string, any)) (Runtime, error)
+}
+
+// InteractiveRuntimeSpec is the complete server-owned session contract passed
+// to an isolated runtime. It deliberately contains no client-controlled paths
+// or image names.
+type InteractiveRuntimeSpec struct {
+	SessionID        string
+	ProjectID        string
+	AgentPackID      string
+	ServerInstanceID string
+	RuntimeToken     string
+	InitialContext   string
+}
+
+type RuntimeFactoryWithSession interface {
+	StartSession(context.Context, InteractiveRuntimeSpec, func(string, any)) (Runtime, error)
 }
 
 type InteractiveMemoryStore interface {
@@ -438,6 +455,19 @@ func (s *InteractiveService) CreateSession(ctx context.Context, userID, agentID,
 	}
 	runtimeCtx, cancel := context.WithCancel(context.Background())
 	sess := &InteractiveSession{ID: uuid.NewString(), UserID: userID, AgentID: agentID, Intent: intent, ProjectID: projectID, ProfileVersion: profileVersion, initialContext: initialContext, memoryExpected: memoryExpected, CreatedAt: now, ExpiresAt: now.Add(s.ttl), Status: "starting", watchers: map[*interactiveWatcher]struct{}{}, pendingQuestions: map[string]InteractiveQuestion{}, runtimeTokenHash: confirmationHash(runtimeToken), cancel: cancel}
+	if projectID != "" && s.repo != nil && s.repo.FeedbackLoop() != nil {
+		scope := "interactive-project:" + projectID
+		won, leaseErr := s.repo.FeedbackLoop().AcquireFeedbackLease(ctx, scope, sess.ID, now.UTC(), s.ttl)
+		if leaseErr != nil {
+			cancel()
+			return nil, errors.Join(ErrInteractivePersistence, leaseErr)
+		}
+		if !won {
+			cancel()
+			return nil, ErrInteractiveBusy
+		}
+		sess.leaseScope = scope
+	}
 	s.mu.Lock()
 	s.pruneTombstonesLocked(time.Now())
 	activeTotal, activeUser := 0, 0
@@ -466,7 +496,9 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	emit := func(k string, d any) { s.runtimeEvent(sess.ID, k, d) }
 	var rt Runtime
 	var e error
-	if factory, ok := s.factory.(RuntimeFactoryWithContext); ok {
+	if factory, ok := s.factory.(RuntimeFactoryWithSession); ok {
+		rt, e = factory.StartSession(ctx, InteractiveRuntimeSpec{SessionID: sess.ID, ProjectID: sess.ProjectID, AgentPackID: sess.AgentID, RuntimeToken: runtimeToken, InitialContext: sess.initialContext}, emit)
+	} else if factory, ok := s.factory.(RuntimeFactoryWithContext); ok {
 		rt, e = factory.StartWithContext(ctx, sess.ID, sess.AgentID, runtimeToken, sess.initialContext, emit)
 	} else {
 		rt, e = s.factory.Start(ctx, sess.ID, sess.AgentID, runtimeToken, emit)
@@ -568,6 +600,8 @@ func (s *InteractiveService) closeSession(id string, emitExpired bool) {
 	sess.runtime = nil
 	cancel := sess.cancel
 	sess.cancel = nil
+	leaseScope := sess.leaseScope
+	sess.leaseScope = ""
 	// Do not retain generated content or a confirmation token after the lease
 	// closes. Durable commit receipts are the replay source after this point.
 	sess.Draft = InteractiveDraft{}
@@ -590,6 +624,9 @@ func (s *InteractiveService) closeSession(id string, emitExpired bool) {
 		sess.events = nil
 	}
 	sess.mu.Unlock()
+	if leaseScope != "" && s.repo != nil && s.repo.FeedbackLoop() != nil {
+		_ = s.repo.FeedbackLoop().ReleaseFeedbackLease(context.Background(), leaseScope, sess.ID)
+	}
 	if rt != nil {
 		_ = rt.Close()
 	}

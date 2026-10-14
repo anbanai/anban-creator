@@ -471,38 +471,8 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"FROM node:24.21.0-alpine3.24",
 		"apk add --no-cache ca-certificates ffmpeg tzdata",
 		"WORKDIR /build/server",
-		"FROM node:24.21.0-alpine3.24 AS dsh-builder",
-		"WORKDIR /build/runtime-dsh",
-		"RUN apk add --no-cache python3 make g++ cmake",
 		"COPY server/go.mod server/go.sum ./",
-		"COPY server ./",
-		"COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./",
-		"COPY runtime-dsh/ ./",
-		"RUN set -eux; \\",
-		"RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts",
-		"npm prune --omit=dev --install-links=true --strict-allow-scripts",
-		"npm_config_build_from_source=true npm rebuild node-pty",
-		"rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/dsh-agent-loop",
-		"cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/",
-		"cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/",
-		"cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/",
-		"cp -a vendor/@deepseek-ai/dsh-agent-loop node_modules/@deepseek-ai/",
-		"test -f node_modules/node-pty/build/Release/pty.node",
-		"test -d node_modules/@deepseek-ai/dsh-sdk-client",
-		"test ! -L node_modules/@deepseek-ai/dsh-sdk-client",
-		"test -d node_modules/@deepseek-ai/dsh-sdk-protocol",
-		"test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol",
-		"test -d node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
-		"test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
-		"test -d node_modules/@deepseek-ai/dsh-agent-loop",
-		"test ! -L node_modules/@deepseek-ai/dsh-agent-loop",
-		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor",
-		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules",
-		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist",
 		`RUN test "$(node --version)" = "v24.21.0"`,
-		`RUN node --input-type=module -e "import('/app/runtime-dsh/dist/dsh-bridge.js')"`,
-		"WORKDIR /app/runtime-dsh",
-		`node-pty-smoke`,
 		"go build -ldflags=\"-s -w\" -o /anban-creator-server .",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
 		"COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/economics.yaml",
@@ -519,40 +489,6 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 			t.Fatalf("%s missing minimal server runtime contract %q", path, want)
 		}
 	}
-	pruneIndex := strings.Index(body, "npm prune --omit=dev --install-links=true --strict-allow-scripts")
-	rebuildIndex := strings.Index(body, "npm_config_build_from_source=true npm rebuild node-pty")
-	cleanupIndex := strings.Index(body, "rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/dsh-agent-loop")
-	ptyCheckIndex := strings.Index(body, "test -f node_modules/node-pty/build/Release/pty.node")
-	materializeIndexes := []int{
-		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/"),
-		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/"),
-		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/"),
-		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-agent-loop node_modules/@deepseek-ai/"),
-	}
-	assertionIndexes := []int{
-		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-client"),
-		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol"),
-		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server"),
-		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-agent-loop"),
-	}
-	if pruneIndex < 0 || rebuildIndex < pruneIndex || cleanupIndex < rebuildIndex || ptyCheckIndex < rebuildIndex {
-		t.Fatal("server Dockerfile must rebuild node-pty after pruning and before checking native artifacts")
-	}
-	for _, index := range materializeIndexes {
-		if index < cleanupIndex {
-			t.Fatal("server Dockerfile must materialize every vendored DSH SDK package after cleanup")
-		}
-	}
-	for _, index := range assertionIndexes {
-		if index < materializeIndexes[2] {
-			t.Fatal("server Dockerfile must verify every DSH SDK package after all packages are materialized")
-		}
-	}
-	ptyWorkdirIndex := strings.Index(body, "WORKDIR /app/runtime-dsh\nRUN node --input-type=module -e \"import * as pty from 'node-pty'")
-	ptySmokeIndex := strings.Index(body, "node-pty-smoke")
-	if ptyWorkdirIndex < 0 || ptySmokeIndex < ptyWorkdirIndex {
-		t.Fatal("server Dockerfile must run the node-pty smoke test from the DSH runtime directory")
-	}
 	for _, forbidden := range []string{
 		"addgroup -S -g 1000 anban",
 		"adduser -S -D -u 1000 -G anban -h /home/anban anban",
@@ -560,11 +496,6 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("server Dockerfile must reuse the Node image's pre-created UID/GID 1000 account; found %q", forbidden)
 		}
-	}
-	if vendorIndex := strings.Index(body, "COPY runtime-dsh/vendor/ ./vendor/"); vendorIndex < 0 {
-		t.Fatal("server Dockerfile must copy runtime-dsh vendor packages before npm ci")
-	} else if npmIndex := strings.Index(body, "npm ci --install-links=true --strict-allow-scripts"); npmIndex < vendorIndex {
-		t.Fatal("server Dockerfile must copy runtime-dsh vendor packages before npm ci")
 	}
 	for _, forbidden := range []string{
 		"ghcr.io/openhands/agent-server",
@@ -582,6 +513,7 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"npx -y skills",
 		"claude plugin",
 		"runtime-claude/",
+		"runtime-dsh/",
 		"@anthropic-ai/claude-agent-sdk",
 		"COPY --from=builder /build/server/billing /app/conf/billing",
 	} {
@@ -919,7 +851,11 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
-			from: []string{"FROM golang:alpine AS builder", "FROM node:24.21.0-alpine3.24 AS dsh-builder", "FROM node:24.21.0-alpine3.24"},
+			from: []string{"FROM golang:alpine AS builder", "FROM node:24.21.0-alpine3.24"},
+		},
+		{
+			path: filepath.Join(root, "deploy/docker/Dockerfile.runtime-dsh"),
+			from: []string{"FROM node:24.21.0-alpine3.24 AS builder", "FROM node:24.21.0-alpine3.24"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.studio"),
@@ -1012,13 +948,14 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 			t.Fatalf("deploy/docker/Dockerfile.server retains build-time Catalog digest dependency %q", forbidden)
 		}
 	}
+	dsh := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.runtime-dsh"))
 	for _, want := range []string{
 		"harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml",
 		"harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js",
 		"harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js",
 	} {
-		if !strings.Contains(server, want) {
-			t.Fatalf("deploy/docker/Dockerfile.server missing Catalog digest build check %q", want)
+		if !strings.Contains(dsh, want) {
+			t.Fatalf("deploy/docker/Dockerfile.runtime-dsh missing plugin asset %q", want)
 		}
 	}
 
@@ -1080,6 +1017,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.agent-wechat-article",
 		"deploy/docker/Dockerfile.agent-wechat-picture",
 		"deploy/docker/Dockerfile.agent-whiteboard-animation",
+		"deploy/docker/Dockerfile.runtime-dsh",
 		"deploy/docker/Dockerfile.server",
 		"deploy/docker/Dockerfile.sidecar-ilink",
 		"deploy/docker/Dockerfile.sidecar-seednote",
@@ -1237,7 +1175,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-sidecar-ilink-image:",
 		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
+		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
 		"docker-moments-agent-image:",
 		"docker-ecommerce-agent-image:",
 		"docker-wechat-article-agent-image:",
@@ -1254,8 +1192,11 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
 		"docker-image:",
+		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image",
+		"docker-dsh-runtime-image:",
 		"docker-wechat-article-agent-image",
 		"make docker-server-image",
+		"make docker-dsh-runtime-image",
 		"make docker-sidecar-ilink-image",
 		"make docker-sidecar-seednote-image",
 		"make docker-studio-image",
@@ -1373,7 +1314,7 @@ func TestComposeUsesOneShotManagedDockerRuntime(t *testing.T) {
 
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
-		"docker-up: docker-server-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
+		"docker-up: docker-server-image docker-dsh-runtime-image docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image",
 		"DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)",
 		"DOCKER_GID=\"$(DOCKER_SOCKET_GID)\" docker compose up -d",
 	} {

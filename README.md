@@ -287,7 +287,7 @@ control variables are optional and may be removed to use provider defaults.
 Invalid or incomplete configured profiles fail closed; execution never falls
 back to another profile or model.
 
-DSH interactive sessions have an independent route table under `dsh.routes`.
+DSH interactive sessions run in one isolated container per session and have an independent route table under `dsh.routes`.
 `dsh.route` selects one route for the next session; it does not read or modify
 `claude.profiles`. A route declares its provider, wire API, endpoint, model,
 and the credential value using the same `${...}` expansion as Claude:
@@ -305,7 +305,7 @@ dsh:
       model: deepseek-flash
 ```
 
-The Bridge starts the official DSH runtime as `dsh --profile sdk`, writes the
+The independent DSH runtime container starts the official DSH runtime as `dsh --profile sdk`, writes the
 selected route into temporary DSH settings using the official `apiKeyEnv`,
 `api`, `baseURL`, and `models` fields, and calls `initialize({ provider,
 model })`. `api_key` uses the same `${...}` expansion as Claude's `envs`; the

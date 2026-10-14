@@ -10,34 +10,6 @@ COPY server ./
 RUN set -eux; \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
 
-FROM node:24.21.0-alpine3.24 AS dsh-builder
-
-RUN apk add --no-cache python3 make g++ cmake
-WORKDIR /build/runtime-dsh
-COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./
-COPY runtime-dsh/vendor/ ./vendor/
-RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts
-COPY runtime-dsh/ ./
-# npm prune may relink local file dependencies; restore the vendored SDKs as real directories.
-RUN set -eux; \
-    npm run build; \
-    npm prune --omit=dev --install-links=true --strict-allow-scripts; \
-    npm_config_build_from_source=true npm rebuild node-pty; \
-    rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/dsh-agent-loop; \
-    cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/; \
-    cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/; \
-    cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/; \
-    cp -a vendor/@deepseek-ai/dsh-agent-loop node_modules/@deepseek-ai/; \
-    test -f node_modules/node-pty/build/Release/pty.node; \
-    test -d node_modules/@deepseek-ai/dsh-sdk-client; \
-    test ! -L node_modules/@deepseek-ai/dsh-sdk-client; \
-    test -d node_modules/@deepseek-ai/dsh-sdk-protocol; \
-    test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol; \
-    test -d node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server; \
-    test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server; \
-    test -d node_modules/@deepseek-ai/dsh-agent-loop; \
-    test ! -L node_modules/@deepseek-ai/dsh-agent-loop
-
 FROM node:24.21.0-alpine3.24
 
 
@@ -56,18 +28,7 @@ COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/produc
 COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml
 COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml
 RUN test "$(node --version)" = "v24.21.0"
-COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor
-COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
-COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
-RUN node --input-type=module -e "import('/app/runtime-dsh/dist/dsh-bridge.js')"
 USER 1000:1000
-WORKDIR /app/runtime-dsh
-RUN node --input-type=module -e "import * as pty from 'node-pty'; const child = pty.spawn('/bin/sh', ['-c', 'exit 0'], { cwd: '/app', cols: 80, rows: 24, env: process.env }); await new Promise((resolve, reject) => { const timeout = setTimeout(() => { child.kill(); reject(new Error('node-pty smoke timed out')); }, 5000); child.onExit(({ exitCode }) => { clearTimeout(timeout); if (exitCode !== 0) reject(new Error('node-pty smoke failed')); else resolve(); }); }); console.log('node-pty-smoke')"
-COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml
-COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
-COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js
-COPY --chown=1000:1000 harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js
-RUN node --input-type=module -e "await import('/app/harness/dsh/plugins/project-creator-restrictions.js'); await import('/app/harness/dsh/plugins/project-creator-context.js')"
 
 WORKDIR /app
 USER 1000:1000

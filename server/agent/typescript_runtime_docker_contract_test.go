@@ -104,15 +104,19 @@ func TestDshRuntimeUsesPinnedNodeLts(t *testing.T) {
 		t.Fatalf("runtime-dsh Node engine = %q, want >=24.21.0 <25", manifest.Engines["node"])
 	}
 
-	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.server"))
+	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.runtime-dsh"))
 	for _, want := range []string{
-		"FROM node:24.21.0-alpine3.24 AS dsh-builder",
+		"FROM node:24.21.0-alpine3.24 AS builder",
 		"FROM node:24.21.0-alpine3.24",
-		`RUN test "$(node --version)" = "v24.21.0"`,
+		"USER 1000:1000",
 	} {
 		if !strings.Contains(dockerfile, want) {
 			t.Fatalf("server Dockerfile missing pinned DSH Node LTS contract %q", want)
 		}
+	}
+	server := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.server"))
+	if strings.Contains(server, "runtime-dsh/") || strings.Contains(server, "dsh-builder") {
+		t.Fatal("Server image must not embed the independent DSH runtime")
 	}
 
 	ci := readTextFile(t, filepath.Join(root, ".github/workflows/ci.yml"))

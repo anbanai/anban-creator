@@ -1,18 +1,18 @@
 # Vendored DeepSeek Harness SDK
 
-These three packages are built from DeepSeek Harness commit
-`8c2ae0d1ebf0e43cbe6fdebaa41495ac8676efba` and are temporarily vendored here
-because the published `0.2.1-alpha.2` packages do not contain the interactive
-`session/start` and `session/answer` protocol. The upstream commit is the
-source of truth; this copy should be removed once an equivalent released SDK
-is available and the DSH bridge has been verified against it.
+These four packages are vendored from the published DeepSeek Harness
+`0.2.1-alpha.3` packages. The published SDK provides the current session
+resume/wait protocol; Anban adds a small compatibility extension for the
+interactive `session/start` and `session/answer` requests used by Studio.
+The upstream package remains the source of truth for all other runtime code.
 
 Only the package runtime JavaScript and declaration files are tracked. Build
-metadata and source maps are intentionally omitted. The package versions stay
-at `0.2.1-alpha.2` so their peer dependency graph remains compatible with the
-other DSH packages installed by the runtime image.
+metadata and source maps are intentionally omitted. The package versions and
+lockfile stay at `0.2.1-alpha.3` so the complete dependency graph is upgraded
+together.
 
 The npm dependencies in `runtime-dsh/package.json` and
 `runtime-dsh/package-lock.json` deliberately point to these local packages.
-Do not replace them with registry versions unless the interactive protocol
-contract tests continue to pass.
+Do not replace the vendored files or remove the compatibility extension unless
+the interactive protocol contract tests and deployed startup smoke continue to
+pass.

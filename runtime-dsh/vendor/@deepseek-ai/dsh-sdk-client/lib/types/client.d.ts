@@ -12,7 +12,6 @@
  * @module @deepseek-ai/dsh-sdk-client/client
  */
 import { type InitializeParams, type InitializeResult, type SdkPromptContentBlock } from '@deepseek-ai/dsh-sdk-protocol';
-import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions/types';
 import { type RuntimeProcessOptions } from './launch.ts';
 import type { HarnessClientOptions, HarnessNotification, NotificationFilter } from './types.ts';
 /**
@@ -90,6 +89,8 @@ export declare class HarnessClient {
      * @returns the runtime's wire identity.
      */
     initialize(params: InitializeParams): Promise<InitializeResult>;
+    startSession(sessionId: string, presetId: string): Promise<{ sessionId: string; presetId: string }>;
+    answerSession(sessionId: string, callId: string, answer: { answers: Array<{ id: string; selected: string[]; custom?: string }> }): Promise<{ accepted: true }>;
     /**
      * Queue one prompt and return its durable inbox identity.
      * @param sessionId - target session; an unknown id creates it.
@@ -97,13 +98,26 @@ export declare class HarnessClient {
      * @returns the queued message id.
      */
     prompt(sessionId: string, contentBlocks: SdkPromptContentBlock[]): Promise<string>;
-    /** Create a blank session and bind one registered preset before prompting. */
-    startSession(sessionId: string, presetId: string): Promise<{
-        sessionId: string;
-        presetId: string;
-    }>;
-    /** Answer a pending root-agent AskUserQuestion call. */
-    answerSession(sessionId: string, callId: string, answer: AskUserQuestionAnswer): Promise<void>;
+    /**
+     * Restore persisted history without sending a prompt; failures propagate without creating a session.
+     * @param sessionId - persisted identity in this runtime's configured persistence store.
+     * @returns after the session is ready for prompts.
+     */
+    resumeSession(sessionId: string): Promise<void>;
+    /**
+     * Read a Session's effective working directory, recovering it if missing.
+     * @param sessionId - target Session; an unknown id creates it.
+     * @returns the absolute effective directory.
+     */
+    getWorkingDirectory(sessionId: string): Promise<string>;
+    /**
+     * Change a Session's effective directory without changing origin or permissions.
+     * @param sessionId - target Session; an unknown id creates it.
+     * @param path - absolute or Session-current-directory-relative path.
+     * @returns the validated absolute directory.
+     */
+    setWorkingDirectory(sessionId: string, path: string): Promise<string>;
+    private workingDirectoryRequest;
     /**
      * Send one JSON-RPC request and await its result.
      * @param method - the wire method name.

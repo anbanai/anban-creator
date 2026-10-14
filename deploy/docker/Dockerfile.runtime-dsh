@@ -1,0 +1,33 @@
+FROM node:24.21.0-alpine3.24 AS builder
+
+RUN apk add --no-cache python3 make g++ cmake
+WORKDIR /build/runtime-dsh
+COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./
+COPY runtime-dsh/vendor/ ./vendor/
+RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts
+COPY runtime-dsh/ ./
+RUN set -eux; \
+    npm run build; \
+    npm prune --omit=dev --install-links=true --strict-allow-scripts; \
+    npm_config_build_from_source=true npm rebuild node-pty; \
+    rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/dsh-agent-loop; \
+    cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/; \
+    cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/; \
+    cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/; \
+    cp -a vendor/@deepseek-ai/dsh-agent-loop node_modules/@deepseek-ai/; \
+    test -f node_modules/node-pty/build/Release/pty.node
+
+FROM node:24.21.0-alpine3.24
+RUN apk add --no-cache ca-certificates tzdata
+RUN addgroup -S -g 1000 anban && adduser -S -D -u 1000 -G anban anban
+WORKDIR /app
+COPY --from=builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor
+COPY --from=builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
+COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
+COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
+COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js
+COPY --chown=1000:1000 harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js
+RUN node --input-type=module -e "await import('/app/harness/dsh/plugins/project-creator-restrictions.js'); await import('/app/harness/dsh/plugins/project-creator-context.js')"
+USER 1000:1000
+ENV DSH_HOME=/tmp/dsh-home HOME=/tmp/dsh-home
+ENTRYPOINT ["node", "/app/runtime-dsh/dist/dsh-bridge.js"]

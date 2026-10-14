@@ -22,7 +22,7 @@ const sdkPackages = [
 describe("vendored DSH interactive SDK contract", () => {
   test("allows only pinned install scripts required by the Linux DSH runtime", () => {
     const approvals = packageJSON.allowScripts ?? {};
-    expect(approvals["@deepseek-ai/dsh-subprocess-local@0.2.1-alpha.2"]).toBe(true);
+    expect(approvals["@deepseek-ai/dsh-subprocess-local@0.2.1-alpha.3"]).toBe(true);
     expect(approvals["node-pty@1.2.0-beta.15"]).toBe(true);
     expect(approvals["koffi@3.1.1"]).toBe(true);
     expect(approvals["@google/genai"]).toBe(false);
@@ -47,8 +47,9 @@ describe("vendored DSH interactive SDK contract", () => {
       versions.add(metadata.version);
       expect(packageJSON.dependencies[name]).toBe(`file:vendor/${name}`);
       const lockEntry = lockJSON.packages[`node_modules/${name}`];
-      expect(lockEntry).toMatchObject({ resolved: `file:vendor/${name}`, version: metadata.version });
-      expect(lockEntry?.link).not.toBe(true);
+      expect(lockEntry).toMatchObject({ resolved: `vendor/${name}`, link: true });
+      const vendorEntry = lockJSON.packages[`vendor/${name}`];
+      expect(vendorEntry).toMatchObject({ version: metadata.version });
       expect(existsSync(join(packageDir, "lib", "index.js"))).toBe(true);
     }
     expect(versions.size).toBe(1);

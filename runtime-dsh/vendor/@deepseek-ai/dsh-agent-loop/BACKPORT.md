@@ -1,6 +1,6 @@
 # Message-free start backport
 
-Baseline: the published `@deepseek-ai/dsh-agent-loop@0.2.1-alpha.2` package.
+Baseline: the published `@deepseek-ai/dsh-agent-loop@0.2.1-alpha.3` package.
 `package.json`, `lib/index.js`, and all `lib/types/**/*.d.ts` were copied from
 that release. This is not a build of the newer upstream package.
 
@@ -21,12 +21,19 @@ Only these upstream changes are applied:
 All other release JavaScript and declarations remain unchanged. Package version
 and dependency metadata remain unchanged to preserve the published graph.
 
-Release baseline SHA-256 values (before the backport):
+The alpha.3 package also includes its published locale files; those and every
+other alpha.3 runtime/declaration change remain intact.
+
+Published alpha.3 baseline SHA-256 values (before the backport):
 
 ```text
 cf57e3ecd487ac5c2553455aaa5cef2c6fb41e6bd61be5aa455675d1d7193033  lib/index.js
 66131a86c5f024fabb77e99103f3f07cdca5818cbce7d6aaecb058197c66589e  lib/types/agent.d.ts
 ```
+
+These two alpha.3 runtime files contain the minimal Anban startup extension;
+the surrounding implementation is from the published alpha.3 package. The
+alpha.3 package metadata and locale files remain from alpha.3.
 
 ## Verification
 

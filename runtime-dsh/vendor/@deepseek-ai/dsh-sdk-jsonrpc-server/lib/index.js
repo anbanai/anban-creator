@@ -68,11 +68,21 @@ var HarnessSdkJsonRpcServer = class {
 		const serverOptions = this.options;
 		const handleHeadlessQuestion = this.handleHeadlessQuestion.bind(this);
 		this.disposers.push(ctx.on("session/event", (session, event) => {
+			const record = this.sessions.get(session.id);
+			if (event.type === "turn/end" && record?.handle.agent.session === session && record.failure !== void 0 && event.seq >= record.failure.atOffset) record.failure = void 0;
 			const payload = {
 				sessionId: String(session.id),
 				event
 			};
 			this.transport.notify("session.event", payload);
+		}));
+		this.disposers.push(ctx.on("agent/error", ({ agent, error }) => {
+			const record = this.sessions.get(agent.session.id);
+			if (record?.handle.agent !== agent) return;
+			record.failure = {
+				error,
+				atOffset: agent.session.seq
+			};
 		}));
 		this.disposers.push(ctx.on("agent/status", ({ agent, status }) => {
 			this.transport.notify("session.status", {
@@ -140,10 +150,7 @@ var HarnessSdkJsonRpcServer = class {
 				name: "deepseek-harness-sdk-runtime",
 				version: "0.0.1"
 			},
-			capabilities: {
-				sessionStart: true,
-				sessionAnswer: true
-			}
+			capabilities: { sessionStart: true, sessionAnswer: true }
 		};
 	}
 	/**
@@ -164,11 +171,6 @@ var HarnessSdkJsonRpcServer = class {
 		rec.handle.agent.followup(message);
 		return { messageId: message.id };
 	}
-	/**
-	* Create an empty session and bind one pre-registered DSH preset before any
-	* model turn can start. Preset documents and plugin paths never cross this
-	* protocol boundary.
-	*/
 	async start(params) {
 		if (!this.initialized) throw new Error("SDK server is not initialized");
 		if (!params.sessionId.trim() || !params.presetId.trim()) throw new TypeError("session/start requires non-empty sessionId and presetId");
@@ -184,20 +186,10 @@ var HarnessSdkJsonRpcServer = class {
 			} catch (error) {
 				throw new Error(`session/start failed for ${params.sessionId}`, { cause: error });
 			}
-			this.transport.notify("session.ready", {
-				sessionId: params.sessionId,
-				presetId: params.presetId
-			});
+			this.transport.notify("session.ready", { sessionId: params.sessionId, presetId: params.presetId });
 		}
-		return {
-			sessionId: params.sessionId,
-			presetId: params.presetId
-		};
+		return { sessionId: params.sessionId, presetId: params.presetId };
 	}
-	/**
-	* Answer exactly one live root Agent question through DSH's existing
-	* userQuestions service, preserving its call ownership and answer checks.
-	*/
 	async answer(params) {
 		if (!this.initialized) throw new Error("SDK server is not initialized");
 		const rec = this.sessions.get(params.sessionId);
@@ -215,15 +207,9 @@ var HarnessSdkJsonRpcServer = class {
 		if (!this.ctx.userQuestions.answer(rec.handle.agent, brandString(params.callId), params.answer)) throw new Error(`question is no longer pending: ${params.callId}`);
 		return { accepted: true };
 	}
-	questionKey(sessionId, callId) {
-		return `${sessionId}\u0000${callId}`;
-	}
+	questionKey(sessionId, callId) { return `${sessionId}\u0000${callId}`; }
 	cloneAnswer(answer) {
-		return { answers: answer.answers.map((item) => ({
-			id: item.id,
-			selected: [...item.selected],
-			...item.custom === void 0 ? {} : { custom: item.custom }
-		})) };
+		return { answers: answer.answers.map((item) => ({ id: item.id, selected: [...item.selected], ...item.custom === void 0 ? {} : { custom: item.custom } })) };
 	}
 	validateAnswer(questions, answer) {
 		if (!Array.isArray(answer?.answers) || answer.answers.length !== questions.length) throw new Error("session/answer must include exactly one answer for every question");
@@ -252,13 +238,7 @@ var HarnessSdkJsonRpcServer = class {
 		if (request.signal?.aborted) return Promise.reject(/* @__PURE__ */ new Error(`question was aborted: ${callId}`));
 		let removeAbortListener = () => {};
 		return new Promise((resolve, reject) => {
-			const pending = {
-				agent,
-				questions: request.questions,
-				resolve,
-				reject,
-				removeAbortListener: () => removeAbortListener()
-			};
+			const pending = { agent, questions: request.questions, resolve, reject, removeAbortListener: () => removeAbortListener() };
 			this.pendingQuestions.set(key, pending);
 			if (request.signal !== void 0) {
 				const onAbort = () => {
@@ -272,11 +252,76 @@ var HarnessSdkJsonRpcServer = class {
 			}
 		});
 	}
+	/**
+	* Restore a persisted session and repair its interrupted final turn without sending input.
+	* Uses the initialized model route while preserving the stored session identity and directory.
+	* Rejects missing, unreadable, or already owned sessions; never creates a replacement.
+	* @param params - persisted session identity in the configured persistence store.
+	* @returns an empty result after the Agent is ready for prompts.
+	*/
+	async resume(params) {
+		if (!this.initialized) throw new Error("SDK server is not initialized");
+		if (this.shuttingDown) throw new Error("SDK server is shutting down");
+		const sessionId = params.sessionId;
+		if (this.sessions.has(sessionId) || this.sessionCreations.has(sessionId)) throw new Error(`SDK session is already open or opening: ${sessionId}`);
+		await this.openSession(sessionId, true);
+		return {};
+	}
+	/**
+	* Wait for an existing owned Agent and its managed descendants to finish.
+	* The response follows all Session notifications emitted during the wait.
+	* Rejects a live Agent failure that has no subsequent durable terminal.
+	* @param params - the SDK-owned session to observe without creating one.
+	* @returns an empty result after the root stays idle across the descendant check.
+	*/
+	async wait(params) {
+		if (!this.initialized) throw new Error("SDK server is not initialized");
+		const rec = this.sessions.get(params.sessionId);
+		if (rec === void 0) throw new Error(`unknown SDK session: ${params.sessionId}`);
+		const agent = rec.handle.agent;
+		const subagents = this.ctx.get("subagents");
+		while (true) {
+			this.assertLiveAgent(rec, params.sessionId);
+			await agent.whenIdle();
+			const idleSeq = agent.session.seq;
+			const children = await subagents?.waitForChildren(agent);
+			this.assertLiveAgent(rec, params.sessionId);
+			if (!children && agent.status === "idle" && agent.session.seq === idleSeq) {
+				if (rec.failure !== void 0) throw rec.failure.error;
+				return {};
+			}
+		}
+	}
 	assertLiveAgent(rec, sessionId) {
 		if (this.ctx.agents.get(rec.handle.agent.id) !== rec.handle.agent) throw new Error(`session agent was disposed outside the server: ${sessionId}`);
 	}
 	/**
+	* Read a Session's effective directory, recovering a missing directory to its origin.
+	* @param params - target Session; an unknown id creates it.
+	* @returns the absolute effective directory.
+	*/
+	async getWorkingDirectory(params) {
+		const agent = await this.workingDirectoryAgent(params.sessionId);
+		return { cwd: await this.ctx.workingDirectory.ensure(agent) };
+	}
+	/**
+	* Change a Session's directory and queue its model-visible transition.
+	* @param params - target Session and absolute or current-directory-relative path.
+	* @returns the validated absolute directory; origin and permissions are unchanged.
+	*/
+	async setWorkingDirectory(params) {
+		const agent = await this.workingDirectoryAgent(params.sessionId);
+		return { cwd: await this.ctx.workingDirectory.set(agent, params.path) };
+	}
+	async workingDirectoryAgent(sessionId) {
+		if (!this.initialized) throw new Error("SDK server is not initialized");
+		const rec = await this.getOrCreateSession(sessionId);
+		this.assertLiveAgent(rec, sessionId);
+		return rec.handle.agent;
+	}
+	/**
 	* Dispose server-owned agents, adapter, and subscriptions to quiescence.
+	* Managed descendants drain before the root Agent handles and adapter are released.
 	* The surrounding context remains running.
 	* @returns empty JSON-RPC result.
 	*/
@@ -302,6 +347,11 @@ var HarnessSdkJsonRpcServer = class {
 		} catch (error) {
 			failures.push(error);
 		}
+		try {
+			await this.ctx.get("subagents")?.drainDescendants(records.map((rec) => rec.handle.agent));
+		} catch (error) {
+			failures.push(error);
+		}
 		const teardownResults = await Promise.allSettled([...records.map((rec) => Promise.resolve().then(() => rec.handle.dispose())), ...this.llmFiber === void 0 ? [] : [Promise.resolve().then(() => this.llmFiber?.dispose())]]);
 		this.llmFiber = void 0;
 		failures.push(...teardownResults.filter((result) => result.status === "rejected").map((result) => result.reason));
@@ -322,6 +372,25 @@ var HarnessSdkJsonRpcServer = class {
 			case "session/start": return this.start(params);
 			case "session/prompt": return this.prompt(params);
 			case "session/answer": return this.answer(params);
+			case "session/resume": {
+				const sessionId = params?.sessionId;
+				if (typeof sessionId !== "string" || sessionId.length === 0) throw new TypeError("session/resume requires a non-empty sessionId string");
+				return this.resume({ sessionId });
+			}
+			case "session/wait": {
+				const sessionId = params?.sessionId;
+				if (typeof sessionId !== "string") throw new TypeError("session/wait requires a sessionId string");
+				return this.wait({ sessionId });
+			}
+			case "session/working-directory/get":
+			case "session/working-directory/set":
+				if (typeof params?.sessionId !== "string" || params.sessionId.length === 0) throw new TypeError("working-directory requests require a non-empty sessionId");
+				if (method === "session/working-directory/get") return this.getWorkingDirectory({ sessionId: params.sessionId });
+				if (typeof params.path !== "string") throw new TypeError("working-directory set requires a path string");
+				return this.setWorkingDirectory({
+					sessionId: params.sessionId,
+					path: params.path
+				});
 			case "shutdown": return this.shutdown();
 			default: throw new Error(`unknown DeepSeek Harness SDK runtime method: ${method}`);
 		}
@@ -332,7 +401,10 @@ var HarnessSdkJsonRpcServer = class {
 		if (existing) return existing;
 		const pending = this.sessionCreations.get(sessionId);
 		if (pending) return pending;
-		const creation = this.createSession(sessionId, presetId);
+		return this.openSession(sessionId, false, presetId);
+	}
+	openSession(sessionId, resume, presetId) {
+		const creation = this.createSession(sessionId, resume, presetId);
 		this.sessionCreations.set(sessionId, creation);
 		creation.then(() => {
 			this.sessionCreations.delete(sessionId);
@@ -341,26 +413,32 @@ var HarnessSdkJsonRpcServer = class {
 		});
 		return creation;
 	}
-	async createSession(sessionId, presetId) {
+	async createSession(sessionId, resume, presetId) {
+		const agentOptions = {
+			provider: this.provider,
+			model: this.model,
+			...this.reasoningEffort === void 0 ? {} : { reasoningEffort: this.reasoningEffort },
+			...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens }
+		};
 		const presets = this.ctx.get("agentPresets");
 		if (presetId !== undefined && presets === undefined) throw new Error("session/start requires the DSH agent preset registry");
-		const handle = await this.ctx.agents.create({
-			sessionId: brandString(sessionId),
-			meta: { cwd: this.cwd },
-			agentOptions: {
-				provider: this.provider,
-				model: this.model,
-				...this.reasoningEffort === undefined ? {} : { reasoningEffort: this.reasoningEffort },
-				...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens }
-			},
-			...presetId === undefined ? {} : {
-				setup: async (agentCtx, agent) => {
+		const rec = {
+			handle: await (resume ? this.ctx.agents.resume({
+				resumeSessionId: brandString(sessionId),
+				agentOptions
+			}) : this.ctx.agents.create({
+				sessionId: brandString(sessionId),
+				meta: { cwd: this.cwd },
+				agentOptions,
+				...presetId === undefined ? {} : { setup: async (agentCtx, agent) => {
 					await presets.mount(agentCtx, presetId);
 					agent.session.append("agent-preset/selected", { agentPreset: presetId });
-				}
-			}
-		});
-		const rec = { handle, started: false, ...presetId === undefined ? {} : { presetId } };
+				} }
+			})),
+			failure: void 0,
+			started: false,
+			...presetId === undefined ? {} : { presetId }
+		};
 		this.sessions.set(sessionId, rec);
 		return rec;
 	}
@@ -381,11 +459,8 @@ var HarnessSdkJsonRpcServer = class {
 * @module @deepseek-ai/dsh-sdk-jsonrpc-server
 */
 const name = "sdk-jsonrpc-server";
-const inject = ["agents"];
-const Config = Schema.object({
-	maxTokensAsSuccess: Schema.boolean().default(false),
-	interactiveQuestions: Schema.boolean().default(false)
-});
+const inject = ["agents", "workingDirectory"];
+const Config = Schema.object({ maxTokensAsSuccess: Schema.boolean().default(false), interactiveQuestions: Schema.boolean().default(false) });
 /**
 * Serve SDK requests over the configured streams. Effect disposal shuts down
 * SDK-created agents and closes the transport. A `shutdown` response is flushed
@@ -404,10 +479,7 @@ function apply(ctx, config) {
 		process.exit(code);
 	});
 	const transport = new JsonRpcLineTransport(input, output);
-	const server = new HarnessSdkJsonRpcServer(ctx, transport, {
-		maxTokensAsSuccess: resolvedConfig.maxTokensAsSuccess,
-		interactiveQuestions: resolvedConfig.interactiveQuestions
-	});
+	const server = new HarnessSdkJsonRpcServer(ctx, transport, { maxTokensAsSuccess: resolvedConfig.maxTokensAsSuccess, interactiveQuestions: resolvedConfig.interactiveQuestions });
 	let exitTask;
 	const disposeAndExit = () => {
 		exitTask ??= (async () => {
