@@ -246,7 +246,7 @@
     {
       "id": "hypit",
       "channel": "hypit",
-      "version": "2.0.4",
+      "version": "0.3.1",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
@@ -434,7 +434,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "7d3326b9fccf30d3c69571fb257fbaa45402faeb79244e9908ce721d22fd345a"
+      "digest": "b2d5281b58c43d02a7feee0bc507b0409f2927bed2487d1006759465ff879ed7"
     },
     {
       "id": "moments",

@@ -37,7 +37,7 @@ func TestManagedAgentsOwnDynamicLifecycleReporting(t *testing.T) {
 				wantVersion = "2.0.5"
 			}
 			if pack.ID == "hypit" {
-				wantVersion = "2.0.4"
+				wantVersion = "0.3.1"
 			}
 			if pack.ID == "seednote" {
 				wantVersion = "2.0.6"
