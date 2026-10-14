@@ -20,6 +20,107 @@ Their independent build definitions, together with the Server, Studio, and
 sidecar iLink definitions, live in `deploy/docker/` and use the repository root as the
 Docker build context.
 
+## System Architecture
+
+```mermaid
+flowchart LR
+    creator[Creator / Operator]
+
+    subgraph clients[User and Agent Surfaces]
+        studio[Studio<br/>React 19 + Vite]
+        claudeHost[Claude Code Host]
+        codexHost[Codex Host]
+    end
+
+    subgraph server[Anban Server - Go / Fiber]
+        api[REST API<br/>Auth, Projects, Tasks, Files]
+        mcp[MCP Endpoint<br/>Atomic stateless capabilities]
+        scheduler[Scheduler<br/>Plans, retries, reconciliation]
+        services[Application Services<br/>Writing, Images, Billing, Analytics]
+        agentDispatch[Agent Dispatcher<br/>Docker or Kubernetes]
+        dshBridge[DSH Interactive Bridge]
+        repositories[Repositories and Models]
+        storageAdapter[Storage Provider]
+    end
+
+    subgraph runtimes[Execution Runtimes]
+        claudeRuntime[One-shot Claude Runtime<br/>Fresh container or Kubernetes Job]
+        dshRuntime[DSH Runtime<br/>Temporary interactive session]
+        workspace[Execution Workspace<br/>Artifacts and resume state]
+    end
+
+    subgraph harness[Canonical Harness Source]
+        pluginAssets[Agent Packs, Agents, Skills,<br/>Hooks, Templates, Writers]
+        hostAdapters[Claude / Codex Manifests<br/>and Host Adapters]
+    end
+
+    subgraph data[State and File Storage]
+        mysql[(MySQL<br/>Business state and records)]
+        redis[(Redis<br/>Queues and ephemeral state)]
+        objectStore[(Local or OSS<br/>Uploaded artifacts)]
+        projectMemory[(Project Memory Volume)]
+    end
+
+    subgraph integrations[External Services and Sidecars]
+        llm[LLM and Image Providers]
+        wechat[WeChat APIs]
+        seednoteSidecar[Seednote Sidecar]
+        ilinkSidecar[iLink Sidecar]
+        montage[OpenMontage / ffmpeg]
+        hypit[Official Hypit Distribution]
+    end
+
+    creator --> studio
+    creator --> claudeHost
+    creator --> codexHost
+    studio -->|HTTPS / REST + SSE| api
+    claudeHost -->|MCP tools| mcp
+    codexHost -->|MCP tools| mcp
+
+    api --> services
+    mcp --> services
+    scheduler --> services
+    services --> repositories
+    services --> storageAdapter
+    services --> agentDispatch
+    services --> dshBridge
+
+    repositories --> mysql
+    scheduler --> redis
+    storageAdapter --> objectStore
+    services -->|Server-owned profile and memory operations| projectMemory
+
+    agentDispatch -->|schedule one-shot job| claudeRuntime
+    claudeRuntime <-->|progress, completion, artifact manifests| api
+    claudeRuntime --> workspace
+    claudeRuntime -->|artifact transfer via Server or signed URL| objectStore
+    claudeRuntime -->|shared project memory mount| projectMemory
+    claudeRuntime -.->|image-specific dependencies| montage
+    claudeRuntime -.->|read-only distribution| hypit
+
+    dshBridge <-->|stdio bridge protocol| dshRuntime
+    dshRuntime -->|authenticated MCP| mcp
+
+    hostAdapters --> pluginAssets
+    pluginAssets -.->|packaged into runtime images| claudeRuntime
+    pluginAssets -.->|preset and patch| dshRuntime
+
+    services -->|authenticated research tools| seednoteSidecar
+    services -->|bot login, events, notifications| ilinkSidecar
+    services -->|generation requests| llm
+    services -->|finalization and publishing| wechat
+
+    classDef boundary fill:#f2f6f8,stroke:#527180,color:#172a32
+    class api,mcp,services,agentDispatch,dshBridge,repositories,storageAdapter boundary
+```
+
+The Server owns identity, business state, execution scheduling, persistence,
+publication policy, and external side effects. Harness Agents and Skills own
+the non-deterministic generation workflow and produce artifacts; the Server
+validates and persists those artifacts. MCP exposes one capability per call and
+does not orchestrate workflow steps. Managed Agent runs use a fresh execution
+environment, while DSH sessions are a separate interactive path.
+
 ## Managed Agent Runtime
 
 The Server scheduler dispatches every managed execution to a fresh container:
