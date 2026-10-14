@@ -21,6 +21,7 @@ COPY runtime-dsh/ ./
 # npm prune may relink local file dependencies; restore the vendored SDKs as real directories.
 RUN npm run build \
     && npm prune --omit=dev --install-links=true --strict-allow-scripts \
+    && npm_config_build_from_source=true npm rebuild node-pty \
     && rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server \
     && mkdir -p node_modules/@deepseek-ai/dsh-sdk-client \
     && mkdir -p node_modules/@deepseek-ai/dsh-sdk-protocol \
