@@ -19,24 +19,22 @@ COPY runtime-dsh/vendor/ ./vendor/
 RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts
 COPY runtime-dsh/ ./
 # npm prune may relink local file dependencies; restore the vendored SDKs as real directories.
-RUN npm run build \
-    && npm prune --omit=dev --install-links=true --strict-allow-scripts \
-    && npm_config_build_from_source=true npm rebuild node-pty \
-    && rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server \
-    && mkdir -p node_modules/@deepseek-ai/dsh-sdk-client \
-    && mkdir -p node_modules/@deepseek-ai/dsh-sdk-protocol \
-    && mkdir -p node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server \
-    && cp -a vendor/@deepseek-ai/dsh-sdk-client/. node_modules/@deepseek-ai/dsh-sdk-client/ \
-    && cp -a vendor/@deepseek-ai/dsh-sdk-protocol/. node_modules/@deepseek-ai/dsh-sdk-protocol/ \
-    && cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server/. node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/ \
-    && test -f node_modules/node-pty/build/Release/pty.node \
-    && test -x node_modules/node-pty/build/Release/spawn-helper \
-    && test -d node_modules/@deepseek-ai/dsh-sdk-client \
-    && test ! -L node_modules/@deepseek-ai/dsh-sdk-client \
-    && test -d node_modules/@deepseek-ai/dsh-sdk-protocol \
-    && test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol \
-    && test -d node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server \
-    && test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server
+RUN set -eux; \
+    npm run build; \
+    npm prune --omit=dev --install-links=true --strict-allow-scripts; \
+    npm_config_build_from_source=true npm rebuild node-pty; \
+    rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server; \
+    cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/; \
+    cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/; \
+    cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/; \
+    test -f node_modules/node-pty/build/Release/pty.node; \
+    test -x node_modules/node-pty/build/Release/spawn-helper; \
+    test -d node_modules/@deepseek-ai/dsh-sdk-client; \
+    test ! -L node_modules/@deepseek-ai/dsh-sdk-client; \
+    test -d node_modules/@deepseek-ai/dsh-sdk-protocol; \
+    test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol; \
+    test -d node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server; \
+    test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server
 
 FROM node:24.21.0-alpine3.24
 
