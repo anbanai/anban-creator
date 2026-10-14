@@ -192,8 +192,8 @@ func checkAndTriggerPlans(ctx context.Context, repo repository.Repository, taskS
 	}
 }
 
-// TriggerPlanNow creates a task from an active plan and advances its next run
-// time. It is used by explicit async plan trigger jobs.
+// TriggerPlanNow creates tasks from an active plan without changing its
+// scheduled next run. It is used by explicit plan execution actions.
 func TriggerPlanNow(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, planID string, logger *zerolog.Logger) error {
 	_, err := triggerPlanNowWithRedis(ctx, repo, taskSvc, planID, logger, nil)
 	return err
@@ -291,7 +291,7 @@ func triggerPlanNowWithRedis(ctx context.Context, repo repository.Repository, ta
 		return false, nil
 	}
 
-	if err := triggerPlan(ctx, repo, taskSvc, plan, logger); err != nil {
+	if err := triggerPlan(ctx, repo, taskSvc, plan, logger, false); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -320,13 +320,13 @@ func triggerPlanWithRedis(ctx context.Context, repo repository.Repository, taskS
 	if plan.Status != model.PlanStatusActive {
 		return false, nil
 	}
-	if err := triggerPlan(ctx, repo, taskSvc, plan, logger); err != nil {
+	if err := triggerPlan(ctx, repo, taskSvc, plan, logger, true); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func triggerPlan(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, plan *model.Plan, logger *zerolog.Logger) error {
+func triggerPlan(ctx context.Context, repo repository.Repository, taskSvc *service.TaskService, plan *model.Plan, logger *zerolog.Logger, advanceSchedule bool) error {
 	planLogger := logger.With().
 		Str("plan_id", plan.ID).
 		Str("user_id", plan.UserID).
@@ -352,8 +352,10 @@ func triggerPlan(ctx context.Context, repo repository.Repository, taskSvc *servi
 				planLogger.Info().Str("entry_id", entry.ID).Str("task_id", task.ID).Msg("task created from plan entry")
 			}
 		}
-		if _, err := advancePlanNextRun(ctx, repo, plan); err != nil {
-			return fmt.Errorf("advance plan %s next_run_at: %w", plan.ID, err)
+		if advanceSchedule {
+			if _, err := advancePlanNextRun(ctx, repo, plan); err != nil {
+				return fmt.Errorf("advance plan %s next_run_at: %w", plan.ID, err)
+			}
 		}
 		if len(failures) > 0 {
 			return errors.Join(failures...)

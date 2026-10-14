@@ -277,7 +277,7 @@ export default function PlansPage() {
   const executeMutation = useMutation({
     mutationFn: (id: string) => api.plans.execute(id),
     onSuccess: () => {
-      toast.success('排期已开始执行')
+      toast.success('已开始额外执行，下次排期不变')
       void queryClient.invalidateQueries({ queryKey: ['plans'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
@@ -465,7 +465,7 @@ export default function PlansPage() {
                       type="button"
                       variant="ghost"
                       size="icon-md"
-                      aria-label={`立即执行：${planLabel}`}
+                      aria-label={`立即执行（不影响下次排期）：${planLabel}`}
                       loading={executeMutation.isPending && executeMutation.variables === plan.id}
                       disabled={executeMutation.isPending}
                       onClick={() => void executeMutation.mutateAsync(plan.id)}
@@ -473,7 +473,7 @@ export default function PlansPage() {
                   >
                     <Play className="size-4" />
                   </TooltipTrigger>
-                  <TooltipContent>立即执行</TooltipContent>
+                  <TooltipContent>立即执行，不影响下次排期</TooltipContent>
                 </Tooltip>
               ) : null}
               {plan.status === 'active' ? (

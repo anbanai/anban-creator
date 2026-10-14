@@ -180,14 +180,14 @@ describe('PlansPage multi-output plans', () => {
     const edit = activeCard.getByRole('button', { name: '编辑排期：活跃排期' })
     const tasks = activeCard.getByRole('link', { name: '查看作品：活跃排期' })
     const pause = activeCard.getByRole('button', { name: '暂停排期：活跃排期' })
-    const execute = activeCard.getByRole('button', { name: '立即执行：活跃排期' })
+    const execute = activeCard.getByRole('button', { name: '立即执行（不影响下次排期）：活跃排期' })
     const remove = activeCard.getByRole('button', { name: '删除排期：活跃排期' })
     expect(edit).toHaveClass('size-11', 'hover:bg-muted')
     expect(tasks).toHaveClass('size-11')
     expect(pause).toHaveClass('size-11')
     expect(execute).toHaveClass('size-11', 'hover:bg-muted')
     expect(execute).not.toHaveTextContent('立即执行')
-    expect(within(screen.getByTestId('plan-card-paused-plan')).queryByRole('button', { name: '立即执行：暂停排期' })).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('plan-card-paused-plan')).queryByRole('button', { name: '立即执行（不影响下次排期）：暂停排期' })).not.toBeInTheDocument()
     expect(remove).toHaveClass('size-11')
     expect(activeCard.queryByText('更多')).not.toBeInTheDocument()
   })
@@ -198,9 +198,9 @@ describe('PlansPage multi-output plans', () => {
     render(<PlansPage />)
 
     const card = await screen.findByTestId('plan-card-execute-plan')
-    fireEvent.click(within(card).getByRole('button', { name: '立即执行：立即排期' }))
+    fireEvent.click(within(card).getByRole('button', { name: '立即执行（不影响下次排期）：立即排期' }))
     await waitFor(() => expect(api.plans.execute).toHaveBeenCalledWith(plan.id))
-    expect(harness.success).toHaveBeenCalledWith('排期已开始执行')
+    expect(harness.success).toHaveBeenCalledWith('已开始额外执行，下次排期不变')
   })
 
   it('shows the most recent generated task outcome on each plan', async () => {

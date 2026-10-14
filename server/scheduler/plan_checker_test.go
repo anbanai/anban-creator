@@ -122,7 +122,7 @@ func setupPlanCheckerTest(t *testing.T) (repository.Repository, *service.TaskSer
 	return repo, taskSvc, enqueuer, &logger
 }
 
-func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
+func TestTriggerPlanNowCreatesTaskWithoutChangingSchedule(t *testing.T) {
 	repo, taskSvc, enqueuer, logger := setupPlanCheckerTest(t)
 	ctx := context.Background()
 
@@ -213,8 +213,11 @@ func TestTriggerPlanNowCreatesTaskAndAdvancesNextRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find updated plan: %v", err)
 	}
-	if updated.NextRunAt == nil || !updated.NextRunAt.After(originalNextRun) {
-		t.Fatalf("next_run_at = %v, want after %v", updated.NextRunAt, originalNextRun)
+	if updated.NextRunAt == nil || !updated.NextRunAt.Equal(originalNextRun) {
+		t.Fatalf("next_run_at = %v, want unchanged at %v", updated.NextRunAt, originalNextRun)
+	}
+	if !updated.UpdatedAt.Equal(plan.UpdatedAt) {
+		t.Fatalf("updated_at = %v, want unchanged at %v", updated.UpdatedAt, plan.UpdatedAt)
 	}
 }
 
@@ -359,8 +362,8 @@ func TestTriggerPlanNowRejectsInvalidReferenceBeforeTaskCreation(t *testing.T) {
 	if findErr != nil {
 		t.Fatal(findErr)
 	}
-	if updated.NextRunAt == nil || !updated.NextRunAt.After(nextRun) {
-		t.Fatalf("next_run_at did not advance after invalid reference: %v", updated.NextRunAt)
+	if updated.NextRunAt == nil || !updated.NextRunAt.Equal(nextRun) {
+		t.Fatalf("next_run_at changed after failed manual execution: %v", updated.NextRunAt)
 	}
 }
 
@@ -575,7 +578,14 @@ func TestTriggerPlanCreatesIndependentOutputsAndIsolatesEntryFailure(t *testing.
 		t.Fatal("output identities are not independent")
 	}
 	updated, err := repo.Plans().FindByID(ctx, plan.ID)
+	if err != nil || updated.NextRunAt == nil || !updated.NextRunAt.Equal(due) {
+		t.Fatalf("manual execution changed schedule: %#v, %v", updated, err)
+	}
+	if _, err := triggerPlanWithRedis(ctx, repo, svc, updated, logger, nil); err == nil {
+		t.Fatal("scheduled execution must report the invalid output entry")
+	}
+	updated, err = repo.Plans().FindByID(ctx, plan.ID)
 	if err != nil || updated.NextRunAt == nil || !updated.NextRunAt.Equal(due.Add(time.Minute)) {
-		t.Fatalf("schedule must advance exactly once: %#v, %v", updated, err)
+		t.Fatalf("scheduled execution must advance exactly once: %#v, %v", updated, err)
 	}
 }
