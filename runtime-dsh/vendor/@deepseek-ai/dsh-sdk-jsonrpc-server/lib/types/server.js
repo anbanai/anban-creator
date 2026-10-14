@@ -401,10 +401,8 @@ export class HarnessSdkJsonRpcServer {
         return creation;
     }
     async createSession(sessionId, presetId) {
-        // No preset composition: this server's compositions keep the model-facing
-        // rows in the host plane, so this agent reads them from the global layer. A
-        // deployment that configures a roster has to join one here first
-        // (@deepseek-ai/dsh-agent-preset-registry README, "Composing a child agent").
+        const presets = this.ctx.get("agentPresets");
+        if (presetId !== undefined && presets === undefined) throw new Error("session/start requires the DSH agent preset registry");
         const handle = await this.ctx.agents.create({
             sessionId: brandString(sessionId),
             meta: { cwd: this.cwd },
@@ -412,24 +410,16 @@ export class HarnessSdkJsonRpcServer {
                 provider: this.provider,
                 model: this.model,
                 ...this.reasoningEffort === undefined ? {} : { reasoningEffort: this.reasoningEffort },
-                ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens },
+                ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens }
             },
+            ...presetId === undefined ? {} : {
+                setup: async (agentCtx, agent) => {
+                    await presets.mount(agentCtx, presetId);
+                    agent.session.append("agent-preset/selected", { agentPreset: presetId });
+                }
+            }
         });
-        if (presetId !== undefined) {
-            const presets = this.ctx.get('agentPresets');
-            if (presets === undefined) {
-                await handle.dispose();
-                throw new Error('session/start requires the DSH agent preset registry');
-            }
-            try {
-                await presets.select(handle.agent, presetId);
-            }
-            catch (error) {
-                await handle.dispose();
-                throw error;
-            }
-        }
-        const rec = { handle, started: false, ...(presetId === undefined ? {} : { presetId }) };
+        const rec = { handle, started: false, ...presetId === undefined ? {} : { presetId } };
         this.sessions.set(sessionId, rec);
         return rec;
     }

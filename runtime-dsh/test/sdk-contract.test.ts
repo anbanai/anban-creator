@@ -13,6 +13,7 @@ const lockJSON = JSON.parse(readFileSync(join(runtimeDir, "package-lock.json"), 
 };
 
 const sdkPackages = [
+  "@deepseek-ai/dsh-agent-loop",
   "@deepseek-ai/dsh-sdk-client",
   "@deepseek-ai/dsh-sdk-protocol",
   "@deepseek-ai/dsh-sdk-jsonrpc-server",

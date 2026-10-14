@@ -482,10 +482,11 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts",
 		"npm prune --omit=dev --install-links=true --strict-allow-scripts",
 		"npm_config_build_from_source=true npm rebuild node-pty",
-		"rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
+		"rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/dsh-agent-loop",
 		"cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/",
 		"cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/",
 		"cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/",
+		"cp -a vendor/@deepseek-ai/dsh-agent-loop node_modules/@deepseek-ai/",
 		"test -f node_modules/node-pty/build/Release/pty.node",
 		"test -d node_modules/@deepseek-ai/dsh-sdk-client",
 		"test ! -L node_modules/@deepseek-ai/dsh-sdk-client",
@@ -493,6 +494,8 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol",
 		"test -d node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
 		"test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server",
+		"test -d node_modules/@deepseek-ai/dsh-agent-loop",
+		"test ! -L node_modules/@deepseek-ai/dsh-agent-loop",
 		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor",
 		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules",
 		"COPY --from=dsh-builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist",
@@ -518,17 +521,19 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	}
 	pruneIndex := strings.Index(body, "npm prune --omit=dev --install-links=true --strict-allow-scripts")
 	rebuildIndex := strings.Index(body, "npm_config_build_from_source=true npm rebuild node-pty")
-	cleanupIndex := strings.Index(body, "rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server")
+	cleanupIndex := strings.Index(body, "rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/dsh-agent-loop")
 	ptyCheckIndex := strings.Index(body, "test -f node_modules/node-pty/build/Release/pty.node")
 	materializeIndexes := []int{
 		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/"),
 		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/"),
 		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/"),
+		strings.Index(body, "cp -a vendor/@deepseek-ai/dsh-agent-loop node_modules/@deepseek-ai/"),
 	}
 	assertionIndexes := []int{
 		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-client"),
 		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol"),
 		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server"),
+		strings.Index(body, "test ! -L node_modules/@deepseek-ai/dsh-agent-loop"),
 	}
 	if pruneIndex < 0 || rebuildIndex < pruneIndex || cleanupIndex < rebuildIndex || ptyCheckIndex < rebuildIndex {
 		t.Fatal("server Dockerfile must rebuild node-pty after pruning and before checking native artifacts")
@@ -722,6 +727,87 @@ func TestDockerRuntimeAgentLoadsImmutablePluginDirectly(t *testing.T) {
 		}
 	}
 
+}
+
+func TestProjectCreatorPatchAnchorsLocalPluginsInTopLevelGroup(t *testing.T) {
+	root := repositoryRoot(t)
+	body := readTextFile(t, filepath.Join(root, "harness", "dsh", "project-creator.patch.yml"))
+	var patch []map[string]any
+	if err := yaml.Unmarshal([]byte(body), &patch); err != nil {
+		t.Fatalf("parse project-creator.patch.yml: %v", err)
+	}
+
+	var topLevelGroup map[string]any
+	for _, entry := range patch {
+		rows, ok := entry["insert"].([]any)
+		if !ok {
+			continue
+		}
+		for _, raw := range rows {
+			row, ok := raw.(map[string]any)
+			if ok && row["id"] == "project-creator-plugins" {
+				topLevelGroup = row
+				break
+			}
+		}
+		if topLevelGroup != nil {
+			break
+		}
+	}
+	if topLevelGroup == nil {
+		t.Fatal("project-creator.patch.yml must declare a top-level project-creator-plugins group")
+	}
+	if group, ok := topLevelGroup["group"].(bool); !ok || !group {
+		t.Fatal("project-creator-plugins must be a nested loader group")
+	}
+	config, ok := topLevelGroup["config"].([]any)
+	if !ok {
+		t.Fatalf("project-creator-plugins config = %T, want list", topLevelGroup["config"])
+	}
+	want := map[string]bool{
+		"./plugins/project-creator-restrictions.js": false,
+		"./plugins/project-creator-context.js":      false,
+	}
+	for _, raw := range config {
+		row, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := row["name"].(string)
+		if _, exists := want[name]; exists {
+			want[name] = true
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("top-level project-creator-plugins group missing %q", name)
+		}
+	}
+
+	for _, entry := range patch {
+		if entry["insert"] == nil {
+			continue
+		}
+		rows, ok := entry["insert"].([]any)
+		if !ok {
+			continue
+		}
+		for _, raw := range rows {
+			row, ok := raw.(map[string]any)
+			if !ok || row["id"] != "preset-project-creator" {
+				continue
+			}
+			presetConfig, _ := row["config"].(map[string]any)
+			plugins, _ := presetConfig["plugins"].([]any)
+			for _, plugin := range plugins {
+				pluginRow, _ := plugin.(map[string]any)
+				name, _ := pluginRow["name"].(string)
+				if _, exists := want[name]; exists {
+					t.Errorf("local plugin %q must not be nested in preset-project-creator config", name)
+				}
+			}
+		}
+	}
 }
 
 func TestDockerRuntimeAgentImageIsImmutableOneShotJobRuntime(t *testing.T) {
@@ -927,6 +1013,8 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
+		"harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml",
+		"harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js",
 		"harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js",
 	} {
 		if !strings.Contains(server, want) {

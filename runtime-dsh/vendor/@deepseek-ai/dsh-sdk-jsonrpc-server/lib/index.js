@@ -342,34 +342,25 @@ var HarnessSdkJsonRpcServer = class {
 		return creation;
 	}
 	async createSession(sessionId, presetId) {
+		const presets = this.ctx.get("agentPresets");
+		if (presetId !== undefined && presets === undefined) throw new Error("session/start requires the DSH agent preset registry");
 		const handle = await this.ctx.agents.create({
 			sessionId: brandString(sessionId),
 			meta: { cwd: this.cwd },
 			agentOptions: {
 				provider: this.provider,
 				model: this.model,
-				...this.reasoningEffort === void 0 ? {} : { reasoningEffort: this.reasoningEffort },
-				...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens }
+				...this.reasoningEffort === undefined ? {} : { reasoningEffort: this.reasoningEffort },
+				...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens }
+			},
+			...presetId === undefined ? {} : {
+				setup: async (agentCtx, agent) => {
+					await presets.mount(agentCtx, presetId);
+					agent.session.append("agent-preset/selected", { agentPreset: presetId });
+				}
 			}
 		});
-		if (presetId !== void 0) {
-			const presets = this.ctx.get("agentPresets");
-			if (presets === void 0) {
-				await handle.dispose();
-				throw new Error("session/start requires the DSH agent preset registry");
-			}
-			try {
-				await presets.select(handle.agent, presetId);
-			} catch (error) {
-				await handle.dispose();
-				throw error;
-			}
-		}
-		const rec = {
-			handle,
-			started: false,
-			...presetId === void 0 ? {} : { presetId }
-		};
+		const rec = { handle, started: false, ...presetId === undefined ? {} : { presetId } };
 		this.sessions.set(sessionId, rec);
 		return rec;
 	}

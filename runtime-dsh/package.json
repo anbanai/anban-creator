@@ -10,18 +10,21 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
-    "start": "node dist/dsh-bridge.js"
+    "start": "node dist/dsh-bridge.js",
+    "test:startup": "bun run build && node test/fixtures/project-creator-start.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-sdk-client": "file:vendor/@deepseek-ai/dsh-sdk-client",
     "@deepseek-ai/dsh-sdk-protocol": "file:vendor/@deepseek-ai/dsh-sdk-protocol",
-    "@deepseek-ai/dsh-sdk-jsonrpc-server": "file:vendor/@deepseek-ai/dsh-sdk-jsonrpc-server"
+    "@deepseek-ai/dsh-sdk-jsonrpc-server": "file:vendor/@deepseek-ai/dsh-sdk-jsonrpc-server",
+    "@deepseek-ai/dsh-agent-loop": "file:vendor/@deepseek-ai/dsh-agent-loop"
   },
   "overrides": {
     "@deepseek-ai/dsh-sdk-client": "$@deepseek-ai/dsh-sdk-client",
     "@deepseek-ai/dsh-sdk-protocol": "$@deepseek-ai/dsh-sdk-protocol",
     "@deepseek-ai/dsh-sdk-jsonrpc-server": "$@deepseek-ai/dsh-sdk-jsonrpc-server",
-    "fflate": "0.8.3"
+    "fflate": "0.8.3",
+    "@deepseek-ai/dsh-agent-loop": "$@deepseek-ai/dsh-agent-loop"
   },
   "devDependencies": {
     "@types/node": "26.6.3",

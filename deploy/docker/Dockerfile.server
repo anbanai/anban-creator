@@ -23,17 +23,20 @@ RUN set -eux; \
     npm run build; \
     npm prune --omit=dev --install-links=true --strict-allow-scripts; \
     npm_config_build_from_source=true npm rebuild node-pty; \
-    rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server; \
+    rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/dsh-agent-loop; \
     cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/; \
     cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/; \
     cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/; \
+    cp -a vendor/@deepseek-ai/dsh-agent-loop node_modules/@deepseek-ai/; \
     test -f node_modules/node-pty/build/Release/pty.node; \
     test -d node_modules/@deepseek-ai/dsh-sdk-client; \
     test ! -L node_modules/@deepseek-ai/dsh-sdk-client; \
     test -d node_modules/@deepseek-ai/dsh-sdk-protocol; \
     test ! -L node_modules/@deepseek-ai/dsh-sdk-protocol; \
     test -d node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server; \
-    test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server
+    test ! -L node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server; \
+    test -d node_modules/@deepseek-ai/dsh-agent-loop; \
+    test ! -L node_modules/@deepseek-ai/dsh-agent-loop
 
 FROM node:24.21.0-alpine3.24
 
@@ -64,6 +67,7 @@ COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patc
 COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js
+RUN node --input-type=module -e "await import('/app/harness/dsh/plugins/project-creator-restrictions.js'); await import('/app/harness/dsh/plugins/project-creator-context.js')"
 
 WORKDIR /app
 USER 1000:1000
