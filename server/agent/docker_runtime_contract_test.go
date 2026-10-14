@@ -464,13 +464,16 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 	root := repositoryRoot(t)
 	path := filepath.Join(root, "deploy/docker/Dockerfile.server")
 	body := readTextFile(t, path)
+	if strings.Contains(body, "test -x node_modules/node-pty/build/Release/spawn-helper") {
+		t.Fatal("server Dockerfile must not require node-pty's macOS-only spawn-helper in the Alpine/Linux image")
+	}
 	for _, want := range []string{
 		"FROM node:24.21.0-alpine3.24",
 		"apk add --no-cache ca-certificates ffmpeg tzdata",
 		"WORKDIR /build/server",
 		"FROM node:24.21.0-alpine3.24 AS dsh-builder",
 		"WORKDIR /build/runtime-dsh",
-		"RUN apk add --no-cache python3 make g++",
+		"RUN apk add --no-cache python3 make g++ cmake",
 		"COPY server/go.mod server/go.sum ./",
 		"COPY server ./",
 		"COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./",
@@ -484,7 +487,6 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		"cp -a vendor/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/",
 		"cp -a vendor/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/",
 		"test -f node_modules/node-pty/build/Release/pty.node",
-		"test -x node_modules/node-pty/build/Release/spawn-helper",
 		"test -d node_modules/@deepseek-ai/dsh-sdk-client",
 		"test ! -L node_modules/@deepseek-ai/dsh-sdk-client",
 		"test -d node_modules/@deepseek-ai/dsh-sdk-protocol",
