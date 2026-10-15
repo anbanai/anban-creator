@@ -36,6 +36,19 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	if pod.Labels["com.anban.runtime"] != "dsh-interactive" {
 		t.Fatal("missing interactive runtime label")
 	}
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("init containers = %#v, want one project-memory initializer", pod.Spec.InitContainers)
+	}
+	initializer := pod.Spec.InitContainers[0]
+	if initializer.Name != "project-memory-init" || initializer.SecurityContext == nil || initializer.SecurityContext.RunAsUser == nil || *initializer.SecurityContext.RunAsUser != 0 {
+		t.Fatalf("project-memory initializer = %#v, want root initializer", initializer)
+	}
+	if len(initializer.Command) != 3 || initializer.Command[0] != "/bin/sh" || initializer.Command[1] != "-c" || !strings.Contains(initializer.Command[2], "mkdir -p /workspace/project/.claude/agent-memory/project-creator") {
+		t.Fatalf("project-memory initializer command = %#v", initializer.Command)
+	}
+	if len(initializer.VolumeMounts) != 1 || initializer.VolumeMounts[0].MountPath != "/workspace/project" || initializer.VolumeMounts[0].ReadOnly {
+		t.Fatalf("project-memory initializer mounts = %#v", initializer.VolumeMounts)
+	}
 	if len(pod.Spec.ImagePullSecrets) != 1 || pod.Spec.ImagePullSecrets[0].Name != "acr-secret" {
 		t.Fatalf("image pull secrets = %#v, want acr-secret", pod.Spec.ImagePullSecrets)
 	}
