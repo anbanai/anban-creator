@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -82,6 +83,23 @@ func TestKubernetesRuntimeExitDetailsRetainBridgeDiagnostics(t *testing.T) {
 	details := interactiveRuntimeExitDetails(nil, errors.New("stream closed"), nil, errors.New("stderr pipe"), "bridge initialization failed", "runtime-secret")
 	if details["error"] != "stream closed" || details["stderr_error"] != "stderr pipe" || details["stderr"] != "bridge initialization failed" {
 		t.Fatalf("runtime exit details = %#v", details)
+	}
+}
+
+func TestInteractivePodDiagnosticIncludesPendingReason(t *testing.T) {
+	diagnostic := interactivePodDiagnostic(&corev1.Pod{Status: corev1.PodStatus{
+		Phase:   corev1.PodPending,
+		Reason:  "Unschedulable",
+		Message: "0/3 nodes are available: insufficient memory",
+		ContainerStatuses: []corev1.ContainerStatus{{
+			Name:  "dsh",
+			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "back-off pulling image"}},
+		}},
+	}})
+	for _, want := range []string{"phase=Pending", "reason=Unschedulable", "insufficient memory", "dsh:waiting", "ImagePullBackOff", "back-off pulling image"} {
+		if !strings.Contains(diagnostic, want) {
+			t.Fatalf("diagnostic %q does not contain %q", diagnostic, want)
+		}
 	}
 }
 

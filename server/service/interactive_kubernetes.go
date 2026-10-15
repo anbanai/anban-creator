@@ -246,16 +246,64 @@ func waitInteractivePod(ctx context.Context, kube kubernetes.Interface, namespac
 		case corev1.PodRunning:
 			return nil
 		case corev1.PodFailed, corev1.PodSucceeded:
-			return fmt.Errorf("DSH pod exited before exec: %s", pod.Status.Message)
+			return fmt.Errorf("DSH pod exited before exec: %s", interactivePodDiagnostic(pod))
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timeout.C:
-			return errors.New("timed out waiting for DSH pod")
+			return fmt.Errorf("timed out waiting for DSH pod: %s", interactivePodDiagnostic(pod))
 		case <-ticker.C:
 		}
 	}
+}
+
+func interactivePodDiagnostic(pod *corev1.Pod) string {
+	if pod == nil {
+		return "pod status unavailable"
+	}
+	parts := []string{"phase=" + string(pod.Status.Phase)}
+	if reason := strings.TrimSpace(pod.Status.Reason); reason != "" {
+		parts = append(parts, "reason="+reason)
+	}
+	if message := strings.TrimSpace(pod.Status.Message); message != "" {
+		parts = append(parts, "message="+message)
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Status == corev1.ConditionTrue || strings.TrimSpace(condition.Reason) != "" || strings.TrimSpace(condition.Message) != "" {
+			conditionParts := []string{string(condition.Type) + "=" + string(condition.Status)}
+			if reason := strings.TrimSpace(condition.Reason); reason != "" {
+				conditionParts = append(conditionParts, "reason="+reason)
+			}
+			if message := strings.TrimSpace(condition.Message); message != "" {
+				conditionParts = append(conditionParts, "message="+message)
+			}
+			parts = append(parts, strings.Join(conditionParts, ","))
+		}
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.State.Waiting != nil {
+			waiting := []string{status.Name + ":waiting"}
+			if reason := strings.TrimSpace(status.State.Waiting.Reason); reason != "" {
+				waiting = append(waiting, "reason="+reason)
+			}
+			if message := strings.TrimSpace(status.State.Waiting.Message); message != "" {
+				waiting = append(waiting, "message="+message)
+			}
+			parts = append(parts, strings.Join(waiting, ","))
+		}
+		if status.State.Terminated != nil {
+			terminated := []string{status.Name + ":terminated", fmt.Sprintf("exit_code=%d", status.State.Terminated.ExitCode)}
+			if reason := strings.TrimSpace(status.State.Terminated.Reason); reason != "" {
+				terminated = append(terminated, "reason="+reason)
+			}
+			if message := strings.TrimSpace(status.State.Terminated.Message); message != "" {
+				terminated = append(terminated, "message="+message)
+			}
+			parts = append(parts, strings.Join(terminated, ","))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 func quantityPtr(value string) *resource.Quantity                             { q := resource.MustParse(value); return &q }
 func dshBoolPtr(v bool) *bool                                                 { return &v }
