@@ -74,6 +74,7 @@ const (
 
 	TaskReviewPassed      TaskReviewStatus = "passed"
 	TaskReviewWarning     TaskReviewStatus = "warning"
+	TaskReviewBlocked     TaskReviewStatus = "blocked"
 	TaskReviewUnavailable TaskReviewStatus = "unavailable"
 
 	TaskPublicationSucceeded    TaskPublicationStatus = "succeeded"

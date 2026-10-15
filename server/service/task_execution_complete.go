@@ -1271,28 +1271,47 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 				Code: "visual_partial", Stage: "visual", Message: "请求的封面或正文配图未全部生成，现有图片已保留。",
 			})
 		}
-		var scan articleStatusArtifact
-		found, readErr := s.readCurrentArticleStatusArtifact(ctx, execution.ID, "output/marketing-scan.json", &scan)
-		switch {
-		case readErr != nil || !found:
-			outcome.Review.Status = model.TaskReviewUnavailable
-			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
-				Code: "review_unavailable", Stage: "review", Message: "营销扫描报告不可用或与最终文章不匹配，文章交付不受影响。",
-			})
-		case scan.Status == "passed":
-			outcome.Review.Status = model.TaskReviewPassed
-		case scan.Status == "warning", scan.Status == "block_publish":
-			outcome.Review.Status = model.TaskReviewWarning
-			code, message := "review_warning", "营销扫描发现需要人工确认的表达，文章仍可交付。"
-			if scan.Status == "block_publish" {
-				code, message = "review_block_publish", "营销扫描阻止自动创建公众号草稿，文章仍已交付。"
+		if taskUsesChannel(task, model.ChannelWechatPicture) {
+			var pkg picturePublicationPackage
+			found, readErr := s.readExecutionJSONArtifact(ctx, execution.ID, "output/publish-package.json", &pkg)
+			switch {
+			case readErr != nil || !found || !validPicturePublicationPackage(&pkg):
+				outcome.Review.Status = model.TaskReviewUnavailable
+				outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
+					Code: "agent_review_unavailable", Stage: "review", Message: "贴图 Agent 的质量审核证据不可用，无法确认图片是否满足交付条件。",
+				})
+			case pkg.Status == "ready":
+				outcome.Review.Status = model.TaskReviewPassed
+			case pkg.Status == "blocked":
+				outcome.Review.Status = model.TaskReviewBlocked
+				outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
+					Code: "agent_review_blocked", Stage: "review", Message: "贴图 Agent 的质量审核未通过，发布包已阻断。",
+				})
 			}
-			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: code, Stage: "review", Message: message})
-		default:
-			outcome.Review.Status = model.TaskReviewUnavailable
-			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
-				Code: "review_unavailable", Stage: "review", Message: "营销扫描报告状态无效，文章交付不受影响。",
-			})
+		} else {
+			var scan articleStatusArtifact
+			found, readErr := s.readCurrentArticleStatusArtifact(ctx, execution.ID, "output/marketing-scan.json", &scan)
+			switch {
+			case readErr != nil || !found:
+				outcome.Review.Status = model.TaskReviewUnavailable
+				outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
+					Code: "review_unavailable", Stage: "review", Message: "营销扫描报告不可用或与最终文章不匹配，文章交付不受影响。",
+				})
+			case scan.Status == "passed":
+				outcome.Review.Status = model.TaskReviewPassed
+			case scan.Status == "warning", scan.Status == "block_publish":
+				outcome.Review.Status = model.TaskReviewWarning
+				code, message := "review_warning", "营销扫描发现需要人工确认的表达，文章仍可交付。"
+				if scan.Status == "block_publish" {
+					code, message = "review_block_publish", "营销扫描阻止自动创建公众号草稿，文章仍已交付。"
+				}
+				outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: code, Stage: "review", Message: message})
+			default:
+				outcome.Review.Status = model.TaskReviewUnavailable
+				outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{
+					Code: "review_unavailable", Stage: "review", Message: "营销扫描报告状态无效，文章交付不受影响。",
+				})
+			}
 		}
 	}
 

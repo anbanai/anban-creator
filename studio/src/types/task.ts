@@ -47,7 +47,7 @@ export interface TaskLifecycle {
 export interface TaskOutcome {
   core_delivery: { status: 'complete' | 'none' }
   visual: { status: 'complete' | 'partial' | 'not_requested' }
-  review: { status: 'passed' | 'warning' | 'unavailable' }
+  review: { status: 'passed' | 'warning' | 'blocked' | 'unavailable' }
   publication: {
     status: 'succeeded' | 'blocked' | 'skipped' | 'failed' | 'ambiguous' | 'not_requested'
     code?: string

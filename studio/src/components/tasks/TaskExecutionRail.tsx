@@ -569,7 +569,7 @@ function CompletionSummary({ workflow, outcome }: { workflow?: WorkflowStatus | 
         <FileCheck2 className="size-3.5 text-muted-foreground" />
         <span className="text-xs font-medium text-foreground">内容验收</span>
         {review && <Badge variant="outline" className="text-[10px]">{readinessValueLabel(review.readiness) || '已评估'} · {review.overall_score}</Badge>}
-        {outcome && <Badge variant="outline" className="text-[10px]">{outcome.review.status === 'passed' ? '审核通过' : outcome.review.status === 'warning' ? '有警告' : '审核不可用'}</Badge>}
+        {outcome && <Badge variant="outline" className="text-[10px]">{outcome.review.status === 'passed' ? '审核通过' : outcome.review.status === 'warning' ? '有警告' : outcome.review.status === 'blocked' ? '审核未通过' : '审核不可用'}</Badge>}
       </div>
       {review?.next_actions?.length ? <p className="mt-2 text-xs text-muted-foreground">下一步：{review.next_actions.slice(0, 2).join('；')}</p> : null}
       {outcome?.warnings.length ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{outcome.warnings.map((warning) => warning.message).join('；')}</p> : null}

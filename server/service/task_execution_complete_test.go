@@ -33,6 +33,58 @@ func setupCloudCompletionTest(t *testing.T, withArtifact bool, startedOverride .
 	return svc, repo, task, execution
 }
 
+func TestBuildCloudTaskOutcomeUsesAgentReviewForWechatPicture(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	task.Type = model.TaskTypeWechatPicture
+	task.AgentID = model.AgentIDWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	task.Status = model.TaskStatusCompleted
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", canonicalPicturePublicationPackage(t, "blocked", "blocked", []string{"image_review_unavailable"}, nil))
+
+	outcome, err := svc.buildCloudTaskOutcome(ctx, task, execution, &agent.ExecutionResult{Success: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Review.Status != model.TaskReviewBlocked {
+		t.Fatalf("review status = %q, want agent review blocked", outcome.Review.Status)
+	}
+	for _, warning := range outcome.Warnings {
+		if warning.Code == "review_unavailable" || strings.Contains(warning.Message, "营销扫描") {
+			t.Fatalf("picture outcome incorrectly used article marketing scan: %#v", outcome.Warnings)
+		}
+	}
+}
+
+func TestBuildCloudTaskOutcomeMarksReadyPicturePackageAsReviewed(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, task, execution := setupCloudCompletionTest(t, false)
+	task.Type = model.TaskTypeWechatPicture
+	task.AgentID = model.AgentIDWechatPicture
+	task.Channel = model.ChannelWechatPicture
+	task.Status = model.TaskStatusCompleted
+	if err := repo.Tasks().Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/publish-package.json", "application/json", canonicalPicturePublicationPackage(t, "ready", "ready", nil, nil))
+
+	outcome, err := svc.buildCloudTaskOutcome(ctx, task, execution, &agent.ExecutionResult{Success: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Review.Status != model.TaskReviewPassed {
+		t.Fatalf("review status = %q, want agent review passed", outcome.Review.Status)
+	}
+	for _, warning := range outcome.Warnings {
+		if strings.Contains(warning.Message, "营销扫描") {
+			t.Fatalf("picture outcome incorrectly used article marketing scan: %#v", outcome.Warnings)
+		}
+	}
+}
+
 func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOverride ...bool) (*TaskService, repository.Repository, *gorm.DB, *model.Task, *model.TaskExecution) {
 	t.Helper()
 	db := setupTaskTestDB(t)

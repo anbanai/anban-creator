@@ -1617,7 +1617,7 @@
       "id": "wechat-picture",
       "channel": "wechat-picture",
       "plan_task_kind": "content_generation",
-      "version": "1.0.4",
+      "version": "1.0.5",
       "kind": "managed",
       "display_name": "微信公众号贴图",
       "description": "研究选题、编排图片消息并生成公众号 newspic 草稿交付包。",
@@ -1790,7 +1790,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "8a2dd1e5c966824a7843b20cc7fb890708654870680f5deb0ff18f483e2f8e0e"
+      "digest": "01852282140c0270c13830ce1a1c3ec8f91a150e0b82a55640f31453dbd23fca"
     },
     {
       "id": "whiteboard-animation",

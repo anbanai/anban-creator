@@ -285,6 +285,25 @@ describe('TaskExecutionRail', () => {
     expect(api.tasks.publishWechat).not.toHaveBeenCalled()
   })
 
+  it('labels an Agent review block separately from unavailable review evidence', () => {
+    const outcome: TaskOutcome = {
+      core_delivery: { status: 'complete' },
+      visual: { status: 'complete' },
+      review: { status: 'blocked' },
+      warnings: [{ code: 'agent_review_blocked', stage: 'review', message: '贴图质量审核未通过。' }],
+      publication: { status: 'blocked', attempted: false, action: 'review_content' },
+    }
+
+    render(<TaskExecutionRail taskId="task-1" status="completed" outcome={outcome} lifecycle={{
+      ...lifecycle,
+      stages: [{ ...lifecycle.stages[0], state: 'complete' }],
+    }} onOpenLogs={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '研究素材，已完成' }))
+    expect(screen.getByText('审核未通过')).toBeInTheDocument()
+    expect(screen.queryByText('审核不可用')).not.toBeInTheDocument()
+  })
+
   it('recovers a blocked draft without reporting a missing publication as a failure', async () => {
     const outcome: TaskOutcome = {
       core_delivery: { status: 'complete' }, visual: { status: 'complete' }, review: { status: 'passed' }, warnings: [],
