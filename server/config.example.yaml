@@ -103,6 +103,8 @@ dsh:
   network: "${ANBAN_DSH_NETWORK:-creator-runtime-network}"
   project_memory_volume: "${ANBAN_DSH_PROJECT_MEMORY_VOLUME:-creator-project-memory}"
   project_memory_mount: "/workspace/project"
+  # Must match claude.kubernetes.namespace so the rendered ServiceAccount and
+  # RoleBinding authorize the DSH Job in the same namespace.
   kubernetes_namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"
   kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"
   kubernetes_project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"

@@ -444,6 +444,22 @@ func TestValidateDshKubernetesUsesClaudeServiceAccount(t *testing.T) {
 	}
 }
 
+func TestValidateDshKubernetesRequiresClaudeNamespace(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Dsh.Executor = "kubernetes"
+	cfg.Dsh.Image = "registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64)
+	cfg.Dsh.KubernetesNamespace = "other-namespace"
+	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
+	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
+	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerInstanceID = "server-1"
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "dsh.kubernetes_namespace must match claude.kubernetes.namespace") {
+		t.Fatalf("Validate() error = %v, want DSH/Claude namespace invariant", err)
+	}
+}
+
 func TestValidateKubernetesAllowsZeroCompletionGrace(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Claude.Kubernetes.CompletionGraceSeconds = 0

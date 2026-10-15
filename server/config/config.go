@@ -1918,6 +1918,12 @@ func (c *Config) Validate() error {
 	if strings.EqualFold(strings.TrimSpace(c.Dsh.Executor), "kubernetes") && strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
 		errs = append(errs, "claude.kubernetes.service_account is required when dsh.executor is kubernetes")
 	}
+	if strings.EqualFold(strings.TrimSpace(c.Dsh.Executor), "kubernetes") &&
+		strings.TrimSpace(c.Dsh.KubernetesNamespace) != "" &&
+		strings.TrimSpace(c.Claude.Kubernetes.Namespace) != "" &&
+		strings.TrimSpace(c.Dsh.KubernetesNamespace) != strings.TrimSpace(c.Claude.Kubernetes.Namespace) {
+		errs = append(errs, "dsh.kubernetes_namespace must match claude.kubernetes.namespace when dsh.executor is kubernetes")
+	}
 	if c.Trends.TTL <= 0 {
 		errs = append(errs, "trends.ttl must be positive")
 	}
