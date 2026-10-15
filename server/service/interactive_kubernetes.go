@@ -338,16 +338,49 @@ func waitInteractivePod(ctx context.Context, kube kubernetes.Interface, namespac
 		case corev1.PodRunning:
 			return nil
 		case corev1.PodFailed, corev1.PodSucceeded:
-			return fmt.Errorf("DSH pod exited before exec: %s", interactivePodDiagnostic(pod))
+			return fmt.Errorf("DSH pod exited before exec: %s", interactivePodDiagnosticWithEvents(ctx, kube, namespace, pod))
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timeout.C:
-			return fmt.Errorf("timed out waiting for DSH pod: %s", interactivePodDiagnostic(pod))
+			return fmt.Errorf("timed out waiting for DSH pod: %s", interactivePodDiagnosticWithEvents(ctx, kube, namespace, pod))
 		case <-ticker.C:
 		}
 	}
+}
+
+// interactivePodDiagnosticWithEvents includes the kubelet event that explains
+// failures which do not reach a normal container state, such as FailedMount or
+// CreateContainerError during init-container setup.
+func interactivePodDiagnosticWithEvents(ctx context.Context, kube kubernetes.Interface, namespace string, pod *corev1.Pod) string {
+	diagnostic := interactivePodDiagnostic(pod)
+	if kube == nil || pod == nil || strings.TrimSpace(pod.Name) == "" {
+		return diagnostic
+	}
+	events, err := kube.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{FieldSelector: "involvedObject.kind=Pod,involvedObject.name=" + pod.Name})
+	if err != nil {
+		return diagnostic + "; events_error=" + sanitizeDiagnosticValue(err.Error())
+	}
+	for _, event := range events.Items {
+		parts := []string{}
+		if reason := strings.TrimSpace(event.Reason); reason != "" {
+			parts = append(parts, reason)
+		}
+		if message := strings.TrimSpace(event.Message); message != "" {
+			parts = append(parts, message)
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		diagnostic += "; event=" + sanitizeDiagnosticValue(strings.Join(parts, ": "))
+	}
+	return diagnostic
+}
+
+func sanitizeDiagnosticValue(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	return strings.ReplaceAll(value, ";", ",")
 }
 
 func interactivePodDiagnostic(pod *corev1.Pod) string {

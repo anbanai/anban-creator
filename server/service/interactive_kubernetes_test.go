@@ -177,6 +177,18 @@ func TestInteractivePodDiagnosticIncludesPendingReason(t *testing.T) {
 	}
 }
 
+func TestInteractivePodDiagnosticWithEventsIncludesKubeletFailure(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: "failed-mount", Namespace: "anban"}, InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "dsh-1"}, Reason: "FailedMount", Message: "MountVolume.SetUp failed for volume agent-memory: read-only file system"},
+	)
+	diagnostic := interactivePodDiagnosticWithEvents(context.Background(), client, "anban", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "dsh-1"}, Status: corev1.PodStatus{Phase: corev1.PodFailed}})
+	for _, want := range []string{"phase=Failed", "event=FailedMount: MountVolume.SetUp failed for volume agent-memory: read-only file system"} {
+		if !strings.Contains(diagnostic, want) {
+			t.Fatalf("diagnostic %q does not contain %q", diagnostic, want)
+		}
+	}
+}
+
 func repeatHex(n int) string {
 	result := make([]byte, n)
 	for i := range result {
