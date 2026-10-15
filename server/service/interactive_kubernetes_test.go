@@ -43,6 +43,9 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	if initializer.Name != "project-memory-init" || initializer.SecurityContext == nil || initializer.SecurityContext.RunAsUser == nil || *initializer.SecurityContext.RunAsUser != 0 {
 		t.Fatalf("project-memory initializer = %#v, want root initializer", initializer)
 	}
+	if initializer.SecurityContext.Capabilities == nil || len(initializer.SecurityContext.Capabilities.Add) != 3 || initializer.SecurityContext.Capabilities.Add[0] != "CHOWN" || initializer.SecurityContext.Capabilities.Add[1] != "FOWNER" || initializer.SecurityContext.Capabilities.Add[2] != "DAC_OVERRIDE" {
+		t.Fatalf("project-memory initializer capabilities = %#v, want CHOWN/FOWNER/DAC_OVERRIDE", initializer.SecurityContext.Capabilities)
+	}
 	if len(initializer.Command) != 3 || initializer.Command[0] != "/bin/sh" || initializer.Command[1] != "-c" || !strings.Contains(initializer.Command[2], "mkdir -p /workspace/project/.claude/agent-memory/project-creator") {
 		t.Fatalf("project-memory initializer command = %#v", initializer.Command)
 	}
@@ -158,12 +161,16 @@ func TestInteractivePodDiagnosticIncludesPendingReason(t *testing.T) {
 		Phase:   corev1.PodPending,
 		Reason:  "Unschedulable",
 		Message: "0/3 nodes are available: insufficient memory",
+		InitContainerStatuses: []corev1.ContainerStatus{{
+			Name:  "project-memory-init",
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1, Reason: "Error", Message: "permission denied"}},
+		}},
 		ContainerStatuses: []corev1.ContainerStatus{{
 			Name:  "dsh",
 			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "back-off pulling image"}},
 		}},
 	}})
-	for _, want := range []string{"phase=Pending", "reason=Unschedulable", "insufficient memory", "dsh:waiting", "ImagePullBackOff", "back-off pulling image"} {
+	for _, want := range []string{"phase=Pending", "reason=Unschedulable", "insufficient memory", "project-memory-init:terminated", "exit_code=1", "permission denied", "dsh:waiting", "ImagePullBackOff", "back-off pulling image"} {
 		if !strings.Contains(diagnostic, want) {
 			t.Fatalf("diagnostic %q does not contain %q", diagnostic, want)
 		}

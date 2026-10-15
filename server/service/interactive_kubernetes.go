@@ -184,7 +184,7 @@ func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, na
 	initProjectMemoryMount.ReadOnly = false
 	projectMemoryPath := strings.TrimRight(f.Config.KubernetesProjectMemoryMount, "/")
 	initCommand := fmt.Sprintf("mkdir -p %s/.claude/agent-memory/project-creator && chown 1000:1000 %s/.claude/agent-memory/project-creator && chmod 0700 %s/.claude/agent-memory/project-creator", projectMemoryPath, projectMemoryPath, projectMemoryPath)
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, ActiveDeadlineSeconds: &deadline, ServiceAccountName: f.ServiceAccount, AutomountServiceAccountToken: dshBoolPtr(false), ImagePullSecrets: imagePullSecrets(f.Config.KubernetesImagePullSecret), SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: dshBoolPtr(true), RunAsUser: int64Ptr(1000), RunAsGroup: int64Ptr(1000), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}, InitContainers: []corev1.Container{{Name: "project-memory-init", Image: f.Config.Image, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/bin/sh", "-c", initCommand}, SecurityContext: &corev1.SecurityContext{RunAsNonRoot: dshBoolPtr(false), RunAsUser: int64Ptr(0), RunAsGroup: int64Ptr(0), AllowPrivilegeEscalation: dshBoolPtr(false), ReadOnlyRootFilesystem: dshBoolPtr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: []corev1.Capability{"CHOWN"}}}, VolumeMounts: []corev1.VolumeMount{initProjectMemoryMount}}}, Containers: []corev1.Container{{Name: "dsh", Image: f.Config.Image, ImagePullPolicy: corev1.PullIfNotPresent, Env: nil, Command: []string{"tail", "-f", "/dev/null"}, WorkingDir: "/workspace/project", Resources: resources, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: dshBoolPtr(false), ReadOnlyRootFilesystem: dshBoolPtr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, VolumeMounts: volumeMounts}}, Volumes: volumes}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, ActiveDeadlineSeconds: &deadline, ServiceAccountName: f.ServiceAccount, AutomountServiceAccountToken: dshBoolPtr(false), ImagePullSecrets: imagePullSecrets(f.Config.KubernetesImagePullSecret), SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: dshBoolPtr(true), RunAsUser: int64Ptr(1000), RunAsGroup: int64Ptr(1000), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}, InitContainers: []corev1.Container{{Name: "project-memory-init", Image: f.Config.Image, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{"/bin/sh", "-c", initCommand}, SecurityContext: &corev1.SecurityContext{RunAsNonRoot: dshBoolPtr(false), RunAsUser: int64Ptr(0), RunAsGroup: int64Ptr(0), AllowPrivilegeEscalation: dshBoolPtr(false), ReadOnlyRootFilesystem: dshBoolPtr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}, Add: []corev1.Capability{"CHOWN", "FOWNER", "DAC_OVERRIDE"}}}, VolumeMounts: []corev1.VolumeMount{initProjectMemoryMount}}}, Containers: []corev1.Container{{Name: "dsh", Image: f.Config.Image, ImagePullPolicy: corev1.PullIfNotPresent, Env: nil, Command: []string{"tail", "-f", "/dev/null"}, WorkingDir: "/workspace/project", Resources: resources, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: dshBoolPtr(false), ReadOnlyRootFilesystem: dshBoolPtr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, VolumeMounts: volumeMounts}}, Volumes: volumes}}
 }
 
 func (f KubernetesRuntimeFactory) secret(spec InteractiveRuntimeSpec, namespace, name string) *corev1.Secret {
@@ -373,28 +373,32 @@ func interactivePodDiagnostic(pod *corev1.Pod) string {
 			parts = append(parts, strings.Join(conditionParts, ","))
 		}
 	}
-	for _, status := range pod.Status.ContainerStatuses {
-		if status.State.Waiting != nil {
-			waiting := []string{status.Name + ":waiting"}
-			if reason := strings.TrimSpace(status.State.Waiting.Reason); reason != "" {
-				waiting = append(waiting, "reason="+reason)
+	appendContainerStatuses := func(statuses []corev1.ContainerStatus) {
+		for _, status := range statuses {
+			if status.State.Waiting != nil {
+				waiting := []string{status.Name + ":waiting"}
+				if reason := strings.TrimSpace(status.State.Waiting.Reason); reason != "" {
+					waiting = append(waiting, "reason="+reason)
+				}
+				if message := strings.TrimSpace(status.State.Waiting.Message); message != "" {
+					waiting = append(waiting, "message="+message)
+				}
+				parts = append(parts, strings.Join(waiting, ","))
 			}
-			if message := strings.TrimSpace(status.State.Waiting.Message); message != "" {
-				waiting = append(waiting, "message="+message)
+			if status.State.Terminated != nil {
+				terminated := []string{status.Name + ":terminated", fmt.Sprintf("exit_code=%d", status.State.Terminated.ExitCode)}
+				if reason := strings.TrimSpace(status.State.Terminated.Reason); reason != "" {
+					terminated = append(terminated, "reason="+reason)
+				}
+				if message := strings.TrimSpace(status.State.Terminated.Message); message != "" {
+					terminated = append(terminated, "message="+message)
+				}
+				parts = append(parts, strings.Join(terminated, ","))
 			}
-			parts = append(parts, strings.Join(waiting, ","))
-		}
-		if status.State.Terminated != nil {
-			terminated := []string{status.Name + ":terminated", fmt.Sprintf("exit_code=%d", status.State.Terminated.ExitCode)}
-			if reason := strings.TrimSpace(status.State.Terminated.Reason); reason != "" {
-				terminated = append(terminated, "reason="+reason)
-			}
-			if message := strings.TrimSpace(status.State.Terminated.Message); message != "" {
-				terminated = append(terminated, "message="+message)
-			}
-			parts = append(parts, strings.Join(terminated, ","))
 		}
 	}
+	appendContainerStatuses(pod.Status.InitContainerStatuses)
+	appendContainerStatuses(pod.Status.ContainerStatuses)
 	return strings.Join(parts, "; ")
 }
 func quantityPtr(value string) *resource.Quantity                             { q := resource.MustParse(value); return &q }
