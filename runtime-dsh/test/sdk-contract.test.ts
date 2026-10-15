@@ -22,7 +22,7 @@ const sdkPackages = [
 describe("vendored DSH interactive SDK contract", () => {
   test("allows only pinned install scripts required by the Linux DSH runtime", () => {
     const approvals = packageJSON.allowScripts ?? {};
-    expect(approvals["@deepseek-ai/dsh-subprocess-local@0.2.1-alpha.3"]).toBe(true);
+    expect(approvals["@deepseek-ai/dsh-subprocess-local@0.2.1-alpha.4"]).toBe(true);
     expect(approvals["node-pty@1.2.0-beta.15"]).toBe(true);
     expect(approvals["koffi@3.1.1"]).toBe(true);
     expect(approvals["@google/genai"]).toBe(false);

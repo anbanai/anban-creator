@@ -1,14 +1,14 @@
 # Vendored DeepSeek Harness SDK
 
 These four packages are vendored from the published DeepSeek Harness
-`0.2.1-alpha.3` packages. The published SDK provides the current session
+`0.2.1-alpha.4` packages. The published SDK provides the current session
 resume/wait protocol; Anban adds a small compatibility extension for the
 interactive `session/start` and `session/answer` requests used by Studio.
 The upstream package remains the source of truth for all other runtime code.
 
 Only the package runtime JavaScript and declaration files are tracked. Build
 metadata and source maps are intentionally omitted. The package versions and
-lockfile stay at `0.2.1-alpha.3` so the complete dependency graph is upgraded
+lockfile stay at `0.2.1-alpha.4` so the complete dependency graph is upgraded
 together.
 
 The npm dependencies in `runtime-dsh/package.json` and
