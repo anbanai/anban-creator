@@ -120,6 +120,7 @@ type InteractiveSession struct {
 	busy                        bool
 	committing                  bool
 	runtimeStarted              bool
+	initialPromptSent           bool
 	runtimeExitPending          bool
 	runtimeExitData             any
 	runtime                     Runtime
@@ -566,8 +567,39 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	sess.runtimeExitData = nil
 	sess.mu.Unlock()
 	s.logRuntime("info", sess.ID, "interactive runtime initialized", nil)
+	sess.mu.Lock()
+	openingAlreadySent := sess.initialPromptSent
+	sess.mu.Unlock()
+	if opening := interactiveOpeningPrompt(sess.Intent); opening != "" && !openingAlreadySent {
+		if e = rt.Command(ctx, "session/prompt", map[string]any{
+			"sessionId":     sess.ID,
+			"contentBlocks": []map[string]string{{"type": "text", "text": opening}},
+		}); e != nil {
+			s.logRuntime("error", sess.ID, "interactive opening prompt failed", e)
+			s.runtimeEvent(sess.ID, "session.error", map[string]any{
+				"status":  "runtime_failed",
+				"message": fmt.Sprintf("interactive opening prompt failed: %v", e),
+			})
+			return
+		}
+		sess.mu.Lock()
+		sess.initialPromptSent = true
+		sess.mu.Unlock()
+		s.logRuntime("info", sess.ID, "interactive opening prompt sent", nil)
+	}
 	if pendingExit {
 		s.runtimeEvent(sess.ID, "runtime.exit", pendingExitData)
+	}
+}
+
+func interactiveOpeningPrompt(intent string) string {
+	switch strings.TrimSpace(intent) {
+	case "create-project":
+		return "我们先从项目定位开始：这个项目主要为哪类人创作？"
+	case "update-project-profile":
+		return "我已经读取现有项目画像。你这次最想优先调整哪一部分？"
+	default:
+		return ""
 	}
 }
 func (s *InteractiveService) expire(id string) {

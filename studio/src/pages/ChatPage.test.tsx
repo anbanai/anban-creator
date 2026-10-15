@@ -66,6 +66,7 @@ function renderChat(path = '/projects/create') {
 describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
     interactiveMocks.agents.mockResolvedValue([agent])
     interactiveMocks.createSession.mockResolvedValue({ id: 'session-1', agent_id: agent.id, status: 'running' })
     interactiveMocks.message.mockResolvedValue({})
@@ -88,6 +89,19 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'create-project'))
     expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
+  })
+
+  it('resumes a persisted session from its last SSE event without creating a new runtime', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    renderChat('/projects/create')
+
+    await waitFor(() => expect(streamMock).toHaveBeenCalledWith(
+      'session-1',
+      'test-token',
+      expect.any(AbortSignal),
+      expect.objectContaining({ lastEventId: '4' }),
+    ))
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
 
   it('starts an existing project update session with its project context', async () => {
@@ -243,7 +257,7 @@ describe('ChatPage', () => {
     expect(interactiveMocks.close).not.toHaveBeenCalledWith('session-1')
   })
 
-  it('prevents unload while the session is active and closes it after unmount', async () => {
+  it('prevents unload while the session is active and preserves it after unmount', async () => {
     const { unmount } = renderChat()
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.getByText('进行中')).toBeInTheDocument())
@@ -253,7 +267,7 @@ describe('ChatPage', () => {
     expect(preventDefault).toHaveBeenCalled()
 
     unmount()
-    await waitFor(() => expect(interactiveMocks.close).toHaveBeenCalledWith('session-1'))
+    await waitFor(() => expect(interactiveMocks.close).not.toHaveBeenCalledWith('session-1'))
   })
 
   it('does not close a committed session during navigation', async () => {

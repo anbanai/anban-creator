@@ -26,10 +26,12 @@ metadata:
     app: ${micro_service_name}
     version: ${version_switch}
 spec:
-  replicas: ${replicas_count}
+  # Interactive sessions are process-local; keep one control-plane replica.
+  replicas: 1
   selector:
     matchLabels:
       app: ${micro_service_name}
+      version: ${version_switch}
   template:
     metadata:
       labels:
@@ -38,7 +40,7 @@ spec:
     spec:
       serviceAccountName: ${agent_service_account}
       # The Server uses client-go in-cluster auth to create and reconcile
-      # Claude Jobs and interactive DSH Pods. Keep the projected token
+      # Claude Jobs and interactive DSH Jobs. Keep the projected token
       # explicit so an ACK admission/defaulting policy cannot disable it.
       automountServiceAccountToken: true
       initContainers:
@@ -235,6 +237,7 @@ metadata:
 spec:
   selector:
     app: ${micro_service_name}
+    version: ${version_switch}
   sessionAffinity: ClientIP
   ports:
     - name: https-8443
@@ -255,8 +258,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: ${micro_service_name}-${version_switch}
-  minReplicas: ${min_replica}
-  maxReplicas: ${max_replica}
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
     - type: Resource
       resource:
@@ -299,6 +302,7 @@ rules:
       - persistentvolumeclaims
     verbs:
       - get
+      - list
       - create
       - delete
   - apiGroups: [""]
@@ -308,12 +312,10 @@ rules:
       - get
       - list
       - watch
-      - create
       - update
-      - delete
   - apiGroups: [""]
     resources:
-      - pods/exec
+      - pods/attach
     verbs:
       - create
   - apiGroups: [""]
@@ -322,7 +324,7 @@ rules:
     verbs:
       - list
       - create
-      - update
+      - patch
       - delete
   - apiGroups: [""]
     resources:

@@ -25,6 +25,25 @@ type interactiveTestRuntime struct {
 	closeCheck func()
 }
 
+type interactiveRecordingRuntime struct {
+	mu      sync.Mutex
+	methods []string
+}
+
+func (r *interactiveRecordingRuntime) Command(_ context.Context, method string, _ any) error {
+	r.mu.Lock()
+	r.methods = append(r.methods, method)
+	r.mu.Unlock()
+	return nil
+}
+func (*interactiveRecordingRuntime) Close() error { return nil }
+
+type interactiveRecordingRuntimeFactory struct{ runtime *interactiveRecordingRuntime }
+
+func (f interactiveRecordingRuntimeFactory) Start(_ context.Context, _ string, _ string, _ string, _ func(string, any)) (Runtime, error) {
+	return f.runtime, nil
+}
+
 func (r *interactiveTestRuntime) Command(context.Context, string, any) error { return r.commandErr }
 func (r *interactiveTestRuntime) Close() error {
 	if r.closeCheck != nil {
@@ -266,6 +285,37 @@ func TestInteractiveCreateSessionAppliesPerUserLimit(t *testing.T) {
 	defer func() { _ = svc.Close("user-1", second.ID) }()
 	if _, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project"); !errors.Is(err, ErrInteractiveBusy) {
 		t.Fatalf("third CreateSession() error = %v, want ErrInteractiveBusy", err)
+	}
+}
+
+func TestInteractiveRuntimeSendsSystemOpeningPromptOnce(t *testing.T) {
+	runtime := &interactiveRecordingRuntime{}
+	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, interactiveRecordingRuntimeFactory{runtime: runtime}, []InteractiveAgent{{
+		ID: "project-creator", DisplayName: "Project Creator", Available: true, Intents: []string{"create-project"},
+	}})
+	svc.SetEnabled(true)
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close("user-1", sess.ID) })
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		methods := append([]string(nil), runtime.methods...)
+		runtime.mu.Unlock()
+		if len(methods) >= 2 {
+			if methods[0] != "session/start" || methods[1] != "session/prompt" {
+				t.Fatalf("runtime methods = %#v, want session/start then session/prompt", methods)
+			}
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.methods) != 2 {
+		t.Fatalf("runtime methods = %#v, want one opening prompt", runtime.methods)
 	}
 }
 

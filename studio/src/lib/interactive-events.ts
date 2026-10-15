@@ -4,6 +4,11 @@ export interface InteractiveStreamEvent extends SSEEvent {
   event: string
 }
 
+export interface InteractiveStreamOptions {
+  lastEventId?: string
+  onEvent?: (event: InteractiveStreamEvent) => void
+}
+
 const TERMINAL_EVENTS = new Set(['session.error', 'session.expired', 'session.closed', 'expired', 'closed'])
 
 function assertEventSequence(lastEventId: string | undefined, eventId: string | undefined) {
@@ -31,8 +36,8 @@ function waitForRetry(ms: number, signal?: AbortSignal) {
   })
 }
 
-export async function* streamInteractiveSession(sessionId: string, token: string, signal?: AbortSignal): AsyncGenerator<InteractiveStreamEvent> {
-  let lastEventId: string | undefined
+export async function* streamInteractiveSession(sessionId: string, token: string, signal?: AbortSignal, options: InteractiveStreamOptions = {}): AsyncGenerator<InteractiveStreamEvent> {
+  let lastEventId: string | undefined = options.lastEventId
   let reconnects = 0
   while (!signal?.aborted) {
     let response: Response
@@ -81,7 +86,9 @@ export async function* streamInteractiveSession(sessionId: string, token: string
               assertEventSequence(lastEventId, event.id)
             if (event.id) lastEventId = event.id
             terminal ||= TERMINAL_EVENTS.has(event.event)
-            yield event as InteractiveStreamEvent
+            const interactiveEvent = event as InteractiveStreamEvent
+            options.onEvent?.(interactiveEvent)
+            yield interactiveEvent
           }
         }
       }
@@ -90,7 +97,9 @@ export async function* streamInteractiveSession(sessionId: string, token: string
           assertEventSequence(lastEventId, event.id)
           if (event.id) lastEventId = event.id
           terminal ||= TERMINAL_EVENTS.has(event.event)
-          yield event as InteractiveStreamEvent
+          const interactiveEvent = event as InteractiveStreamEvent
+          options.onEvent?.(interactiveEvent)
+          yield interactiveEvent
         }
       }
     } finally {

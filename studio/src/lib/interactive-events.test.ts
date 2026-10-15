@@ -24,6 +24,18 @@ describe('streamInteractiveSession', () => {
     }))
   })
 
+  it('resumes from a persisted event id and reports newly received ids', async () => {
+    const onEvent = vi.fn()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response('event:session.status\nid:8\ndata:{"status":"running"}\n\n'))
+    const stream = streamInteractiveSession('session-1', 'token', undefined, { lastEventId: '7', onEvent })
+
+    await expect(stream.next()).resolves.toMatchObject({ value: { event: 'session.status', id: '8' }, done: false })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/interactive/sessions/session-1/events', expect.objectContaining({
+      headers: expect.objectContaining({ 'Last-Event-ID': '7' }),
+    }))
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ id: '8' }))
+  })
+
   it('reconnects with the latest event id after a stream closes', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.spyOn(globalThis, 'fetch')

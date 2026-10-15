@@ -196,16 +196,16 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		t.Fatalf("server ServiceAccount namespace = %q, want ${namespace}", serverServiceAccount.Metadata.Namespace)
 	}
 	if !roleAllows(serverRole, "jobs", "get", "list", "watch", "create", "update", "delete") ||
-		!roleAllows(serverRole, "persistentvolumeclaims", "get", "create", "delete") ||
-		!roleAllows(serverRole, "pods", "get", "list", "watch", "create", "delete") ||
-		!roleAllows(serverRole, "pods/exec", "create") ||
-		!roleAllows(serverRole, "secrets", "list", "create", "update", "delete") {
+		!roleAllows(serverRole, "persistentvolumeclaims", "get", "list", "create", "delete") ||
+		!roleAllows(serverRole, "pods", "get", "list", "watch") ||
+		!roleAllows(serverRole, "pods/attach", "create") ||
+		!roleAllows(serverRole, "secrets", "list", "create", "patch", "delete") {
 		t.Fatalf("server deployment Role must allow Pod and DSH Secret lifecycle management: %#v", serverRole.Rules)
 	}
 	if !roleAllows(serverRole, "events", "get", "list") {
 		t.Fatalf("server deployment Role must allow read-only Pod event diagnostics: %#v", serverRole.Rules)
 	}
-	if roleAllows(serverRole, "secrets", "get") || roleAllows(serverRole, "events", "create") || roleAllows(serverRole, "pods/log", "get") {
+	if roleAllows(serverRole, "secrets", "get") || roleAllows(serverRole, "secrets", "update") || roleAllows(serverRole, "events", "create") || roleAllows(serverRole, "pods/log", "get") || roleAllows(serverRole, "pods/exec", "create") || roleAllows(serverRole, "pods", "create", "delete") {
 		t.Fatalf("server deployment Role grants unused sensitive or event permissions: %#v", serverRole.Rules)
 	}
 	if serverRoleBinding.Metadata.Namespace != "${namespace}" || len(serverRoleBinding.Subjects) != 1 || serverRoleBinding.Subjects[0].Kind != "ServiceAccount" || serverRoleBinding.Subjects[0].Name != "${agent_service_account}" || serverRoleBinding.Subjects[0].Namespace != "${namespace}" || serverRoleBinding.RoleRef.Kind != "Role" || serverRoleBinding.RoleRef.Name != "creator-agent-runner" {

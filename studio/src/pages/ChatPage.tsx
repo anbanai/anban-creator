@@ -70,6 +70,40 @@ function parseData(eventData: string): JsonRecord {
   }
 }
 
+type PersistedInteractiveSession = { sessionId: string; lastEventId?: string }
+
+function interactiveSessionStorageKey(agentId: string, intent: string, projectId?: string): string {
+  return `anban:interactive-session:${agentId}:${intent}:${projectId ?? 'new'}`
+}
+
+function readPersistedInteractiveSession(key: string): PersistedInteractiveSession | null {
+  try {
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return null
+    const value: unknown = JSON.parse(raw)
+    if (!isRecord(value) || typeof value.sessionId !== 'string' || !value.sessionId) return null
+    return { sessionId: value.sessionId, lastEventId: typeof value.lastEventId === 'string' ? value.lastEventId : undefined }
+  } catch {
+    return null
+  }
+}
+
+function persistInteractiveSession(key: string, session: PersistedInteractiveSession): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(session))
+  } catch {
+    // Session persistence is an enhancement; the live SSE stream remains authoritative.
+  }
+}
+
+function clearPersistedInteractiveSession(key: string): void {
+  try {
+    sessionStorage.removeItem(key)
+  } catch {
+    // Ignore storage policies such as private browsing.
+  }
+}
+
 function normalizeDraft(raw: JsonRecord): InteractiveDraft {
   const draft = isRecord(raw.draft) ? raw.draft : raw
   const name = stringValue(draft.name)
@@ -169,7 +203,10 @@ export default function ChatPage() {
   const projectId = params.get('project_id') || undefined
   const isProjectUpdate = intent === 'update-project-profile'
   const [selectedAgent, setSelectedAgent] = useState(requestedAgent || (location.pathname === '/projects/create' ? 'project-creator' : ''))
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const sessionStorageKey = interactiveSessionStorageKey(selectedAgent, intent, projectId)
+  const [persistedSessionKey] = useState(sessionStorageKey)
+  const [persistedSession] = useState(() => readPersistedInteractiveSession(sessionStorageKey))
+  const [sessionId, setSessionId] = useState<string | null>(persistedSession?.sessionId ?? null)
   const [runState, setRunState] = useState<RunState>('idle')
   const [messages, setMessages] = useState<Message[]>([])
   const [questionBatches, setQuestionBatches] = useState<QuestionBatch[]>([])
@@ -183,7 +220,7 @@ export default function ChatPage() {
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [restartNonce, setRestartNonce] = useState(0)
   const idempotencyKeyRef = useRef(crypto.randomUUID())
-  const sessionRef = useRef<string | null>(null)
+  const sessionRef = useRef<string | null>(persistedSession?.sessionId ?? null)
   const startPromiseRef = useRef<{ key: string; promise: Promise<void> } | null>(null)
   const runGenerationRef = useRef(0)
   const streamAbortRef = useRef<AbortController | null>(null)
@@ -211,6 +248,7 @@ export default function ChatPage() {
     streamAbortRef.current?.abort()
     const previousId = sessionRef.current
     if (previousId && !committedRef.current) void api.interactive.close(previousId).catch(() => undefined)
+    clearPersistedInteractiveSession(sessionStorageKey)
     sessionRef.current = null
     setSessionId(null)
     setRunState('idle')
@@ -227,7 +265,7 @@ export default function ChatPage() {
     hasInputRef.current = false
     setCommitting(false)
     idempotencyKeyRef.current = crypto.randomUUID()
-  }, [])
+  }, [sessionStorageKey])
 
   const terminateConversation = useCallback((state: Extract<RunState, 'error' | 'expired' | 'closed'>, message: string) => {
     runGenerationRef.current += 1
@@ -239,14 +277,18 @@ export default function ChatPage() {
     setRunState(state)
     setStreamError(message)
     confirmationTokenRef.current = null
+    clearPersistedInteractiveSession(sessionStorageKey)
     if (previousId && !committedRef.current) void api.interactive.close(previousId).catch(() => undefined)
-  }, [])
+  }, [isProjectUpdate, sessionStorageKey])
 
   const processEvent = useCallback((event: { event: string; data: string }) => {
     const data = parseData(event.data)
     switch (event.event) {
       case 'assistant.message':
         setMessages((items) => [...items, { id: stringValue(data.id) ?? crypto.randomUUID(), role: 'assistant', text: stringValue(data.text) ?? '' }])
+        break
+      case 'user.message':
+        setMessages((items) => [...items, { id: stringValue(data.id) ?? crypto.randomUUID(), role: 'user', text: stringValue(data.text) ?? '' }])
         break
       case 'session.status':
         setRunState(isRunState(data.status) ? data.status : 'running')
@@ -313,7 +355,13 @@ export default function ChatPage() {
     streamAbortRef.current = controller
     try {
       if (!token) throw new Error('登录状态已失效，请重新登录。')
-      for await (const event of streamInteractiveSession(id, token, controller.signal)) {
+      const persisted = readPersistedInteractiveSession(sessionStorageKey)
+      for await (const event of streamInteractiveSession(id, token, controller.signal, {
+        lastEventId: persisted?.sessionId === id ? persisted.lastEventId : undefined,
+        onEvent: (received) => {
+          if (received.id) persistInteractiveSession(sessionStorageKey, { sessionId: id, lastEventId: received.id })
+        },
+      })) {
         if (disposedRef.current || generation !== runGenerationRef.current) return
         processEvent(event)
       }
@@ -324,7 +372,7 @@ export default function ChatPage() {
       if (controller.signal.aborted || disposedRef.current || generation !== runGenerationRef.current) return
       terminateConversation('error', error instanceof Error ? error.message : '与创作会话连接失败')
     }
-  }, [isProjectUpdate, processEvent, terminateConversation, token])
+  }, [isProjectUpdate, processEvent, sessionStorageKey, terminateConversation, token])
 
   const startSession = useCallback((agent: InteractiveAgent) => {
     const key = `${agent.id}:${intent}:${projectId ?? ''}:${restartNonce}`
@@ -342,6 +390,7 @@ export default function ChatPage() {
         return
       }
       sessionRef.current = session.id
+      persistInteractiveSession(sessionStorageKey, { sessionId: session.id })
       setSessionProject({ id: session.project_id ?? projectId, name: session.project_name })
       setSessionId(session.id)
       setRunState((session.status as RunState) || 'running')
@@ -353,7 +402,18 @@ export default function ChatPage() {
     })
     startPromiseRef.current = { key, promise }
     return promise
-  }, [connectStream, intent, isProjectUpdate, projectId, restartNonce])
+  }, [connectStream, intent, isProjectUpdate, projectId, restartNonce, sessionStorageKey])
+
+  useEffect(() => {
+    if (sessionStorageKey !== persistedSessionKey || !persistedSession?.sessionId || !token) return
+    const currentPersisted = readPersistedInteractiveSession(sessionStorageKey)
+    if (currentPersisted?.sessionId !== persistedSession.sessionId) return
+    const generation = ++runGenerationRef.current
+    disposedRef.current = false
+    setRunState('starting')
+    sessionRef.current = persistedSession.sessionId
+    void connectStream(persistedSession.sessionId, generation)
+  }, [connectStream, persistedSession, persistedSessionKey, sessionStorageKey, token])
 
   useEffect(() => {
     if (!selectedAgent || agentsQuery.isLoading || !activeAgent || sessionId || ['starting', 'error', 'expired', 'closed'].includes(runState)) return
@@ -375,15 +435,11 @@ export default function ChatPage() {
     disposedRef.current = false
     return () => {
       disposedRef.current = true
-      // An immediate remount is React StrictMode's effect probe. Let it cancel
-      // destructive cleanup before closing the only session being started.
-      queueMicrotask(() => {
-        if (!disposedRef.current || cleanupGeneration !== cleanupGenerationRef.current) return
-        runGenerationRef.current += 1
-        streamAbortRef.current?.abort()
-        const id = sessionRef.current
-        if (id && !committedRef.current) void api.interactive.close(id).catch(() => undefined)
-      })
+      // Keep the server-owned session alive across refreshes. The next mount
+      // resumes it from the persisted ID and Last-Event-ID.
+      if (cleanupGeneration !== cleanupGenerationRef.current) return
+      runGenerationRef.current += 1
+      streamAbortRef.current?.abort()
     }
   }, [])
 
@@ -407,7 +463,6 @@ export default function ChatPage() {
     if (!text || !sessionId || pendingQuestions.length > 0 || runState === 'starting' || committing) return
     setComposer('')
     hasInputRef.current = true
-    setMessages((items) => [...items, { id: crypto.randomUUID(), role: 'user', text }])
     confirmationTokenRef.current = null
     setDraft((value) => value ? { ...value, ready: false } : value)
     setCommitError(null)
@@ -437,6 +492,7 @@ export default function ChatPage() {
       const result = await api.interactive.commit(sessionId, confirmationToken, idempotencyKeyRef.current, draft?.memory_append)
       committedRef.current = true
       setCommitted(true)
+      clearPersistedInteractiveSession(sessionStorageKey)
       const id = result.project?.id ?? (isProjectUpdate ? projectId : undefined)
       navigate(id ? `/projects?edit=${encodeURIComponent(id)}` : '/projects')
     } catch (error) {

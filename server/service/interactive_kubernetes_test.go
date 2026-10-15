@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -90,14 +91,38 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	}
 }
 
+func TestKubernetesRuntimeFactoryBuildsLongLivedJobWithAttachableBridge(t *testing.T) {
+	factory := KubernetesRuntimeFactory{ServiceAccount: "creator-agent-runner", Config: srvconfig.DshConfig{
+		KubernetesNamespace: "anban", KubernetesImagePullSecret: "acr-secret", KubernetesProjectMemoryClaim: "creator-project-memory",
+		KubernetesProjectMemoryMount: "/workspace/project", Image: "registry.example/creator-dsh@sha256:" + repeatHex(64), CPUCores: 1, MemoryMB: 512, TimeoutSec: 600,
+	}}
+	job := factory.job(InteractiveRuntimeSpec{SessionID: "session-1", AgentPackID: "project-creator", RuntimeToken: "token"}, "anban", "anban-dsh-session-1")
+	if job.Kind != "Job" || job.Spec.Completions == nil || *job.Spec.Completions != 1 || job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 {
+		t.Fatalf("job completion policy = %#v, want one completion and one parallel pod", job.Spec)
+	}
+	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 || job.Spec.Template.Spec.RestartPolicy != corev1.RestartPolicyNever {
+		t.Fatalf("job retry policy = %#v, want backoffLimit=0/restart Never", job.Spec)
+	}
+	container := job.Spec.Template.Spec.Containers[0]
+	if container.Command == nil || len(container.Command) < 2 || container.Command[0] != "node" || container.Command[1] != "/app/runtime-dsh/dist/dsh-bridge.js" {
+		t.Fatalf("bridge command = %#v, want bridge as container process", container.Command)
+	}
+	if !container.Stdin || container.StdinOnce || container.TTY {
+		t.Fatalf("bridge stdio = stdin:%v stdinOnce:%v tty:%v, want attachable stdin", container.Stdin, container.StdinOnce, container.TTY)
+	}
+	if job.Spec.Template.Labels["com.anban.session_id"] != "session-1" || job.Spec.Template.Labels["com.anban.runtime"] != "dsh-interactive" {
+		t.Fatalf("job pod labels = %#v", job.Spec.Template.Labels)
+	}
+}
+
 func TestKubernetesRuntimeFactoryCleanupOrphans(t *testing.T) {
-	client := fake.NewSimpleClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "dsh-1", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive"}}})
+	client := fake.NewSimpleClientset(&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "dsh-1", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive"}}})
 	factory := KubernetesRuntimeFactory{Kube: client, REST: &rest.Config{}, Config: srvconfig.DshConfig{KubernetesNamespace: "anban"}}
 	if err := factory.CleanupOrphans(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.CoreV1().Pods("anban").Get(context.Background(), "dsh-1", metav1.GetOptions{}); err == nil {
-		t.Fatal("orphan pod was not deleted")
+	if _, err := client.BatchV1().Jobs("anban").Get(context.Background(), "dsh-1", metav1.GetOptions{}); err == nil {
+		t.Fatal("orphan Job was not deleted")
 	}
 }
 
@@ -105,8 +130,8 @@ func TestKubernetesRuntimeFactoryCleanupOrphansRetainsDiagnosticResourcesUntilDe
 	active := time.Now().Add(time.Minute).Unix()
 	expired := time.Now().Add(-time.Minute).Unix()
 	client := fake.NewSimpleClientset(
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "active", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(active, 10)}}},
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "expired", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(expired, 10)}}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "anban-dsh-active", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(active, 10)}}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "anban-dsh-expired", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(expired, 10)}}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "active-secret", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1", "com.anban.session_id": "active"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(active, 10)}}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "expired-secret", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1", "com.anban.session_id": "expired"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(expired, 10)}}},
 	)
@@ -114,11 +139,11 @@ func TestKubernetesRuntimeFactoryCleanupOrphansRetainsDiagnosticResourcesUntilDe
 	if err := factory.CleanupOrphans(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.CoreV1().Pods("anban").Get(context.Background(), "active", metav1.GetOptions{}); err != nil {
-		t.Fatalf("active diagnostic pod was deleted: %v", err)
+	if _, err := client.BatchV1().Jobs("anban").Get(context.Background(), "anban-dsh-active", metav1.GetOptions{}); err != nil {
+		t.Fatalf("active diagnostic Job was deleted: %v", err)
 	}
-	if _, err := client.CoreV1().Pods("anban").Get(context.Background(), "expired", metav1.GetOptions{}); err == nil {
-		t.Fatal("expired diagnostic pod was not deleted")
+	if _, err := client.BatchV1().Jobs("anban").Get(context.Background(), "anban-dsh-expired", metav1.GetOptions{}); err == nil {
+		t.Fatal("expired diagnostic Job was not deleted")
 	}
 	if _, err := client.CoreV1().Secrets("anban").Get(context.Background(), "active-secret", metav1.GetOptions{}); err != nil {
 		t.Fatalf("active diagnostic secret was deleted: %v", err)
@@ -146,6 +171,20 @@ func TestWaitInteractivePodUsesConfiguredStartupTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed < 900*time.Millisecond {
 		t.Fatalf("startup timeout elapsed = %v, want at least 900ms", elapsed)
+	}
+}
+
+func TestWaitInteractiveJobPodReturnsRunningJobPod(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "anban-dsh-session-1", Namespace: "anban"}, Status: batchv1.JobStatus{Active: 1}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "anban-dsh-session-1-pod", Namespace: "anban", Labels: map[string]string{"job-name": "anban-dsh-session-1"}}, Status: corev1.PodStatus{Phase: corev1.PodRunning}},
+	)
+	pod, err := waitInteractiveJobPod(context.Background(), client, "anban", "anban-dsh-session-1", 1)
+	if err != nil {
+		t.Fatalf("waitInteractiveJobPod() error = %v", err)
+	}
+	if pod.Name != "anban-dsh-session-1-pod" {
+		t.Fatalf("running pod = %q", pod.Name)
 	}
 }
 

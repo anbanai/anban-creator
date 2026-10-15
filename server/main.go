@@ -760,7 +760,7 @@ func main() {
 				BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
 		}
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
-			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH pods")
+			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH jobs")
 		}
 		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
 		if projectSvc != nil {
