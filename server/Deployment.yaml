@@ -309,6 +309,7 @@ rules:
       - list
       - watch
       - create
+      - update
       - delete
   - apiGroups: [""]
     resources:
@@ -321,6 +322,7 @@ rules:
     verbs:
       - list
       - create
+      - update
       - delete
 ---
 apiVersion: rbac.authorization.k8s.io/v1

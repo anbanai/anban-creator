@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,6 +78,42 @@ func TestKubernetesRuntimeFactoryCleanupOrphans(t *testing.T) {
 	}
 	if _, err := client.CoreV1().Pods("anban").Get(context.Background(), "dsh-1", metav1.GetOptions{}); err == nil {
 		t.Fatal("orphan pod was not deleted")
+	}
+}
+
+func TestKubernetesRuntimeFactoryCleanupOrphansRetainsDiagnosticResourcesUntilDeadline(t *testing.T) {
+	active := time.Now().Add(time.Minute).Unix()
+	expired := time.Now().Add(-time.Minute).Unix()
+	client := fake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "active", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(active, 10)}}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "expired", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(expired, 10)}}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "active-secret", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1", "com.anban.session_id": "active"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(active, 10)}}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "expired-secret", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1", "com.anban.session_id": "expired"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(expired, 10)}}},
+	)
+	factory := KubernetesRuntimeFactory{Kube: client, REST: &rest.Config{}, ServerInstanceID: "server-1", Config: srvconfig.DshConfig{KubernetesNamespace: "anban"}}
+	if err := factory.CleanupOrphans(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CoreV1().Pods("anban").Get(context.Background(), "active", metav1.GetOptions{}); err != nil {
+		t.Fatalf("active diagnostic pod was deleted: %v", err)
+	}
+	if _, err := client.CoreV1().Pods("anban").Get(context.Background(), "expired", metav1.GetOptions{}); err == nil {
+		t.Fatal("expired diagnostic pod was not deleted")
+	}
+	if _, err := client.CoreV1().Secrets("anban").Get(context.Background(), "active-secret", metav1.GetOptions{}); err != nil {
+		t.Fatalf("active diagnostic secret was deleted: %v", err)
+	}
+	if _, err := client.CoreV1().Secrets("anban").Get(context.Background(), "expired-secret", metav1.GetOptions{}); err == nil {
+		t.Fatal("expired diagnostic secret was not deleted")
+	}
+}
+
+func TestDiagnosticRetentionActive(t *testing.T) {
+	if !diagnosticRetentionActive(map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(time.Now().Add(time.Second).Unix(), 10)}, time.Now()) {
+		t.Fatal("future retention deadline was not active")
+	}
+	if diagnosticRetentionActive(map[string]string{dshDiagnosticRetentionAnnotation: "invalid"}, time.Now()) {
+		t.Fatal("invalid retention deadline was active")
 	}
 }
 

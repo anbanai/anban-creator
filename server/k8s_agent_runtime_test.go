@@ -199,7 +199,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		!roleAllows(serverRole, "persistentvolumeclaims", "get", "create", "delete") ||
 		!roleAllows(serverRole, "pods", "get", "list", "watch", "create", "delete") ||
 		!roleAllows(serverRole, "pods/exec", "create") ||
-		!roleAllows(serverRole, "secrets", "list", "create", "delete") {
+		!roleAllows(serverRole, "secrets", "list", "create", "update", "delete") {
 		t.Fatalf("server deployment Role must allow Pod and DSH Secret lifecycle management: %#v", serverRole.Rules)
 	}
 	if roleAllows(serverRole, "secrets", "get") || roleAllows(serverRole, "events", "create") || roleAllows(serverRole, "pods/log", "get") {

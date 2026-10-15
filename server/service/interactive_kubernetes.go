@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
+
+const dshDiagnosticRetentionAnnotation = "anban.ai/dsh-diagnostic-retain-until"
 
 // KubernetesRuntimeFactory runs one non-restarting Pod per interactive
 // session. The Server owns the pod and attaches a single authenticated exec
@@ -98,8 +101,7 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 	}
 	if err := waitInteractivePod(streamCtx, f.Kube, namespace, created.Name); err != nil {
 		abort()
-		_ = f.deletePod(context.Background(), namespace, created.Name)
-		_ = f.deleteSecret(context.Background(), namespace, secretName)
+		f.retainOrDeleteDiagnosticResources(namespace, created.Name, secretName)
 		return nil, err
 	}
 	request := f.Kube.CoreV1().RESTClient().Post().Namespace(namespace).Resource("pods").Name(created.Name).SubResource("exec")
@@ -111,23 +113,30 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 	exec, err := remotecommand.NewSPDYExecutor(f.REST, "POST", request.URL())
 	if err != nil {
 		abort()
-		_ = f.deletePod(context.Background(), namespace, created.Name)
-		_ = f.deleteSecret(context.Background(), namespace, secretName)
+		f.retainOrDeleteDiagnosticResources(namespace, created.Name, secretName)
 		return nil, fmt.Errorf("create DSH pod exec: %w", err)
 	}
 	streamCtx, cancel := context.WithCancel(streamCtx)
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
 	stderrReader, stderrWriter := io.Pipe()
-	r := &execRuntime{in: stdinWriter, done: make(chan struct{}), pending: map[uint64]chan error{}, redactions: []string{spec.RuntimeToken, f.APIKey}, cleanup: func() {
+	r := &execRuntime{in: stdinWriter, done: make(chan struct{}), pending: map[uint64]chan error{}, redactions: []string{spec.RuntimeToken, f.APIKey}}
+	r.cleanup = func() {
 		cancel()
 		if timeoutCancel != nil {
 			timeoutCancel()
 		}
 		_ = stdinReader.Close()
-		_ = f.deletePod(context.Background(), namespace, created.Name)
-		_ = f.deleteSecret(context.Background(), namespace, secretName)
-	}}
+		r.mu.Lock()
+		closedByOwner := r.closed
+		r.mu.Unlock()
+		if closedByOwner {
+			_ = f.deletePod(context.Background(), namespace, created.Name)
+			_ = f.deleteSecret(context.Background(), namespace, secretName)
+			return
+		}
+		f.retainOrDeleteDiagnosticResources(namespace, created.Name, secretName)
+	}
 	if emit == nil {
 		emit = func(string, any) {}
 	}
@@ -198,6 +207,9 @@ func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {
 		if instance := strings.TrimSpace(f.ServerInstanceID); instance != "" && pod.Labels["com.anban.server_instance"] != instance {
 			continue
 		}
+		if diagnosticRetentionActive(pod.Annotations, time.Now()) {
+			continue
+		}
 		if err := f.deletePod(ctx, ns, pod.Name); err != nil {
 			return err
 		}
@@ -208,6 +220,9 @@ func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {
 	}
 	for _, secret := range secrets.Items {
 		if instance := strings.TrimSpace(f.ServerInstanceID); instance != "" && secret.Labels["com.anban.server_instance"] != instance {
+			continue
+		}
+		if diagnosticRetentionActive(secret.Annotations, time.Now()) {
 			continue
 		}
 		sessionID := strings.TrimSpace(secret.Labels["com.anban.session_id"])
@@ -227,11 +242,80 @@ func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {
 
 func (f KubernetesRuntimeFactory) deletePod(ctx context.Context, namespace, name string) error {
 	grace := int64(0)
-	return f.Kube.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{GracePeriodSeconds: &grace, PropagationPolicy: propagationPtr(metav1.DeletePropagationBackground)})
+	err := f.Kube.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{GracePeriodSeconds: &grace, PropagationPolicy: propagationPtr(metav1.DeletePropagationBackground)})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 func (f KubernetesRuntimeFactory) deleteSecret(ctx context.Context, namespace, name string) error {
-	return f.Kube.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	err := f.Kube.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
+
+func (f KubernetesRuntimeFactory) retainOrDeleteDiagnosticResources(namespace, podName, secretName string) {
+	retention := time.Duration(f.Config.RuntimeDiagnosticRetentionSeconds) * time.Second
+	if retention <= 0 {
+		_ = f.deletePod(context.Background(), namespace, podName)
+		_ = f.deleteSecret(context.Background(), namespace, secretName)
+		return
+	}
+	deadline := time.Now().Add(retention)
+	// The timer handles the common case. The annotation lets a fresh Server
+	// process reclaim the same resources after a restart without retaining
+	// bearer credentials indefinitely.
+	_ = f.markDiagnosticPod(context.Background(), namespace, podName, deadline)
+	_ = f.markDiagnosticSecret(context.Background(), namespace, secretName, deadline)
+	time.AfterFunc(retention, func() {
+		_ = f.deletePod(context.Background(), namespace, podName)
+		_ = f.deleteSecret(context.Background(), namespace, secretName)
+	})
+}
+
+func (f KubernetesRuntimeFactory) markDiagnosticPod(ctx context.Context, namespace, name string, deadline time.Time) error {
+	pod, err := f.Kube.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
+	pod.Annotations[dshDiagnosticRetentionAnnotation] = strconv.FormatInt(deadline.Unix(), 10)
+	_, err = f.Kube.CoreV1().Pods(namespace).Update(ctx, pod, metav1.UpdateOptions{})
+	return err
+}
+
+func (f KubernetesRuntimeFactory) markDiagnosticSecret(ctx context.Context, namespace, name string, deadline time.Time) error {
+	secret, err := f.Kube.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if secret.Annotations == nil {
+		secret.Annotations = map[string]string{}
+	}
+	secret.Annotations[dshDiagnosticRetentionAnnotation] = strconv.FormatInt(deadline.Unix(), 10)
+	_, err = f.Kube.CoreV1().Secrets(namespace).Update(ctx, secret, metav1.UpdateOptions{})
+	return err
+}
+
+func diagnosticRetentionActive(annotations map[string]string, now time.Time) bool {
+	value := strings.TrimSpace(annotations[dshDiagnosticRetentionAnnotation])
+	if value == "" {
+		return false
+	}
+	deadline, err := strconv.ParseInt(value, 10, 64)
+	return err == nil && now.Unix() < deadline
+}
+
 func waitInteractivePod(ctx context.Context, kube kubernetes.Interface, namespace, name string) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()

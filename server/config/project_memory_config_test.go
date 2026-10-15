@@ -59,6 +59,18 @@ func TestDshKubernetesServiceAccountIsNotConfigurable(t *testing.T) {
 	}
 }
 
+func TestDshDiagnosticRetentionDefaultsAndRejectsNegative(t *testing.T) {
+	cfg := &Config{}
+	cfg.applyDefaults()
+	if cfg.Dsh.RuntimeDiagnosticRetentionSeconds != 600 {
+		t.Fatalf("DSH diagnostic retention = %d, want 600", cfg.Dsh.RuntimeDiagnosticRetentionSeconds)
+	}
+	cfg.Dsh.RuntimeDiagnosticRetentionSeconds = -1
+	if err := cfg.Dsh.Validate(); err == nil || !strings.Contains(err.Error(), "dsh.runtime_diagnostic_retention_seconds") {
+		t.Fatalf("Dsh.Validate() error = %v, want negative retention rejected", err)
+	}
+}
+
 func TestProjectMemoryConfigRejectsUnsafeOrIncompleteValues(t *testing.T) {
 	tests := []struct {
 		name    string
