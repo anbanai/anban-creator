@@ -117,6 +117,18 @@ func TestDiagnosticRetentionActive(t *testing.T) {
 	}
 }
 
+func TestWaitInteractivePodUsesConfiguredStartupTimeout(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pending", Namespace: "anban"}, Status: corev1.PodStatus{Phase: corev1.PodPending}})
+	started := time.Now()
+	err := waitInteractivePod(context.Background(), client, "anban", "pending", 1)
+	if err == nil || !strings.Contains(err.Error(), "timed out waiting for DSH pod") {
+		t.Fatalf("waitInteractivePod error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 900*time.Millisecond {
+		t.Fatalf("startup timeout elapsed = %v, want at least 900ms", elapsed)
+	}
+}
+
 func TestKubernetesRuntimeExitDetailsRetainBridgeDiagnostics(t *testing.T) {
 	details := interactiveRuntimeExitDetails(nil, errors.New("stream closed"), nil, errors.New("stderr pipe"), "bridge initialization failed", "runtime-secret")
 	if details["error"] != "stream closed" || details["stderr_error"] != "stderr pipe" || details["stderr"] != "bridge initialization failed" {

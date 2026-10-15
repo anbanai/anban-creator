@@ -76,6 +76,7 @@ type DshConfig struct {
 	MemoryMB                     int64  `yaml:"memory_mb"`
 	PidsLimit                    int64  `yaml:"pids_limit"`
 	TimeoutSec                   int    `yaml:"timeout_sec"`
+	StartupTimeoutSec            int    `yaml:"startup_timeout_sec"`
 	// RuntimeDiagnosticRetentionSeconds controls how long failed Kubernetes
 	// DSH resources remain available for pod logs and describe output.
 	RuntimeDiagnosticRetentionSeconds int                       `yaml:"runtime_diagnostic_retention_seconds"`
@@ -105,7 +106,7 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 		"kubernetes_namespace": true, "kubernetes_image_pull_secret": true,
 		"kubernetes_project_memory_claim": true, "kubernetes_project_memory_mount": true,
 		"server_instance_id": true, "cpu_cores": true, "memory_mb": true, "pids_limit": true,
-		"timeout_sec": true, "runtime_diagnostic_retention_seconds": true,
+		"timeout_sec": true, "startup_timeout_sec": true, "runtime_diagnostic_retention_seconds": true,
 	}); err != nil {
 		return err
 	}
@@ -168,6 +169,9 @@ func (c DshConfig) Validate() error {
 	}
 	if c.RuntimeDiagnosticRetentionSeconds < 0 {
 		errs = append(errs, "dsh.runtime_diagnostic_retention_seconds must not be negative")
+	}
+	if c.StartupTimeoutSec < 0 {
+		errs = append(errs, "dsh.startup_timeout_sec must not be negative")
 	}
 	if executor == "kubernetes" {
 		if strings.TrimSpace(c.Image) == "" || !dshImageDigestRe.MatchString(strings.TrimSpace(c.Image)) {
@@ -1542,6 +1546,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Dsh.RuntimeDiagnosticRetentionSeconds == 0 {
 		c.Dsh.RuntimeDiagnosticRetentionSeconds = 600
+	}
+	if c.Dsh.StartupTimeoutSec == 0 {
+		c.Dsh.StartupTimeoutSec = 180
 	}
 	// Auto-detect plugin_dir by searching for agents/.
 	if c.Claude.PluginDir == "" {

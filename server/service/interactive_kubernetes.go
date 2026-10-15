@@ -99,7 +99,7 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		_ = f.deleteSecret(context.Background(), namespace, secretName)
 		return nil, fmt.Errorf("create DSH pod: %w", err)
 	}
-	if err := waitInteractivePod(streamCtx, f.Kube, namespace, created.Name); err != nil {
+	if err := waitInteractivePod(streamCtx, f.Kube, namespace, created.Name, f.Config.StartupTimeoutSec); err != nil {
 		abort()
 		f.retainOrDeleteDiagnosticResources(namespace, created.Name, secretName)
 		return nil, err
@@ -316,10 +316,13 @@ func diagnosticRetentionActive(annotations map[string]string, now time.Time) boo
 	return err == nil && now.Unix() < deadline
 }
 
-func waitInteractivePod(ctx context.Context, kube kubernetes.Interface, namespace, name string) error {
+func waitInteractivePod(ctx context.Context, kube kubernetes.Interface, namespace, name string, startupTimeoutSec int) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	timeout := time.NewTimer(60 * time.Second)
+	if startupTimeoutSec <= 0 {
+		startupTimeoutSec = 180
+	}
+	timeout := time.NewTimer(time.Duration(startupTimeoutSec) * time.Second)
 	defer timeout.Stop()
 	for {
 		pod, err := kube.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})

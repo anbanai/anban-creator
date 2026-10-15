@@ -113,6 +113,8 @@ dsh:
   memory_mb: 1024
   pids_limit: 256
   timeout_sec: 1800
+  # ACK image pulls and NAS mounts may take time on a cold node.
+  startup_timeout_sec: 180
   # Failed Kubernetes DSH pods/secrets stay this long for kubectl logs/describe.
   runtime_diagnostic_retention_seconds: 600
   bridge_command: "node"
