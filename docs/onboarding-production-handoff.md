@@ -66,7 +66,7 @@ Server 要能出站访问两个配置的 HTTPS 服务，并使用现有 Redis。
 6. 发布前运行 CI 的 Go `check` 和 Studio 测试/构建作业。现有 `.github/workflows/ci.yml` 仅在 main push 或面向 main 的 PR 触发；推本分支本身不等于 CI 已跑。`release.yml` 是 DSH 软件包流程，不是这次 Server/Studio 部署。
 7. 检查通过后合并主分支，两条生产流水线使用同一合并提交，先 Server 后 Studio，保留人工卡点。回滚时关闭 onboarding 并回退两张镜像；若回退到不认识新 YAML 段的旧 Server，须同步移除 `onboarding:` 段。无需数据库回滚。
 
-Harness 原锁定提交不可拉取。2026-10-10 用户转述合伙人确认并明确授权改用最新可用版本，本次锁定为 `3bc900c5a69eb0dd2c45616ff1b31595becacf57`。它不是缺失提交的等价副本；须完成此提交组合的 CI 验证，不更新线上 Agent 镜像。
+Harness 原锁定提交不可拉取。当前父仓库锁定的 alpha.4 运行时提交为 `2629ec6407e71199a4e2f2b211b8668bef515830`，已发布到 `codex/dsh-alpha4-upgrade` 分支；云效必须按父仓库 gitlink 拉取该精确提交，并完成此提交组合的 CI 验证。
 
 ## 本次验证记录
 
