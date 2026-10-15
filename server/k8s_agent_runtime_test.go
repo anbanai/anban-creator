@@ -103,8 +103,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	text := string(raw)
 	docs := splitKubernetesYAMLDocuments(text)
-	if len(docs) != 6 {
-		t.Fatalf("ACK agent runtime manifest has %d YAML document(s), want two ServiceAccounts, Role, ClusterRole, ClusterRoleBinding, and RoleBinding", len(docs))
+	if len(docs) != 5 {
+		t.Fatalf("ACK agent runtime manifest has %d YAML document(s), want ServiceAccount, Role, ClusterRole, ClusterRoleBinding, and RoleBinding", len(docs))
 	}
 	parsedDocs := make([]k8sManifestDoc, 0, len(docs))
 	for _, doc := range docs {
@@ -115,7 +115,6 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		parsedDocs = append(parsedDocs, parsed)
 	}
 	wantKindsAndNames := []struct{ kind, name string }{
-		{kind: "ServiceAccount", name: "creator-server"},
 		{kind: "ServiceAccount", name: "creator-agent-runner"},
 		{kind: "Role", name: "creator-agent-runner"},
 		{kind: "ClusterRole", name: "creator-server-tokenreview"},
@@ -127,7 +126,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			t.Fatalf("ACK manifest doc %d = %s/%s, want %s/%s", i+1, got.Kind, got.Metadata.Name, want.kind, want.name)
 		}
 	}
-	role := parsedDocs[2]
+	role := parsedDocs[1]
 	if !roleAllows(role, "jobs", "get", "list", "watch", "create", "update", "delete") {
 		t.Fatalf("Role must allow Job lifecycle management: %#v", role.Rules)
 	}
@@ -143,13 +142,13 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if !roleAllows(role, "secrets", "get", "list", "create", "delete") {
 		t.Fatalf("Role must allow per-session DSH Secret lifecycle: %#v", role.Rules)
 	}
-	clusterRole := parsedDocs[3]
+	clusterRole := parsedDocs[2]
 	if !roleAllows(clusterRole, "tokenreviews", "create") || len(clusterRole.Rules) != 1 || !containsString(clusterRole.Rules[0].APIGroups, "authentication.k8s.io") {
 		t.Fatalf("ClusterRole must only create TokenReviews: %#v", clusterRole.Rules)
 	}
-	binding := parsedDocs[5]
-	if len(binding.Subjects) != 1 || binding.Subjects[0].Kind != "ServiceAccount" || binding.Subjects[0].Name != "creator-server" || binding.Subjects[0].Namespace != "${namespace}" {
-		t.Fatalf("RoleBinding subject = %#v, want creator-server service account in template namespace", binding.Subjects)
+	binding := parsedDocs[4]
+	if len(binding.Subjects) != 1 || binding.Subjects[0].Kind != "ServiceAccount" || binding.Subjects[0].Name != "creator-agent-runner" || binding.Subjects[0].Namespace != "${namespace}" {
+		t.Fatalf("RoleBinding subject = %#v, want creator-agent-runner service account in template namespace", binding.Subjects)
 	}
 	if binding.RoleRef.Kind != "Role" || binding.RoleRef.Name != "creator-agent-runner" {
 		t.Fatalf("RoleBinding roleRef = %#v, want Role/creator-agent-runner", binding.RoleRef)
@@ -196,8 +195,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if deployment.Kind != "Deployment" {
 		t.Fatalf("first server deployment doc kind = %q, want Deployment", deployment.Kind)
 	}
-	if got := deployment.Spec.Template.Spec.ServiceAccountName; got != "creator-server" {
-		t.Fatalf("server serviceAccountName = %q, want creator-server", got)
+	if got := deployment.Spec.Template.Spec.ServiceAccountName; got != "creator-agent-runner" {
+		t.Fatalf("server serviceAccountName = %q, want creator-agent-runner", got)
 	}
 	if len(deployment.Spec.Template.Spec.InitContainers) != 1 {
 		t.Fatalf("server initContainers = %#v, want one project-memory initializer", deployment.Spec.Template.Spec.InitContainers)
@@ -323,6 +322,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			`seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"`,
 			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
+			`kubernetes_service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
 			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"`,
 			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,
 		} {

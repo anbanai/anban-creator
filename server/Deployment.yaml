@@ -36,7 +36,7 @@ spec:
         app: ${micro_service_name}
         version: ${version_switch}
     spec:
-      serviceAccountName: creator-server
+      serviceAccountName: creator-agent-runner
       initContainers:
         - name: project-memory-init
           image: ${image_repo}

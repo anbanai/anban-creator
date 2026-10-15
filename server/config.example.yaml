@@ -104,7 +104,9 @@ dsh:
   project_memory_volume: "${ANBAN_DSH_PROJECT_MEMORY_VOLUME:-creator-project-memory}"
   project_memory_mount: "/workspace/project"
   kubernetes_namespace: "${ANBAN_DSH_KUBERNETES_NAMESPACE:-anban}"
-  kubernetes_service_account: "${ANBAN_DSH_KUBERNETES_SERVICE_ACCOUNT:-creator-server}"
+  # Reuse the Claude Agent Job ServiceAccount for the DSH Pod and Server
+  # Kubernetes controller.
+  kubernetes_service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
   kubernetes_image_pull_secret: "${ANBAN_DSH_KUBERNETES_IMAGE_PULL_SECRET:-}"
   kubernetes_project_memory_claim: "${ANBAN_DSH_KUBERNETES_PROJECT_MEMORY_CLAIM:-creator-project-memory}"
   kubernetes_project_memory_mount: "/workspace/project"
