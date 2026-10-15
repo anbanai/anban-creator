@@ -1301,6 +1301,9 @@ func (c *Config) applyDefaults() {
 	if c.Dsh.KubernetesNamespace == "" {
 		c.Dsh.KubernetesNamespace = c.Claude.Kubernetes.Namespace
 	}
+	if c.Claude.Kubernetes.ImagePullSecret == "" {
+		c.Claude.Kubernetes.ImagePullSecret = "acr-secret"
+	}
 	if c.Dsh.KubernetesImagePullSecret == "" {
 		c.Dsh.KubernetesImagePullSecret = c.Claude.Kubernetes.ImagePullSecret
 	}

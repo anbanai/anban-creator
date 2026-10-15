@@ -104,7 +104,7 @@ dsh:
   project_memory_volume: "${ANBAN_DSH_PROJECT_MEMORY_VOLUME:-creator-project-memory}"
   project_memory_mount: "/workspace/project"
   kubernetes_namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"
-  kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-}"
+  kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"
   kubernetes_project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"
   kubernetes_project_memory_mount: "/workspace/project"
   server_url: "${ANBAN_DSH_SERVER_URL:-http://server:8080}"
@@ -478,7 +478,7 @@ claude:
     # Agent Job 使用的 Kubernetes ServiceAccount。
     service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"
     # 私有镜像仓库拉取 secret；公开镜像可留空。
-    image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET}"
+    image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-acr-secret}"
     # Agent Job 中的 Go 与 Node/Claude Code TLS 客户端校验 Server 使用的签发 CA Secret，仅挂载 ca.crt。
     # 不要指向保存叶子证书 tls.crt/tls.key 的 anban-server-tls。
     server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"

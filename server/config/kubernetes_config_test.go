@@ -164,6 +164,12 @@ func TestKubernetesJobRuntimeDefaults(t *testing.T) {
 	if cfg.Claude.Kubernetes.Namespace != "default" {
 		t.Fatalf("namespace = %q, want default", cfg.Claude.Kubernetes.Namespace)
 	}
+	if cfg.Claude.Kubernetes.ImagePullSecret != "acr-secret" {
+		t.Fatalf("image pull secret = %q, want acr-secret", cfg.Claude.Kubernetes.ImagePullSecret)
+	}
+	if cfg.Dsh.KubernetesImagePullSecret != "acr-secret" {
+		t.Fatalf("DSH image pull secret = %q, want acr-secret", cfg.Dsh.KubernetesImagePullSecret)
+	}
 	if cfg.Claude.Kubernetes.ServerCASecret != "anban-internal-ca" {
 		t.Fatalf("server CA secret = %q, want anban-internal-ca", cfg.Claude.Kubernetes.ServerCASecret)
 	}

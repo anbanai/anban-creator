@@ -19,6 +19,7 @@ import (
 func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	factory := KubernetesRuntimeFactory{Config: srvconfig.DshConfig{
 		Image: "registry.example/dsh@sha256:" + repeatHex(64), KubernetesNamespace: "anban",
+		KubernetesImagePullSecret:    "acr-secret",
 		KubernetesProjectMemoryClaim: "creator-project-memory",
 		KubernetesProjectMemoryMount: "/workspace/project", CPUCores: 1, MemoryMB: 512,
 	}, ServiceAccount: "creator-agent-runner", ServerInstanceID: "server-1"}
@@ -34,6 +35,9 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	}
 	if pod.Labels["com.anban.runtime"] != "dsh-interactive" {
 		t.Fatal("missing interactive runtime label")
+	}
+	if len(pod.Spec.ImagePullSecrets) != 1 || pod.Spec.ImagePullSecrets[0].Name != "acr-secret" {
+		t.Fatalf("image pull secrets = %#v, want acr-secret", pod.Spec.ImagePullSecrets)
 	}
 	context := `{"project":{"name":"existing"}}`
 	secret := factory.secret(InteractiveRuntimeSpec{SessionID: "s-1", RuntimeToken: "token", InitialContext: context}, "anban", "anban-dsh-s-1-secret")
