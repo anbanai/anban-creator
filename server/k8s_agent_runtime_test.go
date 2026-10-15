@@ -323,6 +323,9 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
 			`kubernetes_service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
+			`kubernetes_namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"`,
+			`kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-}"`,
+			`kubernetes_project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"`,
 			`server_ca_secret: "${ANBAN_AGENT_SERVER_CA_SECRET:-anban-internal-ca}"`,
 			`execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"`,
 		} {
