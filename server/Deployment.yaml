@@ -36,7 +36,7 @@ spec:
         app: ${micro_service_name}
         version: ${version_switch}
     spec:
-      serviceAccountName: creator-agent-runner
+      serviceAccountName: ${agent_service_account}
       # The Server uses client-go in-cluster auth to create and reconcile
       # Claude Jobs and interactive DSH Pods. Keep the projected token
       # explicit so an ACK admission/defaulting policy cannot disable it.
@@ -119,7 +119,7 @@ spec:
             - name: ANBAN_AGENT_IMAGE_HYPIT
               value: ${hypit_agent_image_repo}
             - name: ANBAN_AGENT_SERVICE_ACCOUNT
-              value: creator-agent-runner
+              value: ${agent_service_account}
             - name: ANBAN_AGENT_SERVER_CA_SECRET
               value: anban-internal-ca
             - name: ANBAN_AGENT_NAS_STORAGE_CLASS

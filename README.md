@@ -155,6 +155,27 @@ the execution token secret from a Kubernetes Secret.
 For an ACK release, build and push the Server and every managed Agent image
 from the same checkout. Image tags and immutable digests are both accepted;
 digests remain recommended when rollback safety matters.
+Set `agent_service_account` to exactly the value configured at
+`claude.kubernetes.service_account`. Apply `deploy/k8s/ack-agent-runtime.yaml`
+before applying the Server Deployment so the ServiceAccount's RoleBinding is
+active in the Server namespace; that RoleBinding grants the Server's DSH
+controller permission to create its per-session Secrets. Verify the effective
+permission before opening Studio:
+
+```bash
+export namespace=anbanai-prod
+export agent_service_account=creator-agent-runner
+envsubst '${agent_service_account} ${namespace}' < deploy/k8s/ack-agent-runtime.yaml \
+  | kubectl apply -f -
+kubectl auth can-i create secrets \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}" \
+  -n "${namespace}"
+```
+
+The command must return `yes`. If it returns `no`, inspect the active binding
+with `kubectl -n "$namespace" get rolebinding creator-agent-runner -o yaml`
+before restarting the Server.
+
 Run `make agent-pack-generate && make agent-pack-check` before building so the
 generated Server and Harness Catalog files are current. Then run
 `make agent-runtime-release-manifest` may record the selected image references

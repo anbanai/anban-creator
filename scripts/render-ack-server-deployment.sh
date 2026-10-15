@@ -12,8 +12,8 @@ usage() {
 Usage: scripts/render-ack-server-deployment.sh [--manifest PATH] [--output PATH]
 
 Render server/Deployment.yaml from optional Agent runtime release metadata.
-The caller may provide normal ACK variables directly; image tags and digests
-are both accepted.
+The caller must provide agent_service_account and normal ACK variables directly;
+image tags and digests are both accepted.
 EOF
 }
 
@@ -61,8 +61,10 @@ if [[ -f "$manifest_path" ]]; then
 fi
 
 : "${image_repo:?image_repo must be set}"
+: "${agent_service_account:?agent_service_account must be set (must match claude.kubernetes.service_account and the ACK RBAC manifest)}"
 
 export image_repo
+export agent_service_account
 export wechat_article_agent_image_repo wechat_picture_agent_image_repo
 export seednote_agent_image_repo montage_agent_image_repo moments_agent_image_repo
 export ecommerce_agent_image_repo profile_analysis_agent_image_repo

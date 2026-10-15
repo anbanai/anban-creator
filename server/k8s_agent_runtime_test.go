@@ -116,7 +116,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		parsedDocs = append(parsedDocs, parsed)
 	}
 	wantKindsAndNames := []struct{ kind, name string }{
-		{kind: "ServiceAccount", name: "creator-agent-runner"},
+		{kind: "ServiceAccount", name: "${agent_service_account}"},
 		{kind: "Role", name: "creator-agent-runner"},
 		{kind: "ClusterRole", name: "creator-server-tokenreview"},
 		{kind: "ClusterRoleBinding", name: "creator-server-tokenreview"},
@@ -148,8 +148,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		t.Fatalf("ClusterRole must only create TokenReviews: %#v", clusterRole.Rules)
 	}
 	binding := parsedDocs[4]
-	if len(binding.Subjects) != 1 || binding.Subjects[0].Kind != "ServiceAccount" || binding.Subjects[0].Name != "creator-agent-runner" || binding.Subjects[0].Namespace != "${namespace}" {
-		t.Fatalf("RoleBinding subject = %#v, want creator-agent-runner service account in template namespace", binding.Subjects)
+	if len(binding.Subjects) != 1 || binding.Subjects[0].Kind != "ServiceAccount" || binding.Subjects[0].Name != "${agent_service_account}" || binding.Subjects[0].Namespace != "${namespace}" {
+		t.Fatalf("RoleBinding subject = %#v, want rendered agent_service_account in template namespace", binding.Subjects)
 	}
 	if binding.RoleRef.Kind != "Role" || binding.RoleRef.Name != "creator-agent-runner" {
 		t.Fatalf("RoleBinding roleRef = %#v, want Role/creator-agent-runner", binding.RoleRef)
@@ -196,8 +196,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if deployment.Kind != "Deployment" {
 		t.Fatalf("first server deployment doc kind = %q, want Deployment", deployment.Kind)
 	}
-	if got := deployment.Spec.Template.Spec.ServiceAccountName; got != "creator-agent-runner" {
-		t.Fatalf("server serviceAccountName = %q, want creator-agent-runner", got)
+	if got := deployment.Spec.Template.Spec.ServiceAccountName; got != "${agent_service_account}" {
+		t.Fatalf("server serviceAccountName = %q, want rendered agent_service_account", got)
 	}
 	if deployment.Spec.Template.Spec.AutomountServiceAccountToken == nil || !*deployment.Spec.Template.Spec.AutomountServiceAccountToken {
 		t.Fatal("server Deployment must explicitly automount the ServiceAccount token for in-cluster Kubernetes API access")
@@ -236,7 +236,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"ANBAN_AGENT_IMAGE_WECHAT_PICTURE":  "${wechat_picture_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_SEEDNOTE":        "${seednote_agent_image_repo}",
 		"ANBAN_AGENT_IMAGE_MONTAGE":         "${montage_agent_image_repo}",
-		"ANBAN_AGENT_SERVICE_ACCOUNT":       "creator-agent-runner",
+		"ANBAN_AGENT_SERVICE_ACCOUNT":       "${agent_service_account}",
 		"ANBAN_AGENT_SERVER_CA_SECRET":      "anban-internal-ca",
 		"ANBAN_AGENT_IMAGE_PULL_SECRET":     "${imagePullSecret}",
 		"ANBAN_AGENT_NAS_STORAGE_CLASS":     "nas-sc-creator",
