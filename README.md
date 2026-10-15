@@ -164,27 +164,54 @@ Set `agent_service_account` to exactly the value configured at
 `claude.kubernetes.service_account`. The Server deployment template now
 contains the namespace-scoped ServiceAccount, Role, and RoleBinding required by
 the Job and DSH controllers, so the existing Yunxiao Server deployment step
-reconciles `pods list` and `secrets create` automatically. Keep
-`deploy/k8s/ack-agent-runtime.yaml` in the cluster bootstrap path for the
-TokenReview ClusterRoleBinding; it is not part of the ordinary image build.
+reconciles namespace-scoped permissions automatically. Apply
+`deploy/k8s/ack-agent-runtime.yaml` in the same cluster release, before the
+Server Deployment, because the TokenReview ClusterRoleBinding is cluster
+scoped and is not part of the ordinary image build.
 
 After the pipeline rollout, the effective permissions can be checked with:
 
 ```bash
 export namespace=anbanai-prod
 export agent_service_account=creator-agent-runner
+envsubst '${agent_service_account} ${namespace}' \
+  < deploy/k8s/ack-agent-runtime.yaml | kubectl apply -f -
 kubectl auth can-i create secrets \
   --as="system:serviceaccount:${namespace}:${agent_service_account}" \
   -n "${namespace}"
 kubectl auth can-i list pods \
   --as="system:serviceaccount:${namespace}:${agent_service_account}" \
   -n "${namespace}"
+kubectl auth can-i create tokenreviews.authentication.k8s.io \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}"
+kubectl auth can-i create jobs \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}" \
+  -n "${namespace}"
+kubectl auth can-i update jobs \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}" \
+  -n "${namespace}"
+kubectl auth can-i update pods \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}" \
+  -n "${namespace}"
+kubectl auth can-i create pods/attach \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}" \
+  -n "${namespace}"
+kubectl auth can-i list persistentvolumeclaims \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}" \
+  -n "${namespace}"
+kubectl auth can-i patch secrets \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}" \
+  -n "${namespace}"
 ```
 
-Both commands must return `yes`. If either returns `no`, inspect the active
-Role and binding with `kubectl -n "$namespace" get role creator-agent-runner -o yaml`
-and `kubectl -n "$namespace" get rolebinding creator-agent-runner -o yaml` before
-restarting the Server.
+All checks must return `yes`. If the TokenReview check returns `no`,
+apply `deploy/k8s/ack-agent-runtime.yaml` from the cluster bootstrap step and
+inspect `kubectl get clusterrolebinding creator-server-tokenreview -o yaml` to
+confirm it names `system:serviceaccount:${namespace}:${agent_service_account}`.
+If either namespace-scoped check returns `no`, inspect the active Role and
+binding with `kubectl -n "$namespace" get role creator-agent-runner -o yaml`
+and `kubectl -n "$namespace" get rolebinding creator-agent-runner -o yaml`
+before restarting the Server.
 
 Run `make agent-pack-generate && make agent-pack-check` before building so the
 generated Server and Harness Catalog files are current. Then run

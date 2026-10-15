@@ -31,7 +31,6 @@ spec:
   selector:
     matchLabels:
       app: ${micro_service_name}
-      version: ${version_switch}
   template:
     metadata:
       labels:

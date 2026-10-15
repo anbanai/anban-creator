@@ -33,6 +33,9 @@ type k8sManifestDoc struct {
 type deploymentDoc struct {
 	Kind string `yaml:"kind"`
 	Spec struct {
+		Selector struct {
+			MatchLabels map[string]string `yaml:"matchLabels"`
+		} `yaml:"selector"`
 		Template struct {
 			Spec struct {
 				ServiceAccountName           string `yaml:"serviceAccountName"`
@@ -226,6 +229,9 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	if deployment.Kind != "Deployment" {
 		t.Fatalf("first server deployment doc kind = %q, want Deployment", deployment.Kind)
+	}
+	if len(deployment.Spec.Selector.MatchLabels) != 1 || deployment.Spec.Selector.MatchLabels["app"] != "${micro_service_name}" {
+		t.Fatalf("server Deployment selector = %#v, want only the stable app label so existing Deployments remain updatable", deployment.Spec.Selector.MatchLabels)
 	}
 	if got := deployment.Spec.Template.Spec.ServiceAccountName; got != "${agent_service_account}" {
 		t.Fatalf("server serviceAccountName = %q, want rendered agent_service_account", got)

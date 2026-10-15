@@ -757,7 +757,7 @@ func main() {
 		dshFactory := service.KubernetesRuntimeFactory{
 			Config: cfg.Dsh, ServiceAccount: cfg.Claude.Kubernetes.ServiceAccount, Kube: kubeClient, REST: restConfig,
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
-				BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
+			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
 		}
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH jobs")

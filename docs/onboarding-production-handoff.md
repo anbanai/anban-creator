@@ -91,9 +91,40 @@ Harness 原锁定提交不可拉取。2026-10-10 用户转述合伙人确认并�
 
 - 合并请求：<https://github.com/anbanai/anban-creator/pull/1>。
 - 后端流水线：`creator-api-prod`（4876777），源码当前为 `main`，构建 `deploy/docker/Dockerfile.server`，部署 `server/Deployment.yaml`。
+- 后端发布必须在 Server Deployment 前增加一个集群级 RBAC 步骤。该步骤使用同一提交中的 `deploy/k8s/ack-agent-runtime.yaml`，把 `creator-server-tokenreview` 绑定到 `${namespace}/${agent_service_account}`；只重建镜像或只应用 `server/Deployment.yaml` 不会更新这个 ClusterRoleBinding。
 - 前端流水线：`creator.anbanai.com-prod`（4839221），源码当前为功能分支；合并后须改为 `main` 并核对同一提交。构建 `deploy/docker/Dockerfile.studio`，部署 `studio/Deployment.yaml`。
 - 两条流水线均使用 `acs_prod` 集群连接和 `anbanai-prod` 命名空间，镜像分别为 `bx_anbanai/creator-api` 与 `bx_anbanai/creator-studio-web`。
 - 前端现有镜像构建参数为空。发布前读取当前运行镜像 digest，传入 `--build-arg STUDIO_PREVIOUS_IMAGE=<当前镜像@sha256:...>`，保留已有页面 assets。
+
+### Server 发布顺序与权限门禁
+
+云效后端发布任务使用与 Server Deployment 相同的 ACK 集群连接，并按以下顺序执行。`agent_service_account` 必须与挂载的 `config.yaml` 中 `claude.kubernetes.service_account` 一致。
+
+```bash
+set -euo pipefail
+
+export namespace="${namespace:?set the ACK namespace}"
+export agent_service_account="${agent_service_account:?set the Agent ServiceAccount}"
+export deployment_name="${deployment_name:?set the rendered Server Deployment name}"
+
+envsubst '${agent_service_account} ${namespace}' \
+  < deploy/k8s/ack-agent-runtime.yaml | kubectl apply -f -
+
+test "$(kubectl auth can-i create tokenreviews.authentication.k8s.io \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}")" = yes
+
+kubectl apply -f /tmp/server-deployment.yaml
+kubectl -n "$namespace" rollout status "deployment/${deployment_name}" --timeout=10m
+```
+
+如果流水线使用 `kubectl apply --prune`，集群级 RBAC 清单必须属于同一个受管资源集合；否则不要让 Server Deployment 的命名空间清单清理 `creator-server-tokenreview`。发布后还应确认：
+
+```bash
+kubectl get clusterrolebinding creator-server-tokenreview \
+  -o jsonpath='{range .subjects[*]}{.namespace}/{.name}{"\\n"}{end}'
+```
+
+输出应包含 `anbanai-prod/creator-agent-runner`。该步骤只更新 Server 调用 TokenReview 所需的集群级权限；DSH 使用的 Pod、Secret、Job 等命名空间权限仍由 `server/Deployment.yaml` 中的 Role/RoleBinding 管理。
 
 ### 密钥的确切配置位置
 
