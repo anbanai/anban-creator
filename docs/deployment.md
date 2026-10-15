@@ -51,6 +51,13 @@ For Kubernetes or Compose, keep using the existing `ANBAN_*` environment
 references already used by Claude. No additional DSH credential variable or
 Secret mapping is required.
 
+On ACK, the DSH runtime is a separate image from the Server image. The Yunxiao
+release must build and push `deploy/docker/Dockerfile.runtime-dsh` from the same
+commit as the Server, then update the mounted `dsh.image` value to that image
+(prefer an immutable `@sha256` digest) before rolling out the Server. A Server
+rebuild alone does not update existing DSH runtime Pods; an old Bridge can
+close during `session/start` and the API will then report `41000`.
+
 当前先恢复为一个固定的 Studio Deployment（例如 `creator-studio-web-base`），沿用原有 ACS 更新流程。`version_switch` 固定为 `base`；它用于资源名、Pod 标签和日志，不影响 Nginx。Deployment selector 只匹配稳定的 `app` 标签，不能加 `version`，否则会尝试修改已有 Deployment 的不可变 selector。
 
 ## 当前更新流程

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -31,14 +32,38 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	if pod.Labels["com.anban.runtime"] != "dsh-interactive" {
 		t.Fatal("missing interactive runtime label")
 	}
-	secret := factory.secret(InteractiveRuntimeSpec{SessionID: "s-1", RuntimeToken: "token"}, "anban", "anban-dsh-s-1-secret")
+	context := `{"project":{"name":"existing"}}`
+	secret := factory.secret(InteractiveRuntimeSpec{SessionID: "s-1", RuntimeToken: "token", InitialContext: context}, "anban", "anban-dsh-s-1-secret")
 	if secret.StringData["runtime-token"] != "token" {
 		t.Fatal("session token was not isolated in the Kubernetes Secret")
 	}
+	if secret.StringData["initial-context"] != context {
+		t.Fatal("initial context was not staged in the session Secret")
+	}
+	var contextVolume *corev1.Volume
+	for index := range pod.Spec.Volumes {
+		if pod.Spec.Volumes[index].Name == "dsh-context" {
+			contextVolume = &pod.Spec.Volumes[index]
+			break
+		}
+	}
+	if contextVolume == nil || contextVolume.VolumeSource.Secret == nil || contextVolume.VolumeSource.Secret.SecretName != "anban-dsh-s-1-secret" {
+		t.Fatalf("context Secret volume = %#v", contextVolume)
+	}
+	hasContextPath := false
 	for _, env := range dshSecretEnv(secret.Name, "s-1", "http://mcp", "http://server") {
 		if env.Name == "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN" && env.Value != "" {
 			t.Fatal("runtime token must not be in Pod env.value")
 		}
+		if env.Name == "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE" && env.Value != "/var/run/anban-dsh-context/initial-context" {
+			t.Fatalf("initial context path = %q", env.Value)
+		}
+		if env.Name == "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE" {
+			hasContextPath = true
+		}
+	}
+	if !hasContextPath {
+		t.Fatal("missing initial context path")
 	}
 }
 
@@ -50,6 +75,13 @@ func TestKubernetesRuntimeFactoryCleanupOrphans(t *testing.T) {
 	}
 	if _, err := client.CoreV1().Pods("anban").Get(context.Background(), "dsh-1", metav1.GetOptions{}); err == nil {
 		t.Fatal("orphan pod was not deleted")
+	}
+}
+
+func TestKubernetesRuntimeExitDetailsRetainBridgeDiagnostics(t *testing.T) {
+	details := interactiveRuntimeExitDetails(nil, errors.New("stream closed"), nil, errors.New("stderr pipe"), "bridge initialization failed", "runtime-secret")
+	if details["error"] != "stream closed" || details["stderr_error"] != "stderr pipe" || details["stderr"] != "bridge initialization failed" {
+		t.Fatalf("runtime exit details = %#v", details)
 	}
 }
 

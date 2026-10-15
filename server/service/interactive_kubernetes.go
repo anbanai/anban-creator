@@ -132,7 +132,8 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		emit = func(string, any) {}
 	}
 	stderrTail := &interactiveTailBuffer{limit: 16 * 1024}
-	go func() { _, _ = io.Copy(stderrTail, stderrReader) }()
+	stderrDone := make(chan error, 1)
+	go func() { _, copyErr := io.Copy(stderrTail, stderrReader); stderrDone <- copyErr }()
 	stdoutDone := make(chan error, 1)
 	go func() { stdoutDone <- r.read(stdoutReader, emit) }()
 	go func() {
@@ -140,8 +141,11 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		_ = stdoutWriter.CloseWithError(streamErr)
 		_ = stderrWriter.CloseWithError(streamErr)
 		stdoutErr := <-stdoutDone
-		r.finish(interactiveRuntimeExitError(streamErr, stdoutErr, nil, stderrTail.String(), spec.RuntimeToken, f.APIKey))
-		emit("runtime.exit", map[string]any{"error": redactInteractiveRuntimeDiagnostic(fmt.Sprint(streamErr), spec.RuntimeToken, f.APIKey), "pod": created.Name})
+		stderrErr := <-stderrDone
+		r.finish(interactiveRuntimeExitError(streamErr, stdoutErr, stderrErr, stderrTail.String(), spec.RuntimeToken, f.APIKey))
+		details := interactiveRuntimeExitDetails(nil, streamErr, stdoutErr, stderrErr, stderrTail.String(), spec.RuntimeToken, f.APIKey)
+		details["pod"] = created.Name
+		emit("runtime.exit", details)
 	}()
 	return r, nil
 }
@@ -157,8 +161,8 @@ func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, na
 		resources.Limits[corev1.ResourceMemory] = q
 		resources.Requests[corev1.ResourceMemory] = q
 	}
-	volumeMounts := []corev1.VolumeMount{{Name: "project-memory", MountPath: f.Config.KubernetesProjectMemoryMount, ReadOnly: true}, {Name: "agent-memory", MountPath: f.Config.KubernetesProjectMemoryMount + "/.claude/agent-memory/project-creator"}, {Name: "tmp", MountPath: "/tmp"}}
-	volumes := []corev1.Volume{{Name: "agent-memory", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: quantityPtr("16Mi")}}}, {Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: quantityPtr("64Mi")}}}}
+	volumeMounts := []corev1.VolumeMount{{Name: "project-memory", MountPath: f.Config.KubernetesProjectMemoryMount, ReadOnly: true}, {Name: "agent-memory", MountPath: f.Config.KubernetesProjectMemoryMount + "/.claude/agent-memory/project-creator"}, {Name: "tmp", MountPath: "/tmp"}, {Name: "dsh-context", MountPath: "/var/run/anban-dsh-context", ReadOnly: true}}
+	volumes := []corev1.Volume{{Name: "agent-memory", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: quantityPtr("16Mi")}}}, {Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: quantityPtr("64Mi")}}}, {Name: "dsh-context", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: name + "-secret", Items: []corev1.KeyToPath{{Key: "initial-context", Path: "initial-context"}}}}}}
 	if spec.ProjectID != "" {
 		volumes = append(volumes, corev1.Volume{Name: "project-memory", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: f.Config.KubernetesProjectMemoryClaim}}})
 		volumeMounts[0].SubPath = "projects/" + safeContainerPart(spec.ProjectID)
@@ -170,14 +174,15 @@ func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, na
 }
 
 func (f KubernetesRuntimeFactory) secret(spec InteractiveRuntimeSpec, namespace, name string) *corev1.Secret {
-	return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.session_id": spec.SessionID, "com.anban.server_instance": strings.TrimSpace(f.ServerInstanceID)}}, Type: corev1.SecretTypeOpaque, StringData: map[string]string{"runtime-token": spec.RuntimeToken, "provider-api-key": f.APIKey}}
+	data := map[string]string{"runtime-token": spec.RuntimeToken, "provider-api-key": f.APIKey, "initial-context": spec.InitialContext}
+	return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.session_id": spec.SessionID, "com.anban.server_instance": strings.TrimSpace(f.ServerInstanceID)}}, Type: corev1.SecretTypeOpaque, StringData: data}
 }
 
 func dshSecretEnv(secretName, sessionID, mcpURL, serverURL string) []corev1.EnvVar {
 	ref := func(key string) *corev1.EnvVarSource {
 		return &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: key}}
 	}
-	return []corev1.EnvVar{{Name: "HOME", Value: "/tmp/dsh-home"}, {Name: "DSH_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_SESSION_ID", Value: sessionID}, {Name: "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN", ValueFrom: ref("runtime-token")}, {Name: "ANBAN_DSH_BRIDGE_MCP_URL", Value: strings.TrimRight(dshFirstNonEmpty(mcpURL, serverURL+"/api/mcp"), "/")}, {Name: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY", ValueFrom: ref("provider-api-key")}, {Name: "ANBAN_DSH_BRIDGE_PATCH", Value: "/app/harness/dsh/project-creator.patch.yml"}}
+	return []corev1.EnvVar{{Name: "HOME", Value: "/tmp/dsh-home"}, {Name: "DSH_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_SESSION_ID", Value: sessionID}, {Name: "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN", ValueFrom: ref("runtime-token")}, {Name: "ANBAN_DSH_BRIDGE_MCP_URL", Value: strings.TrimRight(dshFirstNonEmpty(mcpURL, serverURL+"/api/mcp"), "/")}, {Name: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY", ValueFrom: ref("provider-api-key")}, {Name: "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE", Value: "/var/run/anban-dsh-context/initial-context"}, {Name: "ANBAN_DSH_BRIDGE_PATCH", Value: "/app/harness/dsh/project-creator.patch.yml"}}
 }
 
 func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {

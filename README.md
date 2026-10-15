@@ -152,9 +152,14 @@ daemon access. Kubernetes instead uses the namespace, task/project PVC storage
 classes, and ServiceAccount settings in `server/Deployment.yaml`, while reading
 the execution token secret from a Kubernetes Secret.
 
-For an ACK release, build and push the Server and every managed Agent image
-from the same checkout. Image tags and immutable digests are both accepted;
-digests remain recommended when rollback safety matters.
+For an ACK release, build and push the Server, the independent DSH runtime
+image (`deploy/docker/Dockerfile.runtime-dsh`), and every managed Agent image
+from the same checkout. Set `dsh.image` in the mounted Server `config.yaml` to
+the newly pushed DSH image (prefer its immutable `@sha256` digest) before the
+Server rollout. Rebuilding only the Server leaves interactive Pods on the old
+Bridge protocol and can make a session close immediately after `session/start`.
+Image tags and immutable digests are both accepted; digests remain recommended
+when rollback safety matters.
 Set `agent_service_account` to exactly the value configured at
 `claude.kubernetes.service_account`. The Server deployment template now
 contains the namespace-scoped ServiceAccount, Role, and RoleBinding required by
