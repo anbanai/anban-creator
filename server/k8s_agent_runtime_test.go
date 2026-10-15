@@ -11,7 +11,8 @@ import (
 type k8sManifestDoc struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
-		Name string `yaml:"name"`
+		Name      string `yaml:"name"`
+		Namespace string `yaml:"namespace"`
 	} `yaml:"metadata"`
 	Subjects []struct {
 		Kind      string `yaml:"kind"`
@@ -104,8 +105,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	text := string(raw)
 	docs := splitKubernetesYAMLDocuments(text)
-	if len(docs) != 5 {
-		t.Fatalf("ACK agent runtime manifest has %d YAML document(s), want ServiceAccount, Role, ClusterRole, ClusterRoleBinding, and RoleBinding", len(docs))
+	if len(docs) != 2 {
+		t.Fatalf("ACK agent runtime manifest has %d YAML document(s), want ClusterRole and ClusterRoleBinding", len(docs))
 	}
 	parsedDocs := make([]k8sManifestDoc, 0, len(docs))
 	for _, doc := range docs {
@@ -116,11 +117,8 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		parsedDocs = append(parsedDocs, parsed)
 	}
 	wantKindsAndNames := []struct{ kind, name string }{
-		{kind: "ServiceAccount", name: "${agent_service_account}"},
-		{kind: "Role", name: "creator-agent-runner"},
 		{kind: "ClusterRole", name: "creator-server-tokenreview"},
 		{kind: "ClusterRoleBinding", name: "creator-server-tokenreview"},
-		{kind: "RoleBinding", name: "creator-agent-runner"},
 	}
 	for i, want := range wantKindsAndNames {
 		if got := parsedDocs[i]; got.Kind != want.kind || got.Metadata.Name != want.name {
@@ -132,47 +130,23 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"${agent_service_account}", renderedServiceAccount,
 		"${namespace}", "anbanai-prod",
 	).Replace(text))
-	var renderedServiceAccountDoc, renderedClusterBinding, renderedRoleBinding k8sManifestDoc
-	if err := yaml.Unmarshal([]byte(renderedRuntimeDocs[0]), &renderedServiceAccountDoc); err != nil {
-		t.Fatalf("parse rendered ServiceAccount: %v", err)
-	}
-	if err := yaml.Unmarshal([]byte(renderedRuntimeDocs[3]), &renderedClusterBinding); err != nil {
+	var renderedClusterBinding k8sManifestDoc
+	if err := yaml.Unmarshal([]byte(renderedRuntimeDocs[1]), &renderedClusterBinding); err != nil {
 		t.Fatalf("parse rendered ClusterRoleBinding: %v", err)
 	}
-	if err := yaml.Unmarshal([]byte(renderedRuntimeDocs[4]), &renderedRoleBinding); err != nil {
-		t.Fatalf("parse rendered RoleBinding: %v", err)
+	if len(renderedClusterBinding.Subjects) != 1 || renderedClusterBinding.Subjects[0].Name != renderedServiceAccount || renderedClusterBinding.Subjects[0].Namespace != "anbanai-prod" {
+		t.Fatalf("rendered ClusterRoleBinding subject = %#v, want agent_service_account in anbanai-prod", renderedClusterBinding.Subjects)
 	}
-	if renderedServiceAccountDoc.Metadata.Name != renderedServiceAccount ||
-		len(renderedClusterBinding.Subjects) != 1 || renderedClusterBinding.Subjects[0].Name != renderedServiceAccount ||
-		len(renderedRoleBinding.Subjects) != 1 || renderedRoleBinding.Subjects[0].Name != renderedServiceAccount {
-		t.Fatalf("rendered ServiceAccount bindings do not use %q: serviceAccount=%q cluster=%#v role=%#v", renderedServiceAccount, renderedServiceAccountDoc.Metadata.Name, renderedClusterBinding.Subjects, renderedRoleBinding.Subjects)
-	}
-	role := parsedDocs[1]
-	if !roleAllows(role, "jobs", "get", "list", "watch", "create", "update", "delete") {
-		t.Fatalf("Role must allow Job lifecycle management: %#v", role.Rules)
-	}
-	if !roleAllows(role, "persistentvolumeclaims", "get", "create", "delete") {
-		t.Fatalf("Role must allow PVC lifecycle management: %#v", role.Rules)
-	}
-	if !roleAllows(role, "pods", "get", "list", "watch") || !roleAllows(role, "pods/log", "get", "list", "watch") {
-		t.Fatalf("Role must allow Pod and log reads: %#v", role.Rules)
-	}
-	if !roleAllows(role, "pods", "create", "delete") || !roleAllows(role, "pods/exec", "create") {
-		t.Fatalf("Role must allow interactive DSH Pod creation, deletion, and exec: %#v", role.Rules)
-	}
-	if !roleAllows(role, "secrets", "get", "list", "create", "delete") {
-		t.Fatalf("Role must allow per-session DSH Secret lifecycle: %#v", role.Rules)
-	}
-	clusterRole := parsedDocs[2]
+	clusterRole := parsedDocs[0]
 	if !roleAllows(clusterRole, "tokenreviews", "create") || len(clusterRole.Rules) != 1 || !containsString(clusterRole.Rules[0].APIGroups, "authentication.k8s.io") {
 		t.Fatalf("ClusterRole must only create TokenReviews: %#v", clusterRole.Rules)
 	}
-	binding := parsedDocs[4]
+	binding := parsedDocs[1]
 	if len(binding.Subjects) != 1 || binding.Subjects[0].Kind != "ServiceAccount" || binding.Subjects[0].Name != "${agent_service_account}" || binding.Subjects[0].Namespace != "${namespace}" {
-		t.Fatalf("RoleBinding subject = %#v, want rendered agent_service_account in template namespace", binding.Subjects)
+		t.Fatalf("ClusterRoleBinding subject = %#v, want agent_service_account in template namespace", binding.Subjects)
 	}
-	if binding.RoleRef.Kind != "Role" || binding.RoleRef.Name != "creator-agent-runner" {
-		t.Fatalf("RoleBinding roleRef = %#v, want Role/creator-agent-runner", binding.RoleRef)
+	if binding.RoleRef.Kind != "ClusterRole" || binding.RoleRef.Name != "creator-server-tokenreview" {
+		t.Fatalf("ClusterRoleBinding roleRef = %#v, want ClusterRole/creator-server-tokenreview", binding.RoleRef)
 	}
 	if strings.Contains(text, "\nkind: Deployment\n") {
 		t.Fatalf("ACK agent runtime manifest must not include server Deployment; server deployment lives in server/Deployment.yaml")
@@ -199,6 +173,40 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	serverDocs := splitKubernetesYAMLDocuments(string(serverDeployment))
 	if len(serverDocs) < 2 {
 		t.Fatalf("server deployment manifest has %d documents, want PVC and Deployment", len(serverDocs))
+	}
+	var serverServiceAccount, serverRole, serverRoleBinding k8sManifestDoc
+	for _, rawDoc := range serverDocs {
+		var doc k8sManifestDoc
+		if err := yaml.Unmarshal([]byte(rawDoc), &doc); err != nil {
+			t.Fatalf("parse server deployment document: %v", err)
+		}
+		switch {
+		case doc.Kind == "ServiceAccount" && doc.Metadata.Name == "${agent_service_account}":
+			serverServiceAccount = doc
+		case doc.Kind == "Role" && doc.Metadata.Name == "creator-agent-runner":
+			serverRole = doc
+		case doc.Kind == "RoleBinding" && doc.Metadata.Name == "creator-agent-runner":
+			serverRoleBinding = doc
+		}
+	}
+	if serverServiceAccount.Kind != "ServiceAccount" {
+		t.Fatal("server deployment must reconcile the Agent ServiceAccount")
+	}
+	if serverServiceAccount.Metadata.Namespace != "${namespace}" {
+		t.Fatalf("server ServiceAccount namespace = %q, want ${namespace}", serverServiceAccount.Metadata.Namespace)
+	}
+	if !roleAllows(serverRole, "jobs", "get", "list", "watch", "create", "update", "delete") ||
+		!roleAllows(serverRole, "persistentvolumeclaims", "get", "create", "delete") ||
+		!roleAllows(serverRole, "pods", "get", "list", "watch", "create", "delete") ||
+		!roleAllows(serverRole, "pods/exec", "create") ||
+		!roleAllows(serverRole, "secrets", "list", "create", "delete") {
+		t.Fatalf("server deployment Role must allow Pod and DSH Secret lifecycle management: %#v", serverRole.Rules)
+	}
+	if roleAllows(serverRole, "secrets", "get") || roleAllows(serverRole, "events", "create") || roleAllows(serverRole, "pods/log", "get") {
+		t.Fatalf("server deployment Role grants unused sensitive or event permissions: %#v", serverRole.Rules)
+	}
+	if serverRoleBinding.Metadata.Namespace != "${namespace}" || len(serverRoleBinding.Subjects) != 1 || serverRoleBinding.Subjects[0].Kind != "ServiceAccount" || serverRoleBinding.Subjects[0].Name != "${agent_service_account}" || serverRoleBinding.Subjects[0].Namespace != "${namespace}" || serverRoleBinding.RoleRef.Kind != "Role" || serverRoleBinding.RoleRef.Name != "creator-agent-runner" {
+		t.Fatalf("server deployment RoleBinding = %#v, want creator-agent-runner bound to agent_service_account", serverRoleBinding)
 	}
 	if strings.Contains(serverDocs[1], "catalog_digest") || strings.Contains(serverDocs[1], "agent-pack-catalog-digest") {
 		t.Fatal("server Deployment template must not require the release Catalog digest as a cloud template variable")

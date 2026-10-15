@@ -156,25 +156,30 @@ For an ACK release, build and push the Server and every managed Agent image
 from the same checkout. Image tags and immutable digests are both accepted;
 digests remain recommended when rollback safety matters.
 Set `agent_service_account` to exactly the value configured at
-`claude.kubernetes.service_account`. Apply `deploy/k8s/ack-agent-runtime.yaml`
-before applying the Server Deployment so the ServiceAccount's RoleBinding is
-active in the Server namespace; that RoleBinding grants the Server's DSH
-controller permission to create its per-session Secrets. Verify the effective
-permission before opening Studio:
+`claude.kubernetes.service_account`. The Server deployment template now
+contains the namespace-scoped ServiceAccount, Role, and RoleBinding required by
+the Job and DSH controllers, so the existing Yunxiao Server deployment step
+reconciles `pods list` and `secrets create` automatically. Keep
+`deploy/k8s/ack-agent-runtime.yaml` in the cluster bootstrap path for the
+TokenReview ClusterRoleBinding; it is not part of the ordinary image build.
+
+After the pipeline rollout, the effective permissions can be checked with:
 
 ```bash
 export namespace=anbanai-prod
 export agent_service_account=creator-agent-runner
-envsubst '${agent_service_account} ${namespace}' < deploy/k8s/ack-agent-runtime.yaml \
-  | kubectl apply -f -
 kubectl auth can-i create secrets \
+  --as="system:serviceaccount:${namespace}:${agent_service_account}" \
+  -n "${namespace}"
+kubectl auth can-i list pods \
   --as="system:serviceaccount:${namespace}:${agent_service_account}" \
   -n "${namespace}"
 ```
 
-The command must return `yes`. If it returns `no`, inspect the active binding
-with `kubectl -n "$namespace" get rolebinding creator-agent-runner -o yaml`
-before restarting the Server.
+Both commands must return `yes`. If either returns `no`, inspect the active
+Role and binding with `kubectl -n "$namespace" get role creator-agent-runner -o yaml`
+and `kubectl -n "$namespace" get rolebinding creator-agent-runner -o yaml` before
+restarting the Server.
 
 Run `make agent-pack-generate && make agent-pack-check` before building so the
 generated Server and Harness Catalog files are current. Then run

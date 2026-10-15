@@ -22,8 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
@@ -33,8 +33,8 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 )
 
-func TestACKRuntimeRBACAllowsJobActivationUpdate(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "k8s", "ack-agent-runtime.yaml"))
+func TestServerDeploymentRBACAllowsJobActivationUpdate(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "server", "Deployment.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestACKRuntimeRBACAllowsJobActivationUpdate(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("creator-agent-runner Role must allow batch/jobs update for suspended Job activation")
+		t.Fatal("server Deployment creator-agent-runner Role must allow batch/jobs update for suspended Job activation")
 	}
 }
 
