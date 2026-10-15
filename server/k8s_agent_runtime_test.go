@@ -127,6 +127,26 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			t.Fatalf("ACK manifest doc %d = %s/%s, want %s/%s", i+1, got.Kind, got.Metadata.Name, want.kind, want.name)
 		}
 	}
+	const renderedServiceAccount = "creator-custom-runner"
+	renderedRuntimeDocs := splitKubernetesYAMLDocuments(strings.NewReplacer(
+		"${agent_service_account}", renderedServiceAccount,
+		"${namespace}", "anbanai-prod",
+	).Replace(text))
+	var renderedServiceAccountDoc, renderedClusterBinding, renderedRoleBinding k8sManifestDoc
+	if err := yaml.Unmarshal([]byte(renderedRuntimeDocs[0]), &renderedServiceAccountDoc); err != nil {
+		t.Fatalf("parse rendered ServiceAccount: %v", err)
+	}
+	if err := yaml.Unmarshal([]byte(renderedRuntimeDocs[3]), &renderedClusterBinding); err != nil {
+		t.Fatalf("parse rendered ClusterRoleBinding: %v", err)
+	}
+	if err := yaml.Unmarshal([]byte(renderedRuntimeDocs[4]), &renderedRoleBinding); err != nil {
+		t.Fatalf("parse rendered RoleBinding: %v", err)
+	}
+	if renderedServiceAccountDoc.Metadata.Name != renderedServiceAccount ||
+		len(renderedClusterBinding.Subjects) != 1 || renderedClusterBinding.Subjects[0].Name != renderedServiceAccount ||
+		len(renderedRoleBinding.Subjects) != 1 || renderedRoleBinding.Subjects[0].Name != renderedServiceAccount {
+		t.Fatalf("rendered ServiceAccount bindings do not use %q: serviceAccount=%q cluster=%#v role=%#v", renderedServiceAccount, renderedServiceAccountDoc.Metadata.Name, renderedClusterBinding.Subjects, renderedRoleBinding.Subjects)
+	}
 	role := parsedDocs[1]
 	if !roleAllows(role, "jobs", "get", "list", "watch", "create", "update", "delete") {
 		t.Fatalf("Role must allow Job lifecycle management: %#v", role.Rules)
@@ -198,6 +218,17 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 	if got := deployment.Spec.Template.Spec.ServiceAccountName; got != "${agent_service_account}" {
 		t.Fatalf("server serviceAccountName = %q, want rendered agent_service_account", got)
+	}
+	var renderedDeployment deploymentDoc
+	renderedServerDocs := splitKubernetesYAMLDocuments(strings.NewReplacer(
+		"${agent_service_account}", renderedServiceAccount,
+		"${namespace}", "anbanai-prod",
+	).Replace(string(serverDeployment)))
+	if err := yaml.Unmarshal([]byte(renderedServerDocs[1]), &renderedDeployment); err != nil {
+		t.Fatalf("parse rendered server deployment: %v", err)
+	}
+	if renderedDeployment.Spec.Template.Spec.ServiceAccountName != renderedServiceAccount {
+		t.Fatalf("rendered server serviceAccountName = %q, want %q", renderedDeployment.Spec.Template.Spec.ServiceAccountName, renderedServiceAccount)
 	}
 	if deployment.Spec.Template.Spec.AutomountServiceAccountToken == nil || !*deployment.Spec.Template.Spec.AutomountServiceAccountToken {
 		t.Fatal("server Deployment must explicitly automount the ServiceAccount token for in-cluster Kubernetes API access")
