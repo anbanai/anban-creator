@@ -757,7 +757,7 @@ func main() {
 		dshFactory := service.KubernetesRuntimeFactory{
 			Config: cfg.Dsh, ServiceAccount: cfg.Claude.Kubernetes.ServiceAccount, Kube: kubeClient, REST: restConfig,
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
-			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
+				BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
 		}
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH pods")
@@ -789,6 +789,7 @@ func main() {
 	// Apply authorization policy after selecting the runtime-backed service so
 	// enabling the bridge cannot silently drop admin-only access control.
 	interactiveSvc.SetAdminOnly(cfg.Dsh.AdminOnly)
+	interactiveSvc.SetLogger(log)
 	if projectMemoryStore != nil {
 		interactiveSvc.SetProjectMemory(projectMemoryStore)
 	}

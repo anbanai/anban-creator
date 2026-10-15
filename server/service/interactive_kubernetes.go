@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -40,6 +41,7 @@ type KubernetesRuntimeFactory struct {
 	APIKey            string
 	Model             string
 	MCPURL            string
+	Logger            *zerolog.Logger
 }
 
 var _ RuntimeFactory = (*KubernetesRuntimeFactory)(nil)
@@ -79,13 +81,16 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 	name := "anban-dsh-" + safeContainerPart(spec.SessionID)
 	secretName := name + "-secret"
 	secret := f.secret(spec, namespace, secretName)
+	f.log(spec.SessionID, "creating DSH session Secret", nil)
 	if _, err := f.Kube.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); apierrors.IsAlreadyExists(err) {
 		abort()
 		return nil, fmt.Errorf("DSH session secret %q already exists", secretName)
 	} else if err != nil {
+		f.log(spec.SessionID, "failed to create DSH session Secret", err)
 		abort()
 		return nil, fmt.Errorf("create DSH session secret: %w", err)
 	}
+	f.log(spec.SessionID, "created DSH session Secret", nil)
 	pod := f.pod(spec, namespace, name)
 	pod.Spec.Containers[0].Env = dshSecretEnv(secretName, spec.SessionID, f.MCPURL, f.Config.ServerURL)
 	created, err := f.Kube.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
@@ -95,11 +100,14 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		return nil, fmt.Errorf("DSH session pod %q already exists", name)
 	}
 	if err != nil {
+		f.log(spec.SessionID, "failed to create DSH Pod", err)
 		abort()
 		_ = f.deleteSecret(context.Background(), namespace, secretName)
 		return nil, fmt.Errorf("create DSH pod: %w", err)
 	}
+	f.log(spec.SessionID, "created DSH Pod", nil)
 	if err := waitInteractivePod(streamCtx, f.Kube, namespace, created.Name, f.Config.StartupTimeoutSec); err != nil {
+		f.log(spec.SessionID, "DSH Pod did not become ready", err)
 		abort()
 		f.retainOrDeleteDiagnosticResources(namespace, created.Name, secretName)
 		return nil, err
@@ -157,6 +165,17 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		emit("runtime.exit", details)
 	}()
 	return r, nil
+}
+
+func (f KubernetesRuntimeFactory) log(sessionID, message string, err error) {
+	if f.Logger == nil {
+		return
+	}
+	event := f.Logger.Info().Str("session_id", sessionID).Str("executor", "kubernetes")
+	if err != nil {
+		event = f.Logger.Error().Err(err).Str("session_id", sessionID).Str("executor", "kubernetes")
+	}
+	event.Msg(message)
 }
 
 func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, name string) *corev1.Pod {

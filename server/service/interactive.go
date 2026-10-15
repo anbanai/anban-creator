@@ -24,6 +24,7 @@ import (
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -186,6 +187,7 @@ type InteractiveService struct {
 	maxPerUser   int
 	tombstoneTTL time.Duration
 	memory       InteractiveMemoryStore
+	logger       *zerolog.Logger
 	receiptMu    sync.Mutex
 }
 
@@ -193,6 +195,31 @@ func (s *InteractiveService) SetProjectMemory(memory InteractiveMemoryStore) {
 	s.mu.Lock()
 	s.memory = memory
 	s.mu.Unlock()
+}
+
+// SetLogger enables structured lifecycle diagnostics for the asynchronous
+// interactive runtime boundary. No credentials or prompt contents are logged.
+func (s *InteractiveService) SetLogger(logger *zerolog.Logger) {
+	s.mu.Lock()
+	s.logger = logger
+	s.mu.Unlock()
+}
+
+func (s *InteractiveService) logRuntime(level string, sessionID string, message string, err error) {
+	s.mu.RLock()
+	logger := s.logger
+	s.mu.RUnlock()
+	if logger == nil {
+		return
+	}
+	event := logger.Info().Str("session_id", sessionID)
+	if err != nil {
+		event = logger.Error().Err(err).Str("session_id", sessionID)
+	}
+	if level == "warn" {
+		event = logger.Warn().Str("session_id", sessionID)
+	}
+	event.Msg(message)
 }
 
 func NewInteractiveService(repo repository.Repository) *InteractiveService {
@@ -488,11 +515,13 @@ func (s *InteractiveService) CreateSession(ctx context.Context, userID, agentID,
 	}
 	s.sessions[sess.ID] = sess
 	s.mu.Unlock()
+	s.logRuntime("info", sess.ID, "interactive session created", nil)
 	time.AfterFunc(s.ttl, func() { s.expire(sess.ID) })
 	go s.startRuntime(runtimeCtx, sess, runtimeToken)
 	return sess, nil
 }
 func (s *InteractiveService) startRuntime(ctx context.Context, sess *InteractiveSession, runtimeToken string) {
+	s.logRuntime("info", sess.ID, "interactive runtime starting", nil)
 	emit := func(k string, d any) { s.runtimeEvent(sess.ID, k, d) }
 	var rt Runtime
 	var e error
@@ -504,6 +533,7 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 		rt, e = s.factory.Start(ctx, sess.ID, sess.AgentID, runtimeToken, emit)
 	}
 	if e != nil {
+		s.logRuntime("error", sess.ID, "interactive runtime failed to start", e)
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{
 			"status":  "runtime_failed",
 			"message": fmt.Sprintf("interactive runtime failed to start: %v", e),
@@ -519,7 +549,9 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	}
 	sess.runtime = rt
 	sess.mu.Unlock()
+	s.logRuntime("info", sess.ID, "interactive runtime started", nil)
 	if e = rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID, "initialContext": sess.initialContext}); e != nil {
+		s.logRuntime("error", sess.ID, "interactive runtime failed to initialize", e)
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{
 			"status":  "runtime_failed",
 			"message": fmt.Sprintf("interactive runtime failed to initialize: %v", e),
@@ -533,6 +565,7 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	sess.runtimeExitPending = false
 	sess.runtimeExitData = nil
 	sess.mu.Unlock()
+	s.logRuntime("info", sess.ID, "interactive runtime initialized", nil)
 	if pendingExit {
 		s.runtimeEvent(sess.ID, "runtime.exit", pendingExitData)
 	}
@@ -1051,6 +1084,9 @@ func (s *InteractiveService) Message(ctx context.Context, uid, id, text string) 
 		"sessionId":     sess.ID,
 		"contentBlocks": []map[string]string{{"type": "text", "text": text}},
 	})
+	if e != nil {
+		s.logRuntime("error", sess.ID, "interactive message failed", e)
+	}
 	sess.mu.Lock()
 	closed := sess.Closed
 	sess.busy = false
