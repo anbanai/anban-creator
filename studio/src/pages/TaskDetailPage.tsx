@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, BarChart3, Ban, CheckCircle2, FileCheck2, Loader2, MessageSquare, RefreshCw, Send, Trash2, XCircle } from 'lucide-react'
+import { ArrowLeft, BarChart3, Ban, Loader2, MessageSquare, RefreshCw, Send, Trash2, XCircle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -196,7 +196,6 @@ function TaskOutcomeNotice({
   filesLoading,
   filesError,
   onResume,
-  onOpenMaterials,
 }: {
   task: Task
   failure: ReturnType<typeof taskFailurePresentation>
@@ -206,7 +205,6 @@ function TaskOutcomeNotice({
   filesLoading: boolean
   filesError: boolean
   onResume?: () => void
-  onOpenMaterials: () => void
 }) {
   if (task.status === 'failed') {
     return (
@@ -239,18 +237,6 @@ function TaskOutcomeNotice({
         </div>
         {canResume && onResume ? <Button size="sm" className="min-h-11" onClick={onResume}><Send className="size-3.5" />继续执行</Button> : null}
       </section>
-    )
-  }
-
-  if (task.status === 'completed' && deliveredCount > 0) {
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200/70 bg-emerald-50/60 px-4 py-2.5 dark:border-emerald-900/60 dark:bg-emerald-950/20">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <CheckCircle2 className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />
-          <p className="text-sm text-foreground">作品已完成，交付成果已保存。</p>
-        </div>
-        <Button size="sm" variant="outline" className="min-h-11" onClick={onOpenMaterials}><FileCheck2 className="size-3.5" />查看交付成果</Button>
-      </div>
     )
   }
 
@@ -780,7 +766,6 @@ export default function TaskDetailPage() {
           filesLoading={filesLoading}
           filesError={filesError}
           onResume={() => setShowResumeDialog(true)}
-          onOpenMaterials={() => openTaskDetails('materials')}
         />
       )}
 

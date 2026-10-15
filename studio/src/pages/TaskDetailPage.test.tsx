@@ -395,7 +395,9 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByText('作品已完成，交付成果已保存。')).toBeInTheDocument()
+    await screen.findByRole('link', { name: '查看内容分析' })
+    expect(screen.queryByText('作品已完成，交付成果已保存。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看交付成果' })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '作品状态摘要' })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '作品关键指标' })).not.toBeInTheDocument()
     expect(screen.queryByText('模型和 MCP 正常')).not.toBeInTheDocument()
