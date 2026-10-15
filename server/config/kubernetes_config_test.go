@@ -422,6 +422,22 @@ func TestValidateKubernetesJobRuntimeRequirements(t *testing.T) {
 	}
 }
 
+func TestValidateDshKubernetesUsesClaudeServiceAccount(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Claude.Executor = "docker"
+	cfg.Claude.Kubernetes.ServiceAccount = ""
+	cfg.Dsh.Executor = "kubernetes"
+	cfg.Dsh.Image = "registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64)
+	cfg.Dsh.KubernetesNamespace = "anbanai-prod"
+	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
+	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
+	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerInstanceID = "server-1"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "claude.kubernetes.service_account is required when dsh.executor is kubernetes") {
+		t.Fatalf("Validate() error = %v, want Claude ServiceAccount requirement for DSH", err)
+	}
+}
+
 func TestValidateKubernetesAllowsZeroCompletionGrace(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Claude.Kubernetes.CompletionGraceSeconds = 0

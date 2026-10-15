@@ -15,11 +15,11 @@ import (
 func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	factory := KubernetesRuntimeFactory{Config: srvconfig.DshConfig{
 		Image: "registry.example/dsh@sha256:" + repeatHex(64), KubernetesNamespace: "anban",
-		KubernetesServiceAccount: "creator-server", KubernetesProjectMemoryClaim: "creator-project-memory",
+		KubernetesProjectMemoryClaim: "creator-project-memory",
 		KubernetesProjectMemoryMount: "/workspace/project", CPUCores: 1, MemoryMB: 512,
-	}, ServerInstanceID: "server-1"}
+	}, ServiceAccount: "creator-agent-runner", ServerInstanceID: "server-1"}
 	pod := factory.pod(InteractiveRuntimeSpec{SessionID: "s-1", ProjectID: "p-1", RuntimeToken: "token"}, "anban", "anban-dsh-s-1")
-	if pod.Spec.RestartPolicy != corev1.RestartPolicyNever || pod.Spec.ServiceAccountName != "creator-server" {
+	if pod.Spec.RestartPolicy != corev1.RestartPolicyNever || pod.Spec.ServiceAccountName != "creator-agent-runner" {
 		t.Fatalf("pod lifecycle = %q/%q", pod.Spec.RestartPolicy, pod.Spec.ServiceAccountName)
 	}
 	if pod.Spec.Containers[0].SecurityContext == nil || pod.Spec.Containers[0].SecurityContext.ReadOnlyRootFilesystem == nil || !*pod.Spec.Containers[0].SecurityContext.ReadOnlyRootFilesystem {

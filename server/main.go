@@ -755,7 +755,7 @@ func main() {
 		}
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		dshFactory := service.KubernetesRuntimeFactory{
-			Config: cfg.Dsh, Kube: kubeClient, REST: restConfig,
+			Config: cfg.Dsh, ServiceAccount: cfg.Claude.Kubernetes.ServiceAccount, Kube: kubeClient, REST: restConfig,
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
 		}

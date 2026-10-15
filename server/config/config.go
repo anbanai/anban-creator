@@ -67,7 +67,6 @@ type DshConfig struct {
 	ProjectMemoryVolume          string                    `yaml:"project_memory_volume"`
 	ProjectMemoryMount           string                    `yaml:"project_memory_mount"`
 	KubernetesNamespace          string                    `yaml:"kubernetes_namespace"`
-	KubernetesServiceAccount     string                    `yaml:"kubernetes_service_account"`
 	KubernetesImagePullSecret    string                    `yaml:"kubernetes_image_pull_secret"`
 	KubernetesProjectMemoryClaim string                    `yaml:"kubernetes_project_memory_claim"`
 	KubernetesProjectMemoryMount string                    `yaml:"kubernetes_project_memory_mount"`
@@ -100,7 +99,7 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 		"bridge_dir": true, "dsh_patch": true, "mcp_url": true, "route": true, "routes": true,
 		"executor": true, "image": true, "docker_binary": true, "network": true,
 		"project_memory_volume": true, "project_memory_mount": true, "server_url": true,
-		"kubernetes_namespace": true, "kubernetes_service_account": true, "kubernetes_image_pull_secret": true,
+		"kubernetes_namespace": true, "kubernetes_image_pull_secret": true,
 		"kubernetes_project_memory_claim": true, "kubernetes_project_memory_mount": true,
 		"server_instance_id": true, "cpu_cores": true, "memory_mb": true, "pids_limit": true,
 		"timeout_sec": true,
@@ -170,9 +169,6 @@ func (c DshConfig) Validate() error {
 		}
 		if strings.TrimSpace(c.KubernetesNamespace) == "" {
 			errs = append(errs, "dsh.kubernetes_namespace is required for kubernetes executor")
-		}
-		if strings.TrimSpace(c.KubernetesServiceAccount) == "" {
-			errs = append(errs, "dsh.kubernetes_service_account is required for kubernetes executor")
 		}
 		if strings.TrimSpace(c.KubernetesProjectMemoryClaim) == "" {
 			errs = append(errs, "dsh.kubernetes_project_memory_claim is required for kubernetes executor")
@@ -1295,9 +1291,6 @@ func (c *Config) applyDefaults() {
 	if c.Dsh.KubernetesNamespace == "" {
 		c.Dsh.KubernetesNamespace = c.Claude.Kubernetes.Namespace
 	}
-	if c.Dsh.KubernetesServiceAccount == "" {
-		c.Dsh.KubernetesServiceAccount = c.Claude.Kubernetes.ServiceAccount
-	}
 	if c.Dsh.KubernetesImagePullSecret == "" {
 		c.Dsh.KubernetesImagePullSecret = c.Claude.Kubernetes.ImagePullSecret
 	}
@@ -1902,6 +1895,9 @@ func (c *Config) Validate() error {
 	var errs []string
 	if err := c.Dsh.Validate(); err != nil {
 		errs = append(errs, err.Error())
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Dsh.Executor), "kubernetes") && strings.TrimSpace(c.Claude.Kubernetes.ServiceAccount) == "" {
+		errs = append(errs, "claude.kubernetes.service_account is required when dsh.executor is kubernetes")
 	}
 	if c.Trends.TTL <= 0 {
 		errs = append(errs, "trends.ttl must be positive")

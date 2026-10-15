@@ -37,6 +37,10 @@ spec:
         version: ${version_switch}
     spec:
       serviceAccountName: creator-agent-runner
+      # The Server uses client-go in-cluster auth to create and reconcile
+      # Claude Jobs and interactive DSH Pods. Keep the projected token
+      # explicit so an ACK admission/defaulting policy cannot disable it.
+      automountServiceAccountToken: true
       initContainers:
         - name: project-memory-init
           image: ${image_repo}

@@ -34,8 +34,9 @@ type deploymentDoc struct {
 	Spec struct {
 		Template struct {
 			Spec struct {
-				ServiceAccountName string `yaml:"serviceAccountName"`
-				InitContainers     []struct {
+				ServiceAccountName           string `yaml:"serviceAccountName"`
+				AutomountServiceAccountToken *bool  `yaml:"automountServiceAccountToken"`
+				InitContainers               []struct {
 					Name            string   `yaml:"name"`
 					Image           string   `yaml:"image"`
 					ImagePullPolicy string   `yaml:"imagePullPolicy"`
@@ -198,6 +199,9 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if got := deployment.Spec.Template.Spec.ServiceAccountName; got != "creator-agent-runner" {
 		t.Fatalf("server serviceAccountName = %q, want creator-agent-runner", got)
 	}
+	if deployment.Spec.Template.Spec.AutomountServiceAccountToken == nil || !*deployment.Spec.Template.Spec.AutomountServiceAccountToken {
+		t.Fatal("server Deployment must explicitly automount the ServiceAccount token for in-cluster Kubernetes API access")
+	}
 	if len(deployment.Spec.Template.Spec.InitContainers) != 1 {
 		t.Fatalf("server initContainers = %#v, want one project-memory initializer", deployment.Spec.Template.Spec.InitContainers)
 	}
@@ -322,7 +326,6 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 			`seednote: "${ANBAN_AGENT_IMAGE_SEEDNOTE:-creator-agent-seednote:latest}"`,
 			`montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"`,
 			`service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
-			`kubernetes_service_account: "${ANBAN_AGENT_SERVICE_ACCOUNT:-creator-agent-runner}"`,
 			`kubernetes_namespace: "${ANBAN_AGENT_NAMESPACE:-anbanai-prod}"`,
 			`kubernetes_image_pull_secret: "${ANBAN_AGENT_IMAGE_PULL_SECRET:-}"`,
 			`kubernetes_project_memory_claim: "${ANBAN_AGENT_PROJECT_MEMORY_CLAIM:-creator-project-memory}"`,

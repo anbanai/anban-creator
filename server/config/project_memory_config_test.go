@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestProjectMemoryConfigDefaults(t *testing.T) {
@@ -46,6 +48,14 @@ func TestLegacyMemoryArchiveConfigIsRejected(t *testing.T) {
 	_, err := NewConfig(path)
 	if err == nil || !strings.Contains(err.Error(), "unknown top-level config key memory") {
 		t.Fatalf("NewConfig() error = %v, want legacy memory config rejected", err)
+	}
+}
+
+func TestDshKubernetesServiceAccountIsNotConfigurable(t *testing.T) {
+	var dsh DshConfig
+	err := yaml.Unmarshal([]byte("kubernetes_service_account: creator-agent-runner\n"), &dsh)
+	if err == nil || !strings.Contains(err.Error(), "dsh.kubernetes_service_account") {
+		t.Fatalf("NewConfig() error = %v, want duplicate DSH ServiceAccount setting rejected", err)
 	}
 }
 
