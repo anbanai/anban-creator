@@ -6,7 +6,7 @@
 
 **Architecture:** Move the existing one-shot Agent runtime to `runtime-claude/` and move only the DSH interactive bridge to `runtime-dsh/`. Update Server configuration, Dockerfiles, CI, release artifacts, contract tests, and active documentation so each execution surface builds only its own dependencies.
 
-**Tech Stack:** TypeScript, Node 22, Claude Agent SDK, DSH SDK, Go contract tests, Docker, GitHub Actions.
+**Tech Stack:** TypeScript, Node 24.22.0, Claude Agent SDK, DSH SDK, Go contract tests, Docker, GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-10-10-agent-runtime-boundaries-design.md`
 

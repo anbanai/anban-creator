@@ -39,7 +39,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.0"
           cache: pnpm
           cache-dependency-path: harness/pnpm-lock.yaml
 
@@ -248,7 +248,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.0"
           cache: pnpm
           cache-dependency-path: harness/pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
@@ -322,7 +322,7 @@ jobs:
       - name: Set up runtime Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.0"
           cache: npm
           cache-dependency-path: |
             runtime-claude/package-lock.json
@@ -371,7 +371,7 @@ jobs:
       - name: Restore release Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24.21.0"
+          node-version: "24.22.0"
           registry-url: https://registry.npmjs.org
 
       - name: Download exact DSH release artifact

@@ -15,12 +15,12 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 		name string
 		from []string
 	}{
-		{name: "Dockerfile.agent-wechat-article", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
-		{name: "Dockerfile.agent-wechat-picture", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
-		{name: "Dockerfile.agent-moments", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
-		{name: "Dockerfile.agent-ecommerce", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
-		{name: "Dockerfile.agent-seednote", from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"}},
-		{name: "Dockerfile.agent-montage", from: []string{"FROM node:24-bookworm-slim AS builder", "FROM node:24-bookworm-slim"}},
+		{name: "Dockerfile.agent-wechat-article", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-wechat-picture", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-moments", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-ecommerce", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-seednote", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
+		{name: "Dockerfile.agent-montage", from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"}},
 	} {
 		data := readTextFile(t, filepath.Join(root, "deploy", "docker", runtime.name))
 		if got := dockerfileFromInstructions(data); !reflect.DeepEqual(got, runtime.from) {
@@ -48,6 +48,57 @@ func TestTypeScriptRuntimeDockerfilesUseBundledAgentSDK(t *testing.T) {
 	launcher := readTextFile(t, filepath.Join(root, "deploy", "docker", "anban-agent-launcher"))
 	if !strings.Contains(launcher, "exec node /app/runtime-claude/dist/main.js \"$@\"") {
 		t.Fatal("TypeScript anban launcher must exec the compiled Node entrypoint")
+	}
+}
+
+func TestManagedAgentImagesUsePinnedNode(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, name := range []string{
+		"Dockerfile.agent-ecommerce",
+		"Dockerfile.agent-feedback-analysis",
+		"Dockerfile.agent-hypit",
+		"Dockerfile.agent-moments",
+		"Dockerfile.agent-montage",
+		"Dockerfile.agent-profile-analysis",
+		"Dockerfile.agent-seednote",
+		"Dockerfile.agent-wechat-article",
+		"Dockerfile.agent-wechat-picture",
+		"Dockerfile.agent-whiteboard-animation",
+	} {
+		body := readTextFile(t, filepath.Join(root, "deploy", "docker", name))
+		foundNodeImage := false
+		for _, instruction := range dockerfileFromInstructions(body) {
+			fields := strings.Fields(instruction)
+			if len(fields) < 2 || !strings.HasPrefix(fields[1], "node:") {
+				continue
+			}
+			foundNodeImage = true
+			if !strings.HasPrefix(fields[1], "node:24.22.0-bookworm-slim") {
+				t.Errorf("%s uses Node image %q; want node:24.22.0-bookworm-slim", name, fields[1])
+			}
+		}
+		if !foundNodeImage {
+			t.Errorf("%s has no Node base image", name)
+		}
+	}
+}
+
+func TestClaudeRuntimeUsesPinnedNodeLTS(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, path := range []string{
+		filepath.Join(root, "runtime-claude", "package.json"),
+		filepath.Join(root, "runtime-claude", "package-lock.json"),
+	} {
+		body := readTextFile(t, path)
+		if !strings.Contains(body, ">=24.22.0 <25") {
+			t.Fatalf("%s must require Node >=24.22.0 <25", path)
+		}
+	}
+
+	ci := readTextFile(t, filepath.Join(root, ".github", "workflows", "ci.yml"))
+	claudeJob, _, found := strings.Cut(ci, "  dsh-runtime:")
+	if !found || !strings.Contains(claudeJob, "node-version: \"24.22.0\"") {
+		t.Fatal("runtime-claude CI must use Node 24.22.0")
 	}
 }
 
@@ -100,14 +151,14 @@ func TestDshRuntimeUsesPinnedNodeLts(t *testing.T) {
 	if err := json.Unmarshal([]byte(packageBody), &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Engines["node"] != ">=24.21.0 <25" {
-		t.Fatalf("runtime-dsh Node engine = %q, want >=24.21.0 <25", manifest.Engines["node"])
+	if manifest.Engines["node"] != ">=24.22.0 <25" {
+		t.Fatalf("runtime-dsh Node engine = %q, want >=24.22.0 <25", manifest.Engines["node"])
 	}
 
 	dockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.runtime-dsh"))
 	for _, want := range []string{
-		"FROM node:24.21.0-alpine3.24 AS builder",
-		"FROM node:24.21.0-alpine3.24",
+		"FROM node:24.22.0-alpine3.24 AS builder",
+		"FROM node:24.22.0-alpine3.24",
 		"USER 1000:1000",
 	} {
 		if !strings.Contains(dockerfile, want) {
@@ -120,7 +171,7 @@ func TestDshRuntimeUsesPinnedNodeLts(t *testing.T) {
 	}
 
 	ci := readTextFile(t, filepath.Join(root, ".github/workflows/ci.yml"))
-	if !strings.Contains(ci, "node-version: \"24.21.0\"") {
+	if !strings.Contains(ci, "node-version: \"24.22.0\"") {
 		t.Fatal("CI must test TypeScript runtimes with the pinned Node LTS")
 	}
 }

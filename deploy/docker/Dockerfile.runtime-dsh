@@ -1,4 +1,4 @@
-FROM node:24.21.0-alpine3.24 AS builder
+FROM node:24.22.0-alpine3.24 AS builder
 
 RUN apk add --no-cache python3 make g++ cmake
 WORKDIR /build/runtime-dsh
@@ -17,7 +17,7 @@ RUN set -eux; \
     cp -a vendor/@deepseek-ai/dsh-agent-loop node_modules/@deepseek-ai/; \
     test -f node_modules/node-pty/build/Release/pty.node
 
-FROM node:24.21.0-alpine3.24
+FROM node:24.22.0-alpine3.24
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor

@@ -10,7 +10,7 @@ COPY server ./
 RUN set -eux; \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /anban-creator-server .
 
-FROM node:24.21.0-alpine3.24
+FROM node:24.22.0-alpine3.24
 
 
 RUN set -eux; \
@@ -27,7 +27,7 @@ COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/econo
 COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml
 COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml
 COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml
-RUN test "$(node --version)" = "v24.21.0"
+RUN test "$(node --version)" = "v24.22.0"
 USER 1000:1000
 
 WORKDIR /app

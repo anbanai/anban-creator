@@ -344,7 +344,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 	article := readTextFile(t, articlePath)
 	seednote := readTextFile(t, seednotePath)
 	for _, want := range []string{
-		"FROM node:bookworm-slim",
+		"FROM node:24.22.0-bookworm-slim",
 		"apt-get install -y --no-install-recommends ca-certificates curl git jq tini",
 		"COPY runtime-claude/package.json runtime-claude/package-lock.json ./",
 		"npm prune --omit=dev",
@@ -411,8 +411,8 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 	path := filepath.Join(root, "deploy/docker/Dockerfile.agent-montage")
 	body := readTextFile(t, path)
 	wantFrom := []string{
-		"FROM node:24-bookworm-slim AS builder",
-		"FROM node:24-bookworm-slim",
+		"FROM node:24.22.0-bookworm-slim AS builder",
+		"FROM node:24.22.0-bookworm-slim",
 	}
 	if got := dockerfileFromInstructions(body); !reflect.DeepEqual(got, wantFrom) {
 		t.Fatalf("%s FROM instructions mismatch\nwant: %v\n got: %v", path, wantFrom, got)
@@ -468,18 +468,18 @@ func TestServerDockerfileUsesMinimalRuntime(t *testing.T) {
 		t.Fatal("server Dockerfile must not require node-pty's macOS-only spawn-helper in the Alpine/Linux image")
 	}
 	for _, want := range []string{
-		"FROM node:24.21.0-alpine3.24",
+		"FROM node:24.22.0-alpine3.24",
 		"apk add --no-cache ca-certificates docker-cli ffmpeg tzdata",
 		"WORKDIR /build/server",
 		"COPY server/go.mod server/go.sum ./",
-		`RUN test "$(node --version)" = "v24.21.0"`,
+		`RUN test "$(node --version)" = "v24.22.0"`,
 		"go build -ldflags=\"-s -w\" -o /anban-creator-server .",
 		"COPY --from=builder /anban-creator-server /app/anban-creator-server",
 		"COPY --from=builder /build/server/billing/economics.yaml /app/conf/billing/economics.yaml",
 		"COPY --from=builder /build/server/billing/products.yaml /app/conf/billing/products.yaml",
 		"COPY --from=builder /build/server/billing/costs.yaml /app/conf/billing/costs.yaml",
 		"COPY --from=builder /build/server/billing/promotions.yaml /app/conf/billing/promotions.yaml",
-		"FROM node:24.21.0-alpine3.24",
+		"FROM node:24.22.0-alpine3.24",
 		"USER 1000:1000",
 		"/app/data/project-memory/projects",
 		"chown -R 1000:1000 /app/data",
@@ -548,7 +548,7 @@ func TestServerComposeInjectsBillingAdminKeyAndDocumentsIt(t *testing.T) {
 func TestArticleAgentRuntimeInstallsPackagesAsRoot(t *testing.T) {
 	path := filepath.Join(repositoryRoot(t), "deploy/docker/Dockerfile.agent-wechat-article")
 	body := readTextFile(t, path)
-	from := strings.Index(body, "FROM node:bookworm-slim")
+	from := strings.Index(body, "FROM node:24.22.0-bookworm-slim")
 	if from < 0 {
 		t.Fatalf("%s missing Article runtime", path)
 	}
@@ -818,7 +818,7 @@ func TestStudioDockerfileIsCentralized(t *testing.T) {
 	}
 }
 
-func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
+func TestDockerBuildInputsUseDeclaredImageTags(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, tc := range []struct {
 		path     string
@@ -827,35 +827,35 @@ func TestDockerBuildInputsUseRollingImageTags(t *testing.T) {
 	}{
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-article"),
-			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-wechat-picture"),
-			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-moments"),
-			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-ecommerce"),
-			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-seednote"),
-			from: []string{"FROM node:bookworm-slim AS builder", "FROM node:bookworm-slim"},
+			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.agent-montage"),
-			from: []string{"FROM node:24-bookworm-slim AS builder", "FROM node:24-bookworm-slim"},
+			from: []string{"FROM node:24.22.0-bookworm-slim AS builder", "FROM node:24.22.0-bookworm-slim"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.server"),
-			from: []string{"FROM golang:alpine AS builder", "FROM node:24.21.0-alpine3.24"},
+			from: []string{"FROM golang:alpine AS builder", "FROM node:24.22.0-alpine3.24"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.runtime-dsh"),
-			from: []string{"FROM node:24.21.0-alpine3.24 AS builder", "FROM node:24.21.0-alpine3.24"},
+			from: []string{"FROM node:24.22.0-alpine3.24 AS builder", "FROM node:24.22.0-alpine3.24"},
 		},
 		{
 			path: filepath.Join(root, "deploy/docker/Dockerfile.studio"),

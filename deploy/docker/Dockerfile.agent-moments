@@ -2,7 +2,7 @@
 # Content runtimes share one system dependency profile: Node + the managed
 # bootstrap bundle + the canonical plugin tree. Each profile keeps its own
 # image identity and Dockerfile so packs never inherit another pack's runtime.
-FROM node:bookworm-slim AS builder
+FROM node:24.22.0-bookworm-slim AS builder
 
 WORKDIR /app/runtime-claude
 COPY runtime-claude/package.json runtime-claude/package-lock.json ./
@@ -16,7 +16,7 @@ RUN npm run build && \
     npm prune --omit=dev && \
     test -d node_modules/@anthropic-ai/claude-agent-sdk
 
-FROM node:bookworm-slim
+FROM node:24.22.0-bookworm-slim
 
 USER root
 RUN set -eux; \
