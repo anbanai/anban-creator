@@ -1031,7 +1031,12 @@ var ReactLoopAgent = class {
 			}
 			turnEnds = {
 				kind: "error",
-				error: error instanceof LlmError ? error.failure : {
+				error: error instanceof LlmError ? {
+					...error.failure,
+					// LlmError.failure omits Error.cause; retain the cause chain for
+					// transport failures so the durable turn diagnostic is actionable.
+					...(error.code === "TRANSPORT" && error.cause !== void 0 ? { message: errorChain(error) } : {})
+				} : {
 					message: errorChain(error),
 					code: "UNKNOWN"
 				}

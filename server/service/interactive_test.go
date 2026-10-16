@@ -444,9 +444,11 @@ func TestInteractiveTurnErrorIsLoggedAndReplayable(t *testing.T) {
 	svc.SetServerInstanceID("server-1")
 
 	svc.runtimeEvent(sess.ID, "session.error", map[string]any{
-		"status":  "runtime_failed",
-		"code":    "PROVIDER_AUTH",
-		"message": "provider rejected credentials",
+		"status":              "runtime_failed",
+		"code":                "PROVIDER_AUTH",
+		"message":             "provider rejected credentials",
+		"provider_status":     401,
+		"provider_request_id": "req-123",
 	})
 
 	history, _, closeFn, err := svc.Events(sess.UserID, sess.ID, 0)
@@ -457,10 +459,13 @@ func TestInteractiveTurnErrorIsLoggedAndReplayable(t *testing.T) {
 	if len(history) != 1 || history[0].Type != "session.error" {
 		t.Fatalf("history = %#v, want replayable session.error", history)
 	}
-	for _, field := range []string{`"session_id":"session-1"`, `"server_instance":"server-1"`, `"error_code":"PROVIDER_AUTH"`, `"error_message":"provider rejected credentials"`} {
+	for _, field := range []string{`"session_id":"session-1"`, `"server_instance":"server-1"`, `"error_code":"PROVIDER_AUTH"`, `"error_message":"provider rejected credentials"`, `"provider_status":401`, `"provider_request_id":"req-123"`} {
 		if !strings.Contains(logs.String(), field) {
 			t.Fatalf("logs %q do not contain %s", logs.String(), field)
 		}
+	}
+	if !strings.Contains(logs.String(), `"level":"error"`) {
+		t.Fatalf("logs %q do not mark session.error as error", logs.String())
 	}
 }
 

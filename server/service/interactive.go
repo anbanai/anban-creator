@@ -238,11 +238,14 @@ func (s *InteractiveService) logRuntimeFields(level string, sessionID string, me
 		return
 	}
 	event := logger.Info().Str("session_id", sessionID).Str("server_instance", instanceID)
-	if err != nil {
-		event = logger.Error().Err(err).Str("session_id", sessionID).Str("server_instance", instanceID)
-	}
-	if level == "warn" {
+	switch level {
+	case "error":
+		event = logger.Error().Str("session_id", sessionID).Str("server_instance", instanceID)
+	case "warn":
 		event = logger.Warn().Str("session_id", sessionID).Str("server_instance", instanceID)
+	}
+	if err != nil {
+		event = event.Err(err)
 	}
 	for key, value := range fields {
 		event = event.Interface(key, value)
@@ -1145,13 +1148,20 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 		sess.activeCommand = 0
 		sess.activeCommandAt = time.Time{}
 		sess.mu.Unlock()
-		s.logRuntimeFields("error", id, "interactive runtime reported an error", nil, map[string]any{
+		errorFields := map[string]any{
 			"event_type":    typ,
 			"error_code":    interactiveErrorCode(data),
 			"error_message": interactiveErrorMessage(data),
 			"command_seq":   commandSeq,
 			"duration_ms":   durationMS,
-		})
+		}
+		if status, ok := interactiveErrorProviderStatus(data); ok {
+			errorFields["provider_status"] = status
+		}
+		if requestID := interactiveErrorProviderRequestID(data); requestID != "" {
+			errorFields["provider_request_id"] = requestID
+		}
+		s.logRuntimeFields("error", id, "interactive runtime reported an error", nil, errorFields)
 		s.emit(sess, typ, data)
 		s.closeSession(id, false)
 		return
@@ -2193,6 +2203,40 @@ func interactiveErrorMessage(data any) string {
 		message = string([]rune(message)[:1024])
 	}
 	return message
+}
+
+func interactiveErrorProviderStatus(data any) (int, bool) {
+	fields, ok := data.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	var status int
+	switch value := fields["provider_status"].(type) {
+	case int:
+		status = value
+	case int64:
+		status = int(value)
+	case float64:
+		if value < 100 || value > 599 || value != float64(int(value)) {
+			return 0, false
+		}
+		status = int(value)
+	default:
+		return 0, false
+	}
+	if status < 100 || status > 599 {
+		return 0, false
+	}
+	return status, true
+}
+
+func interactiveErrorProviderRequestID(data any) string {
+	fields, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	requestID, _ := fields["provider_request_id"].(string)
+	return strings.TrimSpace(requestID)
 }
 
 func (r *execRuntime) Command(ctx context.Context, method string, params any) error {

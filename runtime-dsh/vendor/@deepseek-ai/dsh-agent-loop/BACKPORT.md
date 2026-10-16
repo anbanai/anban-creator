@@ -17,6 +17,8 @@ Only these upstream changes are applied:
 - The initial-step empty-message condition, which permits the requested
   message-free turn and consumes its pending startup request.
 - Matching private fields and `start(): void` in `lib/types/agent.d.ts`.
+- `TRANSPORT` turn failures retain their `Error.cause` chain in the durable
+  `turn/end` diagnostic message, while preserving structured provider fields.
 
 All other release JavaScript and declarations remain unchanged. Package version
 and dependency metadata remain unchanged to preserve the published graph.
@@ -31,9 +33,9 @@ cf57e3ecd487ac5c2553455aaa5cef2c6fb41e6bd61be5aa455675d1d7193033  lib/index.js
 66131a86c5f024fabb77e99103f3f07cdca5818cbce7d6aaecb058197c66589e  lib/types/agent.d.ts
 ```
 
-These two alpha.4 runtime files contain the minimal Anban startup extension;
-the surrounding implementation is from the published alpha.4 package. The
-alpha.4 package metadata and locale files remain from alpha.4.
+The runtime file contains the minimal Anban startup and transport-diagnostic
+extensions; the surrounding implementation is from the published alpha.4
+package. The alpha.4 package metadata and locale files remain from alpha.4.
 
 ## Verification
 
@@ -46,9 +48,10 @@ node --test runtime-dsh/vendor/@deepseek-ai/dsh-agent-loop/backport.test.js
 The tests use the real released Cordis, AgentRegistry, session, prompt, and tool
 services with a deterministic in-process LLM adapter. They check a single model
 request without a user transcript row, duplicate calls before/after completion,
-cancellation both before dispatch and during streaming, and a normal follow-up
-after cancellation. `start()` remains one-shot after cancellation, matching the
-upstream implementation. Repeated calls do not retry the cancelled startup.
+cancellation both before dispatch and during streaming, a normal follow-up
+after cancellation, and preservation of a transport cause chain with provider
+status. `start()` remains one-shot after cancellation, matching the upstream
+implementation. Repeated calls do not retry the cancelled startup.
 
 Before installing this local override, `DSH_BACKPORT_BASELINE=1` selects the
 installed registry package and demonstrates failure because `agent.start` is

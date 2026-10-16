@@ -83,7 +83,15 @@ describe("DSH bridge protocol", () => {
           type: "turn/end",
           data: {
             turn: 3,
-            reason: { kind: "error", error: { code: "AUTH_FAILED", message: "provider token=provider-secret" } },
+            reason: {
+              kind: "error",
+              error: {
+                code: "AUTH_FAILED",
+                message: "provider token=provider-secret",
+                status: 401,
+                requestId: "req-123",
+              },
+            },
           },
         },
       },
@@ -94,6 +102,8 @@ describe("DSH bridge protocol", () => {
         status: "runtime_failed",
         code: "AUTH_FAILED",
         message: "provider token=provider-secret",
+        provider_status: 401,
+        provider_request_id: "req-123",
         turn: 3,
       },
     }]);

@@ -16,3 +16,9 @@ The npm dependencies in `runtime-dsh/package.json` and
 Do not replace the vendored files or remove the compatibility extension unless
 the interactive protocol contract tests and deployed startup smoke continue to
 pass.
+
+The runtime also applies `scripts/patch-dsh-dependencies.mjs` during image build
+and before local tests. It is a pinned, layout-checked patch to the published
+`@deepseek-ai/dsh-llm@0.2.1-alpha.4` failure normalizer so `TRANSPORT` errors
+retain their sanitized `Error.cause` chain in the durable turn diagnostic. The
+script fails closed if the upstream package layout changes.

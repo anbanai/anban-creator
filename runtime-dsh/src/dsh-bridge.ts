@@ -228,6 +228,11 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
       const message = typeof failure.message === "string" && failure.message.trim() !== ""
         ? failure.message
         : "interactive agent turn failed";
+      const status = typeof failure.status === "number" && Number.isInteger(failure.status)
+        && failure.status >= 100 && failure.status <= 599 ? failure.status : undefined;
+      const requestId = typeof failure.requestId === "string" && failure.requestId.trim() !== ""
+        ? failure.requestId
+        : undefined;
       return [{
         event: "session.error",
         data: {
@@ -235,6 +240,8 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
           status: "runtime_failed",
           code,
           message,
+          ...(status === undefined ? {} : { provider_status: status }),
+          ...(requestId === undefined ? {} : { provider_request_id: requestId }),
           ...(turn === undefined ? {} : { turn }),
         },
       }];

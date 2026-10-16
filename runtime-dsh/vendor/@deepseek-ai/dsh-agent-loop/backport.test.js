@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { LlmAdapter, createUserMessage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { LlmAdapter, LlmError, createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -14,11 +14,12 @@ const { default: AgentLoop } = await import(process.env.DSH_BACKPORT_BASELINE ==
 class Adapter extends LlmAdapter {
   requests = []
   entered = Promise.withResolvers()
-  constructor(hang = false) { super(); this.hang = hang }
+  constructor(hang = false, failure = undefined) { super(); this.hang = hang; this.failure = failure }
   async resolveModel(provider, model) { return { provider, id: model, name: model } }
   async *stream(options) {
     this.requests.push(options)
     this.entered.resolve()
+    if (this.failure !== undefined) throw this.failure
     if (this.hang) {
       await new Promise((resolve, reject) => {
         const abort = () => reject(new Error('aborted'))
@@ -34,14 +35,14 @@ class Adapter extends LlmAdapter {
   }
 }
 
-async function setup(t, hang = false) {
+async function setup(t, hang = false, failure = undefined) {
   const ctx = new Context()
   t.after(() => ctx.fiber.dispose())
   for (const plugin of [LlmRuntime, SessionStore, SessionProjectionRegistry, SystemPrompt, ToolRuntime, AgentRegistry]) {
     await ctx.plugin(plugin)
   }
   await ctx.plugin(AgentLoop, { agents: [] })
-  const adapter = new Adapter(hang)
+  const adapter = new Adapter(hang, failure)
   ctx.llm.registerAdapter(['mock'], adapter)
   const agent = await ctx.agentLoop.create(SessionId('backport-test'), { provider: 'mock', model: 'mock' })
   assert.equal(typeof agent.start, 'function', 'published loop must expose message-free start')
@@ -88,4 +89,22 @@ test('cancelling before model dispatch does not let a later start replay startup
   await agent.whenIdle()
   assert.equal(adapter.requests.length, 0)
   assert.equal(agent.session.snapshotEvents().filter(event => event.type === 'user/message').length, 0)
+})
+
+test('turn-end preserves transport cause diagnostics and provider facts', { timeout: 5000 }, async t => {
+  const failure = new LlmError('DeepSeek Messages transport failed', 'TRANSPORT', {
+    cause: new Error('getaddrinfo ENOTFOUND api.deepseek.com'),
+    status: 503,
+  })
+  const { agent } = await setup(t, false, failure)
+  agent.start()
+  await agent.whenIdle()
+  assert.deepEqual(agent.session.snapshotEvents().find(event => event.type === 'turn/end').data.reason, {
+    kind: 'error',
+    error: {
+      message: 'DeepSeek Messages transport failed: getaddrinfo ENOTFOUND api.deepseek.com',
+      code: 'TRANSPORT',
+      status: 503,
+    },
+  })
 })

@@ -62,4 +62,10 @@ describe("vendored DSH interactive SDK contract", () => {
     expect(server).toContain("session/answer");
     expect(protocol).toContain("JsonRpcLineTransport");
   });
+
+  test("ships the pinned transport-cause dependency patch", () => {
+    const patch = readFileSync(join(runtimeDir, "scripts/patch-dsh-dependencies.mjs"), "utf8");
+    expect(patch).toContain("Anban transport-cause preservation patch");
+    expect(patch).toContain("unsupported @deepseek-ai/dsh-llm alpha.4 layout");
+  });
 });

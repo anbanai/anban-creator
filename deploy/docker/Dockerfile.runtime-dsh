@@ -9,6 +9,7 @@ COPY runtime-dsh/ ./
 RUN set -eux; \
     npm run build; \
     npm prune --omit=dev --install-links=true --strict-allow-scripts; \
+    npm run patch:dependencies; \
     npm_config_build_from_source=true npm rebuild node-pty; \
     rm -rf node_modules/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/dsh-sdk-protocol node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server node_modules/@deepseek-ai/dsh-agent-loop; \
     cp -a vendor/@deepseek-ai/dsh-sdk-client node_modules/@deepseek-ai/; \
