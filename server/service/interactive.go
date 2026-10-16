@@ -174,22 +174,29 @@ type InteractiveMemoryStore interface {
 	AppendMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 }
 type InteractiveService struct {
-	repo         repository.Repository
-	projectSvc   *ProjectService
-	factory      RuntimeFactory
-	mu           sync.RWMutex
-	sessions     map[string]*InteractiveSession
-	ttl          time.Duration
-	maxHistory   int
-	enabled      bool
-	agents       []InteractiveAgent
-	adminOnly    bool
-	maxSessions  int
-	maxPerUser   int
-	tombstoneTTL time.Duration
-	memory       InteractiveMemoryStore
-	logger       *zerolog.Logger
-	receiptMu    sync.Mutex
+	repo              repository.Repository
+	projectSvc        *ProjectService
+	factory           RuntimeFactory
+	mu                sync.RWMutex
+	sessions          map[string]*InteractiveSession
+	ttl               time.Duration
+	maxHistory        int
+	enabled           bool
+	agents            []InteractiveAgent
+	adminOnly         bool
+	maxSessions       int
+	maxPerUser        int
+	tombstoneTTL      time.Duration
+	memory            InteractiveMemoryStore
+	logger            *zerolog.Logger
+	receiptMu         sync.Mutex
+	createIdempotency map[string]*interactiveCreateReservation
+}
+
+type interactiveCreateReservation struct {
+	fingerprint string
+	done        chan struct{}
+	session     *InteractiveSession
 }
 
 func (s *InteractiveService) SetProjectMemory(memory InteractiveMemoryStore) {
@@ -235,6 +242,7 @@ func NewInteractiveServiceWithRuntimeAndAgents(repo repository.Repository, facto
 		repo: repo, projectSvc: NewProjectService(repo, nil), factory: factory, sessions: map[string]*InteractiveSession{},
 		ttl: 30 * time.Minute, maxHistory: 256, agents: append([]InteractiveAgent(nil), agents...),
 		maxSessions: 32, maxPerUser: 2, tombstoneTTL: 5 * time.Minute,
+		createIdempotency: map[string]*interactiveCreateReservation{},
 	}
 }
 
@@ -422,6 +430,71 @@ func writeInteractiveProfileProjection(ctx context.Context, memory InteractiveMe
 }
 
 func (s *InteractiveService) CreateSession(ctx context.Context, userID, agentID, intent string, projectIDs ...string) (*InteractiveSession, error) {
+	return s.createSession(ctx, userID, agentID, intent, projectIDs...)
+}
+
+// CreateSessionWithIdempotency makes the browser retry boundary safe. A page
+// refresh can replay a POST whose response was lost after the server created
+// the session; the same key must return the original in-memory session rather
+// than starting a second Job.
+func (s *InteractiveService) CreateSessionWithIdempotency(ctx context.Context, userID, agentID, intent, idempotencyKey string, projectIDs ...string) (*InteractiveSession, error) {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return s.createSession(ctx, userID, agentID, intent, projectIDs...)
+	}
+	if len([]byte(key)) > 128 {
+		return nil, ErrInteractiveIdempotency
+	}
+	projectID := ""
+	if len(projectIDs) > 0 {
+		projectID = strings.TrimSpace(projectIDs[0])
+	}
+	fingerprint := strings.Join([]string{strings.TrimSpace(agentID), strings.TrimSpace(intent), projectID}, "\x00")
+	reservationKey := strings.TrimSpace(userID) + "\x00" + key
+
+	for {
+		s.mu.Lock()
+		if s.createIdempotency == nil {
+			s.createIdempotency = map[string]*interactiveCreateReservation{}
+		}
+		reservation, exists := s.createIdempotency[reservationKey]
+		if exists {
+			if reservation.fingerprint != fingerprint {
+				s.mu.Unlock()
+				return nil, ErrInteractiveIdempotency
+			}
+			if reservation.session != nil {
+				sess := reservation.session
+				s.mu.Unlock()
+				return sess, nil
+			}
+			done := reservation.done
+			s.mu.Unlock()
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		reservation = &interactiveCreateReservation{fingerprint: fingerprint, done: make(chan struct{})}
+		s.createIdempotency[reservationKey] = reservation
+		s.mu.Unlock()
+
+		sess, err := s.createSession(ctx, userID, agentID, intent, projectIDs...)
+		s.mu.Lock()
+		if err == nil {
+			reservation.session = sess
+		} else {
+			delete(s.createIdempotency, reservationKey)
+		}
+		close(reservation.done)
+		s.mu.Unlock()
+		return sess, err
+	}
+}
+
+func (s *InteractiveService) createSession(ctx context.Context, userID, agentID, intent string, projectIDs ...string) (*InteractiveSession, error) {
 	if !s.Enabled() || strings.TrimSpace(userID) == "" {
 		return nil, ErrInteractiveAgent
 	}
@@ -717,6 +790,11 @@ func (s *InteractiveService) deleteTombstone(id string, target *InteractiveSessi
 		current.mu.Unlock()
 		if closed {
 			delete(s.sessions, id)
+			for key, reservation := range s.createIdempotency {
+				if reservation.session == target {
+					delete(s.createIdempotency, key)
+				}
+			}
 		}
 	}
 }
@@ -728,6 +806,11 @@ func (s *InteractiveService) pruneTombstonesLocked(now time.Time) {
 		sess.mu.Unlock()
 		if remove {
 			delete(s.sessions, id)
+			for key, reservation := range s.createIdempotency {
+				if reservation.session == sess {
+					delete(s.createIdempotency, key)
+				}
+			}
 		}
 	}
 }

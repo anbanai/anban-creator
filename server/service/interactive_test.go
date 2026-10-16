@@ -30,6 +30,22 @@ type interactiveRecordingRuntime struct {
 	methods []string
 }
 
+type interactiveBlockingRuntime struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *interactiveBlockingRuntime) Command(_ context.Context, _ string, _ any) error {
+	select {
+	case <-r.started:
+	default:
+		close(r.started)
+	}
+	<-r.release
+	return nil
+}
+func (*interactiveBlockingRuntime) Close() error { return nil }
+
 func (r *interactiveRecordingRuntime) Command(_ context.Context, method string, _ any) error {
 	r.mu.Lock()
 	r.methods = append(r.methods, method)
@@ -285,6 +301,50 @@ func TestInteractiveCreateSessionAppliesPerUserLimit(t *testing.T) {
 	defer func() { _ = svc.Close("user-1", second.ID) }()
 	if _, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project"); !errors.Is(err, ErrInteractiveBusy) {
 		t.Fatalf("third CreateSession() error = %v, want ErrInteractiveBusy", err)
+	}
+}
+
+func TestInteractiveCreateSessionIdempotencyReplaysOneSession(t *testing.T) {
+	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, interactiveTestRuntimeFactory{}, []InteractiveAgent{{
+		ID: "project-creator", DisplayName: "Project Creator", Available: true, Intents: []string{"create-project"},
+	}})
+	svc.SetEnabled(true)
+	first, err := svc.CreateSessionWithIdempotency(context.Background(), "user-1", "project-creator", "create-project", "create-key-1")
+	if err != nil {
+		t.Fatalf("first CreateSessionWithIdempotency() error = %v", err)
+	}
+	defer func() { _ = svc.Close("user-1", first.ID) }()
+	second, err := svc.CreateSessionWithIdempotency(context.Background(), "user-1", "project-creator", "create-project", "create-key-1")
+	if err != nil {
+		t.Fatalf("replay CreateSessionWithIdempotency() error = %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("replay session id = %q, want %q", second.ID, first.ID)
+	}
+	if _, err := svc.CreateSessionWithIdempotency(context.Background(), "user-1", "project-creator", "update-project-profile", "create-key-1", "project-1"); !errors.Is(err, ErrInteractiveIdempotency) {
+		t.Fatalf("mismatched replay error = %v, want ErrInteractiveIdempotency", err)
+	}
+}
+
+func TestInteractiveMessageRejectsConcurrentCommand(t *testing.T) {
+	sess := newInteractiveTestSession()
+	runtime := &interactiveBlockingRuntime{started: make(chan struct{}), release: make(chan struct{})}
+	sess.runtime = runtime
+	svc := newInteractiveTestService(sess)
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- svc.Message(context.Background(), sess.UserID, sess.ID, "first") }()
+	select {
+	case <-runtime.started:
+	case <-time.After(time.Second):
+		t.Fatal("first message did not reach runtime")
+	}
+	if err := svc.Message(context.Background(), sess.UserID, sess.ID, "second"); !errors.Is(err, ErrInteractiveBusy) {
+		t.Fatalf("concurrent Message() error = %v, want ErrInteractiveBusy", err)
+	}
+	close(runtime.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first Message() error = %v", err)
 	}
 }
 

@@ -54,12 +54,12 @@ export interface InteractiveCommitResult {
 
 export const interactiveApi = {
   agents: () => unwrap<InteractiveAgent[]>(http.get('/interactive/agents')),
-  createSession: (agentId: string, intent: string, projectId?: string) =>
+  createSession: (agentId: string, intent: string, projectId?: string, idempotencyKey?: string) =>
     unwrap<InteractiveSession>(http.post('/interactive/sessions', {
       agent_id: agentId,
       intent,
       ...(projectId ? { project_id: projectId } : {}),
-    })),
+    }, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined)),
   message: (sessionId: string, text: string) =>
     unwrap<unknown>(http.post(`/interactive/sessions/${sessionId}/messages`, { text })),
   answer: (sessionId: string, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>) =>

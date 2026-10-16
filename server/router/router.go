@@ -107,6 +107,7 @@ func NewRouter(svc *Services) *fiber.App {
 			return slices.Contains(svc.Config.CORS.AllowedOrigins, origin)
 		},
 		AllowCredentials: true,
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "Idempotency-Key", "Last-Event-ID"},
 	}
 	app.Use(cors.New(corsConfig))
 

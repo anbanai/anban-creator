@@ -87,7 +87,7 @@ describe('ChatPage', () => {
   it('defaults the project creation route to 画像模式 and starts a session', async () => {
     renderChat('/projects/create')
 
-    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'create-project'))
+    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'create-project', undefined, expect.any(String)))
     expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
   })
 
@@ -104,13 +104,48 @@ describe('ChatPage', () => {
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
 
+  it('reuses the persisted create key when a page refresh interrupts session creation', async () => {
+    let resolveFirst: ((value: { id: string; agent_id: string; status: string }) => void) | undefined
+    interactiveMocks.createSession
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+      .mockResolvedValueOnce({ id: 'session-1', agent_id: agent.id, status: 'running' })
+
+    const first = renderChat('/projects/create')
+    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledTimes(1))
+    const firstKey = interactiveMocks.createSession.mock.calls[0]?.[3]
+    expect(typeof firstKey).toBe('string')
+    first.unmount()
+
+    renderChat('/projects/create')
+    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledTimes(2))
+    expect(interactiveMocks.createSession.mock.calls[1]?.[3]).toBe(firstKey)
+    resolveFirst?.({ id: 'session-1', agent_id: agent.id, status: 'running' })
+  })
+
   it('starts an existing project update session with its project context', async () => {
     interactiveMocks.createSession.mockResolvedValueOnce({ id: 'session-1', agent_id: agent.id, intent: 'update-project-profile', project_id: 'project-9', project_name: '茶品牌', status: 'running' })
     renderChat('/chat?agent=project-creator&intent=update-project-profile&project_id=project-9')
 
-    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'update-project-profile', 'project-9'))
+    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'update-project-profile', 'project-9', expect.any(String)))
     expect(await screen.findByText('更新现有项目画像')).toBeInTheDocument()
     expect(screen.getByText(/茶品牌/)).toBeInTheDocument()
+  })
+
+  it('allows only one user message request while the previous message is in flight', async () => {
+    let resolveMessage: (() => void) | undefined
+    interactiveMocks.message.mockImplementationOnce(() => new Promise((resolve) => { resolveMessage = resolve }))
+    renderChat()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toBeEnabled())
+
+    fireEvent.change(composer, { target: { value: '第一条消息' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+    fireEvent.change(composer, { target: { value: '第二条消息' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledTimes(1))
+    expect(interactiveMocks.message).toHaveBeenCalledWith('session-1', '第一条消息')
+    resolveMessage?.()
   })
 
   it('disables question controls optimistically and restores the card when answering fails', async () => {

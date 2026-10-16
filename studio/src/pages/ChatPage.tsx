@@ -70,7 +70,7 @@ function parseData(eventData: string): JsonRecord {
   }
 }
 
-type PersistedInteractiveSession = { sessionId: string; lastEventId?: string }
+type PersistedInteractiveSession = { sessionId?: string; lastEventId?: string; createIdempotencyKey?: string }
 
 function interactiveSessionStorageKey(agentId: string, intent: string, projectId?: string): string {
   return `anban:interactive-session:${agentId}:${intent}:${projectId ?? 'new'}`
@@ -81,8 +81,11 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
     const raw = sessionStorage.getItem(key)
     if (!raw) return null
     const value: unknown = JSON.parse(raw)
-    if (!isRecord(value) || typeof value.sessionId !== 'string' || !value.sessionId) return null
-    return { sessionId: value.sessionId, lastEventId: typeof value.lastEventId === 'string' ? value.lastEventId : undefined }
+    if (!isRecord(value)) return null
+    const sessionId = typeof value.sessionId === 'string' && value.sessionId ? value.sessionId : undefined
+    const createIdempotencyKey = typeof value.createIdempotencyKey === 'string' && value.createIdempotencyKey ? value.createIdempotencyKey : undefined
+    if (!sessionId && !createIdempotencyKey) return null
+    return { sessionId, lastEventId: typeof value.lastEventId === 'string' ? value.lastEventId : undefined, createIdempotencyKey }
   } catch {
     return null
   }
@@ -220,8 +223,10 @@ export default function ChatPage() {
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [restartNonce, setRestartNonce] = useState(0)
   const idempotencyKeyRef = useRef(crypto.randomUUID())
+  const createIdempotencyKeyRef = useRef(persistedSession?.createIdempotencyKey ?? crypto.randomUUID())
   const sessionRef = useRef<string | null>(persistedSession?.sessionId ?? null)
   const startPromiseRef = useRef<{ key: string; promise: Promise<void> } | null>(null)
+  const abandonedStartKeysRef = useRef(new Set<string>())
   const runGenerationRef = useRef(0)
   const streamAbortRef = useRef<AbortController | null>(null)
   const disposedRef = useRef(false)
@@ -229,6 +234,8 @@ export default function ChatPage() {
   const committedRef = useRef(false)
   const hasInputRef = useRef(false)
   const confirmationTokenRef = useRef<string | null>(null)
+  const sendingMessageRef = useRef(false)
+  const [sendingMessage, setSendingMessage] = useState(false)
 
   const agentsQuery = useQuery({
     queryKey: ['interactive-agents'],
@@ -247,6 +254,7 @@ export default function ChatPage() {
     runGenerationRef.current += 1
     streamAbortRef.current?.abort()
     const previousId = sessionRef.current
+    if (startPromiseRef.current) abandonedStartKeysRef.current.add(createIdempotencyKeyRef.current)
     if (previousId && !committedRef.current) void api.interactive.close(previousId).catch(() => undefined)
     clearPersistedInteractiveSession(sessionStorageKey)
     sessionRef.current = null
@@ -264,7 +272,10 @@ export default function ChatPage() {
     committedRef.current = false
     hasInputRef.current = false
     setCommitting(false)
+    sendingMessageRef.current = false
+    setSendingMessage(false)
     idempotencyKeyRef.current = crypto.randomUUID()
+    createIdempotencyKeyRef.current = crypto.randomUUID()
   }, [sessionStorageKey])
 
   const terminateConversation = useCallback((state: Extract<RunState, 'error' | 'expired' | 'closed'>, message: string) => {
@@ -377,16 +388,23 @@ export default function ChatPage() {
   const startSession = useCallback((agent: InteractiveAgent) => {
     const key = `${agent.id}:${intent}:${projectId ?? ''}:${restartNonce}`
     if (startPromiseRef.current?.key === key) return startPromiseRef.current.promise
+    const createRequestKey = createIdempotencyKeyRef.current
     const generation = ++runGenerationRef.current
     disposedRef.current = false
     setRunState('starting')
     setStreamError(null)
+    persistInteractiveSession(sessionStorageKey, { createIdempotencyKey: createRequestKey })
     const promise = (projectId
-      ? api.interactive.createSession(agent.id, intent, projectId)
-      : api.interactive.createSession(agent.id, intent)
+      ? api.interactive.createSession(agent.id, intent, projectId, createRequestKey)
+      : api.interactive.createSession(agent.id, intent, undefined, createRequestKey)
     ).then(async (session) => {
       if (disposedRef.current || generation !== runGenerationRef.current) {
-        await api.interactive.close(session.id).catch(() => undefined)
+        if (abandonedStartKeysRef.current.has(createRequestKey) || createIdempotencyKeyRef.current !== createRequestKey) {
+          abandonedStartKeysRef.current.delete(createRequestKey)
+          await api.interactive.close(session.id).catch(() => undefined)
+        } else {
+          persistInteractiveSession(sessionStorageKey, { sessionId: session.id })
+        }
         return
       }
       sessionRef.current = session.id
@@ -460,15 +478,22 @@ export default function ChatPage() {
 
   const sendMessage = async () => {
     const text = composer.trim()
-    if (!text || !sessionId || pendingQuestions.length > 0 || runState === 'starting' || committing) return
+    if (!text || !sessionId || pendingQuestions.length > 0 || runState === 'starting' || committing || sendingMessageRef.current) return
+    sendingMessageRef.current = true
+    setSendingMessage(true)
     setComposer('')
     hasInputRef.current = true
     confirmationTokenRef.current = null
     setDraft((value) => value ? { ...value, ready: false } : value)
     setCommitError(null)
-    await api.interactive.message(sessionId, text).catch((error) => {
+    try {
+      await api.interactive.message(sessionId, text)
+    } catch (error) {
       setStreamError(error instanceof Error ? error.message : '消息发送失败')
-    })
+    } finally {
+      sendingMessageRef.current = false
+      setSendingMessage(false)
+    }
   }
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer) => {
@@ -502,7 +527,7 @@ export default function ChatPage() {
     }
   }
 
-  const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && !committing && !committed
+  const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && !committing && !committed && !sendingMessage
   const emptyRegistry = !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
 
   return (

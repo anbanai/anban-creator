@@ -36,7 +36,7 @@ func (h *InteractiveHandler) Create(c fiber.Ctx) error {
 	if err := decodeInteractiveJSON(c.Body(), &req); err != nil {
 		return Error(c, 400, "invalid request body")
 	}
-	sess, err := h.svc.CreateSession(c.Context(), uid, req.AgentID, req.Intent, req.ProjectID)
+	sess, err := h.svc.CreateSessionWithIdempotency(c.Context(), uid, req.AgentID, req.Intent, c.Get("Idempotency-Key"), req.ProjectID)
 	if err != nil {
 		return interactiveError(c, err)
 	}
