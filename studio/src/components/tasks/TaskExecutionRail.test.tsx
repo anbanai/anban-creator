@@ -179,7 +179,10 @@ describe('TaskExecutionRail', () => {
 
     expect(screen.getByRole('button', { name: '质量复核，已完成' })).toHaveAttribute('aria-current', 'step')
     expect(screen.getByText('最终交付校验失败')).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: '继续执行' }))
+    const resume = screen.getByRole('button', { name: '继续执行' })
+    expect(resume).not.toHaveTextContent('继续执行')
+    expect(resume).toHaveClass('size-11')
+    fireEvent.click(resume)
     expect(onResume).toHaveBeenCalledOnce()
   })
 

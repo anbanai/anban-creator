@@ -410,11 +410,25 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const outcome = await screen.findByRole('alert', { name: '作品结果提醒' })
-    expect(outcome).toHaveTextContent('执行失败')
-    expect(outcome).toHaveTextContent('模型超时')
+    expect(screen.queryByRole('alert', { name: '作品结果提醒' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '完成创作，失败' })).toBeInTheDocument()
+    expect(screen.getByText('模型超时')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '继续执行' })).not.toHaveTextContent('继续执行')
     expect(screen.queryByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+  })
+
+  it('renders header actions as borderless icon-only controls', async () => {
+    mockTask(taskWith({ status: 'failed', error_message: '模型超时' }))
+
+    render(<TaskDetailPage />)
+
+    const clone = await screen.findByRole('button', { name: '克隆作品' })
+    const deleteButton = screen.getByRole('button', { name: '删除作品' })
+    expect(clone).not.toHaveTextContent('克隆作品')
+    expect(deleteButton).not.toHaveTextContent('删除作品')
+    expect(clone).toHaveClass('size-11')
+    expect(deleteButton).toHaveClass('size-11')
   })
 
   it('shows the active lifecycle stage without percentage or tool noise', async () => {
@@ -1189,7 +1203,8 @@ describe('TaskDetailPage', () => {
       url: '', is_deliverable: false, created_at: '2026-09-20T00:54:05Z',
     })))
     render(<TaskDetailPage />)
-    expect(await screen.findByRole('heading', { name: '产物上传失败' })).toBeInTheDocument()
+    expect(await screen.findByText('产物上传失败')).toBeInTheDocument()
+    expect(screen.queryByRole('alert', { name: '作品结果提醒' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '选题研究，进度未确认' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '选题研究，失败' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '选题研究，进行中' })).not.toBeInTheDocument()
@@ -1234,8 +1249,8 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const outcome = await screen.findByRole('alert', { name: '作品结果提醒' })
-    expect(outcome).toHaveTextContent('仍可查看 2 项产物')
+    expect(screen.queryByRole('alert', { name: '作品结果提醒' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '完成创作，失败' })).toBeInTheDocument()
     const generatedHeading = await screen.findByText('交付成果 (1)')
     const failedHeading = await screen.findByText('已保留产物 (1)')
     const generatedSection = generatedHeading.closest('section') as HTMLElement

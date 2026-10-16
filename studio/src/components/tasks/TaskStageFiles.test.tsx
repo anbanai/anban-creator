@@ -17,6 +17,7 @@ describe('TaskFileDownloads', () => {
 
     const downloadButton = screen.getByRole('button', { name: '下载产物' })
     expect(downloadButton).toHaveClass('size-11')
+    expect(downloadButton).toHaveClass('hover:bg-transparent')
     fireEvent.click(downloadButton)
 
     expect(await screen.findByRole('menuitem', { name: '下载交付成果' })).toBeInTheDocument()

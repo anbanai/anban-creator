@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, BarChart3, Ban, Loader2, MessageSquare, RefreshCw, Send, Trash2, XCircle } from 'lucide-react'
+import { ArrowLeft, BarChart3, Ban, FolderOpen, Loader2, MessageSquare, RefreshCw, Trash2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -31,7 +31,7 @@ import { GENERAL_AGENT_ATTACHMENT_POLICY } from '@/components/agent-prompt/attac
 import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachments'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { taskFailurePresentation, taskStatusLabel, platformDisplayName } from '@/lib/labels'
+import { taskStatusLabel, platformDisplayName } from '@/lib/labels'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
@@ -185,62 +185,6 @@ function appendPollingReplay(prev: string[], replay: string): string[] {
   }
 
   return [...prev, ...replayLines].slice(-MAX_SSE_LOGS)
-}
-
-function TaskOutcomeNotice({
-  task,
-  failure,
-  canResume,
-  deliveredCount,
-  retainedCount,
-  filesLoading,
-  filesError,
-  onResume,
-}: {
-  task: Task
-  failure: ReturnType<typeof taskFailurePresentation>
-  canResume: boolean
-  deliveredCount: number
-  retainedCount: number
-  filesLoading: boolean
-  filesError: boolean
-  onResume?: () => void
-}) {
-  if (task.status === 'failed') {
-    return (
-      <section role="alert" aria-label="作品结果提醒" className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 gap-2.5">
-          <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-destructive">{failure?.title || '执行失败'}</h2>
-            <p className="mt-1 break-words text-sm text-foreground/85">{failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。'}</p>
-            {failure?.recovery ? <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p> : null}
-            <p className="mt-1 text-xs text-muted-foreground" aria-live="polite">
-              {filesLoading ? '正在检查产物状态…'
-                : filesError ? '产物状态暂时无法获取'
-                  : deliveredCount + retainedCount > 0 ? `仍可查看 ${deliveredCount + retainedCount} 项产物`
-                    : '没有可查看的保留产物'}
-            </p>
-          </div>
-        </div>
-        {canResume && onResume ? <Button size="sm" className="min-h-11" onClick={onResume}><Send className="size-3.5" />继续执行</Button> : null}
-      </section>
-    )
-  }
-
-  if (task.status === 'cancelled') {
-    return (
-      <section aria-label="作品结果提醒" className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <XCircle className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <p className="text-sm text-foreground">执行已停止，可从已有上下文继续。</p>
-        </div>
-        {canResume && onResume ? <Button size="sm" className="min-h-11" onClick={onResume}><Send className="size-3.5" />继续执行</Button> : null}
-      </section>
-    )
-  }
-
-  return null
 }
 
 export default function TaskDetailPage() {
@@ -654,13 +598,17 @@ export default function TaskDetailPage() {
             </h1>
             <StatusPill status={task.status} label={taskStatusLabel[task.status] || task.status} />
             {project && (
-              <button
-                type="button"
-                onClick={() => setShowProjectDialog(true)}
-                className="inline-flex min-h-11 items-center rounded-md bg-card px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              >
-                <span className="max-w-[min(18rem,42vw)] truncate text-xs text-muted-foreground">{project.name}</span>
-              </button>
+              <span className="max-w-[min(18rem,42vw)] truncate text-xs text-muted-foreground">
+                {project.name}
+              </span>
+            )}
+            {project && (
+              <Tooltip>
+                <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent" aria-label={`查看项目：${project.name}`} onClick={() => setShowProjectDialog(true)} />}>
+                  <FolderOpen className="size-4" aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipContent>查看项目</TooltipContent>
+              </Tooltip>
             )}
           </div>
         </div>
@@ -672,7 +620,7 @@ export default function TaskDetailPage() {
                   <Link
                     to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
                     aria-label="查看内容分析"
-                    className={buttonVariants({ variant: 'outline', size: 'icon-md' })}
+                    className={buttonVariants({ variant: 'ghost', size: 'icon-md', className: 'hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent' })}
                   />
                 }
               >
@@ -689,6 +637,7 @@ export default function TaskDetailPage() {
                     type="button"
                     variant="ghost"
                     size="icon-md"
+                    className="hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent"
                     aria-label="人工评价"
                     aria-pressed={showFeedback}
                     onClick={() => setShowFeedback(true)}
@@ -705,8 +654,9 @@ export default function TaskDetailPage() {
               <TooltipTrigger
                 render={
                   <Button
-                    variant="destructive"
+                    variant="ghost"
                     size="icon-md"
+                    className="text-destructive hover:bg-transparent dark:hover:bg-transparent hover:text-destructive focus-visible:bg-transparent"
                     aria-label="取消作品"
                     loading={cancelMutation.isPending}
                     onClick={() => setShowCancelDialog(true)}
@@ -723,8 +673,9 @@ export default function TaskDetailPage() {
               <TooltipTrigger
                 render={
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-md"
+                    className="hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent"
                     aria-label={task.type === 'hypit' ? '再次改编' : '克隆作品'}
                     onClick={openCloneDialog}
                   />
@@ -740,9 +691,9 @@ export default function TaskDetailPage() {
               <TooltipTrigger
                 render={
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-md"
-                    className="text-destructive hover:bg-destructive/5 hover:text-destructive"
+                    className="text-destructive hover:bg-transparent dark:hover:bg-transparent hover:text-destructive focus-visible:bg-transparent"
                     aria-label="删除作品"
                     onClick={() => setShowDeleteDialog(true)}
                   />
@@ -756,19 +707,6 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
-      {!showTaskDetails && (
-        <TaskOutcomeNotice
-          task={task}
-          failure={taskFailurePresentation(task)}
-          canResume={canResume}
-          deliveredCount={deliverableFiles.length}
-          retainedCount={files?.filter((file) => file.state === 'retained').length ?? 0}
-          filesLoading={filesLoading}
-          filesError={filesError}
-          onResume={() => setShowResumeDialog(true)}
-        />
-      )}
-
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
           <TaskExecutionRail
@@ -781,7 +719,7 @@ export default function TaskDetailPage() {
             errorMessage={task.error_message}
             onOpenLogs={() => openTaskDetails('logs')}
             onResume={canResume ? () => setShowResumeDialog(true) : undefined}
-            showFailureSummary={false}
+            showFailureSummary
             files={files}
             taskType={task.type}
             filesLoading={filesLoading}

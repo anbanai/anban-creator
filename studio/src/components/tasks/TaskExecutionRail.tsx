@@ -136,7 +136,7 @@ export interface TaskExecutionRailProps {
   filesLoading?: boolean
   filesError?: boolean
   onRetryFiles?: () => void
-  /** The parent can render one consolidated terminal failure callout above the rail. */
+  /** Renders terminal failure details and recovery actions inside the stage rail. */
   showFailureSummary?: boolean
 }
 
@@ -180,7 +180,7 @@ export function TaskExecutionRail({
   const fileFallback = (
     <>
       {filesLoading && <p className="px-4 py-3 text-xs text-muted-foreground" role="status">正在加载产物…</p>}
-      {filesError && <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="alert">产物暂时加载失败<Button size="xs" variant="ghost" className="min-h-11" onClick={onRetryFiles}>重新加载</Button></div>}
+      {filesError && <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="alert">产物暂时加载失败<Tooltip><TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onRetryFiles} aria-label="重新加载" />}><RefreshCw className="size-4" aria-hidden="true" /></TooltipTrigger><TooltipContent>重新加载</TooltipContent></Tooltip></div>}
       {groupedFiles.unassigned.length > 0 && <section aria-label="其他产物" className="mx-4 mt-4 border-t border-border/60 py-4 sm:ml-14">
         <p className="mb-3 flex items-center gap-2 text-sm font-medium"><FolderOpen className="size-4 text-muted-foreground" />{stages.length ? '其他产物' : '创作产物'}</p>
         {stages.length > 0 && <p className="mb-3 text-xs text-muted-foreground">这些文件暂未关联到具体环节。</p>}
@@ -240,20 +240,11 @@ export function TaskExecutionRail({
     ? `${currentStage.title}，${lifecycleStatePresentation[currentStage.state].label}`
     : status === 'running' ? '正在制定执行计划' : ''
 
-  const infrastructureError = showFailureSummary && infrastructureFailure && failure && (
-    <div className="mx-4 mt-4 rounded-lg border border-destructive/20 bg-destructive/5 p-4" role="alert">
-      <h3 className="text-sm font-semibold text-destructive">{failure.title}</h3>
-      <p className="mt-1 text-sm">{failure.message}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p>
-      {onResume && <Button size="xs" variant="outline" className="mt-3 min-h-11" onClick={onResume}><Send className="size-3" />继续执行</Button>}
-    </div>
-  )
-
   if (stages.length === 0) {
     const emptyState = status === 'running'
       ? { title: '正在制定执行计划', description: 'Agent 声明阶段后会在这里持续更新', icon: CircleDashed, iconClassName: 'border-primary/30 bg-primary/10 text-primary' }
       : status === 'failed'
-        ? { title: failure?.title || '作品未完成', description: showFailureSummary ? failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。' : '失败详情已在上方显示。', icon: XCircle, iconClassName: 'border-destructive/30 bg-destructive/10 text-destructive' }
+        ? { title: failure?.title || '作品未完成', description: failure?.message || '服务端没有返回失败详情，可继续执行并补充说明。', icon: XCircle, iconClassName: 'border-destructive/30 bg-destructive/10 text-destructive' }
         : status === 'cancelled'
           ? { title: '执行已停止', description: '作品已取消，可从已有上下文继续。', icon: Ban, iconClassName: 'border-border bg-muted text-muted-foreground' }
           : status === 'completed'
@@ -263,26 +254,26 @@ export function TaskExecutionRail({
     return (
       <section className="rounded-xl border border-border/70 bg-card py-4" aria-labelledby="task-execution-heading">
         {heading}
-        {infrastructureError}
-        {(!infrastructureFailure || !showFailureSummary) && <div className="mx-4 mt-4 flex min-h-14 items-start gap-3 border-l border-border pl-5">
+        <div className="mx-4 mt-4 flex min-h-14 items-start gap-3 border-l border-border pl-5">
           <span className={cn('flex size-7 shrink-0 items-center justify-center rounded-full border', emptyState.iconClassName)}>
             <EmptyStateIcon className={cn('size-4', status === 'running' && 'animate-spin')} />
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-foreground">{emptyState.title}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {showFailureSummary || status !== 'failed' ? emptyState.description : '作品未完成，详情见上方结果提醒。'}
+              {emptyState.description}
             </p>
             {showFailureSummary && status === 'failed' && failure?.recovery && <p className="mt-1 text-xs text-muted-foreground">{failure.recovery}</p>}
             {showFailureSummary && (status === 'failed' || status === 'cancelled') && onResume && (
-              <Button size="xs" variant="outline" className="mt-3 min-h-11" onClick={onResume}>
-                <Send className="size-3" />
-                继续执行
-              </Button>
+              <Tooltip>
+                <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="mt-3 hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onResume} aria-label="继续执行" />}>
+                  <Send className="size-4" aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipContent>继续执行</TooltipContent>
+              </Tooltip>
             )}
           </div>
         </div>
-        }
         {fileFallback}
       </section>
     )
@@ -292,7 +283,6 @@ export function TaskExecutionRail({
     <section className="rounded-xl border border-border/70 bg-card py-4 sm:py-5" aria-labelledby="task-execution-heading">
       <div className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
       {heading}
-      {infrastructureError}
       <ol className="mx-4 mt-5 sm:mx-5" aria-label="执行阶段">
         {stages.map((stage, index) => {
           const unconfirmed = infrastructureFailure && stage.source === 'agent' && (stage.state === 'active' || stage.state === 'pending')
@@ -301,12 +291,14 @@ export function TaskExecutionRail({
             : lifecycleStatePresentation[stage.state]
           const Icon = presentation.icon
           const stageFiles = groupedFiles.byStage.get(stage.id) ?? []
-          const isExpanded = manualExpansion[stage.id] ?? (expandedStages.has(stage.id) || stageFiles.length > 0)
+          const isExpanded = manualExpansion[stage.id] ?? (expandedStages.has(stage.id) || stageFiles.length > 0 || (infrastructureFailure && stage.id === lastWorkStageId))
           const canExpand = stageFiles.length > 0 || (stage.state !== 'pending' && Boolean(
             stage.goal || stage.latest_update || stage.id === lastWorkStageId || stage.source === 'server',
           ))
           const isCurrent = index === currentIndex
+          const isInfrastructureRecoveryPoint = infrastructureFailure && stage.id === lastWorkStageId
           const isTerminalRecoveryPoint = !infrastructureFailure && isCurrent && stage.kind === 'work' && (status === 'failed' || status === 'cancelled')
+          const isRecoveryPoint = isTerminalRecoveryPoint || isInfrastructureRecoveryPoint
           const duplicatesFailure = isTerminalRecoveryPoint && status === 'failed' && failure && stage.latest_update?.trim().replace(/[。.!！]+$/, '') === failure.message.trim().replace(/[。.!！]+$/, '')
           const time = formatStageTime(stage.completed_at || stage.started_at)
           return (
@@ -351,18 +343,20 @@ export function TaskExecutionRail({
                       onRecoverDraft={() => recoverDraft.mutate()}
                     />
                   )}
-                  {showFailureSummary && isTerminalRecoveryPoint && onResume && (
-                    <Button size="xs" variant="secondary" className="min-h-11" onClick={onResume}>
-                      <Send className="size-3" />
-                      继续执行
-                    </Button>
+                  {showFailureSummary && isRecoveryPoint && onResume && (
+                    <Tooltip>
+                      <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onResume} aria-label="继续执行" />}>
+                        <Send className="size-4" aria-hidden="true" />
+                      </TooltipTrigger>
+                      <TooltipContent>继续执行</TooltipContent>
+                    </Tooltip>
                   )}
                 </div>
 
                 {isExpanded && (
                   <div id={`stage-${stage.id}-content`} className="mt-3 min-w-0 space-y-3 pb-1 text-sm">
                     {stage.latest_update && !duplicatesFailure && <p className="break-words text-xs leading-relaxed text-muted-foreground">{stage.latest_update}</p>}
-                    {showFailureSummary && isTerminalRecoveryPoint && status === 'failed' && <FailureSummary failure={failure} />}
+                    {showFailureSummary && isRecoveryPoint && status === 'failed' && <FailureSummary failure={failure} />}
                     {isTerminalRecoveryPoint && status === 'cancelled' && stage.state !== 'cancelled' && (
                       <p className="text-xs text-muted-foreground">执行已停止，可从已有上下文继续。</p>
                     )}
@@ -417,7 +411,7 @@ function RailHeading({ onOpenLogs, taskId, files, stages }: { onOpenLogs: () => 
       <div className="flex flex-wrap items-center gap-1.5">
         <TaskFileDownloads taskId={taskId} files={files} />
         <Tooltip>
-          <TooltipTrigger render={<Button size="icon-md" variant="ghost" onClick={onOpenLogs} aria-label="查看完整日志" />}>
+          <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onOpenLogs} aria-label="查看完整日志" />}>
             <ScrollText className="size-4" />
           </TooltipTrigger>
           <TooltipContent>查看完整日志</TooltipContent>
@@ -449,7 +443,7 @@ function PublicationStageActions({
   const retryAction = (label: string, onClick: () => void) => (
     <Tooltip>
       <TooltipTrigger
-        render={<Button size="icon-md" variant="ghost" loading={pending} onClick={onClick} aria-label={label} />}
+        render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" loading={pending} onClick={onClick} aria-label={label} />}
       >
         {pending ? null : <RefreshCw className="size-4" aria-hidden="true" />}
       </TooltipTrigger>
@@ -458,16 +452,12 @@ function PublicationStageActions({
   )
 
   const backendLink = (
-    <Button
-      size="xs"
-      className="min-h-11"
-      variant="outline"
-      nativeButton={false}
-      render={<a href="https://mp.weixin.qq.com/" target="_blank" rel="noreferrer" aria-label="打开公众号后台" />}
-    >
-      <ExternalLink className="size-3" />
-      公众号后台
-    </Button>
+    <Tooltip>
+      <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" nativeButton={false} render={<a href="https://mp.weixin.qq.com/" target="_blank" rel="noreferrer" aria-label="打开公众号后台" />} />}>
+        <ExternalLink className="size-4" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent>打开公众号后台</TooltipContent>
+    </Tooltip>
   )
 
   if (stage.kind === 'draft') {
@@ -478,10 +468,7 @@ function PublicationStageActions({
       return (
         <div className="flex shrink-0 flex-wrap gap-1.5">
           {backendLink}
-          <Button size="xs" variant="outline" className="min-h-11" loading={pending} onClick={onReconcile}>
-            {pending ? null : <RefreshCw className="size-3" aria-hidden="true" />}
-            检测状态
-          </Button>
+          {retryAction('检测状态', onReconcile)}
         </div>
       )
     }
@@ -498,9 +485,12 @@ function PublicationStageActions({
   if (stage.state === 'complete') {
     if (!publication?.article_url) return backendLink
     return (
-      <Button size="xs" variant="outline" className="min-h-11" nativeButton={false} render={<a href={publication.article_url} target="_blank" rel="noreferrer" />}>
-        <ExternalLink className="size-3" />打开文章
-      </Button>
+      <Tooltip>
+        <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" nativeButton={false} render={<a href={publication.article_url} target="_blank" rel="noreferrer" aria-label="打开文章" />} />}>
+          <ExternalLink className="size-4" aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipContent>打开文章</TooltipContent>
+      </Tooltip>
     )
   }
   if (stage.state === 'failed') return backendLink
@@ -508,18 +498,21 @@ function PublicationStageActions({
 
   const submitted = hasSubmissionEvidence(publication)
   if (stage.state === 'pending' && publication?.status === 'drafted' && !submitted) {
-      return <Button size="xs" className="min-h-11" loading={pending} onClick={onPublish}>{pending ? null : <Send className="size-3" aria-hidden="true" />}正式发布</Button>
+    return (
+      <Tooltip>
+        <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" loading={pending} onClick={onPublish} aria-label="正式发布" />}>
+          {pending ? null : <Send className="size-4" aria-hidden="true" />}
+        </TooltipTrigger>
+        <TooltipContent>正式发布</TooltipContent>
+      </Tooltip>
+    )
   }
   if (stage.state === 'blocked' && publication?.status === 'awaiting_manual_publish' && publication.draft_media_id) {
     return backendLink
   }
   if (stage.state === 'blocked' && publication?.status === 'unsupported' && publication.draft_media_id) {
     if (submitted) {
-      return (
-        <Button size="xs" variant="outline" className="min-h-11" loading={pending} onClick={onReconcile}>
-          {pending ? null : <RefreshCw className="size-3" aria-hidden="true" />}检测状态
-        </Button>
-      )
+      return retryAction('检测状态', onReconcile)
     }
     return retryAction('重试发布', onRetryPublish)
   }
