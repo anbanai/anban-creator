@@ -22,8 +22,8 @@ metadata:
     app: creator-server
 subjects:
   - kind: ServiceAccount
-    name: ${agent_service_account}
-    namespace: ${namespace}
+    name: "${agent_service_account}"
+    namespace: "${namespace}"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -33,7 +33,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: creator-project-memory
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: creator-server
     app.kubernetes.io/component: project-memory
@@ -51,31 +51,31 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: ${namespace}
-  name: ${micro_service_name}-${version_switch}
+  namespace: "${namespace}"
+  name: "${micro_service_name}-${version_switch}"
   labels:
-    app: ${micro_service_name}
-    version: ${version_switch}
+    app: "${micro_service_name}"
+    version: "${version_switch}"
 spec:
   # Interactive sessions are process-local; keep one control-plane replica.
   replicas: 1
   selector:
     matchLabels:
-      app: ${micro_service_name}
+      app: "${micro_service_name}"
   template:
     metadata:
       labels:
-        app: ${micro_service_name}
-        version: ${version_switch}
+        app: "${micro_service_name}"
+        version: "${version_switch}"
     spec:
-      serviceAccountName: ${agent_service_account}
+      serviceAccountName: "${agent_service_account}"
       # The Server uses client-go in-cluster auth to create and reconcile
       # Claude Jobs and interactive DSH Jobs. Keep the projected token
       # explicit so an ACK admission/defaulting policy cannot disable it.
       automountServiceAccountToken: true
       initContainers:
         - name: project-memory-init
-          image: ${image_repo}
+          image: "${image_repo}"
           imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
@@ -98,14 +98,14 @@ spec:
               name: project-memory
       containers:
         - env:
-            - name: aliyun_logs_log-${micro_service_name}-${version_switch}_logstore
-              value: ${log_store}
-            - name: aliyun_logs_log-${micro_service_name}-${version_switch}
+            - name: "aliyun_logs_log-${micro_service_name}-${version_switch}_logstore"
+              value: "${log_store}"
+            - name: "aliyun_logs_log-${micro_service_name}-${version_switch}"
               value: stdout
-            - name: aliyun_logs_${micro_service_name}-${version_switch}_tags
-              value: applog=${micro_service_name}-${version_switch}
+            - name: "aliyun_logs_${micro_service_name}-${version_switch}_tags"
+              value: "applog=${micro_service_name}-${version_switch}"
             - name: version_switch
-              value: ${version_switch}
+              value: "${version_switch}"
             - name: TZ
               value: Asia/Shanghai
             - name: ANBAN_SEEDNOTE_BASE_URL
@@ -119,7 +119,7 @@ spec:
             - name: ANBAN_AGENT_EXECUTOR
               value: kubernetes
             - name: ANBAN_CLAUDE_AGENT_SERVER_URL
-              value: https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443
+              value: "https://${micro_service_name}-svc.${namespace}.svc.cluster.local:8443"
             - name: ANBAN_SERVER_TLS_CERT_FILE
               value: /var/run/secrets/anban-server-tls/tls.crt
             - name: ANBAN_SERVER_TLS_KEY_FILE
@@ -129,31 +129,31 @@ spec:
             - name: NODE_EXTRA_CA_CERTS
               value: /var/run/secrets/anban-internal-ca/ca.crt
             - name: ANBAN_AGENT_NAMESPACE
-              value: ${namespace}
+              value: "${namespace}"
             - name: ANBAN_AGENT_IMAGE_WECHAT_ARTICLE
-              value: ${wechat_article_agent_image_repo}
+              value: "${wechat_article_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_WECHAT_PICTURE
-              value: ${wechat_picture_agent_image_repo}
+              value: "${wechat_picture_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_SEEDNOTE
-              value: ${seednote_agent_image_repo}
+              value: "${seednote_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_MONTAGE
-              value: ${montage_agent_image_repo}
+              value: "${montage_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_MOMENTS
-              value: ${moments_agent_image_repo}
+              value: "${moments_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_ECOMMERCE
-              value: ${ecommerce_agent_image_repo}
+              value: "${ecommerce_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS
-              value: ${profile_analysis_agent_image_repo}
+              value: "${profile_analysis_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS
-              value: ${feedback_analysis_agent_image_repo}
+              value: "${feedback_analysis_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION
-              value: ${whiteboard_animation_agent_image_repo}
+              value: "${whiteboard_animation_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_HYPIT
-              value: ${hypit_agent_image_repo}
+              value: "${hypit_agent_image_repo}"
             - name: ANBAN_DSH_IMAGE
-              value: ${dsh_image_repo}
+              value: "${dsh_image_repo}"
             - name: ANBAN_AGENT_SERVICE_ACCOUNT
-              value: ${agent_service_account}
+              value: "${agent_service_account}"
             - name: ANBAN_AGENT_SERVER_CA_SECRET
               value: anban-internal-ca
             - name: ANBAN_AGENT_NAS_STORAGE_CLASS
@@ -197,32 +197,32 @@ spec:
                   name: anban-billing-admin-api-key
                   key: api-key
             - name: ANBAN_AGENT_IMAGE_PULL_SECRET
-              value: ${imagePullSecret}
+              value: "${imagePullSecret}"
           # Optional so existing installations can deploy with onboarding disabled.
           # The mounted config.yaml must also contain the onboarding section.
           envFrom:
             - secretRef:
                 name: anban-onboarding-providers
                 optional: true
-          name: ${micro_service_name}-${version_switch}
-          image: ${image_repo}
+          name: "${micro_service_name}-${version_switch}"
+          image: "${image_repo}"
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
           resources:
             requests:
-              cpu: ${requests_cpu}
-              memory: ${requests_memory}
+              cpu: "${requests_cpu}"
+              memory: "${requests_memory}"
               ephemeral-storage: 2Gi
             limits:
-              cpu: ${limits_cpu}
-              memory: ${limits_memory}
+              cpu: "${limits_cpu}"
+              memory: "${limits_memory}"
               ephemeral-storage: 2Gi
           volumeMounts:
             - mountPath: /app/data/project-memory
               name: project-memory
             - mountPath: /app/conf/config.yaml
-              name: ${micro_service_name}-config
+              name: "${micro_service_name}-config"
               subPath: config.yaml
               readOnly: true
             - mountPath: /var/run/secrets/anban-server-tls
@@ -232,7 +232,7 @@ spec:
               name: anban-internal-ca
               readOnly: true
       imagePullSecrets:
-        - name: ${imagePullSecret}
+        - name: "${imagePullSecret}"
       volumes:
         - name: project-memory
           persistentVolumeClaim:
@@ -251,25 +251,25 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
-        - name: ${micro_service_name}-config
+        - name: "${micro_service_name}-config"
           configMap:
             defaultMode: 420
-            name: ${configmap_name}
+            name: "${configmap_name}"
             items:
-              - key: ${micro_service_name}.yaml
+              - key: "${micro_service_name}.yaml"
                 path: config.yaml
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${micro_service_name}-svc
-  namespace: ${namespace}
+  name: "${micro_service_name}-svc"
+  namespace: "${namespace}"
   labels:
-    app: ${micro_service_name}-svc
+    app: "${micro_service_name}-svc"
 spec:
   selector:
-    app: ${micro_service_name}
-    version: ${version_switch}
+    app: "${micro_service_name}"
+    version: "${version_switch}"
   sessionAffinity: ClientIP
   ports:
     - name: https-8443
@@ -281,15 +281,15 @@ spec:
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: ${micro_service_name}-${version_switch}-hpa
-  namespace: ${namespace}
+  name: "${micro_service_name}-${version_switch}-hpa"
+  namespace: "${namespace}"
   labels:
-    app: ${micro_service_name}-${version_switch}-hpa
+    app: "${micro_service_name}-${version_switch}-hpa"
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: ${micro_service_name}-${version_switch}
+    name: "${micro_service_name}-${version_switch}"
   minReplicas: 1
   maxReplicas: 1
   metrics:
@@ -303,8 +303,8 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ${agent_service_account}
-  namespace: ${namespace}
+  name: "${agent_service_account}"
+  namespace: "${namespace}"
   labels:
     app: creator-agent
 automountServiceAccountToken: true
@@ -313,11 +313,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: creator-agent-runner
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: creator-agent
   annotations:
-    anban.ai/serviceAccount: ${agent_service_account}
+    anban.ai/serviceAccount: "${agent_service_account}"
 rules:
   - apiGroups: ["batch"]
     resources:
@@ -369,13 +369,13 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: creator-agent-runner
-  namespace: ${namespace}
+  namespace: "${namespace}"
   labels:
     app: creator-agent
 subjects:
   - kind: ServiceAccount
-    name: ${agent_service_account}
-    namespace: ${namespace}
+    name: "${agent_service_account}"
+    namespace: "${namespace}"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

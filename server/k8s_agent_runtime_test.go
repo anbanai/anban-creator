@@ -484,6 +484,12 @@ func TestACKRenderIncludesTokenReviewRBAC(t *testing.T) {
 	if strings.Contains(string(raw), "${") {
 		t.Fatal("combined ACK release contains unresolved template variables")
 	}
+	for index, document := range docs {
+		var parsed map[string]any
+		if err := yaml.Unmarshal([]byte(document), &parsed); err != nil {
+			t.Fatalf("combined ACK release document %d is not valid YAML: %v", index+1, err)
+		}
+	}
 }
 
 func TestACKRenderRejectsStaleCatalogManifest(t *testing.T) {
@@ -521,7 +527,9 @@ func ackRenderEnv(manifestPath string) []string {
 		"dsh_image_repo=registry.example.com/runtime-dsh@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		"micro_service_name=creator-api",
 		"version_switch=base",
-		"log_store=creator",
+		// A colon is legal in a log-store value and must not turn the rendered
+		// `value:` scalar into a YAML mapping.
+		"log_store=creator:prod",
 		"requests_cpu=500m",
 		"requests_memory=1Gi",
 		"limits_cpu=2",
