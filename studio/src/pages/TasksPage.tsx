@@ -6,11 +6,12 @@ import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban,
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
-import type { AgentExecutionProfileID, TaskStatus, Project, TaskType } from '@/types'
+import type { AgentExecutionProfileID, Task, TaskStatus, Project, TaskType } from '@/types'
 import { ProjectSelector } from '@/components/ProjectSelector'
 import { AgentIconStack, agentDisplayName } from '@/components/agent-prompt/AgentIconStack'
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
@@ -51,9 +52,25 @@ function taskAgentId(task: { agent_id?: string; type: TaskType; project_snapshot
   return task.agent_id || task.project_snapshot?.agent_id || task.project_snapshot?.channel || task.type
 }
 
-function TaskStatusMark({ status }: { status: TaskStatus }) {
+function TaskStatusMark({ status, className = 'size-4' }: { status: TaskStatus; className?: string }) {
   const Icon = status === 'completed' ? CheckCircle2 : status === 'failed' ? XCircle : status === 'cancelled' ? BanIcon : status === 'running' ? LoaderCircle : CircleDashed
-  return <Icon aria-hidden="true" className={`size-4 shrink-0 ${status === 'completed' ? 'text-emerald-600' : status === 'failed' ? 'text-destructive' : status === 'running' ? 'animate-spin text-primary motion-reduce:animate-none' : 'text-muted-foreground'}`} />
+  return <Icon aria-hidden="true" className={`${className} shrink-0 ${status === 'completed' ? 'text-emerald-600' : status === 'failed' ? 'text-destructive' : status === 'running' ? 'animate-spin text-primary motion-reduce:animate-none' : 'text-muted-foreground'}`} />
+}
+
+function taskStatusPanelClass(status: TaskStatus) {
+  if (status === 'completed') return 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-900/60 dark:bg-emerald-950/30'
+  if (status === 'failed') return 'border-destructive/20 bg-destructive/5'
+  if (status === 'running') return 'border-primary/20 bg-primary/5'
+  return 'border-border bg-muted/30'
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export default function TasksPage() {
@@ -71,6 +88,8 @@ export default function TasksPage() {
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [createDialogIntent, setCreateDialogIntent] = useState<{ projectId?: string; type?: TaskType }>({})
+  const [retrySourceTask, setRetrySourceTask] = useState<Task | null>(null)
+  const [downloadingTaskIds, setDownloadingTaskIds] = useState<Set<string>>(() => new Set())
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const [bulkAction, setBulkAction] = useState<'cancel' | 'clone' | 'delete' | null>(null)
   const [bulkExecutionProfile, setBulkExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
@@ -215,15 +234,30 @@ export default function TasksPage() {
   const bulkDownloadMutation = useMutation({
     mutationFn: (taskIds: string[]) => api.tasks.downloadBulkZipBlob(taskIds),
     onSuccess: (blob) => {
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `tasks_export_${new Date().toISOString().slice(0, 10)}.zip`
-      a.click()
-      URL.revokeObjectURL(url)
+      triggerBlobDownload(blob, `tasks_export_${new Date().toISOString().slice(0, 10)}.zip`)
       toast.success('批量下载已开始')
     },
     onError: () => toast.error('批量下载失败，请稍后重试'),
+  })
+
+  const downloadTaskMutation = useMutation({
+    mutationFn: (task: Task) => api.tasks.downloadZipBlob(task.id),
+    onMutate: (task) => {
+      setDownloadingTaskIds((current) => new Set(current).add(task.id))
+    },
+    onSuccess: (blob, task) => {
+      triggerBlobDownload(blob, `${(task.title || task.id).replace(/[^\w\-\u4e00-\u9fff]+/g, '_')}.zip`)
+      toast.success('作品下载已开始')
+    },
+    onError: () => toast.error('作品下载失败，请稍后重试'),
+    onSettled: (_data, _error, task) => {
+      if (!task) return
+      setDownloadingTaskIds((current) => {
+        const next = new Set(current)
+        next.delete(task.id)
+        return next
+      })
+    },
   })
 
   // Bulk cancel / clone / delete — best-effort; the server returns a per-task
@@ -385,10 +419,6 @@ export default function TasksPage() {
 
       {!isLoading && !isError && (
         <section aria-label="作品状态概览" className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border/70 px-3 py-2.5">
-            <h2 className="text-sm font-semibold text-foreground">作品状态</h2>
-            <p className="text-xs text-muted-foreground">状态数量按当前已加载作品统计</p>
-          </div>
           <div className="grid grid-cols-2 divide-x divide-y divide-border/70 sm:grid-cols-5 sm:divide-y-0">
             {statusTabs.filter((tab) => tab.value !== 'all').map((tab) => (
               <button
@@ -421,7 +451,7 @@ export default function TasksPage() {
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <div className="min-w-0">
               <p className="font-medium text-foreground">需要处理 · {queueStats.failed} 个失败作品</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">进入详情查看失败原因，并继续执行或克隆作品。</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">进入详情查看失败原因，或直接重试并保留原作品。</p>
             </div>
           </div>
           <Link
@@ -616,7 +646,7 @@ export default function TasksPage() {
             return (
               <div key={task.id} className="border-b border-border last:border-b-0">
                 <div className={`border-l-2 p-3.5 sm:p-4 ${borderColor} ${hoverBorderColor} transition-colors hover:bg-muted/35`}>
-                  <div className="flex items-start gap-3">
+                  <div className="flex flex-wrap items-stretch gap-3">
                     <button
                       type="button"
                       aria-label={selected ? '取消选择作品' : '选择作品'}
@@ -632,10 +662,10 @@ export default function TasksPage() {
                     >
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
-                    <Link to={`/tasks/${task.id}`} className="flex min-w-0 flex-1 items-start gap-3 rounded-md">
-                      <div className="flex shrink-0 items-center gap-2 pt-0.5" title={agentDisplayName(taskAgentId(task))}>
-                        <AgentIconStack agentIds={[taskAgentId(task)]} compact />
-                      </div>
+                    <div data-testid="task-type-icon" className="flex size-12 shrink-0 self-center items-center justify-center" title={agentDisplayName(taskAgentId(task))}>
+                      <AgentIconStack agentIds={[taskAgentId(task)]} className="scale-125" />
+                    </div>
+                    <Link to={`/tasks/${task.id}`} className="flex min-w-0 flex-1 items-center rounded-md">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type)}</h3>
@@ -649,19 +679,70 @@ export default function TasksPage() {
                         </div>
                       </div>
                     </Link>
-                    <div className="flex min-h-20 w-11 shrink-0 flex-col items-center justify-between self-stretch">
+                    <div
+                      data-testid="task-status-mark"
+                      role="img"
+                      aria-label={`任务状态：${taskStatusLabel[task.status] || task.status}`}
+                      className={`flex min-h-20 w-14 shrink-0 self-stretch items-center justify-center rounded-md border ${taskStatusPanelClass(task.status)}`}
+                      title={taskStatusLabel[task.status] || task.status}
+                    >
+                      <TaskStatusMark status={task.status} className="size-6" />
+                      <span className="sr-only">{taskStatusLabel[task.status] || task.status}</span>
+                    </div>
+                    <div data-testid="task-action-rail" role="group" aria-label="作品操作" className="flex basis-full shrink-0 items-center justify-end gap-1 border-t border-border/70 pt-2 sm:basis-auto sm:self-center sm:justify-normal sm:border-l sm:border-t-0 sm:pl-2 sm:pt-0">
+                      {task.status === 'failed' ? (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon-md"
+                                aria-label={`重试作品：${task.title || '未命名作品'}`}
+                                onClick={() => setRetrySourceTask(task)}
+                              />
+                            }
+                          >
+                            <RotateCcw className="size-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>重试作品</TooltipContent>
+                        </Tooltip>
+                      ) : null}
                       {task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? (
-                        <Link
-                          to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
-                          aria-label="查看内容分析"
-                          title="查看内容分析"
-                          className="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                        ><BarChart3 className="size-4" /></Link>
-                      ) : <span aria-hidden="true" className="size-11" />}
-                      <div data-testid="task-status-mark" className="flex size-11 items-center justify-center" title={taskStatusLabel[task.status] || task.status}>
-                        <TaskStatusMark status={task.status} />
-                        <span className="sr-only">{taskStatusLabel[task.status] || task.status}</span>
-                      </div>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Link
+                                to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
+                                aria-label={`查看内容分析：${task.title || '未命名作品'}`}
+                                className="inline-flex size-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                              />
+                            }
+                          >
+                            <BarChart3 className="size-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>查看内容分析</TooltipContent>
+                        </Tooltip>
+                      ) : null}
+                      {task.status === 'completed' ? (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-md"
+                                aria-label={`下载作品：${task.title || '未命名作品'}`}
+                                loading={downloadingTaskIds.has(task.id)}
+                                onClick={() => downloadTaskMutation.mutate(task)}
+                              />
+                            }
+                          >
+                            <Download className="size-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>下载作品文件</TooltipContent>
+                        </Tooltip>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -696,6 +777,18 @@ export default function TasksPage() {
         onOpenChange={setModalOpen}
         onCreated={(task) => navigate(`/tasks/${task.id}`)}
       />
+
+      {retrySourceTask ? (
+        <TaskFormDialog
+          open
+          mode="clone"
+          sourceTask={retrySourceTask}
+          onOpenChange={(open) => {
+            if (!open) setRetrySourceTask(null)
+          }}
+          onCreated={(task) => navigate(`/tasks/${task.id}`)}
+        />
+      ) : null}
 
       {/* 批量操作二次确认：文案/按钮随 bulkAction 变化。取消与删除不可逆 → destructive。 */}
       <AlertDialog

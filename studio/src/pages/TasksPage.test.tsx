@@ -101,10 +101,12 @@ vi.mock('@/lib/api', async () => {
         list: vi.fn().mockResolvedValue({ items: [fixtures.failedTask], total: 1 }),
         listBefore: vi.fn().mockResolvedValue({ items: [fixtures.failedTask], total: 1 }),
         create: vi.fn(),
+        clone: vi.fn(),
         bulkCancel: vi.fn(),
         bulkClone: vi.fn(),
         bulkDelete: vi.fn(),
         downloadBulkZipBlob: vi.fn(),
+        downloadZipBlob: vi.fn(),
       },
       projects: {
         ...actual.api.projects,
@@ -411,17 +413,64 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    const analyticsLink = await screen.findByRole('link', { name: '查看内容分析' })
-    expect(analyticsLink).toHaveClass('size-11')
+    const analyticsLink = await screen.findByRole('link', { name: '查看内容分析：已完成文章' })
+    expect(analyticsLink).toHaveClass('size-10')
     expect(analyticsLink).toHaveAttribute(
       'href',
       '/content-analytics?account=project-1&content=task%3Aapproval-task&platform=wechat&agent=wechat-article',
     )
-    expect(screen.getAllByRole('link', { name: '查看内容分析' })).toHaveLength(1)
+    expect(screen.getAllByRole('link', { name: '查看内容分析：已完成文章' })).toHaveLength(1)
     expect(screen.getByText('已完成文章')).toBeInTheDocument()
     expect(screen.getByText('失败文章')).toBeInTheDocument()
     expect(screen.getAllByTestId('task-status-mark')).toHaveLength(2)
-    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('size-11')
+    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('min-h-20', 'self-stretch')
+  })
+
+  it('opens the existing clone form when retrying a failed task from the row', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({ items: [fixtures.failedTask as Task], total: 1 })
+
+    renderTasksPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '重试作品：失败文章' }))
+
+    expect(await screen.findByRole('dialog', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByText('失败文章')).toBeInTheDocument()
+  })
+
+  it('downloads the completed task package from the row action rail', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({ items: [fixtures.completedTask as Task], total: 1 })
+    vi.mocked(api.tasks.downloadZipBlob).mockResolvedValue(new Blob(['zip'], { type: 'application/zip' }))
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:task-download')
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
+    renderTasksPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: '下载作品：已完成文章' }))
+
+    await waitFor(() => expect(api.tasks.downloadZipBlob).toHaveBeenCalledWith('approval-task'))
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:task-download')
+    expect(anchorClick).toHaveBeenCalled()
+    createObjectURL.mockRestore()
+    revokeObjectURL.mockRestore()
+    anchorClick.mockRestore()
+  })
+
+  it('keeps task type, status, and actions in distinct centered rails', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [fixtures.failedTask as Task, fixtures.completedTask as Task],
+      total: 2,
+    })
+
+    renderTasksPage()
+
+    expect(await screen.findAllByTestId('task-type-icon')).toHaveLength(2)
+    expect(screen.getAllByTestId('task-type-icon').every((node) => node.className.includes('self-center'))).toBe(true)
+    expect(screen.getAllByTestId('task-status-mark')).toHaveLength(2)
+    expect(screen.getAllByTestId('task-status-mark').every((node) => node.className.includes('self-stretch'))).toBe(true)
+    expect(screen.getAllByTestId('task-action-rail')).toHaveLength(2)
+    expect(screen.getAllByTestId('task-action-rail').every((node) => node.className.includes('border-l'))).toBe(true)
   })
 
   it('shows the task total including image operation charges', async () => {
