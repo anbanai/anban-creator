@@ -387,12 +387,14 @@ export default function ChatPage() {
         lastEventId: persisted?.sessionId === id ? persisted.lastEventId : undefined,
         onEvent: (received) => {
           const previous = readPersistedInteractiveSession(sessionStorageKey)
+          const receivedData = parseData(received.data)
+          const idleStatus = received.event === 'session.status' && receivedData.status === 'idle'
           const turnActive = received.event === 'turn.start'
             ? true
-            : received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || (received.event === 'session.status' && parseData(received.data).status === 'idle')
+            : received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || idleStatus
               ? false
               : previous?.turnActive === true
-          if (received.id || received.event === 'turn.start' || received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed') {
+          if (received.id || received.event === 'turn.start' || received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || idleStatus) {
             persistInteractiveSession(sessionStorageKey, {
               sessionId: id,
               lastEventId: received.id ?? previous?.lastEventId,

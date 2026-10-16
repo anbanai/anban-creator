@@ -187,6 +187,21 @@ describe('ChatPage', () => {
     await waitFor(() => expect(composer).toBeDisabled())
   })
 
+  it('persists an idle status as the terminal turn state even without an event id', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '7', turnActive: true }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal: AbortSignal | undefined, options: { onEvent?: (event: InteractiveStreamEvent) => void }) => (async function* () {
+      const event = { event: 'session.status', data: JSON.stringify({ status: 'idle' }) }
+      options.onEvent?.(event)
+      yield event
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+    renderChat()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').turnActive).toBe(false))
+    expect(composer).toBeEnabled()
+  })
+
   it('disables question controls optimistically and restores the card when answering fails', async () => {
     let rejectAnswer: ((error: Error) => void) | undefined
     interactiveMocks.answer.mockImplementationOnce(() => new Promise((_, reject) => {
