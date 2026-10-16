@@ -16,7 +16,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import { taskStatusLabel, contentTypeDisplayName, formatDateTimeCN } from '@/lib/labels'
-import { platformBorderColor, platformHoverBorderColor } from '@/lib/PlatformIcon'
 import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
 import { taskStageSummary } from '@/lib/task-lifecycle'
@@ -376,12 +375,6 @@ export default function TasksPage() {
     active: tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
     failed: tasks.filter((t) => t.status === 'failed').length,
   }), [tasks])
-  const statusCounts = useMemo(() => statusTabs.reduce<Record<string, number>>((counts, tab) => {
-    counts[tab.value] = tab.value === 'all'
-      ? totalTasks
-      : tasks.filter((task) => task.status === tab.value).length
-    return counts
-  }, {}), [tasks, totalTasks])
   const loadedRangeLabel = totalTasks === 0
     ? '当前筛选共 0 个'
     : `当前筛选共 ${totalTasks} 个 · 已加载 1–${Math.min(tasks.length, totalTasks)} / ${totalTasks} 个`
@@ -417,57 +410,29 @@ export default function TasksPage() {
         </div>
       ) : null}
 
-      {!isLoading && !isError && (
-        <section aria-label="作品状态概览" className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="grid grid-cols-2 divide-x divide-y divide-border/70 sm:grid-cols-5 sm:divide-y-0">
-            {statusTabs.filter((tab) => tab.value !== 'all').map((tab) => (
-              <button
-                key={tab.value}
-                type="button"
-                className="flex min-h-11 min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
-                aria-label={`筛选${tab.label}作品`}
-                onClick={() => {
-                  setStatusFilter(tab.value)
-                  setSearchParams((current) => {
-                    const next = new URLSearchParams(current)
-                    next.set('status', tab.value)
-                    return next
-                  }, { replace: true })
-                }}
-              >
-                <span className="truncate text-xs text-muted-foreground">
-                  {tab.label}{' '}
-                  <strong className="text-sm tabular-nums text-foreground">{statusCounts[tab.value] ?? 0}</strong>
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
       {queueStats.failed > 0 && (
-        <div role="alert" aria-label="失败作品提醒" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm">
-          <div className="flex min-w-0 items-start gap-2.5">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+        <div role="alert" aria-label="失败作品提醒" className="flex flex-wrap items-center justify-between gap-3 border-y border-destructive/20 bg-destructive/[0.035] px-3 py-2.5 text-sm sm:px-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <AlertTriangle className="size-4 shrink-0 text-destructive" />
             <div className="min-w-0">
-              <p className="font-medium text-foreground">需要处理 · {queueStats.failed} 个失败作品</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">进入详情查看失败原因，或直接重试并保留原作品。</p>
+              <p className="font-medium text-foreground">{queueStats.failed} 个作品需要处理</p>
+              <p className="hidden text-xs text-muted-foreground sm:block">查看失败原因，或重试并保留原作品。</p>
             </div>
           </div>
           <Link
             to={`/tasks?${failedTaskParams}`}
             aria-label={`查看失败作品，${queueStats.failed} 个失败作品`}
-            className="shrink-0 text-sm font-medium text-destructive hover:underline"
+            className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
-            查看失败作品
+            查看失败作品 <span aria-hidden="true">→</span>
           </Link>
         </div>
       )}
 
       {/* Filters apply to the task queue; text search covers tasks loaded so far. */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3">
         {/* Status filter tabs */}
-        <div className="flex max-w-full flex-wrap gap-1 rounded-lg bg-muted p-1" role="group" aria-label="作品状态">
+        <div className="flex max-w-full flex-wrap gap-1 rounded-lg bg-muted/70 p-1" role="group" aria-label="作品状态">
           {statusTabs.map((tab) => (
             <button
               key={tab.value}
@@ -482,9 +447,9 @@ export default function TasksPage() {
                   return next
                 }, { replace: true })
               }}
-                className={`min-h-11 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                className={`min-h-10 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 statusFilter === tab.value
-                  ? 'bg-card text-foreground shadow-sm'
+                  ? 'bg-card text-foreground shadow-sm ring-1 ring-border/70'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
               }`}
             >
@@ -569,7 +534,7 @@ export default function TasksPage() {
         />
       ) : (
         <>
-        <div className="space-y-3">
+          <div className="space-y-2">
           {selectedTaskIds.length > 0 && (
             <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-lg border border-primary/30 bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -633,20 +598,18 @@ export default function TasksPage() {
               </div>
             </div>
           )}
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="overflow-hidden border-y border-border bg-card">
             {filteredTasks.map((task) => {
             const project = projectMap[task.project_id]
-            const borderColor = platformBorderColor[task.type] || ''
-            const hoverBorderColor = platformHoverBorderColor[task.type] || ''
             const selected = selectedTaskIdSet.has(task.id)
             const actionSignal = taskActionSignal(task)
             const stage = taskStageSummary(task)
             const activityAt = taskActivityTimestamp(task)
 
             return (
-              <div key={task.id} className="border-b border-border last:border-b-0">
-                <div className={`border-l-2 p-3.5 sm:p-4 ${borderColor} ${hoverBorderColor} transition-colors hover:bg-muted/35`}>
-                  <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
+              <div key={task.id} className="border-b border-border/80 last:border-b-0">
+                <div className={`px-2 py-3 transition-colors hover:bg-muted/30 sm:px-3 ${selected ? 'bg-primary/[0.045]' : ''}`}>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-2.5 sm:flex-nowrap sm:gap-x-3">
                     <button
                       type="button"
                       aria-label={selected ? '取消选择作品' : '选择作品'}
@@ -662,20 +625,23 @@ export default function TasksPage() {
                     >
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
-                    <div data-testid="task-type-icon" className="flex size-10 shrink-0 self-center items-center justify-center" title={agentDisplayName(taskAgentId(task))}>
-                      <AgentIconStack agentIds={[taskAgentId(task)]} className="scale-125" />
+                    <div data-testid="task-type-icon" className="flex size-9 shrink-0 self-center items-center justify-center" title={agentDisplayName(taskAgentId(task))}>
+                      <AgentIconStack agentIds={[taskAgentId(task)]} className="scale-110" />
                     </div>
                     <Link to={`/tasks/${task.id}`} className="flex min-w-0 flex-1 items-center rounded-md">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <h3 className="line-clamp-2 text-sm font-medium leading-6 text-foreground sm:line-clamp-1">{task.title || task.prompt || contentTypeDisplayName(task.type)}</h3>
                         </div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                           {project ? <span className="max-w-[min(16rem,42vw)] truncate text-muted-foreground">{project.name}</span> : <span>未设置创作项目</span>}
+                          <span aria-hidden="true" className="text-border">·</span>
                           <span className={actionSignal.tone === 'risk' ? 'font-medium text-destructive' : 'font-medium text-foreground'}>{stage.title}</span>
                           {actionSignal.tone === 'risk' && <span>{actionSignal.hint}</span>}
-                          <span aria-label={`最近活动：${formatDateTimeCN(activityAt)}`}>最近活动：{formatDateTimeCN(activityAt)}</span>
-                          <span className="font-medium text-foreground">累计扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分</span>
+                          <span className="hidden text-border sm:inline" aria-hidden="true">·</span>
+                          <span aria-label={`最近活动：${formatDateTimeCN(activityAt)}`}>{formatDateTimeCN(activityAt)}</span>
+                          <span className="hidden text-border sm:inline" aria-hidden="true">·</span>
+                          <span className="font-medium text-muted-foreground">扣费：{(task.billing_total_credits ?? task.billing_price_credits).toLocaleString()} 积分</span>
                         </div>
                       </div>
                     </Link>
@@ -683,27 +649,29 @@ export default function TasksPage() {
                       data-testid="task-status-mark"
                       role="img"
                       aria-label={`任务状态：${taskStatusLabel[task.status] || task.status}`}
-                      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium ${taskStatusPanelClass(task.status)}`}
+                      className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${taskStatusPanelClass(task.status)}`}
                       title={taskStatusLabel[task.status] || task.status}
                     >
                       <TaskStatusMark status={task.status} className="size-4" />
                       <span>{taskStatusLabel[task.status] || task.status}</span>
                     </div>
-                    <div data-testid="task-action-rail" role="group" aria-label="作品操作" className="flex basis-full shrink-0 items-center justify-end gap-1 sm:basis-auto sm:justify-normal sm:border-l sm:border-border/70 sm:pl-2">
+                    <div data-testid="task-action-rail" role="group" aria-label="作品操作" className="flex basis-full shrink-0 items-center justify-end gap-1.5 sm:basis-auto sm:justify-normal sm:border-l sm:border-border/70 sm:pl-3">
                       {task.status === 'failed' ? (
                         <Tooltip>
                           <TooltipTrigger
                             render={
                               <Button
                                 type="button"
-                                variant="outline"
-                                size="icon-md"
+                                variant="default"
+                                size="sm"
                                 aria-label={`重试作品：${task.title || '未命名作品'}`}
                                 onClick={() => setRetrySourceTask(task)}
+                                className="min-h-10 gap-1.5 px-3"
                               />
                             }
                           >
                             <RotateCcw className="size-4" />
+                            <span>重试</span>
                           </TooltipTrigger>
                           <TooltipContent>重试作品</TooltipContent>
                         </Tooltip>
@@ -715,7 +683,7 @@ export default function TasksPage() {
                               <Link
                                 to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
                                 aria-label={`查看内容分析：${task.title || '未命名作品'}`}
-                                className="inline-flex size-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                                className="inline-flex size-10 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                               />
                             }
                           >
@@ -730,7 +698,7 @@ export default function TasksPage() {
                             render={
                               <Button
                                 type="button"
-                                variant="ghost"
+                                variant="secondary"
                                 size="icon-md"
                                 aria-label={`下载作品：${task.title || '未命名作品'}`}
                                 loading={downloadingTaskIds.has(task.id)}

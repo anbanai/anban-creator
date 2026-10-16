@@ -358,7 +358,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.queryByText('待发布确认')).not.toBeInTheDocument()
   })
 
-  it('shows a compact status summary and an explicit loaded range', async () => {
+  it('uses one clear status filter and keeps the loaded range explicit', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({
       items: [
         { ...fixtures.failedTask as Task, id: 'failed-task-2' },
@@ -372,13 +372,11 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    const summary = await screen.findByRole('region', { name: '作品状态概览' })
-    expect(summary).toHaveTextContent('待执行 1')
-    expect(summary).toHaveTextContent('运行中 1')
-    expect(summary).toHaveTextContent('已完成 1')
-    expect(summary).toHaveTextContent('失败 1')
-    expect(summary).toHaveTextContent('已取消 1')
-    expect(screen.getByText('当前筛选共 12 个 · 已加载 1–5 / 12 个')).toBeInTheDocument()
+    expect(await screen.findByText('已完成文章')).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: '作品状态' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '作品状态概览' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '失败' })).toHaveLength(1)
+    expect(screen.getByText(/当前筛选共 12 个 · 已加载 1–5 \/ 12 个/)).toBeInTheDocument()
   })
 
   it('keeps one failure alert and gives each row a stage and latest activity', async () => {
@@ -399,10 +397,11 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    expect(await screen.findByRole('alert', { name: '失败作品提醒' })).toHaveTextContent('1 个失败作品')
+    expect(await screen.findByRole('alert', { name: '失败作品提醒' })).toHaveTextContent('1 个作品需要处理')
     expect(screen.getAllByRole('link', { name: /1 个失败作品/ })).toHaveLength(1)
     expect(screen.getByText('撰写正文')).toBeInTheDocument()
-    expect(screen.getByText('最近活动：7/6 09:02')).toBeInTheDocument()
+    expect(screen.getByLabelText('最近活动：7/6 09:02')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试作品：失败文章' })).toHaveTextContent('重试')
   })
 
   it('offers content analytics from completed article task rows', async () => {
@@ -423,7 +422,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.getByText('已完成文章')).toBeInTheDocument()
     expect(screen.getByText('失败文章')).toBeInTheDocument()
     expect(screen.getAllByTestId('task-status-mark')).toHaveLength(2)
-    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('rounded-full')
+    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('rounded-md')
   })
 
   it('opens the existing clone form when retrying a failed task from the row', async () => {
@@ -457,7 +456,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     anchorClick.mockRestore()
   })
 
-  it('keeps task type, status, and actions in distinct centered rails', async () => {
+  it('keeps task type, status, and primary actions in distinct centered rails', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({
       items: [fixtures.failedTask as Task, fixtures.completedTask as Task],
       total: 2,
@@ -471,6 +470,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.getAllByTestId('task-status-mark').every((node) => node.className.includes('items-center'))).toBe(true)
     expect(screen.getAllByTestId('task-action-rail')).toHaveLength(2)
     expect(screen.getAllByTestId('task-action-rail').every((node) => node.className.includes('sm:border-l'))).toBe(true)
+    expect(screen.getByRole('button', { name: '重试作品：失败文章' })).toHaveTextContent('重试')
   })
 
   it('shows the task total including image operation charges', async () => {
@@ -481,8 +481,8 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    expect(await screen.findByText('累计扣费：6,800 积分')).toBeInTheDocument()
-    expect(screen.queryByText('累计扣费：6,000 积分')).not.toBeInTheDocument()
+    expect(await screen.findByText('扣费：6,800 积分')).toBeInTheDocument()
+    expect(screen.queryByText('扣费：6,000 积分')).not.toBeInTheDocument()
   })
 
   it('uses the active catalog price for article tasks', async () => {
