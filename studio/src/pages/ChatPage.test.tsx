@@ -133,7 +133,7 @@ describe('ChatPage', () => {
 
   it('allows only one user message request while the previous message is in flight', async () => {
     let resolveMessage: (() => void) | undefined
-    interactiveMocks.message.mockImplementationOnce(() => new Promise((resolve) => { resolveMessage = resolve }))
+    interactiveMocks.message.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveMessage = () => resolve() }))
     renderChat()
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     await waitFor(() => expect(composer).toBeEnabled())
