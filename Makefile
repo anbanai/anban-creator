@@ -15,6 +15,7 @@ PROFILE_ANALYSIS_AGENT_IMAGE ?= creator-agent-profile-analysis:latest
 FEEDBACK_ANALYSIS_AGENT_IMAGE ?= creator-agent-feedback-analysis:latest
 WHITEBOARD_ANIMATION_AGENT_IMAGE ?= creator-agent-whiteboard-animation:latest
 HYPIT_AGENT_IMAGE ?= creator-agent-hypit:latest
+DSH_RUNTIME_IMAGE ?= creator-dsh-runtime:latest
 HYPIT_SOURCE_REPO ?= https://github.com/hypit-ai/hypit.git
 HYPIT_SOURCE_REF ?= 8efbac03ed10929b0f4a3c79fe2b3f77b6479daf
 OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git
@@ -321,6 +322,7 @@ agent-runtime-release-manifest:
 	AGENT_IMAGE_FEEDBACK_ANALYSIS="$(FEEDBACK_ANALYSIS_AGENT_IMAGE)" \
 	AGENT_IMAGE_WHITEBOARD_ANIMATION="$(WHITEBOARD_ANIMATION_AGENT_IMAGE)" \
 	AGENT_IMAGE_HYPIT="$(HYPIT_AGENT_IMAGE)" \
+	DSH_IMAGE="$(DSH_RUNTIME_IMAGE)" \
 	scripts/agent-runtime-release.sh $(if $(AGENT_RUNTIME_RELEASE_MANIFEST),--output "$(AGENT_RUNTIME_RELEASE_MANIFEST)",)
 
 # Backward-compatible alias (builds agent image)

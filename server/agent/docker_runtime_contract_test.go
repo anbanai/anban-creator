@@ -988,7 +988,7 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 	}
 
 	release := readTextFile(t, filepath.Join(root, "scripts/agent-runtime-release.sh"))
-	for _, want := range []string{"catalog_digest", "Agent Pack Catalog files differ"} {
+	for _, want := range []string{"catalog_digest", "Agent Pack Catalog files differ", "DSH_IMAGE", `"dsh=${DSH_IMAGE:?DSH_IMAGE must be set}"`} {
 		if !strings.Contains(release, want) {
 			t.Fatalf("release manifest script missing Catalog audit contract %q", want)
 		}

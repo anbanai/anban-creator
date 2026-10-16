@@ -11,8 +11,9 @@ usage() {
   cat >&2 <<'EOF'
 Usage: scripts/agent-runtime-release.sh [--output PATH]
 
-Image references are supplied through SERVER_IMAGE and one AGENT_IMAGE_* variable
-for every managed runtime profile. Tags and digests are both accepted.
+Image references are supplied through SERVER_IMAGE, DSH_IMAGE, and one
+AGENT_IMAGE_* variable for every managed runtime profile. Tags and digests are
+both accepted.
 EOF
 }
 
@@ -64,6 +65,7 @@ image_entries=(
   "feedback-analysis=${AGENT_IMAGE_FEEDBACK_ANALYSIS:?AGENT_IMAGE_FEEDBACK_ANALYSIS must be set}"
   "whiteboard-animation=${AGENT_IMAGE_WHITEBOARD_ANIMATION:?AGENT_IMAGE_WHITEBOARD_ANIMATION must be set}"
   "hypit=${AGENT_IMAGE_HYPIT:?AGENT_IMAGE_HYPIT must be set}"
+  "dsh=${DSH_IMAGE:?DSH_IMAGE must be set}"
 )
 
 images_json='{}'

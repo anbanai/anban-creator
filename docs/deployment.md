@@ -121,6 +121,11 @@ scripts/render-ack-server-deployment.sh \
 kubectl apply -f /tmp/server-release.yaml
 ```
 
+The release manifest must include the separate DSH runtime image under
+`images.dsh`. Generate it with `DSH_RUNTIME_IMAGE=... make
+agent-runtime-release-manifest`; the ACK renderer maps that entry to the
+`dsh_image_repo` template variable and injects it as `ANBAN_DSH_IMAGE`.
+
 只有在发布流水线已经单独 apply `deploy/k8s/ack-agent-runtime.yaml` 时，
 才使用 `--server-only`。Server 与 Agent 镜像仍必须从同一提交构建并更新
 到清单中；Catalog 不一致会被 Runtime 拒绝执行。
