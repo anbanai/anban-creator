@@ -207,6 +207,22 @@ describe('ChatPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '提交回答' })).toBeInTheDocument())
     expect(screen.getByText('answer failed')).toBeInTheDocument()
     expect(screen.queryByText('会话需要重新开始')).not.toBeInTheDocument()
+    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').turnActive).toBe(false)
+  })
+
+  it('clears the persisted turn lock when a message enqueue fails', async () => {
+    interactiveMocks.message.mockRejectedValueOnce(new Error('message failed'))
+    renderChat()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toBeEnabled())
+    fireEvent.change(composer, { target: { value: '发送失败的消息' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledWith('session-1', '发送失败的消息'))
+    await waitFor(() => expect(screen.getByText('message failed')).toBeInTheDocument())
+    expect(composer).toBeEnabled()
+    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').turnActive).toBe(false)
   })
 
   it('clears a single-select option when the user enters custom text', async () => {

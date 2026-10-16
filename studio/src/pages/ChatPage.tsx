@@ -389,7 +389,7 @@ export default function ChatPage() {
           const previous = readPersistedInteractiveSession(sessionStorageKey)
           const turnActive = received.event === 'turn.start'
             ? true
-            : received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed'
+            : received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || (received.event === 'session.status' && parseData(received.data).status === 'idle')
               ? false
               : previous?.turnActive === true
           if (received.id || received.event === 'turn.start' || received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed') {
@@ -525,12 +525,15 @@ export default function ChatPage() {
     confirmationTokenRef.current = null
     setDraft((value) => value ? { ...value, ready: false } : value)
     setCommitError(null)
+    setTurnActive(true)
+    const persisted = readPersistedInteractiveSession(sessionStorageKey)
+    persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
     try {
       await api.interactive.message(sessionId, text)
-      setTurnActive(true)
-      const persisted = readPersistedInteractiveSession(sessionStorageKey)
-      persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
     } catch (error) {
+      setTurnActive(false)
+      const failed = readPersistedInteractiveSession(sessionStorageKey)
+      persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: failed?.lastEventId, turnActive: false })
       setStreamError(error instanceof Error ? error.message : '消息发送失败')
     } finally {
       sendingMessageRef.current = false
@@ -544,10 +547,17 @@ export default function ChatPage() {
       throw new Error('会话已结束，请重新开始后再回答。')
     }
     hasInputRef.current = true
-    await api.interactive.answer(sessionId, batch.callId, answer.answers)
     setTurnActive(true)
     const persisted = readPersistedInteractiveSession(sessionStorageKey)
     persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
+    try {
+      await api.interactive.answer(sessionId, batch.callId, answer.answers)
+    } catch (error) {
+      setTurnActive(false)
+      const failed = readPersistedInteractiveSession(sessionStorageKey)
+      persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: failed?.lastEventId, turnActive: false })
+      throw error
+    }
     setQuestionBatches((batches) => batches.map((item) => item.callId === batch.callId
       ? { ...item, answers: answer.answers }
       : item))
