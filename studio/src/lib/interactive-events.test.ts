@@ -85,4 +85,20 @@ describe('streamInteractiveSession', () => {
     await vi.advanceTimersByTimeAsync(250)
     await nextEventAssertion
   })
+
+  it('keeps retrying transient network failures until the session can be resumed', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce(response('event:session.status\nid:1\ndata:{"status":"running"}\n\n'))
+    const stream = streamInteractiveSession('session-1', 'token')
+    const nextEvent = stream.next()
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    await expect(nextEvent).resolves.toMatchObject({ value: { event: 'session.status', id: '1' }, done: false })
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+  })
 })

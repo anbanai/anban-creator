@@ -381,7 +381,17 @@ export default function ChatPage() {
       }
     } catch (error) {
       if (controller.signal.aborted || disposedRef.current || generation !== runGenerationRef.current) return
-      terminateConversation('error', error instanceof Error ? error.message : '与创作会话连接失败')
+      const message = error instanceof Error ? error.message : '与创作会话连接失败'
+      const terminal = message === '会话历史已失效，请重新开始创建' || /^SSE connection failed: (401|404|410)$/.test(message)
+      if (terminal) {
+        terminateConversation('error', message)
+      } else {
+        // A transient browser, proxy, or upstream failure must not close the
+        // server-owned session. Keeping its ID persisted lets the next mount
+        // resume the same Job instead of creating a second runtime.
+        setStreamError(message)
+        setRunState('running')
+      }
     }
   }, [isProjectUpdate, processEvent, sessionStorageKey, terminateConversation, token])
 
@@ -592,7 +602,7 @@ export default function ChatPage() {
               {messages.map((message) => <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <MessageSquare className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>)}
               {questionBatches.map((batch) => <DshQuestionComposer key={batch.callId} questions={batch.questions} answers={batch.answers} submitted={Boolean(batch.answers)} disabled={!sessionId || runState === 'starting' || runState === 'expired' || runState === 'closed' || runState === 'error'} onSubmit={(answer) => submitAnswers(batch, answer)} />)}
               {draft?.ready && <ConfirmCard draft={draft} isProjectUpdate={isProjectUpdate} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />}
-              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>会话需要重新开始</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}<Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button></AlertDescription></Alert>}
+              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>{runState === 'error' || runState === 'expired' || runState === 'closed' ? '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}{(runState === 'error' || runState === 'expired' || runState === 'closed') && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
             </div>
             <div className="border-t border-border p-3 sm:p-4"><div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div></div>

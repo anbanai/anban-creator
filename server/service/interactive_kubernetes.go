@@ -194,9 +194,9 @@ func (f KubernetesRuntimeFactory) log(sessionID, message string, err error) {
 	if f.Logger == nil {
 		return
 	}
-	event := f.Logger.Info().Str("session_id", sessionID).Str("executor", "kubernetes")
+	event := f.Logger.Info().Str("session_id", sessionID).Str("executor", "kubernetes").Str("server_instance", strings.TrimSpace(f.ServerInstanceID))
 	if err != nil {
-		event = f.Logger.Error().Err(err).Str("session_id", sessionID).Str("executor", "kubernetes")
+		event = f.Logger.Error().Err(err).Str("session_id", sessionID).Str("executor", "kubernetes").Str("server_instance", strings.TrimSpace(f.ServerInstanceID))
 	}
 	event.Msg(message)
 }
@@ -260,7 +260,7 @@ func dshSecretEnv(secretName, sessionID, mcpURL, serverURL string) []corev1.EnvV
 	ref := func(key string) *corev1.EnvVarSource {
 		return &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: key}}
 	}
-	return []corev1.EnvVar{{Name: "HOME", Value: "/tmp/dsh-home"}, {Name: "DSH_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_SESSION_ID", Value: sessionID}, {Name: "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN", ValueFrom: ref("runtime-token")}, {Name: "ANBAN_DSH_BRIDGE_MCP_URL", Value: strings.TrimRight(dshFirstNonEmpty(mcpURL, serverURL+"/api/mcp"), "/")}, {Name: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY", ValueFrom: ref("provider-api-key")}, {Name: "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE", Value: "/var/run/anban-dsh-context/initial-context"}, {Name: "ANBAN_DSH_BRIDGE_PATCH", Value: "/app/harness/dsh/project-creator.patch.yml"}}
+	return []corev1.EnvVar{{Name: "HOME", Value: "/tmp/dsh-home"}, {Name: "DSH_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_SESSION_ID", Value: sessionID}, {Name: "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN", ValueFrom: ref("runtime-token")}, {Name: "ANBAN_DSH_BRIDGE_MCP_URL", Value: strings.TrimRight(dshFirstNonEmpty(mcpURL, serverURL+"/mcp"), "/")}, {Name: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY", ValueFrom: ref("provider-api-key")}, {Name: "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE", Value: "/var/run/anban-dsh-context/initial-context"}, {Name: "ANBAN_DSH_BRIDGE_PATCH", Value: "/app/harness/dsh/project-creator.patch.yml"}}
 }
 
 func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {

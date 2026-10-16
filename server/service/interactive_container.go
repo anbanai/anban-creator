@@ -134,7 +134,7 @@ func (f ContainerRuntimeFactory) startCommand(ctx context.Context, cancel contex
 	cmd.Env = append(os.Environ(),
 		"ANBAN_DSH_BRIDGE_SESSION_ID="+spec.SessionID,
 		"ANBAN_DSH_BRIDGE_RUNTIME_TOKEN="+spec.RuntimeToken,
-		"ANBAN_DSH_BRIDGE_MCP_URL="+strings.TrimRight(dshFirstNonEmpty(f.MCPURL, f.Config.ServerURL+"/api/mcp"), "/"),
+		"ANBAN_DSH_BRIDGE_MCP_URL="+strings.TrimRight(dshFirstNonEmpty(f.MCPURL, f.Config.ServerURL+"/mcp"), "/"),
 		"ANBAN_DSH_BRIDGE_PROVIDER_API_KEY="+f.APIKey,
 	)
 	stdin, err := cmd.StdinPipe()

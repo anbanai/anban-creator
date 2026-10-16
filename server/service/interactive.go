@@ -191,6 +191,7 @@ type InteractiveService struct {
 	logger            *zerolog.Logger
 	receiptMu         sync.Mutex
 	createIdempotency map[string]*interactiveCreateReservation
+	serverInstanceID  string
 }
 
 type interactiveCreateReservation struct {
@@ -213,6 +214,14 @@ func (s *InteractiveService) SetLogger(logger *zerolog.Logger) {
 	s.mu.Unlock()
 }
 
+// SetServerInstanceID adds the pod identity to interactive lifecycle logs so
+// duplicate Jobs can be attributed to a specific Server instance.
+func (s *InteractiveService) SetServerInstanceID(instanceID string) {
+	s.mu.Lock()
+	s.serverInstanceID = strings.TrimSpace(instanceID)
+	s.mu.Unlock()
+}
+
 func (s *InteractiveService) logRuntime(level string, sessionID string, message string, err error) {
 	s.mu.RLock()
 	logger := s.logger
@@ -220,12 +229,15 @@ func (s *InteractiveService) logRuntime(level string, sessionID string, message 
 	if logger == nil {
 		return
 	}
-	event := logger.Info().Str("session_id", sessionID)
+	s.mu.RLock()
+	instanceID := s.serverInstanceID
+	s.mu.RUnlock()
+	event := logger.Info().Str("session_id", sessionID).Str("server_instance", instanceID)
 	if err != nil {
-		event = logger.Error().Err(err).Str("session_id", sessionID)
+		event = logger.Error().Err(err).Str("session_id", sessionID).Str("server_instance", instanceID)
 	}
 	if level == "warn" {
-		event = logger.Warn().Str("session_id", sessionID)
+		event = logger.Warn().Str("session_id", sessionID).Str("server_instance", instanceID)
 	}
 	event.Msg(message)
 }
@@ -451,6 +463,7 @@ func (s *InteractiveService) CreateSessionWithIdempotency(ctx context.Context, u
 	}
 	fingerprint := strings.Join([]string{strings.TrimSpace(agentID), strings.TrimSpace(intent), projectID}, "\x00")
 	reservationKey := strings.TrimSpace(userID) + "\x00" + key
+	keyHash := confirmationHash(key)[:16]
 
 	for {
 		s.mu.Lock()
@@ -466,6 +479,7 @@ func (s *InteractiveService) CreateSessionWithIdempotency(ctx context.Context, u
 			if reservation.session != nil {
 				sess := reservation.session
 				s.mu.Unlock()
+				s.logRuntime("info", sess.ID, "interactive session creation idempotency replay", nil)
 				return sess, nil
 			}
 			done := reservation.done
@@ -483,6 +497,7 @@ func (s *InteractiveService) CreateSessionWithIdempotency(ctx context.Context, u
 
 		sess, err := s.createSession(ctx, userID, agentID, intent, projectIDs...)
 		s.mu.Lock()
+		accepted := err == nil
 		if err == nil {
 			reservation.session = sess
 		} else {
@@ -490,6 +505,13 @@ func (s *InteractiveService) CreateSessionWithIdempotency(ctx context.Context, u
 		}
 		close(reservation.done)
 		s.mu.Unlock()
+		if accepted {
+			s.logRuntime("info", sess.ID, "interactive session creation accepted", nil)
+		} else {
+			// Keep the key digest available in the error log without exposing the
+			// opaque request key or any runtime credential.
+			s.logRuntime("error", "", "interactive session creation failed for idempotency request", fmt.Errorf("key_hash=%s: %w", keyHash, err))
+		}
 		return sess, err
 	}
 }

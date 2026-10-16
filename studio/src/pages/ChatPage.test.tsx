@@ -305,6 +305,18 @@ describe('ChatPage', () => {
     await waitFor(() => expect(interactiveMocks.close).not.toHaveBeenCalledWith('session-1'))
   })
 
+  it('keeps the session persisted when the SSE stream has a transient network error', async () => {
+    streamMock.mockImplementationOnce(async function* () {
+      throw new Error('network error')
+    })
+    renderChat()
+
+    await waitFor(() => expect(screen.getByText('network error')).toBeInTheDocument())
+    expect(interactiveMocks.close).not.toHaveBeenCalledWith('session-1')
+    expect(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new')).toContain('session-1')
+    expect(screen.queryByText('会话需要重新开始')).not.toBeInTheDocument()
+  })
+
   it('does not close a committed session during navigation', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, confirmation_token: 'secret-token', project: { name: '测试项目', platform: 'wechat' } } }) },

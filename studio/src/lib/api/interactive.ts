@@ -1,5 +1,7 @@
 import { http, unwrap } from '@/lib/http-client'
 
+const INTERACTIVE_COMMAND_TIMEOUT_MS = 15 * 60 * 1000
+
 export interface InteractiveAgent {
   id: string
   display_name: string
@@ -61,14 +63,14 @@ export const interactiveApi = {
       ...(projectId ? { project_id: projectId } : {}),
     }, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined)),
   message: (sessionId: string, text: string) =>
-    unwrap<unknown>(http.post(`/interactive/sessions/${sessionId}/messages`, { text })),
+    unwrap<unknown>(http.post(`/interactive/sessions/${sessionId}/messages`, { text }, { timeout: INTERACTIVE_COMMAND_TIMEOUT_MS })),
   answer: (sessionId: string, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>) =>
-    unwrap<unknown>(http.post(`/interactive/sessions/${sessionId}/questions/${encodeURIComponent(callId)}/answers`, { answers })),
+    unwrap<unknown>(http.post(`/interactive/sessions/${sessionId}/questions/${encodeURIComponent(callId)}/answers`, { answers }, { timeout: INTERACTIVE_COMMAND_TIMEOUT_MS })),
   commit: (sessionId: string, confirmationToken: string, idempotencyKey: string, memoryAppend?: string) =>
     unwrap<InteractiveCommitResult>(http.post(`/interactive/sessions/${sessionId}/commit`, {
       confirmation_token: confirmationToken,
       idempotency_key: idempotencyKey,
       ...(memoryAppend ? { memory_append: memoryAppend } : {}),
-    })),
+    }, { timeout: INTERACTIVE_COMMAND_TIMEOUT_MS })),
   close: (sessionId: string) => http.delete(`/interactive/sessions/${sessionId}`),
 }

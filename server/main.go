@@ -790,6 +790,7 @@ func main() {
 	// enabling the bridge cannot silently drop admin-only access control.
 	interactiveSvc.SetAdminOnly(cfg.Dsh.AdminOnly)
 	interactiveSvc.SetLogger(log)
+	interactiveSvc.SetServerInstanceID(cfg.Dsh.ServerInstanceID)
 	if projectMemoryStore != nil {
 		interactiveSvc.SetProjectMemory(projectMemoryStore)
 	}

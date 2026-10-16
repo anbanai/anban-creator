@@ -36,6 +36,10 @@ function waitForRetry(ms: number, signal?: AbortSignal) {
   })
 }
 
+function retryDelay(reconnects: number): number {
+  return Math.min(10_000, 250 * 2 ** Math.min(reconnects, 6))
+}
+
 export async function* streamInteractiveSession(sessionId: string, token: string, signal?: AbortSignal, options: InteractiveStreamOptions = {}): AsyncGenerator<InteractiveStreamEvent> {
   let lastEventId: string | undefined = options.lastEventId
   let reconnects = 0
@@ -52,8 +56,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
       })
     } catch (error) {
       if (signal?.aborted) throw error
-      if (reconnects >= 3) throw new Error('与创作会话的连接已断开')
-      await waitForRetry(250 * 2 ** reconnects, signal)
+      await waitForRetry(retryDelay(reconnects), signal)
       reconnects += 1
       continue
     }
@@ -61,14 +64,18 @@ export async function* streamInteractiveSession(sessionId: string, token: string
       if (response.status === 409) {
         throw new Error('会话历史已失效，请重新开始创建')
       }
-      if (response.status === 401 || response.status === 404 || response.status === 410 || reconnects >= 3) {
+      if (response.status === 401 || response.status === 404 || response.status === 410) {
         throw new Error(`SSE connection failed: ${response.status}`)
       }
-      await waitForRetry(250 * 2 ** reconnects, signal)
+      await waitForRetry(retryDelay(reconnects), signal)
       reconnects += 1
       continue
     }
-    if (!response.body) throw new Error('Response body is null')
+    if (!response.body) {
+      await waitForRetry(retryDelay(reconnects), signal)
+      reconnects += 1
+      continue
+    }
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
@@ -102,12 +109,14 @@ export async function* streamInteractiveSession(sessionId: string, token: string
           yield interactiveEvent
         }
       }
+    } catch (error) {
+      if (signal?.aborted) throw error
+      if (error instanceof Error && error.message === '会话历史已失效，请重新开始创建') throw error
     } finally {
       reader.releaseLock()
     }
     if (terminal || signal?.aborted) return
-    if (reconnects >= 3) throw new Error('与创作会话的连接已断开')
-    await waitForRetry(250 * 2 ** reconnects, signal)
+    await waitForRetry(retryDelay(reconnects), signal)
     reconnects += 1
   }
 }

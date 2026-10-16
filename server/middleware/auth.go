@@ -52,7 +52,13 @@ func AuthMiddleware(jwtSvc *auth.JWTService, repo repository.Repository, logger 
 
 		claims, err := jwtSvc.ValidateToken(token)
 		if err != nil {
-			logger.Warn().Err(err).Msg("token validation failed")
+			logger.Warn().
+				Err(err).
+				Str("path", c.Path()).
+				Str("method", c.Method()).
+				Int("authorization_segments", len(strings.Fields(authHeader))).
+				Str("user_agent", c.Get("User-Agent")).
+				Msg("token validation failed")
 			return handler.Error(c, fiber.StatusUnauthorized, "invalid or expired token")
 		}
 

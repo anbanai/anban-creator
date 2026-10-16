@@ -17,6 +17,19 @@ import (
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
 
+func TestDshSecretEnvDefaultsToServerMCPRoute(t *testing.T) {
+	envs := dshSecretEnv("session-secret", "session-1", "", "https://creator-server:8443")
+	for _, env := range envs {
+		if env.Name == "ANBAN_DSH_BRIDGE_MCP_URL" {
+			if env.Value != "https://creator-server:8443/mcp" {
+				t.Fatalf("default MCP URL = %q, want server /mcp route", env.Value)
+			}
+			return
+		}
+	}
+	t.Fatal("missing ANBAN_DSH_BRIDGE_MCP_URL")
+}
+
 func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	factory := KubernetesRuntimeFactory{Config: srvconfig.DshConfig{
 		Image: "registry.example/dsh@sha256:" + repeatHex(64), KubernetesNamespace: "anban",
