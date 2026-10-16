@@ -349,12 +349,13 @@ jobs:
 
           cd runtime-dsh
           npm ci
+          npm run patch:dependencies
           npm run typecheck
           npm run test
           npm run build
           cd ..
           tar -czf bin/anban-runtime-dsh-${{ steps.version.outputs.VERSION }}.tar.gz \
-            -C runtime-dsh package.json package-lock.json vendor dist
+            -C runtime-dsh package.json package-lock.json scripts vendor dist
 
           chmod +x bin/anban-creator-server-linux-* bin/anban-creator-server-darwin-* 2>/dev/null || true
           echo "${{ steps.version.outputs.RELEASE_TAG }}" > bin/version.txt
