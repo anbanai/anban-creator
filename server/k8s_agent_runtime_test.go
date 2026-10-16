@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -177,13 +179,17 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if len(serverDocs) < 2 {
 		t.Fatalf("server deployment manifest has %d documents, want PVC and Deployment", len(serverDocs))
 	}
-	var serverServiceAccount, serverRole, serverRoleBinding k8sManifestDoc
+	var serverServiceAccount, serverRole, serverRoleBinding, serverTokenReviewRole, serverTokenReviewBinding k8sManifestDoc
 	for _, rawDoc := range serverDocs {
 		var doc k8sManifestDoc
 		if err := yaml.Unmarshal([]byte(rawDoc), &doc); err != nil {
 			t.Fatalf("parse server deployment document: %v", err)
 		}
 		switch {
+		case doc.Kind == "ClusterRole" && doc.Metadata.Name == "creator-server-tokenreview":
+			serverTokenReviewRole = doc
+		case doc.Kind == "ClusterRoleBinding" && doc.Metadata.Name == "creator-server-tokenreview":
+			serverTokenReviewBinding = doc
 		case doc.Kind == "ServiceAccount" && doc.Metadata.Name == "${agent_service_account}":
 			serverServiceAccount = doc
 		case doc.Kind == "Role" && doc.Metadata.Name == "creator-agent-runner":
@@ -191,6 +197,12 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		case doc.Kind == "RoleBinding" && doc.Metadata.Name == "creator-agent-runner":
 			serverRoleBinding = doc
 		}
+	}
+	if !roleAllows(serverTokenReviewRole, "tokenreviews", "create") || len(serverTokenReviewRole.Rules) != 1 {
+		t.Fatalf("server deployment must reconcile the TokenReview ClusterRole: %#v", serverTokenReviewRole)
+	}
+	if len(serverTokenReviewBinding.Subjects) != 1 || serverTokenReviewBinding.Subjects[0].Kind != "ServiceAccount" || serverTokenReviewBinding.Subjects[0].Name != "${agent_service_account}" || serverTokenReviewBinding.Subjects[0].Namespace != "${namespace}" || serverTokenReviewBinding.RoleRef.Kind != "ClusterRole" || serverTokenReviewBinding.RoleRef.Name != "creator-server-tokenreview" {
+		t.Fatalf("server deployment must bind TokenReview access to the configured ServiceAccount: %#v", serverTokenReviewBinding)
 	}
 	if serverServiceAccount.Kind != "ServiceAccount" {
 		t.Fatal("server deployment must reconcile the Agent ServiceAccount")
@@ -214,18 +226,40 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	if serverRoleBinding.Metadata.Namespace != "${namespace}" || len(serverRoleBinding.Subjects) != 1 || serverRoleBinding.Subjects[0].Kind != "ServiceAccount" || serverRoleBinding.Subjects[0].Name != "${agent_service_account}" || serverRoleBinding.Subjects[0].Namespace != "${namespace}" || serverRoleBinding.RoleRef.Kind != "Role" || serverRoleBinding.RoleRef.Name != "creator-agent-runner" {
 		t.Fatalf("server deployment RoleBinding = %#v, want creator-agent-runner bound to agent_service_account", serverRoleBinding)
 	}
-	if strings.Contains(serverDocs[1], "catalog_digest") || strings.Contains(serverDocs[1], "agent-pack-catalog-digest") {
-		t.Fatal("server Deployment template must not require the release Catalog digest as a cloud template variable")
+	var serverPVCDoc string
+	for _, rawDoc := range serverDocs {
+		var doc k8sManifestDoc
+		if err := yaml.Unmarshal([]byte(rawDoc), &doc); err != nil {
+			t.Fatalf("parse server deployment document for PVC: %v", err)
+		}
+		if doc.Kind == "PersistentVolumeClaim" {
+			serverPVCDoc = rawDoc
+			break
+		}
 	}
-	if strings.Contains(serverDocs[1], "name: ANBAN_AGENT_PACK_CATALOG_DIGEST") {
-		t.Fatal("Server runtime must use its embedded Catalog digest instead of a deployment environment setting")
-	}
-	if !strings.Contains(serverDocs[0], "kind: PersistentVolumeClaim") || !strings.Contains(serverDocs[0], "storage: 20Gi") || !strings.Contains(serverDocs[0], "ReadWriteMany") {
+	if !strings.Contains(serverPVCDoc, "kind: PersistentVolumeClaim") || !strings.Contains(serverPVCDoc, "storage: 20Gi") || !strings.Contains(serverPVCDoc, "ReadWriteMany") {
 		t.Fatalf("server deployment must declare the shared 20Gi RWX project memory PVC")
 	}
 	var deployment deploymentDoc
-	if err := yaml.Unmarshal([]byte(serverDocs[1]), &deployment); err != nil {
+	var serverDeploymentDoc string
+	for _, rawDoc := range serverDocs {
+		var doc k8sManifestDoc
+		if err := yaml.Unmarshal([]byte(rawDoc), &doc); err != nil {
+			t.Fatalf("parse server deployment document for Deployment: %v", err)
+		}
+		if doc.Kind == "Deployment" {
+			serverDeploymentDoc = rawDoc
+			break
+		}
+	}
+	if err := yaml.Unmarshal([]byte(serverDeploymentDoc), &deployment); err != nil {
 		t.Fatalf("parse server deployment: %v", err)
+	}
+	if strings.Contains(serverDeploymentDoc, "catalog_digest") || strings.Contains(serverDeploymentDoc, "agent-pack-catalog-digest") {
+		t.Fatal("server Deployment template must not require the release Catalog digest as a cloud template variable")
+	}
+	if strings.Contains(serverDeploymentDoc, "name: ANBAN_AGENT_PACK_CATALOG_DIGEST") {
+		t.Fatal("Server runtime must use its embedded Catalog digest instead of a deployment environment setting")
 	}
 	if deployment.Kind != "Deployment" {
 		t.Fatalf("first server deployment doc kind = %q, want Deployment", deployment.Kind)
@@ -241,7 +275,18 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 		"${agent_service_account}", renderedServiceAccount,
 		"${namespace}", "anbanai-prod",
 	).Replace(string(serverDeployment)))
-	if err := yaml.Unmarshal([]byte(renderedServerDocs[1]), &renderedDeployment); err != nil {
+	var renderedDeploymentDoc string
+	for _, rawDoc := range renderedServerDocs {
+		var doc k8sManifestDoc
+		if err := yaml.Unmarshal([]byte(rawDoc), &doc); err != nil {
+			t.Fatalf("parse rendered server document: %v", err)
+		}
+		if doc.Kind == "Deployment" {
+			renderedDeploymentDoc = rawDoc
+			break
+		}
+	}
+	if err := yaml.Unmarshal([]byte(renderedDeploymentDoc), &renderedDeployment); err != nil {
 		t.Fatalf("parse rendered server deployment: %v", err)
 	}
 	if renderedDeployment.Spec.Template.Spec.ServiceAccountName != renderedServiceAccount {
@@ -404,6 +449,86 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	}
 }
 
+func TestACKRenderIncludesTokenReviewRBAC(t *testing.T) {
+	if _, err := exec.LookPath("envsubst"); err != nil {
+		t.Skipf("envsubst is required by the ACK renderer: %v", err)
+	}
+	output := filepath.Join(t.TempDir(), "server-release.yaml")
+	cmd := exec.Command("bash", filepath.Join("..", "scripts", "render-ack-server-deployment.sh"), "--output", output)
+	cmd.Env = append(os.Environ(), ackRenderEnv(filepath.Join(t.TempDir(), "missing-manifest.json"))...)
+	if outputBytes, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("render ACK release: %v\n%s", err, outputBytes)
+	}
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs := splitKubernetesYAMLDocuments(string(raw))
+	if len(docs) < 4 {
+		t.Fatalf("combined ACK release has %d documents, want cluster RBAC before Server resources", len(docs))
+	}
+	var clusterRole, binding k8sManifestDoc
+	if err := yaml.Unmarshal([]byte(docs[0]), &clusterRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte(docs[1]), &binding); err != nil {
+		t.Fatal(err)
+	}
+	if clusterRole.Kind != "ClusterRole" || clusterRole.Metadata.Name != "creator-server-tokenreview" || !roleAllows(clusterRole, "tokenreviews", "create") {
+		t.Fatalf("first ACK release resource = %#v, want TokenReview ClusterRole", clusterRole)
+	}
+	if binding.Kind != "ClusterRoleBinding" || binding.Metadata.Name != "creator-server-tokenreview" || len(binding.Subjects) != 1 || binding.Subjects[0].Name != "creator-agent-runner" || binding.Subjects[0].Namespace != "anbanai-prod" {
+		t.Fatalf("second ACK release resource = %#v, want rendered TokenReview binding", binding)
+	}
+	if strings.Contains(string(raw), "${") {
+		t.Fatal("combined ACK release contains unresolved template variables")
+	}
+}
+
+func TestACKRenderRejectsStaleCatalogManifest(t *testing.T) {
+	if _, err := exec.LookPath("envsubst"); err != nil {
+		t.Skipf("envsubst is required by the ACK renderer: %v", err)
+	}
+	manifest := filepath.Join(t.TempDir(), "stale-manifest.json")
+	if err := os.WriteFile(manifest, []byte(`{"schema_version":1,"catalog_digest":"0000000000000000000000000000000000000000000000000000000000000000","images":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", filepath.Join("..", "scripts", "render-ack-server-deployment.sh"))
+	cmd.Env = append(os.Environ(), ackRenderEnv(manifest)...)
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "release manifest Catalog digest does not match Server Catalog") {
+		t.Fatalf("stale Catalog manifest result = %v, output = %s", err, output)
+	}
+}
+
+func ackRenderEnv(manifestPath string) []string {
+	return []string{
+		"AGENT_RUNTIME_RELEASE_MANIFEST=" + manifestPath,
+		"namespace=anbanai-prod",
+		"agent_service_account=creator-agent-runner",
+		"image_repo=registry.example.com/creator-server:release",
+		"wechat_article_agent_image_repo=registry.example.com/creator-article:release",
+		"wechat_picture_agent_image_repo=registry.example.com/creator-picture:release",
+		"seednote_agent_image_repo=registry.example.com/creator-seednote:release",
+		"montage_agent_image_repo=registry.example.com/creator-montage:release",
+		"moments_agent_image_repo=registry.example.com/creator-moments:release",
+		"ecommerce_agent_image_repo=registry.example.com/creator-ecommerce:release",
+		"profile_analysis_agent_image_repo=registry.example.com/creator-profile-analysis:release",
+		"feedback_analysis_agent_image_repo=registry.example.com/creator-feedback-analysis:release",
+		"whiteboard_animation_agent_image_repo=registry.example.com/creator-whiteboard-animation:release",
+		"hypit_agent_image_repo=registry.example.com/creator-hypit:release",
+		"micro_service_name=creator-api",
+		"version_switch=base",
+		"log_store=creator",
+		"requests_cpu=500m",
+		"requests_memory=1Gi",
+		"limits_cpu=2",
+		"limits_memory=4Gi",
+		"imagePullSecret=acr-secret",
+		"configmap_name=creator-prod",
+	}
+}
+
 func assertDeploymentSecretEnv(t *testing.T, doc deploymentDoc, envName, secretName, secretKey string) {
 	t.Helper()
 	if len(doc.Spec.Template.Spec.Containers) != 1 {
@@ -520,7 +645,14 @@ func splitKubernetesYAMLDocuments(text string) []string {
 	var docs []string
 	for _, part := range strings.Split(text, "\n---") {
 		part = strings.TrimSpace(part)
-		if part == "" || strings.HasPrefix(part, "#") {
+		for strings.HasPrefix(part, "#") {
+			if newline := strings.IndexByte(part, '\n'); newline >= 0 {
+				part = strings.TrimSpace(part[newline+1:])
+			} else {
+				part = ""
+			}
+		}
+		if part == "" {
 			continue
 		}
 		docs = append(docs, part)

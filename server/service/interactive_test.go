@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/rs/zerolog"
 	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -29,6 +31,22 @@ type interactiveRecordingRuntime struct {
 	mu      sync.Mutex
 	methods []string
 }
+
+type interactiveAsyncRuntime struct {
+	mu       sync.Mutex
+	emit     func(string, any)
+	commands int
+}
+
+func (r *interactiveAsyncRuntime) Command(_ context.Context, method string, _ any) error {
+	if method == "session/prompt" {
+		r.mu.Lock()
+		r.commands++
+		r.mu.Unlock()
+	}
+	return nil
+}
+func (*interactiveAsyncRuntime) Close() error { return nil }
 
 type interactiveBlockingRuntime struct {
 	started chan struct{}
@@ -345,6 +363,104 @@ func TestInteractiveMessageRejectsConcurrentCommand(t *testing.T) {
 	close(runtime.release)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first Message() error = %v", err)
+	}
+}
+
+func TestInteractiveMessageStaysBusyUntilRuntimeTurnEnds(t *testing.T) {
+	sess := newInteractiveTestSession()
+	runtime := &interactiveAsyncRuntime{}
+	sess.runtime = runtime
+	svc := newInteractiveTestService(sess)
+
+	if err := svc.Message(context.Background(), sess.UserID, sess.ID, "first"); err != nil {
+		t.Fatalf("first Message() error = %v", err)
+	}
+	if err := svc.Message(context.Background(), sess.UserID, sess.ID, "second"); !errors.Is(err, ErrInteractiveBusy) {
+		t.Fatalf("second Message() error = %v, want ErrInteractiveBusy until turn/end", err)
+	}
+
+	svc.runtimeEvent(sess.ID, "turn.end", map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}})
+	if err := svc.Message(context.Background(), sess.UserID, sess.ID, "second"); err != nil {
+		t.Fatalf("second Message() after turn/end error = %v", err)
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.commands != 2 {
+		t.Fatalf("prompt command count = %d, want 2", runtime.commands)
+	}
+}
+
+func TestInteractiveAnswerStaysBusyUntilRuntimeTurnEnds(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.runtime = &interactiveAsyncRuntime{}
+	sess.pendingCall = "call-1"
+	sess.pendingQuestions = map[string]InteractiveQuestion{
+		"q-1": {ID: "q-1", Question: "Choose", Options: []InteractiveOption{{Label: "one"}}},
+	}
+	svc := newInteractiveTestService(sess)
+
+	if err := svc.Answer(context.Background(), sess.UserID, sess.ID, "call-1", []InteractiveAnswer{{ID: "q-1", Selected: []string{"one"}}}); err != nil {
+		t.Fatalf("Answer() error = %v", err)
+	}
+	if err := svc.Message(context.Background(), sess.UserID, sess.ID, "follow-up"); !errors.Is(err, ErrInteractiveBusy) {
+		t.Fatalf("Message() error = %v, want ErrInteractiveBusy until turn/end", err)
+	}
+	svc.runtimeEvent(sess.ID, "turn.end", map[string]any{"turn": 2, "reason": map[string]any{"kind": "completed"}})
+	if err := svc.Message(context.Background(), sess.UserID, sess.ID, "follow-up"); err != nil {
+		t.Fatalf("Message() after turn/end error = %v", err)
+	}
+}
+
+func TestInteractiveRuntimeReadReportsMalformedStdoutWithoutLeakingLine(t *testing.T) {
+	runtime := &execRuntime{}
+	var events []struct {
+		typ  string
+		data any
+	}
+	err := runtime.read(strings.NewReader("not-json\n{\"unexpected\":true}\n"), func(typ string, data any) {
+		events = append(events, struct {
+			typ  string
+			data any
+		}{typ: typ, data: data})
+	})
+	if err != nil {
+		t.Fatalf("read() error = %v", err)
+	}
+	if len(events) != 1 || events[0].typ != "runtime.diagnostic" {
+		t.Fatalf("events = %#v, want one runtime.diagnostic", events)
+	}
+	diagnostic, ok := events[0].data.(map[string]any)
+	if !ok || diagnostic["malformed_stdout_lines"] != 1 || diagnostic["unknown_stdout_messages"] != 1 {
+		t.Fatalf("diagnostic = %#v, want bounded counters", events[0].data)
+	}
+}
+
+func TestInteractiveTurnErrorIsLoggedAndReplayable(t *testing.T) {
+	sess := newInteractiveTestSession()
+	svc := newInteractiveTestService(sess)
+	var logs bytes.Buffer
+	logger := zerolog.New(&logs)
+	svc.SetLogger(&logger)
+	svc.SetServerInstanceID("server-1")
+
+	svc.runtimeEvent(sess.ID, "session.error", map[string]any{
+		"status":  "runtime_failed",
+		"code":    "PROVIDER_AUTH",
+		"message": "provider rejected credentials",
+	})
+
+	history, _, closeFn, err := svc.Events(sess.UserID, sess.ID, 0)
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	closeFn()
+	if len(history) != 1 || history[0].Type != "session.error" {
+		t.Fatalf("history = %#v, want replayable session.error", history)
+	}
+	for _, field := range []string{`"session_id":"session-1"`, `"server_instance":"server-1"`, `"error_code":"PROVIDER_AUTH"`, `"error_message":"provider rejected credentials"`} {
+		if !strings.Contains(logs.String(), field) {
+			t.Fatalf("logs %q do not contain %s", logs.String(), field)
+		}
 	}
 }
 

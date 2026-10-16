@@ -118,6 +118,9 @@ type InteractiveSession struct {
 	pendingCall                 string
 	pendingQuestions            map[string]InteractiveQuestion
 	busy                        bool
+	commandSequence             uint64
+	activeCommand               uint64
+	activeCommandAt             time.Time
 	committing                  bool
 	runtimeStarted              bool
 	initialPromptSent           bool
@@ -223,21 +226,26 @@ func (s *InteractiveService) SetServerInstanceID(instanceID string) {
 }
 
 func (s *InteractiveService) logRuntime(level string, sessionID string, message string, err error) {
+	s.logRuntimeFields(level, sessionID, message, err, nil)
+}
+
+func (s *InteractiveService) logRuntimeFields(level string, sessionID string, message string, err error, fields map[string]any) {
 	s.mu.RLock()
 	logger := s.logger
+	instanceID := s.serverInstanceID
 	s.mu.RUnlock()
 	if logger == nil {
 		return
 	}
-	s.mu.RLock()
-	instanceID := s.serverInstanceID
-	s.mu.RUnlock()
 	event := logger.Info().Str("session_id", sessionID).Str("server_instance", instanceID)
 	if err != nil {
 		event = logger.Error().Err(err).Str("session_id", sessionID).Str("server_instance", instanceID)
 	}
 	if level == "warn" {
 		event = logger.Warn().Str("session_id", sessionID).Str("server_instance", instanceID)
+	}
+	for key, value := range fields {
+		event = event.Interface(key, value)
 	}
 	event.Msg(message)
 }
@@ -611,13 +619,17 @@ func (s *InteractiveService) createSession(ctx context.Context, userID, agentID,
 	}
 	s.sessions[sess.ID] = sess
 	s.mu.Unlock()
-	s.logRuntime("info", sess.ID, "interactive session created", nil)
+	s.logRuntimeFields("info", sess.ID, "interactive session created", nil, map[string]any{
+		"agent_id": sess.AgentID,
+		"intent":   sess.Intent,
+	})
 	time.AfterFunc(s.ttl, func() { s.expire(sess.ID) })
 	go s.startRuntime(runtimeCtx, sess, runtimeToken)
 	return sess, nil
 }
 func (s *InteractiveService) startRuntime(ctx context.Context, sess *InteractiveSession, runtimeToken string) {
-	s.logRuntime("info", sess.ID, "interactive runtime starting", nil)
+	identityFields := map[string]any{"agent_id": sess.AgentID, "intent": sess.Intent}
+	s.logRuntimeFields("info", sess.ID, "interactive runtime starting", nil, identityFields)
 	emit := func(k string, d any) { s.runtimeEvent(sess.ID, k, d) }
 	var rt Runtime
 	var e error
@@ -629,7 +641,7 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 		rt, e = s.factory.Start(ctx, sess.ID, sess.AgentID, runtimeToken, emit)
 	}
 	if e != nil {
-		s.logRuntime("error", sess.ID, "interactive runtime failed to start", e)
+		s.logRuntimeFields("error", sess.ID, "interactive runtime failed to start", e, identityFields)
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{
 			"status":  "runtime_failed",
 			"message": fmt.Sprintf("interactive runtime failed to start: %v", e),
@@ -645,9 +657,9 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	}
 	sess.runtime = rt
 	sess.mu.Unlock()
-	s.logRuntime("info", sess.ID, "interactive runtime started", nil)
+	s.logRuntimeFields("info", sess.ID, "interactive runtime started", nil, identityFields)
 	if e = rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID, "initialContext": sess.initialContext}); e != nil {
-		s.logRuntime("error", sess.ID, "interactive runtime failed to initialize", e)
+		s.logRuntimeFields("error", sess.ID, "interactive runtime failed to initialize", e, identityFields)
 		s.runtimeEvent(sess.ID, "session.error", map[string]any{
 			"status":  "runtime_failed",
 			"message": fmt.Sprintf("interactive runtime failed to initialize: %v", e),
@@ -661,16 +673,30 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	sess.runtimeExitPending = false
 	sess.runtimeExitData = nil
 	sess.mu.Unlock()
-	s.logRuntime("info", sess.ID, "interactive runtime initialized", nil)
+	s.logRuntimeFields("info", sess.ID, "interactive runtime initialized", nil, identityFields)
 	sess.mu.Lock()
 	openingAlreadySent := sess.initialPromptSent
 	sess.mu.Unlock()
 	if opening := interactiveOpeningPrompt(sess.Intent); opening != "" && !openingAlreadySent {
+		sess.mu.Lock()
+		if !sess.Closed {
+			sess.busy = true
+			sess.commandSequence++
+			sess.activeCommand = sess.commandSequence
+			sess.activeCommandAt = time.Now()
+		}
+		openingCommandSeq := sess.activeCommand
+		sess.mu.Unlock()
 		if e = rt.Command(ctx, "session/prompt", map[string]any{
 			"sessionId":     sess.ID,
 			"contentBlocks": []map[string]string{{"type": "text", "text": opening}},
 		}); e != nil {
-			s.logRuntime("error", sess.ID, "interactive opening prompt failed", e)
+			sess.mu.Lock()
+			sess.busy = false
+			sess.activeCommand = 0
+			sess.activeCommandAt = time.Time{}
+			sess.mu.Unlock()
+			s.logRuntimeFields("error", sess.ID, "interactive opening prompt failed", e, map[string]any{"command": "session/prompt", "command_seq": openingCommandSeq})
 			s.runtimeEvent(sess.ID, "session.error", map[string]any{
 				"status":  "runtime_failed",
 				"message": fmt.Sprintf("interactive opening prompt failed: %v", e),
@@ -680,7 +706,7 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 		sess.mu.Lock()
 		sess.initialPromptSent = true
 		sess.mu.Unlock()
-		s.logRuntime("info", sess.ID, "interactive opening prompt sent", nil)
+		s.logRuntimeFields("info", sess.ID, "interactive opening prompt sent", nil, map[string]any{"command": "session/prompt", "command_seq": openingCommandSeq})
 	}
 	if pendingExit {
 		s.runtimeEvent(sess.ID, "runtime.exit", pendingExitData)
@@ -962,7 +988,9 @@ func (s *InteractiveService) Events(uid, id string, after uint64) ([]Interactive
 	// only its terminal event. Only a reconnect with an explicit cursor can
 	// prove that events were lost and must receive a 409 for recovery.
 	if after > 0 && len(sess.events) > 0 && sess.events[0].ID > after+1 {
+		firstAvailable := sess.events[0].ID
 		sess.mu.Unlock()
+		s.logRuntimeFields("warn", id, "interactive event stream gap", nil, map[string]any{"after_event_id": after, "first_available_event_id": firstAvailable})
 		return nil, nil, func() {}, ErrInteractiveEventGap
 	}
 	history := []InteractiveEvent{}
@@ -973,11 +1001,13 @@ func (s *InteractiveService) Events(uid, id string, after uint64) ([]Interactive
 	}
 	if sess.Closed {
 		sess.mu.Unlock()
+		s.logRuntimeFields("info", id, "interactive event stream replayed closed session", nil, map[string]any{"after_event_id": after, "replayed_events": len(history)})
 		return history, closedInteractiveEvents(), func() {}, nil
 	}
 	w := &interactiveWatcher{ch: make(chan InteractiveEvent, 16)}
 	sess.watchers[w] = struct{}{}
 	sess.mu.Unlock()
+	s.logRuntimeFields("info", id, "interactive event stream attached", nil, map[string]any{"after_event_id": after, "replayed_events": len(history)})
 	return history, w.ch, func() {
 		sess.mu.Lock()
 		if !w.closed {
@@ -986,6 +1016,7 @@ func (s *InteractiveService) Events(uid, id string, after uint64) ([]Interactive
 			close(w.ch)
 		}
 		sess.mu.Unlock()
+		s.logRuntimeFields("info", id, "interactive event stream detached", nil, map[string]any{"after_event_id": after})
 	}, nil
 }
 
@@ -1007,6 +1038,7 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 		if !s.openQuestions(sess, data) {
 			return
 		}
+		s.logRuntimeFields("info", id, "interactive question opened", nil, map[string]any{"event_type": typ})
 	case "session.status":
 		if m, ok := data.(map[string]any); ok {
 			if st, _ := m["status"].(string); st != "" {
@@ -1017,9 +1049,45 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 						sess.Status = st
 					}
 					sess.mu.Unlock()
+				case "idle":
+					// DSH emits idle after a turn. Keep this as a fallback terminal
+					// signal if a runtime version omits turn/end.
+					sess.mu.Lock()
+					if !sess.Closed && sess.pendingCall == "" {
+						sess.busy = false
+						sess.Status = "running"
+					}
+					sess.mu.Unlock()
 				}
+				s.logRuntimeFields("info", id, "interactive runtime status", nil, map[string]any{"event_type": typ, "runtime_status": st})
 			}
 		}
+	case "turn.end":
+		sess.mu.Lock()
+		commandSeq := sess.activeCommand
+		var durationMS int64
+		if !sess.activeCommandAt.IsZero() {
+			durationMS = time.Since(sess.activeCommandAt).Milliseconds()
+		}
+		if !sess.Closed {
+			sess.busy = false
+			if sess.pendingCall == "" {
+				sess.Status = "running"
+			}
+		}
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
+		sess.mu.Unlock()
+		s.logRuntimeFields("info", id, "interactive turn ended", nil, map[string]any{"event_type": typ, "turn": interactiveTurnNumber(data), "command_seq": commandSeq, "duration_ms": durationMS})
+	case "turn.start":
+		sess.mu.Lock()
+		commandSeq := sess.activeCommand
+		if !sess.Closed {
+			sess.busy = true
+			sess.Status = "running"
+		}
+		sess.mu.Unlock()
+		s.logRuntimeFields("info", id, "interactive turn started", nil, map[string]any{"event_type": typ, "turn": interactiveTurnNumber(data), "command_seq": commandSeq})
 	case "session.ready":
 		sess.mu.Lock()
 		if !sess.Closed {
@@ -1032,6 +1100,14 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 			sess.mu.Unlock()
 			return
 		}
+		sess.busy = false
+		commandSeq := sess.activeCommand
+		var durationMS int64
+		if !sess.activeCommandAt.IsZero() {
+			durationMS = time.Since(sess.activeCommandAt).Milliseconds()
+		}
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
 		if !sess.runtimeStarted {
 			sess.runtimeExitPending = true
 			sess.runtimeExitData = data
@@ -1040,6 +1116,7 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 		}
 		sess.mu.Unlock()
 		if message := interactiveRuntimeExitMessage(data); message != "" {
+			s.logRuntimeFields("error", id, "interactive runtime exited", nil, map[string]any{"event_type": typ, "command_seq": commandSeq, "duration_ms": durationMS})
 			sess.mu.Lock()
 			if !sess.Closed {
 				sess.Status = "error"
@@ -1049,19 +1126,50 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 			s.closeSession(id, false)
 			return
 		}
+		s.logRuntimeFields("warn", id, "interactive runtime exited without diagnostics", nil, map[string]any{"event_type": typ, "command_seq": commandSeq, "duration_ms": durationMS})
 		s.expire(id)
 	case "session.error":
 		// A bridge error means the one-shot runtime can no longer make progress.
 		// Publish the diagnostic while the watcher is still attached, then close
 		// the lease so the failed process cannot remain alive until TTL expiry.
 		sess.mu.Lock()
+		commandSeq := sess.activeCommand
+		var durationMS int64
+		if !sess.activeCommandAt.IsZero() {
+			durationMS = time.Since(sess.activeCommandAt).Milliseconds()
+		}
 		if !sess.Closed {
 			sess.Status = "error"
+			sess.busy = false
 		}
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
 		sess.mu.Unlock()
+		s.logRuntimeFields("error", id, "interactive runtime reported an error", nil, map[string]any{
+			"event_type":    typ,
+			"error_code":    interactiveErrorCode(data),
+			"error_message": interactiveErrorMessage(data),
+			"command_seq":   commandSeq,
+			"duration_ms":   durationMS,
+		})
 		s.emit(sess, typ, data)
 		s.closeSession(id, false)
 		return
+	case "runtime.diagnostic":
+		s.logRuntimeFields("warn", id, "interactive runtime stdout diagnostic", nil, map[string]any{
+			"event_type": typ,
+			"diagnostic": data,
+		})
+		return
+	}
+	if typ == "assistant.message" {
+		textLength := 0
+		if fields, ok := data.(map[string]any); ok {
+			if text, ok := fields["text"].(string); ok {
+				textLength = len([]rune(text))
+			}
+		}
+		s.logRuntimeFields("info", id, "interactive assistant message received", nil, map[string]any{"event_type": typ, "text_length": textLength})
 	}
 	s.emit(sess, typ, data)
 }
@@ -1178,6 +1286,9 @@ func (s *InteractiveService) openQuestions(sess *InteractiveSession, data any) b
 		}
 	}
 	sess.Status = "waiting_answer"
+	sess.busy = false
+	sess.activeCommand = 0
+	sess.activeCommandAt = time.Time{}
 	sess.mu.Unlock()
 	return true
 }
@@ -1208,11 +1319,17 @@ func (s *InteractiveService) Message(ctx context.Context, uid, id, text string) 
 		return ErrInteractiveBusy
 	}
 	sess.busy = true
+	sess.commandSequence++
+	commandSeq := sess.commandSequence
+	sess.activeCommand = commandSeq
+	sess.activeCommandAt = time.Now()
 	rt := sess.runtime
 	sess.mu.Unlock()
 	if rt == nil {
 		sess.mu.Lock()
 		sess.busy = false
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
 		sess.mu.Unlock()
 		return ErrInteractiveSessionClosed
 	}
@@ -1222,11 +1339,20 @@ func (s *InteractiveService) Message(ctx context.Context, uid, id, text string) 
 		"contentBlocks": []map[string]string{{"type": "text", "text": text}},
 	})
 	if e != nil {
-		s.logRuntime("error", sess.ID, "interactive message failed", e)
+		sess.mu.Lock()
+		sess.busy = false
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
+		sess.mu.Unlock()
+		s.logRuntimeFields("error", sess.ID, "interactive prompt enqueue failed", e, map[string]any{"command": "session/prompt", "command_seq": commandSeq})
+	} else {
+		s.logRuntimeFields("info", sess.ID, "interactive prompt enqueued", nil, map[string]any{"command": "session/prompt", "command_seq": commandSeq})
 	}
 	sess.mu.Lock()
 	closed := sess.Closed
-	sess.busy = false
+	if closed {
+		sess.busy = false
+	}
 	sess.mu.Unlock()
 	if e == nil && closed {
 		return ErrInteractiveSessionClosed
@@ -1289,11 +1415,17 @@ func (s *InteractiveService) Answer(ctx context.Context, uid, id, callID string,
 		return ErrInteractiveBusy
 	}
 	sess.busy = true
+	sess.commandSequence++
+	commandSeq := sess.commandSequence
+	sess.activeCommand = commandSeq
+	sess.activeCommandAt = time.Now()
 	rt := sess.runtime
 	sess.mu.Unlock()
 	if rt == nil {
 		sess.mu.Lock()
 		sess.busy = false
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
 		sess.mu.Unlock()
 		return ErrInteractiveSessionClosed
 	}
@@ -1308,9 +1440,17 @@ func (s *InteractiveService) Answer(ctx context.Context, uid, id, callID string,
 		sess.pendingCall = ""
 		sess.pendingQuestions = map[string]InteractiveQuestion{}
 		sess.Status = "running"
+	} else {
+		sess.busy = false
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
 	}
-	sess.busy = false
 	sess.mu.Unlock()
+	if e != nil {
+		s.logRuntimeFields("error", sess.ID, "interactive answer enqueue failed", e, map[string]any{"command": "session/answer", "call_id": callID, "command_seq": commandSeq})
+	} else {
+		s.logRuntimeFields("info", sess.ID, "interactive answer enqueued", nil, map[string]any{"command": "session/answer", "call_id": callID, "command_seq": commandSeq})
+	}
 	if e == nil && closed {
 		e = ErrInteractiveSessionClosed
 	}
@@ -2025,6 +2165,36 @@ func interactiveRuntimeExitMessage(data any) string {
 	return "interactive runtime exited before responding: " + strings.Join(parts, "; ")
 }
 
+func interactiveTurnNumber(data any) any {
+	fields, ok := data.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return fields["turn"]
+}
+
+func interactiveErrorCode(data any) string {
+	fields, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	code, _ := fields["code"].(string)
+	return code
+}
+
+func interactiveErrorMessage(data any) string {
+	fields, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	message, _ := fields["message"].(string)
+	message = strings.TrimSpace(message)
+	if len([]rune(message)) > 1024 {
+		message = string([]rune(message)[:1024])
+	}
+	return message
+}
+
 func (r *execRuntime) Command(ctx context.Context, method string, params any) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -2151,9 +2321,12 @@ func interactiveResponseID(value any) (uint64, bool) {
 func (r *execRuntime) read(out io.Reader, emit func(string, any)) error {
 	sc := bufio.NewScanner(out)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	malformedLines := 0
+	unknownMessages := 0
 	for sc.Scan() {
 		var m map[string]any
 		if json.Unmarshal(sc.Bytes(), &m) != nil {
+			malformedLines++
 			continue
 		}
 		if typ, ok := m["event"].(string); ok {
@@ -2162,7 +2335,15 @@ func (r *execRuntime) read(out io.Reader, emit func(string, any)) error {
 		}
 		if id, ok := interactiveResponseID(m["id"]); ok {
 			r.deliverResponse(id, bridgeResponseError(m["error"], r.redactions...))
+			continue
 		}
+		unknownMessages++
+	}
+	if malformedLines > 0 || unknownMessages > 0 {
+		emit("runtime.diagnostic", map[string]any{
+			"malformed_stdout_lines":  malformedLines,
+			"unknown_stdout_messages": unknownMessages,
+		})
 	}
 	return sc.Err()
 }

@@ -161,21 +161,23 @@ Bridge protocol and can make a session close immediately after `session/start`.
 Image tags and immutable digests are both accepted; digests remain recommended
 when rollback safety matters.
 Set `agent_service_account` to exactly the value configured at
-`claude.kubernetes.service_account`. The Server deployment template now
-contains the namespace-scoped ServiceAccount, Role, and RoleBinding required by
-the Job and DSH controllers, so the existing Yunxiao Server deployment step
-reconciles namespace-scoped permissions automatically. Apply
-`deploy/k8s/ack-agent-runtime.yaml` in the same cluster release, before the
-Server Deployment, because the TokenReview ClusterRoleBinding is cluster
-scoped and is not part of the ordinary image build.
+`claude.kubernetes.service_account`. Render the ACK release with
+`scripts/render-ack-server-deployment.sh`; its default output contains the
+TokenReview ClusterRole/ClusterRoleBinding before the Server Deployment and
+the namespace-scoped ServiceAccount, Role, and RoleBinding required by the Job
+and DSH controllers. Applying only `server/Deployment.yaml` leaves the Server
+unable to verify Agent workload tokens and causes every managed task to fail at
+bootstrap.
 
 After the pipeline rollout, the effective permissions can be checked with:
 
 ```bash
 export namespace=anbanai-prod
 export agent_service_account=creator-agent-runner
-envsubst '${agent_service_account} ${namespace}' \
-  < deploy/k8s/ack-agent-runtime.yaml | kubectl apply -f -
+scripts/render-ack-server-deployment.sh \
+  --manifest release/agent-runtime-manifest.json \
+  --output /tmp/server-release.yaml
+kubectl apply -f /tmp/server-release.yaml
 kubectl auth can-i create secrets \
   --as="system:serviceaccount:${namespace}:${agent_service_account}" \
   -n "${namespace}"
@@ -204,10 +206,10 @@ kubectl auth can-i patch secrets \
   -n "${namespace}"
 ```
 
-All checks must return `yes`. If the TokenReview check returns `no`,
-apply `deploy/k8s/ack-agent-runtime.yaml` from the cluster bootstrap step and
-inspect `kubectl get clusterrolebinding creator-server-tokenreview -o yaml` to
-confirm it names `system:serviceaccount:${namespace}:${agent_service_account}`.
+All checks must return `yes`. If the TokenReview check returns `no`, inspect
+`kubectl get clusterrolebinding creator-server-tokenreview -o yaml` and
+reapply the rendered release manifest to confirm it names
+`system:serviceaccount:${namespace}:${agent_service_account}`.
 If either namespace-scoped check returns `no`, inspect the active Role and
 binding with `kubectl -n "$namespace" get role creator-agent-runner -o yaml`
 and `kubectl -n "$namespace" get rolebinding creator-agent-runner -o yaml`
@@ -216,10 +218,9 @@ before restarting the Server.
 Run `make agent-pack-generate && make agent-pack-check` before building so the
 generated Server and Harness Catalog files are current. Then run
 `make agent-runtime-release-manifest` may record the selected image references
-for audit. Use
-`scripts/render-ack-server-deployment.sh --manifest release/agent-runtime-manifest.json`
-to inject that image set into the ACK template, or pass image variables directly
-to the renderer.
+for audit. Use the same renderer to inject that image set into the combined ACK release
+manifest. Pass `--server-only` only when the separate
+`deploy/k8s/ack-agent-runtime.yaml` has already been applied by the pipeline.
 The runtime bootstrap still compares the Server's embedded Catalog digest with
 the Catalog shipped in each Agent image; no Docker build argument or image label
 is required.

@@ -109,5 +109,18 @@ docker build -f deploy/docker/Dockerfile.agent-seednote -t "$IMAGE" .
 `make agent-pack-check` 校验 Server 与 Harness 的生成 Catalog 一致。发布
 manifest 仍记录 Catalog digest 作为审计信息；Runtime 启动时会计算镜像内
 Catalog digest，并与 Server bootstrap 返回的 digest 比较，发现漂移则拒绝
-执行。Server Deployment 模板不依赖 Catalog digest 变量，因此云效可以直
-接渲染 `server/Deployment.yaml`，运行时一致性校验仍然保留。
+执行。Server Deployment 模板不依赖 Catalog digest 变量。ACK 发布必须用
+下面的渲染脚本生成完整清单；脚本默认把 TokenReview ClusterRole 和
+ClusterRoleBinding 放在 Server 命名空间资源之前，避免只发布 Server 清单
+导致所有 Agent 在 bootstrap 阶段失败：
+
+```bash
+scripts/render-ack-server-deployment.sh \
+  --manifest release/agent-runtime-manifest.json \
+  --output /tmp/server-release.yaml
+kubectl apply -f /tmp/server-release.yaml
+```
+
+只有在发布流水线已经单独 apply `deploy/k8s/ack-agent-runtime.yaml` 时，
+才使用 `--server-only`。Server 与 Agent 镜像仍必须从同一提交构建并更新
+到清单中；Catalog 不一致会被 Runtime 拒绝执行。

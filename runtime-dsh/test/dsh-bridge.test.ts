@@ -74,6 +74,54 @@ describe("DSH bridge protocol", () => {
     })).toEqual([{ event: "question.opened", data: { session_id: "s", call_id: "call-1", questions: [{ id: "q", question: "What?", multiSelect: true }] } }]);
   });
 
+  test("maps terminal turn errors into a safe session diagnostic", () => {
+    expect(mapHarnessNotification({
+      method: "session.event",
+      params: {
+        sessionId: "root",
+        event: {
+          type: "turn/end",
+          data: {
+            turn: 3,
+            reason: { kind: "error", error: { code: "AUTH_FAILED", message: "provider token=provider-secret" } },
+          },
+        },
+      },
+    }, "root")).toEqual([{
+      event: "session.error",
+      data: {
+        session_id: "root",
+        status: "runtime_failed",
+        code: "AUTH_FAILED",
+        message: "provider token=provider-secret",
+        turn: 3,
+      },
+    }]);
+  });
+
+  test("forwards successful terminal turns so the server can release the command lease", () => {
+    expect(mapHarnessNotification({
+      method: "session.event",
+      params: {
+        sessionId: "root",
+        event: { type: "turn/start", data: { turn: 4 } },
+      },
+    }, "root")).toEqual([{
+      event: "turn.start",
+      data: { session_id: "root", turn: 4 },
+    }]);
+    expect(mapHarnessNotification({
+      method: "session.event",
+      params: {
+        sessionId: "root",
+        event: { type: "turn/end", data: { turn: 4, reason: { kind: "completed" } } },
+      },
+    }, "root")).toEqual([{
+      event: "turn.end",
+      data: { session_id: "root", turn: 4, reason: { kind: "completed" } },
+    }]);
+  });
+
   test("rejects AskUserQuestion notifications without a call id", () => {
     expect(mapHarnessNotification({
       method: "session.event",

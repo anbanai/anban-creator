@@ -210,7 +210,44 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
   const event = isRecord(params.event) ? params.event : undefined;
   if (!event || typeof event.type !== "string") return [];
+  if (rootSessionId !== undefined && sessionId !== rootSessionId && event.type !== "tool/call") return [];
   const data = isRecord(event.data) ? event.data : {};
+  if (event.type === "turn/start") {
+    const turn = typeof data.turn === "number" ? data.turn : undefined;
+    return [{
+      event: "turn.start",
+      data: { session_id: sessionId, ...(turn === undefined ? {} : { turn }) },
+    }];
+  }
+  if (event.type === "turn/end") {
+    const reason = isRecord(data.reason) ? data.reason : {};
+    const turn = typeof data.turn === "number" ? data.turn : undefined;
+    if (reason.kind === "error") {
+      const failure = isRecord(reason.error) ? reason.error : {};
+      const code = typeof failure.code === "string" && failure.code.trim() !== "" ? failure.code : "UNKNOWN";
+      const message = typeof failure.message === "string" && failure.message.trim() !== ""
+        ? failure.message
+        : "interactive agent turn failed";
+      return [{
+        event: "session.error",
+        data: {
+          session_id: sessionId,
+          status: "runtime_failed",
+          code,
+          message,
+          ...(turn === undefined ? {} : { turn }),
+        },
+      }];
+    }
+    return [{
+      event: "turn.end",
+      data: {
+        session_id: sessionId,
+        ...(turn === undefined ? {} : { turn }),
+        reason,
+      },
+    }];
+  }
   if (event.type === "assistant/message") {
     const message = isRecord(data.message) ? data.message : {};
     const text = textFromContent(message.content);

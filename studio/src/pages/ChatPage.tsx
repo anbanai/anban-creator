@@ -70,7 +70,7 @@ function parseData(eventData: string): JsonRecord {
   }
 }
 
-type PersistedInteractiveSession = { sessionId?: string; lastEventId?: string; createIdempotencyKey?: string }
+type PersistedInteractiveSession = { sessionId?: string; lastEventId?: string; createIdempotencyKey?: string; turnActive?: boolean }
 
 function interactiveSessionStorageKey(agentId: string, intent: string, projectId?: string): string {
   return `anban:interactive-session:${agentId}:${intent}:${projectId ?? 'new'}`
@@ -85,7 +85,12 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
     const sessionId = typeof value.sessionId === 'string' && value.sessionId ? value.sessionId : undefined
     const createIdempotencyKey = typeof value.createIdempotencyKey === 'string' && value.createIdempotencyKey ? value.createIdempotencyKey : undefined
     if (!sessionId && !createIdempotencyKey) return null
-    return { sessionId, lastEventId: typeof value.lastEventId === 'string' ? value.lastEventId : undefined, createIdempotencyKey }
+    return {
+      sessionId,
+      lastEventId: typeof value.lastEventId === 'string' ? value.lastEventId : undefined,
+      createIdempotencyKey,
+      turnActive: value.turnActive === true,
+    }
   } catch {
     return null
   }
@@ -236,6 +241,7 @@ export default function ChatPage() {
   const confirmationTokenRef = useRef<string | null>(null)
   const sendingMessageRef = useRef(false)
   const [sendingMessage, setSendingMessage] = useState(false)
+  const [turnActive, setTurnActive] = useState(false)
 
   const agentsQuery = useQuery({
     queryKey: ['interactive-agents'],
@@ -274,6 +280,7 @@ export default function ChatPage() {
     setCommitting(false)
     sendingMessageRef.current = false
     setSendingMessage(false)
+    setTurnActive(false)
     idempotencyKeyRef.current = crypto.randomUUID()
     createIdempotencyKeyRef.current = crypto.randomUUID()
   }, [sessionStorageKey])
@@ -286,6 +293,7 @@ export default function ChatPage() {
     startPromiseRef.current = null
     setSessionId(null)
     setRunState(state)
+    setTurnActive(false)
     setStreamError(message)
     confirmationTokenRef.current = null
     clearPersistedInteractiveSession(sessionStorageKey)
@@ -303,12 +311,20 @@ export default function ChatPage() {
         break
       case 'session.status':
         setRunState(isRunState(data.status) ? data.status : 'running')
+        if (data.status === 'idle') setTurnActive(false)
+        break
+      case 'turn.start':
+        setTurnActive(true)
+        break
+      case 'turn.end':
+        setTurnActive(false)
         break
       case 'ready':
       case 'session.ready':
         setRunState('running')
         break
       case 'question.opened':
+        setTurnActive(false)
         setRunState('waiting_answer')
         {
           const callId = stringValue(data.call_id) ?? stringValue(data.callId) ?? ''
@@ -370,7 +386,19 @@ export default function ChatPage() {
       for await (const event of streamInteractiveSession(id, token, controller.signal, {
         lastEventId: persisted?.sessionId === id ? persisted.lastEventId : undefined,
         onEvent: (received) => {
-          if (received.id) persistInteractiveSession(sessionStorageKey, { sessionId: id, lastEventId: received.id })
+          const previous = readPersistedInteractiveSession(sessionStorageKey)
+          const turnActive = received.event === 'turn.start'
+            ? true
+            : received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed'
+              ? false
+              : previous?.turnActive === true
+          if (received.id || received.event === 'turn.start' || received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed') {
+            persistInteractiveSession(sessionStorageKey, {
+              sessionId: id,
+              lastEventId: received.id ?? previous?.lastEventId,
+              turnActive,
+            })
+          }
         },
       })) {
         if (disposedRef.current || generation !== runGenerationRef.current) return
@@ -439,6 +467,7 @@ export default function ChatPage() {
     const generation = ++runGenerationRef.current
     disposedRef.current = false
     setRunState('starting')
+    setTurnActive(persistedSession.turnActive === true)
     sessionRef.current = persistedSession.sessionId
     void connectStream(persistedSession.sessionId, generation)
   }, [connectStream, persistedSession, persistedSessionKey, sessionStorageKey, token])
@@ -488,7 +517,7 @@ export default function ChatPage() {
 
   const sendMessage = async () => {
     const text = composer.trim()
-    if (!text || !sessionId || pendingQuestions.length > 0 || runState === 'starting' || committing || sendingMessageRef.current) return
+    if (!text || !sessionId || pendingQuestions.length > 0 || runState === 'starting' || committing || turnActive || sendingMessageRef.current) return
     sendingMessageRef.current = true
     setSendingMessage(true)
     setComposer('')
@@ -498,6 +527,9 @@ export default function ChatPage() {
     setCommitError(null)
     try {
       await api.interactive.message(sessionId, text)
+      setTurnActive(true)
+      const persisted = readPersistedInteractiveSession(sessionStorageKey)
+      persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
     } catch (error) {
       setStreamError(error instanceof Error ? error.message : '消息发送失败')
     } finally {
@@ -513,6 +545,9 @@ export default function ChatPage() {
     }
     hasInputRef.current = true
     await api.interactive.answer(sessionId, batch.callId, answer.answers)
+    setTurnActive(true)
+    const persisted = readPersistedInteractiveSession(sessionStorageKey)
+    persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
     setQuestionBatches((batches) => batches.map((item) => item.callId === batch.callId
       ? { ...item, answers: answer.answers }
       : item))
@@ -537,7 +572,7 @@ export default function ChatPage() {
     }
   }
 
-  const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && !committing && !committed && !sendingMessage
+  const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && !committing && !committed && !sendingMessage && !turnActive
   const emptyRegistry = !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
 
   return (

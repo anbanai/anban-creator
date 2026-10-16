@@ -104,6 +104,24 @@ describe('ChatPage', () => {
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
 
+  it('keeps a resumed composer disabled when the persisted session was mid-turn', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '7', turnActive: true }))
+    let release: (() => void) | undefined
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
+      yield { event: 'session.ready', data: JSON.stringify({ session_id: 'session-1' }) }
+      await new Promise<void>((resolve) => {
+        release = resolve
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+    })())
+    renderChat('/projects/create')
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
+    expect(composer).toBeDisabled()
+    release?.()
+  })
+
   it('reuses the persisted create key when a page refresh interrupts session creation', async () => {
     let resolveFirst: ((value: { id: string; agent_id: string; status: string }) => void) | undefined
     interactiveMocks.createSession
@@ -148,6 +166,27 @@ describe('ChatPage', () => {
     resolveMessage?.()
   })
 
+  it('keeps the composer disabled until the runtime reports the turn end', async () => {
+    let releaseTurn: (() => void) | undefined
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
+      await new Promise<void>((resolve) => {
+        releaseTurn = resolve
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      yield { event: 'turn.start', data: JSON.stringify({ turn: 1 }) }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+    renderChat()
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toBeEnabled())
+
+    fireEvent.change(composer, { target: { value: '触发一轮' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+    await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledWith('session-1', '触发一轮'))
+    releaseTurn?.()
+    await waitFor(() => expect(composer).toBeDisabled())
+  })
+
   it('disables question controls optimistically and restores the card when answering fails', async () => {
     let rejectAnswer: ((error: Error) => void) | undefined
     interactiveMocks.answer.mockImplementationOnce(() => new Promise((_, reject) => {
@@ -181,7 +220,32 @@ describe('ChatPage', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '问题补充说明' }), { target: { value: '小红书' } })
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
     await waitFor(() => expect(interactiveMocks.answer).toHaveBeenCalledWith('session-1', 'call-single', [{ id: 'choice', selected: [], custom: '小红书' }]))
-    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+  })
+
+  it('keeps the composer locked after an answer until the runtime turn ends', async () => {
+    let releaseTurn: (() => void) | undefined
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
+      yield { event: 'question.opened', data: JSON.stringify({ call_id: 'call-lock', questions: [{ id: 'choice', question: '选择平台', options: [{ label: '微信' }] }] }) }
+      await new Promise<void>((resolve) => {
+        releaseTurn = resolve
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      yield { event: 'turn.start', data: JSON.stringify({ turn: 1 }) }
+      yield { event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'completed' } }) }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+    renderChat()
+
+    await waitFor(() => expect(screen.getByText('选择平台')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('radio', { name: '微信' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(interactiveMocks.answer).toHaveBeenCalledWith('session-1', 'call-lock', [{ id: 'choice', selected: ['微信'] }]))
+    expect(composer).toBeDisabled()
+
+    releaseTurn?.()
+    await waitFor(() => expect(composer).toBeEnabled())
   })
 
   it('keeps earlier question batches reviewable when the agent opens another batch', async () => {

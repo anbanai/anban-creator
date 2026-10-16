@@ -26,6 +26,9 @@ roleRef:
   kind: ClusterRole
   name: creator-server-tokenreview
 
+# This file is rendered into the combined ACK release by
+# scripts/render-ack-server-deployment.sh. It may also be applied on its own
+# when a cluster bootstrap pipeline manages cluster-scoped RBAC separately.
 # Namespace-scoped Agent permissions are owned by server/Deployment.yaml,
 # which the Yunxiao Server pipeline applies on every release.
 # The Server and one-shot Agent Jobs share creator-project-memory. Jobs mount
