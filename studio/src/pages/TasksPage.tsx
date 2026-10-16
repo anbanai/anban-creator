@@ -58,10 +58,10 @@ function TaskStatusMark({ status, className = 'size-4' }: { status: TaskStatus; 
 }
 
 function taskStatusPanelClass(status: TaskStatus) {
-  if (status === 'completed') return 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-900/60 dark:bg-emerald-950/30'
-  if (status === 'failed') return 'border-destructive/20 bg-destructive/5'
-  if (status === 'running') return 'border-primary/20 bg-primary/5'
-  return 'border-border bg-muted/30'
+  if (status === 'completed') return 'border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300'
+  if (status === 'failed') return 'border-destructive/20 bg-destructive/5 text-destructive'
+  if (status === 'running') return 'border-primary/20 bg-primary/5 text-primary'
+  return 'border-border bg-muted/30 text-muted-foreground'
 }
 
 function triggerBlobDownload(blob: Blob, filename: string) {
@@ -646,7 +646,7 @@ export default function TasksPage() {
             return (
               <div key={task.id} className="border-b border-border last:border-b-0">
                 <div className={`border-l-2 p-3.5 sm:p-4 ${borderColor} ${hoverBorderColor} transition-colors hover:bg-muted/35`}>
-                  <div className="flex flex-wrap items-stretch gap-3">
+                  <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
                     <button
                       type="button"
                       aria-label={selected ? '取消选择作品' : '选择作品'}
@@ -662,7 +662,7 @@ export default function TasksPage() {
                     >
                       {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                     </button>
-                    <div data-testid="task-type-icon" className="flex size-12 shrink-0 self-center items-center justify-center" title={agentDisplayName(taskAgentId(task))}>
+                    <div data-testid="task-type-icon" className="flex size-10 shrink-0 self-center items-center justify-center" title={agentDisplayName(taskAgentId(task))}>
                       <AgentIconStack agentIds={[taskAgentId(task)]} className="scale-125" />
                     </div>
                     <Link to={`/tasks/${task.id}`} className="flex min-w-0 flex-1 items-center rounded-md">
@@ -683,13 +683,13 @@ export default function TasksPage() {
                       data-testid="task-status-mark"
                       role="img"
                       aria-label={`任务状态：${taskStatusLabel[task.status] || task.status}`}
-                      className={`flex min-h-20 w-14 shrink-0 self-stretch items-center justify-center rounded-md border ${taskStatusPanelClass(task.status)}`}
+                      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium ${taskStatusPanelClass(task.status)}`}
                       title={taskStatusLabel[task.status] || task.status}
                     >
-                      <TaskStatusMark status={task.status} className="size-6" />
-                      <span className="sr-only">{taskStatusLabel[task.status] || task.status}</span>
+                      <TaskStatusMark status={task.status} className="size-4" />
+                      <span>{taskStatusLabel[task.status] || task.status}</span>
                     </div>
-                    <div data-testid="task-action-rail" role="group" aria-label="作品操作" className="flex basis-full shrink-0 items-center justify-end gap-1 border-t border-border/70 pt-2 sm:basis-auto sm:self-center sm:justify-normal sm:border-l sm:border-t-0 sm:pl-2 sm:pt-0">
+                    <div data-testid="task-action-rail" role="group" aria-label="作品操作" className="flex basis-full shrink-0 items-center justify-end gap-1 sm:basis-auto sm:justify-normal sm:border-l sm:border-border/70 sm:pl-2">
                       {task.status === 'failed' ? (
                         <Tooltip>
                           <TooltipTrigger

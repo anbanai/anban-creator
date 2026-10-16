@@ -423,7 +423,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.getByText('已完成文章')).toBeInTheDocument()
     expect(screen.getByText('失败文章')).toBeInTheDocument()
     expect(screen.getAllByTestId('task-status-mark')).toHaveLength(2)
-    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('min-h-20', 'self-stretch')
+    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('rounded-full')
   })
 
   it('opens the existing clone form when retrying a failed task from the row', async () => {
@@ -468,9 +468,9 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(await screen.findAllByTestId('task-type-icon')).toHaveLength(2)
     expect(screen.getAllByTestId('task-type-icon').every((node) => node.className.includes('self-center'))).toBe(true)
     expect(screen.getAllByTestId('task-status-mark')).toHaveLength(2)
-    expect(screen.getAllByTestId('task-status-mark').every((node) => node.className.includes('self-stretch'))).toBe(true)
+    expect(screen.getAllByTestId('task-status-mark').every((node) => node.className.includes('items-center'))).toBe(true)
     expect(screen.getAllByTestId('task-action-rail')).toHaveLength(2)
-    expect(screen.getAllByTestId('task-action-rail').every((node) => node.className.includes('border-l'))).toBe(true)
+    expect(screen.getAllByTestId('task-action-rail').every((node) => node.className.includes('sm:border-l'))).toBe(true)
   })
 
   it('shows the task total including image operation charges', async () => {
