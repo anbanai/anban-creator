@@ -50,6 +50,6 @@ export function taskStageSummary(task: Pick<Task, 'status' | 'lifecycle'>): { ti
   if (task.status === 'running') return { title: '正在制定执行计划', state: 'active' }
   if (task.status === 'pending') return { title: '等待执行', state: 'pending' }
   if (task.status === 'completed') return { title: '作品已完成', state: 'complete' }
-  if (task.status === 'failed') return { title: '作品失败', state: 'failed' }
+  if (task.status === 'failed') return { title: '创作失败', state: 'failed' }
   return { title: '作品已取消', state: 'cancelled' }
 }

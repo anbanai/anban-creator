@@ -374,7 +374,7 @@ export default function TaskDetailPage() {
         queryClient.invalidateQueries({ queryKey: ['task', taskId] })
         queryClient.invalidateQueries({ queryKey: ['task-files', taskId] })
         const statusText = event.event === 'completed' ? '作品完成'
-          : event.event === 'failed' ? '作品失败'
+          : event.event === 'failed' ? '创作失败'
             : event.event === 'cancelled' ? '作品取消' : '作品完成'
         setSseLogs((prev) => appendLog(prev, `--- ${statusText} ---`))
         break
@@ -574,7 +574,7 @@ export default function TaskDetailPage() {
       {/* Screen reader live region for status changes */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {task.status === 'completed' && '作品已完成'}
-        {task?.status === 'failed' && (hasPreservedDelivery ? '续跑失败，历史交付已保留' : '作品失败')}
+        {task?.status === 'failed' && (hasPreservedDelivery ? '续跑失败，历史交付已保留' : '创作失败')}
         {task?.status === 'cancelled' && '作品已取消'}
       </div>
 

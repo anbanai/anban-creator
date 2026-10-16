@@ -142,11 +142,11 @@ describe('studio business UX helpers', () => {
 
   it('labels the primary task action signal', () => {
     expect(taskActionSignal(task({ status: 'failed', error_message: '模型超时' }))).toMatchObject({
-      label: '作品失败',
+      label: '创作失败',
       tone: 'risk',
     })
     expect(taskActionSignal(task({ status: 'failed' }))).toMatchObject({
-      label: '作品失败',
+      label: '创作失败',
       hint: '未返回失败详情',
       tone: 'risk',
     })
