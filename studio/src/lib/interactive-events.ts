@@ -12,6 +12,7 @@ export interface InteractiveStreamOptions {
 
 const TERMINAL_EVENTS = new Set(['session.error', 'session.expired', 'session.closed', 'expired', 'closed'])
 const MAX_RECONNECTS = 6
+const EVENT_GAP_MESSAGE = '会话历史已失效，请重新开始创建'
 
 function assertEventSequence(lastEventId: string | undefined, eventId: string | undefined) {
   if (!eventId) return
@@ -20,7 +21,7 @@ function assertEventSequence(lastEventId: string | undefined, eventId: string | 
   if (lastEventId === undefined) return
   const previous = Number(lastEventId)
   if (Number.isSafeInteger(previous) && current > previous + 1) {
-    throw new Error('会话历史已失效，请重新开始创建')
+    throw new Error(EVENT_GAP_MESSAGE)
   }
 }
 
@@ -71,7 +72,13 @@ export async function* streamInteractiveSession(sessionId: string, token: string
     }
     if (!response.ok) {
       if (response.status === 409) {
-        throw new Error('会话历史已失效，请重新开始创建')
+        // The server may have compacted the cursor's prefix while the page
+        // was backgrounded. Reopen from retained history and reconcile the
+        // replay against the persisted client timeline.
+        await response.body?.cancel()
+        lastEventId = undefined
+        reconnects = 0
+        continue
       }
       if (response.status === 401 || response.status === 404 || response.status === 410) {
         throw new Error(`SSE connection failed: ${response.status}`)
@@ -91,6 +98,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
     const decoder = new TextDecoder()
     let buffer = ''
     let terminal = false
+    let historyGap = false
     try {
       while (true) {
         const { done, value } = await reader.read()
@@ -123,11 +131,17 @@ export async function* streamInteractiveSession(sessionId: string, token: string
       }
     } catch (error) {
       if (signal?.aborted) throw error
-      if (error instanceof Error && error.message === '会话历史已失效，请重新开始创建') throw error
+      if (error instanceof Error && error.message === EVENT_GAP_MESSAGE) {
+        await reader.cancel(error).catch(() => undefined)
+        lastEventId = undefined
+        reconnects = 0
+        historyGap = true
+      }
     } finally {
       reader.releaseLock()
     }
     if (terminal || signal?.aborted) return
+    if (historyGap) continue
     await retryOrFail(reconnects, signal)
     reconnects += 1
   }

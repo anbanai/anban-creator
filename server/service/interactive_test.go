@@ -237,6 +237,55 @@ func TestInteractiveRuntimeHeartbeatRenewsIdleLease(t *testing.T) {
 	}
 }
 
+func TestInteractiveClientHeartbeatRenewsIdleLease(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.CreatedAt = time.Now()
+	sess.ExpiresAt = sess.CreatedAt.Add(30 * time.Minute)
+	svc := newInteractiveTestService(sess)
+	svc.ttl = 24 * time.Hour
+	svc.idleTimeout = 30 * time.Minute
+	defer svc.closeSession(sess.ID, false)
+
+	before := sess.ExpiresAt
+	time.Sleep(10 * time.Millisecond)
+	if err := svc.TouchSession(sess.UserID, sess.ID); err != nil {
+		t.Fatalf("TouchSession() error = %v", err)
+	}
+
+	sess.mu.Lock()
+	after := sess.ExpiresAt
+	closed := sess.Closed
+	sess.mu.Unlock()
+	if !after.After(before) {
+		t.Fatalf("client heartbeat expiry = %s, want later than %s", after, before)
+	}
+	if closed {
+		t.Fatal("client heartbeat closed the session")
+	}
+}
+
+func TestInteractiveClientHeartbeatValidatesSessionOwnership(t *testing.T) {
+	sess := newInteractiveTestSession()
+	svc := newInteractiveTestService(sess)
+	svc.idleTimeout = time.Minute
+	if err := svc.TouchSession("another-user", sess.ID); !errors.Is(err, ErrInteractiveSessionOwner) {
+		t.Fatalf("TouchSession() error = %v, want ownership error", err)
+	}
+}
+
+func TestInteractiveClientHeartbeatIntervalRespectsShortIdleLease(t *testing.T) {
+	sess := newInteractiveTestSession()
+	svc := newInteractiveTestService(sess)
+	svc.idleTimeout = 3 * time.Second
+	if interval := svc.ClientHeartbeatInterval(); interval != time.Second {
+		t.Fatalf("ClientHeartbeatInterval() = %s, want 1s", interval)
+	}
+	svc.idleTimeout = time.Minute
+	if interval := svc.ClientHeartbeatInterval(); interval != 15*time.Second {
+		t.Fatalf("ClientHeartbeatInterval() = %s, want capped 15s", interval)
+	}
+}
+
 func TestInteractiveRuntimeHeartbeatCannotExtendAbsoluteLifetime(t *testing.T) {
 	sess := newInteractiveTestSession()
 	sess.CreatedAt = time.Now().Add(-23*time.Hour - 59*time.Minute)

@@ -180,6 +180,59 @@ func TestInteractiveHandlerEventsStreamsPublishedEvent(t *testing.T) {
 	}
 }
 
+func TestInteractiveHandlerSSEHeartbeatRenewsIdleLease(t *testing.T) {
+	svc := service.NewInteractiveServiceWithRuntime(nil, handlerInteractiveRuntimeFactory{})
+	svc.SetEnabled(true)
+	svc.SetSessionTTL(time.Second)
+	svc.SetSessionIdleTimeout(30 * time.Millisecond)
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewInteractiveHandler(svc)
+	h.heartbeatInterval = 5 * time.Millisecond
+	app := fiber.New()
+	app.Get("/events/:id", func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return h.Events(c)
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- app.Listener(listener, fiber.ListenConfig{DisableStartupMessage: true}) }()
+	t.Cleanup(func() {
+		_ = app.Shutdown()
+		select {
+		case <-serveDone:
+		case <-time.After(time.Second):
+			t.Error("timed out shutting down Fiber listener")
+		}
+	})
+	svc.Publish(sess.ID, "session.status", map[string]string{"status": "starting"})
+
+	resp, err := (&http.Client{}).Get("http://" + listener.Addr().String() + "/events/" + sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	reader := bufio.NewReader(resp.Body)
+	if line, readErr := reader.ReadString('\n'); readErr != nil || line != "id: 1\n" {
+		t.Fatalf("initial SSE line = %q, err = %v", line, readErr)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	status, statusErr := svc.SessionState("user-1", sess.ID)
+	if statusErr != nil {
+		t.Fatal(statusErr)
+	}
+	if status == "expired" {
+		t.Fatal("active SSE connection allowed the interactive session to expire")
+	}
+}
+
 func TestInteractiveHandlerMapsEventHistoryGapToConflict(t *testing.T) {
 	svc := service.NewInteractiveServiceWithRuntime(nil, handlerInteractiveRuntimeFactory{})
 	svc.SetEnabled(true)

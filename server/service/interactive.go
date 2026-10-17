@@ -807,29 +807,81 @@ func (s *InteractiveService) renewSession(id string) {
 		return
 	}
 	sess.mu.Lock()
+	now := time.Now()
 	if sess.Closed {
 		sess.mu.Unlock()
 		return
 	}
-	if !time.Now().Before(sess.ExpiresAt) {
+	if !now.Before(sess.ExpiresAt) {
 		sess.mu.Unlock()
 		s.expire(id)
 		return
 	}
-	expiresAt := time.Now().Add(idleTimeout)
+	s.renewSessionLocked(sess, idleTimeout, maxLifetime, now)
+	sess.mu.Unlock()
+}
+
+// TouchSession renews the idle lease for a browser-owned session. The SSE
+// handler uses this while the page remains connected so a stalled runtime
+// cannot expire an otherwise active Studio session.
+func (s *InteractiveService) TouchSession(uid, id string) error {
+	s.mu.RLock()
+	sess := s.sessions[id]
+	idleTimeout := s.idleTimeout
+	maxLifetime := s.ttl
+	s.mu.RUnlock()
+	if sess == nil {
+		return ErrInteractiveSessionNotFound
+	}
+	if sess.UserID != uid {
+		return ErrInteractiveSessionOwner
+	}
+	sess.mu.Lock()
+	now := time.Now()
+	if sess.Closed {
+		sess.mu.Unlock()
+		return ErrInteractiveSessionClosed
+	}
+	if !now.Before(sess.ExpiresAt) {
+		sess.mu.Unlock()
+		s.expire(id)
+		return ErrInteractiveSessionClosed
+	}
+	s.renewSessionLocked(sess, idleTimeout, maxLifetime, now)
+	sess.mu.Unlock()
+	return nil
+}
+
+// ClientHeartbeatInterval returns an SSE heartbeat interval that remains
+// shorter than the configured idle lease while avoiding unnecessary traffic
+// for the default longer timeout.
+func (s *InteractiveService) ClientHeartbeatInterval() time.Duration {
+	s.mu.RLock()
+	idleTimeout := s.idleTimeout
+	s.mu.RUnlock()
+	interval := idleTimeout / 3
+	if interval <= 0 || interval > 15*time.Second {
+		return 15 * time.Second
+	}
+	return interval
+}
+
+func (s *InteractiveService) renewSessionLocked(sess *InteractiveSession, idleTimeout, maxLifetime time.Duration, now time.Time) {
+	if idleTimeout <= 0 {
+		return
+	}
+	expiresAt := now.Add(idleTimeout)
 	if maxLifetime > 0 {
 		absoluteExpiry := sess.CreatedAt.Add(maxLifetime)
 		if absoluteExpiry.Before(expiresAt) {
 			expiresAt = absoluteExpiry
 		}
 	}
-	if !expiresAt.After(time.Now()) {
-		sess.mu.Unlock()
+	if !expiresAt.After(now) {
 		return
 	}
 	sess.ExpiresAt = expiresAt
 	s.scheduleExpiryLocked(sess)
-	sess.mu.Unlock()
 }
 
 func (s *InteractiveService) agentAllowedLocked(agentID, intent string) bool {

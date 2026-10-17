@@ -83,25 +83,35 @@ describe('streamInteractiveSession', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('fails closed when the server reports that event history was compacted', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 409 }))
-    const stream = streamInteractiveSession('session-1', 'token')
+  it('reopens from retained history when the server reports a compacted cursor', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(response('event:session.status\nid:8\ndata:{"status":"running"}\n\nevent:session.closed\nid:9\ndata:{}\n\n'))
+    const stream = streamInteractiveSession('session-1', 'token', undefined, { lastEventId: '7' })
 
-    await expect(stream.next()).rejects.toThrow('会话历史已失效，请重新开始创建')
+    await expect(stream.next()).resolves.toMatchObject({ value: { event: 'session.status', id: '8' }, done: false })
+    await expect(stream.next()).resolves.toMatchObject({ value: { event: 'session.closed', id: '9' }, done: false })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/v1/interactive/sessions/session-1/events', expect.objectContaining({
+      headers: {
+        Authorization: 'Bearer token',
+        Accept: 'text/event-stream',
+      },
+    }))
   })
 
-  it('fails closed when a reconnect starts after an unavailable history gap', async () => {
+  it('reopens from retained history when a reconnect starts after an unavailable history gap', async () => {
     vi.useFakeTimers()
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(response('event:session.status\nid:7\ndata:{"status":"running"}\n\n'))
       .mockResolvedValueOnce(response('event:session.status\nid:9\ndata:{"status":"running"}\n\n'))
+      .mockResolvedValueOnce(response('event:session.status\nid:8\ndata:{"status":"running"}\n\nevent:session.closed\nid:9\ndata:{}\n\n'))
     const stream = streamInteractiveSession('session-1', 'token')
 
     await expect(stream.next()).resolves.toMatchObject({ value: { id: '7' }, done: false })
     const nextEvent = stream.next()
-    const nextEventAssertion = expect(nextEvent).rejects.toThrow('会话历史已失效，请重新开始创建')
     await vi.advanceTimersByTimeAsync(250)
-    await nextEventAssertion
+    await expect(nextEvent).resolves.toMatchObject({ value: { id: '8' }, done: false })
+    await expect(stream.next()).resolves.toMatchObject({ value: { id: '9' }, done: false })
   })
 
   it('keeps retrying transient network failures until the session can be resumed', async () => {

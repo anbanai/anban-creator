@@ -14,7 +14,10 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-type InteractiveHandler struct{ svc *service.InteractiveService }
+type InteractiveHandler struct {
+	svc               *service.InteractiveService
+	heartbeatInterval time.Duration
+}
 
 func NewInteractiveHandler(svc *service.InteractiveService) *InteractiveHandler {
 	return &InteractiveHandler{svc: svc}
@@ -55,7 +58,11 @@ func (h *InteractiveHandler) Events(c fiber.Ctx) error {
 	if raw := c.Get("Last-Event-ID"); raw != "" {
 		after, _ = strconv.ParseUint(raw, 10, 64)
 	}
-	history, ch, closeFn, err := h.svc.Events(uid, c.Params("id"), after)
+	sessionID := c.Params("id")
+	if err := h.svc.TouchSession(uid, sessionID); err != nil {
+		return interactiveError(c, err)
+	}
+	history, ch, closeFn, err := h.svc.Events(uid, sessionID, after)
 	if err != nil {
 		return interactiveError(c, err)
 	}
@@ -68,7 +75,11 @@ func (h *InteractiveHandler) Events(c fiber.Ctx) error {
 	contextDone := c.Context().Done()
 	return c.SendStreamWriter(func(w *bufio.Writer) {
 		defer closeFn()
-		heartbeat := time.NewTicker(15 * time.Second)
+		heartbeatInterval := h.heartbeatInterval
+		if heartbeatInterval <= 0 {
+			heartbeatInterval = h.svc.ClientHeartbeatInterval()
+		}
+		heartbeat := time.NewTicker(heartbeatInterval)
 		defer heartbeat.Stop()
 		for _, ev := range history {
 			if err := writeInteractiveEvent(w, ev); err != nil {
@@ -82,6 +93,9 @@ func (h *InteractiveHandler) Events(c fiber.Ctx) error {
 			case <-requestDone:
 				return
 			case <-heartbeat.C:
+				if err := h.svc.TouchSession(uid, sessionID); err != nil {
+					return
+				}
 				if _, err := w.WriteString(": heartbeat\n\n"); err != nil || w.Flush() != nil {
 					return
 				}
