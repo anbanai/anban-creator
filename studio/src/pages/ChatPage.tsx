@@ -31,6 +31,10 @@ import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer, type Dsh
 
 type Message = { id: string; role: 'assistant' | 'user'; text: string }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
+type TimelineItem =
+  | { kind: 'message'; message: Message }
+  | { kind: 'question'; callId: string }
+  | { kind: 'draft'; id: 'draft' }
 type RunState = 'idle' | 'starting' | 'running' | 'waiting_answer' | 'error' | 'expired' | 'closed'
 type JsonRecord = Record<string, unknown>
 
@@ -70,7 +74,17 @@ function parseData(eventData: string): JsonRecord {
   }
 }
 
-type PersistedInteractiveSession = { sessionId?: string; lastEventId?: string; createIdempotencyKey?: string; turnActive?: boolean }
+type PersistedInteractiveSession = {
+  sessionId?: string
+  lastEventId?: string
+  draftReadyEventId?: string
+  createIdempotencyKey?: string
+  turnActive?: boolean
+  messages?: Message[]
+  questionBatches?: QuestionBatch[]
+  timeline?: TimelineItem[]
+  draft?: InteractiveDraft | null
+}
 
 function interactiveSessionStorageKey(agentId: string, intent: string, projectId?: string): string {
   return `anban:interactive-session:${agentId}:${intent}:${projectId ?? 'new'}`
@@ -85,11 +99,53 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
     const sessionId = typeof value.sessionId === 'string' && value.sessionId ? value.sessionId : undefined
     const createIdempotencyKey = typeof value.createIdempotencyKey === 'string' && value.createIdempotencyKey ? value.createIdempotencyKey : undefined
     if (!sessionId && !createIdempotencyKey) return null
+    const messages = Array.isArray(value.messages)
+      ? value.messages.flatMap((item): Message[] => {
+        if (!isRecord(item)) return []
+        const text = stringValue(item.text)
+        const role = item.role === 'assistant' || item.role === 'user' ? item.role : undefined
+        if (!text || !role) return []
+        return [{ id: stringValue(item.id) ?? crypto.randomUUID(), role, text }]
+      })
+      : undefined
+    const questionBatches = Array.isArray(value.questionBatches)
+      ? value.questionBatches.flatMap((item): QuestionBatch[] => {
+        if (!isRecord(item)) return []
+        const callId = stringValue(item.callId)
+        const questions = Array.isArray(item.questions) ? item.questions.flatMap((question) => {
+          const parsed = parseQuestion(question)
+          return parsed ? [parsed] : []
+        }) : []
+        if (!callId || questions.length === 0) return []
+        return [{ callId, questions, answers: item.answers === undefined ? undefined : parseAnswers(item.answers) }]
+      })
+      : undefined
+    const timeline = Array.isArray(value.timeline)
+      ? value.timeline.flatMap((item): TimelineItem[] => {
+        if (!isRecord(item) || typeof item.kind !== 'string') return []
+        if (item.kind === 'message' && isRecord(item.message)) {
+          const text = stringValue(item.message.text)
+          const role = item.message.role === 'assistant' || item.message.role === 'user' ? item.message.role : undefined
+          return text && role ? [{ kind: 'message', message: { id: stringValue(item.message.id) ?? crypto.randomUUID(), role, text } }] : []
+        }
+        if (item.kind === 'question') {
+          const callId = stringValue(item.callId)
+          return callId ? [{ kind: 'question', callId }] : []
+        }
+        return item.kind === 'draft' ? [{ kind: 'draft', id: 'draft' }] : []
+      })
+      : undefined
+    const draft = isRecord(value.draft) ? normalizeDraft(value.draft) : undefined
     return {
       sessionId,
       lastEventId: typeof value.lastEventId === 'string' ? value.lastEventId : undefined,
+      draftReadyEventId: typeof value.draftReadyEventId === 'string' ? value.draftReadyEventId : undefined,
       createIdempotencyKey,
       turnActive: value.turnActive === true,
+      messages,
+      questionBatches,
+      timeline,
+      draft,
     }
   } catch {
     return null
@@ -98,10 +154,18 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
 
 function persistInteractiveSession(key: string, session: PersistedInteractiveSession): void {
   try {
-    sessionStorage.setItem(key, JSON.stringify(session))
+    const previous = readPersistedInteractiveSession(key)
+    sessionStorage.setItem(key, JSON.stringify({ ...previous, ...session }))
   } catch {
     // Session persistence is an enhancement; the live SSE stream remains authoritative.
   }
+}
+
+function resumeEventId(session: PersistedInteractiveSession | null): string | undefined {
+  if (!session?.draft?.ready || !session.draftReadyEventId) return session?.lastEventId
+  const readyEventId = Number(session.draftReadyEventId)
+  if (!Number.isSafeInteger(readyEventId) || readyEventId < 1) return session.lastEventId
+  return readyEventId > 1 ? String(readyEventId - 1) : undefined
 }
 
 function clearPersistedInteractiveSession(key: string): void {
@@ -110,6 +174,22 @@ function clearPersistedInteractiveSession(key: string): void {
   } catch {
     // Ignore storage policies such as private browsing.
   }
+}
+
+function restoreTimeline(session: PersistedInteractiveSession | null): TimelineItem[] {
+  if (session?.timeline?.length) return session.timeline
+  const messages = session?.messages ?? []
+  const questions = session?.questionBatches ?? []
+  return [
+    ...messages.map((message): TimelineItem => ({ kind: 'message', message })),
+    ...questions.map((batch): TimelineItem => ({ kind: 'question', callId: batch.callId })),
+    ...(session?.draft?.ready ? [{ kind: 'draft' as const, id: 'draft' as const }] : []),
+  ]
+}
+
+function formatAgentActivity(name?: string): string {
+  const label = name?.replace(/^mcp__anban__/, '').replace(/[_-]+/g, ' ').trim()
+  return label ? `Agent 正在执行：${label}` : 'Agent 正在工作…'
 }
 
 function normalizeDraft(raw: JsonRecord): InteractiveDraft {
@@ -216,9 +296,10 @@ export default function ChatPage() {
   const [persistedSession] = useState(() => readPersistedInteractiveSession(sessionStorageKey))
   const [sessionId, setSessionId] = useState<string | null>(persistedSession?.sessionId ?? null)
   const [runState, setRunState] = useState<RunState>('idle')
-  const [messages, setMessages] = useState<Message[]>([])
-  const [questionBatches, setQuestionBatches] = useState<QuestionBatch[]>([])
-  const [draft, setDraft] = useState<InteractiveDraft | null>(null)
+  const [messages, setMessages] = useState<Message[]>(persistedSession?.messages ?? [])
+  const [questionBatches, setQuestionBatches] = useState<QuestionBatch[]>(persistedSession?.questionBatches ?? [])
+  const [timeline, setTimeline] = useState<TimelineItem[]>(() => restoreTimeline(persistedSession))
+  const [draft, setDraft] = useState<InteractiveDraft | null>(persistedSession?.draft ?? null)
   const [composer, setComposer] = useState('')
   const [streamError, setStreamError] = useState<string | null>(null)
   const [commitError, setCommitError] = useState<string | null>(null)
@@ -242,6 +323,7 @@ export default function ChatPage() {
   const sendingMessageRef = useRef(false)
   const [sendingMessage, setSendingMessage] = useState(false)
   const [turnActive, setTurnActive] = useState(false)
+  const [agentActivity, setAgentActivity] = useState<string | null>(null)
 
   const agentsQuery = useQuery({
     queryKey: ['interactive-agents'],
@@ -268,6 +350,7 @@ export default function ChatPage() {
     setRunState('idle')
     setMessages([])
     setQuestionBatches([])
+    setTimeline([])
     setDraft(null)
     setSessionProject(null)
     confirmationTokenRef.current = null
@@ -281,6 +364,7 @@ export default function ChatPage() {
     sendingMessageRef.current = false
     setSendingMessage(false)
     setTurnActive(false)
+    setAgentActivity(null)
     idempotencyKeyRef.current = crypto.randomUUID()
     createIdempotencyKeyRef.current = crypto.randomUUID()
   }, [sessionStorageKey])
@@ -294,20 +378,34 @@ export default function ChatPage() {
     setSessionId(null)
     setRunState(state)
     setTurnActive(false)
+    setAgentActivity(null)
     setStreamError(message)
     confirmationTokenRef.current = null
     clearPersistedInteractiveSession(sessionStorageKey)
     if (previousId && !committedRef.current) void api.interactive.close(previousId).catch(() => undefined)
   }, [isProjectUpdate, sessionStorageKey])
 
-  const processEvent = useCallback((event: { event: string; data: string }) => {
+  const processEvent = useCallback((event: { event: string; data: string; id?: string }) => {
     const data = parseData(event.data)
     switch (event.event) {
       case 'assistant.message':
-        setMessages((items) => [...items, { id: stringValue(data.id) ?? crypto.randomUUID(), role: 'assistant', text: stringValue(data.text) ?? '' }])
+        {
+          const message = { id: stringValue(data.id) ?? event.id ?? crypto.randomUUID(), role: 'assistant' as const, text: stringValue(data.text) ?? '' }
+          setMessages((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
+          setTimeline((items) => items.some((item) => item.kind === 'message' && item.message.id === message.id)
+            ? items
+            : [...items, { kind: 'message', message }])
+          setAgentActivity(null)
+        }
         break
       case 'user.message':
-        setMessages((items) => [...items, { id: stringValue(data.id) ?? crypto.randomUUID(), role: 'user', text: stringValue(data.text) ?? '' }])
+        {
+          const message = { id: stringValue(data.id) ?? event.id ?? crypto.randomUUID(), role: 'user' as const, text: stringValue(data.text) ?? '' }
+          setMessages((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
+          setTimeline((items) => items.some((item) => item.kind === 'message' && item.message.id === message.id)
+            ? items
+            : [...items, { kind: 'message', message }])
+        }
         break
       case 'session.status':
         setRunState(isRunState(data.status) ? data.status : 'running')
@@ -316,27 +414,40 @@ export default function ChatPage() {
       case 'session.snapshot':
         setRunState(data.status === 'waiting_answer' ? 'waiting_answer' : data.status === 'starting' ? 'starting' : 'running')
         setTurnActive(data.busy === true)
+        setAgentActivity(null)
         {
           const callId = stringValue(data.pending_call_id) ?? ''
           const questions = Array.isArray(data.questions) ? data.questions.flatMap((value) => {
             const question = parseQuestion(value)
             return question ? [question] : []
           }) : []
-          setQuestionBatches(callId && questions.length > 0 ? [{ callId, questions }] : [])
+          setQuestionBatches((batches) => {
+            const answered = batches.filter((batch) => Boolean(batch.answers))
+            return callId && questions.length > 0 ? [...answered, { callId, questions }] : answered
+          })
+          if (callId && questions.length > 0) {
+            setTimeline((items) => items.some((item) => item.kind === 'question' && item.callId === callId)
+              ? items
+              : [...items, { kind: 'question', callId }])
+          }
         }
         break
       case 'turn.start':
         setTurnActive(true)
+        setAgentActivity(null)
         break
       case 'turn.end':
         setTurnActive(false)
+        setAgentActivity(null)
         break
       case 'ready':
       case 'session.ready':
         setRunState('running')
+        setAgentActivity(null)
         break
       case 'question.opened':
         setTurnActive(false)
+        setAgentActivity(null)
         setRunState('waiting_answer')
         {
           const callId = stringValue(data.call_id) ?? stringValue(data.callId) ?? ''
@@ -347,7 +458,14 @@ export default function ChatPage() {
           setQuestionBatches((batches) => batches.some((batch) => batch.callId === callId)
             ? batches
             : [...batches, { callId, questions }])
+          setTimeline((items) => items.some((item) => item.kind === 'question' && item.callId === callId)
+            ? items
+            : [...items, { kind: 'question', callId }])
         }
+        break
+      case 'agent.activity':
+        setTurnActive(true)
+        setAgentActivity(formatAgentActivity(stringValue(data.name)))
         break
       case 'question.answered':
         setQuestionBatches((batches) => batches.map((batch) => batch.callId === (stringValue(data.call_id) ?? stringValue(data.callId) ?? '')
@@ -371,6 +489,9 @@ export default function ChatPage() {
           const next = normalizeDraft(data)
           return event.event === 'draft.ready' ? { ...next, ready: data.ready !== false } : { ...previous, ...next }
         })
+        if (event.event === 'draft.ready') {
+          setTimeline((items) => items.some((item) => item.kind === 'draft') ? items : [...items, { kind: 'draft', id: 'draft' }])
+        }
         break
       case 'session.error':
         terminateConversation('error', stringValue(data.message) ?? '创作会话发生错误')
@@ -396,7 +517,7 @@ export default function ChatPage() {
       if (!token) throw new Error('登录状态已失效，请重新登录。')
       const persisted = readPersistedInteractiveSession(sessionStorageKey)
       for await (const event of streamInteractiveSession(id, token, controller.signal, {
-        lastEventId: persisted?.sessionId === id ? persisted.lastEventId : undefined,
+        lastEventId: persisted?.sessionId === id ? resumeEventId(persisted) : undefined,
         onConnected: () => {
           if (disposedRef.current || generation !== runGenerationRef.current) return
           setStreamError(null)
@@ -416,6 +537,7 @@ export default function ChatPage() {
             persistInteractiveSession(sessionStorageKey, {
               sessionId: id,
               lastEventId: received.id ?? previous?.lastEventId,
+              draftReadyEventId: received.event === 'draft.ready' ? received.id : previous?.draftReadyEventId,
               turnActive,
             })
           }
@@ -534,6 +656,21 @@ export default function ChatPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!sessionId) return
+    const persisted = readPersistedInteractiveSession(sessionStorageKey)
+    if (persisted?.sessionId !== sessionId) return
+    persistInteractiveSession(sessionStorageKey, {
+      ...persisted,
+      sessionId,
+      messages,
+      questionBatches,
+      timeline,
+      draft,
+      draftReadyEventId: draft?.ready ? persisted.draftReadyEventId : undefined,
+    })
+  }, [draft, messages, questionBatches, sessionId, sessionStorageKey, timeline])
+
   const selectAgent = (agent: InteractiveAgent) => {
     if (agent.id === selectedAgent) return
     if ((hasInputRef.current || draft) && !window.confirm(`切换 Agent 会丢弃当前${isProjectUpdate ? '更新' : '创建'}草稿，确定继续吗？`)) return
@@ -541,6 +678,10 @@ export default function ChatPage() {
     startPromiseRef.current = null
     setSelectedAgent(agent.id)
     setModeMenuOpen(false)
+    const nextParams = new URLSearchParams(params)
+    nextParams.set('agent', agent.id)
+    if (!nextParams.has('intent')) nextParams.set('intent', intent)
+    navigate({ pathname: location.pathname, search: `?${nextParams.toString()}` })
   }
 
   useEffect(() => {
@@ -677,10 +818,21 @@ export default function ChatPage() {
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
           <section className="flex min-h-0 flex-col rounded-xl border border-border bg-card">
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6" aria-live="polite">
-              {messages.length === 0 && runState === 'starting' && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />正在准备对话…</div>}
-              {messages.map((message) => <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <MessageSquare className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>)}
-              {questionBatches.map((batch) => <DshQuestionComposer key={batch.callId} questions={batch.questions} answers={batch.answers} submitted={Boolean(batch.answers)} disabled={!sessionId || runState === 'starting' || runState === 'expired' || runState === 'closed' || runState === 'error'} onSubmit={(answer) => submitAnswers(batch, answer)} />)}
-              {draft?.ready && <ConfirmCard draft={draft} isProjectUpdate={isProjectUpdate} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />}
+              {runState === 'starting' && !turnActive && <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />{messages.length === 0 ? '正在准备对话…' : '正在恢复会话…'}</div>}
+              {timeline.map((item) => {
+                if (item.kind === 'message') {
+                  const { message } = item
+                  return <div key={`message-${message.id}`} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <MessageSquare className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>
+                }
+                if (item.kind === 'question') {
+                  const batch = questionBatches.find((candidate) => candidate.callId === item.callId)
+                  if (!batch) return null
+                  return <DshQuestionComposer key={`question-${batch.callId}`} questions={batch.questions} answers={batch.answers} submitted={Boolean(batch.answers)} disabled={!sessionId || runState === 'starting' || runState === 'expired' || runState === 'closed' || runState === 'error'} onSubmit={(answer) => submitAnswers(batch, answer)} />
+                }
+                if (!draft?.ready) return null
+                return <ConfirmCard key="draft-card" draft={draft} isProjectUpdate={isProjectUpdate} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />
+              })}
+              {turnActive && <div role="status" className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-3 py-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin text-primary" />{agentActivity ?? 'Agent 正在工作…'}</div>}
               {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>{runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
             </div>

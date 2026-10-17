@@ -14,7 +14,7 @@
 
 - `profile-analysis` 保持现有零交互托管行为；新增 Agent 的内部 id 为 `project-creator`，展示名为 `Project Creator`。
 - 不使用 `/init`，不显示“新会话”按钮；选择 Agent 后自动创建临时 Session 并触发 `session/start`。
-- 未提交 Session、草稿和 Runtime 状态不持久化；Runtime 退出、刷新、关闭、Server 重启或超时后不可恢复。
+- 未提交 Session、草稿和 Runtime 状态不做跨设备持久化；Studio 在当前标签页的 `sessionStorage` 保存恢复所需的事件游标和已显示内容，刷新时重连同一 Session。Runtime 退出、关闭标签页、Server 重启或超时后不可恢复。
 - 浏览器不得提交任意 profile、插件路径、MCP 配置或用户身份；Server 从能力注册表、鉴权上下文和 Session 推导全部权限。
 - `AskUserQuestion` 只对 manifest 声明 `interaction.user_questions: true` 的 root Agent 开放；子 Agent 和现有托管 Agent 继续禁止。
 - MCP 只能执行原子 capability；Runtime 不得修改正式 profile、项目 memory、活动上下文、`AGENTS.md` 或 `CLAUDE.md`。
@@ -109,7 +109,7 @@
 - [x] Add DSH-style mode selector, message stream, Markdown rendering, question cards, answer locking, draft confirmation, and six-dimension progress.
 - [x] Add mobile horizontal progress, fixed composer, leave/refresh warning, retry state, and form fallback.
 - [x] Add an existing-project entry point, source-project context banner, memory change preview, and update-specific confirmation copy.
-- [x] Preserve messages and local draft on terminal errors; only explicit restart or Agent switch clears the temporary conversation.
+- [x] Preserve messages and local draft on terminal errors; only explicit restart or Agent switch clears the temporary conversation. Restore the same Session and visible history after a refresh in the current browser tab.
 - [x] Filter unavailable registry entries and handle a URL that requests an unavailable Agent.
 - [x] Run `bun run test` and `bun run build`, recording unrelated pre-existing build failures separately.
 

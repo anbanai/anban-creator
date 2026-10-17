@@ -279,8 +279,17 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
     return [{ event: "assistant.message", data: { session_id: sessionId, text } }];
   }
   if (event.type === "tool/call") {
-    const name = typeof data.name === "string" ? data.name : "";
-    if (name.toLowerCase() !== "ask_user_question") return [];
+    const name = typeof data.name === "string" ? data.name.trim() : "";
+    if (name.toLowerCase() !== "ask_user_question") {
+      if (!name) return [];
+      return [{
+        event: "agent.activity",
+        data: {
+          session_id: sessionId,
+          name: name.replace(/^mcp__anban__/, "").slice(0, 128),
+        },
+      }];
+    }
     if (rootSessionId !== undefined && sessionId !== rootSessionId) {
       return [{
         event: "session.error",

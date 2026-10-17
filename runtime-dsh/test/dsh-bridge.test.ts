@@ -74,6 +74,19 @@ describe("DSH bridge protocol", () => {
     })).toEqual([{ event: "question.opened", data: { session_id: "s", call_id: "call-1", questions: [{ id: "q", question: "What?", multiSelect: true }] } }]);
   });
 
+  test("maps non-question tool calls into safe agent activity events", () => {
+    expect(mapHarnessNotification({
+      method: "session.event",
+      params: {
+        sessionId: "s",
+        event: {
+          type: "tool/call",
+          data: { name: "mcp__anban__get_project_profile" },
+        },
+      },
+    })).toEqual([{ event: "agent.activity", data: { session_id: "s", name: "get_project_profile" } }]);
+  });
+
   test("maps terminal turn errors into a safe session diagnostic", () => {
     expect(mapHarnessNotification({
       method: "session.event",
