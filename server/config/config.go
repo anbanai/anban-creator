@@ -255,6 +255,9 @@ func validateDshBaseURL(raw string) error {
 	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("must be an absolute HTTP(S) URL without credentials, query, or fragment")
 	}
+	if strings.IndexFunc(parsed.Hostname(), func(r rune) bool { return r > unicode.MaxASCII }) >= 0 {
+		return fmt.Errorf("must use an ASCII hostname; configure the provider URL, not a descriptive label")
+	}
 	return nil
 }
 

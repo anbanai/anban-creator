@@ -476,6 +476,13 @@ func TestValidateDshKubernetesRejectsMalformedDigestImageReference(t *testing.T)
 	}
 }
 
+func TestValidateDshBaseURLRejectsUnicodeHostname(t *testing.T) {
+	err := validateDshBaseURL("https://实际的deepseek-anthropic兼容地址")
+	if err == nil || !strings.Contains(err.Error(), "ASCII hostname") {
+		t.Fatalf("validateDshBaseURL() error = %v, want Unicode hostname rejected", err)
+	}
+}
+
 func TestValidateDshKubernetesAcceptsImmutableImageReferences(t *testing.T) {
 	for _, image := range []string{
 		"registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64),

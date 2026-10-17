@@ -351,6 +351,11 @@ DSH interactive sessions run in one isolated workload per session and have an in
 `claude.profiles`. A route declares its provider, wire API, endpoint, model,
 and the credential value using the same `${...}` expansion as Claude:
 
+`base_url` must be the actual HTTP(S) endpoint with an ASCII DNS hostname, such
+as `https://api.deepseek.com/anthropic`. Do not put a descriptive label or
+Chinese text in the Secret key `deepseek-anthropic-base-url`; the Server rejects
+that value before a DSH session starts.
+
 ```yaml
 dsh:
   enabled: true
