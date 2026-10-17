@@ -791,6 +791,9 @@ func main() {
 	if cfg.Dsh.TimeoutSec > 0 {
 		interactiveSvc.SetSessionTTL(time.Duration(cfg.Dsh.TimeoutSec) * time.Second)
 	}
+	if cfg.Dsh.IdleTimeoutSec > 0 {
+		interactiveSvc.SetSessionIdleTimeout(time.Duration(cfg.Dsh.IdleTimeoutSec) * time.Second)
+	}
 	interactiveSvc.SetAdminOnly(cfg.Dsh.AdminOnly)
 	interactiveSvc.SetLogger(log)
 	interactiveSvc.SetServerInstanceID(cfg.Dsh.ServerInstanceID)

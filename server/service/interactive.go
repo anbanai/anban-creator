@@ -138,6 +138,8 @@ type InteractiveSession struct {
 	initialContext        string
 	memoryExpected        string
 	leaseScope            string
+	expiryTimer           *time.Timer
+	expiryGeneration      uint64
 }
 type interactiveWatcher struct {
 	ch     chan InteractiveEvent
@@ -184,6 +186,7 @@ type InteractiveService struct {
 	mu                sync.RWMutex
 	sessions          map[string]*InteractiveSession
 	ttl               time.Duration
+	idleTimeout       time.Duration
 	maxHistory        int
 	enabled           bool
 	agents            []InteractiveAgent
@@ -264,7 +267,7 @@ func NewInteractiveServiceWithRuntime(repo repository.Repository, factory Runtim
 func NewInteractiveServiceWithRuntimeAndAgents(repo repository.Repository, factory RuntimeFactory, agents []InteractiveAgent) *InteractiveService {
 	return &InteractiveService{
 		repo: repo, projectSvc: NewProjectService(repo, nil), factory: factory, sessions: map[string]*InteractiveSession{},
-		ttl: 30 * time.Minute, maxHistory: 256, agents: append([]InteractiveAgent(nil), agents...),
+		ttl: 30 * time.Minute, idleTimeout: 30 * time.Minute, maxHistory: 256, agents: append([]InteractiveAgent(nil), agents...),
 		maxSessions: 32, maxPerUser: 2, tombstoneTTL: 5 * time.Minute,
 		createIdempotency: map[string]*interactiveCreateReservation{},
 	}
@@ -307,6 +310,17 @@ func (s *InteractiveService) SetSessionTTL(ttl time.Duration) {
 	}
 	s.mu.Lock()
 	s.ttl = ttl
+	s.mu.Unlock()
+}
+
+// SetSessionIdleTimeout configures how long an interactive session may remain
+// without a runtime heartbeat. It is applied before session creation.
+func (s *InteractiveService) SetSessionIdleTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.idleTimeout = timeout
 	s.mu.Unlock()
 }
 func (s *InteractiveService) Enabled() bool {
@@ -600,7 +614,11 @@ func (s *InteractiveService) createSession(ctx context.Context, userID, agentID,
 		return nil, err
 	}
 	runtimeCtx, cancel := context.WithCancel(context.Background())
-	sess := &InteractiveSession{ID: uuid.NewString(), UserID: userID, AgentID: agentID, Intent: intent, ProjectID: projectID, ProfileVersion: profileVersion, initialContext: initialContext, memoryExpected: memoryExpected, CreatedAt: now, ExpiresAt: now.Add(s.ttl), Status: "starting", watchers: map[*interactiveWatcher]struct{}{}, pendingQuestions: map[string]InteractiveQuestion{}, runtimeTokenHash: confirmationHash(runtimeToken), cancel: cancel}
+	expiresAt := now.Add(s.ttl)
+	if idleExpiry := now.Add(s.idleTimeout); idleExpiry.Before(expiresAt) {
+		expiresAt = idleExpiry
+	}
+	sess := &InteractiveSession{ID: uuid.NewString(), UserID: userID, AgentID: agentID, Intent: intent, ProjectID: projectID, ProfileVersion: profileVersion, initialContext: initialContext, memoryExpected: memoryExpected, CreatedAt: now, ExpiresAt: expiresAt, Status: "starting", watchers: map[*interactiveWatcher]struct{}{}, pendingQuestions: map[string]InteractiveQuestion{}, runtimeTokenHash: confirmationHash(runtimeToken), cancel: cancel}
 	if projectID != "" && s.repo != nil && s.repo.FeedbackLoop() != nil {
 		scope := "interactive-project:" + projectID
 		won, leaseErr := s.repo.FeedbackLoop().AcquireFeedbackLease(ctx, scope, sess.ID, now.UTC(), s.ttl)
@@ -638,7 +656,9 @@ func (s *InteractiveService) createSession(ctx context.Context, userID, agentID,
 		"agent_id": sess.AgentID,
 		"intent":   sess.Intent,
 	})
-	time.AfterFunc(s.ttl, func() { s.expire(sess.ID) })
+	sess.mu.Lock()
+	s.scheduleExpiryLocked(sess)
+	sess.mu.Unlock()
 	go s.startRuntime(runtimeCtx, sess, runtimeToken)
 	return sess, nil
 }
@@ -742,6 +762,76 @@ func (s *InteractiveService) expire(id string) {
 	s.closeSession(id, true)
 }
 
+func (s *InteractiveService) scheduleExpiryLocked(sess *InteractiveSession) {
+	sess.expiryGeneration++
+	delay := time.Until(sess.ExpiresAt)
+	if delay < 0 {
+		delay = 0
+	}
+	if sess.expiryTimer == nil {
+		sess.expiryTimer = time.AfterFunc(delay, func() { s.expireIfDue(sess.ID) })
+		return
+	}
+	sess.expiryTimer.Reset(delay)
+}
+
+func (s *InteractiveService) expireIfDue(id string) {
+	s.mu.RLock()
+	sess := s.sessions[id]
+	s.mu.RUnlock()
+	if sess == nil {
+		return
+	}
+	sess.mu.Lock()
+	if sess.Closed {
+		sess.mu.Unlock()
+		return
+	}
+	if time.Now().Before(sess.ExpiresAt) {
+		s.scheduleExpiryLocked(sess)
+		sess.mu.Unlock()
+		return
+	}
+	generation := sess.expiryGeneration
+	sess.mu.Unlock()
+	s.closeSessionAtDeadline(id, generation, true)
+}
+
+func (s *InteractiveService) renewSession(id string) {
+	s.mu.RLock()
+	sess := s.sessions[id]
+	idleTimeout := s.idleTimeout
+	maxLifetime := s.ttl
+	s.mu.RUnlock()
+	if sess == nil || idleTimeout <= 0 {
+		return
+	}
+	sess.mu.Lock()
+	if sess.Closed {
+		sess.mu.Unlock()
+		return
+	}
+	if !time.Now().Before(sess.ExpiresAt) {
+		sess.mu.Unlock()
+		s.expire(id)
+		return
+	}
+	expiresAt := time.Now().Add(idleTimeout)
+	if maxLifetime > 0 {
+		absoluteExpiry := sess.CreatedAt.Add(maxLifetime)
+		if absoluteExpiry.Before(expiresAt) {
+			expiresAt = absoluteExpiry
+		}
+	}
+	if !expiresAt.After(time.Now()) {
+		sess.mu.Unlock()
+		return
+	}
+	sess.ExpiresAt = expiresAt
+	s.scheduleExpiryLocked(sess)
+	sess.mu.Unlock()
+}
+
 func (s *InteractiveService) agentAllowedLocked(agentID, intent string) bool {
 	for _, agent := range s.agents {
 		if agent.ID != strings.TrimSpace(agentID) || !agent.Available {
@@ -757,6 +847,10 @@ func (s *InteractiveService) agentAllowedLocked(agentID, intent string) bool {
 }
 
 func (s *InteractiveService) closeSession(id string, emitExpired bool) {
+	s.closeSessionAtDeadline(id, 0, emitExpired)
+}
+
+func (s *InteractiveService) closeSessionAtDeadline(id string, generation uint64, shouldEmitExpired bool) {
 	s.mu.RLock()
 	sess := s.sessions[id]
 	s.mu.RUnlock()
@@ -768,15 +862,30 @@ func (s *InteractiveService) closeSession(id string, emitExpired bool) {
 		sess.mu.Unlock()
 		return
 	}
+	if generation > 0 {
+		if sess.expiryGeneration != generation {
+			sess.mu.Unlock()
+			return
+		}
+		if time.Now().Before(sess.ExpiresAt) {
+			s.scheduleExpiryLocked(sess)
+			sess.mu.Unlock()
+			return
+		}
+	}
 	if sess.committing {
 		sess.mu.Unlock()
-		if emitExpired {
-			time.AfterFunc(100*time.Millisecond, func() { s.expire(id) })
+		if shouldEmitExpired {
+			if generation == 0 {
+				time.AfterFunc(100*time.Millisecond, func() { s.expire(id) })
+			} else {
+				time.AfterFunc(100*time.Millisecond, func() { s.closeSessionAtDeadline(id, generation, shouldEmitExpired) })
+			}
 		}
 		return
 	}
 	var terminal *InteractiveEvent
-	if emitExpired {
+	if shouldEmitExpired {
 		// Publish the terminal event while the session is still open. The event
 		// is retained for clients that reconnect before the tombstone is collected.
 		sess.nextEvent++
@@ -797,6 +906,10 @@ func (s *InteractiveService) closeSession(id string, emitExpired bool) {
 	}
 	sess.Closed = true
 	sess.ClosedAt = time.Now()
+	if sess.expiryTimer != nil {
+		sess.expiryTimer.Stop()
+		sess.expiryTimer = nil
+	}
 	rt := sess.runtime
 	sess.runtime = nil
 	cancel := sess.cancel
@@ -1059,6 +1172,10 @@ func (s *InteractiveService) runtimeEvent(id, typ string, data any) {
 	sess := s.sessions[id]
 	s.mu.RUnlock()
 	if sess == nil {
+		return
+	}
+	if typ == "session.heartbeat" {
+		s.renewSession(id)
 		return
 	}
 	switch typ {

@@ -196,6 +196,7 @@ func newInteractiveTestSession() *InteractiveSession {
 func TestInteractiveSessionTTLCanBeConfigured(t *testing.T) {
 	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, interactiveTestRuntimeFactory{}, []InteractiveAgent{{ID: "project-creator", Available: true, Intents: []string{"create-project"}}})
 	svc.SetEnabled(true)
+	svc.idleTimeout = 3 * time.Hour
 	svc.SetSessionTTL(2 * time.Hour)
 	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
 	if err != nil {
@@ -206,6 +207,120 @@ func TestInteractiveSessionTTLCanBeConfigured(t *testing.T) {
 		t.Fatalf("session TTL = %v, want approximately 2h", remaining)
 	}
 	_ = svc.Close("user-1", sess.ID)
+}
+
+func TestInteractiveRuntimeHeartbeatRenewsIdleLease(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.CreatedAt = time.Now()
+	sess.ExpiresAt = sess.CreatedAt.Add(30 * time.Minute)
+	svc := newInteractiveTestService(sess)
+	svc.ttl = 24 * time.Hour
+	svc.idleTimeout = 30 * time.Minute
+	defer svc.closeSession(sess.ID, false)
+
+	before := sess.ExpiresAt
+	time.Sleep(10 * time.Millisecond)
+	svc.runtimeEvent(sess.ID, "session.heartbeat", nil)
+
+	sess.mu.Lock()
+	after := sess.ExpiresAt
+	closed := sess.Closed
+	sess.mu.Unlock()
+	if !after.After(before) {
+		t.Fatalf("heartbeat expiry = %s, want later than %s", after, before)
+	}
+	if closed {
+		t.Fatal("heartbeat closed the session")
+	}
+	if len(sess.events) != 0 {
+		t.Fatalf("heartbeat was exposed as an interactive event: %#v", sess.events)
+	}
+}
+
+func TestInteractiveRuntimeHeartbeatCannotExtendAbsoluteLifetime(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.CreatedAt = time.Now().Add(-23*time.Hour - 59*time.Minute)
+	sess.ExpiresAt = sess.CreatedAt.Add(24 * time.Hour)
+	svc := newInteractiveTestService(sess)
+	svc.ttl = 24 * time.Hour
+	svc.idleTimeout = 30 * time.Minute
+	defer svc.closeSession(sess.ID, false)
+
+	svc.runtimeEvent(sess.ID, "session.heartbeat", nil)
+
+	sess.mu.Lock()
+	after := sess.ExpiresAt
+	sess.mu.Unlock()
+	if limit := sess.CreatedAt.Add(svc.ttl); !after.Equal(limit) {
+		t.Fatalf("heartbeat expiry = %s, want absolute deadline %s", after, limit)
+	}
+}
+
+func TestInteractiveIdleLeaseResetsTimerAndExpiresAfterHeartbeatsStop(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.CreatedAt = time.Now()
+	sess.ExpiresAt = sess.CreatedAt.Add(500 * time.Millisecond)
+	svc := newInteractiveTestService(sess)
+	svc.ttl = time.Second
+	svc.idleTimeout = 500 * time.Millisecond
+	sess.mu.Lock()
+	svc.scheduleExpiryLocked(sess)
+	sess.mu.Unlock()
+	defer svc.closeSession(sess.ID, false)
+
+	time.Sleep(200 * time.Millisecond)
+	svc.runtimeEvent(sess.ID, "session.heartbeat", nil)
+	time.Sleep(200 * time.Millisecond)
+	sess.mu.Lock()
+	closedBeforeIdleDeadline := sess.Closed
+	sess.mu.Unlock()
+	if closedBeforeIdleDeadline {
+		t.Fatal("session closed at its original idle deadline after a heartbeat")
+	}
+
+	sess.mu.Lock()
+	deadline := sess.ExpiresAt
+	sess.mu.Unlock()
+	time.Sleep(time.Until(deadline) + 100*time.Millisecond)
+	sess.mu.Lock()
+	closed := sess.Closed
+	sess.mu.Unlock()
+	if !closed {
+		t.Fatal("session remained open after heartbeats stopped and idle lease expired")
+	}
+}
+
+func TestInteractiveStaleExpiryCallbackCannotCloseRenewedLease(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.CreatedAt = time.Now()
+	sess.ExpiresAt = sess.CreatedAt.Add(time.Minute)
+	svc := newInteractiveTestService(sess)
+	svc.ttl = time.Hour
+	svc.idleTimeout = time.Minute
+
+	sess.mu.Lock()
+	svc.scheduleExpiryLocked(sess)
+	staleGeneration := sess.expiryGeneration
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		svc.closeSessionAtDeadline(sess.ID, staleGeneration, true)
+		close(done)
+	}()
+	<-started
+	sess.ExpiresAt = time.Now().Add(2 * time.Minute)
+	svc.scheduleExpiryLocked(sess)
+	sess.mu.Unlock()
+	defer svc.closeSession(sess.ID, false)
+
+	<-done
+	sess.mu.Lock()
+	closed := sess.Closed
+	sess.mu.Unlock()
+	if closed {
+		t.Fatal("stale expiry callback closed the renewed session")
+	}
 }
 
 func TestInteractiveCloseSessionWithShortHistory(t *testing.T) {

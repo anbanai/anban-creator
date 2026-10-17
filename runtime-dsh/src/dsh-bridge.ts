@@ -8,6 +8,7 @@ type JsonRecord = Record<string, unknown>;
 const DSH_BRIDGE_PROVIDER_API_KEY_ENV = "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY";
 const PROVIDER_REGISTRATION_RETRIES = 20;
 const PROVIDER_REGISTRATION_RETRY_MS = 50;
+const RUNTIME_HEARTBEAT_INTERVAL_MS = 30_000;
 
 export interface InteractiveCommand {
   id?: string | number;
@@ -305,6 +306,7 @@ export class DshBridge {
   private client: InteractiveRuntimeClient | undefined;
   private subscription: { next(): Promise<HarnessNotification>; close(): void } | undefined;
   private runtimeReady: Promise<void> | undefined;
+  private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private closeTask: Promise<void> | undefined;
   private commandQueue: Promise<unknown> = Promise.resolve();
   private closed = false;
@@ -362,6 +364,10 @@ export class DshBridge {
       this.subscription = client.subscribeSessionTree(this.rootSessionId);
       void this.forwardNotifications();
       this.write({ event: "session.status", data: { status: "starting" } });
+      this.write({ event: "session.heartbeat", data: {} });
+      this.heartbeatTimer = setInterval(() => {
+        if (!this.closed) this.write({ event: "session.heartbeat", data: {} });
+      }, RUNTIME_HEARTBEAT_INTERVAL_MS);
     })().catch(async (error: unknown) => {
       this.write({ event: "session.error", data: { message: this.redact(error instanceof Error ? error.message : String(error)) } });
       await this.closeRuntime();
@@ -400,6 +406,10 @@ export class DshBridge {
   private closeRuntime(): Promise<void> {
     this.closeTask ??= (async () => {
       this.closed = true;
+      if (this.heartbeatTimer !== undefined) {
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = undefined;
+      }
       this.subscription?.close();
       this.subscription = undefined;
       await this.client?.close();

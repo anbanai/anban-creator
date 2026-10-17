@@ -181,6 +181,23 @@ describe("DSH bridge protocol", () => {
     await bridge.dispose();
   });
 
+  test("announces runtime liveness after initialization", async () => {
+    const events: Array<{ event: string; data?: unknown }> = [];
+    const client = {
+      start: () => undefined,
+      initialize: async () => ({ capabilities: { sessionStart: true, sessionAnswer: true } }),
+      request: async () => ({}),
+      subscribeSessionTree: () => ({ next: async () => new Promise<never>(() => undefined), close: () => undefined }),
+      close: async () => undefined,
+    };
+    const bridge = new DshBridge((event) => events.push(event), () => client, "root");
+
+    await bridge.command({ method: "session/start", params: { sessionId: "root", presetId: "project-creator" } });
+
+    expect(events.some(({ event }) => event === "session.heartbeat")).toBe(true);
+    await bridge.dispose();
+  });
+
   test("serializes answer and prompt requests", async () => {
     let releaseAnswer: (() => void) | undefined;
     const calls: string[] = [];

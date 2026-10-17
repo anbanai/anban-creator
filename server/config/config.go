@@ -78,6 +78,7 @@ type DshConfig struct {
 	MemoryMB                     int64  `yaml:"memory_mb"`
 	PidsLimit                    int64  `yaml:"pids_limit"`
 	TimeoutSec                   int    `yaml:"timeout_sec"`
+	IdleTimeoutSec               int    `yaml:"idle_timeout_sec"`
 	StartupTimeoutSec            int    `yaml:"startup_timeout_sec"`
 	// RuntimeDiagnosticRetentionSeconds controls how long failed Kubernetes
 	// DSH resources remain available for pod logs and describe output.
@@ -108,7 +109,7 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 		"kubernetes_namespace": true, "kubernetes_image_pull_secret": true,
 		"kubernetes_project_memory_claim": true, "kubernetes_project_memory_mount": true,
 		"server_instance_id": true, "cpu_cores": true, "memory_mb": true, "pids_limit": true,
-		"timeout_sec": true, "startup_timeout_sec": true, "runtime_diagnostic_retention_seconds": true,
+		"timeout_sec": true, "idle_timeout_sec": true, "startup_timeout_sec": true, "runtime_diagnostic_retention_seconds": true,
 	}); err != nil {
 		return err
 	}
@@ -174,6 +175,9 @@ func (c DshConfig) Validate() error {
 	}
 	if c.StartupTimeoutSec < 0 {
 		errs = append(errs, "dsh.startup_timeout_sec must not be negative")
+	}
+	if c.Enabled && c.IdleTimeoutSec <= 0 {
+		errs = append(errs, "dsh.idle_timeout_sec must be positive")
 	}
 	if executor == "kubernetes" {
 		if !validDshKubernetesImageReference(c.Image) {
@@ -1347,6 +1351,9 @@ func (c *Config) applyDefaults() {
 		// Keep the interactive session and its one-shot DSH runtime alive long
 		// enough for users to resume a project after an extended break.
 		c.Dsh.TimeoutSec = 24 * 60 * 60
+	}
+	if c.Dsh.IdleTimeoutSec == 0 {
+		c.Dsh.IdleTimeoutSec = 30 * 60
 	}
 	if c.Dsh.ServerURL == "" {
 		c.Dsh.ServerURL = c.AgentServerURL()

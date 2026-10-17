@@ -116,6 +116,8 @@ dsh:
   pids_limit: 256
   # Maximum lifetime of the interactive session and its DSH runtime.
   timeout_sec: 86400
+  # Close the session and runtime after this much time without a DSH heartbeat.
+  idle_timeout_sec: 1800
   # ACK image pulls and NAS mounts may take time on a cold node.
   startup_timeout_sec: 180
   # Failed Kubernetes DSH pods/secrets stay this long for kubectl logs/describe.
