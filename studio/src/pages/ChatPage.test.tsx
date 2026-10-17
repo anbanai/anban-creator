@@ -104,6 +104,80 @@ describe('ChatPage', () => {
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
 
+  it('does not enable a resumed session from SSE connectivity alone', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
+      options?.onConnected?.()
+      return holdStream([], signal)
+    })
+    renderChat('/projects/create')
+
+    await waitFor(() => expect(streamMock).toHaveBeenCalled())
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+  })
+
+  it('restores an idle session from its authoritative SSE snapshot', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
+      options?.onConnected?.()
+      return holdStream([{ event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: false, questions: [] }) }], signal)
+    })
+    renderChat('/projects/create')
+
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled())
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps the composer disabled when a resumed session snapshot is busy', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
+      options?.onConnected?.()
+      return holdStream([{ event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: true, questions: [] }) }], signal)
+    })
+    renderChat('/projects/create')
+
+    expect(await screen.findByText('进行中')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+  })
+
+  it('restores pending questions from a resumed session snapshot', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
+      options?.onConnected?.()
+      return holdStream([{
+        event: 'session.snapshot',
+        data: JSON.stringify({ status: 'waiting_answer', busy: false, pending_call_id: 'call-1', questions: [{ id: 'topic', question: '创作主题是什么？' }] }),
+      }], signal)
+    })
+    renderChat('/projects/create')
+
+    expect(await screen.findByText('创作主题是什么？')).toBeInTheDocument()
+    expect(screen.getByText('等待回答')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps the session and offers reconnection after the SSE retry budget is exhausted', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    streamMock
+      .mockImplementationOnce(() => { throw new Error('SSE connection failed after 7 attempts') })
+      .mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+        { event: 'session.ready', data: JSON.stringify({ session_id: 'session-1' }) },
+      ], signal))
+    renderChat('/projects/create')
+
+    const reconnect = await screen.findByRole('button', { name: '重新连接' })
+    expect(interactiveMocks.close).not.toHaveBeenCalled()
+    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').sessionId).toBe('session-1')
+
+    fireEvent.click(reconnect)
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled())
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+  })
+
   it('keeps a resumed composer disabled when the persisted session was mid-turn', async () => {
     sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '7', turnActive: true }))
     let release: (() => void) | undefined

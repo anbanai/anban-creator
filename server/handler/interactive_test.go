@@ -153,6 +153,24 @@ func TestInteractiveHandlerEventsStreamsPublishedEvent(t *testing.T) {
 	if line != "\n" {
 		t.Fatalf("historical SSE event terminator = %q, want blank line", line)
 	}
+	for _, want := range []string{"id: 1\n", "event: session.snapshot\n"} {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line != want {
+			t.Fatalf("snapshot SSE line = %q, want %q", line, want)
+		}
+	}
+	if line, err = reader.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(line, "data: {") || !strings.Contains(line, `"status":"starting"`) {
+		t.Fatalf("snapshot SSE data = %q, want current starting status", line)
+	}
+	if line, err = reader.ReadString('\n'); err != nil || line != "\n" {
+		t.Fatalf("snapshot SSE terminator = %q, err = %v, want blank line", line, err)
+	}
 	line, err = reader.ReadString('\n')
 	if err != nil {
 		t.Fatal(err)

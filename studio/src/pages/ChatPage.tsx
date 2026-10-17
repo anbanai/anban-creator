@@ -313,6 +313,18 @@ export default function ChatPage() {
         setRunState(isRunState(data.status) ? data.status : 'running')
         if (data.status === 'idle') setTurnActive(false)
         break
+      case 'session.snapshot':
+        setRunState(data.status === 'waiting_answer' ? 'waiting_answer' : data.status === 'starting' ? 'starting' : 'running')
+        setTurnActive(data.busy === true)
+        {
+          const callId = stringValue(data.pending_call_id) ?? ''
+          const questions = Array.isArray(data.questions) ? data.questions.flatMap((value) => {
+            const question = parseQuestion(value)
+            return question ? [question] : []
+          }) : []
+          setQuestionBatches(callId && questions.length > 0 ? [{ callId, questions }] : [])
+        }
+        break
       case 'turn.start':
         setTurnActive(true)
         break
@@ -385,16 +397,22 @@ export default function ChatPage() {
       const persisted = readPersistedInteractiveSession(sessionStorageKey)
       for await (const event of streamInteractiveSession(id, token, controller.signal, {
         lastEventId: persisted?.sessionId === id ? persisted.lastEventId : undefined,
+        onConnected: () => {
+          if (disposedRef.current || generation !== runGenerationRef.current) return
+          setStreamError(null)
+        },
         onEvent: (received) => {
           const previous = readPersistedInteractiveSession(sessionStorageKey)
           const receivedData = parseData(received.data)
           const idleStatus = received.event === 'session.status' && receivedData.status === 'idle'
-          const turnActive = received.event === 'turn.start'
+          const turnActive = received.event === 'session.snapshot'
+            ? receivedData.busy === true
+            : received.event === 'turn.start'
             ? true
             : received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || idleStatus
               ? false
               : previous?.turnActive === true
-          if (received.id || received.event === 'turn.start' || received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || idleStatus) {
+          if (received.id || received.event === 'session.snapshot' || received.event === 'turn.start' || received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || idleStatus) {
             persistInteractiveSession(sessionStorageKey, {
               sessionId: id,
               lastEventId: received.id ?? previous?.lastEventId,
@@ -412,6 +430,11 @@ export default function ChatPage() {
     } catch (error) {
       if (controller.signal.aborted || disposedRef.current || generation !== runGenerationRef.current) return
       const message = error instanceof Error ? error.message : '与创作会话连接失败'
+      if (/^SSE connection failed after \d+ attempts$/.test(message)) {
+        setStreamError('会话连接多次失败。当前会话已保留，请重新连接。')
+        setRunState('error')
+        return
+      }
       const terminal = message === '会话历史已失效，请重新开始创建' || /^SSE connection failed: (401|404|410)$/.test(message)
       if (terminal) {
         terminateConversation('error', message)
@@ -420,10 +443,19 @@ export default function ChatPage() {
         // server-owned session. Keeping its ID persisted lets the next mount
         // resume the same Job instead of creating a second runtime.
         setStreamError(message)
-        setRunState('running')
       }
     }
   }, [isProjectUpdate, processEvent, sessionStorageKey, terminateConversation, token])
+
+  const reconnectSession = useCallback(() => {
+    const id = sessionRef.current
+    if (!id) return
+    const generation = ++runGenerationRef.current
+    disposedRef.current = false
+    setStreamError(null)
+    setRunState('starting')
+    void connectStream(id, generation)
+  }, [connectStream])
 
   const startSession = useCallback((agent: InteractiveAgent) => {
     const key = `${agent.id}:${intent}:${projectId ?? ''}:${restartNonce}`
@@ -584,7 +616,7 @@ export default function ChatPage() {
     }
   }
 
-  const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && !committing && !committed && !sendingMessage && !turnActive
+  const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && runState !== 'error' && !committing && !committed && !sendingMessage && !turnActive
   const emptyRegistry = !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
 
   return (
@@ -649,10 +681,10 @@ export default function ChatPage() {
               {messages.map((message) => <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`flex max-w-[min(720px,90%)] gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}><div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{message.role === 'user' ? <UserRound className="size-3.5" /> : <MessageSquare className="size-3.5" />}</div><div className={`rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted/70'}`}><Streamdown>{message.text}</Streamdown></div></div></div>)}
               {questionBatches.map((batch) => <DshQuestionComposer key={batch.callId} questions={batch.questions} answers={batch.answers} submitted={Boolean(batch.answers)} disabled={!sessionId || runState === 'starting' || runState === 'expired' || runState === 'closed' || runState === 'error'} onSubmit={(answer) => submitAnswers(batch, answer)} />)}
               {draft?.ready && <ConfirmCard draft={draft} isProjectUpdate={isProjectUpdate} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />}
-              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>{runState === 'error' || runState === 'expired' || runState === 'closed' ? '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}{(runState === 'error' || runState === 'expired' || runState === 'closed') && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</AlertDescription></Alert>}
+              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>{runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
             </div>
-            <div className="border-t border-border p-3 sm:p-4"><div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div></div>
+            <div className="border-t border-border p-3 sm:p-4"><div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div></div>
           </section>
           <ProgressRail draft={draft} />
         </div>

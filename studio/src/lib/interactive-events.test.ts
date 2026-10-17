@@ -36,6 +36,24 @@ describe('streamInteractiveSession', () => {
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ id: '8' }))
   })
 
+  it('reports an idle SSE connection as ready before its first event', async () => {
+    const onConnected = vi.fn()
+    let enqueue: ((value: Uint8Array) => void) | undefined
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        enqueue = (value) => controller.enqueue(value)
+      },
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+    const stream = streamInteractiveSession('session-1', 'token', undefined, { onConnected })
+    const nextEvent = stream.next()
+
+    await vi.waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1))
+    enqueue?.(new TextEncoder().encode('event:session.ready\ndata:{}\n\n'))
+    await expect(nextEvent).resolves.toMatchObject({ value: { event: 'session.ready' }, done: false })
+    await stream.return(undefined)
+  })
+
   it('reconnects with the latest event id after a stream closes', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.spyOn(globalThis, 'fetch')
@@ -100,5 +118,21 @@ describe('streamInteractiveSession', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     await expect(nextEvent).resolves.toMatchObject({ value: { event: 'session.status', id: '1' }, done: false })
     expect(fetchMock).toHaveBeenCalledTimes(5)
+  })
+
+  it('fails closed after the reconnect budget is exhausted', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network error'))
+    const controller = new AbortController()
+    const stream = streamInteractiveSession('session-1', 'token', controller.signal)
+    const nextEvent = stream.next()
+    let settled = false
+    void nextEvent.then(() => { settled = true }, () => { settled = true })
+
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(settled).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(7)
+    controller.abort()
+    await nextEvent.catch(() => undefined)
   })
 })

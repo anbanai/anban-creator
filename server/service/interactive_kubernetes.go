@@ -83,6 +83,7 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 	}
 	name := "anban-dsh-" + safeContainerPart(spec.SessionID)
 	secretName := name + "-secret"
+	stageStarted := time.Now()
 	secret := f.secret(spec, namespace, secretName)
 	f.log(spec.SessionID, "creating DSH session Secret", nil)
 	if _, err := f.Kube.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); apierrors.IsAlreadyExists(err) {
@@ -93,7 +94,8 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		abort()
 		return nil, fmt.Errorf("create DSH session secret: %w", err)
 	}
-	f.log(spec.SessionID, "created DSH session Secret", nil)
+	f.logStartupStage(spec.SessionID, "created DSH session Secret", stageStarted)
+	stageStarted = time.Now()
 	job := f.job(spec, namespace, name)
 	job.Spec.Template.Spec.Containers[0].Env = dshSecretEnv(secretName, spec.SessionID, f.MCPURL, f.Config.ServerURL)
 	created, err := f.Kube.BatchV1().Jobs(namespace).Create(ctx, job, metav1.CreateOptions{})
@@ -108,7 +110,8 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		_ = f.deleteSecret(context.Background(), namespace, secretName)
 		return nil, fmt.Errorf("create DSH Job: %w", err)
 	}
-	f.log(spec.SessionID, "created DSH Job", nil)
+	f.logStartupStage(spec.SessionID, "created DSH Job", stageStarted)
+	stageStarted = time.Now()
 	pod, err := waitInteractiveJobPod(streamCtx, f.Kube, namespace, created.Name, f.Config.StartupTimeoutSec)
 	if err != nil {
 		f.log(spec.SessionID, "DSH Job Pod did not become ready", err)
@@ -116,7 +119,8 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		f.retainOrDeleteDiagnosticResources(namespace, created.Name, "", secretName)
 		return nil, err
 	}
-	f.log(spec.SessionID, "DSH Pod running", nil)
+	f.logStartupStage(spec.SessionID, "DSH Pod running", stageStarted)
+	stageStarted = time.Now()
 	request := f.Kube.CoreV1().RESTClient().Post().Namespace(namespace).Resource("pods").Name(pod.Name).SubResource("attach")
 	request.VersionedParams(&corev1.PodAttachOptions{
 		Container: "dsh", Stdin: true, Stdout: true, Stderr: true, TTY: false,
@@ -127,7 +131,7 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		f.retainOrDeleteDiagnosticResources(namespace, created.Name, pod.Name, secretName)
 		return nil, fmt.Errorf("create DSH pod attach: %w", err)
 	}
-	f.log(spec.SessionID, "attached DSH Bridge", nil)
+	f.logStartupStage(spec.SessionID, "created DSH Bridge attach executor", stageStarted)
 	streamCtx, cancel := context.WithCancel(streamCtx)
 	stdinReader, stdinWriter := io.Pipe()
 	stdoutReader, stdoutWriter := io.Pipe()
@@ -199,6 +203,18 @@ func (f KubernetesRuntimeFactory) log(sessionID, message string, err error) {
 		event = f.Logger.Error().Err(err).Str("session_id", sessionID).Str("executor", "kubernetes").Str("server_instance", strings.TrimSpace(f.ServerInstanceID))
 	}
 	event.Msg(message)
+}
+
+func (f KubernetesRuntimeFactory) logStartupStage(sessionID, message string, started time.Time) {
+	if f.Logger == nil {
+		return
+	}
+	f.Logger.Info().
+		Str("session_id", sessionID).
+		Str("executor", "kubernetes").
+		Str("server_instance", strings.TrimSpace(f.ServerInstanceID)).
+		Int64("duration_ms", time.Since(started).Milliseconds()).
+		Msg(message)
 }
 
 func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, name string) *corev1.Pod {

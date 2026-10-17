@@ -121,8 +121,17 @@ func TestStageProjectCreatorDraftUsesProtectedInteractiveIdentity(t *testing.T) 
 	}
 	defer closeEvents()
 	var staged map[string]any
-	if err := json.Unmarshal(interactiveTestJSON(t, history[len(history)-1].Data), &staged); err != nil {
-		t.Fatal(err)
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Type != "draft.updated" && history[i].Type != "draft.ready" {
+			continue
+		}
+		if err := json.Unmarshal(interactiveTestJSON(t, history[i].Data), &staged); err != nil {
+			t.Fatal(err)
+		}
+		break
+	}
+	if staged == nil {
+		t.Fatal("staged draft event was not found in event history")
 	}
 	if got := staged["missing_fields"]; got == nil {
 		t.Fatalf("staged event = %#v, missing missing_fields", staged)

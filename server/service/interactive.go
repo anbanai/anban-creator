@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1006,6 +1007,19 @@ func (s *InteractiveService) Events(uid, id string, after uint64) ([]Interactive
 		sess.mu.Unlock()
 		s.logRuntimeFields("info", id, "interactive event stream replayed closed session", nil, map[string]any{"after_event_id": after, "replayed_events": len(history)})
 		return history, closedInteractiveEvents(), func() {}, nil
+	}
+	if sess.nextEvent > 0 {
+		questions := make([]InteractiveQuestion, 0, len(sess.pendingQuestions))
+		for _, question := range sess.pendingQuestions {
+			questions = append(questions, question)
+		}
+		sort.Slice(questions, func(i, j int) bool { return questions[i].ID < questions[j].ID })
+		history = append(history, InteractiveEvent{
+			ID:        sess.nextEvent,
+			Type:      "session.snapshot",
+			Data:      map[string]any{"status": sess.Status, "busy": sess.busy, "pending_call_id": sess.pendingCall, "questions": questions},
+			CreatedAt: time.Now(),
+		})
 	}
 	w := &interactiveWatcher{ch: make(chan InteractiveEvent, 16)}
 	sess.watchers[w] = struct{}{}

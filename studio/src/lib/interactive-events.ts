@@ -6,10 +6,12 @@ export interface InteractiveStreamEvent extends SSEEvent {
 
 export interface InteractiveStreamOptions {
   lastEventId?: string
+  onConnected?: () => void
   onEvent?: (event: InteractiveStreamEvent) => void
 }
 
 const TERMINAL_EVENTS = new Set(['session.error', 'session.expired', 'session.closed', 'expired', 'closed'])
+const MAX_RECONNECTS = 6
 
 function assertEventSequence(lastEventId: string | undefined, eventId: string | undefined) {
   if (!eventId) return
@@ -40,6 +42,13 @@ function retryDelay(reconnects: number): number {
   return Math.min(10_000, 250 * 2 ** Math.min(reconnects, 6))
 }
 
+async function retryOrFail(reconnects: number, signal?: AbortSignal) {
+  if (reconnects >= MAX_RECONNECTS) {
+    throw new Error(`SSE connection failed after ${MAX_RECONNECTS + 1} attempts`)
+  }
+  await waitForRetry(retryDelay(reconnects), signal)
+}
+
 export async function* streamInteractiveSession(sessionId: string, token: string, signal?: AbortSignal, options: InteractiveStreamOptions = {}): AsyncGenerator<InteractiveStreamEvent> {
   let lastEventId: string | undefined = options.lastEventId
   let reconnects = 0
@@ -56,7 +65,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
       })
     } catch (error) {
       if (signal?.aborted) throw error
-      await waitForRetry(retryDelay(reconnects), signal)
+      await retryOrFail(reconnects, signal)
       reconnects += 1
       continue
     }
@@ -67,15 +76,16 @@ export async function* streamInteractiveSession(sessionId: string, token: string
       if (response.status === 401 || response.status === 404 || response.status === 410) {
         throw new Error(`SSE connection failed: ${response.status}`)
       }
-      await waitForRetry(retryDelay(reconnects), signal)
+      await retryOrFail(reconnects, signal)
       reconnects += 1
       continue
     }
     if (!response.body) {
-      await waitForRetry(retryDelay(reconnects), signal)
+      await retryOrFail(reconnects, signal)
       reconnects += 1
       continue
     }
+    options.onConnected?.()
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
@@ -90,8 +100,9 @@ export async function* streamInteractiveSession(sessionId: string, token: string
         buffer = parts.pop() ?? ''
         for (const part of parts) {
           for (const event of parseSSE(`${part}\n\n`)) {
-              assertEventSequence(lastEventId, event.id)
+            assertEventSequence(lastEventId, event.id)
             if (event.id) lastEventId = event.id
+            reconnects = 0
             terminal ||= TERMINAL_EVENTS.has(event.event)
             const interactiveEvent = event as InteractiveStreamEvent
             options.onEvent?.(interactiveEvent)
@@ -103,6 +114,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
         for (const event of parseSSE(`${buffer}\n\n`)) {
           assertEventSequence(lastEventId, event.id)
           if (event.id) lastEventId = event.id
+          reconnects = 0
           terminal ||= TERMINAL_EVENTS.has(event.event)
           const interactiveEvent = event as InteractiveStreamEvent
           options.onEvent?.(interactiveEvent)
@@ -116,7 +128,7 @@ export async function* streamInteractiveSession(sessionId: string, token: string
       reader.releaseLock()
     }
     if (terminal || signal?.aborted) return
-    await waitForRetry(retryDelay(reconnects), signal)
+    await retryOrFail(reconnects, signal)
     reconnects += 1
   }
 }

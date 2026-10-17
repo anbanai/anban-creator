@@ -742,8 +742,8 @@ func TestInteractiveEventsAllowsFreshConnectionAfterHistoryCompaction(t *testing
 		t.Fatalf("Events() error = %v, want fresh connection to receive retained history", err)
 	}
 	closeFn()
-	if len(history) != 2 || history[0].ID != 3 || history[1].ID != 4 {
-		t.Fatalf("retained history = %#v, want events 3 and 4", history)
+	if len(history) != 3 || history[0].ID != 3 || history[1].ID != 4 || history[2].Type != "session.snapshot" {
+		t.Fatalf("retained history = %#v, want events 3 and 4 followed by a session snapshot", history)
 	}
 	select {
 	case _, ok := <-events:
@@ -752,6 +752,56 @@ func TestInteractiveEventsAllowsFreshConnectionAfterHistoryCompaction(t *testing
 		}
 	case <-time.After(time.Second):
 		t.Fatal("fresh connection channel did not close after cleanup")
+	}
+}
+
+func TestInteractiveEventsIncludeCurrentSessionSnapshotAfterReplayCursor(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.Status = "waiting_answer"
+	sess.pendingCall = "call-1"
+	sess.pendingQuestions = map[string]InteractiveQuestion{
+		"q-2": {ID: "q-2", Question: "Second question"},
+		"q-1": {ID: "q-1", Question: "First question"},
+	}
+	svc := newInteractiveTestService(sess)
+	svc.emit(sess, "turn.end", map[string]any{"turn": 1})
+
+	history, _, closeFn, err := svc.Events(sess.UserID, sess.ID, sess.nextEvent)
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	defer closeFn()
+	if len(history) != 1 || history[0].Type != "session.snapshot" || history[0].ID != sess.nextEvent {
+		t.Fatalf("snapshot history = %#v, want one current session.snapshot", history)
+	}
+	data, ok := history[0].Data.(map[string]any)
+	if !ok || data["status"] != "waiting_answer" || data["pending_call_id"] != "call-1" {
+		t.Fatalf("snapshot data = %#v, want waiting_answer with pending call", history[0].Data)
+	}
+	questions, ok := data["questions"].([]InteractiveQuestion)
+	if !ok || len(questions) != 2 || questions[0].ID != "q-1" || questions[1].ID != "q-2" {
+		t.Fatalf("snapshot questions = %#v, want sorted pending questions", data["questions"])
+	}
+}
+
+func TestInteractiveEventsSnapshotIncludesBusyTurn(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.Status = "running"
+	sess.busy = true
+	svc := newInteractiveTestService(sess)
+	svc.emit(sess, "turn.start", map[string]any{"turn": 1})
+
+	history, _, closeFn, err := svc.Events(sess.UserID, sess.ID, sess.nextEvent)
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	defer closeFn()
+	if len(history) != 1 || history[0].Type != "session.snapshot" {
+		t.Fatalf("snapshot history = %#v, want one session.snapshot", history)
+	}
+	data, ok := history[0].Data.(map[string]any)
+	if !ok || data["busy"] != true {
+		t.Fatalf("snapshot data = %#v, want busy=true", history[0].Data)
 	}
 }
 
