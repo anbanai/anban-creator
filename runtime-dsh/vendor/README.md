@@ -19,6 +19,9 @@ pass.
 
 The runtime also applies `scripts/patch-dsh-dependencies.mjs` during image build
 and before local tests. It is a pinned, layout-checked patch to the published
-`@deepseek-ai/dsh-llm@0.2.1-alpha.4` failure normalizer so `TRANSPORT` errors
-retain their sanitized `Error.cause` chain in the durable turn diagnostic. The
-script fails closed if the upstream package layout changes.
+`0.2.1-alpha.4` packages: `@deepseek-ai/dsh-llm` keeps the sanitized
+`Error.cause` chain for `TRANSPORT` diagnostics, and
+`@deepseek-ai/dsh-llm-deepseek` preserves truncated tool arguments so the
+ToolRuntime can return `INVALID_ARGS` without running a tool body or ending the
+interactive session. The script fails closed if either upstream package layout
+changes.
