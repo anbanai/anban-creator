@@ -36,6 +36,7 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/vendor /app/runtime-dsh/vendor
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/node_modules /app/runtime-dsh/node_modules
+RUN ln -s /app/runtime-dsh/node_modules /app/node_modules
 COPY --from=builder --chown=1000:1000 /build/runtime-dsh/dist /app/runtime-dsh/dist
 COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml
 COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml

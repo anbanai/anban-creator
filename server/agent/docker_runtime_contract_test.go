@@ -1006,6 +1006,14 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 	}
 }
 
+func TestDshRuntimeMakesBundledDependenciesVisibleToHarnessPlugins(t *testing.T) {
+	root := repositoryRoot(t)
+	dsh := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.runtime-dsh"))
+	if !strings.Contains(dsh, "RUN ln -s /app/runtime-dsh/node_modules /app/node_modules") {
+		t.Fatal("DSH runtime must expose its bundled node_modules at /app so harness plugins can resolve bare imports")
+	}
+}
+
 func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	root := repositoryRoot(t)
 	got := trackedDockerfiles(t, root)
