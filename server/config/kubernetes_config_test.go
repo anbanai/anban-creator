@@ -460,6 +460,68 @@ func TestValidateDshKubernetesRequiresClaudeNamespace(t *testing.T) {
 	}
 }
 
+func TestValidateDshKubernetesRejectsMalformedDigestImageReference(t *testing.T) {
+	cfg := baseKubernetesConfigForTest()
+	cfg.Dsh.Executor = "kubernetes"
+	cfg.Dsh.Image = "crpi.example.com/bx_anbanai/runtime-dsh: 4ca2ec7bd14a7981133a648cae01b5982a7d73c9@sha256:" + strings.Repeat("c", 64)
+	cfg.Dsh.KubernetesNamespace = "anbanai-prod"
+	cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
+	cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
+	cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+	cfg.Dsh.ServerInstanceID = "server-1"
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "dsh.image must be a valid immutable container image reference") {
+		t.Fatalf("Config.Validate() error = %v, want malformed DSH image reference rejected", err)
+	}
+}
+
+func TestValidateDshKubernetesAcceptsImmutableImageReferences(t *testing.T) {
+	for _, image := range []string{
+		"registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64),
+		"registry.example.com/creator-dsh:release@sha256:" + strings.Repeat("b", 64),
+	} {
+		t.Run(image, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Dsh.Executor = "kubernetes"
+			cfg.Dsh.Image = image
+			cfg.Dsh.KubernetesNamespace = "anbanai-prod"
+			cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
+			cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
+			cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+			cfg.Dsh.ServerInstanceID = "server-1"
+
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Config.Validate() error = %v, want immutable image reference accepted", err)
+			}
+		})
+	}
+}
+
+func TestValidateDshKubernetesRejectsNonDigestAndWhitespaceImageReferences(t *testing.T) {
+	for _, image := range []string{
+		"registry.example.com/creator-dsh:latest",
+		" registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64),
+		"registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 64) + "\n",
+		"registry.example.com/creator-dsh@sha256:" + strings.Repeat("a", 63),
+	} {
+		t.Run(image, func(t *testing.T) {
+			cfg := baseKubernetesConfigForTest()
+			cfg.Dsh.Executor = "kubernetes"
+			cfg.Dsh.Image = image
+			cfg.Dsh.KubernetesNamespace = "anbanai-prod"
+			cfg.Dsh.KubernetesProjectMemoryClaim = "creator-project-memory"
+			cfg.Dsh.KubernetesProjectMemoryMount = "/workspace/project"
+			cfg.Dsh.ServerURL = "https://creator-api-svc.anbanai-prod.svc.cluster.local:8443"
+			cfg.Dsh.ServerInstanceID = "server-1"
+
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "dsh.image must be a valid immutable container image reference") {
+				t.Fatalf("Config.Validate() error = %v, want invalid image reference rejected", err)
+			}
+		})
+	}
+}
+
 func TestValidateKubernetesAllowsZeroCompletionGrace(t *testing.T) {
 	cfg := baseKubernetesConfigForTest()
 	cfg.Claude.Kubernetes.CompletionGraceSeconds = 0

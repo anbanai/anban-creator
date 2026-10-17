@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+source "$repository_root/scripts/lib/dsh-image-reference.sh"
 manifest_path=${AGENT_RUNTIME_RELEASE_MANIFEST:-"$repository_root/release/agent-runtime-manifest.json"}
 catalog_path=${AGENT_PACK_CATALOG_PATH:-"$repository_root/server/agentpack/catalog.generated.json"}
 template_path=${ACK_SERVER_DEPLOYMENT_TEMPLATE:-"$repository_root/server/Deployment.yaml"}
@@ -19,7 +20,8 @@ The output includes the cluster-scoped TokenReview RBAC required by the Server
 and the namespace-scoped Server resources. Use --server-only only for an
 existing workflow that applies deploy/k8s/ack-agent-runtime.yaml separately.
 The caller must provide namespace, agent_service_account, and normal ACK
-variables directly; image tags and digests are both accepted.
+variables directly; managed Agent image tags and digests are both accepted,
+but dsh_image_repo must include a sha256 digest.
 EOF
 }
 
@@ -89,6 +91,11 @@ fi
 : "${namespace:?namespace must be set}"
 : "${agent_service_account:?agent_service_account must be set (must match claude.kubernetes.service_account and the ACK RBAC manifest)}"
 : "${dsh_image_repo:?dsh_image_repo must be set when the Server config uses ANBAN_DSH_IMAGE}"
+
+if ! is_valid_dsh_image_reference "$dsh_image_repo"; then
+  echo "dsh_image_repo must be a valid immutable sha256 image reference without whitespace" >&2
+  exit 1
+fi
 
 export image_repo
 export namespace

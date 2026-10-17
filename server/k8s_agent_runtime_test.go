@@ -508,6 +508,81 @@ func TestACKRenderRejectsStaleCatalogManifest(t *testing.T) {
 	}
 }
 
+func TestACKRenderRejectsMalformedDshImageReference(t *testing.T) {
+	if _, err := exec.LookPath("envsubst"); err != nil {
+		t.Skipf("envsubst is required by the ACK renderer: %v", err)
+	}
+	env := ackRenderEnv(filepath.Join(t.TempDir(), "missing-manifest.json"))
+	for index, value := range env {
+		if strings.HasPrefix(value, "dsh_image_repo=") {
+			env[index] = "dsh_image_repo=registry.example.com/runtime-dsh: broken@sha256:" + strings.Repeat("a", 64)
+		}
+	}
+	cmd := exec.Command("bash", filepath.Join("..", "scripts", "render-ack-server-deployment.sh"))
+	cmd.Env = append(os.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "dsh_image_repo must be a valid immutable sha256 image reference without whitespace") {
+		t.Fatalf("malformed DSH image render result = %v, output = %s", err, output)
+	}
+}
+
+func TestAgentRuntimeReleaseRejectsMalformedDshImageReference(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skipf("jq is required by the runtime release script: %v", err)
+	}
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	env := []string{
+		"SERVER_IMAGE=registry.example.com/server:release",
+		"AGENT_IMAGE_WECHAT_ARTICLE=registry.example.com/article:release",
+		"AGENT_IMAGE_WECHAT_PICTURE=registry.example.com/picture:release",
+		"AGENT_IMAGE_SEEDNOTE=registry.example.com/seednote:release",
+		"AGENT_IMAGE_MONTAGE=registry.example.com/montage:release",
+		"AGENT_IMAGE_MOMENTS=registry.example.com/moments:release",
+		"AGENT_IMAGE_ECOMMERCE=registry.example.com/ecommerce:release",
+		"AGENT_IMAGE_PROFILE_ANALYSIS=registry.example.com/profile-analysis:release",
+		"AGENT_IMAGE_FEEDBACK_ANALYSIS=registry.example.com/feedback-analysis:release",
+		"AGENT_IMAGE_WHITEBOARD_ANIMATION=registry.example.com/whiteboard-animation:release",
+		"AGENT_IMAGE_HYPIT=registry.example.com/hypit:release",
+		"DSH_IMAGE=registry.example.com/runtime-dsh: broken@sha256:" + strings.Repeat("a", 64),
+		"AGENT_RUNTIME_RELEASE_MANIFEST=" + manifest,
+	}
+	cmd := exec.Command("bash", filepath.Join("..", "scripts", "agent-runtime-release.sh"))
+	cmd.Env = append(os.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "DSH_IMAGE must be a valid immutable sha256 image reference without whitespace") {
+		t.Fatalf("malformed DSH image release result = %v, output = %s", err, output)
+	}
+	if _, err := os.Stat(manifest); !os.IsNotExist(err) {
+		t.Fatalf("malformed DSH image wrote release manifest, stat error = %v", err)
+	}
+}
+
+func TestDshImageReferenceShellValidator(t *testing.T) {
+	validator := filepath.Join("..", "scripts", "lib", "dsh-image-reference.sh")
+	for _, test := range []struct {
+		name  string
+		image string
+		valid bool
+	}{
+		{name: "digest only", image: "registry.example.com/runtime-dsh@sha256:" + strings.Repeat("a", 64), valid: true},
+		{name: "tag and digest", image: "registry.example.com/runtime-dsh:release@sha256:" + strings.Repeat("b", 64), valid: true},
+		{name: "reported whitespace", image: "registry.example.com/runtime-dsh: release@sha256:" + strings.Repeat("c", 64)},
+		{name: "invalid repository separator", image: "registry.example.com/runtime..dsh@sha256:" + strings.Repeat("d", 64)},
+		{name: "non digest", image: "registry.example.com/runtime-dsh:latest"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := exec.Command("bash", "-c", `source "$1" && is_valid_dsh_image_reference "$2"`, "bash", validator, test.image)
+			err := cmd.Run()
+			if test.valid && err != nil {
+				t.Fatalf("validator rejected valid image %q: %v", test.image, err)
+			}
+			if !test.valid && err == nil {
+				t.Fatalf("validator accepted invalid image %q", test.image)
+			}
+		})
+	}
+}
+
 func ackRenderEnv(manifestPath string) []string {
 	return []string{
 		"AGENT_RUNTIME_RELEASE_MANIFEST=" + manifestPath,

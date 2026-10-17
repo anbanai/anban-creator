@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+source "$repository_root/scripts/lib/dsh-image-reference.sh"
 catalog_path=${AGENT_PACK_CATALOG_PATH:-"$repository_root/server/agentpack/catalog.generated.json"}
 runtime_catalog_path=${AGENT_RUNTIME_CATALOG_PATH:-"$repository_root/harness/agent-pack-catalog.json"}
 manifest_path=${AGENT_RUNTIME_RELEASE_MANIFEST:-"$repository_root/release/agent-runtime-manifest.json"}
@@ -13,7 +14,7 @@ Usage: scripts/agent-runtime-release.sh [--output PATH]
 
 Image references are supplied through SERVER_IMAGE, DSH_IMAGE, and one
 AGENT_IMAGE_* variable for every managed runtime profile. Tags and digests are
-both accepted.
+accepted for managed Agent images; DSH_IMAGE must include a sha256 digest.
 EOF
 }
 
@@ -52,6 +53,12 @@ if [[ ! "$catalog_digest" =~ ^[0-9a-f]{64}$ ]]; then
 fi
 
 : "${SERVER_IMAGE:?SERVER_IMAGE must be set}"
+: "${DSH_IMAGE:?DSH_IMAGE must be set}"
+
+if ! is_valid_dsh_image_reference "$DSH_IMAGE"; then
+  echo "DSH_IMAGE must be a valid immutable sha256 image reference without whitespace" >&2
+  exit 1
+fi
 
 image_entries=(
   "server=$SERVER_IMAGE"

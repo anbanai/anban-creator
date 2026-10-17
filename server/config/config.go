@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
+	"github.com/distribution/reference"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -174,8 +176,8 @@ func (c DshConfig) Validate() error {
 		errs = append(errs, "dsh.startup_timeout_sec must not be negative")
 	}
 	if executor == "kubernetes" {
-		if strings.TrimSpace(c.Image) == "" || !dshImageDigestRe.MatchString(strings.TrimSpace(c.Image)) {
-			errs = append(errs, "dsh.image must be an immutable digest for kubernetes executor")
+		if !validDshKubernetesImageReference(c.Image) {
+			errs = append(errs, "dsh.image must be a valid immutable container image reference")
 		}
 		if strings.TrimSpace(c.KubernetesNamespace) == "" {
 			errs = append(errs, "dsh.kubernetes_namespace is required for kubernetes executor")
@@ -1236,7 +1238,23 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 // expanded, so a literal '$' in a value (e.g. a password) is never touched.
 // Submatch 1 = variable name; submatch 2 = default text (nil when no :-group).
 var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}`)
-var dshImageDigestRe = regexp.MustCompile(`^.+@sha256:[a-f0-9]{64}$`)
+var sha256DigestRe = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
+func validDshKubernetesImageReference(image string) bool {
+	if image == "" || image != strings.TrimSpace(image) || strings.IndexFunc(image, unicode.IsSpace) >= 0 {
+		return false
+	}
+	named, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		return false
+	}
+	digested, ok := named.(reference.Digested)
+	if !ok {
+		return false
+	}
+	digest := digested.Digest()
+	return string(digest.Algorithm()) == "sha256" && sha256DigestRe.MatchString(digest.Encoded())
+}
 
 // expandEnvVars replaces ${VAR} / ${VAR:-default} occurrences in the raw config
 // text using the process environment. A referenced variable that is unset (or
