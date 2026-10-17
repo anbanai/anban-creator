@@ -264,6 +264,35 @@ func TestInteractiveClientHeartbeatRenewsIdleLease(t *testing.T) {
 	}
 }
 
+func TestInteractiveClientHeartbeatCanExtendBeyondRuntimeLifetime(t *testing.T) {
+	now := time.Now()
+	sess := newInteractiveTestSession()
+	sess.CreatedAt = now.Add(-time.Minute)
+	sess.ExpiresAt = now.Add(30 * time.Millisecond)
+	svc := newInteractiveTestService(sess)
+	svc.ttl = 50 * time.Millisecond
+	svc.idleTimeout = 100 * time.Millisecond
+	sess.mu.Lock()
+	svc.scheduleExpiryLocked(sess)
+	sess.mu.Unlock()
+	defer svc.closeSession(sess.ID, false)
+
+	if err := svc.TouchSession(sess.UserID, sess.ID); err != nil {
+		t.Fatalf("TouchSession() error = %v", err)
+	}
+
+	sess.mu.Lock()
+	after := sess.ExpiresAt
+	closed := sess.Closed
+	sess.mu.Unlock()
+	if !after.After(now.Add(50 * time.Millisecond)) {
+		t.Fatalf("client heartbeat expiry = %s, want beyond runtime lifetime %s", after, now.Add(50*time.Millisecond))
+	}
+	if closed {
+		t.Fatal("client heartbeat closed the session")
+	}
+}
+
 func TestInteractiveClientHeartbeatValidatesSessionOwnership(t *testing.T) {
 	sess := newInteractiveTestSession()
 	svc := newInteractiveTestService(sess)

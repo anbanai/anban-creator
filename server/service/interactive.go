@@ -828,7 +828,6 @@ func (s *InteractiveService) TouchSession(uid, id string) error {
 	s.mu.RLock()
 	sess := s.sessions[id]
 	idleTimeout := s.idleTimeout
-	maxLifetime := s.ttl
 	s.mu.RUnlock()
 	if sess == nil {
 		return ErrInteractiveSessionNotFound
@@ -847,7 +846,7 @@ func (s *InteractiveService) TouchSession(uid, id string) error {
 		s.expire(id)
 		return ErrInteractiveSessionClosed
 	}
-	s.renewSessionLocked(sess, idleTimeout, maxLifetime, now)
+	s.renewSessionLocked(sess, idleTimeout, 0, now)
 	sess.mu.Unlock()
 	return nil
 }
