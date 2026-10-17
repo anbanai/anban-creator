@@ -269,6 +269,8 @@ describe("DSH bridge protocol", () => {
     const text = readFileSync(path, "utf8");
     expect(text).toContain('apiKeyEnv: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY"');
     expect(text).toContain('baseURL: "https://api.deepseek.com/anthropic"');
+    expect(text).toContain("retryPolicy:");
+    expect(text).toContain("- MALFORMED_RESPONSE");
     expect(text).toContain('id: "deepseek-v4-flash"');
     expect(() => parseInteractiveRouteArgs([
       "--provider", "deepseek-official", "--model", "deepseek-v4-flash",

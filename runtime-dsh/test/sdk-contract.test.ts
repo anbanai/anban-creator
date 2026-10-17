@@ -68,4 +68,14 @@ describe("vendored DSH interactive SDK contract", () => {
     expect(patch).toContain("Anban transport-cause preservation patch");
     expect(patch).toContain("unsupported @deepseek-ai/dsh-llm alpha.4 layout");
   });
+
+  test("keeps malformed provider tool input recoverable", () => {
+    const adapter = readFileSync(
+      join(runtimeDir, "node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js"),
+      "utf8",
+    );
+    expect(adapter).toContain("Anban malformed-tool-input recovery patch");
+    expect(adapter).toContain("ToolRuntime validates malformed provider arguments");
+    expect(adapter).not.toContain('return malformed("tool input is invalid JSON")');
+  });
 });

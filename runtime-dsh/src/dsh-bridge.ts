@@ -9,6 +9,22 @@ const DSH_BRIDGE_PROVIDER_API_KEY_ENV = "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY";
 const PROVIDER_REGISTRATION_RETRIES = 20;
 const PROVIDER_REGISTRATION_RETRY_MS = 50;
 const RUNTIME_HEARTBEAT_INTERVAL_MS = 30_000;
+const DSH_RETRY_POLICY = [
+  "  retryPolicy:",
+  "    mode: normal",
+  "    maxRetries: 2",
+  "    retryableCodes:",
+  "      - EMPTY_RESPONSE",
+  "      - RATE_LIMIT",
+  "      - SERVER",
+  "      - TIMEOUT",
+  "      - TRANSPORT",
+  "      - MALFORMED_RESPONSE",
+  "    backoff:",
+  "      initialDelayMs: 500",
+  "      maxDelayMs: 5000",
+  "      jitterRatio: 0.1",
+].join("\n");
 
 export interface InteractiveCommand {
   id?: string | number;
@@ -85,8 +101,8 @@ export function writeDshRouteSettings(dshHome: string, route: InteractiveRouteCo
   mkdirSync(dshHome, { recursive: true, mode: 0o700 });
   const model = `        - id: ${yamlQuote(route.model)}\n          contextWindow: 262144\n          maxTokens: 32768`;
   const body = route.provider === "deepseek-official"
-    ? ["llm-deepseek:", `  apiKeyEnv: ${yamlQuote(DSH_BRIDGE_PROVIDER_API_KEY_ENV)}`, `  baseURL: ${yamlQuote(route.baseURL)}`, "  models:", model].join("\n") + "\n"
-    : ["llm-pi-ai:", "  providers:", `    ${route.provider}:`, `      apiKeyEnv: ${yamlQuote(DSH_BRIDGE_PROVIDER_API_KEY_ENV)}`, `      api: ${yamlQuote(route.api)}`, `      baseURL: ${yamlQuote(route.baseURL)}`, "      models:", model].join("\n") + "\n";
+    ? ["llm-deepseek:", `  apiKeyEnv: ${yamlQuote(DSH_BRIDGE_PROVIDER_API_KEY_ENV)}`, `  baseURL: ${yamlQuote(route.baseURL)}`, DSH_RETRY_POLICY, "  models:", model].join("\n") + "\n"
+    : ["llm-pi-ai:", "  providers:", `    ${route.provider}:`, `      apiKeyEnv: ${yamlQuote(DSH_BRIDGE_PROVIDER_API_KEY_ENV)}`, `      api: ${yamlQuote(route.api)}`, `      baseURL: ${yamlQuote(route.baseURL)}`, DSH_RETRY_POLICY.replace(/^/gm, "    "), "      models:", model].join("\n") + "\n";
   const path = resolve(dshHome, "settings.yaml");
   writeFileSync(path, body, { encoding: "utf8", mode: 0o600 });
   return path;
