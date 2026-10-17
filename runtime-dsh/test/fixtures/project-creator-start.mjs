@@ -13,6 +13,8 @@ const staged = join(root, 'harness/dsh')
 mkdirSync(staged, { recursive: true })
 cpSync(join(repo, 'harness/dsh/project-creator.patch.yml'), join(staged, 'project-creator.patch.yml'))
 cpSync(join(repo, 'harness/dsh/plugins'), join(staged, 'plugins'), { recursive: true })
+cpSync(join(repo, 'harness/dsh/lib'), join(staged, 'lib'), { recursive: true })
+cpSync(join(repo, 'harness/dsh/presets/project-creator/skills'), join(staged, 'presets/project-creator/skills'), { recursive: true })
 mkdirSync(join(root, 'runtime-dsh'))
 symlinkSync(join(repo, 'runtime-dsh/node_modules'), join(root, 'runtime-dsh/node_modules'))
 const snapshot = 'PROJECT_CREATOR_SNAPSHOT_SMOKE_MARKER'
@@ -71,8 +73,9 @@ try {
   }
   assert.deepEqual(await client.request('session/start', { sessionId: 'smoke-root', presetId: 'project-creator' }), { sessionId: 'smoke-root', presetId: 'project-creator' })
   const request = await Promise.race([modelRequest, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('model request timed out')), 10000) })])
-  assert.deepEqual(request.tools.map(tool => tool.name).sort(), ['ask_user_question', 'mcp__creator__stage_project_creator_draft'])
+  assert.deepEqual(request.tools.map(tool => tool.name).sort(), ['ask_user_question', 'mcp__creator__stage_project_creator_draft', 'skill'])
   assert.ok(JSON.stringify(request.messages).includes(snapshot), 'runtime snapshot reaches first model request')
+  assert.ok(JSON.stringify(request).includes('project-creator-client-discovery'), 'Project Creator discovery Skill reaches first model request')
   console.log('PASS: deployed layout session/start, real tool allowlist, and context injection')
 } finally {
   clearTimeout(timer)

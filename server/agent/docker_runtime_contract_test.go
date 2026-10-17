@@ -953,6 +953,9 @@ func TestCatalogDigestIsCheckedAtRuntimeAndRecordedForRelease(t *testing.T) {
 		"harness/dsh/project-creator.patch.yml /app/harness/dsh/project-creator.patch.yml",
 		"harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js",
 		"harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js",
+		"harness/dsh/plugins/project-creator-skills-provider.js /app/harness/dsh/plugins/project-creator-skills-provider.js",
+		"--from=builder --chown=1000:1000 /build/runtime-dsh/harness-dsh/lib /app/harness/dsh/lib",
+		"harness/dsh/presets/project-creator/skills/ /app/harness/dsh/presets/project-creator/skills/",
 	} {
 		if !strings.Contains(dsh, want) {
 			t.Fatalf("deploy/docker/Dockerfile.runtime-dsh missing plugin asset %q", want)

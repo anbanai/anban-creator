@@ -6,8 +6,21 @@ COPY runtime-dsh/package.json runtime-dsh/package-lock.json ./
 COPY runtime-dsh/vendor/ ./vendor/
 RUN npm_config_build_from_source=true npm ci --install-links=true --strict-allow-scripts
 COPY runtime-dsh/ ./
+COPY harness/dsh/src/ ./harness-dsh/src/
 RUN set -eux; \
     npm run build; \
+    ./node_modules/.bin/tsc --ignoreConfig \
+      --target ES2022 \
+      --module NodeNext \
+      --moduleResolution NodeNext \
+      --strict \
+      --declaration \
+      --verbatimModuleSyntax \
+      --noUncheckedIndexedAccess \
+      --exactOptionalPropertyTypes \
+      --skipLibCheck \
+      --outDir ./harness-dsh/lib \
+      ./harness-dsh/src/*.ts; \
     npm prune --omit=dev --install-links=true --strict-allow-scripts; \
     npm run patch:dependencies; \
     npm_config_build_from_source=true npm rebuild node-pty; \
@@ -28,7 +41,10 @@ COPY --chown=1000:1000 harness/dsh/project-creator.patch.yml /app/harness/dsh/pr
 COPY --chown=1000:1000 harness/dsh/cordis.patch.yml /app/harness/dsh/cordis.patch.yml
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-restrictions.js /app/harness/dsh/plugins/project-creator-restrictions.js
 COPY --chown=1000:1000 harness/dsh/plugins/project-creator-context.js /app/harness/dsh/plugins/project-creator-context.js
-RUN node --input-type=module -e "await import('/app/harness/dsh/plugins/project-creator-restrictions.js'); await import('/app/harness/dsh/plugins/project-creator-context.js')"
+COPY --chown=1000:1000 harness/dsh/plugins/project-creator-skills-provider.js /app/harness/dsh/plugins/project-creator-skills-provider.js
+COPY --from=builder --chown=1000:1000 /build/runtime-dsh/harness-dsh/lib /app/harness/dsh/lib
+COPY --chown=1000:1000 harness/dsh/presets/project-creator/skills/ /app/harness/dsh/presets/project-creator/skills/
+RUN node --input-type=module -e "await import('/app/harness/dsh/plugins/project-creator-restrictions.js'); await import('/app/harness/dsh/plugins/project-creator-context.js'); await import('/app/harness/dsh/plugins/project-creator-skills-provider.js')"
 USER 1000:1000
 ENV DSH_HOME=/tmp/dsh-home HOME=/tmp/dsh-home
 ENTRYPOINT ["node", "/app/runtime-dsh/dist/dsh-bridge.js"]

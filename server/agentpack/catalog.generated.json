@@ -991,12 +991,15 @@
     },
     {
       "id": "project-creator",
-      "version": "1.0.1",
+      "version": "1.0.3",
       "kind": "managed",
       "display_name": "画像模式",
-      "description": "通过对话收集六维项目画像，创建或更新项目画像。",
+      "description": "通过中文对话判断 Anban 项目适配性，选择内容类型并创建或更新六维项目画像。",
       "agent": {
         "name": "project-creator",
+        "skills": [
+          "project-creator-client-discovery"
+        ],
         "max_turns": 120
       },
       "interaction": {
@@ -1129,7 +1132,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "3f08a1895b15c632d62ba3844d4d2f42157b67f9ee00542c282b250149b8c7df"
+      "digest": "708abcb66206ea8b4e1242c8de461ef359fa9bae78c72fe49e3a2a571568c53f"
     },
     {
       "id": "seednote",
