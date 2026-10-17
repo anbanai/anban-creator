@@ -50,21 +50,16 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	if pod.Labels["com.anban.runtime"] != "dsh-interactive" {
 		t.Fatal("missing interactive runtime label")
 	}
-	if len(pod.Spec.InitContainers) != 1 {
-		t.Fatalf("init containers = %#v, want one project-memory initializer", pod.Spec.InitContainers)
+	if len(pod.Spec.InitContainers) != 0 {
+		t.Fatalf("init containers = %#v, want none for read-only project snapshot", pod.Spec.InitContainers)
 	}
-	initializer := pod.Spec.InitContainers[0]
-	if initializer.Name != "project-memory-init" || initializer.SecurityContext == nil || initializer.SecurityContext.RunAsUser == nil || *initializer.SecurityContext.RunAsUser != 0 {
-		t.Fatalf("project-memory initializer = %#v, want root initializer", initializer)
+	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
+		if mount.Name == "agent-memory" || strings.HasPrefix(mount.MountPath, "/workspace/project/.claude") {
+			t.Fatalf("DSH must not mount writable memory beneath its read-only project snapshot: %#v", mount)
+		}
 	}
-	if initializer.SecurityContext.Capabilities == nil || len(initializer.SecurityContext.Capabilities.Add) != 3 || initializer.SecurityContext.Capabilities.Add[0] != "CHOWN" || initializer.SecurityContext.Capabilities.Add[1] != "FOWNER" || initializer.SecurityContext.Capabilities.Add[2] != "DAC_OVERRIDE" {
-		t.Fatalf("project-memory initializer capabilities = %#v, want CHOWN/FOWNER/DAC_OVERRIDE", initializer.SecurityContext.Capabilities)
-	}
-	if len(initializer.Command) != 3 || initializer.Command[0] != "/bin/sh" || initializer.Command[1] != "-c" || !strings.Contains(initializer.Command[2], "mkdir -p /workspace/project/.claude/agent-memory/project-creator") {
-		t.Fatalf("project-memory initializer command = %#v", initializer.Command)
-	}
-	if len(initializer.VolumeMounts) != 1 || initializer.VolumeMounts[0].MountPath != "/workspace/project" || initializer.VolumeMounts[0].ReadOnly {
-		t.Fatalf("project-memory initializer mounts = %#v", initializer.VolumeMounts)
+	if len(pod.Spec.Containers[0].VolumeMounts) == 0 || pod.Spec.Containers[0].VolumeMounts[0].Name != "project-memory" || pod.Spec.Containers[0].VolumeMounts[0].MountPath != "/workspace/project" || !pod.Spec.Containers[0].VolumeMounts[0].ReadOnly {
+		t.Fatalf("project snapshot mounts = %#v, want read-only project root", pod.Spec.Containers[0].VolumeMounts)
 	}
 	if len(pod.Spec.ImagePullSecrets) != 1 || pod.Spec.ImagePullSecrets[0].Name != "acr-secret" {
 		t.Fatalf("image pull secrets = %#v, want acr-secret", pod.Spec.ImagePullSecrets)
