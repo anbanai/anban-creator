@@ -520,6 +520,24 @@ export default function ChatPage() {
         setRunState(isRunState(data.status) ? data.status : 'running')
         setTurnActive(data.busy === true)
         {
+          if (isRecord(data.draft)) {
+            const snapshotDraft = data.draft
+            const normalizedDraft = normalizeDraft({ draft: snapshotDraft })
+            confirmationTokenRef.current = stringValue(snapshotDraft.confirmation_token) ?? null
+            setDraft(normalizedDraft)
+            if (normalizedDraft.ready) {
+              const readyEventId = eventIdValue(data.draft_event_id)
+              setDraftReadyEventId(readyEventId === undefined ? undefined : String(readyEventId))
+              setTimeline((items) => upsertTimeline(items, {
+                kind: 'draft',
+                id: 'draft',
+                eventId: readyEventId ?? eventId,
+              }, (item) => item.kind === 'draft'))
+            } else {
+              setDraftReadyEventId(undefined)
+              setTimeline((items) => items.filter((item) => item.kind !== 'draft'))
+            }
+          }
           const callId = stringValue(data.pending_call_id) ?? ''
           const questions = Array.isArray(data.questions) ? data.questions.flatMap((value) => {
             const question = parseQuestion(value)

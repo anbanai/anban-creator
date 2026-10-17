@@ -963,6 +963,67 @@ func TestInteractiveEventsAllowsFreshConnectionAfterHistoryCompaction(t *testing
 	}
 }
 
+func TestInteractiveSnapshotRecoversReadyDraftAfterHistoryCompaction(t *testing.T) {
+	sess := newInteractiveTestSession()
+	svc := newInteractiveTestService(sess)
+	progress := InteractiveProgress{
+		"identity": "collected", "style": "collected", "audience": "collected",
+		"platforms": "collected", "preferences": "collected", "memory": "collected",
+	}
+	if err := svc.StageDraftForSession(sess.ID, InteractiveStageInput{
+		Project: InteractiveProject{Name: "Recoverable project", Platform: model.PlatformWechat},
+		Profile: model.NewProjectProfile(), Progress: progress, Ready: true,
+	}); err != nil {
+		t.Fatalf("StageDraftForSession() error = %v", err)
+	}
+
+	var readyEventID uint64
+	var issuedToken string
+	for _, event := range sess.events {
+		if event.Type != "draft.ready" {
+			continue
+		}
+		readyEventID = event.ID
+		if draft, ok := event.Data.(InteractiveDraft); ok {
+			issuedToken = draft.ConfirmationToken
+		}
+	}
+	if readyEventID == 0 || issuedToken == "" {
+		t.Fatal("ready draft event did not contain its event ID and confirmation token")
+	}
+
+	svc.maxHistory = 2
+	for i := 0; i < 4; i++ {
+		svc.emit(sess, "session.status", map[string]string{"status": "running"})
+	}
+
+	history, _, closeFn, err := svc.Events(sess.UserID, sess.ID, 0)
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	defer closeFn()
+
+	var snapshot map[string]any
+	for _, event := range history {
+		if event.Type == "session.snapshot" {
+			snapshot, _ = event.Data.(map[string]any)
+		}
+	}
+	if snapshot == nil {
+		t.Fatal("history did not include a session.snapshot")
+	}
+	draft, ok := snapshot["draft"].(InteractiveDraft)
+	if !ok || !draft.Ready || draft.ConfirmationToken != issuedToken {
+		t.Fatalf("snapshot draft = %#v, want ready draft with its current confirmation token", snapshot["draft"])
+	}
+	if got := snapshot["draft_event_id"]; got != readyEventID {
+		t.Fatalf("snapshot draft_event_id = %#v, want %d", got, readyEventID)
+	}
+	if !confirmationMatches(draft.ConfirmationToken, sess.confirmationTokenHash) {
+		t.Fatal("snapshot confirmation token cannot authorize the current draft")
+	}
+}
+
 func TestInteractiveEventsIncludeCurrentSessionSnapshotAfterReplayCursor(t *testing.T) {
 	sess := newInteractiveTestSession()
 	sess.Status = "waiting_answer"
@@ -1139,6 +1200,9 @@ func TestInteractiveCommitAcceptsTokenIssuedByReadyDraft(t *testing.T) {
 	case event := <-events:
 		if event.Type != "draft.updated" {
 			t.Fatalf("live event type = %q, want draft.updated", event.Type)
+		}
+		if draft, ok := event.Data.(InteractiveDraft); !ok || draft.ConfirmationToken != "" {
+			t.Fatalf("draft.updated payload = %#v, want no confirmation token", event.Data)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for live draft event")
