@@ -83,6 +83,11 @@ search:
     api_key: "${ANBAN_DOUBAO_GLOBAL_SEARCH_API_KEY:-}"
     timeout: 30s
     max_web_results: 10
+  deepseek:
+    endpoint: "${ANBAN_DEEPSEEK_SEARCH_ENDPOINT:-https://api.deepseek.com/v1/tools/search}"
+    api_key: "${ANBAN_DEEPSEEK_SEARCH_API_KEY:-}"
+    timeout: 30s
+    max_results: 10
 
 # Optional interactive Project Creator runtime. Sessions are process-local and
 # are discarded when the runtime exits or its lease expires. DSH routing is

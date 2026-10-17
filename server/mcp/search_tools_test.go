@@ -72,6 +72,9 @@ func TestSearchWebHandlerRejectsProviderOverrideAndInvalidInput(t *testing.T) {
 	}{
 		{name: "provider override", args: map[string]any{"query": "q", "provider": "other"}, want: "provider_selection_forbidden"},
 		{name: "empty query", args: map[string]any{"query": "  "}, want: "invalid_request"},
+		{name: "non-string ori_question", args: map[string]any{"query": "q", "ori_question": 42}, want: "invalid_request"},
+		{name: "empty localization", args: map[string]any{"query": "q", "localization": "  "}, want: "invalid_request"},
+		{name: "oversized ori_question", args: map[string]any{"query": "q", "ori_question": strings.Repeat("x", 129)}, want: "invalid_request"},
 		{name: "fractional limit", args: map[string]any{"query": "q", "limit": 1.5}, want: "invalid_request"},
 		{name: "large limit", args: map[string]any{"query": "q", "limit": 51}, want: "invalid_request"},
 		{name: "sites scalar", args: map[string]any{"query": "q", "sites": "example.com"}, want: "invalid_request"},
@@ -144,12 +147,14 @@ func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {
 		wantValue     any
 		wantField     string
 		wantCount     float64
+		wantDeepSeek  map[string]any
 		wantError     bool
 	}{
 		{name: "configured default limit", edition: "custom", args: map[string]any{"query": "q"}, wantCount: 3, wantField: "Count"},
 		{name: "sites constraint", edition: "custom", args: map[string]any{"query": "q", "limit": 2, "sites": []string{"example.com"}}, wantCount: 2, wantField: "Count", wantFilter: "Sites", wantValue: "example.com"},
 		{name: "explicit zero auth filter", edition: "custom", args: map[string]any{"query": "q", "limit": 2, "auth_info_level": 0}, wantCount: 2, wantField: "Count", wantFilter: "AuthInfoLevel", wantValue: float64(0)},
 		{name: "global rejects zero auth filter", edition: "global", args: map[string]any{"query": "q", "limit": 2, "auth_info_level": 0}, wantError: true},
+		{name: "DeepSeek fields", edition: "deepseek", args: map[string]any{"query": "q", "limit": 2, "ori_question": "original question", "localization": "203.0.113.10", "need_content": true}, wantField: "count", wantCount: 2, wantDeepSeek: map[string]any{"ori_question": "original question", "localization": "203.0.113.10", "need_content": true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requests := make(chan map[string]any, 1)
@@ -162,6 +167,9 @@ func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {
 				result := map[string]any{"ResultCount": 0, "WebResults": []any{}}
 				if tc.edition == "global" {
 					result = map[string]any{"ErrorCode": 0, "TotalDocCount": 0, "Documents": []any{}}
+				} else if tc.edition == "deepseek" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+					return
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"ResponseMetadata": map[string]any{"RequestId": "search-request"}, "Result": result})
 			}))
@@ -185,11 +193,13 @@ func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {
 			if _, err := catalog.Publish(ctx); err != nil {
 				t.Fatal(err)
 			}
-			cfg := &serverconfig.SearchConfig{Enabled: true, Provider: tc.edition, Custom: serverconfig.SearchDoubaoConfig{MaxWebResults: 3}, Global: serverconfig.SearchDoubaoConfig{MaxWebResults: 3}}
+			cfg := &serverconfig.SearchConfig{Enabled: true, Provider: tc.edition, Custom: serverconfig.SearchDoubaoConfig{MaxWebResults: 3}, Global: serverconfig.SearchDoubaoConfig{MaxWebResults: 3}, DeepSeek: serverconfig.SearchDeepSeekConfig{MaxResults: 3}}
 			providerConfig := serverconfig.SearchDoubaoConfig{Endpoint: upstream.URL, APIKey: "fixture", Timeout: time.Second, MaxWebResults: 3}
 			var provider service.SearchProvider = service.NewDoubaoCustomSearchProvider(providerConfig)
 			if tc.edition == "global" {
 				provider = service.NewDoubaoGlobalSearchProvider(providerConfig)
+			} else if tc.edition == "deepseek" {
+				provider = service.NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{Endpoint: upstream.URL + "/v1/tools/search", APIKey: "fixture", Timeout: time.Second, MaxResults: 3})
 			}
 			old := svcs
 			svcs = &Services{SearchSvc: service.NewSearchService(cfg, provider, catalog, service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{}), nil, repo.SearchOperations())}
@@ -214,6 +224,11 @@ func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {
 			request := <-requests
 			if tc.wantField != "" && request[tc.wantField] != tc.wantCount {
 				t.Fatalf("%s = %#v, want %v", tc.wantField, request[tc.wantField], tc.wantCount)
+			}
+			for key, want := range tc.wantDeepSeek {
+				if request[key] != want {
+					t.Fatalf("DeepSeek request %s = %#v, want %#v", key, request[key], want)
+				}
 			}
 			if tc.wantFilter != "" {
 				filter, _ := request["Filter"].(map[string]any)

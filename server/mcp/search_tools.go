@@ -17,8 +17,10 @@ func registerSearchTools(server *mcp.Server) {
 		InputSchema: map[string]any{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]any{
-				"query":           map[string]any{"type": "string", "minLength": 1, "maxLength": 100},
+				"query":           map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
 				"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
+				"ori_question":    map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
+				"localization":    map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
 				"time_range":      map[string]any{"type": "string"},
 				"sites":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20},
 				"block_hosts":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 5},
@@ -49,6 +51,14 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	query := strings.TrimSpace(stringArg(args, "query"))
 	if query == "" {
 		return errorResult(`{"code":"invalid_request","message":"query is required"}`), nil
+	}
+	originalQuestion, err := optionalSearchStringArg(args, "ori_question", 128)
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"ori_question must be a non-empty string of at most 128 characters"}`), nil
+	}
+	localization, err := optionalSearchStringArg(args, "localization", 128)
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"localization must be a non-empty string of at most 128 characters"}`), nil
 	}
 	if _, providerOverride := args["provider"]; providerOverride {
 		return errorResult(`{"code":"provider_selection_forbidden","message":"search provider is controlled by Server configuration"}`), nil
@@ -90,7 +100,7 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 	if svcs == nil || svcs.SearchSvc == nil {
 		return errorResult(`{"code":"provider_unavailable","message":"search provider is not configured"}`), nil
 	}
-	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, TimeRange: stringArg(args, "time_range"), Domains: domains, BlockHosts: blockHosts, NeedContent: needContent, NeedURL: needURL, AuthInfoLevel: authInfoLevel, AuthInfoLevelSet: authInfoLevelSet, ContentFormats: stringArg(args, "content_formats"), Industry: stringArg(args, "industry"), QueryRewrite: queryRewrite}})
+	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, OriginalQuestion: originalQuestion, Localization: localization, TimeRange: stringArg(args, "time_range"), Domains: domains, BlockHosts: blockHosts, NeedContent: needContent, NeedURL: needURL, AuthInfoLevel: authInfoLevel, AuthInfoLevelSet: authInfoLevelSet, ContentFormats: stringArg(args, "content_formats"), Industry: stringArg(args, "industry"), QueryRewrite: queryRewrite}})
 	if err != nil {
 		code := "search_failed"
 		if errors.Is(err, service.ErrSearchProviderUnavailable) {
@@ -99,6 +109,22 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult(searchErrorJSON(code, err.Error())), nil
 	}
 	return textResult(result)
+}
+
+func optionalSearchStringArg(args map[string]any, key string, maxLength int) (string, error) {
+	raw, present := args[key]
+	if !present {
+		return "", nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", errors.New("string required")
+	}
+	value = strings.TrimSpace(value)
+	if value == "" || len([]rune(value)) > maxLength {
+		return "", errors.New("invalid string length")
+	}
+	return value, nil
 }
 
 func parseSearchStringArray(args map[string]any, key string) ([]string, error) {

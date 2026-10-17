@@ -825,6 +825,8 @@ func main() {
 				searchProvider = service.NewDoubaoCustomSearchProvider(cfg.Search.Custom)
 			case "global":
 				searchProvider = service.NewDoubaoGlobalSearchProvider(cfg.Search.Global)
+			case "deepseek":
+				searchProvider = service.NewDeepSeekSearchProvider(cfg.Search.DeepSeek)
 			}
 			if searchProvider != nil {
 				searchSvc = service.NewSearchService(&cfg.Search, searchProvider, fixedBilling.Catalog, fixedBilling.Wallet, fixedBilling.Cost, repo.SearchOperations(), log)

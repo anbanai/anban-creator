@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -153,6 +155,138 @@ func TestDoubaoGlobalSearchProviderUsesOfficialGlobalContract(t *testing.T) {
 	item := result.Results[0]
 	if item.Title != "Global result" || item.URL != "https://example.org/article" || item.Domain != "example.org" || item.Snippet != "Global summary" || item.PublishedAt != "2026-10-02T00:00:00Z" || item.Authority != "very_high" || item.Rank != 2 {
 		t.Fatalf("normalized result = %#v", item)
+	}
+}
+
+func TestDeepSeekSearchProviderUsesOfficialSearchContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/tools/search" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer deepseek-secret" || r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("unexpected headers")
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request["query"] != "DeepSeek Search" || request["count"] != float64(3) || request["need_content"] != true || request["ori_question"] != "What is the latest DeepSeek Search API?" || request["localization"] != "203.0.113.10" {
+			t.Fatalf("deepseek request = %#v", request)
+		}
+		for _, field := range []string{"model", "input", "tools", "SearchType", "Count", "DocCount"} {
+			if _, ok := request[field]; ok {
+				t.Fatalf("unrelated field %q in DeepSeek request", field)
+			}
+		}
+		w.Header().Set("X-Request-ID", "ds-req-123")
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{
+			"rerank_score": 2.4,
+			"title":        "DeepSeek Search",
+			"url":          "https://example.com/deepseek",
+			"snippet":      "Short summary",
+			"summary":      "Long summary",
+			"content":      "Markdown content",
+			"site_name":    "Example",
+			"date":         "2026-10-17T00:00:00+00:00",
+			"authority":    3,
+		}}})
+	}))
+	defer server.Close()
+
+	needContent := true
+	provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{Endpoint: server.URL + "/v1/tools/search", APIKey: "deepseek-secret", Timeout: time.Second, MaxResults: 10})
+	result, err := provider.Search(context.Background(), SearchRequest{Query: "DeepSeek Search", Limit: 3, NeedContent: &needContent, OriginalQuestion: "What is the latest DeepSeek Search API?", Localization: "203.0.113.10"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if result.Provider != "deepseek" || result.ProviderRequestID != "ds-req-123" || result.TotalCount != 1 || len(result.Results) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	item := result.Results[0]
+	if item.Title != "DeepSeek Search" || item.URL != "https://example.com/deepseek" || item.Domain != "example.com" || item.Snippet != "Short summary" || item.Summary != "Long summary" || item.Content != "Markdown content" || item.PublishedAt != "2026-10-17T00:00:00+00:00" || item.Authority != "3" || item.RankScore != 2.4 || item.CitationID != item.URL {
+		t.Fatalf("normalized result = %#v", item)
+	}
+}
+
+func TestDeepSeekSearchProviderRejectsUnsupportedFiltersAndInvalidQueries(t *testing.T) {
+	provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{Endpoint: "https://api.deepseek.com/v1/tools/search", APIKey: "secret", Timeout: time.Second, MaxResults: 50})
+	tests := []SearchRequest{
+		{Query: "q", Domains: []string{"example.com"}},
+		{Query: "q", TimeRange: "OneWeek"},
+		{Query: strings.Repeat("q", 129)},
+		{Query: "q", Limit: 51},
+		{Query: "q", Localization: "CN"},
+	}
+	for _, req := range tests {
+		if err := provider.ValidateRequest(req); err == nil {
+			t.Fatalf("ValidateRequest accepted %#v", req)
+		}
+	}
+}
+
+func TestDeepSeekSearchProviderSanitizesFailuresAndAcceptsEmptyResults(t *testing.T) {
+	var redirected atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		redirected.Add(1)
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/empty":
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		case "/unauthorized":
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"secret upstream detail"}}`))
+		case "/server-error":
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":{"message":"secret upstream detail"}}`))
+		case "/invalid":
+			_, _ = w.Write([]byte(`{"results":[`))
+		case "/missing-results":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case "/oversized":
+			_, _ = io.WriteString(w, `{"results":[]}`+strings.Repeat(" ", (4<<20)+1))
+		case "/redirect":
+			http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+		case "/timeout":
+			time.Sleep(100 * time.Millisecond)
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		}
+	}))
+	defer server.Close()
+
+	for _, tc := range []struct {
+		path       string
+		timeout    time.Duration
+		wantResult bool
+	}{
+		{path: "/empty", timeout: time.Second, wantResult: true},
+		{path: "/unauthorized", timeout: time.Second},
+		{path: "/server-error", timeout: time.Second},
+		{path: "/invalid", timeout: time.Second},
+		{path: "/missing-results", timeout: time.Second},
+		{path: "/oversized", timeout: time.Second},
+		{path: "/redirect", timeout: time.Second},
+		{path: "/timeout", timeout: 20 * time.Millisecond},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{Endpoint: server.URL + tc.path, APIKey: "secret", Timeout: tc.timeout, MaxResults: 10})
+			result, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+			if tc.wantResult {
+				if err != nil || result == nil || len(result.Results) != 0 {
+					t.Fatalf("Search() = %#v, %v; want valid empty result", result, err)
+				}
+				return
+			}
+			if err == nil || !IsSearchProviderUnavailable(err) || strings.Contains(err.Error(), "secret upstream detail") || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("error = %v, want sanitized provider unavailable", err)
+			}
+		})
+	}
+	if got := redirected.Load(); got != 0 {
+		t.Fatalf("redirect target received %d request(s), want zero", got)
 	}
 }
 
@@ -326,6 +460,9 @@ func TestSearchServiceOperationLeaseFollowsConfiguredProviderTimeout(t *testing.
 	}
 	if got := (&SearchService{config: &serverconfig.SearchConfig{Provider: "global", Global: serverconfig.SearchDoubaoConfig{Timeout: 10 * time.Minute}}}).operationLease(); got != 11*time.Minute {
 		t.Fatalf("global operationLease() = %s", got)
+	}
+	if got := (&SearchService{config: &serverconfig.SearchConfig{Provider: "deepseek", DeepSeek: serverconfig.SearchDeepSeekConfig{Timeout: 10 * time.Minute}}}).operationLease(); got != 11*time.Minute {
+		t.Fatalf("DeepSeek operationLease() = %s", got)
 	}
 	var nilService *SearchService
 	if got := nilService.operationLease(); got != 5*time.Minute {

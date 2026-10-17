@@ -280,10 +280,11 @@ type TrendsConfig struct {
 // SearchConfig controls Server-owned web search providers. Credentials are
 // intentionally kept in server configuration and are never exposed to Agents.
 type SearchConfig struct {
-	Enabled  bool               `yaml:"enabled"`
-	Provider string             `yaml:"provider"`
-	Custom   SearchDoubaoConfig `yaml:"custom"`
-	Global   SearchDoubaoConfig `yaml:"global"`
+	Enabled  bool                 `yaml:"enabled"`
+	Provider string               `yaml:"provider"`
+	Custom   SearchDoubaoConfig   `yaml:"custom"`
+	Global   SearchDoubaoConfig   `yaml:"global"`
+	DeepSeek SearchDeepSeekConfig `yaml:"deepseek"`
 }
 
 type SearchDoubaoConfig struct {
@@ -291,6 +292,13 @@ type SearchDoubaoConfig struct {
 	APIKey        string        `yaml:"api_key"`
 	Timeout       time.Duration `yaml:"timeout"`
 	MaxWebResults int           `yaml:"max_web_results"`
+}
+
+type SearchDeepSeekConfig struct {
+	Endpoint   string        `yaml:"endpoint"`
+	APIKey     string        `yaml:"api_key" json:"-"`
+	Timeout    time.Duration `yaml:"timeout"`
+	MaxResults int           `yaml:"max_results"`
 }
 
 func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceConfig) []string {
@@ -1302,6 +1310,15 @@ func (c *Config) applyDefaults() {
 	}
 	applySearchDefaults(&c.Search.Custom, "https://open.feedcoopapi.com/search_api/web_search")
 	applySearchDefaults(&c.Search.Global, "https://open.feedcoopapi.com/search_api/global_search")
+	if c.Search.DeepSeek.Endpoint == "" {
+		c.Search.DeepSeek.Endpoint = "https://api.deepseek.com/v1/tools/search"
+	}
+	if c.Search.DeepSeek.Timeout == 0 {
+		c.Search.DeepSeek.Timeout = 30 * time.Second
+	}
+	if c.Search.DeepSeek.MaxResults == 0 {
+		c.Search.DeepSeek.MaxResults = 10
+	}
 	if c.Dsh.BridgeDir == "" {
 		c.Dsh.BridgeDir = "./runtime-dsh"
 	}
@@ -1970,6 +1987,22 @@ func (c *Config) Validate() error {
 			selected = &c.Search.Custom
 		case "global":
 			selected = &c.Search.Global
+		case "deepseek":
+			selectedDeepSeek := &c.Search.DeepSeek
+			if strings.TrimSpace(selectedDeepSeek.Endpoint) == "" {
+				errs = append(errs, "search.deepseek.endpoint is required when search is enabled")
+			} else if endpoint, err := url.Parse(strings.TrimSpace(selectedDeepSeek.Endpoint)); err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+				errs = append(errs, "search.deepseek.endpoint must be an absolute HTTPS URL without credentials, query, or fragment")
+			}
+			if strings.TrimSpace(selectedDeepSeek.APIKey) == "" {
+				errs = append(errs, "search.deepseek.api_key is required when search is enabled")
+			}
+			if selectedDeepSeek.Timeout <= 0 {
+				errs = append(errs, "search.deepseek.timeout must be positive when search is enabled")
+			}
+			if selectedDeepSeek.MaxResults <= 0 || selectedDeepSeek.MaxResults > 50 {
+				errs = append(errs, "search.deepseek.max_results must be between 1 and 50 when search is enabled")
+			}
 		default:
 			errs = append(errs, fmt.Sprintf("search.provider %q is unsupported", c.Search.Provider))
 		}

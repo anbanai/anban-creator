@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +32,8 @@ func IsSearchProviderUnavailable(err error) bool { return errors.Is(err, ErrSear
 type SearchRequest struct {
 	Query            string
 	Limit            int
+	OriginalQuestion string
+	Localization     string
 	TimeRange        string
 	Domains          []string
 	BlockHosts       []string
@@ -48,10 +52,13 @@ type SearchResultItem struct {
 	URL         string  `json:"url"`
 	Domain      string  `json:"domain,omitempty"`
 	Snippet     string  `json:"snippet,omitempty"`
+	Summary     string  `json:"summary,omitempty"`
 	Content     string  `json:"content,omitempty"`
 	PublishedAt string  `json:"published_at,omitempty"`
 	PageAge     string  `json:"page_age,omitempty"`
 	CitationID  string  `json:"citation_id,omitempty"`
+	SiteName    string  `json:"site_name,omitempty"`
+	SiteIcon    string  `json:"site_icon,omitempty"`
 	Authority   string  `json:"authority,omitempty"`
 	Rank        int     `json:"rank,omitempty"`
 	RankScore   float64 `json:"rank_score,omitempty"`
@@ -80,6 +87,166 @@ type DoubaoSearchProvider struct {
 	apiKey        string
 	edition       string
 	maxWebResults int
+}
+
+// DeepSeekSearchProvider implements DeepSeek's standalone Search API. Fetch is
+// intentionally outside search_web so the MCP contract remains one atomic
+// web-search capability.
+type DeepSeekSearchProvider struct {
+	client     *http.Client
+	endpoint   string
+	apiKey     string
+	maxResults int
+}
+
+func NewDeepSeekSearchProvider(cfg serverconfig.SearchDeepSeekConfig) *DeepSeekSearchProvider {
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	max := cfg.MaxResults
+	if max <= 0 || max > 50 {
+		max = 10
+	}
+	return &DeepSeekSearchProvider{
+		client: &http.Client{
+			Timeout: timeout,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+		endpoint:   strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/"),
+		apiKey:     strings.TrimSpace(cfg.APIKey),
+		maxResults: max,
+	}
+}
+
+func (p *DeepSeekSearchProvider) Name() string {
+	if p == nil {
+		return ""
+	}
+	return "deepseek"
+}
+
+func (p *DeepSeekSearchProvider) ValidateRequest(req SearchRequest) error {
+	if p == nil {
+		return ErrSearchProviderUnavailable
+	}
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		return errors.New("query is required")
+	}
+	if len([]rune(query)) > 128 {
+		return errors.New("query exceeds the 128-character limit")
+	}
+	if req.Limit < 0 || req.Limit > p.maxResults {
+		return fmt.Errorf("limit must be between 1 and %d", p.maxResults)
+	}
+	if req.TimeRange != "" || len(req.Domains) > 0 || len(req.BlockHosts) > 0 || req.NeedURL != nil || req.AuthInfoLevelSet || req.AuthInfoLevel != 0 || req.ContentFormats != "" || req.Industry != "" || req.QueryRewrite != nil {
+		return errors.New("the selected DeepSeek search provider does not support structured filters; use search syntax in query")
+	}
+	if len([]rune(strings.TrimSpace(req.OriginalQuestion))) > 128 {
+		return errors.New("ori_question exceeds the 128-character limit")
+	}
+	if len([]rune(strings.TrimSpace(req.Localization))) > 128 {
+		return errors.New("localization exceeds the 128-character limit")
+	}
+	if localization := strings.TrimSpace(req.Localization); localization != "" && net.ParseIP(localization) == nil {
+		return errors.New("localization must be an IP address")
+	}
+	return nil
+}
+
+func (p *DeepSeekSearchProvider) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
+	if p == nil || p.client == nil || p.endpoint == "" || p.apiKey == "" {
+		return nil, ErrSearchProviderUnavailable
+	}
+	if err := p.ValidateRequest(req); err != nil {
+		return nil, err
+	}
+	query := strings.TrimSpace(req.Query)
+	limit := req.Limit
+	if limit <= 0 {
+		limit = p.maxResults
+	}
+	body := map[string]any{"query": query, "count": limit}
+	if value := strings.TrimSpace(req.OriginalQuestion); value != "" {
+		body["ori_question"] = value
+	}
+	if value := strings.TrimSpace(req.Localization); value != "" {
+		body["localization"] = value
+	}
+	if req.NeedContent != nil {
+		body["need_content"] = *req.NeedContent
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("%w: upstream request failed", ErrSearchProviderUnavailable)
+	}
+	defer resp.Body.Close()
+	const maxResponseBytes = 4 << 20
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if readErr != nil {
+		return nil, fmt.Errorf("%w: read response failed", ErrSearchProviderUnavailable)
+	}
+	if len(data) > maxResponseBytes {
+		return nil, fmt.Errorf("%w: response too large", ErrSearchProviderUnavailable)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%w: HTTP %d", ErrSearchProviderUnavailable, resp.StatusCode)
+	}
+	var decoded struct {
+		Results *[]struct {
+			RerankScore float64 `json:"rerank_score"`
+			Title       string  `json:"title"`
+			URL         string  `json:"url"`
+			Snippet     string  `json:"snippet"`
+			Summary     string  `json:"summary"`
+			Content     string  `json:"content"`
+			SiteName    string  `json:"site_name"`
+			SiteIcon    string  `json:"site_icon"`
+			Date        string  `json:"date"`
+			Authority   int     `json:"authority"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil || decoded.Results == nil {
+		return nil, fmt.Errorf("%w: invalid response", ErrSearchProviderUnavailable)
+	}
+	items := make([]SearchResultItem, 0, len(*decoded.Results))
+	for _, item := range *decoded.Results {
+		items = append(items, SearchResultItem{
+			Title: item.Title, URL: item.URL, Domain: domainOf(item.URL), Snippet: item.Snippet, Summary: item.Summary,
+			Content: item.Content, PublishedAt: item.Date, CitationID: item.URL,
+			SiteName: item.SiteName, SiteIcon: item.SiteIcon, Authority: strconv.Itoa(item.Authority), RankScore: item.RerankScore,
+		})
+		if len(items) == limit {
+			break
+		}
+	}
+	return &SearchResponse{
+		Provider: "deepseek", ProviderRequestID: firstHeader(resp.Header, "X-Request-ID", "Request-ID"),
+		Query: query, TotalCount: len(items), Results: items, FetchedAt: time.Now().UTC(),
+		ProviderMetadata: map[string]any{"api": "search"},
+	}, nil
+}
+
+func firstHeader(headers http.Header, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func NewDoubaoCustomSearchProvider(cfg serverconfig.SearchDoubaoConfig) *DoubaoSearchProvider {
@@ -121,11 +288,14 @@ func (p *DoubaoSearchProvider) ValidateRequest(req SearchRequest) error {
 		return fmt.Errorf("limit must be between 1 and %d", p.maxWebResults)
 	}
 	if p.edition == "global" {
-		if req.TimeRange != "" || len(req.Domains) > 0 || len(req.BlockHosts) > 0 || req.NeedContent != nil || req.NeedURL != nil || req.AuthInfoLevelSet || req.AuthInfoLevel != 0 || req.ContentFormats != "" || req.Industry != "" || req.QueryRewrite != nil {
+		if req.OriginalQuestion != "" || req.Localization != "" || req.TimeRange != "" || len(req.Domains) > 0 || len(req.BlockHosts) > 0 || req.NeedContent != nil || req.NeedURL != nil || req.AuthInfoLevelSet || req.AuthInfoLevel != 0 || req.ContentFormats != "" || req.Industry != "" || req.QueryRewrite != nil {
 			return errors.New("the selected Global search edition does not support Custom filters")
 		}
 	}
 	if p.edition == "custom" {
+		if req.OriginalQuestion != "" || req.Localization != "" {
+			return errors.New("the selected Doubao search provider does not support DeepSeek-only fields")
+		}
 		if len(req.Domains) > 20 {
 			return errors.New("domains supports at most 20 entries")
 		}
@@ -395,8 +565,11 @@ func (s *SearchService) operationLease() time.Duration {
 	lease := 5 * time.Minute
 	if s != nil && s.config != nil {
 		timeout := s.config.Custom.Timeout
-		if strings.TrimSpace(s.config.Provider) == "global" {
+		switch strings.TrimSpace(s.config.Provider) {
+		case "global":
 			timeout = s.config.Global.Timeout
+		case "deepseek":
+			timeout = s.config.DeepSeek.Timeout
 		}
 		configured := timeout + time.Minute
 		if configured > lease {
@@ -576,6 +749,12 @@ func searchProviderCostFilters(req SearchRequest) map[string]any {
 	if req.QueryRewrite != nil {
 		filters["query_rewrite"] = *req.QueryRewrite
 	}
+	if value := strings.TrimSpace(req.OriginalQuestion); value != "" {
+		filters["ori_question"] = value
+	}
+	if value := strings.TrimSpace(req.Localization); value != "" {
+		filters["localization"] = value
+	}
 	return filters
 }
 
@@ -590,6 +769,8 @@ func searchFingerprint(req SearchOperationRequest) string {
 		ExecutionID      string   `json:"execution_id"`
 		Query            string   `json:"query"`
 		Limit            int      `json:"limit"`
+		OriginalQuestion string   `json:"ori_question"`
+		Localization     string   `json:"localization"`
 		TimeRange        string   `json:"time_range"`
 		Domains          []string `json:"domains"`
 		BlockHosts       []string `json:"block_hosts"`
@@ -600,7 +781,7 @@ func searchFingerprint(req SearchOperationRequest) string {
 		ContentFormat    string   `json:"content_formats"`
 		Industry         string   `json:"industry"`
 		QueryRewrite     *bool    `json:"query_rewrite,omitempty"`
-	}{1, strings.TrimSpace(req.UserID), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ExecutionID), strings.TrimSpace(req.Request.Query), req.Request.Limit, strings.TrimSpace(req.Request.TimeRange), domains, blockHosts, req.Request.NeedContent, req.Request.NeedURL, req.Request.AuthInfoLevel, req.Request.AuthInfoLevelSet, strings.TrimSpace(req.Request.ContentFormats), strings.TrimSpace(req.Request.Industry), req.Request.QueryRewrite})
+	}{1, strings.TrimSpace(req.UserID), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ExecutionID), strings.TrimSpace(req.Request.Query), req.Request.Limit, strings.TrimSpace(req.Request.OriginalQuestion), strings.TrimSpace(req.Request.Localization), strings.TrimSpace(req.Request.TimeRange), domains, blockHosts, req.Request.NeedContent, req.Request.NeedURL, req.Request.AuthInfoLevel, req.Request.AuthInfoLevelSet, strings.TrimSpace(req.Request.ContentFormats), strings.TrimSpace(req.Request.Industry), req.Request.QueryRewrite})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
