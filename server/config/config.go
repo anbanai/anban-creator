@@ -1344,7 +1344,9 @@ func (c *Config) applyDefaults() {
 		c.Dsh.PidsLimit = 256
 	}
 	if c.Dsh.TimeoutSec == 0 {
-		c.Dsh.TimeoutSec = 1800
+		// Keep the interactive session and its one-shot DSH runtime alive long
+		// enough for users to resume a project after an extended break.
+		c.Dsh.TimeoutSec = 24 * 60 * 60
 	}
 	if c.Dsh.ServerURL == "" {
 		c.Dsh.ServerURL = c.AgentServerURL()

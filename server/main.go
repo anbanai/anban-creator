@@ -788,6 +788,9 @@ func main() {
 	}
 	// Apply authorization policy after selecting the runtime-backed service so
 	// enabling the bridge cannot silently drop admin-only access control.
+	if cfg.Dsh.TimeoutSec > 0 {
+		interactiveSvc.SetSessionTTL(time.Duration(cfg.Dsh.TimeoutSec) * time.Second)
+	}
 	interactiveSvc.SetAdminOnly(cfg.Dsh.AdminOnly)
 	interactiveSvc.SetLogger(log)
 	interactiveSvc.SetServerInstanceID(cfg.Dsh.ServerInstanceID)

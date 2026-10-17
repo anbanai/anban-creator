@@ -19,6 +19,10 @@ claude:
 
 dsh:
   enabled: true
+  # The DSH process and its resumable Studio session share this lease. Keep it
+  # long enough for users to return after an extended break; tune lower only
+  # when the runtime resource budget requires it.
+  timeout_sec: 86400
   route: effective
   routes:
     effective:

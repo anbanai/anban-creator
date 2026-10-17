@@ -193,6 +193,21 @@ func newInteractiveTestSession() *InteractiveSession {
 	}
 }
 
+func TestInteractiveSessionTTLCanBeConfigured(t *testing.T) {
+	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, interactiveTestRuntimeFactory{}, []InteractiveAgent{{ID: "project-creator", Available: true, Intents: []string{"create-project"}}})
+	svc.SetEnabled(true)
+	svc.SetSessionTTL(2 * time.Hour)
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	remaining := time.Until(sess.ExpiresAt)
+	if remaining < 2*time.Hour-time.Second || remaining > 2*time.Hour+time.Second {
+		t.Fatalf("session TTL = %v, want approximately 2h", remaining)
+	}
+	_ = svc.Close("user-1", sess.ID)
+}
+
 func TestInteractiveCloseSessionWithShortHistory(t *testing.T) {
 	sess := newInteractiveTestSession()
 	svc := newInteractiveTestService(sess)

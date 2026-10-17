@@ -359,6 +359,8 @@ that value before a DSH session starts.
 ```yaml
 dsh:
   enabled: true
+  # Maximum lifetime of the resumable DSH session and runtime.
+  timeout_sec: 86400
   route: effective
   routes:
     effective:

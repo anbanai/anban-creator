@@ -12,6 +12,9 @@ import (
 func TestProjectMemoryConfigDefaults(t *testing.T) {
 	cfg := &Config{}
 	cfg.applyDefaults()
+	if cfg.Dsh.TimeoutSec != 24*60*60 {
+		t.Fatalf("DSH timeout default = %d, want 86400 seconds", cfg.Dsh.TimeoutSec)
+	}
 
 	got := cfg.Claude.ProjectMemory
 	if got.RootDir != "/app/data/project-memory" || got.MaxProjectBytes != 16*1024*1024 {

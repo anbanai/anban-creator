@@ -298,6 +298,17 @@ func interactiveAgentsFromCatalog(available bool) []InteractiveAgent {
 }
 func (s *InteractiveService) SetEnabled(v bool)   { s.mu.Lock(); s.enabled = v; s.mu.Unlock() }
 func (s *InteractiveService) SetAdminOnly(v bool) { s.mu.Lock(); s.adminOnly = v; s.mu.Unlock() }
+
+// SetSessionTTL configures the maximum lifetime of a DSH interactive session.
+// It is applied before session creation during Server startup.
+func (s *InteractiveService) SetSessionTTL(ttl time.Duration) {
+	if ttl <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.ttl = ttl
+	s.mu.Unlock()
+}
 func (s *InteractiveService) Enabled() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
