@@ -324,6 +324,40 @@ describe('ChatPage', () => {
     expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')).not.toHaveProperty('confirmation_token')
   })
 
+  it('restores a ready draft and its confirmation credential from a compacted-history snapshot', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+      sessionId: 'session-1',
+      lastEventId: '40',
+      draftReadyEventId: '9',
+      draft: { revision: 1, ready: true, project: { name: '恢复项目', platform: 'wechat' } },
+      timeline: [{ kind: 'draft', id: 'draft', eventId: 9 }],
+    }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      {
+        id: '41',
+        event: 'session.snapshot',
+        data: JSON.stringify({
+          status: 'running',
+          busy: false,
+          questions: [],
+          draft_event_id: 9,
+          draft: { revision: 1, ready: true, confirmation_token: 'snapshot-secret', project: { name: '恢复项目', platform: 'wechat' } },
+        }),
+      },
+      { id: '42', event: 'assistant.message', data: JSON.stringify({ text: '草稿之后的新消息' }) },
+    ], signal))
+
+    renderChat('/projects/create')
+
+    const commit = await screen.findByRole('button', { name: '确认创建创作项目' })
+    expect(commit).toBeEnabled()
+    const laterMessage = await screen.findByText('草稿之后的新消息')
+    expect(commit.compareDocumentPosition(laterMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(commit)
+    await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledWith('session-1', 'snapshot-secret', expect.any(String), undefined))
+    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')).not.toHaveProperty('confirmation_token')
+  })
+
   it('shows live agent activity while a turn is running', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { event: 'turn.start', data: JSON.stringify({ turn: 1 }) },

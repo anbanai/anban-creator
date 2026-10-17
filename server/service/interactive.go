@@ -131,8 +131,10 @@ type InteractiveSession struct {
 	cancel                      context.CancelFunc
 	runtimeTokenHash            string
 	// confirmationTokenHash is server-only state. The raw token is included
-	// only in the draft.ready event sent to the owning Studio client.
+	// only in owner-authenticated draft.ready events and session snapshots.
 	confirmationTokenHash string
+	confirmationToken     string
+	draftReadyEventID     uint64
 	ProjectID             string
 	ProfileVersion        int64
 	initialContext        string
@@ -974,6 +976,8 @@ func (s *InteractiveService) closeSessionAtDeadline(id string, generation uint64
 	sess.pendingQuestions = map[string]InteractiveQuestion{}
 	sess.runtimeTokenHash = ""
 	sess.confirmationTokenHash = ""
+	sess.confirmationToken = ""
+	sess.draftReadyEventID = 0
 	terminalEvents := make([]InteractiveEvent, 0, 2)
 	for _, event := range sess.events {
 		if event.Type == "session.error" {
@@ -1112,6 +1116,9 @@ func (s *InteractiveService) emit(sess *InteractiveSession, typ string, data any
 	live := InteractiveEvent{ID: sess.nextEvent, Type: typ, Data: data, CreatedAt: now}
 	sess.events = append(sess.events, live)
 	sess.events = trimInteractiveEvents(sess.events, s.maxHistory)
+	if typ == "draft.ready" {
+		sess.draftReadyEventID = live.ID
+	}
 	for w := range sess.watchers {
 		select {
 		case w.ch <- live:
@@ -1189,10 +1196,18 @@ func (s *InteractiveService) Events(uid, id string, after uint64) ([]Interactive
 			questions = append(questions, question)
 		}
 		sort.Slice(questions, func(i, j int) bool { return questions[i].ID < questions[j].ID })
+		draft := sess.Draft
+		draft.ConfirmationToken = ""
+		if draft.Ready {
+			draft.ConfirmationToken = sess.confirmationToken
+		}
 		history = append(history, InteractiveEvent{
-			ID:        sess.nextEvent,
-			Type:      "session.snapshot",
-			Data:      map[string]any{"status": sess.Status, "busy": sess.busy, "pending_call_id": sess.pendingCall, "questions": questions},
+			ID:   sess.nextEvent,
+			Type: "session.snapshot",
+			Data: map[string]any{
+				"status": sess.Status, "busy": sess.busy, "pending_call_id": sess.pendingCall,
+				"questions": questions, "draft": draft, "draft_event_id": sess.draftReadyEventID,
+			},
 			CreatedAt: time.Now(),
 		})
 	}
@@ -1735,6 +1750,8 @@ func (s *InteractiveService) stage(sess *InteractiveSession, in InteractiveStage
 	sess.Draft.Ready = in.Ready
 	sess.Draft.ConfirmationToken = ""
 	sess.confirmationTokenHash = ""
+	sess.confirmationToken = ""
+	sess.draftReadyEventID = 0
 	if in.Ready {
 		token, e := randomToken()
 		if e != nil {
@@ -1743,13 +1760,16 @@ func (s *InteractiveService) stage(sess *InteractiveSession, in InteractiveStage
 		}
 		sess.Draft.ConfirmationToken = token
 		sess.confirmationTokenHash = confirmationHash(token)
+		sess.confirmationToken = token
 	}
 	draft := sess.Draft
 	sess.Draft.ConfirmationToken = ""
 	sess.mu.Unlock()
 	// Event history is process-local and owner-authenticated. Keeping the token
 	// there lets an SSE reconnect recover a ready draft after a startup race.
-	s.emit(sess, "draft.updated", draft)
+	updated := draft
+	updated.ConfirmationToken = ""
+	s.emit(sess, "draft.updated", updated)
 	if draft.Ready {
 		s.emit(sess, "draft.ready", draft)
 	}
@@ -1976,6 +1996,8 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 	sess.Draft = InteractiveDraft{}
 	sess.runtimeTokenHash = ""
 	sess.confirmationTokenHash = ""
+	sess.confirmationToken = ""
+	sess.draftReadyEventID = 0
 	sess.events = nil
 	sess.mu.Unlock()
 	if rt != nil {
