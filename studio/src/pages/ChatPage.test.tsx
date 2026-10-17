@@ -145,9 +145,9 @@ describe('ChatPage', () => {
 
   it('keeps question cards in the same order as the streamed messages', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
-      { event: 'assistant.message', data: JSON.stringify({ id: 'message-1', text: '第一条消息' }) },
-      { event: 'question.opened', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'topic', question: '问题卡', options: [{ label: '回答' }] }] }) },
-      { event: 'assistant.message', data: JSON.stringify({ id: 'message-2', text: '第二条消息' }) },
+      { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '第一条消息' }) },
+      { id: '2', event: 'question.opened', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'topic', question: '问题卡', options: [{ label: '回答' }] }] }) },
+      { id: '3', event: 'assistant.message', data: JSON.stringify({ text: '第二条消息' }) },
     ], signal))
     const { container } = renderChat()
 
@@ -156,6 +156,97 @@ describe('ChatPage', () => {
     const content = container.textContent ?? ''
     expect(content.indexOf('第一条消息')).toBeLessThan(content.indexOf('问题卡'))
     expect(content.indexOf('问题卡')).toBeLessThan(content.indexOf('第二条消息'))
+  })
+
+  it('rebuilds a legacy session timeline in event order after refresh', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+      sessionId: 'session-1',
+      lastEventId: '3',
+      messages: [
+        { id: '1', role: 'assistant', text: '刷新前第一条消息' },
+        { id: '3', role: 'assistant', text: '刷新前第二条消息' },
+      ],
+      questionBatches: [{ callId: 'call-1', questions: [{ id: 'topic', question: '刷新前的问题卡', options: [{ label: '回答' }] }] }],
+    }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '刷新前第一条消息' }) },
+      { id: '2', event: 'question.opened', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'topic', question: '刷新前的问题卡', options: [{ label: '回答' }] }] }) },
+      { id: '3', event: 'assistant.message', data: JSON.stringify({ text: '刷新前第二条消息' }) },
+    ], signal))
+    const { container } = renderChat()
+
+    await screen.findByText('刷新前的问题卡')
+    await screen.findByText('刷新前第二条消息')
+    const content = container.textContent ?? ''
+    expect(content.indexOf('刷新前第一条消息')).toBeLessThan(content.indexOf('刷新前的问题卡'))
+    expect(content.indexOf('刷新前的问题卡')).toBeLessThan(content.indexOf('刷新前第二条消息'))
+    expect(streamMock.mock.calls[0]?.[3]).toEqual(expect.objectContaining({ lastEventId: undefined }))
+  })
+
+  it('orders legacy timeline items using message and question event IDs', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+      sessionId: 'session-1',
+      lastEventId: '3',
+      messages: [
+        { id: '1', role: 'assistant', text: '较早的消息' },
+        { id: '3', role: 'assistant', text: '较晚的消息' },
+      ],
+      questionBatches: [{ callId: 'call-1', eventId: 2, answers: [{ id: 'topic', selected: ['回答'] }], questions: [{ id: 'topic', question: '中间的问题卡', options: [{ label: '回答' }] }] }],
+      timeline: [
+        { kind: 'message', message: { id: '3', role: 'assistant', text: '较晚的消息' } },
+        { kind: 'question', callId: 'call-1' },
+        { kind: 'message', message: { id: '1', role: 'assistant', text: '较早的消息' } },
+      ],
+    }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '3', event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: false, questions: [] }) },
+    ], signal))
+
+    const { container } = renderChat('/projects/create')
+
+    expect(await screen.findByText('较早的消息')).toBeInTheDocument()
+    expect(screen.getByText('中间的问题卡')).toBeInTheDocument()
+    expect(screen.getByText('较晚的消息')).toBeInTheDocument()
+    const content = container.textContent ?? ''
+    expect(content.indexOf('较早的消息')).toBeLessThan(content.indexOf('中间的问题卡'))
+    expect(content.indexOf('中间的问题卡')).toBeLessThan(content.indexOf('较晚的消息'))
+  })
+
+  it('hydrates legacy messages without duplicating UUID-backed cache entries', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+      sessionId: 'session-1',
+      lastEventId: '1',
+      messages: [{ id: 'legacy-message-uuid', role: 'assistant', text: '缓存里的历史消息' }],
+      timeline: [{ kind: 'message', message: { id: 'legacy-message-uuid', role: 'assistant', text: '缓存里的历史消息' } }],
+    }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '缓存里的历史消息' }) },
+    ], signal))
+
+    renderChat('/projects/create')
+
+    await screen.findByText('缓存里的历史消息')
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').messages).toHaveLength(1))
+    expect(screen.getAllByText('缓存里的历史消息', { exact: true })).toHaveLength(1)
+  })
+
+  it('merges messages into an older partial timeline and replays its history', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+      sessionId: 'session-1',
+      lastEventId: '3',
+      messages: [{ id: '1', role: 'assistant', text: '缓存里的消息' }],
+      timeline: [{ kind: 'draft', id: 'draft' }],
+      draft: { revision: 1, ready: true, project: { name: '创作项目' } },
+    }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '缓存里的消息' }) },
+      { id: '2', event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, project: { name: '创作项目' } } }) },
+    ], signal))
+
+    renderChat()
+
+    expect(await screen.findByText('缓存里的消息')).toBeInTheDocument()
+    expect(streamMock.mock.calls[0]?.[3]).toEqual(expect.objectContaining({ lastEventId: undefined }))
   })
 
   it('restores the visible message history after a refresh', async () => {
@@ -191,6 +282,28 @@ describe('ChatPage', () => {
     ]))
   })
 
+  it('does not advance the persisted event cursor before the event projection is stored', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    let cursorAtReceipt: string | undefined
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onEvent?: (event: InteractiveStreamEvent) => void }) => (async function* () {
+      const event = { id: '5', event: 'assistant.message', data: JSON.stringify({ text: '游标原子消息' }) }
+      options?.onEvent?.(event)
+      cursorAtReceipt = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').lastEventId
+      yield event
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+
+    renderChat('/projects/create')
+
+    expect(await screen.findByText('游标原子消息')).toBeInTheDocument()
+    expect(cursorAtReceipt).toBe('4')
+    await waitFor(() => {
+      const persisted = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+      expect(persisted.lastEventId).toBe('5')
+      expect(persisted.timeline).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'message', message: expect.objectContaining({ id: '5', text: '游标原子消息' }) })]))
+    })
+  })
+
   it('replays a ready draft event after refresh without persisting its confirmation token', async () => {
     sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
       sessionId: 'session-1',
@@ -218,7 +331,8 @@ describe('ChatPage', () => {
 
     renderChat()
 
-    expect(await screen.findByText('Agent 正在工作…')).toBeInTheDocument()
+    expect(await screen.findByText('Agent 本轮开始处理')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Agent 本轮开始处理')
   })
 
   it('shows the current agent tool activity when the runtime reports it', async () => {
@@ -231,6 +345,210 @@ describe('ChatPage', () => {
     expect(await screen.findByText('Agent 正在执行：get project profile')).toBeInTheDocument()
   })
 
+  it('keeps the agent activity history and completed state in the chat timeline', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
+      { id: '3', event: 'agent.activity', data: JSON.stringify({ name: 'update_project_profile' }) },
+      { id: '4', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'completed' } }) },
+    ], signal))
+    const { container } = renderChat()
+
+    await screen.findByText('Agent 本轮已完成')
+    const content = container.textContent ?? ''
+    expect(content.indexOf('Agent 本轮开始处理')).toBeLessThan(content.indexOf('Agent 正在执行：get project profile'))
+    expect(content.indexOf('Agent 正在执行：get project profile')).toBeLessThan(content.indexOf('Agent 正在执行：update project profile'))
+    expect(content.indexOf('Agent 正在执行：update project profile')).toBeLessThan(content.indexOf('Agent 本轮已完成'))
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').timeline).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'activity', eventId: 1, status: 'completed' }),
+      expect.objectContaining({ kind: 'activity', eventId: 2, status: 'completed' }),
+      expect.objectContaining({ kind: 'activity', eventId: 3, status: 'completed' }),
+      expect.objectContaining({ kind: 'activity', eventId: 4, status: 'completed' }),
+    ])))
+  })
+
+  it('shows aborted DSH turns as stopped', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'aborted' } }) },
+    ], signal))
+    renderChat()
+
+    expect(await screen.findByText('Agent 本轮已停止')).toBeInTheDocument()
+    expect(screen.getByText('已停止')).toBeInTheDocument()
+  })
+
+  it('shows only the latest tool as running while the agent continues its turn', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
+      { id: '3', event: 'agent.activity', data: JSON.stringify({ name: 'update_project_profile' }) },
+    ], signal))
+    renderChat()
+
+    const previousActivity = await screen.findByText('Agent 正在执行：get project profile')
+    const currentActivity = await screen.findByText('Agent 正在执行：update project profile')
+    expect(previousActivity.parentElement).toHaveTextContent('已完成')
+    expect(currentActivity.parentElement).toHaveTextContent('进行中')
+  })
+
+  it('keeps the current agent activity visible above the composer as history grows', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'update_project_profile' }) },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        id: String(index + 3), event: 'assistant.message', data: JSON.stringify({ text: `历史记录 ${index + 1}` }),
+      })),
+    ], signal))
+    renderChat()
+
+    const liveStatus = await screen.findByRole('status')
+    expect(liveStatus).toHaveTextContent('Agent 正在执行：update project profile')
+    expect(liveStatus.closest('[aria-live="polite"]')).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' }).parentElement?.parentElement?.parentElement).toContainElement(liveStatus)
+  })
+
+  it('marks activity complete when an idle status is the runtime end signal', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
+      { id: '3', event: 'session.status', data: JSON.stringify({ status: 'idle' }) },
+    ], signal))
+    renderChat()
+
+    const activity = await screen.findByText('Agent 正在执行：get project profile')
+    await waitFor(() => expect(activity.parentElement).toHaveTextContent('已完成'))
+  })
+
+  it('clears a stale running activity from a resumed session snapshot', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+      sessionId: 'session-1',
+      lastEventId: '4',
+      timeline: [{ kind: 'activity', id: 'activity-3', eventId: 3, status: 'running', text: 'Agent 正在执行：get project profile' }],
+    }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '4', event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: false, questions: [] }) },
+    ], signal))
+    renderChat('/projects/create')
+
+    const activity = await screen.findByText('Agent 正在执行：get project profile')
+    await waitFor(() => expect(activity.parentElement).toHaveTextContent('已完成'))
+    expect(activity.closest('[role="status"]')).not.toBeInTheDocument()
+  })
+
+  it('reconciles an idle snapshot as ready and completes stale activity', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+      sessionId: 'session-1',
+      lastEventId: '4',
+      timeline: [{ kind: 'activity', id: 'activity-3', eventId: 3, status: 'running', text: 'Agent 正在执行：get project profile' }],
+    }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '4', event: 'session.snapshot', data: JSON.stringify({ status: 'idle', busy: false, questions: [] }) },
+    ], signal))
+    renderChat('/projects/create')
+
+    const activity = await screen.findByText('Agent 正在执行：get project profile')
+    await waitFor(() => expect(activity.parentElement).toHaveTextContent('已完成'))
+    expect(screen.getByText('准备就绪')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('shows a waiting state without a running spinner', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'question.opened', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'topic', question: '创作主题是什么？' }] }) },
+    ], signal))
+    renderChat()
+
+    const status = (await screen.findByText('Agent 正在等待你的回答')).closest('[role="status"]')
+    expect(status).not.toBeNull()
+    expect(status!).toHaveTextContent('Agent 正在等待你的回答')
+    expect(status!).toHaveTextContent('等待中')
+    expect(status!.querySelector('.animate-spin')).not.toBeInTheDocument()
+  })
+
+  it('transitions a waiting activity to a fresh running state after an answer', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'question.opened', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'topic', question: '创作主题是什么？' }] }) },
+      { id: '3', event: 'question.answered', data: JSON.stringify({ call_id: 'call-1', answers: [{ id: 'topic', selected: ['回答'] }] }) },
+      { id: '4', event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: true, questions: [] }) },
+    ], signal))
+    renderChat()
+
+    const question = await screen.findByText('创作主题是什么？')
+    expect(question).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Agent 正在工作…')).toBeInTheDocument())
+    const content = document.body.textContent ?? ''
+    expect(content).toContain('Agent 正在等待你的回答')
+    expect(content.indexOf('Agent 正在等待你的回答')).toBeLessThan(content.indexOf('Agent 正在工作…'))
+    await waitFor(() => {
+      const timeline = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').timeline
+      expect(timeline).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: 'Agent 正在等待你的回答', status: 'completed' }),
+        expect.objectContaining({ text: 'Agent 正在工作…', status: 'running' }),
+      ]))
+    })
+    expect(screen.getByRole('status')).toHaveTextContent('Agent 正在工作…')
+  })
+
+  it('reconciles a started turn with a resumed busy snapshot without duplicating activity', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: true, questions: [] }) },
+    ], signal))
+    renderChat('/projects/create')
+
+    await waitFor(() => {
+      const timeline = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').timeline
+      expect(timeline.filter((item: { kind: string; status?: string }) => item.kind === 'activity' && (item.status === 'started' || item.status === 'running'))).toHaveLength(1)
+    })
+  })
+
+  it('reconciles a started turn with a waiting snapshot without duplicating activity', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'session.snapshot', data: JSON.stringify({ status: 'waiting_answer', busy: false, pending_call_id: 'call-1', questions: [{ id: 'topic', question: '创作主题是什么？' }] }) },
+    ], signal))
+    renderChat('/projects/create')
+
+    await screen.findByText('创作主题是什么？')
+    await waitFor(() => {
+      const timeline = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').timeline
+      expect(timeline.filter((item: { kind: string; status?: string }) => item.kind === 'activity' && item.status === 'waiting')).toHaveLength(1)
+    })
+  })
+
+  it('marks active timeline entries as failed when the runtime reports an error', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
+      { id: '3', event: 'session.error', data: JSON.stringify({ message: '运行失败' }) },
+    ], signal))
+    renderChat()
+
+    const activity = await screen.findByText('Agent 正在执行：get project profile')
+    await waitFor(() => expect(activity.parentElement).toHaveTextContent('出错'))
+  })
+
+  it('preserves the conversation timeline after a terminal runtime error and refresh', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '错误前的聊天记录' }) },
+      { id: '2', event: 'agent.activity', data: JSON.stringify({ name: 'get_project_profile' }) },
+      { id: '3', event: 'session.error', data: JSON.stringify({ message: '运行失败' }) },
+    ], signal))
+    const first = renderChat()
+
+    expect(await screen.findByText('运行失败')).toBeInTheDocument()
+    first.unmount()
+    streamMock.mockClear()
+    renderChat('/projects/create')
+
+    expect(await screen.findByText('错误前的聊天记录')).toBeInTheDocument()
+    expect(screen.getByText('Agent 正在执行：get project profile')).toBeInTheDocument()
+    expect(screen.getByText('出错')).toBeInTheDocument()
+    expect(streamMock).not.toHaveBeenCalled()
+  })
+
   it('keeps the composer disabled when a resumed session snapshot is busy', async () => {
     sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
@@ -239,7 +557,8 @@ describe('ChatPage', () => {
     })
     renderChat('/projects/create')
 
-    expect(await screen.findByText('进行中')).toBeInTheDocument()
+    expect(await screen.findByText('Agent 正在工作…')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Agent 正在工作…')
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
@@ -256,7 +575,8 @@ describe('ChatPage', () => {
     renderChat('/projects/create')
 
     expect(await screen.findByText('创作主题是什么？')).toBeInTheDocument()
-    expect(screen.getByText('等待回答')).toBeInTheDocument()
+    expect(screen.getAllByText('等待回答')).toHaveLength(2)
+    expect(screen.getByText('Agent 正在等待你的回答')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
@@ -277,6 +597,25 @@ describe('ChatPage', () => {
     fireEvent.click(reconnect)
     await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled())
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps a retryable session resumable after a refresh', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    streamMock.mockImplementationOnce(() => { throw new Error('SSE connection failed after 7 attempts') })
+    const first = renderChat('/projects/create')
+
+    await screen.findByRole('button', { name: '重新连接' })
+    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')).not.toHaveProperty('terminalState')
+    first.unmount()
+
+    streamMock.mockClear()
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: false, questions: [] }) },
+    ], signal))
+    renderChat('/projects/create')
+
+    await waitFor(() => expect(streamMock).toHaveBeenCalledWith('session-1', 'test-token', expect.any(AbortSignal), expect.objectContaining({ lastEventId: '4' })))
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
 

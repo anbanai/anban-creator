@@ -30,12 +30,14 @@ import { useAuth } from '@/contexts/AuthContext'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer, type DshQuestionOption } from '@/components/dsh-user-questions/DshQuestionComposer'
 
 type Message = { id: string; role: 'assistant' | 'user'; text: string }
-type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers'] }
+type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; eventId?: number }
 type TimelineItem =
-  | { kind: 'message'; message: Message }
-  | { kind: 'question'; callId: string }
-  | { kind: 'draft'; id: 'draft' }
+  | { kind: 'message'; message: Message; eventId?: number }
+  | { kind: 'question'; callId: string; eventId?: number }
+  | { kind: 'draft'; id: 'draft'; eventId?: number }
+  | { kind: 'activity'; id: string; eventId?: number; status: 'started' | 'running' | 'waiting' | 'completed' | 'stopped' | 'error'; text: string }
 type RunState = 'idle' | 'starting' | 'running' | 'waiting_answer' | 'error' | 'expired' | 'closed'
+type TerminalRunState = Extract<RunState, 'error' | 'expired' | 'closed'>
 type JsonRecord = Record<string, unknown>
 
 interface BlockableNavigator {
@@ -65,6 +67,25 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
+function eventIdValue(value: unknown): number | undefined {
+  const id = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined
+}
+
+function messageFingerprint(role: Message['role'], text: string): string {
+  return `${role}\u0000${text}`
+}
+
+function legacyMessageCandidates(messages: Message[] = []): Map<string, string[]> {
+  const candidates = new Map<string, string[]>()
+  for (const message of messages) {
+    if (eventIdValue(message.id) !== undefined) continue
+    const key = messageFingerprint(message.role, message.text)
+    candidates.set(key, [...(candidates.get(key) ?? []), message.id])
+  }
+  return candidates
+}
+
 function parseData(eventData: string): JsonRecord {
   try {
     const value: unknown = JSON.parse(eventData)
@@ -80,6 +101,8 @@ type PersistedInteractiveSession = {
   draftReadyEventId?: string
   createIdempotencyKey?: string
   turnActive?: boolean
+  terminalState?: TerminalRunState
+  terminalMessage?: string
   messages?: Message[]
   questionBatches?: QuestionBatch[]
   timeline?: TimelineItem[]
@@ -117,7 +140,7 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
           return parsed ? [parsed] : []
         }) : []
         if (!callId || questions.length === 0) return []
-        return [{ callId, questions, answers: item.answers === undefined ? undefined : parseAnswers(item.answers) }]
+        return [{ callId, questions, answers: item.answers === undefined ? undefined : parseAnswers(item.answers), eventId: eventIdValue(item.eventId) }]
       })
       : undefined
     const timeline = Array.isArray(value.timeline)
@@ -126,13 +149,21 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
         if (item.kind === 'message' && isRecord(item.message)) {
           const text = stringValue(item.message.text)
           const role = item.message.role === 'assistant' || item.message.role === 'user' ? item.message.role : undefined
-          return text && role ? [{ kind: 'message', message: { id: stringValue(item.message.id) ?? crypto.randomUUID(), role, text } }] : []
+          const id = stringValue(item.message.id) ?? crypto.randomUUID()
+          return text && role ? [{ kind: 'message', message: { id, role, text }, eventId: eventIdValue(item.eventId) ?? eventIdValue(id) }] : []
         }
         if (item.kind === 'question') {
           const callId = stringValue(item.callId)
-          return callId ? [{ kind: 'question', callId }] : []
+          return callId ? [{ kind: 'question', callId, eventId: eventIdValue(item.eventId) }] : []
         }
-        return item.kind === 'draft' ? [{ kind: 'draft', id: 'draft' }] : []
+        if (item.kind === 'draft') return [{ kind: 'draft', id: 'draft', eventId: eventIdValue(item.eventId) ?? eventIdValue(value.draftReadyEventId) }]
+        if (item.kind === 'activity') {
+          const id = stringValue(item.id)
+          const text = stringValue(item.text)
+          const status = item.status === 'started' || item.status === 'running' || item.status === 'waiting' || item.status === 'completed' || item.status === 'stopped' || item.status === 'error' ? item.status : undefined
+          return id && text && status ? [{ kind: 'activity', id, eventId: eventIdValue(item.eventId), status, text }] : []
+        }
+        return []
       })
       : undefined
     const draft = isRecord(value.draft) ? normalizeDraft(value.draft) : undefined
@@ -142,6 +173,8 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
       draftReadyEventId: typeof value.draftReadyEventId === 'string' ? value.draftReadyEventId : undefined,
       createIdempotencyKey,
       turnActive: value.turnActive === true,
+      terminalState: isTerminalRunState(value.terminalState) ? value.terminalState : undefined,
+      terminalMessage: stringValue(value.terminalMessage),
       messages,
       questionBatches,
       timeline,
@@ -162,6 +195,15 @@ function persistInteractiveSession(key: string, session: PersistedInteractiveSes
 }
 
 function resumeEventId(session: PersistedInteractiveSession | null): string | undefined {
+  const timeline = session?.timeline ?? []
+  const timelineMessageIds = new Set(timeline.flatMap((item) => item.kind === 'message' ? [item.message.id] : []))
+  const timelineQuestionIds = new Set(timeline.flatMap((item) => item.kind === 'question' ? [item.callId] : []))
+  const missingPersistedItems = (session?.messages ?? []).some((message) => !timelineMessageIds.has(message.id))
+    || (session?.questionBatches ?? []).some((batch) => !timelineQuestionIds.has(batch.callId))
+  const timelineNeedsReplay = timeline.some((item) => item.kind !== 'draft' && item.eventId === undefined)
+    || missingPersistedItems
+    || (timeline.length === 0 && Boolean(session?.messages?.length || session?.questionBatches?.length))
+  if (timelineNeedsReplay) return undefined
   if (!session?.draft?.ready || !session.draftReadyEventId) return session?.lastEventId
   const readyEventId = Number(session.draftReadyEventId)
   if (!Number.isSafeInteger(readyEventId) || readyEventId < 1) return session.lastEventId
@@ -177,14 +219,53 @@ function clearPersistedInteractiveSession(key: string): void {
 }
 
 function restoreTimeline(session: PersistedInteractiveSession | null): TimelineItem[] {
-  if (session?.timeline?.length) return session.timeline
+  const existing = session?.timeline ?? []
   const messages = session?.messages ?? []
   const questions = session?.questionBatches ?? []
-  return [
-    ...messages.map((message): TimelineItem => ({ kind: 'message', message })),
-    ...questions.map((batch): TimelineItem => ({ kind: 'question', callId: batch.callId })),
-    ...(session?.draft?.ready ? [{ kind: 'draft' as const, id: 'draft' as const }] : []),
-  ]
+  const messageById = new Map(messages.map((message) => [message.id, message]))
+  const questionById = new Map(questions.map((batch) => [batch.callId, batch]))
+  const normalizedExisting = existing.map((item): TimelineItem => {
+    if (item.kind === 'message') {
+      const message = messageById.get(item.message.id) ?? item.message
+      return { ...item, message, eventId: item.eventId ?? eventIdValue(message.id) }
+    }
+    if (item.kind === 'question') {
+      return { ...item, eventId: item.eventId ?? questionById.get(item.callId)?.eventId }
+    }
+    if (item.kind === 'draft') {
+      return { ...item, eventId: item.eventId ?? eventIdValue(session?.draftReadyEventId) }
+    }
+    return item
+  })
+  const messageIds = new Set(normalizedExisting.flatMap((item) => item.kind === 'message' ? [item.message.id] : []))
+  const questionIds = new Set(normalizedExisting.flatMap((item) => item.kind === 'question' ? [item.callId] : []))
+  const hasDraft = normalizedExisting.some((item) => item.kind === 'draft')
+  return sortTimeline([
+    ...normalizedExisting,
+    ...messages.filter((message) => !messageIds.has(message.id)).map((message): TimelineItem => ({ kind: 'message', message, eventId: eventIdValue(message.id) })),
+    ...questions.filter((batch) => !questionIds.has(batch.callId)).map((batch): TimelineItem => ({ kind: 'question', callId: batch.callId, eventId: batch.eventId })),
+    ...(session?.draft?.ready && !hasDraft ? [{ kind: 'draft' as const, id: 'draft' as const, eventId: eventIdValue(session.draftReadyEventId) }] : []),
+  ])
+}
+
+function timelineEventId(item: TimelineItem): number | undefined {
+  return item.eventId
+}
+
+function sortTimeline(items: TimelineItem[]): TimelineItem[] {
+  const ordered = items.filter((item) => timelineEventId(item) !== undefined)
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => (timelineEventId(a.item) ?? 0) - (timelineEventId(b.item) ?? 0) || a.index - b.index)
+    .map(({ item }) => item)
+  let orderedIndex = 0
+  return items.map((item) => timelineEventId(item) === undefined ? item : ordered[orderedIndex++]!)
+}
+
+function upsertTimeline(items: TimelineItem[], next: TimelineItem, matches: (item: TimelineItem) => boolean): TimelineItem[] {
+  const index = items.findIndex(matches)
+  if (index < 0) return sortTimeline([...items, next])
+  const merged = { ...items[index], ...next } as TimelineItem
+  return sortTimeline(items.map((item, itemIndex) => itemIndex === index ? merged : item))
 }
 
 function formatAgentActivity(name?: string): string {
@@ -256,6 +337,10 @@ function isRunState(value: unknown): value is RunState {
   return value === 'idle' || value === 'starting' || value === 'running' || value === 'waiting_answer' || value === 'error' || value === 'expired' || value === 'closed'
 }
 
+function isTerminalRunState(value: unknown): value is TerminalRunState {
+  return value === 'error' || value === 'expired' || value === 'closed'
+}
+
 function useNavigationWarning(when: boolean, committedRef: MutableRefObject<boolean>, message: string) {
   const { navigator } = useContext(UNSAFE_NavigationContext)
   useEffect(() => {
@@ -294,14 +379,16 @@ export default function ChatPage() {
   const sessionStorageKey = interactiveSessionStorageKey(selectedAgent, intent, projectId)
   const [persistedSessionKey] = useState(sessionStorageKey)
   const [persistedSession] = useState(() => readPersistedInteractiveSession(sessionStorageKey))
-  const [sessionId, setSessionId] = useState<string | null>(persistedSession?.sessionId ?? null)
-  const [runState, setRunState] = useState<RunState>('idle')
+  const [sessionId, setSessionId] = useState<string | null>(persistedSession?.terminalState ? null : persistedSession?.sessionId ?? null)
+  const [runState, setRunState] = useState<RunState>(persistedSession?.terminalState ?? 'idle')
+  const [lastEventId, setLastEventId] = useState(persistedSession?.lastEventId)
+  const [draftReadyEventId, setDraftReadyEventId] = useState(persistedSession?.draftReadyEventId)
   const [messages, setMessages] = useState<Message[]>(persistedSession?.messages ?? [])
   const [questionBatches, setQuestionBatches] = useState<QuestionBatch[]>(persistedSession?.questionBatches ?? [])
   const [timeline, setTimeline] = useState<TimelineItem[]>(() => restoreTimeline(persistedSession))
   const [draft, setDraft] = useState<InteractiveDraft | null>(persistedSession?.draft ?? null)
   const [composer, setComposer] = useState('')
-  const [streamError, setStreamError] = useState<string | null>(null)
+  const [streamError, setStreamError] = useState<string | null>(persistedSession?.terminalMessage ?? null)
   const [commitError, setCommitError] = useState<string | null>(null)
   const [committing, setCommitting] = useState(false)
   const [committed, setCommitted] = useState(false)
@@ -310,7 +397,7 @@ export default function ChatPage() {
   const [restartNonce, setRestartNonce] = useState(0)
   const idempotencyKeyRef = useRef(crypto.randomUUID())
   const createIdempotencyKeyRef = useRef(persistedSession?.createIdempotencyKey ?? crypto.randomUUID())
-  const sessionRef = useRef<string | null>(persistedSession?.sessionId ?? null)
+  const sessionRef = useRef<string | null>(persistedSession?.terminalState ? null : persistedSession?.sessionId ?? null)
   const startPromiseRef = useRef<{ key: string; promise: Promise<void> } | null>(null)
   const abandonedStartKeysRef = useRef(new Set<string>())
   const runGenerationRef = useRef(0)
@@ -321,9 +408,10 @@ export default function ChatPage() {
   const hasInputRef = useRef(false)
   const confirmationTokenRef = useRef<string | null>(null)
   const sendingMessageRef = useRef(false)
+  const legacyMessageCandidatesRef = useRef(legacyMessageCandidates(persistedSession?.messages))
+  const messageAliasesRef = useRef(new Map<string, string>())
   const [sendingMessage, setSendingMessage] = useState(false)
   const [turnActive, setTurnActive] = useState(false)
-  const [agentActivity, setAgentActivity] = useState<string | null>(null)
 
   const agentsQuery = useQuery({
     queryKey: ['interactive-agents'],
@@ -364,57 +452,73 @@ export default function ChatPage() {
     sendingMessageRef.current = false
     setSendingMessage(false)
     setTurnActive(false)
-    setAgentActivity(null)
+    legacyMessageCandidatesRef.current.clear()
+    messageAliasesRef.current.clear()
+    setLastEventId(undefined)
+    setDraftReadyEventId(undefined)
     idempotencyKeyRef.current = crypto.randomUUID()
     createIdempotencyKeyRef.current = crypto.randomUUID()
   }, [sessionStorageKey])
 
-  const terminateConversation = useCallback((state: Extract<RunState, 'error' | 'expired' | 'closed'>, message: string) => {
+  const terminateConversation = useCallback((state: TerminalRunState, message: string) => {
     runGenerationRef.current += 1
     streamAbortRef.current?.abort()
     const previousId = sessionRef.current
-    sessionRef.current = null
     startPromiseRef.current = null
+    sessionRef.current = null
     setSessionId(null)
     setRunState(state)
     setTurnActive(false)
-    setAgentActivity(null)
+    setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+      ? { ...item, status: state === 'error' ? 'error' : 'stopped' }
+      : item))
     setStreamError(message)
     confirmationTokenRef.current = null
-    clearPersistedInteractiveSession(sessionStorageKey)
     if (previousId && !committedRef.current) void api.interactive.close(previousId).catch(() => undefined)
-  }, [isProjectUpdate, sessionStorageKey])
+  }, [])
 
   const processEvent = useCallback((event: { event: string; data: string; id?: string }) => {
     const data = parseData(event.data)
+    const eventId = eventIdValue(event.id)
+    if (event.id) setLastEventId(event.id)
+    const streamedMessage = (role: Message['role']): Message => {
+      const text = stringValue(data.text) ?? ''
+      const aliasKey = event.id ? `${role}:${event.id}` : undefined
+      const existingId = aliasKey ? messageAliasesRef.current.get(aliasKey) : undefined
+      if (existingId) return { id: existingId, role, text }
+      const legacyIds = legacyMessageCandidatesRef.current.get(messageFingerprint(role, text))
+      const legacyId = legacyIds?.shift()
+      const id = legacyId ?? stringValue(data.id) ?? event.id ?? crypto.randomUUID()
+      if (aliasKey) messageAliasesRef.current.set(aliasKey, id)
+      return { id, role, text }
+    }
     switch (event.event) {
       case 'assistant.message':
         {
-          const message = { id: stringValue(data.id) ?? event.id ?? crypto.randomUUID(), role: 'assistant' as const, text: stringValue(data.text) ?? '' }
+          const message = streamedMessage('assistant')
           setMessages((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
-          setTimeline((items) => items.some((item) => item.kind === 'message' && item.message.id === message.id)
-            ? items
-            : [...items, { kind: 'message', message }])
-          setAgentActivity(null)
+          setTimeline((items) => upsertTimeline(items, { kind: 'message', message, eventId }, (item) => item.kind === 'message' && item.message.id === message.id))
         }
         break
       case 'user.message':
         {
-          const message = { id: stringValue(data.id) ?? event.id ?? crypto.randomUUID(), role: 'user' as const, text: stringValue(data.text) ?? '' }
+          const message = streamedMessage('user')
           setMessages((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
-          setTimeline((items) => items.some((item) => item.kind === 'message' && item.message.id === message.id)
-            ? items
-            : [...items, { kind: 'message', message }])
+          setTimeline((items) => upsertTimeline(items, { kind: 'message', message, eventId }, (item) => item.kind === 'message' && item.message.id === message.id))
         }
         break
       case 'session.status':
         setRunState(isRunState(data.status) ? data.status : 'running')
-        if (data.status === 'idle') setTurnActive(false)
+        if (data.status === 'idle') {
+          setTurnActive(false)
+          setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+            ? { ...item, status: 'completed' }
+            : item))
+        }
         break
       case 'session.snapshot':
-        setRunState(data.status === 'waiting_answer' ? 'waiting_answer' : data.status === 'starting' ? 'starting' : 'running')
+        setRunState(isRunState(data.status) ? data.status : 'running')
         setTurnActive(data.busy === true)
-        setAgentActivity(null)
         {
           const callId = stringValue(data.pending_call_id) ?? ''
           const questions = Array.isArray(data.questions) ? data.questions.flatMap((value) => {
@@ -423,31 +527,86 @@ export default function ChatPage() {
           }) : []
           setQuestionBatches((batches) => {
             const answered = batches.filter((batch) => Boolean(batch.answers))
-            return callId && questions.length > 0 ? [...answered, { callId, questions }] : answered
+            return callId && questions.length > 0
+              ? [...answered, { callId, questions, eventId: batches.find((batch) => batch.callId === callId)?.eventId ?? eventId }]
+              : answered
           })
           if (callId && questions.length > 0) {
-            setTimeline((items) => items.some((item) => item.kind === 'question' && item.callId === callId)
-              ? items
-              : [...items, { kind: 'question', callId }])
+            setTimeline((items) => {
+              const existing = items.find((item) => item.kind === 'question' && item.callId === callId)
+              if (existing?.eventId !== undefined) return items
+              return upsertTimeline(items, { kind: 'question', callId, eventId }, (item) => item.kind === 'question' && item.callId === callId)
+            })
+          }
+          const waiting = callId !== '' && questions.length > 0
+          if (data.busy === true || waiting) {
+            const status = waiting ? 'waiting' : 'running'
+            const text = waiting ? 'Agent 正在等待你的回答' : 'Agent 正在工作…'
+            setTimeline((items) => {
+              let currentIndex = -1
+              items.forEach((item, index) => {
+                if (item.kind === 'activity' && (item.status === 'started' || item.status === 'running' || item.status === 'waiting')) currentIndex = index
+              })
+              if (currentIndex >= 0) {
+                return items.map((item, index) => {
+                  if (index !== currentIndex || item.kind !== 'activity') return item
+                  return {
+                    ...item,
+                    status,
+                    text: status === 'waiting' || item.status === 'started' || item.status === 'waiting' ? text : item.text,
+                  }
+                })
+              }
+              return upsertTimeline(items, {
+                kind: 'activity',
+                id: `snapshot-${status}-${eventId ?? crypto.randomUUID()}`,
+                status,
+                eventId,
+                text,
+              }, (item) => item.kind === 'activity' && item.status === status)
+            })
+          } else {
+            setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+              ? { ...item, status: 'completed' }
+              : item))
           }
         }
         break
       case 'turn.start':
         setTurnActive(true)
-        setAgentActivity(null)
+        setTimeline((items) => upsertTimeline(items, {
+          kind: 'activity',
+          id: `turn-start-${eventId ?? crypto.randomUUID()}`,
+          eventId,
+          status: 'started',
+          text: 'Agent 本轮开始处理',
+        }, (item) => item.kind === 'activity' && item.eventId === eventId && eventId !== undefined))
         break
       case 'turn.end':
         setTurnActive(false)
-        setAgentActivity(null)
+        {
+          const reason = isRecord(data.reason) ? data.reason : {}
+          const status: Extract<TimelineItem, { kind: 'activity' }>['status'] = reason.kind === 'error' ? 'error' : reason.kind === 'aborted' || reason.kind === 'interrupted' || reason.kind === 'cancelled' ? 'stopped' : 'completed'
+          const text = status === 'error' ? 'Agent 本轮发生错误' : status === 'stopped' ? 'Agent 本轮已停止' : 'Agent 本轮已完成'
+          const completion: TimelineItem = { kind: 'activity', id: `turn-end-${eventId ?? crypto.randomUUID()}`, eventId, status, text }
+          setTimeline((items) => upsertTimeline(
+            items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+              ? { ...item, status: status === 'stopped' && item.id.startsWith('turn-start-') ? 'completed' : status }
+              : item),
+            completion,
+            (item) => item.kind === 'activity' && item.id === completion.id,
+          ))
+        }
         break
       case 'ready':
       case 'session.ready':
         setRunState('running')
-        setAgentActivity(null)
         break
       case 'question.opened':
         setTurnActive(false)
-        setAgentActivity(null)
+        setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+          ? { ...item, status: 'waiting', text: 'Agent 正在等待你的回答' }
+          : item))
         setRunState('waiting_answer')
         {
           const callId = stringValue(data.call_id) ?? stringValue(data.callId) ?? ''
@@ -456,21 +615,38 @@ export default function ChatPage() {
             return question ? [question] : []
           }) : []
           setQuestionBatches((batches) => batches.some((batch) => batch.callId === callId)
-            ? batches
-            : [...batches, { callId, questions }])
-          setTimeline((items) => items.some((item) => item.kind === 'question' && item.callId === callId)
-            ? items
-            : [...items, { kind: 'question', callId }])
+            ? batches.map((batch) => batch.callId === callId ? { ...batch, eventId: batch.eventId ?? eventId } : batch)
+            : [...batches, { callId, questions, eventId }])
+          setTimeline((items) => upsertTimeline(items, { kind: 'question', callId, eventId }, (item) => item.kind === 'question' && item.callId === callId))
         }
         break
       case 'agent.activity':
         setTurnActive(true)
-        setAgentActivity(formatAgentActivity(stringValue(data.name)))
+        {
+          const text = formatAgentActivity(stringValue(data.name))
+          setTimeline((items) => {
+            const completedPrevious = items.map((item) => {
+              if (item.kind !== 'activity') return item
+              if (item.status === 'started') return { ...item, status: 'completed' as const }
+              return item.status === 'running' ? { ...item, status: 'completed' as const } : item
+            })
+            return upsertTimeline(completedPrevious, {
+              kind: 'activity',
+              id: `activity-${eventId ?? crypto.randomUUID()}`,
+              eventId,
+              status: 'running',
+              text,
+            }, (item) => item.kind === 'activity' && item.eventId === eventId && eventId !== undefined)
+          })
+        }
         break
       case 'question.answered':
         setQuestionBatches((batches) => batches.map((batch) => batch.callId === (stringValue(data.call_id) ?? stringValue(data.callId) ?? '')
           ? { ...batch, answers: parseAnswers(data.answers ?? data.answer) }
           : batch))
+        setTimeline((items) => items.map((item) => item.kind === 'activity' && item.status === 'waiting'
+          ? { ...item, status: 'completed' }
+          : item))
         setRunState('running')
         break
       case 'draft.updated':
@@ -490,7 +666,8 @@ export default function ChatPage() {
           return event.event === 'draft.ready' ? { ...next, ready: data.ready !== false } : { ...previous, ...next }
         })
         if (event.event === 'draft.ready') {
-          setTimeline((items) => items.some((item) => item.kind === 'draft') ? items : [...items, { kind: 'draft', id: 'draft' }])
+          setDraftReadyEventId(event.id)
+          setTimeline((items) => upsertTimeline(items, { kind: 'draft', id: 'draft', eventId }, (item) => item.kind === 'draft'))
         }
         break
       case 'session.error':
@@ -521,26 +698,6 @@ export default function ChatPage() {
         onConnected: () => {
           if (disposedRef.current || generation !== runGenerationRef.current) return
           setStreamError(null)
-        },
-        onEvent: (received) => {
-          const previous = readPersistedInteractiveSession(sessionStorageKey)
-          const receivedData = parseData(received.data)
-          const idleStatus = received.event === 'session.status' && receivedData.status === 'idle'
-          const turnActive = received.event === 'session.snapshot'
-            ? receivedData.busy === true
-            : received.event === 'turn.start'
-            ? true
-            : received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || idleStatus
-              ? false
-              : previous?.turnActive === true
-          if (received.id || received.event === 'session.snapshot' || received.event === 'turn.start' || received.event === 'turn.end' || received.event === 'question.opened' || received.event === 'session.error' || received.event === 'session.closed' || idleStatus) {
-            persistInteractiveSession(sessionStorageKey, {
-              sessionId: id,
-              lastEventId: received.id ?? previous?.lastEventId,
-              draftReadyEventId: received.event === 'draft.ready' ? received.id : previous?.draftReadyEventId,
-              turnActive,
-            })
-          }
         },
       })) {
         if (disposedRef.current || generation !== runGenerationRef.current) return
@@ -617,7 +774,7 @@ export default function ChatPage() {
   }, [connectStream, intent, isProjectUpdate, projectId, restartNonce, sessionStorageKey])
 
   useEffect(() => {
-    if (sessionStorageKey !== persistedSessionKey || !persistedSession?.sessionId || !token) return
+    if (sessionStorageKey !== persistedSessionKey || !persistedSession?.sessionId || persistedSession.terminalState || !token) return
     const currentPersisted = readPersistedInteractiveSession(sessionStorageKey)
     if (currentPersisted?.sessionId !== persistedSession.sessionId) return
     const generation = ++runGenerationRef.current
@@ -657,19 +814,25 @@ export default function ChatPage() {
   }, [])
 
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId && !isTerminalRunState(runState)) return
     const persisted = readPersistedInteractiveSession(sessionStorageKey)
-    if (persisted?.sessionId !== sessionId) return
+    const persistedSessionId = sessionId ?? persisted?.sessionId ?? persistedSession?.sessionId
+    if (!persistedSessionId) return
+    if (sessionId && persisted?.sessionId !== sessionId) return
     persistInteractiveSession(sessionStorageKey, {
       ...persisted,
-      sessionId,
+      sessionId: persistedSessionId,
+      lastEventId,
+      turnActive,
+      terminalState: isTerminalRunState(runState) && !sessionId ? runState : undefined,
+      terminalMessage: isTerminalRunState(runState) && !sessionId ? streamError ?? undefined : undefined,
+      draftReadyEventId,
       messages,
       questionBatches,
       timeline,
       draft,
-      draftReadyEventId: draft?.ready ? persisted.draftReadyEventId : undefined,
     })
-  }, [draft, messages, questionBatches, sessionId, sessionStorageKey, timeline])
+  }, [draft, draftReadyEventId, lastEventId, messages, persistedSession, questionBatches, runState, sessionId, sessionStorageKey, streamError, timeline, turnActive])
 
   const selectAgent = (agent: InteractiveAgent) => {
     if (agent.id === selectedAgent) return
@@ -758,6 +921,15 @@ export default function ChatPage() {
   }
 
   const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && runState !== 'error' && !committing && !committed && !sendingMessage && !turnActive
+  const currentActivity = [...timeline].reverse().find((item): item is Extract<TimelineItem, { kind: 'activity' }> => item.kind === 'activity' && (item.status === 'started' || item.status === 'running'))
+  const liveStatus = runState === 'starting'
+    ? messages.length === 0 ? '正在准备对话…' : '正在恢复会话…'
+    : runState === 'waiting_answer'
+      ? 'Agent 正在等待你的回答'
+      : turnActive
+        ? currentActivity?.text ?? 'Agent 正在工作…'
+        : null
+  const liveStatusLabel = runState === 'starting' ? '准备中' : runState === 'waiting_answer' ? '等待中' : '进行中'
   const emptyRegistry = !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
 
   return (
@@ -818,7 +990,6 @@ export default function ChatPage() {
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
           <section className="flex min-h-0 flex-col rounded-xl border border-border bg-card">
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6" aria-live="polite">
-              {runState === 'starting' && !turnActive && <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />{messages.length === 0 ? '正在准备对话…' : '正在恢复会话…'}</div>}
               {timeline.map((item) => {
                 if (item.kind === 'message') {
                   const { message } = item
@@ -829,14 +1000,22 @@ export default function ChatPage() {
                   if (!batch) return null
                   return <DshQuestionComposer key={`question-${batch.callId}`} questions={batch.questions} answers={batch.answers} submitted={Boolean(batch.answers)} disabled={!sessionId || runState === 'starting' || runState === 'expired' || runState === 'closed' || runState === 'error'} onSubmit={(answer) => submitAnswers(batch, answer)} />
                 }
+                if (item.kind === 'activity') {
+                  const statusLabel = item.status === 'started' ? '已开始' : item.status === 'running' ? '进行中' : item.status === 'waiting' ? '等待回答' : item.status === 'completed' ? '已完成' : item.status === 'stopped' ? '已停止' : '出错'
+                  const active = item.status === 'started' || item.status === 'running'
+                  const text = active ? item.text.replace(/^Agent /, '') : item.status === 'waiting' ? '等待你的回答' : item.text
+                  return <div key={`activity-${item.id}`} className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground"><Loader2 className={`size-4 shrink-0 ${active ? 'animate-spin text-primary' : 'hidden'}`} /><span className="min-w-0 flex-1 break-words">{text}</span><span className="shrink-0 text-xs">{statusLabel}</span></div>
+                }
                 if (!draft?.ready) return null
                 return <ConfirmCard key="draft-card" draft={draft} isProjectUpdate={isProjectUpdate} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />
               })}
-              {turnActive && <div role="status" className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-3 py-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin text-primary" />{agentActivity ?? 'Agent 正在工作…'}</div>}
               {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>{runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
             </div>
-            <div className="border-t border-border p-3 sm:p-4"><div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div></div>
+            <div className="border-t border-border p-3 sm:p-4">
+              {liveStatus && <div role="status" className="mb-3 flex min-h-9 items-center gap-2 border-b border-border/60 pb-3 text-sm text-muted-foreground">{liveStatusLabel === '等待中' ? <MessageSquare className="size-4 shrink-0 text-muted-foreground" /> : <Loader2 className="size-4 shrink-0 animate-spin text-primary" />}<span className="min-w-0 flex-1 break-words">{liveStatus}</span><span className="shrink-0 text-xs">{liveStatusLabel}</span></div>}
+              <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
+            </div>
           </section>
           <ProgressRail draft={draft} />
         </div>
