@@ -96,10 +96,7 @@ func (f ContainerRuntimeFactory) StartSession(ctx context.Context, spec Interact
 		"-e", "ANBAN_DSH_BRIDGE_MCP_URL",
 		"-e", "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY",
 	}
-	if strings.TrimSpace(f.Config.ProjectMemoryVolume) != "" {
-		if strings.TrimSpace(spec.ProjectID) == "" {
-			return nil, fmt.Errorf("project memory volume requires a project id")
-		}
+	if strings.TrimSpace(f.Config.ProjectMemoryVolume) != "" && strings.TrimSpace(spec.ProjectID) != "" {
 		args = append(args, "--mount", "type=volume,source="+f.Config.ProjectMemoryVolume+",destination="+f.Config.ProjectMemoryMount+",volume-subpath=projects/"+safeContainerPart(spec.ProjectID)+",readonly")
 	} else if strings.TrimSpace(f.ProjectMemoryRoot) != "" && strings.TrimSpace(spec.ProjectID) != "" {
 		projectDir := filepath.Join(f.ProjectMemoryRoot, "projects", filepath.Base(spec.ProjectID))

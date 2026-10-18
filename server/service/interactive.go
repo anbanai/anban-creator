@@ -648,6 +648,12 @@ func (s *InteractiveService) createSession(ctx context.Context, userID, agentID,
 		memory := s.memory
 		s.mu.RUnlock()
 		if memory != nil {
+			// Docker volume-subpath and Kubernetes subPath mounts require the
+			// project directory to exist before the runtime is created. Older
+			// projects may predate file-backed memory, so bootstrap it here.
+			if err := memory.EnsureProject(ctx, projectID); err != nil {
+				return nil, errors.Join(ErrInteractivePersistence, err)
+			}
 			view, err = memory.ReadProject(ctx, projectID)
 			if err != nil && !errors.Is(err, projectmemory.ErrProjectMemoryMissing) {
 				return nil, errors.Join(ErrInteractivePersistence, err)

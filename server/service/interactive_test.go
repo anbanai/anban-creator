@@ -181,6 +181,34 @@ func (m *retryInteractiveMemory) AppendMarkdownFileIfUnchanged(context.Context, 
 	return nil
 }
 
+type missingInteractiveMemory struct {
+	ensured bool
+}
+
+func (m *missingInteractiveMemory) ReadProject(context.Context, string) (projectmemory.ProjectView, error) {
+	if !m.ensured {
+		return projectmemory.ProjectView{}, projectmemory.ErrProjectMemoryMissing
+	}
+	return projectmemory.ProjectView{}, nil
+}
+
+func (m *missingInteractiveMemory) EnsureProject(context.Context, string) error {
+	m.ensured = true
+	return nil
+}
+
+func (m *missingInteractiveMemory) CreateMarkdownFileIfMissing(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
+func (m *missingInteractiveMemory) WriteMarkdownFile(context.Context, string, string, string) error {
+	return nil
+}
+
+func (m *missingInteractiveMemory) AppendMarkdownFileIfUnchanged(context.Context, string, string, string, string) error {
+	return nil
+}
+
 func newInteractiveTestService(sess *InteractiveSession) *InteractiveService {
 	return &InteractiveService{
 		sessions:   map[string]*InteractiveSession{sess.ID: sess},
@@ -546,6 +574,33 @@ func TestInteractiveCreateSessionHonorsAdminOnlyForRuntimeBackedService(t *testi
 	svc.SetAdminOnly(true)
 	if _, err := svc.CreateSession(context.Background(), userID, "project-creator", "create-project"); !errors.Is(err, ErrInteractiveAgent) {
 		t.Fatalf("CreateSession() error = %v, want ErrInteractiveAgent", err)
+	}
+}
+
+func TestInteractiveUpdateSessionBootstrapsMissingProjectMemory(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "interactive-project-memory.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Project{}, &model.FeedbackLease{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	project := &model.Project{ID: "project-1", UserID: "user-1", Name: "Existing project", Platform: model.PlatformWechat, Profile: datatypes.NewJSONType(model.NewProjectProfile())}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	memory := &missingInteractiveMemory{}
+	svc := NewInteractiveServiceWithRuntime(repo, interactiveTestRuntimeFactory{})
+	svc.SetEnabled(true)
+	svc.SetProjectMemory(memory)
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "update-project-profile", "project-1")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	defer func() { _ = svc.Close("user-1", sess.ID) }()
+	if !memory.ensured {
+		t.Fatal("CreateSession() did not bootstrap missing project memory")
 	}
 }
 

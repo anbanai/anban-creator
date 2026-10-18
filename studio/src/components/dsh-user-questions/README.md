@@ -5,8 +5,8 @@ This directory adapts the question UX from DeepSeek Harness for Anban Studio.
 ## Upstream
 
 - Package: `@deepseek-ai/dsh-client-ui-user-questions`
-- Runtime protocol target: `0.2.1-alpha.2`
-- The checked-out upstream package currently declares `0.2.1-alpha.1`; verify
+- Runtime protocol target: `0.2.1-rc.2`
+- The checked-out upstream package currently declares `0.2.1-rc.2`; verify
   the published UI package before moving this adapter to a direct dependency.
 - Source checkout: `/Users/medivh/WORKSPACE/deepseek-harness/packages/client/ui-user-questions`
 - Primary references: `src/client/QuestionComposer.tsx`, `QuestionReplyView.tsx`, and `PlanReviewPanel.tsx`
