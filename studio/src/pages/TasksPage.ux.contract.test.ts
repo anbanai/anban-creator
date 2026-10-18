@@ -6,15 +6,6 @@ import { describe, expect, it } from 'vitest'
 const here = dirname(fileURLToPath(import.meta.url))
 
 describe('TasksPage recovery workspace contract', () => {
-  it('keeps recovery signals compact and removes the dashboard-style workbench', () => {
-    const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
-
-    expect(source).not.toContain('恢复工作台')
-    expect(source).toContain('需要处理')
-    expect(source).toContain('个失败作品')
-    expect(source).not.toContain('待发布确认')
-  })
-
   it('shows bulk controls only after tasks are selected', () => {
     const source = readFileSync(join(here, 'TasksPage.tsx'), 'utf8')
 

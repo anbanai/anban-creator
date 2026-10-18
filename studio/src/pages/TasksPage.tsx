@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2, BarChart3, CheckCircle2, CircleDashed, XCircle, Ban as BanIcon, LoaderCircle, MoreHorizontal } from 'lucide-react'
+import { Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2, BarChart3, CheckCircle2, CircleDashed, XCircle, Ban as BanIcon, LoaderCircle, MoreHorizontal } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -487,23 +487,21 @@ export default function TasksPage() {
     },
   }
 
-  const queueStats = useMemo(() => ({
-    active: tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
-    failed: tasks.filter((t) => t.status === 'failed').length,
-  }), [tasks])
+  const activeTaskCount = useMemo(
+    () => tasks.filter((t) => t.status === 'running' || t.status === 'pending').length,
+    [tasks],
+  )
   const loadedRangeLabel = totalTasks === 0
     ? '当前筛选共 0 个'
     : `当前筛选共 ${totalTasks} 个 · 已加载 1–${Math.min(tasks.length, totalTasks)} / ${totalTasks} 个`
-  const failedTaskParams = new URLSearchParams(searchParams)
-  failedTaskParams.set('status', 'failed')
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="作品"
         description={
-          queueStats.active > 0
-            ? <>已加载：{queueStats.active} 个作品等待或执行中</>
+          activeTaskCount > 0
+            ? <>已加载：{activeTaskCount} 个作品等待或执行中</>
             : '查看进度、产物与发布状态。'
         }
       >
@@ -525,25 +523,6 @@ export default function TasksPage() {
           </div>
         </div>
       ) : null}
-
-      {queueStats.failed > 0 && (
-        <div role="alert" aria-label="失败作品提醒" className="flex flex-wrap items-center justify-between gap-3 border-y border-destructive/20 bg-destructive/[0.035] px-3 py-2.5 text-sm sm:px-4">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <AlertTriangle className="size-4 shrink-0 text-destructive" />
-            <div className="min-w-0">
-              <p className="font-medium text-foreground">{queueStats.failed} 个作品需要处理</p>
-              <p className="hidden text-xs text-muted-foreground sm:block">查看失败原因，或重试并保留原作品。</p>
-            </div>
-          </div>
-          <Link
-            to={`/tasks?${failedTaskParams}`}
-            aria-label={`查看失败作品，${queueStats.failed} 个失败作品`}
-            className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            查看失败作品 <span aria-hidden="true">→</span>
-          </Link>
-        </div>
-      )}
 
       {/* Filters apply to the task queue; text search covers tasks loaded so far. */}
       <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3">

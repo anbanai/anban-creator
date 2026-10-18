@@ -301,7 +301,7 @@ describe('TasksPage URL-driven recovery filters', () => {
 
   it('keeps the plan context when opening failed tasks', async () => {
     renderTasksPage('/tasks?plan_id=plan-1')
-    fireEvent.click(await screen.findByRole('link', { name: /失败作品/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '失败' }))
     await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({
       plan_id: 'plan-1', status: 'failed',
     })))
@@ -331,14 +331,14 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(await screen.findByRole('button', { name: '选择作品' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('syncs recovery queue links into the task status filter', async () => {
+  it('filters failed tasks from the status tabs', async () => {
     renderTasksPage()
 
     await waitFor(() => {
       expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }))
     })
 
-    fireEvent.click(await screen.findByRole('link', { name: /失败作品/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '失败' }))
 
     await waitFor(() => {
       expect(api.tasks.list).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }))
@@ -379,7 +379,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.getByText(/当前筛选共 12 个 · 已加载 1–5 \/ 12 个/)).toBeInTheDocument()
   })
 
-  it('keeps one failure alert and gives each row a stage and latest activity', async () => {
+  it('keeps failed task rows actionable without a separate failure reminder', async () => {
     vi.mocked(api.tasks.list).mockResolvedValue({
       items: [{
         ...fixtures.failedTask as Task,
@@ -397,8 +397,9 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage()
 
-    expect(await screen.findByRole('alert', { name: '失败作品提醒' })).toHaveTextContent('1 个作品需要处理')
-    expect(screen.getAllByRole('link', { name: /1 个失败作品/ })).toHaveLength(1)
+    expect(await screen.findByText('失败文章')).toBeInTheDocument()
+    expect(screen.queryByRole('alert', { name: '失败作品提醒' })).not.toBeInTheDocument()
+    expect(screen.queryByText('查看失败原因，或重试并保留原作品。')).not.toBeInTheDocument()
     expect(screen.getByText('撰写正文')).toBeInTheDocument()
     expect(screen.getByLabelText('最近活动：7/6 09:02')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试作品：失败文章' })).toHaveTextContent('重试')
