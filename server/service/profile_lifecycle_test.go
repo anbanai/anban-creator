@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/anbanai/anban-creator/server/agent"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
@@ -23,7 +24,26 @@ type profileProjectionMemory struct {
 	files map[string]string
 }
 
+func (m *profileProjectionMemory) ReadProject(_ context.Context, _ string) (projectmemory.ProjectView, error) {
+	view := projectmemory.ProjectView{Status: projectmemory.StatusReady}
+	for path, content := range m.files {
+		view.Files = append(view.Files, projectmemory.FileView{Path: path, Content: content})
+	}
+	return view, nil
+}
+
 func (m *profileProjectionMemory) EnsureProject(context.Context, string) error { return nil }
+
+func (m *profileProjectionMemory) CreateMarkdownFileIfMissing(_ context.Context, _, path, content string) (bool, error) {
+	if m.files == nil {
+		m.files = map[string]string{}
+	}
+	if _, exists := m.files[path]; exists {
+		return false, nil
+	}
+	m.files[path] = content
+	return true, nil
+}
 
 func (m *profileProjectionMemory) WriteMarkdownFile(_ context.Context, _, path, content string) error {
 	if m.files == nil {
@@ -100,6 +120,39 @@ func validProfileDimensions() model.ProjectProfileDimensions {
 	return model.ProjectProfileDimensions{
 		Identity: newDimension("账号定位"), Style: newDimension("表达风格"), Audience: newDimension("目标受众"),
 		Platforms: newDimension("平台规则"), Preferences: newDimension("内容偏好"), Memory: newDimension("复盘经验"),
+	}
+}
+
+func TestProjectCreateInitializesProjectAgentsWithoutOverwritingCustomRules(t *testing.T) {
+	svc, _, ctx, userID := setupProjectServiceTest(t)
+	memory := &profileProjectionMemory{files: map[string]string{"AGENTS.md": "# Custom project rules\n"}}
+	svc.SetProjectProfileMemory(memory)
+
+	project, err := svc.Create(ctx, userID, &model.Project{
+		Name: "memory-backed project", Platform: model.PlatformWechat, Instructions: "只写清晰、可执行的内容",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got := memory.files["AGENTS.md"]; got != "# Custom project rules\n" {
+		t.Fatalf("custom AGENTS.md was overwritten: %q", got)
+	}
+	for _, name := range model.ProfileDimensions() {
+		if strings.TrimSpace(memory.files["profile/"+name+".md"]) == "" {
+			t.Fatalf("profile projection %q was not initialized", name)
+		}
+	}
+
+	second, err := svc.Create(ctx, userID, &model.Project{Name: "fresh project", Platform: model.PlatformWechat, Instructions: "项目规则"})
+	if err != nil {
+		t.Fatalf("Create second project: %v", err)
+	}
+	_ = project
+	if !strings.Contains(memory.files["AGENTS.md"], "Custom project rules") {
+		t.Fatalf("AGENTS.md changed after second initialization: %q", memory.files["AGENTS.md"])
+	}
+	if second.ID == "" {
+		t.Fatal("second project has no id")
 	}
 }
 

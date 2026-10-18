@@ -70,6 +70,7 @@ type InteractiveQuestion struct {
 type InteractiveOption struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
 }
 type InteractiveAnswer struct {
 	ID       string   `json:"id"`
@@ -210,6 +211,7 @@ type RuntimeFactoryWithSession interface {
 type InteractiveMemoryStore interface {
 	ReadProject(context.Context, string) (projectmemory.ProjectView, error)
 	EnsureProject(context.Context, string) error
+	CreateMarkdownFileIfMissing(context.Context, string, string, string) (bool, error)
 	WriteMarkdownFile(context.Context, string, string, string) error
 	AppendMarkdownFileIfUnchanged(context.Context, string, string, string, string) error
 }
@@ -413,30 +415,41 @@ func interactiveInitialContext(project *model.Project, profile model.ProjectProf
 		Content   string `json:"content"`
 		Truncated bool   `json:"truncated,omitempty"`
 	}
-	// The database profile is the authoritative source for rebuildable Agent
-	// projections. Read the NAS only for the continuously maintained root
-	// MEMORY.md, so a stale or incomplete NAS projection cannot hide current
-	// profile facts from the update conversation.
-	files := make([]contextFile, 0, len(model.ProfileDimensions())+2)
-	files = append(files, contextFile{Path: "AGENTS.md", Content: ProfileAgentsMarkdown()})
-	for _, name := range model.ProfileDimensions() {
-		content, err := ProfileDimensionMarkdownAtVersion(name, profileDimension(profile, name), profile.Version)
-		if err != nil {
-			return "", ""
-		}
-		files = append(files, contextFile{Path: "profile/" + name + ".md", Content: content})
-	}
-	memoryExpected := ""
+	// The NAS project directory is the runtime source for project context. The
+	// database profile is only a compatibility fallback for older projects that
+	// predate the file projection; once a file exists, it is used verbatim.
+	files := make([]contextFile, 0, len(projectMemoryContextPaths))
+	byPath := make(map[string]projectmemory.FileView, len(view.Files))
 	for _, file := range view.Files {
-		if file.Path != "MEMORY.md" {
+		byPath[file.Path] = file
+	}
+	for _, path := range projectMemoryContextPaths {
+		if file, ok := byPath[path]; ok {
+			files = append(files, contextFile{Path: path, Content: file.Content, Truncated: file.Truncated})
 			continue
 		}
-		content := file.Content
-		if file.Path == "MEMORY.md" && !file.Truncated {
-			memoryExpected = content
+		if path == "MEMORY.md" {
+			continue
 		}
-		truncated := file.Truncated
-		files = append(files, contextFile{Path: file.Path, Content: content, Truncated: truncated})
+		var content string
+		if path == "AGENTS.md" {
+			content = ProfileAgentsMarkdownForProject(project.Instructions)
+		} else {
+			name := strings.TrimSuffix(strings.TrimPrefix(path, "profile/"), ".md")
+			var err error
+			content, err = ProfileDimensionMarkdownAtVersion(name, profileDimension(profile, name), profile.Version)
+			if err != nil {
+				return "", ""
+			}
+		}
+		files = append(files, contextFile{Path: path, Content: content})
+	}
+	memoryExpected := ""
+	if file, ok := byPath["MEMORY.md"]; ok {
+		if !file.Truncated {
+			memoryExpected = file.Content
+		}
+		files = append(files, contextFile{Path: file.Path, Content: file.Content, Truncated: file.Truncated})
 	}
 	ctx := map[string]any{
 		"kind": "anban.project_profile_reference", "version": 1,
@@ -509,7 +522,7 @@ func writeInteractiveProfileProjection(ctx context.Context, memory InteractiveMe
 			return err
 		}
 	}
-	return memory.WriteMarkdownFile(ctx, projectID, "AGENTS.md", ProfileAgentsMarkdownAtVersion(profile.Version))
+	return nil
 }
 
 func (s *InteractiveService) CreateSession(ctx context.Context, userID, agentID, intent string, projectIDs ...string) (*InteractiveSession, error) {
@@ -2087,6 +2100,12 @@ func (s *InteractiveService) applyReceipt(ctx context.Context, receipt *model.In
 	if receipt.MemoryAppliedAt != nil {
 		return nil
 	}
+	if err := memory.EnsureProject(ctx, result.Project.ID); err != nil {
+		return s.recordReceiptProjectionError(ctx, receipt, err)
+	}
+	if _, err := memory.CreateMarkdownFileIfMissing(ctx, result.Project.ID, "AGENTS.md", ProfileAgentsMarkdownForProject(currentProject.Instructions)); err != nil {
+		return s.recordReceiptProjectionError(ctx, receipt, err)
+	}
 	if err := writeInteractiveProfileProjection(ctx, memory, result.Project.ID, result.Profile); err != nil {
 		return s.recordReceiptProjectionError(ctx, receipt, err)
 	}
@@ -2098,9 +2117,6 @@ func (s *InteractiveService) applyReceipt(ctx context.Context, receipt *model.In
 			return errors.Join(ErrInteractivePersistence, err)
 		}
 		return nil
-	}
-	if err := memory.EnsureProject(ctx, result.Project.ID); err != nil {
-		return s.recordReceiptProjectionError(ctx, receipt, err)
 	}
 	if err := memory.AppendMarkdownFileIfUnchanged(ctx, result.Project.ID, "MEMORY.md", receipt.MemoryExpected, receipt.MemoryAppend); err != nil {
 		return s.recordReceiptProjectionError(ctx, receipt, err)

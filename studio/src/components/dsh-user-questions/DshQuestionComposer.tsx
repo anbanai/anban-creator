@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 export interface DshQuestionOption {
   label: string
   description?: string
+  recommended?: boolean
 }
 
 export interface DshQuestion {
@@ -52,6 +53,14 @@ function parseRecommendedLabel(label: string) {
     : { label, recommended: false }
 }
 
+function optionDisplay(option: DshQuestionOption) {
+  const parsed = parseRecommendedLabel(option.label)
+  return {
+    label: parsed.label,
+    recommended: option.recommended === true || parsed.recommended,
+  }
+}
+
 function isComposing(event: KeyboardEvent<HTMLTextAreaElement>) {
   return event.nativeEvent.isComposing || Reflect.get(event.nativeEvent, 'keyCode') === 229
 }
@@ -75,7 +84,10 @@ export function DshQuestionComposer({
 }) {
   const [drafts, setDrafts] = useState<DraftAnswer[]>(() => questions.map((question) => ({
     selected: answers.find((answer) => answer.id === question.id)?.selected
-      ?? (question.options?.[0] && parseRecommendedLabel(question.options[0].label).recommended ? [question.options[0].label] : []),
+      ?? (() => {
+        const recommended = question.options?.find((option) => optionDisplay(option).recommended)
+        return recommended ? [recommended.label] : []
+      })(),
     custom: answers.find((answer) => answer.id === question.id)?.custom ?? '',
     skipped: answers.some((answer) => answer.id === question.id && answer.selected.length === 0 && !answer.custom),
   })))
@@ -243,7 +255,7 @@ export function DshQuestionComposer({
               <div className="space-y-1" role={multi ? 'group' : 'radiogroup'} aria-label={question.question}>
                 {question.options.map((option, optionIndex) => {
                   const selected = draft.selected.includes(option.label)
-                  const display = parseRecommendedLabel(option.label)
+                  const display = optionDisplay(option)
                   return (
                     <button
                       key={`${option.label}-${optionIndex}`} type="button"

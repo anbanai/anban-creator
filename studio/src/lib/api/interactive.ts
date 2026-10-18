@@ -24,6 +24,7 @@ export interface InteractiveSession {
 export interface InteractiveOption {
   label: string
   description?: string
+  recommended?: boolean
 }
 
 export interface InteractiveQuestion {

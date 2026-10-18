@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ProfileDimension } from '@/types/project'
+import { normalizeProfileDimension } from '@/lib/project-profile'
 import { Button } from '@/components/common/button'
 import { Textarea } from '@/components/ui/textarea'
 
@@ -40,18 +41,26 @@ export function ProfileDimensionCard({ label, dimension, text, error, disabled =
 }) {
   const [editing, setEditing] = useState(false)
   const [advanced, setAdvanced] = useState(false)
-  return <section aria-label={`${label}资料`} className="space-y-3 rounded-lg border p-4">
+  const safeDimension = normalizeProfileDimension(dimension)
+  const { sources, missing_fields: missingFields, evidence, content } = safeDimension
+  const hasSupplementalInfo = sources.length > 0 || missingFields.length > 0 || evidence.length > 0
+  return <section aria-label={`${label}资料`} className="space-y-4 border-b py-6 first:pt-0 last:border-b-0 last:pb-0">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h3 className="text-sm font-semibold">{label}</h3>
       <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setEditing(!editing)}>{editing ? `收起${label}编辑` : `修改${label}`}</Button>
     </div>
-    <p className="text-xs text-muted-foreground">来源：{dimension.sources.join('、') || '[待补充]'}</p>
     {advanced ? <Textarea aria-label={`${label}画像内容`} value={text} disabled={disabled} onChange={(event) => onTextChange(event.target.value)} className="min-h-32 font-mono text-xs" />
-      : Object.keys(dimension.content).length || editing ? <ContentValue value={Object.keys(dimension.content).length ? dimension.content : { summary: '' }} label={label} editing={editing} disabled={disabled} onChange={(value) => onTextChange(JSON.stringify(value, null, 2))} />
+      : Object.keys(content).length || editing ? <ContentValue value={Object.keys(content).length ? content : { summary: '' }} label={label} editing={editing} disabled={disabled} onChange={(value) => onTextChange(JSON.stringify(value, null, 2))} />
         : <p className="text-sm text-muted-foreground">还没有足够信息，可以稍后补充。</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {dimension.missing_fields.length > 0 && <p className="text-xs text-amber-700">待补充：{dimension.missing_fields.join('、')}</p>}
-    {dimension.evidence.length > 0 && <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">查看依据</summary><ul className="mt-2 space-y-1">{dimension.evidence.map((item, index) => <li key={index} className="whitespace-pre-wrap break-words">{item}</li>)}</ul></details>}
+    {hasSupplementalInfo && <details className="text-xs text-muted-foreground">
+      <summary className="cursor-pointer">补充信息</summary>
+      <div className="mt-3 space-y-3 border-l pl-3">
+        {sources.length > 0 && <p>来源：{sources.join('、')}</p>}
+        {missingFields.length > 0 && <p className="text-amber-700">待补充：{missingFields.join('、')}</p>}
+        {evidence.length > 0 && <div><p className="mb-1">依据</p><ul className="space-y-1">{evidence.map((item, index) => <li key={index} className="whitespace-pre-wrap break-words">{item}</li>)}</ul></div>}
+      </div>
+    </details>}
     {editing && <div className="flex flex-wrap gap-2">
       {onSave && <Button size="sm" variant="secondary" disabled={disabled || Boolean(error)} onClick={onSave}>保存此维度</Button>}
       <Button size="sm" variant="ghost" disabled={disabled || Boolean(error)} onClick={() => setAdvanced(!advanced)}>{advanced ? '返回易读编辑' : '高级编辑（JSON）'}</Button>

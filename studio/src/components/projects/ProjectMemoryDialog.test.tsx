@@ -6,13 +6,70 @@ import { ProjectMemoryDialog } from './ProjectMemoryDialog'
 import { projectsApi } from '@/lib/api/projects'
 
 vi.mock('@/lib/api/projects', () => ({
-  projectsApi: { memory: vi.fn(), updateMemory: vi.fn() },
+  projectsApi: {
+    memory: vi.fn(),
+    updateMemory: vi.fn(),
+    getAccountProfile: vi.fn(),
+    profileAnalysis: vi.fn(),
+    refreshProfile: vi.fn(),
+    retryProfile: vi.fn(),
+    updateProfileDimension: vi.fn(),
+  },
 }))
+
+function profileProject(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'profile-project',
+    user_id: 'user-1',
+    platform: 'wechat' as const,
+    agent_ids: ['wechat-article'],
+    name: '公众号创作项目',
+    avatar_url: '',
+    profile_url: '',
+    keywords: '',
+    visual_style: '',
+    writer: '',
+    theme: '',
+    author: '',
+    image_ratio: '',
+    max_concurrent_tasks: 1,
+    status: 'active' as const,
+    created_at: '2026-07-01T00:00:00.000Z',
+    updated_at: '2026-07-01T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function accountProfile(overrides: Record<string, unknown> = {}) {
+  const dimension = { content: { summary: '项目定位' }, sources: ['项目资料'], evidence: [], missing_fields: [] }
+  return {
+    schema_version: 1,
+    status: 'confirmed' as const,
+    initialization_status: 'ready' as const,
+    version: 3,
+    dimensions: {
+      identity: dimension,
+      style: dimension,
+      audience: dimension,
+      platforms: dimension,
+      preferences: dimension,
+      memory: dimension,
+    },
+    analysis_limits: [],
+    follow_up_questions: [],
+    ...overrides,
+  }
+}
 
 describe('ProjectMemoryDialog', () => {
   beforeEach(() => {
     vi.mocked(projectsApi.memory).mockReset()
     vi.mocked(projectsApi.updateMemory).mockReset()
+    vi.mocked(projectsApi.getAccountProfile).mockReset()
+    vi.mocked(projectsApi.profileAnalysis).mockReset()
+    vi.mocked(projectsApi.refreshProfile).mockReset()
+    vi.mocked(projectsApi.retryProfile).mockReset()
+    vi.mocked(projectsApi.updateProfileDimension).mockReset()
   })
 
   it('loads only when opened, prioritizes MEMORY.md, switches files, and blocks images', async () => {
@@ -33,7 +90,7 @@ describe('ProjectMemoryDialog', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
     expect(screen.getByText('内容已按安全限制截断')).toBeInTheDocument()
     expect(screen.getByText('MEMORY.md', { selector: 'h2' })).toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: '创作项目记忆' })).toHaveAttribute('data-slot', 'dialog-content')
+    expect(screen.getByRole('dialog', { name: '项目记忆' })).toHaveAttribute('data-slot', 'dialog-content')
     expect(screen.getByRole('region', { name: '记忆正文' })).toBeInTheDocument()
     const readingPane = screen.getByRole('region', { name: '记忆正文' })
     readingPane.scrollTop = 400
@@ -50,8 +107,8 @@ describe('ProjectMemoryDialog', () => {
   it('shows the empty state and supports refresh', async () => {
     vi.mocked(projectsApi.memory).mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
     render(<ProjectMemoryDialog projectId="project-2" projectName="空创作项目" open onOpenChange={() => {}} />)
-    expect(await screen.findByText('还没有创作项目记忆')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '刷新记忆' }))
+    expect(await screen.findByText('还没有项目记忆')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '刷新项目记忆' }))
     expect(projectsApi.memory).toHaveBeenCalledTimes(2)
   })
 
@@ -68,7 +125,7 @@ describe('ProjectMemoryDialog', () => {
     expect(await screen.findByText('创作项目概要')).toBeInTheDocument()
     fireEvent.change(screen.getByRole('combobox', { name: '选择记忆文件' }), { target: { value: 'notes/style.md' } })
     expect(screen.getByText('风格偏好')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '关闭创作项目记忆' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭项目记忆' }))
     expect(onOpenChange).toHaveBeenCalledWith(false, expect.anything())
   })
   it('shows a recoverable error and retries without closing the dialog', async () => {
@@ -76,10 +133,10 @@ describe('ProjectMemoryDialog', () => {
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce({ status: 'empty', updated_at: null, partial: false, files: [] })
     render(<ProjectMemoryDialog projectId="retry" projectName="创作项目" open onOpenChange={() => {}} />)
-    expect(await screen.findByText('无法读取创作项目记忆')).toBeInTheDocument()
+    expect(await screen.findByText('无法读取项目记忆')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByText('还没有创作项目记忆')).toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: '创作项目记忆' })).toBeInTheDocument()
+    expect(await screen.findByText('还没有项目记忆')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '项目记忆' })).toBeInTheDocument()
     expect(projectsApi.memory).toHaveBeenCalledTimes(2)
   })
 
@@ -101,6 +158,7 @@ describe('ProjectMemoryDialog', () => {
     render(<ProjectMemoryDialog projectId="editable" projectName="创作项目" open onOpenChange={() => {}} />)
     expect(await screen.findByText('旧风格')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '编辑记忆文件' })).toBeInTheDocument())
     const editor = screen.getByRole('textbox', { name: '编辑记忆文件' })
     fireEvent.change(editor, { target: { value: '新风格' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -121,6 +179,92 @@ describe('ProjectMemoryDialog', () => {
     render(<ProjectMemoryDialog projectId="managed" projectName="创作项目" open onOpenChange={() => {}} />)
     expect(await screen.findByText('managed')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
+  })
+
+  it('shows AGENTS.md in the memory list as a server-managed read-only file', async () => {
+    vi.mocked(projectsApi.memory).mockResolvedValue({
+      status: 'ready', updated_at: null, partial: false,
+      files: [{ path: 'AGENTS.md', content: '# 项目规则', size_bytes: 12, modified_at: '2026-09-22T03:45:00Z', truncated: false }],
+    })
+    render(<ProjectMemoryDialog projectId="agents" projectName="创作项目" open onOpenChange={() => {}} />)
+    expect(await screen.findByRole('heading', { name: '项目规则' })).toBeInTheDocument()
+    expect(screen.getAllByText('只读')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
+  })
+
+  it('loads the profile as part of the combined project memory page', async () => {
+    vi.mocked(projectsApi.memory).mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
+    vi.mocked(projectsApi.getAccountProfile).mockResolvedValue(accountProfile())
+    render(<ProjectMemoryDialog projectId="profile-project" projectName="公众号创作项目" project={profileProject()} open onOpenChange={() => {}} />)
+
+    expect(await screen.findByText('还没有项目记忆')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '定位资料' })).toBeInTheDocument()
+    expect(projectsApi.getAccountProfile).toHaveBeenCalledWith('profile-project')
+  })
+
+  it('renders a partial server profile with null arrays and missing dimensions', async () => {
+    const incompleteProfile = {
+      ...accountProfile(),
+      dimensions: {
+        identity: { content: null, sources: null, evidence: null, missing_fields: null },
+      },
+      analysis_limits: null,
+      follow_up_questions: null,
+    } as unknown as ReturnType<typeof accountProfile>
+    vi.mocked(projectsApi.memory).mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
+    vi.mocked(projectsApi.getAccountProfile).mockResolvedValue(incompleteProfile)
+    render(<ProjectMemoryDialog projectId="partial-profile" projectName="公众号创作项目" project={profileProject()} open onOpenChange={() => {}} />)
+
+    expect(await screen.findByRole('region', { name: '定位资料' })).toBeInTheDocument()
+    expect(screen.getAllByText('还没有足够信息，可以稍后补充。')).toHaveLength(6)
+  })
+
+  it('does not show a profile tab for projects without profile support', async () => {
+    vi.mocked(projectsApi.memory).mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
+    render(<ProjectMemoryDialog projectId="legacy" projectName="旧项目" project={profileProject({ platform: 'ecommerce', agent_ids: null })} open onOpenChange={() => {}} />)
+
+    expect(await screen.findByText('还没有项目记忆')).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '人设画像' })).not.toBeInTheDocument()
+  })
+
+  it('retries a failed profile analysis from the profile tab', async () => {
+    const failedProfile = accountProfile({ initialization_status: 'failed', analysis_task_id: 'analysis-1' })
+    vi.mocked(projectsApi.memory).mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
+    vi.mocked(projectsApi.getAccountProfile).mockResolvedValue(failedProfile)
+    vi.mocked(projectsApi.profileAnalysis).mockResolvedValue({ status: 'failed', profile: failedProfile })
+    vi.mocked(projectsApi.retryProfile).mockResolvedValue({ task: { id: 'analysis-2', status: 'pending' } as never, profile: accountProfile({ initialization_status: 'queued' }) })
+    render(<ProjectMemoryDialog projectId="profile-project" projectName="公众号创作项目" project={profileProject()} open onOpenChange={() => {}} />)
+
+    expect(await screen.findByText('画像分析失败')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试分析' }))
+
+    await waitFor(() => expect(projectsApi.retryProfile).toHaveBeenCalledWith('profile-project', 3))
+  })
+
+  it('saves edited profile dimensions with the current revision', async () => {
+    const currentProfile = accountProfile()
+    vi.mocked(projectsApi.memory).mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
+    vi.mocked(projectsApi.getAccountProfile).mockResolvedValue(currentProfile)
+    vi.mocked(projectsApi.updateProfileDimension).mockResolvedValue(accountProfile({ version: 4 }))
+    render(<ProjectMemoryDialog projectId="profile-project" projectName="公众号创作项目" project={profileProject()} open onOpenChange={() => {}} />)
+
+    await screen.findByRole('region', { name: '定位资料' })
+    fireEvent.click(screen.getByRole('button', { name: '修改定位' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '定位 · 概述' }), { target: { value: '新的项目定位' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存此维度' }))
+
+    await waitFor(() => expect(projectsApi.updateProfileDimension).toHaveBeenCalledWith('profile-project', 'identity', 3, expect.objectContaining({ content: { summary: '新的项目定位' } })))
+  })
+
+  it('opens the conversation update flow from the combined memory page', async () => {
+    const onUpdateProfile = vi.fn()
+    vi.mocked(projectsApi.memory).mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
+    vi.mocked(projectsApi.getAccountProfile).mockResolvedValue(accountProfile())
+    render(<ProjectMemoryDialog projectId="profile-project" projectName="公众号创作项目" project={profileProject()} open onOpenChange={() => {}} onUpdateProfile={onUpdateProfile} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '对话更新画像' }))
+
+    expect(onUpdateProfile).toHaveBeenCalledOnce()
   })
 
 })

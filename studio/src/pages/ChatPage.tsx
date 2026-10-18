@@ -96,13 +96,14 @@ function parseData(eventData: string): JsonRecord {
 }
 
 type PersistedInteractiveSession = {
-  sessionId?: string
+  sessionId?: string | null
   lastEventId?: string
   draftReadyEventId?: string
   createIdempotencyKey?: string
   turnActive?: boolean
   terminalState?: TerminalRunState
   terminalMessage?: string
+  draftNeedsReconfirmation?: boolean
   messages?: Message[]
   questionBatches?: QuestionBatch[]
   timeline?: TimelineItem[]
@@ -119,7 +120,7 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
     if (!raw) return null
     const value: unknown = JSON.parse(raw)
     if (!isRecord(value)) return null
-    const sessionId = typeof value.sessionId === 'string' && value.sessionId ? value.sessionId : undefined
+    const sessionId = typeof value.sessionId === 'string' && value.sessionId ? value.sessionId : null
     const createIdempotencyKey = typeof value.createIdempotencyKey === 'string' && value.createIdempotencyKey ? value.createIdempotencyKey : undefined
     if (!sessionId && !createIdempotencyKey) return null
     const messages = Array.isArray(value.messages)
@@ -175,6 +176,7 @@ function readPersistedInteractiveSession(key: string): PersistedInteractiveSessi
       turnActive: value.turnActive === true,
       terminalState: isTerminalRunState(value.terminalState) ? value.terminalState : undefined,
       terminalMessage: stringValue(value.terminalMessage),
+      draftNeedsReconfirmation: value.draftNeedsReconfirmation === true,
       messages,
       questionBatches,
       timeline,
@@ -192,6 +194,49 @@ function persistInteractiveSession(key: string, session: PersistedInteractiveSes
   } catch {
     // Session persistence is an enhancement; the live SSE stream remains authoritative.
   }
+}
+
+function replacePersistedInteractiveSession(key: string, session: PersistedInteractiveSession): void {
+  try {
+    const next = { ...session }
+    if (next.sessionId == null) delete next.sessionId
+    sessionStorage.setItem(key, JSON.stringify(next))
+  } catch {
+    // Session persistence is an enhancement; the live SSE stream remains authoritative.
+  }
+}
+
+function hasSavedMaterial(session: PersistedInteractiveSession | null): boolean {
+  return Boolean(session?.messages?.length || session?.questionBatches?.length || session?.draft?.ready)
+}
+
+function recoveryPrompt(session: PersistedInteractiveSession | null): string {
+  const messages = (session?.messages ?? []).slice(-24).map((message) => `${message.role === 'user' ? '用户' : '助手'}：${message.text}`).join('\n')
+  const answers = (session?.questionBatches ?? []).filter((batch) => batch.answers?.length).map((batch) => `${batch.callId}：${batch.answers?.map((answer) => `${answer.id}=${answer.selected.join('、')}${answer.custom ? `（${answer.custom}）` : ''}`).join('；')}`).join('\n')
+  const draft = session?.draft ? JSON.stringify({
+    revision: session.draft.revision,
+    project: session.draft.project,
+    profile: session.draft.profile,
+    progress: session.draft.progress,
+    missing_fields: session.draft.missing_fields,
+    inferred_fields: session.draft.inferred_fields,
+    memory_append: session.draft.memory_append,
+  }) : ''
+  const prompt = [
+    '这是一次从浏览器本地保存材料恢复的新创作项目画像会话。原 runtime 上下文已经失效，下面内容只能作为用户提供的草稿，不能视为服务端已确认的结果。',
+    '请先告诉用户已恢复哪些内容，再让用户补充或确认；完成后重新生成一个需要重新确认的新草稿。不要假装恢复了原会话，也不要直接沿用旧确认凭据。',
+    messages ? `保存的历史消息：\n${messages}` : '',
+    answers ? `保存的问答：\n${answers}` : '',
+    draft ? `保存的草稿：\n${draft}` : '',
+    '请继续画像流程，优先从保存材料中缺失或需要确认的部分开始。',
+  ].filter(Boolean).join('\n\n')
+  return prompt.length > 12000 ? `${prompt.slice(0, 11960)}\n\n（历史材料过长，已截取；请继续向用户核对未显示的部分。）` : prompt
+}
+
+function displayInteractiveMessage(text: string): string {
+  return text.startsWith('这是一次从浏览器本地保存材料恢复的新创作项目画像会话。')
+    ? '我已带入上次保存的画像材料，请根据这些内容继续并重新确认。'
+    : text
 }
 
 function resumeEventId(session: PersistedInteractiveSession | null): string | undefined {
@@ -300,6 +345,28 @@ function normalizeDraft(raw: JsonRecord): InteractiveDraft {
   }
 }
 
+function hasObjectContent(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0
+  if (typeof value === 'number') return value !== 0
+  if (typeof value === 'boolean') return value
+  if (Array.isArray(value)) return value.length > 0
+  if (!isRecord(value)) return value != null
+  return Object.values(value).some((item) => hasObjectContent(item))
+}
+
+function isEmptyDraft(draft: InteractiveDraft): boolean {
+  return draft.revision <= 0
+    && !hasObjectContent(draft.project)
+    && !hasObjectContent(draft.profile)
+    && !hasObjectContent(draft.progress)
+    && !draft.name
+    && !draft.fields
+    && !draft.memory_append
+    && (draft.missing_fields?.length ?? 0) === 0
+    && (draft.inferred_fields?.length ?? 0) === 0
+    && !draft.ready
+}
+
 function parseQuestion(value: unknown): DshQuestion | null {
   if (!isRecord(value)) return null
   const id = stringValue(value.id)
@@ -309,7 +376,11 @@ function parseQuestion(value: unknown): DshQuestion | null {
     ? value.options.flatMap((option): DshQuestionOption[] => {
       if (!isRecord(option)) return []
       const label = stringValue(option.label)
-      return label ? [{ label, description: stringValue(option.description) }] : []
+      return label ? [{
+        label,
+        description: stringValue(option.description),
+        recommended: option.recommended === true ? true : undefined,
+      }] : []
     })
     : undefined
   return {
@@ -389,12 +460,14 @@ export default function ChatPage() {
   const [draft, setDraft] = useState<InteractiveDraft | null>(persistedSession?.draft ?? null)
   const [composer, setComposer] = useState('')
   const [streamError, setStreamError] = useState<string | null>(persistedSession?.terminalMessage ?? null)
+  const [draftNeedsReconfirmation, setDraftNeedsReconfirmation] = useState(persistedSession?.draftNeedsReconfirmation === true)
   const [commitError, setCommitError] = useState<string | null>(null)
   const [committing, setCommitting] = useState(false)
   const [committed, setCommitted] = useState(false)
   const [sessionProject, setSessionProject] = useState<{ id?: string; name?: string } | null>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [restartNonce, setRestartNonce] = useState(0)
+  const [recoveryAvailable, setRecoveryAvailable] = useState(() => Boolean(persistedSession?.draftNeedsReconfirmation || (!persistedSession?.sessionId && hasSavedMaterial(persistedSession))))
   const idempotencyKeyRef = useRef(crypto.randomUUID())
   const createIdempotencyKeyRef = useRef(persistedSession?.createIdempotencyKey ?? crypto.randomUUID())
   const sessionRef = useRef<string | null>(persistedSession?.terminalState ? null : persistedSession?.sessionId ?? null)
@@ -407,9 +480,24 @@ export default function ChatPage() {
   const committedRef = useRef(false)
   const hasInputRef = useRef(false)
   const confirmationTokenRef = useRef<string | null>(null)
+  const recoveryPromptRef = useRef<string | null>(null)
+  const recoveryMessagePromiseRef = useRef<Promise<void> | null>(null)
+  const recoveryDraftRef = useRef<InteractiveDraft | null>(null)
   const sendingMessageRef = useRef(false)
   const legacyMessageCandidatesRef = useRef(legacyMessageCandidates(persistedSession?.messages))
   const messageAliasesRef = useRef(new Map<string, string>())
+  const messagesRef = useRef(messages)
+  const questionBatchesRef = useRef(questionBatches)
+  const timelineRef = useRef(timeline)
+  const draftRef = useRef(draft)
+  const draftReadyEventIdRef = useRef(draftReadyEventId)
+  const lastEventIdRef = useRef(lastEventId)
+  messagesRef.current = messages
+  questionBatchesRef.current = questionBatches
+  timelineRef.current = timeline
+  draftRef.current = draft
+  draftReadyEventIdRef.current = draftReadyEventId
+  lastEventIdRef.current = lastEventId
   const [sendingMessage, setSendingMessage] = useState(false)
   const [turnActive, setTurnActive] = useState(false)
 
@@ -440,6 +528,7 @@ export default function ChatPage() {
     setQuestionBatches([])
     setTimeline([])
     setDraft(null)
+    setDraftNeedsReconfirmation(false)
     setSessionProject(null)
     confirmationTokenRef.current = null
     setComposer('')
@@ -452,12 +541,59 @@ export default function ChatPage() {
     sendingMessageRef.current = false
     setSendingMessage(false)
     setTurnActive(false)
+    setRecoveryAvailable(false)
+    recoveryPromptRef.current = null
+    recoveryMessagePromiseRef.current = null
+    recoveryDraftRef.current = null
     legacyMessageCandidatesRef.current.clear()
     messageAliasesRef.current.clear()
     setLastEventId(undefined)
     setDraftReadyEventId(undefined)
     idempotencyKeyRef.current = crypto.randomUUID()
     createIdempotencyKeyRef.current = crypto.randomUUID()
+  }, [sessionStorageKey])
+
+  const preserveLocalMaterialAfterLostSession = useCallback((message: string) => {
+    runGenerationRef.current += 1
+    streamAbortRef.current?.abort()
+    startPromiseRef.current = null
+    sessionRef.current = null
+    setSessionId(null)
+    setRunState('error')
+    setTurnActive(false)
+    setRecoveryAvailable(true)
+    const savedAtFailure = readPersistedInteractiveSession(sessionStorageKey)
+    setDraftNeedsReconfirmation(Boolean(savedAtFailure?.draft?.ready || savedAtFailure?.draftNeedsReconfirmation || draftRef.current?.ready))
+    setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+      ? { ...item, status: 'stopped' }
+      : item))
+    setStreamError(message)
+    confirmationTokenRef.current = null
+    const persisted = savedAtFailure
+    // Event handlers can run before React commits the latest render. Prefer the
+    // durable snapshot for recovery, then fall back to the current render for
+    // data that has not reached storage yet.
+    const savedMessages = persisted?.messages ?? messagesRef.current
+    const savedQuestionBatches = persisted?.questionBatches ?? questionBatchesRef.current
+    const savedTimeline = persisted?.timeline ?? timelineRef.current
+    const savedDraft = persisted?.draft ?? draftRef.current
+    const savedDraftReadyEventId = persisted?.draftReadyEventId ?? draftReadyEventIdRef.current
+    const savedLastEventId = persisted?.lastEventId ?? lastEventIdRef.current
+    replacePersistedInteractiveSession(sessionStorageKey, {
+      ...persisted,
+      sessionId: null,
+      createIdempotencyKey: persisted?.createIdempotencyKey ?? createIdempotencyKeyRef.current,
+      messages: savedMessages,
+      questionBatches: savedQuestionBatches,
+      timeline: savedTimeline,
+      draft: savedDraft,
+      draftReadyEventId: savedDraftReadyEventId,
+      lastEventId: savedLastEventId,
+      turnActive: false,
+      terminalState: 'error',
+      terminalMessage: message,
+      draftNeedsReconfirmation: Boolean(savedDraft?.ready || persisted?.draftNeedsReconfirmation),
+    })
   }, [sessionStorageKey])
 
   const terminateConversation = useCallback((state: TerminalRunState, message: string) => {
@@ -482,7 +618,8 @@ export default function ChatPage() {
     const eventId = eventIdValue(event.id)
     if (event.id) setLastEventId(event.id)
     const streamedMessage = (role: Message['role']): Message => {
-      const text = stringValue(data.text) ?? ''
+      const rawText = stringValue(data.text) ?? ''
+      const text = role === 'user' ? displayInteractiveMessage(rawText) : rawText
       const aliasKey = event.id ? `${role}:${event.id}` : undefined
       const existingId = aliasKey ? messageAliasesRef.current.get(aliasKey) : undefined
       if (existingId) return { id: existingId, role, text }
@@ -523,19 +660,30 @@ export default function ChatPage() {
           if (isRecord(data.draft)) {
             const snapshotDraft = data.draft
             const normalizedDraft = normalizeDraft({ draft: snapshotDraft })
-            confirmationTokenRef.current = stringValue(snapshotDraft.confirmation_token) ?? null
-            setDraft(normalizedDraft)
-            if (normalizedDraft.ready) {
-              const readyEventId = eventIdValue(data.draft_event_id)
-              setDraftReadyEventId(readyEventId === undefined ? undefined : String(readyEventId))
-              setTimeline((items) => upsertTimeline(items, {
-                kind: 'draft',
-                id: 'draft',
-                eventId: readyEventId ?? eventId,
-              }, (item) => item.kind === 'draft'))
+            if (recoveryDraftRef.current && isEmptyDraft(normalizedDraft)) {
+              // A newly created session emits an empty snapshot before the
+              // recovery prompt has produced its first draft. Keep the saved
+              // local material until a meaningful replacement arrives.
             } else {
-              setDraftReadyEventId(undefined)
-              setTimeline((items) => items.filter((item) => item.kind !== 'draft'))
+              recoveryDraftRef.current = null
+              confirmationTokenRef.current = stringValue(snapshotDraft.confirmation_token) ?? null
+              if (normalizedDraft.ready && confirmationTokenRef.current) {
+                setRecoveryAvailable(false)
+                setDraftNeedsReconfirmation(false)
+              }
+              setDraft(normalizedDraft)
+              if (normalizedDraft.ready) {
+                const readyEventId = eventIdValue(data.draft_event_id)
+                setDraftReadyEventId(readyEventId === undefined ? undefined : String(readyEventId))
+                setTimeline((items) => upsertTimeline(items, {
+                  kind: 'draft',
+                  id: 'draft',
+                  eventId: readyEventId ?? eventId,
+                }, (item) => item.kind === 'draft'))
+              } else {
+                setDraftReadyEventId(undefined)
+                setTimeline((items) => items.filter((item) => item.kind !== 'draft'))
+              }
             }
           }
           const callId = stringValue(data.pending_call_id) ?? ''
@@ -669,12 +817,17 @@ export default function ChatPage() {
         break
       case 'draft.updated':
       case 'draft.ready':
+        recoveryDraftRef.current = null
         {
           const payload = isRecord(data.draft) ? data.draft : data
           const token = stringValue(payload.confirmation_token)
           const notReady = payload.ready === false || data.ready === false
           if (token) {
             confirmationTokenRef.current = token
+            if (event.event === 'draft.ready' && !notReady) {
+              setRecoveryAvailable(false)
+              setDraftNeedsReconfirmation(false)
+            }
           } else if (notReady) {
             confirmationTokenRef.current = null
           }
@@ -704,6 +857,35 @@ export default function ChatPage() {
     }
   }, [isProjectUpdate, terminateConversation])
 
+  const sendRecoveryPrompt = useCallback(async (id: string, prompt: string) => {
+    if (recoveryMessagePromiseRef.current) return recoveryMessagePromiseRef.current
+    const promise = (async () => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          await api.interactive.message(id, prompt)
+          recoveryPromptRef.current = null
+          return
+        } catch (error) {
+          const message = error instanceof Error ? error.message : ''
+          const retryable = /409|410|closed|runtime|starting|busy|繁忙|处理中/.test(message)
+          if (!retryable || attempt === 4) {
+            setStreamError('已恢复本地材料，但继续画像失败，请重新连接后重试。')
+            setRunState('error')
+            return
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)))
+        }
+      }
+    })()
+    recoveryMessagePromiseRef.current = promise
+    try {
+      await promise
+    } finally {
+      recoveryMessagePromiseRef.current = null
+    }
+    return promise
+  }, [])
+
   const connectStream = useCallback(async (id: string, generation: number) => {
     streamAbortRef.current?.abort()
     const controller = new AbortController()
@@ -716,6 +898,8 @@ export default function ChatPage() {
         onConnected: () => {
           if (disposedRef.current || generation !== runGenerationRef.current) return
           setStreamError(null)
+          const prompt = recoveryPromptRef.current
+      if (prompt && sessionRef.current === id) void sendRecoveryPrompt(id, prompt)
         },
       })) {
         if (disposedRef.current || generation !== runGenerationRef.current) return
@@ -732,17 +916,23 @@ export default function ChatPage() {
         setRunState('error')
         return
       }
-      const terminal = message === '会话历史已失效，请重新开始创建' || /^SSE connection failed: (401|404|410)$/.test(message)
+      const terminal = /^SSE connection failed: (401|404|410)$/.test(message) || message === '会话历史已失效，请重新开始创建'
       if (terminal) {
-        terminateConversation('error', message)
+        if (/^SSE connection failed: (404|410)$/.test(message) || message === '会话历史已失效，请重新开始创建') {
+          preserveLocalMaterialAfterLostSession('原会话已失效，本地材料仍已保留')
+        } else {
+          setStreamError(message)
+          setRunState('error')
+        }
       } else {
         // A transient browser, proxy, or upstream failure must not close the
         // server-owned session. Keeping its ID persisted lets the next mount
         // resume the same Job instead of creating a second runtime.
         setStreamError(message)
+        setRunState('error')
       }
     }
-  }, [isProjectUpdate, processEvent, sessionStorageKey, terminateConversation, token])
+  }, [isProjectUpdate, preserveLocalMaterialAfterLostSession, processEvent, sendRecoveryPrompt, sessionStorageKey, terminateConversation, token])
 
   const reconnectSession = useCallback(() => {
     const id = sessionRef.current
@@ -753,6 +943,30 @@ export default function ChatPage() {
     setRunState('starting')
     void connectStream(id, generation)
   }, [connectStream])
+
+  const recoverSavedDraft = useCallback(() => {
+    const saved = readPersistedInteractiveSession(sessionStorageKey)
+    if (!saved || !hasSavedMaterial(saved)) return
+    recoveryPromptRef.current = recoveryPrompt(saved)
+    recoveryMessagePromiseRef.current = null
+    recoveryDraftRef.current = saved.draft?.ready ? saved.draft : null
+    createIdempotencyKeyRef.current = crypto.randomUUID()
+    idempotencyKeyRef.current = crypto.randomUUID()
+    replacePersistedInteractiveSession(sessionStorageKey, {
+      ...saved,
+      sessionId: null,
+      createIdempotencyKey: createIdempotencyKeyRef.current,
+      terminalState: undefined,
+      terminalMessage: undefined,
+      draftNeedsReconfirmation: Boolean(saved.draft?.ready),
+      turnActive: false,
+    })
+    setRecoveryAvailable(false)
+    setDraftNeedsReconfirmation(Boolean(saved.draft?.ready))
+    setStreamError(null)
+    setRunState('idle')
+    setRestartNonce((value) => value + 1)
+  }, [sessionStorageKey])
 
   const startSession = useCallback((agent: InteractiveAgent) => {
     const key = `${agent.id}:${intent}:${projectId ?? ''}:${restartNonce}`
@@ -804,9 +1018,9 @@ export default function ChatPage() {
   }, [connectStream, persistedSession, persistedSessionKey, sessionStorageKey, token])
 
   useEffect(() => {
-    if (!selectedAgent || agentsQuery.isLoading || !activeAgent || sessionId || ['starting', 'error', 'expired', 'closed'].includes(runState)) return
+    if (!selectedAgent || agentsQuery.isLoading || !activeAgent || sessionId || recoveryAvailable || ['starting', 'error', 'expired', 'closed'].includes(runState)) return
     void startSession(activeAgent)
-  }, [activeAgent, agentsQuery.isLoading, runState, selectedAgent, sessionId, startSession])
+  }, [activeAgent, agentsQuery.isLoading, recoveryAvailable, runState, selectedAgent, sessionId, startSession])
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -834,7 +1048,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!sessionId && !isTerminalRunState(runState)) return
     const persisted = readPersistedInteractiveSession(sessionStorageKey)
-    const persistedSessionId = sessionId ?? persisted?.sessionId ?? persistedSession?.sessionId
+    const persistedSessionId = sessionId ?? persisted?.sessionId
     if (!persistedSessionId) return
     if (sessionId && persisted?.sessionId !== sessionId) return
     persistInteractiveSession(sessionStorageKey, {
@@ -849,8 +1063,9 @@ export default function ChatPage() {
       questionBatches,
       timeline,
       draft,
+      draftNeedsReconfirmation,
     })
-  }, [draft, draftReadyEventId, lastEventId, messages, persistedSession, questionBatches, runState, sessionId, sessionStorageKey, streamError, timeline, turnActive])
+  }, [draft, draftNeedsReconfirmation, draftReadyEventId, lastEventId, messages, persistedSession, questionBatches, runState, sessionId, sessionStorageKey, streamError, timeline, turnActive])
 
   const selectAgent = (agent: InteractiveAgent) => {
     if (agent.id === selectedAgent) return
@@ -878,6 +1093,7 @@ export default function ChatPage() {
     setSendingMessage(true)
     setComposer('')
     hasInputRef.current = true
+    recoveryDraftRef.current = null
     confirmationTokenRef.current = null
     setDraft((value) => value ? { ...value, ready: false } : value)
     setCommitError(null)
@@ -903,6 +1119,7 @@ export default function ChatPage() {
       throw new Error('会话已结束，请重新开始后再回答。')
     }
     hasInputRef.current = true
+    recoveryDraftRef.current = null
     setTurnActive(true)
     const persisted = readPersistedInteractiveSession(sessionStorageKey)
     persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
@@ -949,6 +1166,7 @@ export default function ChatPage() {
         : null
   const liveStatusLabel = runState === 'starting' ? '准备中' : runState === 'waiting_answer' ? '等待中' : '进行中'
   const emptyRegistry = !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
+  const canRecoverSavedDraft = recoveryAvailable && hasSavedMaterial(readPersistedInteractiveSession(sessionStorageKey))
 
   return (
     <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-[1500px] flex-col gap-4 lg:min-h-[calc(100dvh-4rem)]">
@@ -1025,9 +1243,9 @@ export default function ChatPage() {
                   return <div key={`activity-${item.id}`} className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground"><Loader2 className={`size-4 shrink-0 ${active ? 'animate-spin text-primary' : 'hidden'}`} /><span className="min-w-0 flex-1 break-words">{text}</span><span className="shrink-0 text-xs">{statusLabel}</span></div>
                 }
                 if (!draft?.ready) return null
-                return <ConfirmCard key="draft-card" draft={draft} isProjectUpdate={isProjectUpdate} canCommit={Boolean(confirmationTokenRef.current)} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />
+                return <ConfirmCard key="draft-card" draft={draft} isProjectUpdate={isProjectUpdate} needsReconfirmation={draftNeedsReconfirmation} canCommit={Boolean(confirmationTokenRef.current) && !draftNeedsReconfirmation} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />
               })}
-              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>{runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{streamError}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</AlertDescription></Alert>}
+              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>{canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>本地保存的消息、问答和草稿仍然保留。</p><p>旧 runtime 上下文不会恢复。</p><p>保存草稿需要重新确认</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />恢复已保存草稿</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
             </div>
             <div className="border-t border-border p-3 sm:p-4">
@@ -1046,10 +1264,10 @@ function ProgressRail({ draft }: { draft: InteractiveDraft | null }) {
   return <aside className="order-first overflow-x-auto rounded-xl border border-border bg-card p-4 lg:order-last lg:overflow-visible"><div className="flex min-w-max gap-5 lg:min-w-0 lg:flex-col lg:gap-4"><div className="min-w-48 lg:min-w-0"><p className="text-sm font-semibold">创作项目画像</p><p className="mt-1 text-xs text-muted-foreground">六个维度逐步收集</p></div>{DIMENSIONS.map(([key, label]) => { const status = dimensionStatus(draft?.progress?.[key]); return <div key={key} className="min-w-28 border-l border-border pl-3 lg:min-w-0 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-3"><div className="flex items-center justify-between gap-2"><span className="text-sm">{label}</span><span className={`text-xs ${status.className}`}>{status.label}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-muted"><div className={`h-full transition-all ${status.label === '待开始' ? 'w-0' : status.label === '已确认' ? 'w-full bg-emerald-500' : 'w-2/3 bg-primary'}`} /></div></div> })}</div></aside>
 }
 
-function ConfirmCard({ draft, isProjectUpdate, canCommit, committing, error, onCommit, onContinue }: { draft: InteractiveDraft; isProjectUpdate: boolean; canCommit: boolean; committing: boolean; error: string | null; onCommit: () => void; onContinue: () => void }) {
+function ConfirmCard({ draft, isProjectUpdate, needsReconfirmation = false, canCommit, committing, error, onCommit, onContinue }: { draft: InteractiveDraft; isProjectUpdate: boolean; needsReconfirmation?: boolean; canCommit: boolean; committing: boolean; error: string | null; onCommit: () => void; onContinue: () => void }) {
   const project = draft.project ?? {}
   const dimensions = isRecord(draft.profile?.dimensions) ? draft.profile.dimensions : {}
-  return <Card className="border-emerald-500/30 bg-emerald-500/[0.035]"><CardHeader><CardTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />{isProjectUpdate ? '确认更新创作项目画像' : '确认创作项目画像'}</CardTitle><CardDescription>{isProjectUpdate ? '信息已整理完成，确认后会更新现有项目画像并保存变更。' : '信息已整理完成，确认后会创建创作项目并保存六维画像。'}</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 rounded-lg border border-border bg-background/70 p-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">创作项目名称</span><p className="font-medium">{String(project.name ?? draft.name ?? '未命名创作项目')}</p></div><div><span className="text-xs text-muted-foreground">平台</span><p className="font-medium">{String(project.platform ?? '待设定')}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">定位</span><p className="mt-1 leading-5">{String(project.instructions ?? project.description ?? '已收集')}</p></div></div><div><p className="text-xs font-medium text-muted-foreground">六维画像摘要</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{DIMENSIONS.map(([key, label]) => <div key={key} className="rounded-lg border border-border bg-background/60 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm leading-5">{summarizeDimension(dimensions[key])}</p></div>)}</div></div>{(draft.missing_fields?.length || draft.inferred_fields?.length) ? <div className="grid gap-3 sm:grid-cols-2"><div><p className="text-xs font-medium text-muted-foreground">待补充字段</p><p className="mt-1 text-sm leading-5">{draft.missing_fields?.length ? draft.missing_fields.join('、') : '暂无'}</p></div><div><p className="text-xs font-medium text-muted-foreground">推断字段</p><p className="mt-1 text-sm leading-5">{draft.inferred_fields?.length ? draft.inferred_fields.join('、') : '暂无'}</p></div></div> : null}{draft.memory_append && <div className="rounded-lg border border-border bg-background/70 p-3"><p className="text-xs font-medium text-muted-foreground">将追加到项目记忆的内容</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5">{draft.memory_append}</p></div>}{!canCommit && <p className="text-sm text-muted-foreground">确认凭据尚未就绪，请等待会话继续同步。</p>}{error && <p className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button onClick={onCommit} disabled={committing || !canCommit}>{committing && <Loader2 className="size-4 animate-spin" />}确认{isProjectUpdate ? '更新画像' : '创建创作项目'}</Button><Button variant="outline" onClick={onContinue} disabled={committing}><SquarePen className="size-4" />继续编辑</Button></div></CardContent></Card>
+  return <Card className="border-emerald-500/30 bg-emerald-500/[0.035]"><CardHeader><CardTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />{needsReconfirmation ? '已保存的画像草稿' : isProjectUpdate ? '确认更新创作项目画像' : '确认创作项目画像'}</CardTitle><CardDescription>{needsReconfirmation ? '这是本地保留的旧草稿，仅供参考。旧会话确认凭据不会恢复，请先由 Agent 核对并重新生成草稿。' : isProjectUpdate ? '信息已整理完成，确认后会更新现有项目画像并保存变更。' : '信息已整理完成，确认后会创建创作项目并保存六维画像。'}</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 rounded-lg border border-border bg-background/70 p-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">创作项目名称</span><p className="font-medium">{String(project.name ?? draft.name ?? '未命名创作项目')}</p></div><div><span className="text-xs text-muted-foreground">平台</span><p className="font-medium">{String(project.platform ?? '待设定')}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">定位</span><p className="mt-1 leading-5">{String(project.instructions ?? project.description ?? '已收集')}</p></div></div><div><p className="text-xs font-medium text-muted-foreground">六维画像摘要</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{DIMENSIONS.map(([key, label]) => <div key={key} className="rounded-lg border border-border bg-background/60 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm leading-5">{summarizeDimension(dimensions[key])}</p></div>)}</div></div>{(draft.missing_fields?.length || draft.inferred_fields?.length) ? <div className="grid gap-3 sm:grid-cols-2"><div><p className="text-xs font-medium text-muted-foreground">待补充字段</p><p className="mt-1 text-sm leading-5">{draft.missing_fields?.length ? draft.missing_fields.join('、') : '暂无'}</p></div><div><p className="text-xs font-medium text-muted-foreground">推断字段</p><p className="mt-1 text-sm leading-5">{draft.inferred_fields?.length ? draft.inferred_fields.join('、') : '暂无'}</p></div></div> : null}{draft.memory_append && <div className="rounded-lg border border-border bg-background/70 p-3"><p className="text-xs font-medium text-muted-foreground">将追加到项目记忆的内容</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5">{draft.memory_append}</p></div>}{needsReconfirmation ? <p className="text-sm text-amber-700 dark:text-amber-400">保存草稿需要重新确认</p> : !canCommit && <p className="text-sm text-muted-foreground">确认凭据尚未就绪，请等待会话继续同步。</p>}{error && <p className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button onClick={onCommit} disabled={committing || !canCommit}>{committing && <Loader2 className="size-4 animate-spin" />}{needsReconfirmation ? '等待重新确认' : `确认${isProjectUpdate ? '更新画像' : '创建创作项目'}`}</Button><Button variant="outline" onClick={onContinue} disabled={committing}><SquarePen className="size-4" />继续编辑</Button></div></CardContent></Card>
 }
 
 function summarizeDimension(value: unknown): string {

@@ -166,6 +166,10 @@ func (m *retryInteractiveMemory) ReadProject(context.Context, string) (projectme
 
 func (m *retryInteractiveMemory) EnsureProject(context.Context, string) error { return nil }
 
+func (m *retryInteractiveMemory) CreateMarkdownFileIfMissing(context.Context, string, string, string) (bool, error) {
+	return true, nil
+}
+
 func (m *retryInteractiveMemory) WriteMarkdownFile(context.Context, string, string, string) error {
 	if m.failWrites {
 		return errors.New("memory projection unavailable")

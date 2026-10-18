@@ -10,6 +10,7 @@ import { ProfileContentFields } from '@/components/projects/ProfileContentFields
 import { ProfileAccountFields } from '@/components/projects/ProfileAccountFields'
 import { ReferenceAssetUpload } from '@/components/projects/ReferenceAssetUpload'
 import { api } from '@/lib/api'
+import { normalizeProjectProfile } from '@/lib/project-profile'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import type { CreateProjectRequest, ProfileDimension, Project, ProjectProfile, ProjectProfileSetup, ReferenceImageValue } from '@/types'
@@ -173,7 +174,8 @@ function ProfileLabPage() {
       return status === 'queued' || status === 'running' ? 2000 : false
     },
   })
-  const profile = profileQuery.data ?? project?.profile ?? null
+  const rawProfile = profileQuery.data ?? project?.profile ?? null
+  const profile = useMemo(() => normalizeProjectProfile(rawProfile), [rawProfile])
   const historyQuery = useQuery({
     queryKey: ['project-profile-revisions', projectId],
     queryFn: () => api.projects.profileRevisions(projectId!),

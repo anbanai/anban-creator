@@ -5,6 +5,7 @@ import { ProjectCard } from './ProjectCard'
 import { render } from '@/test/test-utils'
 import type { Project, ProjectStats } from '@/types'
 import { api } from '@/lib/api'
+import { projectsApi } from '@/lib/api/projects'
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
@@ -33,6 +34,18 @@ function project(overrides: Partial<Project> = {}): Project {
 describe('ProjectCard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.spyOn(projectsApi, 'memory').mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
+    vi.spyOn(projectsApi, 'getAccountProfile').mockResolvedValue({
+      schema_version: 1, status: 'confirmed', initialization_status: 'ready', version: 1,
+      dimensions: {
+        identity: { content: {}, sources: [], evidence: [], missing_fields: [] },
+        style: { content: {}, sources: [], evidence: [], missing_fields: [] },
+        audience: { content: {}, sources: [], evidence: [], missing_fields: [] },
+        platforms: { content: {}, sources: [], evidence: [], missing_fields: [] },
+        preferences: { content: {}, sources: [], evidence: [], missing_fields: [] },
+        memory: { content: {}, sources: [], evidence: [], missing_fields: [] },
+      }, analysis_limits: [], follow_up_questions: [],
+    })
     vi.spyOn(api.projects, 'feedback').mockResolvedValue({
       project_id: 'project-1', platform: 'wechat', timezone: 'Asia/Shanghai', feedback_paused: false,
       analytics: { revision: 3, status: 'ready', content_count: 6, valid_observation_count: 5 },
@@ -81,7 +94,7 @@ describe('ProjectCard', () => {
   })
 
   it.each(['moments', 'ecommerce'] as const)('keeps legacy %s projects in their basic settings flow', (platform) => {
-    render(<ProjectCard project={project({ platform, agent_ids: null, name: '公众号项目' })} onProfile={vi.fn()} onEdit={vi.fn()} />)
+    render(<ProjectCard project={project({ platform, agent_ids: null, name: '公众号项目' })} onEdit={vi.fn()} />)
     expect(screen.queryByRole('button', { name: '人设画像：公众号项目' })).not.toBeInTheDocument()
     expect(screen.queryByText('画像待配置')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '编辑项目：公众号项目' })).toBeInTheDocument()
@@ -132,12 +145,12 @@ describe('ProjectCard', () => {
     const onArchive = vi.fn()
     render(<ProjectCard project={project()} stats={stats} onEdit={onEdit} onArchive={onArchive} />)
 
-    expect(screen.queryByRole('button', { name: '更多创作项目操作：公众号创作项目' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多项目操作：公众号创作项目' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑创作项目：公众号创作项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑项目：公众号创作项目' }))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '归档创作项目：公众号创作项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '归档项目：公众号创作项目' }))
     expect(onArchive).toHaveBeenCalledWith('project-1')
 
     fireEvent.click(screen.getByRole('button', { name: '选题池：公众号创作项目，剩余 6 个' }))
@@ -147,24 +160,24 @@ describe('ProjectCard', () => {
   it('lists project actions directly without a more menu and uses accessible icon targets', async () => {
     const onChannelConfig = vi.fn()
     const onEdit = vi.fn()
-    const onProfile = vi.fn()
-    render(<ProjectCard project={project()} onChannelConfig={onChannelConfig} onEdit={onEdit} onProfile={onProfile} onArchive={vi.fn()} />)
+    const onUpdateProfile = vi.fn()
+    render(<ProjectCard project={project()} onChannelConfig={onChannelConfig} onEdit={onEdit} onUpdateProfile={onUpdateProfile} onArchive={vi.fn()} />)
 
     expect(screen.queryByText('更多')).not.toBeInTheDocument()
     const channelConfig = screen.getByRole('button', { name: '平台设置：公众号创作项目' })
-    const edit = screen.getByRole('button', { name: '编辑创作项目：公众号创作项目' })
-    const profile = screen.getByRole('button', { name: '人设画像：公众号创作项目' })
-    const memory = screen.getByRole('button', { name: '创作项目记忆：公众号创作项目' })
-    for (const control of [channelConfig, edit, profile, memory]) expect(control).toHaveClass('size-11')
+    const edit = screen.getByRole('button', { name: '编辑项目：公众号创作项目' })
+    const memory = screen.getByRole('button', { name: '项目记忆：公众号创作项目' })
+    for (const control of [channelConfig, edit, memory]) expect(control).toHaveClass('size-11')
+    expect(screen.queryByRole('button', { name: '人设画像：公众号创作项目' })).not.toBeInTheDocument()
 
     fireEvent.click(channelConfig)
     expect(onChannelConfig).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
     fireEvent.click(edit)
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
-    fireEvent.click(profile)
-    expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
     fireEvent.click(memory)
-    expect(await screen.findByRole('dialog', { name: /创作项目记忆/ })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: /项目记忆/ })).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '对话更新画像' }))
+    expect(onUpdateProfile).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }))
   })
 
   it('does not report zero remaining topics before stats are available', () => {
@@ -175,13 +188,12 @@ describe('ProjectCard', () => {
     expect(topicPoolButton).not.toHaveTextContent('0')
   })
 
-  it.each(['', 'wechat', 'seednote', 'moments'] as const)('shows the project profile action for %s projects', (platform) => {
-    const onProfile = vi.fn()
-    render(<ProjectCard project={project({ platform })} onProfile={onProfile} />)
+  it.each(['', 'wechat', 'seednote'] as const)('includes profile controls in project memory for %s projects', async (platform) => {
+    const agentIDs = platform === 'seednote' ? ['seednote'] : ['wechat-article']
+    render(<ProjectCard project={project({ platform, agent_ids: agentIDs })} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '人设画像：公众号创作项目' }))
-    expect(onProfile).toHaveBeenCalledWith(expect.objectContaining({ platform }))
-    expect(screen.queryByRole('button', { name: /配置账号画像/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '项目记忆：公众号创作项目' }))
+    expect(await screen.findByRole('region', { name: '项目画像' })).toBeInTheDocument()
   })
 
   it('shows restore instead of archive for archived projects', () => {
@@ -196,8 +208,8 @@ describe('ProjectCard', () => {
       />,
     )
 
-    expect(screen.queryByRole('button', { name: '归档创作项目：公众号创作项目' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '恢复创作项目：公众号创作项目' }))
+    expect(screen.queryByRole('button', { name: '归档项目：公众号创作项目' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '恢复项目：公众号创作项目' }))
     expect(onRestore).toHaveBeenCalledWith('project-1')
   })
 

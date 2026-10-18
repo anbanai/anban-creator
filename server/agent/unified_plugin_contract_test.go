@@ -70,8 +70,35 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	if claudeManifest.Version == "" || claudeManifest.Version != codexManifest.Version {
 		t.Fatalf("native manifest versions = %q/%q, want one aligned version", claudeManifest.Version, codexManifest.Version)
 	}
-	if claudeManifest.Version != "4.2.55" {
-		t.Fatalf("native manifest version = %q, want 4.2.55 for the current plugin surface", claudeManifest.Version)
+	type marketplace struct {
+		Plugins []struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"plugins"`
+	}
+	var marketplaceManifest marketplace
+	if err := json.Unmarshal([]byte(readRepoFile(t, filepath.Join(pluginRoot, ".claude-plugin", "marketplace.json"))), &marketplaceManifest); err != nil {
+		t.Fatalf("parse marketplace manifest: %v", err)
+	}
+	var packageManifest struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(readRepoFile(t, filepath.Join(pluginRoot, "package.json"))), &packageManifest); err != nil {
+		t.Fatalf("parse plugin package manifest: %v", err)
+	}
+	if len(marketplaceManifest.Plugins) != 1 || marketplaceManifest.Plugins[0].Name != "anban" {
+		t.Fatalf("marketplace plugin entries = %+v, want one anban entry", marketplaceManifest.Plugins)
+	}
+	pluginVersions := map[string]string{
+		".claude-plugin/plugin.json":      claudeManifest.Version,
+		".codex-plugin/plugin.json":       codexManifest.Version,
+		".claude-plugin/marketplace.json": marketplaceManifest.Plugins[0].Version,
+		"package.json":                    packageManifest.Version,
+	}
+	for path, version := range pluginVersions {
+		if version == "" || version != claudeManifest.Version {
+			t.Fatalf("plugin version %s = %q, want %q aligned with all native metadata", path, version, claudeManifest.Version)
+		}
 	}
 	if codexManifest.Skills != "./skills/" || codexManifest.Interface == nil {
 		t.Fatalf("Codex manifest must reference shared Skills and declare interface metadata")
@@ -100,6 +127,11 @@ func TestUnifiedPluginLayout(t *testing.T) {
 	tomlAgents := pluginAgentNames(t, filepath.Join(pluginRoot, "agents"), ".toml")
 	if len(markdownAgents) != 11 || strings.Join(markdownAgents, "\n") != strings.Join(tomlAgents, "\n") {
 		t.Fatalf("native Agent sets differ or count drifted: Claude=%v Codex=%v", markdownAgents, tomlAgents)
+	}
+	for _, name := range tomlAgents {
+		if !strings.Contains(registration, "[agents."+name+"]") {
+			t.Errorf("Codex registration missing Agent table for %q", name)
+		}
 	}
 }
 

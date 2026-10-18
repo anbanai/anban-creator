@@ -182,6 +182,43 @@ func (s *FilesystemStore) WriteMarkdownFile(ctx context.Context, projectID, rela
 	return s.writeMarkdownFile(ctx, projectID, relativePath, content)
 }
 
+// CreateMarkdownFileIfMissing creates one project-scoped Markdown file without
+// replacing an existing file. This is used for project-owned bootstrap files
+// such as AGENTS.md; later profile projections must never overwrite them.
+func (s *FilesystemStore) CreateMarkdownFileIfMissing(ctx context.Context, projectID, relativePath, content string) (bool, error) {
+	if strings.TrimSpace(relativePath) == "" {
+		return false, errUnsafePath
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projectDir, err := s.projectDir(projectID)
+	if err != nil {
+		return false, err
+	}
+	if err := s.EnsureProject(ctx, projectID); err != nil {
+		return false, err
+	}
+	unlock, err := lockProject(projectDir)
+	if err != nil {
+		return false, fmt.Errorf("lock project memory: %w", err)
+	}
+	defer unlock()
+	clean := filepath.Clean(filepath.FromSlash(strings.TrimSpace(relativePath)))
+	if clean == "." || !filepath.IsLocal(clean) || strings.EqualFold(filepath.Ext(clean), ".") {
+		return false, errUnsafePath
+	}
+	if file, openErr := openProjectFileNoSymlinks(projectDir, clean); openErr == nil {
+		_ = file.Close()
+		return false, nil
+	} else if !errors.Is(openErr, fs.ErrNotExist) {
+		return false, openErr
+	}
+	if err := s.writeMarkdownFile(ctx, projectID, clean, content); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *FilesystemStore) rejectOlderProjection(projectDir, relativePath, content string) error {
 	incomingVersion, incomingOK := projectionVersion(content)
 	if !incomingOK {

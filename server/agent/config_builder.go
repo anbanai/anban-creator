@@ -192,9 +192,9 @@ func writeSettingsJSON(workDir string, cfg *appconfig.Config) error {
 	return nil
 }
 
-// writeProjectAgentsMD writes a project's positioning into the canonical
-// AGENTS.md workspace instructions file. It is a no-op when the project is nil
-// or blank.
+// writeProjectAgentsMD keeps the legacy workspace fixture contract available
+// for config-builder tests. Runtime profile context is projected by Server
+// services and does not call this helper.
 func writeProjectAgentsMD(workDir string, project *model.Project) error {
 	if project == nil || strings.TrimSpace(project.Instructions) == "" {
 		return nil

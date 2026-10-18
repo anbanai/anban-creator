@@ -180,6 +180,7 @@
         ],
         "max_turns": 80
       },
+      "interaction": {},
       "bindings": {
         "task_kinds": [
           "feedback_analysis"
@@ -241,7 +242,7 @@
         }
       ],
       "ui": {},
-      "digest": "a9724802a54f61e8016c1db1b4a67f81af52009dbfeffeb384b177282a9d0f39"
+      "digest": "2bc3556be0b20b95b56208fb8e977a4b3770062c5446d11ffddcf425ec766a54"
     },
     {
       "id": "hypit",
@@ -1132,7 +1133,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "8995fed29cafe6a1bf622271a16449984ce80f4aea89bf57da88108f127b0d1f"
+      "digest": "5f7f17619afa88911712f0b51e13e677d8be38bf4dc4814a9896a6e15accb3a3"
     },
     {
       "id": "seednote",
@@ -1600,7 +1601,7 @@
         }
       ],
       "ui": {
-        "renderer": "custom:article"
+        "renderer": "custom:wechat-article"
       },
       "tagging": {
         "enabled": true,
@@ -1614,7 +1615,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "5c81a99f0e5e60ad92ba5ac0c8c68b3ef8577c5343a7ee6ebccb143f50a46ddc"
+      "digest": "58dfca29b9c6d07842e561d6e585554eb12a52084a6ef2a06f01011ce6fddb32"
     },
     {
       "id": "wechat-picture",
@@ -1809,6 +1810,7 @@
         ],
         "max_turns": 120
       },
+      "interaction": {},
       "bindings": {
         "task_kinds": [
           "whiteboard-animation"
@@ -1952,7 +1954,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "b1b9b3073dd19d0cecbbd8020071c759a5e21018895df445e6f904bcea58e831"
+      "digest": "8cf01926088c305cdd23643d827e9df53c14fa026a046ac5844627c6a5d72b8b"
     }
   ]
 }

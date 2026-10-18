@@ -74,6 +74,29 @@ describe("DSH bridge protocol", () => {
     })).toEqual([{ event: "question.opened", data: { session_id: "s", call_id: "call-1", questions: [{ id: "q", question: "What?", multiSelect: true }] } }]);
   });
 
+  test("preserves structured recommendation metadata on question options", () => {
+    expect(mapHarnessNotification({
+      method: "session.event",
+      params: {
+        sessionId: "s",
+        event: {
+          type: "tool/call",
+          data: {
+            callId: "call-recommendation",
+            name: "ask_user_question",
+            arguments: JSON.stringify({ questions: [{
+              id: "q", question: "选择主平台",
+              options: [{ label: "公众号", description: "适合深度内容", recommended: true }],
+            }] }),
+          },
+        },
+      },
+    })).toEqual([{ event: "question.opened", data: {
+      session_id: "s", call_id: "call-recommendation",
+      questions: [{ id: "q", question: "选择主平台", options: [{ label: "公众号", description: "适合深度内容", recommended: true }] }],
+    } }]);
+  });
+
   test("maps non-question tool calls into safe agent activity events", () => {
     expect(mapHarnessNotification({
       method: "session.event",

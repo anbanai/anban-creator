@@ -117,6 +117,7 @@ type ProjectMemoryLifecycle interface {
 // database-to-memory profile projection.
 type ProjectProfileMemory interface {
 	EnsureProject(context.Context, string) error
+	CreateMarkdownFileIfMissing(context.Context, string, string, string) (bool, error)
 	WriteMarkdownFile(context.Context, string, string, string) error
 }
 
@@ -228,6 +229,7 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 		if err := s.repo.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: ch.ID, Status: model.ProfileInitializationNotStarted}); err != nil && !missingProfileStateTable(err) {
 			return nil, fmt.Errorf("create project profile state: %w", err)
 		}
+		s.initializeProjectMemory(ctx, ch)
 		s.reconcileProfileProjection(ctx, ch.ID, projectProfileFor(ch))
 		return ch, nil
 	}
@@ -237,6 +239,7 @@ func (s *ProjectService) Create(ctx context.Context, userID string, ch *model.Pr
 	if err := s.repo.ProjectProfileStates().Create(ctx, &model.ProjectProfileState{ProjectID: ch.ID, Status: model.ProfileInitializationNotStarted}); err != nil && !missingProfileStateTable(err) {
 		return nil, fmt.Errorf("create project profile state: %w", err)
 	}
+	s.initializeProjectMemory(ctx, ch)
 	s.reconcileProfileProjection(ctx, ch.ID, projectProfileFor(ch))
 
 	return ch, nil
@@ -324,16 +327,38 @@ func (s *ProjectService) writeProfileProjection(ctx context.Context, projectID s
 			return fmt.Errorf("write profile/%s.md: %w", name, err)
 		}
 	}
-	if err := s.profileMemory.WriteMarkdownFile(ctx, projectID, "AGENTS.md", ProfileAgentsMarkdownAtVersion(profile.Version)); err != nil {
-		return fmt.Errorf("write AGENTS.md: %w", err)
-	}
 	return nil
+}
+
+// initializeProjectMemory creates the project-owned instruction file once.
+// Profile updates only replace the six profile projections and never rewrite
+// this file, so project-specific guidance survives future analysis runs.
+func (s *ProjectService) initializeProjectMemory(ctx context.Context, project *model.Project) {
+	if s == nil || s.profileMemory == nil || project == nil {
+		return
+	}
+	if err := s.profileMemory.EnsureProject(ctx, project.ID); err != nil {
+		if s.logger != nil {
+			s.logger.Warn().Err(err).Str("project_id", project.ID).Msg("project memory initialization failed; will retry")
+		}
+		return
+	}
+	if _, err := s.profileMemory.CreateMarkdownFileIfMissing(ctx, project.ID, "AGENTS.md", ProfileAgentsMarkdownForProject(project.Instructions)); err != nil && s.logger != nil {
+		s.logger.Warn().Err(err).Str("project_id", project.ID).Msg("project AGENTS.md initialization failed; will retry")
+	}
 }
 
 // reconcileProfileProjection is deliberately best-effort. The database is the
 // profile source of truth; filesystem projection is recoverable and may be
 // retried by a later profile read or task bootstrap.
 func (s *ProjectService) reconcileProfileProjection(ctx context.Context, projectID string, profile model.ProjectProfile) {
+	if s != nil && s.profileMemory != nil && s.repo != nil {
+		if project, err := s.repo.Projects().FindByID(ctx, projectID); err == nil {
+			s.initializeProjectMemory(ctx, project)
+		} else if s.logger != nil {
+			s.logger.Warn().Err(err).Str("project_id", projectID).Msg("project memory bootstrap lookup failed; will retry")
+		}
+	}
 	if err := s.writeProfileProjection(ctx, projectID, profile); err != nil && s.logger != nil {
 		s.logger.Warn().Err(err).Str("project_id", projectID).Int64("profile_revision", profile.Version).Msg("profile memory projection is stale; will retry")
 	}

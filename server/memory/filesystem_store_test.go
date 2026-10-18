@@ -184,6 +184,28 @@ func TestFilesystemStoreWritesProjectMarkdownAtomically(t *testing.T) {
 	}
 }
 
+func TestFilesystemStoreCreatesMarkdownOnlyWhenMissing(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewFilesystemStore(root, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := uuid.NewString()
+
+	created, err := store.CreateMarkdownFileIfMissing(context.Background(), projectID, "AGENTS.md", "initial\n")
+	if err != nil || !created {
+		t.Fatalf("first create = %v, %v; want created", created, err)
+	}
+	created, err = store.CreateMarkdownFileIfMissing(context.Background(), projectID, "AGENTS.md", "replacement\n")
+	if err != nil || created {
+		t.Fatalf("second create = %v, %v; want existing file preserved", created, err)
+	}
+	view, err := store.ReadProject(context.Background(), projectID)
+	if err != nil || len(view.Files) != 1 || view.Files[0].Content != "initial\n" {
+		t.Fatalf("created file = %#v, error=%v", view.Files, err)
+	}
+}
+
 func TestFilesystemStoreAppendsMarkdownWithContentCASAndIdempotentRetry(t *testing.T) {
 	root := t.TempDir()
 	limits := testLimits()

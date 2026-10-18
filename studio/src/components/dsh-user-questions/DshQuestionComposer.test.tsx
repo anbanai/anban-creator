@@ -54,6 +54,21 @@ describe('DshQuestionComposer', () => {
     expect(screen.getByText('已回答')).toBeInTheDocument()
   })
 
+  it('defaults to a structured recommendation while keeping it editable', () => {
+    render(<DshQuestionComposer questions={[{
+      id: 'platform',
+      question: '选择主平台',
+      options: [
+        { label: '公众号', description: '适合沉淀深度内容', recommended: true },
+        { label: '小红书' },
+      ],
+    }]} onSubmit={vi.fn()} />)
+
+    expect(screen.getByRole('radio', { name: '公众号' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('推荐')).toBeInTheDocument()
+    expect(screen.getByText('适合沉淀深度内容')).toBeInTheDocument()
+  })
+
   it('makes a custom single-select answer mutually exclusive', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(<DshQuestionComposer questions={[questions[0]]} onSubmit={onSubmit} />)

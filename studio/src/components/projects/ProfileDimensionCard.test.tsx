@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/test-utils'
+import type { ProfileDimension } from '@/types'
 import { ProfileDimensionCard } from './ProfileDimensionCard'
 
 describe('ProfileDimensionCard', () => {
@@ -12,6 +13,11 @@ describe('ProfileDimensionCard', () => {
     expect(screen.queryByText('是', { exact: true })).not.toBeInTheDocument()
     expect(screen.getByText('否')).toBeInTheDocument()
     expect(screen.getByText('尚不确定')).toBeInTheDocument()
+    const supplemental = screen.getByText('补充信息').closest('details')
+    expect(supplemental).not.toHaveAttribute('open')
+    expect(supplemental).toBeInTheDocument()
+    fireEvent.click(screen.getByText('补充信息'))
+    expect(supplemental).toHaveAttribute('open')
     expect(screen.getByText(/推断待确认/)).toBeInTheDocument()
     expect(screen.getByText('来自用户提供的简介')).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
@@ -42,5 +48,18 @@ describe('ProfileDimensionCard', () => {
     expect(input).toHaveFocus()
     fireEvent.change(input, { target: { value: '白茶商家' } })
     expect(input).toHaveValue('白茶商家')
+  })
+
+  it('renders an incomplete server dimension with null evidence fields as empty', () => {
+    const incomplete = {
+      content: null,
+      sources: null,
+      evidence: null,
+      missing_fields: null,
+    } as unknown as ProfileDimension
+    render(<ProfileDimensionCard label="定位" dimension={incomplete} text="{}" onTextChange={vi.fn()} />)
+
+    expect(screen.getByText('还没有足够信息，可以稍后补充。')).toBeInTheDocument()
+    expect(screen.queryByText('补充信息')).not.toBeInTheDocument()
   })
 })

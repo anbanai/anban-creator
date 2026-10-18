@@ -23,9 +23,39 @@ import (
 	"github.com/anbanai/anban-creator/server/agentpack"
 	"github.com/anbanai/anban-creator/server/auth"
 	"github.com/anbanai/anban-creator/server/config"
+	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
 )
+
+type bootstrapProjectMemory struct {
+	files []projectmemory.FileView
+}
+
+func (m bootstrapProjectMemory) ReadProject(context.Context, string) (projectmemory.ProjectView, error) {
+	return projectmemory.ProjectView{Status: projectmemory.StatusReady, Files: m.files}, nil
+}
+
+func TestReadProjectBootstrapFilesUsesCompleteNASMemoryInStableOrder(t *testing.T) {
+	files, err := readProjectBootstrapFiles(context.Background(), bootstrapProjectMemory{files: []projectmemory.FileView{
+		{Path: "MEMORY.md", Content: "memory"},
+		{Path: "profile/style.md", Content: "style"},
+		{Path: "AGENTS.md", Content: "custom rules"},
+		{Path: "profile/identity.md", Content: "identity", Truncated: true},
+		{Path: "notes/extra.md", Content: "ignored"},
+	}}, "project-1")
+	if err != nil {
+		t.Fatalf("readProjectBootstrapFiles: %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("bootstrap files = %#v, want 3 complete context files", files)
+	}
+	for i, want := range []string{"AGENTS.md", "profile/style.md", "MEMORY.md"} {
+		if files[i].Path != want {
+			t.Fatalf("bootstrap file %d path = %q, want %q", i, files[i].Path, want)
+		}
+	}
+}
 
 var recoveryBootstrapTestPaths = []string{
 	"output/04-article-final.md",

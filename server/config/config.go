@@ -179,6 +179,9 @@ func (c DshConfig) Validate() error {
 	if c.Enabled && c.IdleTimeoutSec <= 0 {
 		errs = append(errs, "dsh.idle_timeout_sec must be positive")
 	}
+	if c.Enabled && c.TimeoutSec <= c.IdleTimeoutSec {
+		errs = append(errs, "dsh.timeout_sec must be greater than dsh.idle_timeout_sec")
+	}
 	if executor == "kubernetes" {
 		if !validDshKubernetesImageReference(c.Image) {
 			errs = append(errs, "dsh.image must be a valid immutable container image reference")

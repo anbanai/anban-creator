@@ -96,6 +96,7 @@ type AgentBootstrapConfig struct {
 	Hypit                   srvconfig.HypitConfig
 	MontageEnv              map[string]string
 	Registry                *AgentProfileRegistry
+	ProjectMemory           ProjectMemoryReader
 }
 
 type AgentBootstrapService struct {
@@ -421,22 +422,38 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("marshal runtime settings: %w", err)
 	}
 	files = append(files, BootstrapFile{Path: ".anban-creator/settings.json", Text: string(settings), Mode: 0600, ReplaceExisting: true})
-	// Every execution receives a read-only snapshot of the current project
-	// profile. The runtime may read these files, but persistence is owned by the
-	// Server's profile service and the dedicated MCP submission capability.
+	// Every execution receives a read-only snapshot from the project's NAS
+	// memory directory. Missing files are filled from the database only for
+	// compatibility with projects created before file-backed memory existed.
 	profile := projectProfileForAgentContext(project)
-	agents := ProfileAgentsMarkdown()
-	instructions := strings.TrimSpace(effective.Instructions)
-	if instructions != "" {
-		agents += "\n\n## 项目定位\n\n" + instructions + "\n"
+	memoryFiles := map[string]BootstrapFile{}
+	if s.cfg.ProjectMemory != nil && strings.TrimSpace(task.ProjectID) != "" {
+		loaded, err := readProjectBootstrapFiles(ctx, s.cfg.ProjectMemory, task.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("read project memory context: %w", err)
+		}
+		for _, file := range loaded {
+			memoryFiles[file.Path] = file
+		}
 	}
-	files = append(files, BootstrapFile{Path: "AGENTS.md", Text: agents, Mode: 0644})
+	if _, ok := memoryFiles["AGENTS.md"]; !ok {
+		memoryFiles["AGENTS.md"] = BootstrapFile{Path: "AGENTS.md", Text: ProfileAgentsMarkdownForProject(effective.Instructions), Mode: 0644}
+	}
 	for _, dimension := range model.ProfileDimensions() {
-		content, err := ProfileDimensionMarkdown(dimension, profileDimension(profile, dimension))
+		path := "profile/" + dimension + ".md"
+		if _, ok := memoryFiles[path]; ok {
+			continue
+		}
+		content, err := ProfileDimensionMarkdownAtVersion(dimension, profileDimension(profile, dimension), profile.Version)
 		if err != nil {
 			return nil, fmt.Errorf("render profile input %s: %w", dimension, err)
 		}
-		files = append(files, BootstrapFile{Path: "profile/" + dimension + ".md", Text: content, Mode: 0644})
+		memoryFiles[path] = BootstrapFile{Path: path, Text: content, Mode: 0644}
+	}
+	for _, path := range projectMemoryContextPaths {
+		if file, ok := memoryFiles[path]; ok {
+			files = append(files, file)
+		}
 	}
 	if feedbackFile.Path != "" {
 		files = append(files, feedbackFile)

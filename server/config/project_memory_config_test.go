@@ -77,6 +77,46 @@ func TestDshDiagnosticRetentionDefaultsAndRejectsNegative(t *testing.T) {
 	}
 }
 
+func TestDshTimeoutMustExceedIdleTimeout(t *testing.T) {
+	base := DshConfig{
+		Enabled:        true,
+		Executor:       "process",
+		TimeoutSec:     1800,
+		IdleTimeoutSec: 1800,
+		Route:          "default",
+		Routes: map[string]DshRouteConfig{
+			"default": {
+				Provider: "deepseek-official",
+				API:      "deepseek-messages",
+				BaseURL:  "https://api.deepseek.com/anthropic",
+				APIKey:   "test-key",
+				Model:    "deepseek-chat",
+			},
+		},
+	}
+	for _, test := range []struct {
+		name       string
+		timeoutSec int
+	}{
+		{name: "equal", timeoutSec: 1800},
+		{name: "shorter", timeoutSec: 1799},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := base
+			cfg.TimeoutSec = test.timeoutSec
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), "dsh.timeout_sec must be greater than dsh.idle_timeout_sec") {
+				t.Fatalf("Dsh.Validate() error = %v, want timeout/idle ordering error", err)
+			}
+		})
+	}
+
+	base.TimeoutSec = 1801
+	if err := base.Validate(); err != nil {
+		t.Fatalf("Dsh.Validate() with longer runtime timeout = %v, want nil", err)
+	}
+}
+
 func TestProjectMemoryConfigRejectsUnsafeOrIncompleteValues(t *testing.T) {
 	tests := []struct {
 		name    string

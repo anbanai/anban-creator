@@ -217,6 +217,25 @@ describe('ProfileLabPage', () => {
     expect(screen.getByText(/preferences.*硬性约束/)).toBeInTheDocument()
   })
 
+  it('renders a partial server profile with null arrays and missing dimensions', async () => {
+    vi.mocked(api.projects.getAccountProfile).mockResolvedValueOnce({
+      ...profile,
+      dimensions: {
+        identity: { content: null, sources: null, evidence: null, missing_fields: null },
+      },
+      analysis_limits: null,
+      follow_up_questions: null,
+    } as unknown as ProjectProfile)
+    renderRoute('/projects/project-1/profile-lab')
+
+    const identity = await screen.findByRole('region', { name: '定位 identity' })
+    expect(identity).toBeInTheDocument()
+    for (const [key, label] of [['style', '风格'], ['audience', '受众'], ['platforms', '平台'], ['preferences', '偏好与红线'], ['memory', '经验记忆']] as const) {
+      expect(screen.getByRole('region', { name: `${label} ${key}` })).toBeInTheDocument()
+    }
+    expect(within(identity).getByText('[待补充] 当前没有已记录内容。', { exact: false })).toBeInTheDocument()
+  })
+
   it('offers retry after analysis failure and keeps version restoration disabled while analysis runs', async () => {
     vi.mocked(api.projects.getAccountProfile).mockResolvedValueOnce({ ...profile, initialization_status: 'failed', last_error: '主页访问受限' })
     renderRoute('/projects/project-1/profile-lab')

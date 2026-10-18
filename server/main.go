@@ -375,6 +375,7 @@ func main() {
 		MontageEnv:              cfg.Montage.Env,
 		Hypit:                   cfg.Hypit,
 		Registry:                agentProfiles,
+		ProjectMemory:           projectMemoryStore,
 	}, *log)
 
 	// 13. Create services.

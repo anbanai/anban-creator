@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, MessageSquare, Pause, Play, RefreshCw, RotateCcw, SquarePen, UserRound } from 'lucide-react'
+import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, Pause, Play, RefreshCw, RotateCcw, SquarePen } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
@@ -31,7 +31,6 @@ interface ProjectCardProps {
   stats?: ProjectStats
   onEdit?: (project: Project) => void
   onChannelConfig?: (project: Project) => void
-  onProfile?: (project: Project) => void
   onUpdateProfile?: (project: Project) => void
   archiving?: boolean
   restoring?: boolean
@@ -39,7 +38,7 @@ interface ProjectCardProps {
   onRestore?: (id: string) => void
 }
 
-export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile, onChannelConfig, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
+export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannelConfig, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [monthlyRerunOpen, setMonthlyRerunOpen] = useState(false)
@@ -57,7 +56,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
   const feedbackEnabled = platform === '' || platform === 'wechat' || platform === 'seednote'
-  const editLabel = supportsProfileLab(project) ? '编辑创作项目' : '编辑项目'
+  const editLabel = '编辑项目'
   const feedbackQuery = useQuery({
     queryKey: ['project-feedback', project.id],
     queryFn: ({ signal }) => api.projects.feedback(project.id, signal),
@@ -136,7 +135,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
                   { label: '失败', value: stats.failed_tasks },
                 ]}
               />
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="创作项目活动">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="项目活动">
                 {stats.running_tasks > 0 && <span>{stats.running_tasks} 个运行中</span>}
                 {stats.pending_tasks > 0 && <span>{stats.pending_tasks} 个待执行</span>}
               </div>
@@ -203,29 +202,13 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
             )}
           </div>
         )}
-        <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`创作项目操作：${project.name}`}>
+        <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`项目操作：${project.name}`}>
           {onEdit && (
             <Tooltip>
               <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`${editLabel}：${project.name}`} />}>
                 <SquarePen />
               </TooltipTrigger>
               <TooltipContent>编辑</TooltipContent>
-            </Tooltip>
-          )}
-          {onProfile && supportsProfileLab(project) && (
-            <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onProfile(project)} aria-label={`人设画像：${project.name}`} />}>
-                <UserRound />
-              </TooltipTrigger>
-              <TooltipContent>人设画像</TooltipContent>
-            </Tooltip>
-          )}
-          {onUpdateProfile && !isArchived && (
-            <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onUpdateProfile(project)} aria-label={`对话更新项目画像：${project.name}`} />}>
-                <MessageSquare />
-              </TooltipTrigger>
-              <TooltipContent>对话更新画像</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
@@ -243,14 +226,14 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
             </Tooltip>
           )}
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`创作项目记忆：${project.name}`} />}>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setMemoryOpen(true)} aria-label={`项目记忆：${project.name}`} />}>
               <Brain />
             </TooltipTrigger>
-            <TooltipContent>创作项目记忆</TooltipContent>
+              <TooltipContent>项目记忆</TooltipContent>
           </Tooltip>
           {!isArchived && onArchive && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档创作项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={archiving} onClick={() => onArchive(project.id)} aria-label={`归档项目：${project.name}`} />}>
                 <Archive />
               </TooltipTrigger>
               <TooltipContent>归档</TooltipContent>
@@ -258,7 +241,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
           )}
           {isArchived && onRestore && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复创作项目：${project.name}`} />}>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-md" disabled={restoring} onClick={() => onRestore(project.id)} aria-label={`恢复项目：${project.name}`} />}>
                 <RotateCcw />
               </TooltipTrigger>
               <TooltipContent>恢复</TooltipContent>
@@ -267,7 +250,7 @@ export function ProjectCard({ project, stats, onEdit, onProfile, onUpdateProfile
         </div>
       </div>
       <TopicPoolDialog project={project} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
-      <ProjectMemoryDialog projectId={project.id} projectName={project.name} project={project} open={memoryOpen} onOpenChange={setMemoryOpen} />
+      <ProjectMemoryDialog projectId={project.id} projectName={project.name} project={project} open={memoryOpen} onOpenChange={setMemoryOpen} onUpdateProfile={onUpdateProfile ? () => onUpdateProfile(project) : undefined} />
       <Dialog open={monthlyRerunOpen} onOpenChange={setMonthlyRerunOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>重跑月度反馈</DialogTitle></DialogHeader>

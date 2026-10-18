@@ -30,7 +30,7 @@ const transportSource = readFileSync(transportTargetPath, "utf8");
 let patchedTransport = transportSource;
 if (!patchedTransport.includes(marker)) {
   if (!patchedTransport.includes(before)) {
-    throw new Error(`unsupported @deepseek-ai/dsh-llm alpha.4 layout: ${transportTargetPath}`);
+    throw new Error(`unsupported @deepseek-ai/dsh-llm rc.2 layout: ${transportTargetPath}`);
   }
   if (checkOnly) {
     throw new Error(`@deepseek-ai/dsh-llm transport-cause patch is not applied: ${transportTargetPath}`);
@@ -41,7 +41,7 @@ const malformedToolInputSource = readFileSync(malformedToolInputTargetPath, "utf
 let patchedMalformedToolInput = malformedToolInputSource;
 if (!patchedMalformedToolInput.includes(malformedToolInputMarker)) {
   if (!patchedMalformedToolInput.includes(malformedToolInputBefore)) {
-    throw new Error(`unsupported @deepseek-ai/dsh-llm-deepseek translate layout: ${malformedToolInputTargetPath}`);
+    throw new Error(`unsupported @deepseek-ai/dsh-llm-deepseek rc.2 layout: ${malformedToolInputTargetPath}`);
   }
   if (checkOnly) {
     throw new Error(`@deepseek-ai/dsh-llm-deepseek malformed-tool-input patch is not applied: ${malformedToolInputTargetPath}`);

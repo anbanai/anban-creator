@@ -118,6 +118,133 @@ describe('ChatPage', () => {
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
 
+  it('keeps local portrait material after a missing runtime and restores it into a fresh session', async () => {
+    const storageKey = 'anban:interactive-session:project-creator:create-project:new'
+    sessionStorage.setItem(storageKey, JSON.stringify({
+      sessionId: 'expired-runtime',
+      lastEventId: '18',
+      createIdempotencyKey: 'expired-create-key',
+      messages: [
+        { id: 'message-1', role: 'user', text: '我想通过公众号获客' },
+        { id: 'message-2', role: 'assistant', text: '保存下来的历史内容' },
+      ],
+      questionBatches: [{
+        callId: 'call-goal',
+        questions: [{ id: 'goal', question: '你的主要目标是什么？' }],
+        answers: [{ id: 'goal', selected: ['获客'], custom: '' }],
+      }],
+      timeline: [
+        { kind: 'message', message: { id: 'message-1', role: 'user', text: '我想通过公众号获客' } },
+        { kind: 'message', message: { id: 'message-2', role: 'assistant', text: '保存下来的历史内容' } },
+        { kind: 'question', callId: 'call-goal' },
+        { kind: 'draft', id: 'draft' },
+      ],
+      draft: {
+        revision: 3,
+        ready: true,
+        project: { name: '获客公众号', platform: 'wechat', instructions: '帮助潜在客户了解服务' },
+        profile: { dimensions: { identity: { content: { summary: '面向潜在客户' } } } },
+      },
+    }))
+    streamMock.mockImplementationOnce(() => { throw new Error('SSE connection failed: 410') })
+
+    renderChat('/projects/create')
+
+    expect(await screen.findByText('保存下来的历史内容')).toBeInTheDocument()
+    expect(await screen.findByText('原会话已失效，本地材料仍已保留')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复已保存草稿' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新开始创建' })).toBeInTheDocument()
+    expect(screen.getByText('获客公众号')).toBeInTheDocument()
+    expect(screen.getAllByText('保存草稿需要重新确认')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: '等待重新确认' })).toBeDisabled()
+    expect(interactiveMocks.close).not.toHaveBeenCalled()
+    await waitFor(() => {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')
+      expect(saved).not.toHaveProperty('sessionId')
+      expect(saved.messages).toHaveLength(2)
+      expect(saved.draft.project.name).toBe('获客公众号')
+    })
+
+    interactiveMocks.message.mockRejectedValueOnce(new Error('410 interactive runtime is still starting'))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
+      options?.onConnected?.()
+      return holdStream([{
+        id: '1',
+        event: 'session.snapshot',
+        data: JSON.stringify({
+          status: 'running',
+          busy: false,
+          questions: [],
+          draft: {
+            revision: 0,
+            project: { name: '', platform: '' },
+            profile: {},
+            progress: {},
+            missing_fields: [],
+            inferred_fields: [],
+            ready: false,
+          },
+        }),
+      }], signal)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复已保存草稿' }))
+
+    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledTimes(1))
+    const [, , , freshCreateKey] = interactiveMocks.createSession.mock.calls[0] as [string, string, string | undefined, string]
+    expect(freshCreateKey).not.toBe('expired-create-key')
+    await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    expect(interactiveMocks.message).toHaveBeenLastCalledWith('session-1', expect.stringContaining('我想通过公众号获客'))
+    await waitFor(() => {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')
+      expect(saved.draft.project.name).toBe('获客公众号')
+    })
+    const recoveryPrompt = interactiveMocks.message.mock.calls[0]?.[1] as string
+    expect(recoveryPrompt).toContain('保存下来的历史内容')
+    expect(recoveryPrompt).toContain('获客公众号')
+    expect(recoveryPrompt).toContain('获客')
+    expect(recoveryPrompt).toContain('需要重新确认')
+  })
+
+  it('keeps a transient stream failure reconnectable without labeling the session as lost', async () => {
+    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    streamMock.mockImplementationOnce(() => { throw new Error('SSE connection failed: 503') })
+
+    renderChat('/projects/create')
+
+    expect(await screen.findByRole('button', { name: '重新连接' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复已保存草稿' })).not.toBeInTheDocument()
+    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').sessionId).toBe('session-1')
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+    expect(interactiveMocks.close).not.toHaveBeenCalled()
+  })
+
+  it('preserves structured recommendations from question events', async () => {
+    streamMock.mockImplementationOnce((sessionId: string, token: string, signal?: AbortSignal) => {
+      void sessionId
+      void token
+      return holdStream([{
+        event: 'question.opened',
+        data: JSON.stringify({
+          call_id: 'call-recommendation',
+          questions: [{
+            id: 'platform', question: '选择主平台',
+            options: [
+              { label: '公众号', description: '适合沉淀深度内容', recommended: true },
+              { label: '小红书' },
+            ],
+          }],
+        }),
+      }], signal)
+    })
+    renderChat('/projects/create')
+
+    const recommended = await screen.findByRole('radio', { name: '公众号' })
+    expect(recommended).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('推荐')).toBeInTheDocument()
+    expect(screen.getByText('适合沉淀深度内容')).toBeInTheDocument()
+  })
+
   it('does not enable a resumed session from SSE connectivity alone', async () => {
     sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
