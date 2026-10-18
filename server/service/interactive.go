@@ -1560,6 +1560,10 @@ func (s *InteractiveService) Message(ctx context.Context, uid, id, text string) 
 		return ErrInteractiveDraftInvalid
 	}
 	sess.mu.Lock()
+	if sess.committing {
+		sess.mu.Unlock()
+		return ErrInteractiveBusy
+	}
 	if sess.pendingCall != "" {
 		sess.mu.Unlock()
 		return ErrInteractivePending
@@ -1615,6 +1619,10 @@ func (s *InteractiveService) Answer(ctx context.Context, uid, id, callID string,
 		return e
 	}
 	sess.mu.Lock()
+	if sess.committing {
+		sess.mu.Unlock()
+		return ErrInteractiveBusy
+	}
 	if sess.pendingCall == "" || sess.pendingCall != callID || len(answers) != len(sess.pendingQuestions) {
 		sess.mu.Unlock()
 		return ErrInteractiveDraftInvalid
@@ -1858,10 +1866,6 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 		sess.mu.Unlock()
 		return InteractiveCommitResult{}, ErrInteractiveBusy
 	}
-	if sess.pendingCall != "" || sess.busy {
-		sess.mu.Unlock()
-		return InteractiveCommitResult{}, ErrInteractiveBusy
-	}
 	if sess.Closed || time.Now().After(sess.ExpiresAt) {
 		expired := time.Now().After(sess.ExpiresAt)
 		sess.mu.Unlock()
@@ -1875,6 +1879,10 @@ func (s *InteractiveService) Commit(ctx context.Context, userID, id string, req 
 		return InteractiveCommitResult{}, ErrInteractiveToken
 	}
 	sess.committing = true
+	// A ready draft is an immutable approval target once the user presents its
+	// confirmation token. The Agent may still be finishing the staging turn or
+	// have opened an unsolicited follow-up question; the commit closes that
+	// runtime after persisting this exact draft.
 	draft := sess.Draft
 	projectID := sess.ProjectID
 	profileVersion := sess.ProfileVersion

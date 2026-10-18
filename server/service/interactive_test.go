@@ -609,6 +609,23 @@ func TestInteractiveMessageRejectsConcurrentCommand(t *testing.T) {
 	}
 }
 
+func TestInteractiveMessageRejectsCommandDuringCommit(t *testing.T) {
+	sess := newInteractiveTestSession()
+	runtime := &interactiveRecordingRuntime{}
+	sess.runtime = runtime
+	sess.committing = true
+	svc := newInteractiveTestService(sess)
+
+	if err := svc.Message(context.Background(), sess.UserID, sess.ID, "continue editing"); !errors.Is(err, ErrInteractiveBusy) {
+		t.Fatalf("Message() during commit error = %v, want ErrInteractiveBusy", err)
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.methods) != 0 {
+		t.Fatalf("runtime commands during commit = %#v, want none", runtime.methods)
+	}
+}
+
 func TestInteractiveMessageStaysBusyUntilRuntimeTurnEnds(t *testing.T) {
 	sess := newInteractiveTestSession()
 	runtime := &interactiveAsyncRuntime{}
@@ -651,6 +668,30 @@ func TestInteractiveAnswerStaysBusyUntilRuntimeTurnEnds(t *testing.T) {
 	svc.runtimeEvent(sess.ID, "turn.end", map[string]any{"turn": 2, "reason": map[string]any{"kind": "completed"}})
 	if err := svc.Message(context.Background(), sess.UserID, sess.ID, "follow-up"); err != nil {
 		t.Fatalf("Message() after turn/end error = %v", err)
+	}
+}
+
+func TestInteractiveAnswerRejectsQuestionDuringCommit(t *testing.T) {
+	sess := newInteractiveTestSession()
+	runtime := &interactiveRecordingRuntime{}
+	sess.runtime = runtime
+	sess.committing = true
+	sess.pendingCall = "follow-up-question"
+	sess.pendingQuestions = map[string]InteractiveQuestion{
+		"q-1": {ID: "q-1", Question: "还需要确认一个细节吗？"},
+	}
+	svc := newInteractiveTestService(sess)
+
+	if err := svc.Answer(context.Background(), sess.UserID, sess.ID, "follow-up-question", []InteractiveAnswer{{ID: "q-1"}}); !errors.Is(err, ErrInteractiveBusy) {
+		t.Fatalf("Answer() during commit error = %v, want ErrInteractiveBusy", err)
+	}
+	if sess.pendingCall != "follow-up-question" {
+		t.Fatalf("pending call after rejected answer = %q, want unchanged follow-up question", sess.pendingCall)
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.methods) != 0 {
+		t.Fatalf("runtime commands during commit = %#v, want none", runtime.methods)
 	}
 }
 
@@ -1187,7 +1228,7 @@ func TestInteractiveRuntimeCanStageWhileUserTurnIsBusy(t *testing.T) {
 	}
 }
 
-func TestInteractiveCommitAcceptsTokenIssuedByReadyDraft(t *testing.T) {
+func TestInteractiveCommitAcceptsReadyDraftDuringAgentFollowUp(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "interactive.db")), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -1196,6 +1237,8 @@ func TestInteractiveCommitAcceptsTokenIssuedByReadyDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	sess := newInteractiveTestSession()
+	runtimeClosed := false
+	sess.runtime = &interactiveTestRuntime{closeCheck: func() { runtimeClosed = true }}
 	svc := newInteractiveTestService(sess)
 	svc.repo = repository.New(db)
 	progress := InteractiveProgress{
@@ -1207,6 +1250,11 @@ func TestInteractiveCommitAcceptsTokenIssuedByReadyDraft(t *testing.T) {
 		Profile: model.NewProjectProfile(), Progress: progress, Ready: true,
 	}); err != nil {
 		t.Fatalf("StageDraftForSession() error = %v", err)
+	}
+	sess.busy = true
+	sess.pendingCall = "follow-up-question"
+	sess.pendingQuestions = map[string]InteractiveQuestion{
+		"q-1": {ID: "q-1", Question: "还需要确认一个细节吗？"},
 	}
 	history, events, closeEvents, err := svc.Events(sess.UserID, sess.ID, 0)
 	if err != nil {
@@ -1230,6 +1278,12 @@ func TestInteractiveCommitAcceptsTokenIssuedByReadyDraft(t *testing.T) {
 		Profile: model.NewProjectProfile(), Progress: progress, Ready: true,
 	}); err != nil {
 		t.Fatalf("StageDraftForSession() second error = %v", err)
+	}
+	if _, err := svc.Commit(context.Background(), sess.UserID, sess.ID, InteractiveCommitRequest{
+		ConfirmationToken: replayedToken,
+		IdempotencyKey:    "interactive-stale-commit",
+	}); !errors.Is(err, ErrInteractiveToken) {
+		t.Fatalf("Commit() with superseded draft token error = %v, want ErrInteractiveToken", err)
 	}
 	select {
 	case event := <-events:
@@ -1268,6 +1322,9 @@ func TestInteractiveCommitAcceptsTokenIssuedByReadyDraft(t *testing.T) {
 	}
 	if result.Project == nil || result.Project.Name != "Project Creator test 2" {
 		t.Fatalf("Commit() result = %#v", result)
+	}
+	if !runtimeClosed || !sess.Closed || sess.Status != "committed" {
+		t.Fatalf("session closed=%v status=%q runtimeClosed=%v, want committed session with closed runtime", sess.Closed, sess.Status, runtimeClosed)
 	}
 	if result.Project.ImageRatio != model.DefaultImageRatio(model.PlatformSeednote) {
 		t.Fatalf("interactive project image ratio = %q, want regular project default %q", result.Project.ImageRatio, model.DefaultImageRatio(model.PlatformSeednote))
