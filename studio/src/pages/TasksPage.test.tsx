@@ -179,8 +179,9 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-function renderTasksPage(initialPath = '/tasks') {
+function renderTasksPage(initialPath = '/tasks', cachedProjects?: Project[]) {
   const queryClient = createTestQueryClient()
+  if (cachedProjects) queryClient.setQueryData(['projects', 'active'], cachedProjects)
   return {
     queryClient,
     ...render(
@@ -245,6 +246,22 @@ describe('TasksPage unified prompt composer', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     expect(await screen.findByText('created task detail')).toBeInTheDocument()
+  })
+
+  it('waits for a newly created linked project when the task page has an older project cache', async () => {
+    const olderProject = { ...fixtures.project, id: 'older-project', name: '旧项目' } as Project
+    const newProject = { ...fixtures.project, id: 'new-project', name: '刚创建的账号' } as Project
+    let resolveProjects!: (projects: Project[]) => void
+    const projectListPromise = new Promise<Project[]>((resolve) => { resolveProjects = resolve })
+    vi.mocked(api.projects.list).mockImplementation(() => projectListPromise)
+    renderTasksPage(`/tasks?create=true&type=wechat-article&project_id=${newProject.id}&intent=new`, [olderProject])
+
+    await waitFor(() => expect(api.projects.list).toHaveBeenCalled())
+    expect(screen.queryByRole('dialog', { name: '新建作品' })).not.toBeInTheDocument()
+    await act(async () => resolveProjects([newProject]))
+
+    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: `创作项目：${newProject.name}` })).toBeInTheDocument())
   })
 
   it('marks attachment changes dirty so closing asks for confirmation', async () => {
@@ -622,7 +639,7 @@ describe('TasksPage URL-driven recovery filters', () => {
   })
 
   it('shows ecommerce creation as a base task fee instead of a module package charge', async () => {
-    vi.mocked(api.projects.list).mockResolvedValueOnce([{
+    vi.mocked(api.projects.list).mockResolvedValue([{
       ...fixtures.project,
       id: 'project-ecommerce',
       platform: 'ecommerce',
@@ -631,6 +648,7 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     renderTasksPage('/tasks?create=true&type=ecommerce&project_id=project-ecommerce&intent=new')
 
+    await waitFor(() => expect(api.projects.list).toHaveBeenCalled())
     expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
     expect(await screen.findByText(/固定创作价：3,000 × 1 =/)).toBeInTheDocument()
     expect(screen.queryByText(/模块套餐预估/)).not.toBeInTheDocument()

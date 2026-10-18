@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Bot, FilePlus2, Inbox } from 'lucide-react'
+import { Bot, CalendarRange, FilePlus2, Inbox, PenLine } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { FieldHint } from '@/components/common/FieldHint'
@@ -30,11 +30,12 @@ import { useFormDirtyCheck } from '@/hooks/useFormDirtyCheck'
 import { useSubmitLock } from '@/hooks/useSubmitLock'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
-import { parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
+import { createPlanHref, createTaskHref, parseCreationIntent, projectCreatedReturnHref } from '@/lib/command-center'
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
 import { MetricStrip } from '@/components/workspace'
+import { getProjectCreationDefaults } from '@/lib/studio-ux'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
@@ -84,6 +85,8 @@ export default function ProjectsPage() {
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const formSessionRef = useRef(0)
   const createdProjectReturnHrefRef = useRef<string | null>(null)
+  const pendingOnboardingProjectRef = useRef<Project | null>(null)
+  const suppressCreateIntentRef = useRef(false)
   useEffect(() => () => { formSessionRef.current += 1 }, [])
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
   const [editingAnalysis, setEditingAnalysis] = useState<ImageAnalysis | null>(null)
@@ -95,6 +98,7 @@ export default function ProjectsPage() {
   const [profileDraftText, setProfileDraftText] = useState<Record<string, string>>({})
   const [profileJsonError, setProfileJsonError] = useState<string | null>(null)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [onboardingProject, setOnboardingProject] = useState<Project | null>(null)
   const { submit } = useSubmitLock()
 
   const form = useForm<ProjectFormValues>({
@@ -114,6 +118,7 @@ export default function ProjectsPage() {
       api.projects.list({
         status: statusFilter === 'all' ? undefined : statusFilter,
       }),
+    staleTime: searchParams.has('onboarding') ? 0 : undefined,
     refetchInterval: (query) => {
       const items = query.state.data ?? []
       return items.some((project) => isImageAnalysisActive(project.image_analysis)) ? 2000 : false
@@ -181,6 +186,23 @@ export default function ProjectsPage() {
     if (project) openEdit(project)
   }, [modalOpen, searchParams, visibleProjects])
 
+  useEffect(() => {
+    const onboardingID = searchParams.get('onboarding')
+    if (!onboardingID || onboardingProject) return
+    const project = visibleProjects.find((item) => item.id === onboardingID)
+    if (!project) return
+    setOnboardingProject(project)
+    const next = new URLSearchParams(searchParams)
+    next.delete('onboarding')
+    setSearchParams(next, { replace: true })
+  }, [onboardingProject, searchParams, setSearchParams, visibleProjects])
+
+  useEffect(() => {
+    if (modalOpen || !pendingOnboardingProjectRef.current) return
+    setOnboardingProject(pendingOnboardingProjectRef.current)
+    pendingOnboardingProjectRef.current = null
+  }, [modalOpen])
+
   const createMutation = useMutation({
     mutationFn: async ({ data, sessionID, returnContext }: { data: CreateProjectRequest; sessionID: number; returnContext: Omit<Parameters<typeof projectCreatedReturnHref>[0], 'projectId'> | null }) => {
       const created = await api.projects.create(data)
@@ -194,7 +216,7 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       if (sessionID !== formSessionRef.current) return
       toast.success(created.project.image_analysis ? '创作项目已创建，正在后台识别视觉风格' : '创作项目创建成功')
-      finishProjectSave()
+      finishProjectSave(createdProjectReturnHrefRef.current ? undefined : created.project)
     },
     onError: (err, { sessionID }) => {
       if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建创作项目失败，请重试'))
@@ -341,6 +363,10 @@ export default function ProjectsPage() {
   }
 
   useEffect(() => {
+    if (suppressCreateIntentRef.current) {
+      suppressCreateIntentRef.current = false
+      return
+    }
     if (!createIntent.shouldCreate || modalOpen) return
     openCreate()
   }, [createIntent.shouldCreate, modalOpen])
@@ -356,9 +382,11 @@ export default function ProjectsPage() {
     setModalOpen(true)
   }
 
-  function finishProjectSave() {
+  function finishProjectSave(createdProject?: Project) {
     const returnHref = createdProjectReturnHrefRef.current
     if (returnHref) closeProfile()
+    if (createdProject) pendingOnboardingProjectRef.current = createdProject
+    if (createIntent.shouldCreate) suppressCreateIntentRef.current = true
     resetModal()
     if (returnHref) navigate(returnHref)
   }
@@ -687,6 +715,42 @@ export default function ProjectsPage() {
           <DialogFooter>
             <Button variant="secondary" onClick={closeProfile}>关闭</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(onboardingProject)} onOpenChange={(open) => { if (!open) setOnboardingProject(null) }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>开始使用这个创作项目</DialogTitle>
+            <p className="text-sm text-muted-foreground">项目画像已经保存。你可以马上生成第一篇作品，也可以先制定一套账号内容计划。</p>
+          </DialogHeader>
+          {onboardingProject && (() => {
+            const { type } = getProjectCreationDefaults(onboardingProject)
+            const typeLabel = type === 'wechat-article' ? '公众号文章' : type === 'seednote' ? '种草笔记' : '作品'
+            return (
+              <div className="grid gap-3">
+                <Link
+                  to={createTaskHref({ type, projectId: onboardingProject.id, intent: 'new' })}
+                  className="flex items-start gap-3 rounded-lg border border-border p-4 transition-colors hover:border-primary/60 hover:bg-muted/40"
+                  onClick={() => setOnboardingProject(null)}
+                >
+                  <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"><PenLine className="size-4" /></span>
+                  <span><span className="block font-medium">开始第一篇{typeLabel}</span><span className="mt-1 block text-sm text-muted-foreground">打开创作表单，确认要求后立即开始。</span></span>
+                </Link>
+                <Link
+                  to={createPlanHref({ projectId: onboardingProject.id })}
+                  className="flex items-start gap-3 rounded-lg border border-border p-4 transition-colors hover:border-primary/60 hover:bg-muted/40"
+                  onClick={() => setOnboardingProject(null)}
+                >
+                  <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"><CalendarRange className="size-4" /></span>
+                  <span><span className="block font-medium">制定账号内容计划</span><span className="mt-1 block text-sm text-muted-foreground">按固定节奏生成作品，排期提交后才会生效。</span></span>
+                </Link>
+                <div className="flex justify-end">
+                  <Button type="button" variant="ghost" onClick={() => setOnboardingProject(null)}>先去项目页</Button>
+                </div>
+              </div>
+            )
+          })()}
         </DialogContent>
       </Dialog>
 

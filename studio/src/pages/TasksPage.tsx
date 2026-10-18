@@ -157,16 +157,20 @@ export default function TasksPage() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const [bulkAction, setBulkAction] = useState<'cancel' | 'clone' | 'delete' | null>(null)
   const [bulkExecutionProfile, setBulkExecutionProfile] = useState<AgentExecutionProfileID | ''>('')
+  const projectIntentRefreshRef = useRef<string | null>(null)
 
   useEffect(() => {
     const nextStatus = normalizeTaskStatusFilter(searchParams.get('status'))
     setStatusFilter((current) => (current === nextStatus ? current : nextStatus))
   }, [searchParams])
 
-  const { data: projects = [], isLoading: projectsLoading } = useQuery({
+  const projectsQuery = useQuery({
     queryKey: ['projects', 'active'],
     queryFn: () => api.projects.list({ status: 'active' }),
+    staleTime: 60_000,
   })
+  const projects = projectsQuery.data ?? []
+  const projectsLoading = projectsQuery.isLoading
 
   const projectMap = useMemo(() => {
     const map: Record<string, Project> = {}
@@ -179,9 +183,22 @@ export default function TasksPage() {
   // Resolve create intent after project prerequisites are known.
   useEffect(() => {
     if (!shouldCreate || projectsLoading) return
+    if (createIntent.projectId && !projectMap[createIntent.projectId]) {
+      if (projectsQuery.isFetching) return
+      if (projectIntentRefreshRef.current !== createIntent.projectId) {
+        projectIntentRefreshRef.current = createIntent.projectId
+        void projectsQuery.refetch()
+        return
+      }
+      toast.error(projectsQuery.isError
+        ? '无法加载对应的创作项目，请刷新后重试。'
+        : '所选创作项目不存在或已归档，请返回项目页重试。')
+      setSearchParams({}, { replace: true })
+      return
+    }
     openCreate()
     setSearchParams({}, { replace: true })
-  }, [shouldCreate, projectsLoading, setSearchParams])
+  }, [shouldCreate, projectsLoading, createIntent.projectId, projectMap, projectsQuery.isFetching, projectsQuery.isError, projectsQuery.refetch, setSearchParams])
 
   useEffect(() => {
     if (!modalOpen) return

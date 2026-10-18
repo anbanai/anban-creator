@@ -1,5 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import ProjectsPage from './ProjectsPage'
 import { api } from '@/lib/api'
 import { render } from '@/test/test-utils'
@@ -12,6 +14,19 @@ const { errorMock, successMock, authState } = vi.hoisted(() => ({
   authState: { isAdmin: true },
 }))
 const uploadToOSSMock = vi.hoisted(() => vi.fn())
+
+function ProjectsPageWithWarmProjectCache() {
+  const queryClient = useQueryClient()
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    queryClient.setDefaultOptions({ queries: { staleTime: 30_000, retry: false } })
+    queryClient.setQueryData(['projects', 'all'], [])
+    setReady(true)
+  }, [queryClient])
+
+  return ready ? <ProjectsPage /> : null
+}
 
 const projectWithReference: Project = {
   id: 'ch-1',
@@ -241,6 +256,50 @@ describe('ProjectsPage', () => {
     })
     expect(payload).not.toHaveProperty('reference_image_url')
     expect(successMock).toHaveBeenCalledWith('创作项目已创建，正在后台识别视觉风格')
+  })
+
+  it('offers an optional first work or account plan after direct project creation', async () => {
+    vi.mocked(api.projects.create).mockResolvedValueOnce({ project: { ...projectWithReference, id: 'created-project', platform: 'wechat' } })
+    window.history.pushState({}, '', '/projects?create=true')
+
+    render(<ProjectsPage />)
+    const dialog = await screen.findByRole('dialog', { name: '新建创作项目' })
+    fireEvent.change(within(dialog).getByPlaceholderText('例如 我的科技博客'), { target: { value: '测试品牌' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalledTimes(1))
+
+    const onboardingTitle = await screen.findByRole('heading', { name: '开始使用这个创作项目' })
+    const onboarding = onboardingTitle.closest<HTMLElement>('[role="dialog"]')
+    expect(onboarding).not.toBeNull()
+    expect(within(onboarding!).getByRole('link', { name: /开始第一篇公众号文章/ })).toHaveAttribute(
+      'href',
+      '/tasks?create=true&type=wechat-article&project_id=created-project&intent=new',
+    )
+    expect(within(onboarding!).getByRole('link', { name: /制定账号内容计划/ })).toHaveAttribute(
+      'href',
+      '/plans?create=true&project_id=created-project&intent=schedule',
+    )
+
+    fireEvent.click(within(onboarding!).getByRole('button', { name: '先去项目页' }))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '开始使用这个创作项目' })).not.toBeInTheDocument())
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(screen.queryByRole('dialog', { name: '新建创作项目' })).not.toBeInTheDocument()
+  })
+
+  it('refreshes a warm project list before opening Project Creator next steps', async () => {
+    const createdProject = { ...projectWithReference, id: 'created-project' }
+    vi.mocked(api.projects.list).mockResolvedValueOnce([createdProject])
+    window.history.pushState({}, '', '/projects?onboarding=created-project')
+
+    render(<ProjectsPageWithWarmProjectCache />)
+
+    const onboarding = await screen.findByRole('dialog', { name: '开始使用这个创作项目' })
+    expect(within(onboarding).getByRole('link', { name: /开始第一篇公众号文章/ })).toHaveAttribute(
+      'href',
+      '/tasks?create=true&type=wechat-article&project_id=created-project&intent=new',
+    )
+    expect(api.projects.list).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(window.location.search).toBe(''))
   })
 
   it('only polls the project list while an image analysis is active', async () => {

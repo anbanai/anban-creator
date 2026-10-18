@@ -682,7 +682,7 @@
     {
       "id": "profile-analysis",
       "channel": "profile-analysis",
-      "version": "2.1.4",
+      "version": "2.1.5",
       "kind": "managed",
       "display_name": "账号画像分析",
       "description": "基于用户提供的公开资料和问答生成并提交六维项目账号画像。",
@@ -987,7 +987,7 @@
       "ui": {
         "renderer": "custom:profile-analysis"
       },
-      "digest": "a6a344db07e26a89d07e12429222c2563a3f66ea02ef64c650d73eb2f64c2432"
+      "digest": "f490b2a7d84a48737f11a0f7886e3d6f5a1726aa3d5a0b39b3e8b1dd61290a1a"
     },
     {
       "id": "project-creator",
