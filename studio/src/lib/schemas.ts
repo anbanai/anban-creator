@@ -245,13 +245,14 @@ export type PlanFormValues = z.infer<typeof planSchema>
 
 export const projectSchema = z.object({
   platform: z.enum(["seednote", "wechat", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit"]).or(z.literal('')).optional(),
-  name: z.string().trim().min(1, "请输入创作项目名称").max(100, "名称不能超过 100 个字符"),
+  agent_ids: z.array(z.string()).min(1, "至少选择一种项目类型").max(6, "最多选择 6 种项目类型").default(['wechat-article']),
+  name: z.string().trim().min(1, "请输入项目名称").max(100, "名称不能超过 100 个字符"),
   profile_url: z.string().optional(),
   avatar_url: z.string().url("请输入有效的 URL").or(z.literal("")).optional(),
   wechat_app_id: z.string().optional(),
   wechat_secret: z.string().optional(),
   keywords: z.string().max(200, "关键词不能超过 200 个字符").optional(),
-  instructions: z.string().max(8192, "创作项目定位不能超过 8192 个字符").optional(),
+  instructions: z.string().max(8192, "项目定位不能超过 8192 个字符").optional(),
   visual_style: z.string().max(1024, "视觉风格不能超过 1024 个字符").optional(),
   writer: z.string().max(100, "写作风格不能超过 100 个字符").optional(),
   theme: z.string().max(100, "主题不能超过 100 个字符").optional(),

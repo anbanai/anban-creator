@@ -121,7 +121,7 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
           <DialogTitle>平台设置</DialogTitle>
           <DialogDescription className="space-y-2">
             <ProjectIdentity project={project} compact showAgents={false} className="max-w-full" />
-            <span className="block">管理此创作项目的发布账号。</span>
+            <span className="block">管理此项目的发布账号。</span>
           </DialogDescription>
         </DialogHeader>
         {configs.isPending || (!configs.isFetchedAfterMount && !configs.isError) ? <p role="status">正在加载平台设置…</p> : configs.isError ? (

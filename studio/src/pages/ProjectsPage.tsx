@@ -4,13 +4,13 @@ import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Bot, CalendarRange, FilePlus2, Inbox, PenLine } from 'lucide-react'
+import { Bot, CalendarRange, FilePlus2, Inbox, MessagesSquare, PenLine, Settings2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { FieldHint } from '@/components/common/FieldHint'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { api } from '@/lib/api'
-import type { ImageAnalysis, Project, ProjectPlatform, ProjectStats, CreateProjectRequest, ProjectProfile } from '@/types'
+import type { ImageAnalysis, Project, ProjectPlatform, ProjectStats, CreateProjectRequest } from '@/types'
 import { isImageAnalysisActive, isImageAnalysisUpdateOlder } from '@/types'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { queryKeys } from '@/lib/query-keys'
@@ -35,6 +35,8 @@ import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
 import { MetricStrip } from '@/components/workspace'
+import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
+import { profileLabAgents, projectAgentIDs } from '@/lib/project-capabilities'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
@@ -50,6 +52,7 @@ const statusTabs: { label: string; value: string }[] = [
 ]
 
 const PROJECT_FORM_DEFAULTS: ProjectFormValues = {
+  agent_ids: ['wechat-article'],
   name: '',
   keywords: '',
   instructions: '',
@@ -62,6 +65,7 @@ const PROJECT_FORM_DEFAULTS: ProjectFormValues = {
 function projectToForm(project: Project): ProjectFormValues {
   return {
     ...PROJECT_FORM_DEFAULTS,
+    agent_ids: projectAgentIDs(project),
     name: project.name || '',
     keywords: project.keywords || '',
     instructions: project.instructions || project.positioning || '',
@@ -70,6 +74,21 @@ function projectToForm(project: Project): ProjectFormValues {
     portrait_reference_image: project.portrait_reference_image ?? null,
   }
 }
+
+function primaryProjectPlatform(agentIDs: string[]): ProjectPlatform | '' {
+  if (agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')) return 'wechat'
+  if (agentIDs.includes('seednote')) return 'seednote'
+  if (agentIDs.includes('montage')) return 'montage'
+  if (agentIDs.includes('hypit')) return 'hypit'
+  if (agentIDs.includes('whiteboard-animation')) return 'whiteboard-animation'
+  return ''
+}
+
+function usesWechatPublishing(agentIDs: readonly string[]) {
+  return agentIDs.some((id) => id === 'wechat-article' || id === 'wechat-picture')
+}
+
+const selectableProjectTypeIDs: Set<string> = new Set(profileLabAgents.map((agent) => agent.id))
 
 export default function ProjectsPage() {
   const { user } = useAuth()
@@ -85,7 +104,10 @@ export default function ProjectsPage() {
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const formSessionRef = useRef(0)
   const createdProjectReturnHrefRef = useRef<string | null>(null)
+  const pendingChannelProjectRef = useRef<Project | null>(null)
   const pendingOnboardingProjectRef = useRef<Project | null>(null)
+  const pendingOnboardingAfterChannelRef = useRef<Project | null>(null)
+  const skipCreateIntentRef = useRef(false)
   const suppressCreateIntentRef = useRef(false)
   useEffect(() => () => { formSessionRef.current += 1 }, [])
   const [showDirtyDialog, setShowDirtyDialog] = useState(false)
@@ -93,13 +115,21 @@ export default function ProjectsPage() {
   const editingAnalysisUpdatedAtRef = useRef('')
   const [referenceUploading, setReferenceUploading] = useState(false)
   const [channelProject, setChannelProject] = useState<Project | null>(null)
-  const [profileProject, setProfileProject] = useState<Project | null>(null)
-  const [profileDraft, setProfileDraft] = useState<ProjectProfile | null>(null)
-  const [profileDraftText, setProfileDraftText] = useState<Record<string, string>>({})
-  const [profileJsonError, setProfileJsonError] = useState<string | null>(null)
-  const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [onboardingProject, setOnboardingProject] = useState<Project | null>(null)
   const { submit } = useSubmitLock()
+
+  useEffect(() => {
+    if (modalOpen || !pendingChannelProjectRef.current) return
+    const project = pendingChannelProjectRef.current
+    pendingChannelProjectRef.current = null
+    setChannelProject(project)
+  }, [modalOpen])
+
+  useEffect(() => {
+    if (modalOpen || !pendingOnboardingProjectRef.current) return
+    setOnboardingProject(pendingOnboardingProjectRef.current)
+    pendingOnboardingProjectRef.current = null
+  }, [modalOpen])
 
   const form = useForm<ProjectFormValues>({
     resolver: zodResolver(projectSchema) as Resolver<ProjectFormValues>,
@@ -108,6 +138,8 @@ export default function ProjectsPage() {
 
   const referenceImage = useWatch({ control: form.control, name: 'reference_image' })
   const portraitReferenceImage = useWatch({ control: form.control, name: 'portrait_reference_image' })
+  const selectedAgentIDs = useWatch({ control: form.control, name: 'agent_ids' }) ?? []
+  const hasWechatPublishing = usesWechatPublishing(selectedAgentIDs)
 
   // Warn before closing with unsaved changes
   useFormDirtyCheck(form, modalOpen)
@@ -197,12 +229,6 @@ export default function ProjectsPage() {
     setSearchParams(next, { replace: true })
   }, [onboardingProject, searchParams, setSearchParams, visibleProjects])
 
-  useEffect(() => {
-    if (modalOpen || !pendingOnboardingProjectRef.current) return
-    setOnboardingProject(pendingOnboardingProjectRef.current)
-    pendingOnboardingProjectRef.current = null
-  }, [modalOpen])
-
   const createMutation = useMutation({
     mutationFn: async ({ data, sessionID, returnContext }: { data: CreateProjectRequest; sessionID: number; returnContext: Omit<Parameters<typeof projectCreatedReturnHref>[0], 'projectId'> | null }) => {
       const created = await api.projects.create(data)
@@ -211,94 +237,28 @@ export default function ProjectsPage() {
       }
       return created
     },
-    onSuccess: (created, { sessionID }) => {
+    onSuccess: (created, { data, sessionID }) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       if (sessionID !== formSessionRef.current) return
-      toast.success(created.project.image_analysis ? '创作项目已创建，正在后台识别视觉风格' : '创作项目创建成功')
-      finishProjectSave(createdProjectReturnHrefRef.current ? undefined : created.project)
+      const returnHref = createdProjectReturnHrefRef.current
+      const shouldConfigureWechat = usesWechatPublishing(data.agent_ids ?? created.project.agent_ids ?? [])
+      const hasExplicitCreationType = Boolean(createIntent.type)
+      toast.success(created.project.image_analysis ? '项目已创建，正在后台识别视觉风格' : '项目创建成功')
+      if (!returnHref && shouldConfigureWechat && hasExplicitCreationType) {
+        pendingChannelProjectRef.current = created.project
+        pendingOnboardingAfterChannelRef.current = created.project
+      } else if (!returnHref) {
+        pendingOnboardingProjectRef.current = created.project
+      }
+      if (createIntent.shouldCreate) {
+        skipCreateIntentRef.current = true
+        suppressCreateIntentRef.current = true
+      }
+      finishProjectSave()
     },
     onError: (err, { sessionID }) => {
-      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建创作项目失败，请重试'))
-    },
-  })
-
-  const profileQuery = useQuery({
-    queryKey: ['project-profile', profileProject?.id],
-    queryFn: () => api.projects.getAccountProfile(profileProject!.id),
-    enabled: profileModalOpen && Boolean(profileProject),
-  })
-  useEffect(() => {
-    if (!profileQuery.data) return
-    setProfileDraft(profileQuery.data)
-    setProfileDraftText(Object.fromEntries(Object.entries(profileQuery.data.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
-    setProfileJsonError(null)
-  }, [profileQuery.data])
-  const profileAnalysisQuery = useQuery({
-    queryKey: ['project-profile-analysis', profileProject?.id, profileDraft?.analysis_task_id],
-    queryFn: () => api.projects.profileAnalysis(profileProject!.id),
-    enabled: profileModalOpen && Boolean(profileProject?.id && profileDraft?.analysis_task_id),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === 'pending' || status === 'running' ? 2000 : false
-    },
-  })
-  useEffect(() => {
-    const result = profileAnalysisQuery.data
-    if (!result) return
-    setProfileDraft(result.profile)
-    setProfileDraftText(Object.fromEntries(Object.entries(result.profile.dimensions).map(([key, dimension]) => [key, JSON.stringify(dimension.content, null, 2)])))
-    setProfileJsonError(null)
-  }, [profileAnalysisQuery.data])
-  const profileAnalysisMutation = useMutation({
-    mutationFn: (retry: boolean) => retry
-      ? api.projects.retryProfile(profileProject!.id, profileDraft!.version)
-      : api.projects.refreshProfile(profileProject!.id, profileDraft!.version),
-    onSuccess: (result) => {
-      setProfileDraft(result.profile)
-      queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
-      toast.success('画像分析已加入队列')
-    },
-    onError: (err) => {
-      if (getApiErrorMessage(err, '').includes('profile_revision_conflict')) {
-        toast.error('画像版本已变化，请刷新后再试')
-        queryClient.invalidateQueries({ queryKey: ['project-profile', profileProject?.id] })
-      } else toast.error(getApiErrorMessage(err, '画像更新失败'))
-    },
-  })
-
-  function resetProfileFlow() {
-    setProfileDraft(null)
-    setProfileDraftText({})
-    setProfileJsonError(null)
-  }
-
-  function openProfile(project: Project) {
-    resetProfileFlow()
-    setProfileProject(project)
-    setProfileModalOpen(true)
-    void queryClient.invalidateQueries({ queryKey: ['project-profile', project.id] })
-  }
-
-  function closeProfile() {
-    setProfileModalOpen(false)
-    setProfileProject(null)
-    resetProfileFlow()
-  }
-
-  const profileDimensionMutation = useMutation({
-    mutationFn: ({ name, dimension }: { name: string; dimension: ProjectProfile['dimensions'][keyof ProjectProfile['dimensions']] }) => api.projects.updateProfileDimension(profileProject!.id, name, profileDraft!.version, dimension),
-    onSuccess: (profile) => {
-      setProfileDraft(profile)
-      queryClient.setQueryData(['project-profile', profileProject?.id], profile)
-      queryClient.invalidateQueries({ queryKey: ['project-profile-analysis', profileProject?.id] })
-      toast.success('画像文件已保存')
-    },
-    onError: (err) => {
-      if (getApiErrorMessage(err, '').includes('profile_revision_conflict')) {
-        toast.error('画像版本冲突，正在重新加载当前内容')
-        queryClient.invalidateQueries({ queryKey: ['project-profile', profileProject?.id] })
-      } else toast.error(getApiErrorMessage(err, '画像保存失败'))
+      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建项目失败，请重试'))
     },
   })
 
@@ -311,35 +271,35 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       if (sessionID !== formSessionRef.current) return
-      toast.success('创作项目更新成功')
+      toast.success('项目更新成功')
       finishProjectSave()
     },
     onError: (err, { sessionID }) => {
-      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '更新创作项目失败，请重试'))
+      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '更新项目失败，请重试'))
     },
   })
 
   const archiveMutation = useMutation({
     mutationFn: (id: string) => api.projects.archive(id),
     onSuccess: () => {
-      toast.success('创作项目已归档')
+      toast.success('项目已归档')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: () => {
-      toast.error('归档创作项目失败，请重试')
+      toast.error('归档项目失败，请重试')
     },
   })
 
   const restoreMutation = useMutation({
     mutationFn: (id: string) => api.projects.restore(id),
     onSuccess: () => {
-      toast.success('创作项目已恢复')
+      toast.success('项目已恢复')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: () => {
-      toast.error('恢复创作项目失败，请重试')
+      toast.error('恢复项目失败，请重试')
     },
   })
 
@@ -347,7 +307,11 @@ export default function ProjectsPage() {
     formSessionRef.current += 1
     createdProjectReturnHrefRef.current = null
     setEditingProject(null)
-    form.reset(PROJECT_FORM_DEFAULTS)
+    const intentType = createIntent.type
+    form.reset({
+      ...PROJECT_FORM_DEFAULTS,
+      agent_ids: intentType && selectableProjectTypeIDs.has(intentType as string) ? [intentType as ProjectFormValues['agent_ids'][number]] : PROJECT_FORM_DEFAULTS.agent_ids,
+    })
     setEditingAnalysis(null)
     editingAnalysisUpdatedAtRef.current = ''
     setReferenceUploading(false)
@@ -363,7 +327,8 @@ export default function ProjectsPage() {
   }
 
   useEffect(() => {
-    if (suppressCreateIntentRef.current) {
+    if (skipCreateIntentRef.current || suppressCreateIntentRef.current) {
+      skipCreateIntentRef.current = false
       suppressCreateIntentRef.current = false
       return
     }
@@ -382,11 +347,8 @@ export default function ProjectsPage() {
     setModalOpen(true)
   }
 
-  function finishProjectSave(createdProject?: Project) {
+  function finishProjectSave() {
     const returnHref = createdProjectReturnHrefRef.current
-    if (returnHref) closeProfile()
-    if (createdProject) pendingOnboardingProjectRef.current = createdProject
-    if (createIntent.shouldCreate) suppressCreateIntentRef.current = true
     resetModal()
     if (returnHref) navigate(returnHref)
   }
@@ -424,6 +386,14 @@ export default function ProjectsPage() {
       keywords: values.keywords?.trim() || '',
       instructions: values.instructions?.trim() || '',
     }
+    if (!editingProject || form.formState.dirtyFields.agent_ids) {
+      const selectedAgentIDs = values.agent_ids ?? []
+      if (selectedAgentIDs.every((id) => selectableProjectTypeIDs.has(id))) {
+        payload.agent_ids = selectedAgentIDs
+        const primaryPlatform = primaryProjectPlatform(selectedAgentIDs)
+        if (primaryPlatform) payload.platform = primaryPlatform
+      }
+    }
     if (!editingProject || form.formState.dirtyFields.visual_style) {
       payload.visual_style = values.visual_style?.trim() ?? ''
     }
@@ -455,28 +425,23 @@ export default function ProjectsPage() {
   }
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending
-  const profileDimensionLabels: Record<string, string> = { identity: '定位', style: '风格', audience: '受众', platforms: '平台', preferences: '偏好与红线', memory: '记忆' }
-  const profileAnalysisStatus = profileAnalysisQuery.data?.status ?? (profileDraft?.analysis_task_id ? 'pending' : 'not_started')
-  const profileAnalysisRunning = profileAnalysisStatus === 'pending' || profileAnalysisStatus === 'running' || profileAnalysisMutation.isPending
-  const profileAnalysisFailed = profileAnalysisStatus === 'failed' || profileAnalysisStatus === 'cancelled'
-
   return (
     <div className="space-y-6">
-      <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，可用于不同类型的作品。">
+      <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，服务不同类型的内容。">
         <Button variant="outline" aria-label="使用表单创建" onClick={openCreate}>
           <FilePlus2 className="h-4 w-4" />
           表单创建
         </Button>
-        <Button aria-label="智能创建创作项目" onClick={openCreator}>
+        <Button aria-label="智能创建项目" onClick={openCreator}>
           <Bot className="h-4 w-4" />
           AI 创建
         </Button>
       </PageHeader>
 
       <MetricStrip
-        label="创作项目概览"
+        label="项目概览"
         metrics={[
-          { label: '创作项目', value: projectOverview.projects },
+          { label: '项目', value: projectOverview.projects },
           { label: '作品', value: projectOverview.tasks, detail: projectOverview.running ? `${projectOverview.running} 个运行中` : undefined },
           { label: '完成率', value: projectOverview.completion, detail: projectOverview.completed ? `${projectOverview.completed} 个已完成` : '暂无作品' },
         ]}
@@ -489,7 +454,7 @@ export default function ProjectsPage() {
           variant="outline"
           size="sm"
           spacing={0}
-          aria-label="创作项目状态"
+          aria-label="项目状态"
         >
           {statusTabs.map((tab) => (
             <ToggleGroupItem key={tab.value} value={tab.value}>
@@ -501,7 +466,7 @@ export default function ProjectsPage() {
         <SearchInput
           value={searchFilter}
           onChange={setSearchFilter}
-          placeholder="搜索创作项目"
+          placeholder="搜索项目"
           className="w-full sm:w-64"
         />
       </div>
@@ -530,9 +495,9 @@ export default function ProjectsPage() {
       ) : filteredProjects.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有创作项目' : statusFilter === 'active' ? '没有活跃的创作项目' : '没有已归档的创作项目') : '未找到匹配的创作项目'}
-          description={!visibleProjects.length ? '创建创作项目后即可开始创作。' : '换个关键词试试'}
-          action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '智能创建创作项目', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
+          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有项目' : statusFilter === 'active' ? '没有活跃项目' : '没有已归档项目') : '未找到匹配的项目'}
+          description={!visibleProjects.length ? '创建项目后即可开始创作。' : '换个关键词试试'}
+          action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '智能创建项目', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
@@ -542,7 +507,6 @@ export default function ProjectsPage() {
               project={project}
               stats={projectStats[project.id]}
               onEdit={openEdit}
-              onProfile={openProfile}
               onUpdateProfile={openProfileCreator}
               onChannelConfig={setChannelProject}
               archiving={archiveMutation.isPending}
@@ -556,15 +520,15 @@ export default function ProjectsPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{editingProject ? '编辑创作项目' : '新建创作项目'}</DialogTitle>
+            <DialogTitle>{editingProject ? '编辑项目' : '新建项目'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
             <form id="project-form" onSubmit={handleProjectSubmit} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
-                  <FormLabel className="shrink-0 w-20 text-right">创作项目名称</FormLabel>
+                  <FormLabel className="w-20 shrink-0 text-right">项目名称</FormLabel>
                   <FormControl>
                     <Input className="flex-1 min-w-0" placeholder="例如 我的科技博客" {...field} />
                   </FormControl>
@@ -572,11 +536,53 @@ export default function ProjectsPage() {
                 </FormItem>
               )} />
 
+              <FormField control={form.control} name="agent_ids" render={({ field }) => (
+                <FormItem className="rounded-lg border border-border bg-muted/20 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <FormLabel>项目类型</FormLabel>
+                      <FormDescription className="mt-1">可多选。项目会只展示并支持已选择的创作类型。</FormDescription>
+                    </div>
+                    <span className="rounded-full bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">{field.value?.length ?? 0} 种已选</span>
+                  </div>
+                  <FormControl>
+                    <CreationTypePicker
+                      options={profileLabAgents.filter((agent) => canViewPlatform((agent.id === 'wechat-article' || agent.id === 'wechat-picture' ? 'wechat' : agent.id) as ProjectPlatform, isAdmin))}
+                      value={field.value ?? []}
+                      onChange={field.onChange}
+                      multiple
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              {hasWechatPublishing && (
+                <section className="rounded-lg border border-[#07C160]/25 bg-[#07C160]/5 p-4" aria-labelledby="wechat-publishing-title">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#07C160]/10 text-[#07C160]">
+                        <MessagesSquare aria-hidden="true" className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 id="wechat-publishing-title" className="text-sm font-medium">公众号发布账号</h3>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">公众号文章与贴图共用一个账号。AppSecret 只在保存时提交，之后不会回显。</p>
+                      </div>
+                    </div>
+                    {editingProject ? (
+                      <Button type="button" variant="outline" size="sm" onClick={() => setChannelProject(editingProject)}>
+                        <Settings2 />配置 AppID / Secret
+                      </Button>
+                    ) : <span className="shrink-0 text-xs font-medium text-muted-foreground">创建后自动配置</span>}
+                  </div>
+                </section>
+              )}
+
               <FormField control={form.control} name="instructions" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center gap-1">
-                    <FormLabel className="w-auto">创作项目定位</FormLabel>
-                    <FieldHint>每次创作都会参考这些要求，保持创作项目定位与表达风格一致。</FieldHint>
+                    <FormLabel className="w-auto">项目定位</FormLabel>
+                    <FieldHint>每次创作都会参考这些要求，保持项目定位与表达风格一致。</FieldHint>
                   </div>
                   <FormControl>
                     <Textarea
@@ -663,65 +669,24 @@ export default function ProjectsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={profileModalOpen} onOpenChange={(open) => { if (!open) closeProfile() }}>
-        <DialogContent className="sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>创作项目画像</DialogTitle>
-          </DialogHeader>
-          <div className="max-h-[70vh] space-y-4 overflow-y-auto">
-            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
-              <div>
-                <p className="text-sm font-medium">初始化状态：{profileDraft?.initialization_status ?? 'not_started'}</p>
-                {profileDraft?.last_error && <p className="text-xs text-destructive" role="alert">{profileDraft.last_error}</p>}
-              </div>
-              {profileDraft && <Button variant="outline" size="sm" loading={profileAnalysisMutation.isPending} disabled={profileAnalysisRunning} onClick={() => profileAnalysisMutation.mutate(profileAnalysisFailed)}>更新画像</Button>}
-            </div>
-            {profileAnalysisRunning && <p className="text-sm text-blue-600" role="status">画像分析中，完成后会自动刷新。</p>}
-            {profileAnalysisFailed && <p className="text-sm text-destructive" role="alert">画像分析失败，当前画像保持不变，可以重试。</p>}
-            <table className="w-full text-left text-xs"><thead><tr className="border-b"><th className="py-2 pr-3">引用路径</th><th className="py-2">用途</th></tr></thead><tbody>
-              {Object.entries(profileDimensionLabels).map(([key, label]) => <tr key={key} className="border-b"><td className="py-2 pr-3 font-mono">profile/{key}.md</td><td className="py-2">{label}</td></tr>)}
-            </tbody></table>
-            {profileDraft && (
-              <div className="space-y-3">
-                {Object.entries(profileDraft.dimensions).map(([key, dimension]) => (
-                  <div key={key} className="space-y-2 rounded-md border p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-medium">{profileDimensionLabels[key] || key}</span>
-                      <span className="text-xs text-muted-foreground">{dimension.sources.join('、') || '[待补充]'}</span>
-                    </div>
-                    <Textarea
-                      value={profileDraftText[key] ?? JSON.stringify(dimension.content, null, 2)}
-                      onChange={(event) => {
-                        const text = event.target.value
-                        setProfileDraftText((current) => ({ ...current, [key]: text }))
-                        try {
-                          const content = JSON.parse(text) as Record<string, unknown>
-                          if (!content || Array.isArray(content) || typeof content !== 'object') throw new Error('object required')
-                          setProfileJsonError(null)
-                          setProfileDraft({ ...profileDraft, dimensions: { ...profileDraft.dimensions, [key]: { ...dimension, content } } })
-                        } catch { setProfileJsonError(`${profileDimensionLabels[key] || key} 的内容必须是有效 JSON 对象`) }
-                      }}
-                      className="min-h-[76px] font-mono text-xs"
-                    />
-                    <Button size="sm" variant="secondary" disabled={Boolean(profileJsonError) || profileDimensionMutation.isPending || profileAnalysisRunning} onClick={() => profileDimensionMutation.mutate({ name: key, dimension })}>保存文件</Button>
-                    {dimension.missing_fields.length > 0 && <p className="mt-1 text-xs text-amber-600">待补充：{dimension.missing_fields.join('、')}</p>}
-                  </div>
-                ))}
-                {profileDraft.follow_up_questions.length > 0 && <div className="text-sm text-muted-foreground">待确认问题：{profileDraft.follow_up_questions.join('；')}</div>}
-                {profileJsonError && <p className="text-sm text-destructive" role="alert">{profileJsonError}</p>}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={closeProfile}>关闭</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {channelProject && (
+        <ProjectChannelConfigDialog
+          key={channelProject.id}
+          project={channelProject}
+          onClose={() => {
+            setChannelProject(null)
+            if (pendingOnboardingAfterChannelRef.current) {
+              setOnboardingProject(pendingOnboardingAfterChannelRef.current)
+              pendingOnboardingAfterChannelRef.current = null
+            }
+          }}
+        />
+      )}
 
       <Dialog open={Boolean(onboardingProject)} onOpenChange={(open) => { if (!open) setOnboardingProject(null) }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>开始使用这个创作项目</DialogTitle>
+            <DialogTitle>开始使用这个项目</DialogTitle>
             <p className="text-sm text-muted-foreground">项目画像已经保存。你可以马上生成第一篇作品，也可以先制定一套账号内容计划。</p>
           </DialogHeader>
           {onboardingProject && (() => {
@@ -753,14 +718,6 @@ export default function ProjectsPage() {
           })()}
         </DialogContent>
       </Dialog>
-
-      {channelProject && (
-        <ProjectChannelConfigDialog
-          key={channelProject.id}
-          project={channelProject}
-          onClose={() => setChannelProject(null)}
-        />
-      )}
 
       {/* Dirty form confirmation */}
       <AlertDialog open={showDirtyDialog} onOpenChange={setShowDirtyDialog}>
