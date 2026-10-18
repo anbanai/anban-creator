@@ -76,6 +76,9 @@ try {
   assert.deepEqual(request.tools.map(tool => tool.name).sort(), ['ask_user_question', 'mcp__creator__stage_project_creator_draft', 'skill'])
   assert.ok(JSON.stringify(request.messages).includes(snapshot), 'runtime snapshot reaches first model request')
   assert.ok(JSON.stringify(request).includes('project-creator-client-discovery'), 'Project Creator discovery Skill reaches first model request')
+  const serializedRequest = JSON.stringify(request)
+  assert.ok(serializedRequest.includes('你要先弄清客户的业务及内容要解决的问题'), 'updated Project Creator persona reaches first model request')
+  assert.ok(!serializedRequest.includes('优先确认项目名称/一句话定位、主平台和内容类型'), 'obsolete fixed interview priority is absent from first model request')
   console.log('PASS: deployed layout session/start, real tool allowlist, and context injection')
 } finally {
   clearTimeout(timer)
