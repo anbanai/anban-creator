@@ -111,6 +111,11 @@ export function createTaskHref({
   return `/tasks?${params.toString()}`
 }
 
+export function createPlanHref({ projectId }: { projectId: string }) {
+  const params = new URLSearchParams({ create: 'true', project_id: projectId, intent: 'schedule' })
+  return `/plans?${params.toString()}`
+}
+
 export function projectsReturnHref({
   type = 'seednote',
   intent,

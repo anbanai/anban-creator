@@ -930,7 +930,7 @@ export default function ChatPage() {
       setCommitted(true)
       clearPersistedInteractiveSession(sessionStorageKey)
       const id = result.project?.id ?? (isProjectUpdate ? projectId : undefined)
-      navigate(id ? `/projects?edit=${encodeURIComponent(id)}` : '/projects')
+      navigate(id ? isProjectUpdate ? `/projects?edit=${encodeURIComponent(id)}` : `/projects?onboarding=${encodeURIComponent(id)}` : '/projects')
     } catch (error) {
       setCommitError(error instanceof Error ? error.message : `创作项目${isProjectUpdate ? '更新' : '创建'}失败，请重试。`)
     } finally {

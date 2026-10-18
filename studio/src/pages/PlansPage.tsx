@@ -150,6 +150,7 @@ export default function PlansPage() {
   const [recommendationUnavailable, setRecommendationUnavailable] = useState(false)
   const recommendationRequestRef = useRef(0)
   const scheduleManuallyChangedRef = useRef(false)
+  const projectIntentRefreshRef = useRef<string | null>(null)
 
   const form = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema) as Resolver<PlanFormValues>,
@@ -202,11 +203,13 @@ export default function PlansPage() {
   const { items: imageCapabilities, defaultCapability: defaultImageCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(modalOpen)
   const effectiveImageCapability = watchedImageCapabilityKey || defaultImageCapability || ''
 
-  const { data: projects = [], isLoading: projectsLoading } = useQuery({
+  const projectsQuery = useQuery({
     queryKey: ['projects-for-plans'],
     queryFn: () => api.projects.list({ status: 'active' }),
     staleTime: 60_000,
   })
+  const projects = projectsQuery.data ?? []
+  const projectsLoading = projectsQuery.isLoading
   const projectMap = useMemo(() => Object.fromEntries(projects.map((project) => [project.id, project])), [projects])
   const selectedProject = projectMap[watchedProjectID]
 
@@ -313,10 +316,24 @@ export default function PlansPage() {
   }, [createIntent.projectId, form, projectMap, resetAttachments])
 
   useEffect(() => {
-    if (!createIntent.shouldCreate || (createIntent.projectId && projects.length === 0)) return
+    if (!createIntent.shouldCreate) return
+    if (createIntent.projectId && !projectMap[createIntent.projectId]) {
+      if (projectsQuery.isLoading || projectsQuery.isFetching) return
+      if (projectIntentRefreshRef.current !== createIntent.projectId) {
+        projectIntentRefreshRef.current = createIntent.projectId
+        void projectsQuery.refetch()
+        return
+      }
+      const message = projectsQuery.isError
+        ? getApiErrorMessage(projectsQuery.error, '加载创作项目失败，请刷新后重试')
+        : '未找到对应的创作项目，请返回项目页重试'
+      toast.error(message)
+      setSearchParams({}, { replace: true })
+      return
+    }
     openCreate()
     setSearchParams({}, { replace: true })
-  }, [createIntent.projectId, createIntent.shouldCreate, openCreate, projects.length, setSearchParams])
+  }, [createIntent.projectId, createIntent.shouldCreate, openCreate, projectMap, projectsQuery.error, projectsQuery.isError, projectsQuery.isFetching, projectsQuery.isLoading, projectsQuery.refetch, setSearchParams])
 
   function openEdit(plan: Plan) {
     recommendationRequestRef.current += 1

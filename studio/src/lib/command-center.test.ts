@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCommandCenterSignals,
   buildNextBestActions,
+  createPlanHref,
   projectCreatedReturnHref,
   createTaskHref,
   parseCreationIntent,
@@ -154,6 +155,9 @@ describe('command center rules', () => {
     })).toBe('/tasks?create=true&type=wechat-article&project_id=project-1')
     expect(createTaskHref({ type: 'moments', projectId: 'moments-1', intent: 'new' })).toBe(
       '/tasks?create=true&type=moments&project_id=moments-1&intent=new',
+    )
+    expect(createPlanHref({ projectId: 'project-1' })).toBe(
+      '/plans?create=true&project_id=project-1&intent=schedule',
     )
   })
 

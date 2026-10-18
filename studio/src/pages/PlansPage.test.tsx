@@ -1,10 +1,12 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import PlansPage from './PlansPage'
 import { render } from '@/test/test-utils'
 import { api } from '@/lib/api'
 import { mockAgentPackCatalog, mockPlans, mockProjects } from '@/test/mocks/handlers'
-import type { Plan } from '@/types'
+import type { Plan, Project } from '@/types'
 
 
 const harness = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), upload: vi.fn() }))
@@ -23,6 +25,19 @@ vi.mock('@/lib/api', async () => {
     imageCapabilities: { ...actual.api.imageCapabilities, list: vi.fn() },
   } }
 })
+
+function PlansPageWithCachedProjects({ projects }: { projects: Project[] }) {
+  const queryClient = useQueryClient()
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    queryClient.setQueryData(['projects-for-plans'], projects)
+    setReady(true)
+  }, [projects, queryClient])
+
+  return ready ? <PlansPage /> : null
+}
+
 async function openCreate() {
   fireEvent.click((await screen.findAllByRole('button', { name: '新建排期' }))[0])
   return screen.findByRole('dialog', { name: '新建排期' })
@@ -33,6 +48,7 @@ async function selectProject(dialog: HTMLElement, name: string) {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(api.projects.list).mockReset()
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:plan-preview')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   window.history.pushState({}, '', '/plans')
@@ -95,6 +111,22 @@ describe('PlansPage multi-output plans', () => {
     const dialog = await screen.findByRole('dialog', { name: '新建排期' })
     expect(await within(dialog).findByRole('button', { name: '公众号文章' })).toHaveAttribute('aria-pressed', 'false')
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
+  })
+
+  it.each([
+    ['empty', []],
+    ['stale and missing the target project', [mockProjects[0]]],
+  ])('waits for the linked project when the plan page has a %s cache', async (_cacheState, cachedProjects) => {
+    const project = { ...mockProjects[0], id: 'new-project', name: '刚创建的账号' }
+    vi.mocked(api.projects.list).mockResolvedValueOnce([project])
+    window.history.pushState({}, '', `/plans?create=true&project_id=${project.id}&intent=schedule`)
+
+    render(<PlansPageWithCachedProjects projects={cachedProjects} />)
+
+    const dialog = await screen.findByRole('dialog', { name: '新建排期' })
+    expect(await within(dialog).findByRole('combobox', { name: '创作项目' })).toHaveTextContent(project.name)
+    expect(api.projects.list).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(window.location.search).toBe(''))
   })
   it('loads new eligible packs dynamically and excludes incomplete or non-plan packs', async () => {
     const base = mockAgentPackCatalog.packs[0]

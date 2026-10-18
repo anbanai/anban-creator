@@ -355,6 +355,7 @@ describe('ChatPage', () => {
     expect(commit.compareDocumentPosition(laterMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(commit)
     await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledWith('session-1', 'snapshot-secret', expect.any(String), undefined))
+    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/projects?onboarding=project-1'))
     expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')).not.toHaveProperty('confirmation_token')
   })
 
@@ -914,13 +915,16 @@ describe('ChatPage', () => {
     expect(screen.getByText('主要受众为一二线城市白领')).toBeInTheDocument()
   })
 
-  it('previews memory additions and uses update confirmation copy', async () => {
+  it('returns to the existing project after confirming a profile update', async () => {
+    interactiveMocks.commit.mockResolvedValueOnce({})
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 2, ready: true, confirmation_token: 'secret-token', memory_append: '补充：春茶系列将在四月上线。', project: { name: '茶品牌', platform: 'wechat' } } }) },
     ], signal))
     renderChat('/chat?agent=project-creator&intent=update-project-profile&project_id=project-9')
 
-    expect(await screen.findByRole('button', { name: '确认更新画像' })).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '确认更新画像' }))
+    await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/projects?edit=project-9'))
     expect(screen.getByText('将追加到项目记忆的内容')).toBeInTheDocument()
     expect(screen.getByText('补充：春茶系列将在四月上线。')).toBeInTheDocument()
   })

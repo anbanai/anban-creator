@@ -121,6 +121,7 @@ export function TaskFormDialog({
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ['projects', 'active'],
     queryFn: () => api.projects.list({ status: 'active' }),
+    staleTime: 60_000,
   })
   const { data: billingWallet } = useQuery({
     queryKey: queryKeys.billing.wallet,
