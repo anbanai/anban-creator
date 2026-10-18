@@ -61,6 +61,7 @@ type fakeWechatPublicationAPI struct {
 	addError                                                            error
 	draftListResponse                                                   *appwechat.DraftBatchGetResponse
 	draftListResponses                                                  map[int64]*appwechat.DraftBatchGetResponse
+	draftListErrors                                                     []error
 	draftListRequests                                                   []appwechat.DraftBatchGetRequest
 	draftListError                                                      error
 	submitResponse                                                      *appwechat.FreePublishSubmitResponse
@@ -95,7 +96,15 @@ func (f *fakeWechatPublicationAPI) BatchGetDrafts(_ context.Context, request app
 	if f.draftListResponses != nil {
 		response = f.draftListResponses[request.Offset]
 	}
+	var err error
+	if len(f.draftListErrors) > 0 {
+		err = f.draftListErrors[0]
+		f.draftListErrors = f.draftListErrors[1:]
+	}
 	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return response, f.draftListError
 }
 func (f *fakeWechatPublicationAPI) SubmitFreePublish(context.Context, appwechat.FreePublishSubmitRequest) (*appwechat.FreePublishSubmitResponse, error) {
@@ -719,6 +728,33 @@ func TestCreateDraftKeepsWechatPictureInDraftBox(t *testing.T) {
 	}
 	if f.api.addCalls != 1 || f.api.submitCalls != 0 {
 		t.Fatalf("draft_add calls=%d formal publish calls=%d, want 1 and 0", f.api.addCalls, f.api.submitCalls)
+	}
+}
+
+func TestCreateDraftRetriesTransientDraftListFailureBeforeCreatingPictureDraft(t *testing.T) {
+	f := newPublicationFixture(t)
+	if err := f.db.Model(&model.Task{}).Where("id = ?", f.taskID).Updates(map[string]any{
+		"type": model.TaskTypeWechatPicture, "channel": model.ChannelWechatPicture,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.api.draftListErrors = []error{&appwechat.WechatAPIError{ErrCode: 42001, UserMsg: "access token expired", Retryable: true}}
+	f.api.draftListResponse = &appwechat.DraftBatchGetResponse{}
+	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "picture-draft-after-retry"}
+	request := appwechat.DraftAddRequest{Articles: []appwechat.DraftArticle{{
+		ArticleType: "newspic", Title: "图片消息", Content: "图下注释",
+		ImageInfo: &appwechat.DraftImageInfo{ImageList: []appwechat.DraftImage{{ImageMediaID: "image-1"}}},
+	}}}
+
+	publication, err := f.svc.CreateDraft(context.Background(), f.userID, f.taskID, f.projectID, f.executionID, request)
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+	if publication == nil || publication.DraftMediaID != "picture-draft-after-retry" {
+		t.Fatalf("publication = %#v, want draft created after transient list failure", publication)
+	}
+	if f.api.draftListCalls != 2 || f.api.addCalls != 1 {
+		t.Fatalf("provider calls list=%d add=%d, want list=2 add=1", f.api.draftListCalls, f.api.addCalls)
 	}
 }
 

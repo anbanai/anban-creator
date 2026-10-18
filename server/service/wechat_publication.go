@@ -50,6 +50,7 @@ const (
 	wechatReconcileRateLimit    = time.Minute
 	wechatProviderPageSize      = int64(20)
 	wechatRecoveryDispatchLease = 15 * time.Minute
+	wechatDraftListRetryDelay   = 100 * time.Millisecond
 
 	WechatPublicationPollTaskType      = "wechat:publication_poll"
 	WechatPublicationReconcileTaskType = "wechat:publication_reconcile"
@@ -1441,7 +1442,23 @@ func (s *WechatPublicationService) deferAutomaticPublish(ctx context.Context, pu
 }
 
 func (s *WechatPublicationService) recoverDraftByListing(ctx context.Context, api WechatPublicationAPI, publication *model.WechatPublication) (bool, error) {
-	items, err := listAllWechatDrafts(ctx, api)
+	var items []appwechat.DraftBatchItem
+	var err error
+	// A failed read-only check has not submitted a draft, so one bounded retry
+	// avoids turning transient token/network errors into a manual-only recovery.
+	for attempt := 0; attempt < 2; attempt++ {
+		items, err = listAllWechatDrafts(ctx, api)
+		if err == nil || !appwechat.IsRetryable(err) || attempt == 1 {
+			break
+		}
+		timer := time.NewTimer(wechatDraftListRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, ctx.Err()
+		case <-timer.C:
+		}
+	}
 	if err != nil {
 		if code, ok := publicationWechatErrCode(err); ok && code == 48001 {
 			expectedStatus, expectedUpdatedAt := publication.Status, publication.UpdatedAt
