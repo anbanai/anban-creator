@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2, BarChart3, CheckCircle2, CircleDashed, XCircle, Ban as BanIcon, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, Plus, ClipboardList, Download, Square, CheckSquare, Ban, RotateCcw, Trash2, BarChart3, CheckCircle2, CircleDashed, XCircle, Ban as BanIcon, LoaderCircle, MoreHorizontal } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import QueryErrorState from '@/components/QueryErrorState'
 import { api } from '@/lib/api'
@@ -12,6 +12,7 @@ import { AgentIconStack, agentDisplayName } from '@/components/agent-prompt/Agen
 import { SearchInput } from '@/components/ui/SearchInput'
 import { Button } from '@/components/common/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PageHeader from '@/components/layout/PageHeader'
 import EmptyState from '@/components/EmptyState'
@@ -20,6 +21,7 @@ import { parseCreationIntent, projectsReturnHref } from '@/lib/command-center'
 import { taskActionSignal } from '@/lib/studio-ux'
 import { taskStageSummary } from '@/lib/task-lifecycle'
 import { taskContentAnalyticsHref } from '@/lib/content-analytics'
+import { cn } from '@/lib/utils'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ExecutionProfileSelector } from '@/components/tasks/ExecutionProfileSelector'
 import { useAgentExecutionProfiles } from '@/hooks/useAgentExecutionProfiles'
@@ -57,10 +59,124 @@ function TaskStatusMark({ status, className = 'size-4' }: { status: TaskStatus; 
 }
 
 function taskStatusPanelClass(status: TaskStatus) {
-  if (status === 'completed') return 'border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300'
-  if (status === 'failed') return 'border-destructive/20 bg-destructive/5 text-destructive'
-  if (status === 'running') return 'border-primary/20 bg-primary/5 text-primary'
-  return 'border-border bg-muted/30 text-muted-foreground'
+  if (status === 'completed') return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+  if (status === 'failed') return 'border-destructive/25 bg-destructive/10 text-destructive'
+  if (status === 'running') return 'border-primary/25 bg-primary/10 text-primary'
+  return 'border-border bg-muted/50 text-muted-foreground'
+}
+
+export type TaskActionDefinition = {
+  id: string
+  label: string
+  ariaLabel: string
+  icon: ReactNode
+  priority: number
+  showLabel?: boolean
+  href?: string
+  onSelect?: () => void
+  disabled?: boolean
+  loading?: boolean
+  className?: string
+}
+
+function TaskActionControl({ action }: { action: TaskActionDefinition }) {
+  const inactive = Boolean(action.disabled || action.loading)
+  const className = cn(
+    action.showLabel ? 'min-h-11 gap-1.5 px-3' : 'size-11',
+    action.className,
+    'border-transparent bg-transparent shadow-none hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent',
+  )
+  const content = <>{action.icon}{action.showLabel ? <span>{action.label}</span> : null}</>
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={action.href
+          ? <Link
+              to={action.href}
+              aria-label={action.ariaLabel}
+              aria-disabled={inactive || undefined}
+              aria-busy={action.loading || undefined}
+              tabIndex={inactive ? -1 : undefined}
+              onClick={inactive ? (event) => event.preventDefault() : undefined}
+              className={`inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 aria-disabled:pointer-events-none aria-disabled:opacity-50 ${className}`}
+            />
+          : <Button type="button" variant="ghost" size={action.showLabel ? 'sm' : 'icon-md'} aria-label={action.ariaLabel} loading={action.loading} disabled={action.disabled} onClick={action.onSelect} className={className} />}
+      >
+        {content}
+      </TooltipTrigger>
+      <TooltipContent>{action.label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function TaskActionMenuItem({ action }: { action: TaskActionDefinition }) {
+  const inactive = Boolean(action.disabled || action.loading)
+  const icon = action.loading
+    ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
+    : action.icon
+
+  return action.href ? (
+    <DropdownMenuItem
+      disabled={inactive}
+      aria-busy={action.loading || undefined}
+      className="min-h-11 gap-2 px-3"
+      render={<Link
+        to={action.href}
+        aria-disabled={inactive || undefined}
+        aria-busy={action.loading || undefined}
+        tabIndex={inactive ? -1 : undefined}
+        onClick={(event) => {
+          if (inactive) event.preventDefault()
+        }}
+      />}
+    >
+      {icon}
+      {action.label}
+    </DropdownMenuItem>
+  ) : (
+    <DropdownMenuItem disabled={inactive} aria-busy={action.loading || undefined} className="min-h-11 gap-2 px-3" onClick={inactive ? undefined : action.onSelect}>
+      {icon}
+      {action.label}
+    </DropdownMenuItem>
+  )
+}
+
+export function TaskActionToolbar({
+  taskTitle,
+  actions,
+  maxVisibleActions = 2,
+  status,
+}: {
+  taskTitle: string
+  actions: TaskActionDefinition[]
+  maxVisibleActions?: number
+  status?: TaskStatus
+}) {
+  if (actions.length === 0) return null
+
+  const orderedActions = [...actions].sort((a, b) => b.priority - a.priority)
+  const visibleActions = orderedActions.slice(0, maxVisibleActions)
+  const overflowActions = orderedActions.slice(maxVisibleActions)
+
+  return (
+    <div data-testid="task-action-rail" data-status={status} role="group" aria-label="作品操作" className="flex basis-full shrink-0 items-center justify-end gap-1 sm:basis-auto sm:justify-normal sm:border-l sm:border-border/70 sm:pl-3">
+      {visibleActions.map((action) => <TaskActionControl key={action.id} action={action} />)}
+      {overflowActions.length > 0 ? (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger render={<DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-md" aria-label={`更多作品操作：${taskTitle}`} className="size-11 border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent hover:text-foreground" />} />}>
+              <MoreHorizontal className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>更多操作</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            {overflowActions.map((action) => <TaskActionMenuItem key={action.id} action={action} />)}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
+  )
 }
 
 function triggerBlobDownload(blob: Blob, filename: string) {
@@ -647,71 +763,48 @@ export default function TasksPage() {
                     </Link>
                     <div
                       data-testid="task-status-mark"
+                      data-status={task.status}
                       role="img"
                       aria-label={`任务状态：${taskStatusLabel[task.status] || task.status}`}
-                      className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${taskStatusPanelClass(task.status)}`}
+                      className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm ${taskStatusPanelClass(task.status)}`}
                       title={taskStatusLabel[task.status] || task.status}
                     >
                       <TaskStatusMark status={task.status} className="size-4" />
                       <span>{taskStatusLabel[task.status] || task.status}</span>
                     </div>
-                    <div data-testid="task-action-rail" role="group" aria-label="作品操作" className="flex basis-full shrink-0 items-center justify-end gap-1.5 sm:basis-auto sm:justify-normal sm:border-l sm:border-border/70 sm:pl-3">
-                      {task.status === 'failed' ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                type="button"
-                                variant="default"
-                                size="sm"
-                                aria-label={`重试作品：${task.title || '未命名作品'}`}
-                                onClick={() => setRetrySourceTask(task)}
-                                className="min-h-10 gap-1.5 px-3"
-                              />
-                            }
-                          >
-                            <RotateCcw className="size-4" />
-                            <span>重试</span>
-                          </TooltipTrigger>
-                          <TooltipContent>重试作品</TooltipContent>
-                        </Tooltip>
-                      ) : null}
-                      {task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Link
-                                to={taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type)}
-                                aria-label={`查看内容分析：${task.title || '未命名作品'}`}
-                                className="inline-flex size-10 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                              />
-                            }
-                          >
-                            <BarChart3 className="size-4" />
-                          </TooltipTrigger>
-                          <TooltipContent>查看内容分析</TooltipContent>
-                        </Tooltip>
-                      ) : null}
-                      {task.status === 'completed' ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="icon-md"
-                                aria-label={`下载作品：${task.title || '未命名作品'}`}
-                                loading={downloadingTaskIds.has(task.id)}
-                                onClick={() => downloadTaskMutation.mutate(task)}
-                              />
-                            }
-                          >
-                            <Download className="size-4" />
-                          </TooltipTrigger>
-                          <TooltipContent>下载作品文件</TooltipContent>
-                        </Tooltip>
-                      ) : null}
-                    </div>
+                    <TaskActionToolbar
+                      taskTitle={task.title || '未命名作品'}
+                      status={task.status}
+                      actions={[
+                        ...(task.status === 'failed' ? [{
+                          id: 'retry',
+                          label: '重试',
+                          ariaLabel: `重试作品：${task.title || '未命名作品'}`,
+                          priority: 100,
+                          showLabel: true,
+                          icon: <RotateCcw className="size-4" />,
+                          className: 'font-semibold text-primary hover:text-primary',
+                          onSelect: () => setRetrySourceTask(task),
+                        }] : []),
+                        ...(task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? [{
+                          id: 'analytics',
+                          label: '查看内容分析',
+                          ariaLabel: `查看内容分析：${task.title || '未命名作品'}`,
+                          priority: 90,
+                          icon: <BarChart3 className="size-4" />,
+                          href: taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type),
+                        }] : []),
+                        ...(task.status === 'completed' ? [{
+                          id: 'download',
+                          label: '下载作品文件',
+                          ariaLabel: `下载作品：${task.title || '未命名作品'}`,
+                          priority: 80,
+                          icon: <Download className="size-4" />,
+                          loading: downloadingTaskIds.has(task.id),
+                          onSelect: () => downloadTaskMutation.mutate(task),
+                        }] : []),
+                      ]}
+                    />
                   </div>
                 </div>
               </div>

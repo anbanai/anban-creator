@@ -3,7 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
-import TasksPage from './TasksPage'
+import TasksPage, { TaskActionToolbar } from './TasksPage'
 import { api } from '@/lib/api'
 import { createTestQueryClient } from '@/test/test-utils'
 import type { ReferenceMaterialInputProps } from '@/components/ReferenceMaterialInput'
@@ -413,7 +413,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     renderTasksPage()
 
     const analyticsLink = await screen.findByRole('link', { name: '查看内容分析：已完成文章' })
-    expect(analyticsLink).toHaveClass('size-10')
+    expect(analyticsLink).toHaveClass('size-11')
     expect(analyticsLink).toHaveAttribute(
       'href',
       '/content-analytics?account=project-1&content=task%3Aapproval-task&platform=wechat&agent=wechat-article',
@@ -422,7 +422,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.getByText('已完成文章')).toBeInTheDocument()
     expect(screen.getByText('失败文章')).toBeInTheDocument()
     expect(screen.getAllByTestId('task-status-mark')).toHaveLength(2)
-    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('rounded-md')
+    for (const mark of screen.getAllByTestId('task-status-mark')) expect(mark).toHaveClass('rounded-lg')
   })
 
   it('opens the existing clone form when retrying a failed task from the row', async () => {
@@ -471,6 +471,104 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.getAllByTestId('task-action-rail')).toHaveLength(2)
     expect(screen.getAllByTestId('task-action-rail').every((node) => node.className.includes('sm:border-l'))).toBe(true)
     expect(screen.getByRole('button', { name: '重试作品：失败文章' })).toHaveTextContent('重试')
+  })
+
+  it('gives each status and action rail a clear visual hierarchy', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [fixtures.failedTask as Task, fixtures.completedTask as Task],
+      total: 2,
+    })
+
+    renderTasksPage()
+
+    const statusMarks = await screen.findAllByTestId('task-status-mark')
+    expect(statusMarks[0]).toHaveAttribute('data-status', 'failed')
+    expect(statusMarks[0]).toHaveClass('rounded-lg', 'shadow-sm')
+    expect(statusMarks[1]).toHaveAttribute('data-status', 'completed')
+    expect(statusMarks[1]).toHaveClass('rounded-lg', 'shadow-sm')
+
+    const actionRails = screen.getAllByTestId('task-action-rail')
+    expect(actionRails[0]).toHaveAttribute('data-status', 'failed')
+    expect(actionRails[0]).toHaveClass('gap-1')
+    expect(actionRails[0]).not.toHaveClass('rounded-lg', 'border', 'bg-muted/30')
+    expect(actionRails[1]).toHaveAttribute('data-status', 'completed')
+    expect(actionRails[1]).toHaveClass('gap-1')
+    expect(actionRails[1]).not.toHaveClass('rounded-lg', 'border', 'bg-muted/30')
+  })
+
+  it('keeps row action controls transparent and borderless', async () => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [fixtures.failedTask as Task, fixtures.completedTask as Task],
+      total: 2,
+    })
+
+    renderTasksPage()
+
+    const retryButton = await screen.findByRole('button', { name: '重试作品：失败文章' })
+    const analyticsLink = screen.getByRole('link', { name: '查看内容分析：已完成文章' })
+    const downloadButton = screen.getByRole('button', { name: '下载作品：已完成文章' })
+
+    for (const control of [retryButton, analyticsLink, downloadButton]) {
+      expect(control).toHaveClass('bg-transparent', 'border-transparent', 'shadow-none', 'hover:bg-transparent')
+    }
+
+    expect(retryButton).toHaveClass('min-h-11')
+    expect(analyticsLink).toHaveClass('size-11')
+    expect(downloadButton).toHaveClass('size-11')
+  })
+
+  it('keeps frequent actions visible and moves additional actions into More', async () => {
+    const onSelect = vi.fn()
+    render(
+      <TaskActionToolbar
+        taskTitle="测试作品"
+        actions={[
+          { id: 'retry', label: '重试', ariaLabel: '重试作品', priority: 100, icon: <span aria-hidden="true">R</span>, showLabel: true, onSelect },
+          { id: 'download', label: '下载文件', ariaLabel: '下载作品', priority: 80, icon: <span aria-hidden="true">D</span>, onSelect },
+          { id: 'analytics', label: '查看统计', ariaLabel: '查看统计', priority: 60, icon: <span aria-hidden="true">A</span>, onSelect },
+        ]}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '重试作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下载作品' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看统计' })).not.toBeInTheDocument()
+
+    const moreButton = screen.getByRole('button', { name: '更多作品操作：测试作品' })
+    expect(moreButton).toHaveClass('size-11', 'aria-expanded:bg-transparent')
+    fireEvent.click(moreButton)
+    expect(moreButton).toHaveClass('bg-transparent', 'border-transparent')
+    const analyticsMenuItem = await screen.findByRole('menuitem', { name: '查看统计' })
+    fireEvent.click(analyticsMenuItem)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves disabled and loading states inside the More menu', async () => {
+    const onDisabledSelect = vi.fn()
+    const onLoadingSelect = vi.fn()
+    render(
+      <MemoryRouter>
+        <TaskActionToolbar
+          taskTitle="状态作品"
+          actions={[
+            { id: 'primary', label: '主操作', ariaLabel: '主操作', priority: 100, icon: <span aria-hidden="true">P</span>, onSelect: vi.fn() },
+            { id: 'disabled-link', label: '禁用链接', ariaLabel: '禁用链接', priority: 80, icon: <span aria-hidden="true">L</span>, href: '/disabled', disabled: true, onSelect: onDisabledSelect },
+            { id: 'loading-action', label: '加载中', ariaLabel: '加载中', priority: 60, icon: <span aria-hidden="true">W</span>, loading: true, onSelect: onLoadingSelect },
+          ]}
+          maxVisibleActions={1}
+        />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '更多作品操作：状态作品' }))
+    const disabledLink = await screen.findByRole('menuitem', { name: '禁用链接' })
+    const loadingAction = screen.getByRole('menuitem', { name: '加载中' })
+    expect(disabledLink).toHaveAttribute('data-disabled')
+    expect(loadingAction).toHaveAttribute('data-disabled')
+    fireEvent.click(disabledLink)
+    fireEvent.click(loadingAction)
+    expect(onDisabledSelect).not.toHaveBeenCalled()
+    expect(onLoadingSelect).not.toHaveBeenCalled()
   })
 
   it('shows the task total including image operation charges', async () => {
