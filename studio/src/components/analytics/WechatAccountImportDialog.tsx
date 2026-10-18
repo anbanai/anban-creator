@@ -31,7 +31,7 @@ function isContentAnalyticsWorkbookError(error: unknown) {
   return getApiErrorMessage(error, '').includes('公众号内容分析报表')
 }
 
-export default function WechatAccountImportDialog({ project, onClose, onImported, onContentImportRequested }: { project: Project; onClose: () => void; onImported?: (result: { count: number; date: string }) => void; onContentImportRequested?: (handoff: { file: File; uploadId: string }) => void }) {
+export default function WechatAccountImportDialog({ project, onClose, onImported, onContentImportRequested }: { project: Project; onClose: () => void; onImported?: (result: { count: number; date: string; dateFrom?: string; dateTo?: string }) => void; onContentImportRequested?: (handoff: { file: File; uploadId: string }) => void }) {
   const client = useQueryClient()
   const [file, setFile] = useState<File>()
   const [uploadId, setUploadId] = useState('')
@@ -72,7 +72,7 @@ export default function WechatAccountImportDialog({ project, onClose, onImported
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ['wechat-account-analytics', project.id] })
       await client.invalidateQueries({ queryKey: ['content-analytics', project.id], refetchType: 'none' })
-      onImported?.({ count: preview?.rows.length ?? 0, date: maxDate(preview) })
+      onImported?.({ count: preview?.rows.length ?? 0, date: maxDate(preview), dateFrom: preview?.date_from, dateTo: preview?.date_to })
       onClose()
     },
     onError: (err) => setError(err instanceof Error ? err.message : '导入失败，请重试'),

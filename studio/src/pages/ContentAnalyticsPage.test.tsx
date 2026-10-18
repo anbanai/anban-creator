@@ -10,7 +10,7 @@ vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1
 vi.mock('@/lib/api', () => ({ api: { projects: { list: vi.fn(async () => [{ id: 'notes', platform: 'seednote', name: '生活笔记', agent_ids: ['seednote'] }]) } } }))
 vi.mock('@/components/analytics/AnalyticsTrend', () => ({ default: () => <div>趋势</div> }))
 vi.mock('@/components/analytics/ContentImportDialog', () => ({ default: ({ onImported }: { onImported: (result: { count: number; date: string }) => void }) => <button type="button" aria-label="模拟导入完成" onClick={() => onImported({ count: 1, date: '2026-09-24' })}>模拟导入完成</button> }))
-vi.mock('@/components/analytics/WechatAccountImportDialog', () => ({ default: ({ onImported }: { onImported: (result: { count: number; date: string }) => void }) => <button type="button" aria-label="模拟账号导入完成" onClick={() => onImported({ count: 1, date: '2026-09-24' })}>模拟账号导入完成</button> }))
+vi.mock('@/components/analytics/WechatAccountImportDialog', () => ({ default: ({ onImported }: { onImported: (result: { count: number; date: string; dateFrom: string; dateTo: string }) => void }) => <button type="button" aria-label="模拟账号导入完成" onClick={() => onImported({ count: 1, date: '2026-08-31', dateFrom: '2026-08-01', dateTo: '2026-08-31' })}>模拟账号导入完成</button> }))
 vi.mock('@/components/analytics/ContentImportHistory', () => ({ default: () => null }))
 vi.mock('@/lib/content-analytics', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/content-analytics')>(), contentAnalyticsApi: { overview: vi.fn(), contents: vi.fn(), detail: vi.fn(), dates: vi.fn(), observations: vi.fn() } }))
 vi.mock('@/lib/wechat-account-analytics', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/wechat-account-analytics')>(), wechatAccountAnalyticsApi: { overview: vi.fn(), trafficSources: vi.fn() } }))
@@ -87,6 +87,40 @@ describe('server analytics queries', () => {
     await waitFor(() => expect(wechatAccountAnalyticsApi.overview).toHaveBeenCalledWith('wechat', { from: expect.any(String), to: expect.any(String) }, expect.any(AbortSignal)))
     expect(vi.mocked(wechatAccountAnalyticsApi.overview).mock.calls[0]?.[1]).not.toHaveProperty('source')
     await waitFor(() => expect(wechatAccountAnalyticsApi.trafficSources).toHaveBeenCalledWith('wechat', expect.objectContaining({ source: 'search' }), expect.any(AbortSignal)))
+  })
+
+  it('opens the imported account date range when it is outside the selected period', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat&from=2026-09-19&to=2026-10-18&preset=30d')
+    render(<ContentAnalyticsPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '导入公众号账号统计' }))
+    fireEvent.click(await screen.findByRole('button', { name: '模拟账号导入完成' }))
+
+    await waitFor(() => expect(wechatAccountAnalyticsApi.overview).toHaveBeenLastCalledWith(
+      'wechat',
+      { from: '2026-08-01', to: '2026-08-31' },
+      expect.any(AbortSignal),
+    ))
+    expect(window.location.search).toContain('from=2026-08-01')
+    expect(window.location.search).toContain('to=2026-08-31')
+  })
+
+  it('keeps the selected period when imported account dates overlap it', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat&from=2026-08-15&to=2026-09-15&preset=custom')
+    render(<ContentAnalyticsPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '导入公众号账号统计' }))
+    fireEvent.click(await screen.findByRole('button', { name: '模拟账号导入完成' }))
+
+    await waitFor(() => expect(wechatAccountAnalyticsApi.overview).toHaveBeenLastCalledWith(
+      'wechat',
+      { from: '2026-08-15', to: '2026-09-15' },
+      expect.any(AbortSignal),
+    ))
+    expect(window.location.search).toContain('from=2026-08-15')
+    expect(window.location.search).toContain('to=2026-09-15')
   })
 
   it('renders every supported Agent as a selectable icon for a multi-Agent project', async () => {
