@@ -422,9 +422,8 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, fmt.Errorf("marshal runtime settings: %w", err)
 	}
 	files = append(files, BootstrapFile{Path: ".anban-creator/settings.json", Text: string(settings), Mode: 0600, ReplaceExisting: true})
-	// Every execution receives a read-only snapshot from the project's NAS
-	// memory directory. Missing files are filled from the database only for
-	// compatibility with projects created before file-backed memory existed.
+	// Every execution receives a read-only snapshot. The database profile is
+	// authoritative; versioned NAS projections are used only when current.
 	profile := projectProfileForAgentContext(project)
 	memoryFiles := map[string]BootstrapFile{}
 	if s.cfg.ProjectMemory != nil && strings.TrimSpace(task.ProjectID) != "" {
@@ -436,12 +435,16 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			memoryFiles[file.Path] = file
 		}
 	}
-	if _, ok := memoryFiles["AGENTS.md"]; !ok {
-		memoryFiles["AGENTS.md"] = BootstrapFile{Path: "AGENTS.md", Text: ProfileAgentsMarkdownForProject(effective.Instructions), Mode: 0644}
+	if file, ok := memoryFiles["AGENTS.md"]; !ok || !profileProjectionMatchesVersion(file.Text, profile.Version) {
+		content := ProfileAgentsMarkdownAtVersion(profile.Version)
+		if instructions := strings.TrimSpace(effective.Instructions); instructions != "" {
+			content += "\n\n## 项目定位\n\n" + instructions + "\n"
+		}
+		memoryFiles["AGENTS.md"] = BootstrapFile{Path: "AGENTS.md", Text: content, Mode: 0644}
 	}
 	for _, dimension := range model.ProfileDimensions() {
 		path := "profile/" + dimension + ".md"
-		if _, ok := memoryFiles[path]; ok {
+		if file, ok := memoryFiles[path]; ok && profileProjectionMatchesVersion(file.Text, profile.Version) {
 			continue
 		}
 		content, err := ProfileDimensionMarkdownAtVersion(dimension, profileDimension(profile, dimension), profile.Version)

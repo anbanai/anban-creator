@@ -96,6 +96,47 @@ describe('ChatPage', () => {
     expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
   })
 
+  it('asks before cancelling and preserves saved conversation material', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '已整理的项目方向' }) },
+    ], signal))
+    renderChat('/projects/create')
+
+    expect(await screen.findByText('已整理的项目方向')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消对话' }))
+
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Agent 会立即停止')
+    expect(interactiveMocks.close).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '确认取消对话' }))
+
+    await waitFor(() => expect(interactiveMocks.close).toHaveBeenCalledWith('session-1'))
+    expect(screen.getByText('已整理的项目方向')).toBeInTheDocument()
+    expect(screen.getByText('对话已取消')).toBeInTheDocument()
+    expect(screen.getByText('已取消')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复本地材料' })).toBeInTheDocument()
+    const saved = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+    expect(saved.sessionId).toBeUndefined()
+    expect(saved.terminalState).toBe('closed')
+    expect(saved.messages).toEqual([expect.objectContaining({ text: '已整理的项目方向' })])
+  })
+
+  it('closes a session that finishes starting after cancellation', async () => {
+    let resolveSession!: (session: { id: string; agent_id: string; status: string }) => void
+    interactiveMocks.createSession.mockImplementationOnce(() => new Promise((resolve) => { resolveSession = resolve }))
+    renderChat('/projects/create')
+
+    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: '取消对话' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认取消对话' }))
+
+    expect(interactiveMocks.close).not.toHaveBeenCalled()
+    resolveSession({ id: 'session-starting', agent_id: agent.id, status: 'running' })
+
+    await waitFor(() => expect(interactiveMocks.close).toHaveBeenCalledWith('session-starting'))
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(screen.getByText('对话已取消')).toBeInTheDocument()
+  })
+
   it('pins a selected Agent in the route so a bare chat can resume after refresh', async () => {
     renderChat('/chat')
 
@@ -132,6 +173,16 @@ describe('ChatPage', () => {
         callId: 'call-goal',
         questions: [{ id: 'goal', question: '你的主要目标是什么？' }],
         answers: [{ id: 'goal', selected: ['获客'], custom: '' }],
+      },
+      // This batch was opened immediately before the runtime disappeared and
+      // has no answer yet. Recovery must carry the question and its choices.
+      {
+        callId: 'call-platform',
+        questions: [{
+          id: 'platform',
+          question: '你主要发布什么平台？',
+          options: [{ label: '公众号' }, { label: '小红书' }],
+        }],
       }],
       timeline: [
         { kind: 'message', message: { id: 'message-1', role: 'user', text: '我想通过公众号获客' } },
@@ -152,7 +203,7 @@ describe('ChatPage', () => {
 
     expect(await screen.findByText('保存下来的历史内容')).toBeInTheDocument()
     expect(await screen.findByText('原会话已失效，本地材料仍已保留')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '恢复已保存草稿' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '恢复本地材料' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新开始创建' })).toBeInTheDocument()
     expect(screen.getByText('获客公众号')).toBeInTheDocument()
     expect(screen.getAllByText('保存草稿需要重新确认')).toHaveLength(2)
@@ -188,7 +239,7 @@ describe('ChatPage', () => {
       }], signal)
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '恢复已保存草稿' }))
+    fireEvent.click(screen.getByRole('button', { name: '恢复本地材料' }))
 
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledTimes(1))
     const [, , , freshCreateKey] = interactiveMocks.createSession.mock.calls[0] as [string, string, string | undefined, string]
@@ -203,6 +254,9 @@ describe('ChatPage', () => {
     expect(recoveryPrompt).toContain('保存下来的历史内容')
     expect(recoveryPrompt).toContain('获客公众号')
     expect(recoveryPrompt).toContain('获客')
+    expect(recoveryPrompt).toContain('你主要发布什么平台？')
+    expect(recoveryPrompt).toContain('公众号')
+    expect(recoveryPrompt).toContain('小红书')
     expect(recoveryPrompt).toContain('需要重新确认')
   })
 
@@ -213,7 +267,7 @@ describe('ChatPage', () => {
     renderChat('/projects/create')
 
     expect(await screen.findByRole('button', { name: '重新连接' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '恢复已保存草稿' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复本地材料' })).not.toBeInTheDocument()
     expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').sessionId).toBe('session-1')
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
     expect(interactiveMocks.close).not.toHaveBeenCalled()
@@ -709,6 +763,22 @@ describe('ChatPage', () => {
     expect(screen.getByText('Agent 正在执行：get project profile')).toBeInTheDocument()
     expect(screen.getByText('出错')).toBeInTheDocument()
     expect(streamMock).not.toHaveBeenCalled()
+  })
+
+  it('offers saved-material recovery when a ready draft receives a terminal runtime event', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, project: { name: '已完成画像' } } }) },
+      { id: '2', event: 'session.error', data: JSON.stringify({ message: '运行失败' }) },
+    ], signal))
+
+    renderChat('/projects/create')
+
+    expect(await screen.findByText('已完成画像')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '恢复本地材料' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新开始创建' })).toBeInTheDocument()
+    const saved = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+    expect(saved).not.toHaveProperty('sessionId')
+    expect(saved.draftNeedsReconfirmation).toBe(true)
   })
 
   it('keeps the composer disabled when a resumed session snapshot is busy', async () => {

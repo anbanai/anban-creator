@@ -57,6 +57,44 @@ func TestReadProjectBootstrapFilesUsesCompleteNASMemoryInStableOrder(t *testing.
 	}
 }
 
+func TestBootstrapUsesDatabaseProfileWhenNASProjectionIsStale(t *testing.T) {
+	repo := openBootstrapTestRepository(t)
+	tokens, err := auth.NewExecutionTokenService("0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := model.NewProjectProfile()
+	profile.Status = model.ProfileStatusConfirmed
+	profile.Version = 8
+	profile.Dimensions.Identity.Content["summary"] = "数据库最新画像"
+	staleIdentity, err := ProfileDimensionMarkdownAtVersion("identity", model.ProfileDimension{Content: map[string]any{"summary": "NAS旧画像"}}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memory := bootstrapProjectMemory{files: []projectmemory.FileView{
+		{Path: "profile/identity.md", Content: staleIdentity},
+		{Path: "AGENTS.md", Content: "<!-- anban-profile-version: 7 -->\n旧版本规则"},
+	}}
+	project := &model.Project{ID: "project-profile-version", UserID: "user-1", Platform: model.PlatformSeednote, Profile: datatypes.NewJSONType(profile)}
+	task := &model.Task{ID: "task-profile-version", UserID: project.UserID, ProjectID: project.ID, Type: model.PlatformSeednote}
+	svc := NewAgentBootstrapService(repo, tokens, AgentBootstrapConfig{TokenTTL: time.Hour, ProjectMemory: memory}, zerolog.Nop())
+
+	response, err := buildBootstrapTestResponse(t, svc, context.Background(), &model.TaskExecution{ID: "execution-profile-version"}, task, project, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("buildResponse: %v", err)
+	}
+	files := map[string]string{}
+	for _, file := range response.Files {
+		files[file.Path] = file.Text
+	}
+	if strings.Contains(files["profile/identity.md"], "NAS旧画像") || !strings.Contains(files["profile/identity.md"], "数据库最新画像") {
+		t.Fatalf("bootstrap profile = %q; want current database projection", files["profile/identity.md"])
+	}
+	if strings.Contains(files["AGENTS.md"], "旧版本规则") {
+		t.Fatalf("bootstrap used stale AGENTS.md: %q", files["AGENTS.md"])
+	}
+}
+
 var recoveryBootstrapTestPaths = []string{
 	"output/04-article-final.md",
 	"output/seo-result.md",

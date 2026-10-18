@@ -604,6 +604,25 @@ func TestInteractiveUpdateSessionBootstrapsMissingProjectMemory(t *testing.T) {
 	}
 }
 
+func TestInteractiveInitialContextIgnoresStaleProfileProjection(t *testing.T) {
+	project := &model.Project{ID: "project-1", Name: "当前项目", Platform: "wechat", Instructions: "数据库定位"}
+	profile := model.NewProjectProfile()
+	profile.Status = model.ProfileStatusConfirmed
+	profile.Version = 8
+	profile.Dimensions.Identity.Content["summary"] = "数据库最新画像"
+
+	stale, err := ProfileDimensionMarkdownAtVersion("identity", model.ProfileDimension{Content: map[string]any{"summary": "NAS旧画像"}}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextJSON, _ := interactiveInitialContext(project, profile, projectmemory.ProjectView{Files: []projectmemory.FileView{
+		{Path: "profile/identity.md", Content: stale},
+	}})
+	if strings.Contains(contextJSON, "NAS旧画像") || !strings.Contains(contextJSON, "数据库最新画像") {
+		t.Fatalf("initial context did not prefer current database profile: %s", contextJSON)
+	}
+}
+
 func TestInteractiveCreateSessionAppliesPerUserLimit(t *testing.T) {
 	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, interactiveTestRuntimeFactory{}, []InteractiveAgent{{
 		ID: "project-creator", DisplayName: "Project Creator", Available: true, Intents: []string{"create-project"},

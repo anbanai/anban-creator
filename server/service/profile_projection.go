@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -113,4 +114,15 @@ func ProfileAgentsMarkdownForProject(instructions string) string {
 // Server-owned AGENTS.md projection.
 func ProfileAgentsMarkdownAtVersion(version int64) string {
 	return fmt.Sprintf("<!-- anban-profile-version: %d -->\n%s", version, ProfileAgentsMarkdown())
+}
+
+func profileProjectionMatchesVersion(content string, version int64) bool {
+	const prefix = "<!-- anban-profile-version: "
+	if !strings.HasPrefix(content, prefix) {
+		return false
+	}
+	line, _, _ := strings.Cut(content, "\n")
+	value := strings.TrimSuffix(strings.TrimPrefix(line, prefix), " -->")
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	return err == nil && parsed == version
 }

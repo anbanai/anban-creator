@@ -415,16 +415,19 @@ func interactiveInitialContext(project *model.Project, profile model.ProjectProf
 		Content   string `json:"content"`
 		Truncated bool   `json:"truncated,omitempty"`
 	}
-	// The NAS project directory is the runtime source for project context. The
-	// database profile is only a compatibility fallback for older projects that
-	// predate the file projection; once a file exists, it is used verbatim.
+	// The database profile is authoritative. NAS profile files are accepted only
+	// when their server-owned version marker matches the current profile.
 	files := make([]contextFile, 0, len(projectMemoryContextPaths))
 	byPath := make(map[string]projectmemory.FileView, len(view.Files))
 	for _, file := range view.Files {
 		byPath[file.Path] = file
 	}
 	for _, path := range projectMemoryContextPaths {
-		if file, ok := byPath[path]; ok {
+		if file, ok := byPath[path]; ok && path != "MEMORY.md" && path != "AGENTS.md" && profileProjectionMatchesVersion(file.Content, profile.Version) {
+			files = append(files, contextFile{Path: path, Content: file.Content, Truncated: file.Truncated})
+			continue
+		}
+		if file, ok := byPath[path]; ok && path == "MEMORY.md" {
 			files = append(files, contextFile{Path: path, Content: file.Content, Truncated: file.Truncated})
 			continue
 		}
@@ -433,7 +436,10 @@ func interactiveInitialContext(project *model.Project, profile model.ProjectProf
 		}
 		var content string
 		if path == "AGENTS.md" {
-			content = ProfileAgentsMarkdownForProject(project.Instructions)
+			content = ProfileAgentsMarkdownAtVersion(profile.Version)
+			if trimmed := strings.TrimSpace(project.Instructions); trimmed != "" {
+				content += "\n\n## 项目定位\n\n" + trimmed + "\n"
+			}
 		} else {
 			name := strings.TrimSuffix(strings.TrimPrefix(path, "profile/"), ".md")
 			var err error

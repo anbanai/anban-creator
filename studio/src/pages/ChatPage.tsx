@@ -5,6 +5,7 @@ import { Streamdown } from 'streamdown'
 import {
   AlertTriangle,
   ArrowRight,
+  Ban,
   Check,
   ChevronDown,
   Loader2,
@@ -20,6 +21,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { api } from '@/lib/api'
 import type {
   InteractiveAgent,
@@ -213,6 +223,10 @@ function hasSavedMaterial(session: PersistedInteractiveSession | null): boolean 
 function recoveryPrompt(session: PersistedInteractiveSession | null): string {
   const messages = (session?.messages ?? []).slice(-24).map((message) => `${message.role === 'user' ? '用户' : '助手'}：${message.text}`).join('\n')
   const answers = (session?.questionBatches ?? []).filter((batch) => batch.answers?.length).map((batch) => `${batch.callId}：${batch.answers?.map((answer) => `${answer.id}=${answer.selected.join('、')}${answer.custom ? `（${answer.custom}）` : ''}`).join('；')}`).join('\n')
+  const pendingQuestions = (session?.questionBatches ?? []).filter((batch) => !batch.answers?.length).flatMap((batch) => batch.questions.map((question) => {
+    const options = question.options?.map((option) => option.description ? `${option.label}（${option.description}）` : option.label).join('、')
+    return `${question.question}${options ? `（选项：${options}）` : ''}`
+  })).join('\n')
   const draft = session?.draft ? JSON.stringify({
     revision: session.draft.revision,
     project: session.draft.project,
@@ -227,6 +241,7 @@ function recoveryPrompt(session: PersistedInteractiveSession | null): string {
     '请先告诉用户已恢复哪些内容，再让用户补充或确认；完成后重新生成一个需要重新确认的新草稿。不要假装恢复了原会话，也不要直接沿用旧确认凭据。',
     messages ? `保存的历史消息：\n${messages}` : '',
     answers ? `保存的问答：\n${answers}` : '',
+    pendingQuestions ? `保存的待回答问题：\n${pendingQuestions}` : '',
     draft ? `保存的草稿：\n${draft}` : '',
     '请继续画像流程，优先从保存材料中缺失或需要确认的部分开始。',
   ].filter(Boolean).join('\n\n')
@@ -463,6 +478,9 @@ export default function ChatPage() {
   const [draftNeedsReconfirmation, setDraftNeedsReconfirmation] = useState(persistedSession?.draftNeedsReconfirmation === true)
   const [commitError, setCommitError] = useState<string | null>(null)
   const [committing, setCommitting] = useState(false)
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const [committed, setCommitted] = useState(false)
   const [sessionProject, setSessionProject] = useState<{ id?: string; name?: string } | null>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
@@ -498,6 +516,21 @@ export default function ChatPage() {
   draftRef.current = draft
   draftReadyEventIdRef.current = draftReadyEventId
   lastEventIdRef.current = lastEventId
+  const updateMessagesNow = useCallback((update: (items: Message[]) => Message[]) => {
+    const next = update(messagesRef.current)
+    messagesRef.current = next
+    setMessages(next)
+  }, [])
+  const updateQuestionsNow = useCallback((update: (items: QuestionBatch[]) => QuestionBatch[]) => {
+    const next = update(questionBatchesRef.current)
+    questionBatchesRef.current = next
+    setQuestionBatches(next)
+  }, [])
+  const updateTimelineNow = useCallback((update: (items: TimelineItem[]) => TimelineItem[]) => {
+    const next = update(timelineRef.current)
+    timelineRef.current = next
+    setTimeline(next)
+  }, [])
   const [sendingMessage, setSendingMessage] = useState(false)
   const [turnActive, setTurnActive] = useState(false)
 
@@ -553,32 +586,30 @@ export default function ChatPage() {
     createIdempotencyKeyRef.current = crypto.randomUUID()
   }, [sessionStorageKey])
 
-  const preserveLocalMaterialAfterLostSession = useCallback((message: string) => {
+  const preserveLocalMaterialAfterLostSession = useCallback((message: string, activityStatus: 'stopped' | 'error' = 'stopped', terminalState: TerminalRunState = 'error') => {
     runGenerationRef.current += 1
     streamAbortRef.current?.abort()
     startPromiseRef.current = null
     sessionRef.current = null
     setSessionId(null)
-    setRunState('error')
+    setRunState(terminalState)
     setTurnActive(false)
     setRecoveryAvailable(true)
     const savedAtFailure = readPersistedInteractiveSession(sessionStorageKey)
+    const persisted = savedAtFailure
     setDraftNeedsReconfirmation(Boolean(savedAtFailure?.draft?.ready || savedAtFailure?.draftNeedsReconfirmation || draftRef.current?.ready))
-    setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
-      ? { ...item, status: 'stopped' }
-      : item))
+    const savedTimeline = (persisted?.timeline ?? timelineRef.current).map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+      ? { ...item, status: activityStatus }
+      : item)
+    timelineRef.current = savedTimeline
+    setTimeline(savedTimeline)
     setStreamError(message)
     confirmationTokenRef.current = null
-    const persisted = savedAtFailure
-    // Event handlers can run before React commits the latest render. Prefer the
-    // durable snapshot for recovery, then fall back to the current render for
-    // data that has not reached storage yet.
-    const savedMessages = persisted?.messages ?? messagesRef.current
-    const savedQuestionBatches = persisted?.questionBatches ?? questionBatchesRef.current
-    const savedTimeline = persisted?.timeline ?? timelineRef.current
-    const savedDraft = persisted?.draft ?? draftRef.current
-    const savedDraftReadyEventId = persisted?.draftReadyEventId ?? draftReadyEventIdRef.current
-    const savedLastEventId = persisted?.lastEventId ?? lastEventIdRef.current
+    const savedMessages = messagesRef.current
+    const savedQuestionBatches = questionBatchesRef.current
+    const savedDraft = draftRef.current
+    const savedDraftReadyEventId = draftReadyEventIdRef.current
+    const savedLastEventId = lastEventIdRef.current
     replacePersistedInteractiveSession(sessionStorageKey, {
       ...persisted,
       sessionId: null,
@@ -590,33 +621,23 @@ export default function ChatPage() {
       draftReadyEventId: savedDraftReadyEventId,
       lastEventId: savedLastEventId,
       turnActive: false,
-      terminalState: 'error',
+      terminalState,
       terminalMessage: message,
       draftNeedsReconfirmation: Boolean(savedDraft?.ready || persisted?.draftNeedsReconfirmation),
     })
   }, [sessionStorageKey])
 
   const terminateConversation = useCallback((state: TerminalRunState, message: string) => {
-    runGenerationRef.current += 1
-    streamAbortRef.current?.abort()
-    const previousId = sessionRef.current
-    startPromiseRef.current = null
-    sessionRef.current = null
-    setSessionId(null)
-    setRunState(state)
-    setTurnActive(false)
-    setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
-      ? { ...item, status: state === 'error' ? 'error' : 'stopped' }
-      : item))
-    setStreamError(message)
-    confirmationTokenRef.current = null
-    if (previousId && !committedRef.current) void api.interactive.close(previousId).catch(() => undefined)
-  }, [])
+    preserveLocalMaterialAfterLostSession(message, state === 'error' ? 'error' : 'stopped', state)
+  }, [preserveLocalMaterialAfterLostSession])
 
   const processEvent = useCallback((event: { event: string; data: string; id?: string }) => {
     const data = parseData(event.data)
     const eventId = eventIdValue(event.id)
-    if (event.id) setLastEventId(event.id)
+    if (event.id) {
+      lastEventIdRef.current = event.id
+      setLastEventId(event.id)
+    }
     const streamedMessage = (role: Message['role']): Message => {
       const rawText = stringValue(data.text) ?? ''
       const text = role === 'user' ? displayInteractiveMessage(rawText) : rawText
@@ -633,22 +654,22 @@ export default function ChatPage() {
       case 'assistant.message':
         {
           const message = streamedMessage('assistant')
-          setMessages((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
-          setTimeline((items) => upsertTimeline(items, { kind: 'message', message, eventId }, (item) => item.kind === 'message' && item.message.id === message.id))
+          updateMessagesNow((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
+          updateTimelineNow((items) => upsertTimeline(items, { kind: 'message', message, eventId }, (item) => item.kind === 'message' && item.message.id === message.id))
         }
         break
       case 'user.message':
         {
           const message = streamedMessage('user')
-          setMessages((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
-          setTimeline((items) => upsertTimeline(items, { kind: 'message', message, eventId }, (item) => item.kind === 'message' && item.message.id === message.id))
+          updateMessagesNow((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
+          updateTimelineNow((items) => upsertTimeline(items, { kind: 'message', message, eventId }, (item) => item.kind === 'message' && item.message.id === message.id))
         }
         break
       case 'session.status':
         setRunState(isRunState(data.status) ? data.status : 'running')
         if (data.status === 'idle') {
           setTurnActive(false)
-          setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+          updateTimelineNow((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
             ? { ...item, status: 'completed' }
             : item))
         }
@@ -671,18 +692,22 @@ export default function ChatPage() {
                 setRecoveryAvailable(false)
                 setDraftNeedsReconfirmation(false)
               }
+              draftRef.current = normalizedDraft
               setDraft(normalizedDraft)
               if (normalizedDraft.ready) {
                 const readyEventId = eventIdValue(data.draft_event_id)
-                setDraftReadyEventId(readyEventId === undefined ? undefined : String(readyEventId))
-                setTimeline((items) => upsertTimeline(items, {
+                const readyEventIdValue = readyEventId === undefined ? undefined : String(readyEventId)
+                draftReadyEventIdRef.current = readyEventIdValue
+                setDraftReadyEventId(readyEventIdValue)
+                updateTimelineNow((items) => upsertTimeline(items, {
                   kind: 'draft',
                   id: 'draft',
                   eventId: readyEventId ?? eventId,
                 }, (item) => item.kind === 'draft'))
               } else {
+                draftReadyEventIdRef.current = undefined
                 setDraftReadyEventId(undefined)
-                setTimeline((items) => items.filter((item) => item.kind !== 'draft'))
+                updateTimelineNow((items) => items.filter((item) => item.kind !== 'draft'))
               }
             }
           }
@@ -691,14 +716,14 @@ export default function ChatPage() {
             const question = parseQuestion(value)
             return question ? [question] : []
           }) : []
-          setQuestionBatches((batches) => {
+          updateQuestionsNow((batches) => {
             const answered = batches.filter((batch) => Boolean(batch.answers))
             return callId && questions.length > 0
               ? [...answered, { callId, questions, eventId: batches.find((batch) => batch.callId === callId)?.eventId ?? eventId }]
               : answered
           })
           if (callId && questions.length > 0) {
-            setTimeline((items) => {
+            updateTimelineNow((items) => {
               const existing = items.find((item) => item.kind === 'question' && item.callId === callId)
               if (existing?.eventId !== undefined) return items
               return upsertTimeline(items, { kind: 'question', callId, eventId }, (item) => item.kind === 'question' && item.callId === callId)
@@ -708,7 +733,7 @@ export default function ChatPage() {
           if (data.busy === true || waiting) {
             const status = waiting ? 'waiting' : 'running'
             const text = waiting ? 'Agent 正在等待你的回答' : 'Agent 正在工作…'
-            setTimeline((items) => {
+            updateTimelineNow((items) => {
               let currentIndex = -1
               items.forEach((item, index) => {
                 if (item.kind === 'activity' && (item.status === 'started' || item.status === 'running' || item.status === 'waiting')) currentIndex = index
@@ -732,7 +757,7 @@ export default function ChatPage() {
               }, (item) => item.kind === 'activity' && item.status === status)
             })
           } else {
-            setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+            updateTimelineNow((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
               ? { ...item, status: 'completed' }
               : item))
           }
@@ -740,7 +765,7 @@ export default function ChatPage() {
         break
       case 'turn.start':
         setTurnActive(true)
-        setTimeline((items) => upsertTimeline(items, {
+        updateTimelineNow((items) => upsertTimeline(items, {
           kind: 'activity',
           id: `turn-start-${eventId ?? crypto.randomUUID()}`,
           eventId,
@@ -755,7 +780,7 @@ export default function ChatPage() {
           const status: Extract<TimelineItem, { kind: 'activity' }>['status'] = reason.kind === 'error' ? 'error' : reason.kind === 'aborted' || reason.kind === 'interrupted' || reason.kind === 'cancelled' ? 'stopped' : 'completed'
           const text = status === 'error' ? 'Agent 本轮发生错误' : status === 'stopped' ? 'Agent 本轮已停止' : 'Agent 本轮已完成'
           const completion: TimelineItem = { kind: 'activity', id: `turn-end-${eventId ?? crypto.randomUUID()}`, eventId, status, text }
-          setTimeline((items) => upsertTimeline(
+          updateTimelineNow((items) => upsertTimeline(
             items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
               ? { ...item, status: status === 'stopped' && item.id.startsWith('turn-start-') ? 'completed' : status }
               : item),
@@ -770,7 +795,7 @@ export default function ChatPage() {
         break
       case 'question.opened':
         setTurnActive(false)
-        setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+        updateTimelineNow((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
           ? { ...item, status: 'waiting', text: 'Agent 正在等待你的回答' }
           : item))
         setRunState('waiting_answer')
@@ -780,17 +805,17 @@ export default function ChatPage() {
             const question = parseQuestion(value)
             return question ? [question] : []
           }) : []
-          setQuestionBatches((batches) => batches.some((batch) => batch.callId === callId)
+          updateQuestionsNow((batches) => batches.some((batch) => batch.callId === callId)
             ? batches.map((batch) => batch.callId === callId ? { ...batch, eventId: batch.eventId ?? eventId } : batch)
             : [...batches, { callId, questions, eventId }])
-          setTimeline((items) => upsertTimeline(items, { kind: 'question', callId, eventId }, (item) => item.kind === 'question' && item.callId === callId))
+          updateTimelineNow((items) => upsertTimeline(items, { kind: 'question', callId, eventId }, (item) => item.kind === 'question' && item.callId === callId))
         }
         break
       case 'agent.activity':
         setTurnActive(true)
         {
           const text = formatAgentActivity(stringValue(data.name))
-          setTimeline((items) => {
+          updateTimelineNow((items) => {
             const completedPrevious = items.map((item) => {
               if (item.kind !== 'activity') return item
               if (item.status === 'started') return { ...item, status: 'completed' as const }
@@ -807,10 +832,10 @@ export default function ChatPage() {
         }
         break
       case 'question.answered':
-        setQuestionBatches((batches) => batches.map((batch) => batch.callId === (stringValue(data.call_id) ?? stringValue(data.callId) ?? '')
+        updateQuestionsNow((batches) => batches.map((batch) => batch.callId === (stringValue(data.call_id) ?? stringValue(data.callId) ?? '')
           ? { ...batch, answers: parseAnswers(data.answers ?? data.answer) }
           : batch))
-        setTimeline((items) => items.map((item) => item.kind === 'activity' && item.status === 'waiting'
+        updateTimelineNow((items) => items.map((item) => item.kind === 'activity' && item.status === 'waiting'
           ? { ...item, status: 'completed' }
           : item))
         setRunState('running')
@@ -832,17 +857,26 @@ export default function ChatPage() {
             confirmationTokenRef.current = null
           }
         }
-        setDraft((previous) => {
-          const next = normalizeDraft(data)
-          return event.event === 'draft.ready' ? { ...next, ready: data.ready !== false } : { ...previous, ...next }
-        })
+        {
+          const nextDraft = normalizeDraft(data)
+          const next = event.event === 'draft.ready'
+            ? { ...nextDraft, ready: data.ready !== false }
+            : { ...(draftRef.current ?? {}), ...nextDraft }
+          draftRef.current = next
+          setDraft(next)
+        }
         if (event.event === 'draft.ready') {
           setDraftReadyEventId(event.id)
-          setTimeline((items) => upsertTimeline(items, { kind: 'draft', id: 'draft', eventId }, (item) => item.kind === 'draft'))
+          draftReadyEventIdRef.current = event.id
+          updateTimelineNow((items) => upsertTimeline(items, { kind: 'draft', id: 'draft', eventId }, (item) => item.kind === 'draft'))
         }
         break
       case 'session.error':
-        terminateConversation('error', stringValue(data.message) ?? '创作会话发生错误')
+        {
+          const sessionId = sessionRef.current
+          preserveLocalMaterialAfterLostSession(stringValue(data.message) ?? '创作会话发生错误', 'error')
+          if (sessionId && !committedRef.current) void api.interactive.close(sessionId).catch(() => undefined)
+        }
         break
       case 'expired':
       case 'session.expired':
@@ -855,7 +889,7 @@ export default function ChatPage() {
       default:
         break
     }
-  }, [isProjectUpdate, terminateConversation])
+  }, [isProjectUpdate, preserveLocalMaterialAfterLostSession, terminateConversation, updateMessagesNow, updateQuestionsNow, updateTimelineNow])
 
   const sendRecoveryPrompt = useCallback(async (id: string, prompt: string) => {
     if (recoveryMessagePromiseRef.current) return recoveryMessagePromiseRef.current
@@ -1155,6 +1189,61 @@ export default function ChatPage() {
     }
   }
 
+  const cancelConversation = async () => {
+    if (cancelling || committing) return
+    const previousId = sessionRef.current
+    const pendingCreateKey = !previousId && startPromiseRef.current
+      ? createIdempotencyKeyRef.current
+      : undefined
+    if (!previousId && !pendingCreateKey) return
+
+    setCancelling(true)
+    setCancelError(null)
+    if (pendingCreateKey) abandonedStartKeysRef.current.add(pendingCreateKey)
+    runGenerationRef.current += 1
+    streamAbortRef.current?.abort()
+    const message = '对话已取消。已保存的消息、问答和草稿仍保留。'
+    if (previousId) {
+      try {
+        await api.interactive.close(previousId)
+      } catch (error) {
+        setCancelError(error instanceof Error ? error.message : '取消对话失败，请重试。')
+        setCancelling(false)
+        reconnectSession()
+        return
+      }
+    }
+
+    startPromiseRef.current = null
+    sessionRef.current = null
+    setSessionId(null)
+    setRunState('closed')
+    setTurnActive(false)
+    setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
+      ? { ...item, status: 'stopped' }
+      : item))
+    setStreamError(message)
+    setRecoveryAvailable(true)
+    confirmationTokenRef.current = null
+
+    const persisted = readPersistedInteractiveSession(sessionStorageKey)
+    const savedDraft = draftRef.current
+    replacePersistedInteractiveSession(sessionStorageKey, {
+      ...persisted,
+      sessionId: null,
+      turnActive: false,
+      terminalState: 'closed',
+      terminalMessage: message,
+      messages: messagesRef.current,
+      questionBatches: questionBatchesRef.current,
+      timeline: timelineRef.current,
+      draft: savedDraft,
+      draftNeedsReconfirmation: Boolean(savedDraft?.ready || persisted?.draftNeedsReconfirmation),
+    })
+    setCancelDialogOpen(false)
+    setCancelling(false)
+  }
+
   const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && runState !== 'error' && !committing && !committed && !sendingMessage && !turnActive
   const currentActivity = [...timeline].reverse().find((item): item is Extract<TimelineItem, { kind: 'activity' }> => item.kind === 'activity' && (item.status === 'started' || item.status === 'running'))
   const liveStatus = runState === 'starting'
@@ -1167,6 +1256,7 @@ export default function ChatPage() {
   const liveStatusLabel = runState === 'starting' ? '准备中' : runState === 'waiting_answer' ? '等待中' : '进行中'
   const emptyRegistry = !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
   const canRecoverSavedDraft = recoveryAvailable && hasSavedMaterial(readPersistedInteractiveSession(sessionStorageKey))
+  const canCancelConversation = !committed && !committing && (Boolean(sessionId) || runState === 'starting')
 
   return (
     <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-[1500px] flex-col gap-4 lg:min-h-[calc(100dvh-4rem)]">
@@ -1179,9 +1269,10 @@ export default function ChatPage() {
           </div>
         </div>
         <div className="relative flex items-center gap-2">
-          <Badge variant={runState === 'error' || runState === 'expired' ? 'destructive' : 'outline'}>
-            {runState === 'starting' ? '正在启动' : runState === 'waiting_answer' ? '等待回答' : runState === 'running' ? '进行中' : runState === 'error' ? '连接异常' : runState === 'expired' ? '已过期' : '准备就绪'}
+          <Badge variant={runState === 'error' || runState === 'expired' ? 'destructive' : runState === 'closed' ? 'secondary' : 'outline'}>
+            {runState === 'starting' ? '正在启动' : runState === 'waiting_answer' ? '等待回答' : runState === 'running' ? '进行中' : runState === 'error' ? '连接异常' : runState === 'expired' ? '已过期' : runState === 'closed' ? '已取消' : '准备就绪'}
           </Badge>
+          {canCancelConversation && <Button variant="outline" size="sm" disabled={cancelling} onClick={() => { setCancelError(null); setCancelDialogOpen(true) }}><Ban className="size-4" />取消对话</Button>}
           <Button variant="outline" size="sm" disabled={selectableAgents.length === 0} onClick={() => setModeMenuOpen((open) => !open)} aria-expanded={modeMenuOpen}>
             <UserRound className="size-4" />
             {activeAgent?.display_name ?? '选择 Agent'}
@@ -1245,7 +1336,7 @@ export default function ChatPage() {
                 if (!draft?.ready) return null
                 return <ConfirmCard key="draft-card" draft={draft} isProjectUpdate={isProjectUpdate} needsReconfirmation={draftNeedsReconfirmation} canCommit={Boolean(confirmationTokenRef.current) && !draftNeedsReconfirmation} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />
               })}
-              {streamError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertTitle>{canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>本地保存的消息、问答和草稿仍然保留。</p><p>旧 runtime 上下文不会恢复。</p><p>保存草稿需要重新确认</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />恢复已保存草稿</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
+              {streamError && <Alert variant={streamError.startsWith('对话已取消') ? 'default' : 'destructive'}>{streamError.startsWith('对话已取消') ? <Ban className="size-4" /> : <AlertTriangle className="size-4" />}<AlertTitle>{streamError.startsWith('对话已取消') ? '对话已取消' : canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>本地保存的消息、问答和草稿仍然保留。</p><p>旧 runtime 上下文不会恢复。</p><p>保存草稿需要重新确认</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />恢复本地材料</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
             </div>
             <div className="border-t border-border p-3 sm:p-4">
@@ -1256,6 +1347,22 @@ export default function ChatPage() {
           <ProgressRail draft={draft} />
         </div>
       )}
+      <AlertDialog open={cancelDialogOpen} onOpenChange={(open) => { if (!cancelling) setCancelDialogOpen(open) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>取消当前对话？</AlertDialogTitle>
+            <AlertDialogDescription>Agent 会立即停止。当前已保存的消息、问答和草稿会保留，你可以恢复到新会话中继续。</AlertDialogDescription>
+          </AlertDialogHeader>
+          {cancelError && <p role="alert" className="text-sm text-destructive">取消失败：{cancelError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelling}>继续对话</AlertDialogCancel>
+            <Button variant="destructive" disabled={cancelling} onClick={() => void cancelConversation()}>
+              {cancelling ? <Loader2 className="size-4 animate-spin" /> : <Ban className="size-4" />}
+              {cancelling ? '正在取消' : '确认取消对话'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
