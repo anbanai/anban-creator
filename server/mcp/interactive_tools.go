@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -18,9 +19,9 @@ func registerInteractiveTools(server *mcp.Server) {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"project":  map[string]any{"type": "object"},
-				"profile":  map[string]any{"type": "object"},
-				"progress": map[string]any{"type": "object"},
+				"project":  projectCreatorProjectSchema(),
+				"profile":  projectCreatorProfileSchema(),
+				"progress": projectCreatorProgressSchema(),
 				"ready":    map[string]any{"type": "boolean"},
 				"missing_fields": map[string]any{
 					"type": "array", "maxItems": 64,
@@ -54,7 +55,7 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 	if err := decodeInteractiveArgument(args, "project", &input.Project); err != nil {
 		return errorResult(fmt.Sprintf("project is invalid: %v", err)), nil
 	}
-	if err := decodeInteractiveArgument(args, "profile", &input.Profile); err != nil {
+	if err := decodeInteractiveArgumentStrict(args, "profile", &input.Profile); err != nil {
 		return errorResult(fmt.Sprintf("profile is invalid: %v", err)), nil
 	}
 	if err := decodeInteractiveArgument(args, "progress", &input.Progress); err != nil {
@@ -96,4 +97,69 @@ func decodeInteractiveArgument(args map[string]any, key string, target any) erro
 		return err
 	}
 	return nil
+}
+
+func decodeInteractiveArgumentStrict(args map[string]any, key string, target any) error {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return fmt.Errorf("%s is required", key)
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(target)
+}
+
+func projectCreatorProfileSchema() map[string]any {
+	dimension := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []any{"content", "sources", "evidence", "missing_fields"},
+		"properties": map[string]any{
+			"content":        map[string]any{"type": "object"},
+			"sources":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"evidence":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"missing_fields": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		},
+	}
+	return map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []any{"schema_version", "status", "initialization_status", "dimensions"},
+		"properties": map[string]any{
+			"schema_version":        map[string]any{"type": "integer", "const": 1},
+			"status":                map[string]any{"type": "string", "enum": []any{"draft", "confirmed"}},
+			"initialization_status": map[string]any{"type": "string", "enum": []any{"not_started", "queued", "running", "ready", "failed"}},
+			"last_error":            map[string]any{"type": "string"}, "version": map[string]any{"type": "integer"},
+			"application_source": map[string]any{"type": "string", "enum": []any{"", "system_analysis", "user_confirmation", "user_edit", "user_restore"}}, "analysis_task_id": map[string]any{"type": "string"},
+			"dimensions": map[string]any{
+				"type": "object", "additionalProperties": false,
+				"required":   []any{"identity", "style", "audience", "platforms", "preferences", "memory"},
+				"properties": map[string]any{"identity": dimension, "style": dimension, "audience": dimension, "platforms": dimension, "preferences": dimension, "memory": dimension},
+			},
+			"analysis_limits":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"follow_up_questions": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		},
+	}
+}
+
+func projectCreatorProgressSchema() map[string]any {
+	status := map[string]any{"type": "string", "enum": []any{"not_started", "collected", "pending_confirmation", "confirmed"}}
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+		"stage": map[string]any{"type": "string"}, "collected_dimensions": map[string]any{"type": "string"},
+		"current_dimension": map[string]any{"type": "string"}, "notes": map[string]any{"type": "string"},
+		"identity": status, "style": status, "audience": status, "platforms": status,
+		"preferences": status, "memory": status,
+	}, "required": []any{"identity", "style", "audience", "platforms", "preferences", "memory"}}
+}
+
+func projectCreatorProjectSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []any{"name", "platform"}, "properties": map[string]any{
+		"name":         map[string]any{"type": "string", "maxLength": 100},
+		"platform":     map[string]any{"type": "string", "enum": []any{"wechat", "seednote", "moments", "ecommerce", "montage", "whiteboard-animation", "hypit"}},
+		"instructions": map[string]any{"type": "string", "maxLength": 20000},
+		"keywords":     map[string]any{"type": "string", "maxLength": 10000},
+		"visual_style": map[string]any{"type": "string", "maxLength": 10000},
+	}}
 }

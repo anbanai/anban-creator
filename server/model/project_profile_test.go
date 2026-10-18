@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +57,34 @@ func TestProjectProfileSupportsLifecycleStateAndUserEdits(t *testing.T) {
 	profile.Dimensions.Identity.Sources = []string{"[用户编辑]"}
 	if err := profile.Validate(); err != nil {
 		t.Fatalf("user-edited ready profile should validate: %v", err)
+	}
+}
+
+func TestProjectProfileValidateReportsEveryDimensionInStableOrder(t *testing.T) {
+	profile := NewProjectProfile()
+	profile.Dimensions.Identity.Content = nil
+	profile.Dimensions.Style.Sources = nil
+	profile.Dimensions.Audience.Evidence = nil
+	profile.Dimensions.Platforms.MissingFields = nil
+	profile.Dimensions.Preferences.Content = nil
+	profile.Dimensions.Memory.Content = nil
+
+	err := profile.Validate()
+	if err == nil {
+		t.Fatal("incomplete profile should be rejected")
+	}
+	message := err.Error()
+	for _, dimension := range []string{"identity", "style", "audience", "platforms", "preferences", "memory"} {
+		if !strings.Contains(message, "profile dimension "+dimension) {
+			t.Fatalf("validation error = %q, missing %s details", message, dimension)
+		}
+	}
+	last := -1
+	for _, dimension := range []string{"identity", "style", "audience", "platforms", "preferences", "memory"} {
+		at := strings.Index(message, "profile dimension "+dimension)
+		if at < last {
+			t.Fatalf("validation order is unstable: %q", message)
+		}
+		last = at
 	}
 }

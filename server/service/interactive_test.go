@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -455,6 +456,40 @@ func TestInteractiveCreateDraftRejectsMemoryAppend(t *testing.T) {
 	defer sess.mu.Unlock()
 	if sess.Draft.Revision != 0 || sess.committing {
 		t.Fatalf("rejected create draft mutated session: revision=%d committing=%v", sess.Draft.Revision, sess.committing)
+	}
+}
+
+func TestValidateStageRetainsAllProfileDimensionReasons(t *testing.T) {
+	profile := model.NewProjectProfile()
+	profile.Dimensions.Identity.Content = nil
+	profile.Dimensions.Style.Sources = nil
+	profile.Dimensions.Audience.Evidence = nil
+	profile.Dimensions.Platforms.MissingFields = nil
+	profile.Dimensions.Preferences.Content = nil
+	profile.Dimensions.Memory.Content = nil
+
+	err := validateStage(InteractiveStageInput{
+		Project:  InteractiveProject{Name: "Project Creator", Platform: model.PlatformWechat},
+		Profile:  profile,
+		Progress: InteractiveProgress{"identity": "collected", "style": "collected", "audience": "collected", "platforms": "collected", "preferences": "collected", "memory": "collected"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "interactive project draft is invalid") {
+		t.Fatalf("validateStage() error = %v, want draft error", err)
+	}
+	for _, dimension := range model.ProfileDimensions() {
+		if !strings.Contains(err.Error(), "profile dimension "+dimension) {
+			t.Fatalf("validateStage() error = %v, missing %s detail", err, dimension)
+		}
+	}
+}
+
+func TestInteractiveProgressRejectsFieldsInStableOrder(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		var progress InteractiveProgress
+		err := json.Unmarshal([]byte(`{"zeta": "x", "alpha": []}`), &progress)
+		if err == nil || !strings.Contains(err.Error(), `unknown progress field "alpha"`) {
+			t.Fatalf("progress decode error = %v, want deterministic alpha field error", err)
+		}
 	}
 }
 

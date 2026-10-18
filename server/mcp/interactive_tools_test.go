@@ -72,9 +72,127 @@ func TestStageProjectCreatorDraftToolSchema(t *testing.T) {
 				t.Fatalf("required fields = %#v, missing %q", required, field)
 			}
 		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("schema properties = %T, want map", schema["properties"])
+		}
+		projectSchema, ok := properties["project"].(map[string]any)
+		if !ok || projectSchema["additionalProperties"] != false {
+			t.Fatalf("project schema = %#v, want closed object", properties["project"])
+		}
+		projectProperties, ok := projectSchema["properties"].(map[string]any)
+		if !ok || projectProperties["platform"].(map[string]any)["enum"] == nil {
+			t.Fatalf("project platform schema = %#v, want enum", projectProperties["platform"])
+		}
+		profileSchema, ok := properties["profile"].(map[string]any)
+		if !ok || profileSchema["type"] != "object" {
+			t.Fatalf("profile schema = %#v, want object", properties["profile"])
+		}
+		profileProperties, ok := profileSchema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("profile properties = %#v", profileSchema)
+		}
+		dimensions, ok := profileProperties["dimensions"].(map[string]any)
+		if !ok || dimensions["type"] != "object" {
+			t.Fatalf("profile dimensions schema = %#v", profileProperties["dimensions"])
+		}
+		progressSchema, ok := properties["progress"].(map[string]any)
+		if !ok || progressSchema["additionalProperties"] != false {
+			t.Fatalf("progress schema = %#v, want closed object", properties["progress"])
+		}
+		progressProperties, ok := progressSchema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("progress properties = %#v", progressSchema)
+		}
+		progressRequired, ok := progressSchema["required"].([]any)
+		if !ok {
+			t.Fatalf("progress required = %#v, want six dimension statuses", progressSchema["required"])
+		}
+		for _, field := range []string{"stage", "collected_dimensions", "current_dimension", "notes", "identity", "style", "audience", "platforms", "preferences", "memory"} {
+			entry, ok := progressProperties[field].(map[string]any)
+			if !ok || entry["type"] != "string" {
+				t.Fatalf("progress.%s schema = %#v, want string", field, progressProperties[field])
+			}
+		}
+		for _, field := range []string{"identity", "style", "audience", "platforms", "preferences", "memory"} {
+			entry := progressProperties[field].(map[string]any)
+			if entry["enum"] == nil {
+				t.Fatalf("progress.%s schema = %#v, want status enum", field, entry)
+			}
+		}
+		for _, field := range []string{"identity", "style", "audience", "platforms", "preferences", "memory"} {
+			found := false
+			for _, required := range progressRequired {
+				if required == field {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("progress required = %#v, missing %q", progressRequired, field)
+			}
+		}
 		return
 	}
 	t.Fatal("stage_project_creator_draft tool not registered")
+}
+
+func TestStageProjectCreatorDraftReturnsValidationCause(t *testing.T) {
+	svc := service.NewInteractiveServiceWithRuntime(nil, &interactiveMCPFactory{tokens: make(chan string, 1)})
+	svc.SetEnabled(true)
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := interactiveMCPStageInput()
+	in.Profile.Dimensions.Identity.Content = nil
+	result, err := stageProjectCreatorDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", sess.ID), interactiveMCPRequest(t, map[string]any{
+		"project": in.Project, "profile": in.Profile, "progress": in.Progress, "ready": true,
+		"missing_fields": []string{}, "inferred_fields": []string{},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := toolResultText(result)
+	if !result.IsError || !strings.Contains(message, "interactive project draft is invalid") || !strings.Contains(message, "profile dimension identity") || !strings.Contains(message, "content") {
+		t.Fatalf("draft error = %#v, want root cause details", result)
+	}
+}
+
+func TestStageProjectCreatorDraftRejectsLegacyRootDimensionShape(t *testing.T) {
+	svc := service.NewInteractiveServiceWithRuntime(nil, &interactiveMCPFactory{tokens: make(chan string, 1)})
+	svc.SetEnabled(true)
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := interactiveMCPStageInput()
+	rawProfile, err := json.Marshal(in.Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]any
+	if err := json.Unmarshal(rawProfile, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy["identity"] = map[string]any{"content": map[string]any{"summary": "x"}}
+	result, err := stageProjectCreatorDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", sess.ID), interactiveMCPRequest(t, map[string]any{
+		"project": in.Project, "profile": legacy, "progress": in.Progress, "ready": false,
+		"missing_fields": []string{}, "inferred_fields": []string{},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || !strings.Contains(toolResultText(result), "unknown field") {
+		t.Fatalf("legacy profile result = %#v, want unknown field error", result)
+	}
 }
 
 func TestStageProjectCreatorDraftUsesProtectedInteractiveIdentity(t *testing.T) {

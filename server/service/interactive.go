@@ -77,6 +77,38 @@ type InteractiveAnswer struct {
 	Custom   string   `json:"custom,omitempty"`
 }
 type InteractiveProgress map[string]string
+
+var interactiveProgressFields = map[string]struct{}{
+	"stage": {}, "collected_dimensions": {}, "current_dimension": {}, "notes": {},
+	"identity": {}, "style": {}, "audience": {}, "platforms": {}, "preferences": {}, "memory": {},
+}
+
+func (p *InteractiveProgress) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("progress must be an object: %w", err)
+	}
+	parsed := InteractiveProgress{}
+	keys := make([]string, 0, len(raw))
+	for key := range raw {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := raw[key]
+		if _, ok := interactiveProgressFields[key]; !ok {
+			return fmt.Errorf("unknown progress field %q", key)
+		}
+		var text string
+		if err := json.Unmarshal(value, &text); err != nil {
+			return fmt.Errorf("progress.%s must be a string: %w", key, err)
+		}
+		parsed[key] = text
+	}
+	*p = parsed
+	return nil
+}
+
 type InteractiveProject struct {
 	Name         string `json:"name"`
 	Platform     string `json:"platform"`

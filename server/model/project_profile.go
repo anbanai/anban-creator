@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -136,19 +137,40 @@ func (p ProjectProfile) Validate() error {
 	default:
 		return fmt.Errorf("invalid profile initialization status")
 	}
-	for name, dimension := range map[string]ProfileDimension{
-		"identity": p.Dimensions.Identity, "style": p.Dimensions.Style,
-		"audience": p.Dimensions.Audience, "platforms": p.Dimensions.Platforms,
-		"preferences": p.Dimensions.Preferences, "memory": p.Dimensions.Memory,
-	} {
-		if dimension.Content == nil || dimension.Sources == nil || dimension.Evidence == nil || dimension.MissingFields == nil {
-			return fmt.Errorf("profile dimension %s is incomplete", name)
+	dimensions := []struct {
+		name  string
+		value ProfileDimension
+	}{
+		{"identity", p.Dimensions.Identity}, {"style", p.Dimensions.Style},
+		{"audience", p.Dimensions.Audience}, {"platforms", p.Dimensions.Platforms},
+		{"preferences", p.Dimensions.Preferences}, {"memory", p.Dimensions.Memory},
+	}
+	var validationErrors []error
+	for _, item := range dimensions {
+		missing := []string{}
+		if item.value.Content == nil {
+			missing = append(missing, "content")
 		}
-		for _, source := range dimension.Sources {
+		if item.value.Sources == nil {
+			missing = append(missing, "sources")
+		}
+		if item.value.Evidence == nil {
+			missing = append(missing, "evidence")
+		}
+		if item.value.MissingFields == nil {
+			missing = append(missing, "missing_fields")
+		}
+		if len(missing) > 0 {
+			validationErrors = append(validationErrors, fmt.Errorf("profile dimension %s is incomplete: missing %s", item.name, strings.Join(missing, ", ")))
+		}
+		for _, source := range item.value.Sources {
 			if _, ok := profileSourceTags[strings.TrimSpace(source)]; !ok {
-				return fmt.Errorf("profile dimension %s has invalid source", name)
+				validationErrors = append(validationErrors, fmt.Errorf("profile dimension %s has invalid source %q", item.name, source))
 			}
 		}
+	}
+	if len(validationErrors) > 0 {
+		return errors.Join(validationErrors...)
 	}
 	encoded, err := json.Marshal(p)
 	if err != nil {
