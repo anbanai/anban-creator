@@ -120,6 +120,59 @@ describe('ChatPage', () => {
     expect(saved.messages).toEqual([expect.objectContaining({ text: '已整理的项目方向' })])
   })
 
+  it('preserves a submitted message when cancellation races its SSE event', async () => {
+    let resolveMessage!: (value: unknown) => void
+    let messageResolved = false
+    interactiveMocks.message.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveMessage = (value) => { messageResolved = true; resolve(value) }
+    }))
+    renderChat('/projects/create')
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toBeEnabled())
+    fireEvent.change(composer, { target: { value: '刚提交但尚未同步的消息' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledWith('session-1', '刚提交但尚未同步的消息'))
+    resolveMessage({})
+    await waitFor(() => expect(messageResolved).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: '取消对话' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认取消对话' }))
+    await waitFor(() => expect(interactiveMocks.close).toHaveBeenCalledWith('session-1'))
+
+    await waitFor(() => {
+      const saved = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+      expect(saved.sessionId).toBeUndefined()
+      expect(saved.messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: 'user', text: '刚提交但尚未同步的消息' }),
+      ]))
+    })
+  })
+
+  it('preserves a submitted answer when cancellation races its request', async () => {
+    let resolveAnswer!: (value: unknown) => void
+    interactiveMocks.answer.mockImplementationOnce(() => new Promise((resolve) => { resolveAnswer = resolve }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'question.opened', data: JSON.stringify({ call_id: 'call-1', questions: [{ id: 'platform', question: '选择平台', options: [{ label: '公众号' }] }] }) },
+    ], signal))
+    renderChat('/projects/create')
+
+    fireEvent.click(await screen.findByRole('radio', { name: '公众号' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+    await waitFor(() => expect(interactiveMocks.answer).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: '取消对话' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认取消对话' }))
+    await waitFor(() => expect(interactiveMocks.close).toHaveBeenCalledWith('session-1'))
+    resolveAnswer({})
+
+    await waitFor(() => {
+      const saved = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+      expect(saved.questionBatches).toEqual(expect.arrayContaining([
+        expect.objectContaining({ callId: 'call-1', answers: [expect.objectContaining({ id: 'platform', selected: ['公众号'] })] }),
+      ]))
+    })
+  })
+
   it('closes a session that finishes starting after cancellation', async () => {
     let resolveSession!: (session: { id: string; agent_id: string; status: string }) => void
     interactiveMocks.createSession.mockImplementationOnce(() => new Promise((resolve) => { resolveSession = resolve }))

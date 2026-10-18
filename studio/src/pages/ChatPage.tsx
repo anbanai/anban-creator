@@ -46,6 +46,9 @@ type TimelineItem =
   | { kind: 'question'; callId: string; eventId?: number }
   | { kind: 'draft'; id: 'draft'; eventId?: number }
   | { kind: 'activity'; id: string; eventId?: number; status: 'started' | 'running' | 'waiting' | 'completed' | 'stopped' | 'error'; text: string }
+type PendingSubmission =
+  | { kind: 'message'; sessionId: string; message: Message; status: 'pending' | 'accepted' | 'failed' }
+  | { kind: 'answer'; sessionId: string; callId: string; answers: DshQuestionAnswer['answers']; status: 'pending' | 'accepted' | 'failed' }
 type RunState = 'idle' | 'starting' | 'running' | 'waiting_answer' | 'error' | 'expired' | 'closed'
 type TerminalRunState = Extract<RunState, 'error' | 'expired' | 'closed'>
 type JsonRecord = Record<string, unknown>
@@ -502,6 +505,7 @@ export default function ChatPage() {
   const recoveryMessagePromiseRef = useRef<Promise<void> | null>(null)
   const recoveryDraftRef = useRef<InteractiveDraft | null>(null)
   const sendingMessageRef = useRef(false)
+  const pendingSubmissionRef = useRef<PendingSubmission | null>(null)
   const legacyMessageCandidatesRef = useRef(legacyMessageCandidates(persistedSession?.messages))
   const messageAliasesRef = useRef(new Map<string, string>())
   const messagesRef = useRef(messages)
@@ -660,7 +664,12 @@ export default function ChatPage() {
         break
       case 'user.message':
         {
-          const message = streamedMessage('user')
+          const streamed = streamedMessage('user')
+          const pending = pendingSubmissionRef.current
+          const message = pending?.kind === 'message' && pending.message.text === streamed.text
+            ? pending.message
+            : streamed
+          if (pending?.kind === 'message' && pending.message.id === message.id) pendingSubmissionRef.current = null
           updateMessagesNow((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
           updateTimelineNow((items) => upsertTimeline(items, { kind: 'message', message, eventId }, (item) => item.kind === 'message' && item.message.id === message.id))
         }
@@ -1127,6 +1136,13 @@ export default function ChatPage() {
     setSendingMessage(true)
     setComposer('')
     hasInputRef.current = true
+    const pendingSubmission: PendingSubmission = {
+      kind: 'message',
+      sessionId,
+      message: { id: crypto.randomUUID(), role: 'user', text },
+      status: 'pending',
+    }
+    pendingSubmissionRef.current = pendingSubmission
     recoveryDraftRef.current = null
     confirmationTokenRef.current = null
     setDraft((value) => value ? { ...value, ready: false } : value)
@@ -1136,14 +1152,21 @@ export default function ChatPage() {
     persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
     try {
       await api.interactive.message(sessionId, text)
+      if (sessionRef.current !== sessionId) return
+      if (pendingSubmissionRef.current === pendingSubmission) pendingSubmission.status = 'accepted'
     } catch (error) {
+      if (sessionRef.current !== sessionId) return
+      if (pendingSubmissionRef.current === pendingSubmission && pendingSubmission.status === 'pending') pendingSubmission.status = 'failed'
       setTurnActive(false)
       const failed = readPersistedInteractiveSession(sessionStorageKey)
       persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: failed?.lastEventId, turnActive: false })
       setStreamError(error instanceof Error ? error.message : '消息发送失败')
     } finally {
-      sendingMessageRef.current = false
-      setSendingMessage(false)
+      if (pendingSubmissionRef.current === pendingSubmission) {
+        if (pendingSubmission.status === 'failed') pendingSubmissionRef.current = null
+        sendingMessageRef.current = false
+        setSendingMessage(false)
+      }
     }
   }
 
@@ -1153,21 +1176,29 @@ export default function ChatPage() {
       throw new Error('会话已结束，请重新开始后再回答。')
     }
     hasInputRef.current = true
+    const pendingSubmission: PendingSubmission = { kind: 'answer', sessionId, callId: batch.callId, answers: answer.answers, status: 'pending' }
+    pendingSubmissionRef.current = pendingSubmission
     recoveryDraftRef.current = null
     setTurnActive(true)
     const persisted = readPersistedInteractiveSession(sessionStorageKey)
     persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
     try {
       await api.interactive.answer(sessionId, batch.callId, answer.answers)
+      if (sessionRef.current !== sessionId) return
+      if (pendingSubmissionRef.current === pendingSubmission) pendingSubmission.status = 'accepted'
     } catch (error) {
+      if (sessionRef.current !== sessionId) return
+      if (pendingSubmissionRef.current === pendingSubmission && pendingSubmission.status === 'pending') pendingSubmission.status = 'failed'
       setTurnActive(false)
       const failed = readPersistedInteractiveSession(sessionStorageKey)
       persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: failed?.lastEventId, turnActive: false })
       throw error
     }
-    setQuestionBatches((batches) => batches.map((item) => item.callId === batch.callId
+    if (sessionRef.current !== sessionId) return
+    updateQuestionsNow((batches) => batches.map((item) => item.callId === batch.callId
       ? { ...item, answers: answer.answers }
       : item))
+    if (pendingSubmissionRef.current === pendingSubmission) pendingSubmissionRef.current = null
   }
 
   const commitProject = async () => {
@@ -1219,8 +1250,10 @@ export default function ChatPage() {
     setSessionId(null)
     setRunState('closed')
     setTurnActive(false)
-    setTimeline((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started')
-      ? { ...item, status: 'stopped' }
+    sendingMessageRef.current = false
+    setSendingMessage(false)
+    updateTimelineNow((items) => items.map((item) => item.kind === 'activity' && (item.status === 'running' || item.status === 'started' || item.status === 'waiting')
+      ? { ...item, status: 'stopped', ...(item.status === 'waiting' ? { text: '等待回答前已取消' } : {}) }
       : item))
     setStreamError(message)
     setRecoveryAvailable(true)
@@ -1228,18 +1261,31 @@ export default function ChatPage() {
 
     const persisted = readPersistedInteractiveSession(sessionStorageKey)
     const savedDraft = draftRef.current
+    const pendingSubmission = pendingSubmissionRef.current
+    const savedMessages = pendingSubmission?.kind === 'message' && pendingSubmission.sessionId === previousId && pendingSubmission.status !== 'failed'
+      ? [...messagesRef.current.filter((item) => item.id !== pendingSubmission.message.id), pendingSubmission.message]
+      : messagesRef.current
+    const savedQuestions = pendingSubmission?.kind === 'answer' && pendingSubmission.sessionId === previousId && pendingSubmission.status !== 'failed'
+      ? questionBatchesRef.current.map((batch) => batch.callId === pendingSubmission.callId ? { ...batch, answers: pendingSubmission.answers } : batch)
+      : questionBatchesRef.current
+    if (savedMessages !== messagesRef.current) updateMessagesNow(() => savedMessages)
+    if (savedQuestions !== questionBatchesRef.current) updateQuestionsNow(() => savedQuestions)
+    if (pendingSubmission?.kind === 'message' && pendingSubmission.sessionId === previousId && pendingSubmission.status !== 'failed') {
+      updateTimelineNow((items) => upsertTimeline(items, { kind: 'message', message: pendingSubmission.message }, (item) => item.kind === 'message' && item.message.id === pendingSubmission.message.id))
+    }
     replacePersistedInteractiveSession(sessionStorageKey, {
       ...persisted,
       sessionId: null,
       turnActive: false,
       terminalState: 'closed',
       terminalMessage: message,
-      messages: messagesRef.current,
-      questionBatches: questionBatchesRef.current,
+      messages: savedMessages,
+      questionBatches: savedQuestions,
       timeline: timelineRef.current,
       draft: savedDraft,
       draftNeedsReconfirmation: Boolean(savedDraft?.ready || persisted?.draftNeedsReconfirmation),
     })
+    pendingSubmissionRef.current = null
     setCancelDialogOpen(false)
     setCancelling(false)
   }
