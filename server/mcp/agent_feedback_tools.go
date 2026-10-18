@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -65,8 +66,17 @@ func feedbackContextHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	if job == nil {
 		return errorResult("feedback job not found"), nil
 	}
+	var frozen model.FeedbackFrozenContext
+	if job.FrozenContextJSON != "" {
+		if err := json.Unmarshal([]byte(job.FrozenContextJSON), &frozen); err != nil || frozen.SchemaVersion != "1.0" || frozen.AnalyticsRevision != job.AnalyticsRevision || frozen.ProfileRevision != job.ProfileRevision {
+			return errorResult("frozen feedback context invalid"), nil
+		}
+	}
 	if job.TaskID != task.ID || job.ProjectID != task.ProjectID || job.UserID != task.UserID || task.TaskKind != model.TaskKindFeedbackAnalysis {
 		return errorResult("feedback job is not bound to the current task"), nil
+	}
+	if job.Operation == "content_postmortem" && job.TargetContentID != "" && job.FrozenContextJSON == "" {
+		return errorResult("frozen feedback context unavailable"), nil
 	}
 	identity, _ := getMCPExecutionIdentity(ctx)
 	currentExecution, err := repo.TaskExecutions().FindCurrentByTaskID(ctx, taskID)
@@ -76,22 +86,33 @@ func feedbackContextHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	db := repo.Analytics().DB().WithContext(ctx)
 	var content model.AnalyticsContent
 	if job.TargetContentID != "" {
-		if err := db.Where("id = ? AND project_id = ?", job.TargetContentID, job.ProjectID).First(&content).Error; err != nil {
-			return errorResult("feedback target content unavailable"), nil
+		if job.FrozenContextJSON != "" {
+			content = frozen.TargetContent
+		} else {
+			if err := db.Where("id = ? AND project_id = ?", job.TargetContentID, job.ProjectID).First(&content).Error; err != nil {
+				return errorResult("feedback target content unavailable"), nil
+			}
 		}
 	}
 	var observations []model.AnalyticsObservation
 	if job.TargetContentID != "" {
-		if err := db.Where("project_id = ? AND content_id = ? AND revoked_at IS NULL", job.ProjectID, job.TargetContentID).Order("stat_date asc").Find(&observations).Error; err != nil {
-			return errorResult("feedback observations unavailable"), nil
+		if job.FrozenContextJSON != "" {
+			observations = frozen.TargetObservations
+		} else {
+			if err := db.Where("project_id = ? AND content_id = ? AND revoked_at IS NULL", job.ProjectID, job.TargetContentID).Order("stat_date asc").Find(&observations).Error; err != nil {
+				return errorResult("feedback observations unavailable"), nil
+			}
 		}
 	}
-	insights, err := repo.FeedbackLoop().ListInsightsByTarget(ctx, job.ProjectID, job.TargetContentID)
-	if err != nil {
-		return errorResult("feedback insights unavailable"), nil
+	var insights []*model.FeedbackInsight
+	if job.FrozenContextJSON == "" {
+		insights, err = repo.FeedbackLoop().ListInsightsByTarget(ctx, job.ProjectID, job.TargetContentID)
+		if err != nil {
+			return errorResult("feedback insights unavailable"), nil
+		}
 	}
 	var strategy *model.StrategySnapshot
-	if job.StrategyRevision > 0 {
+	if job.StrategyRevision > 0 && job.FrozenContextJSON == "" {
 		var snapshot model.StrategySnapshot
 		platforms := []string{job.Platform}
 		switch job.Platform {
@@ -108,7 +129,13 @@ func feedbackContextHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 		strategy = &snapshot
 	}
 	var baselineContents []model.AnalyticsContent
-	if job.TargetContentID != "" {
+	var baselineObservations []model.AnalyticsObservation
+	if job.FrozenContextJSON != "" {
+		for _, item := range frozen.Baseline {
+			baselineContents = append(baselineContents, item.Content)
+			baselineObservations = append(baselineObservations, item.Observation)
+		}
+	} else if job.TargetContentID != "" {
 		q := db.Where("project_id = ? AND channel = ? AND content_type = ? AND id <> ?", job.ProjectID, content.Channel, content.ContentType, content.ID)
 		if content.Date != nil {
 			q = q.Where("date < ?", *content.Date)
@@ -126,11 +153,18 @@ func feedbackContextHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp
 	for _, item := range baselineContents {
 		baselineIDs = append(baselineIDs, item.ID)
 	}
-	var baselineObservations []model.AnalyticsObservation
-	if err := db.Where("project_id = ? AND revoked_at IS NULL AND (content_id = '' OR content_id IN ?)", job.ProjectID, baselineIDs).Order("stat_date asc").Find(&baselineObservations).Error; err != nil {
-		return errorResult("feedback baseline observations unavailable"), nil
+	if job.FrozenContextJSON == "" {
+		if err := db.Where("project_id = ? AND revoked_at IS NULL AND (content_id = '' OR content_id IN ?)", job.ProjectID, baselineIDs).Order("stat_date asc").Find(&baselineObservations).Error; err != nil {
+			return errorResult("feedback baseline observations unavailable"), nil
+		}
 	}
-	result, err := textResult(map[string]any{"job": job, "target_content": content, "observations": observations, "baseline_scope": "account_platform_content_type", "baseline_contents": baselineContents, "baseline_observations": baselineObservations, "insights": insights, "strategy": strategy, "analytics_revision": job.AnalyticsRevision})
+	var profile any
+	if job.FrozenContextJSON != "" {
+		profile = frozen.ProjectProfile
+	} else if currentProject, projectErr := repo.Projects().FindByID(ctx, job.ProjectID); projectErr == nil && currentProject != nil {
+		profile = currentProject.Profile.Data()
+	}
+	result, err := textResult(map[string]any{"job": job, "target_content": content, "observations": observations, "baseline_scope": "account_platform_content_type", "baseline_contents": baselineContents, "baseline_observations": baselineObservations, "insights": insights, "strategy": strategy, "project_profile": profile, "analytics_revision": job.AnalyticsRevision})
 	return result, err
 }
 

@@ -45,7 +45,7 @@ func TestFinalizeFeedbackExecutionPersistsOnlyValidatedPrivateArtifacts(t *testi
 		AnalyticsRevision: job.AnalyticsRevision, BaselineScope: "account_platform", Summary: "Observed above account baseline.",
 		Confidence: "medium", Limitations: "Correlation does not establish causation.",
 	}
-	evidence := feedbackEvidenceArtifact{SchemaVersion: feedbackArtifactSchemaVersion, Status: "ready", Source: "get_feedback_context", DataAt: "2026-10-01T00:00:00Z", Missing: []string{}, EvidencePaths: []string{}, JobID: job.ID, AnalyticsRevision: job.AnalyticsRevision, Evidence: json.RawMessage(`{"sample_count":5,"target":{"likes":20},"baseline":{"median_likes":4}}`)}
+	evidence := feedbackEvidenceArtifact{SchemaVersion: feedbackArtifactSchemaVersion, Status: "ready", Source: "get_feedback_context", DataAt: "2026-10-01T00:00:00Z", Missing: []string{}, EvidencePaths: []string{}, JobID: job.ID, ProjectID: job.ProjectID, TargetContentID: job.TargetContentID, AnalyticsRevision: job.AnalyticsRevision, Evidence: json.RawMessage(`{"sample_count":5,"target":{"likes":20},"baseline":{"median_likes":4}}`)}
 	analysisBytes, _ := json.Marshal(analysis)
 	evidenceBytes, _ := json.Marshal(evidence)
 	for path, body := range map[string][]byte{feedbackAnalysisArtifactPath: analysisBytes, feedbackEvidenceArtifactPath: evidenceBytes} {
@@ -88,6 +88,28 @@ func TestFinalizeFeedbackExecutionPersistsOnlyValidatedPrivateArtifacts(t *testi
 	}
 }
 
+func TestFeedbackInsightPromotionStatusOnlyCandidatesReadyPostmortems(t *testing.T) {
+	job := &model.FeedbackJob{Operation: "content_postmortem", TargetContentID: "content-1", Trigger: FeedbackTriggerAutoAttribution}
+	for _, status := range []string{"ready", "warning", "data_insufficient", "skipped"} {
+		got := feedbackInsightPromotionStatus(job, feedbackAnalysisArtifact{Status: status})
+		want := model.FeedbackPromotionNone
+		if status == "ready" {
+			want = model.FeedbackPromotionCandidate
+		}
+		if got != want {
+			t.Errorf("status %q created promotion status %q, want %q", status, got, want)
+		}
+	}
+	if !feedbackInsightShouldPersist(job, feedbackAnalysisArtifact{Status: "ready"}) {
+		t.Fatal("ready analysis should persist an insight")
+	}
+	for _, status := range []string{"warning", "data_insufficient", "skipped"} {
+		if feedbackInsightShouldPersist(job, feedbackAnalysisArtifact{Status: status}) {
+			t.Errorf("status %q should not persist a formal insight", status)
+		}
+	}
+}
+
 func TestFinalizeFeedbackExecutionRejectsArtifactRevisionMismatch(t *testing.T) {
 	fixture := newFeedbackFinalizerFixture(t)
 	db := fixture.svc.repo.Analytics().DB()
@@ -103,7 +125,7 @@ func TestFinalizeFeedbackExecutionRejectsArtifactRevisionMismatch(t *testing.T) 
 		t.Fatal(err)
 	}
 	analysis := feedbackAnalysisArtifact{SchemaVersion: feedbackArtifactSchemaVersion, Status: "ready", Source: "get_feedback_context", DataAt: "2026-10-01T00:00:00Z", Missing: []string{}, EvidencePaths: []string{}, JobID: job.ID, AnalyticsRevision: 8}
-	evidence := feedbackEvidenceArtifact{SchemaVersion: feedbackArtifactSchemaVersion, Status: "ready", Source: "get_feedback_context", DataAt: "2026-10-01T00:00:00Z", Missing: []string{}, EvidencePaths: []string{}, JobID: job.ID, AnalyticsRevision: 9, Evidence: json.RawMessage(`{"sample_count":1}`)}
+	evidence := feedbackEvidenceArtifact{SchemaVersion: feedbackArtifactSchemaVersion, Status: "ready", Source: "get_feedback_context", DataAt: "2026-10-01T00:00:00Z", Missing: []string{}, EvidencePaths: []string{}, JobID: job.ID, ProjectID: job.ProjectID, TargetContentID: job.TargetContentID, AnalyticsRevision: 9, Evidence: json.RawMessage(`{"sample_count":1}`)}
 	analysisBytes, _ := json.Marshal(analysis)
 	evidenceBytes, _ := json.Marshal(evidence)
 	for path, body := range map[string][]byte{feedbackAnalysisArtifactPath: analysisBytes, feedbackEvidenceArtifactPath: evidenceBytes} {
@@ -155,7 +177,7 @@ func TestFinalizeFeedbackExecutionDoesNotActivateStrategyFromWarning(t *testing.
 	evidence := feedbackEvidenceArtifact{
 		SchemaVersion: feedbackArtifactSchemaVersion, Status: "warning", Source: "get_feedback_context",
 		DataAt: "2026-10-01T00:00:00Z", Missing: []string{"baseline.coverage"}, EvidencePaths: []string{},
-		JobID: job.ID, AnalyticsRevision: job.AnalyticsRevision, Evidence: json.RawMessage(`{"sample_count":10}`),
+		JobID: job.ID, ProjectID: job.ProjectID, TargetContentID: job.TargetContentID, AnalyticsRevision: job.AnalyticsRevision, Evidence: json.RawMessage(`{"sample_count":10}`),
 	}
 	for path, body := range map[string][]byte{feedbackAnalysisArtifactPath: feedbackMustJSON(t, analysis), feedbackEvidenceArtifactPath: feedbackMustJSON(t, evidence)} {
 		key := buildTaskMCPArtifactStoragePrefix(fixture.task, fixture.execution.ID) + path

@@ -88,7 +88,7 @@ func respondAttributionError(c fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrAttributionTaskNotFound), errors.Is(err, service.ErrAttributionContentNotOwned), errors.Is(err, service.ErrFeedbackInsightNotFound):
 		return Error(c, fiber.StatusNotFound, err.Error())
-	case errors.Is(err, service.ErrAttributionWindowNotMature), errors.Is(err, service.ErrAttributionNoObservation), errors.Is(err, service.ErrAttributionAlreadySucceeded), errors.Is(err, service.ErrAttributionAccountBusy), errors.Is(err, service.ErrFeedbackInsightNotConfirmable), errors.Is(err, service.ErrFeedbackInsightNotValidated):
+	case errors.Is(err, service.ErrAttributionWindowNotMature), errors.Is(err, service.ErrAttributionNoObservation), errors.Is(err, service.ErrAttributionAlreadySucceeded), errors.Is(err, service.ErrAttributionAccountBusy), errors.Is(err, service.ErrFeedbackInsightNotConfirmable), errors.Is(err, service.ErrFeedbackInsightNotValidated), errors.Is(err, service.ErrProjectProfileVersionConflict):
 		return Error(c, fiber.StatusConflict, err.Error())
 	default:
 		return Error(c, fiber.StatusInternalServerError, err.Error())

@@ -80,6 +80,41 @@ export interface FeedbackDashboard {
   }
   next_runs: { daily?: string; weekly?: string; monthly?: string }
   strategy: { id: string; revision: number; source_revision?: number; status: string; digest?: string; expires_at?: string | null }
+  insights?: FeedbackInsight[]
+  attribution_jobs?: FeedbackAttributionJob[]
+}
+
+export interface FeedbackInsight {
+  id: string
+  target_content_id: string
+  analytics_revision: number
+  evidence: string
+  summary: string
+  confidence: string
+  limitations: string
+  promotion_status: string
+  kind: string
+  created_at: string
+  job_status?: string
+  sample_count?: number
+  maturity_cutoff?: string
+  attribution_direction?: string
+  performance_metric?: string
+  performance_percentile?: number
+}
+
+export interface FeedbackAttributionJob {
+  id: string
+  target_content_id: string
+  status: string
+  skip_reason?: string
+  sample_count: number
+  maturity_cutoff?: string
+  direction?: string
+  analytics_revision: number
+  performance_metric?: string
+  performance_percentile?: number
+  created_at: string
 }
 
 export interface EcommerceProjectDefaults {

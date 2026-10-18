@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +141,34 @@ func TestFeedbackSampleThresholdUsesOperationSpecificMinimums(t *testing.T) {
 func TestFeedbackOperationsKeepContentPostmortemManual(t *testing.T) {
 	if got := feedbackOperations(FeedbackCadenceWeekly); len(got) != 1 || got[0] != "publish_analytics" {
 		t.Fatalf("weekly feedback operations = %#v, want only publish_analytics", got)
+	}
+}
+
+func TestSelectAttributionOutliersUsesAccountDecilesAndOnePerDirection(t *testing.T) {
+	samples := make([]AttributionPerformanceSample, 10)
+	for i := range samples {
+		samples[i] = AttributionPerformanceSample{ContentID: fmt.Sprintf("content-%02d", i), Score: float64(i)}
+	}
+	got, eligible := selectAttributionOutliers(samples)
+	if !eligible {
+		t.Fatal("10 samples should be enough to identify outliers")
+	}
+	if len(got) != 2 || got[0].Direction != AttributionDirectionHigh || got[0].ContentID != "content-09" || got[1].Direction != AttributionDirectionLow || got[1].ContentID != "content-00" {
+		t.Fatalf("outliers = %#v, want highest content-09 and lowest content-00", got)
+	}
+}
+
+func TestSelectAttributionOutliersSkipsSmallSamplesAndBreaksTiesStably(t *testing.T) {
+	if got, eligible := selectAttributionOutliers([]AttributionPerformanceSample{{ContentID: "one", Score: 1}}); eligible || len(got) != 0 {
+		t.Fatalf("small-sample outliers = %#v, eligible=%v", got, eligible)
+	}
+	samples := make([]AttributionPerformanceSample, 10)
+	for i := range samples {
+		samples[i] = AttributionPerformanceSample{ContentID: fmt.Sprintf("content-%02d", 9-i), Score: 1}
+	}
+	got, eligible := selectAttributionOutliers(samples)
+	if !eligible || len(got) != 0 {
+		t.Fatalf("tied outliers = %#v, eligible=%v, want no arbitrary outlier", got, eligible)
 	}
 }
 

@@ -39,7 +39,7 @@ type FeedbackScheduler struct {
 }
 
 func NewFeedbackScheduler(repo repository.Repository, enqueuer FeedbackTaskEnqueuer) *FeedbackScheduler {
-	return &FeedbackScheduler{repo: repo, enqueuer: enqueuer, now: time.Now, maxPerUser: 3, maxPerProject: 2, maxPerAccount: 1, maxPerRun: 100, windowRuns: make(map[string]time.Time)}
+	return &FeedbackScheduler{repo: repo, enqueuer: enqueuer, now: time.Now, maxPerUser: 5, maxPerProject: 4, maxPerAccount: 1, maxPerRun: 100, windowRuns: make(map[string]time.Time)}
 }
 
 type FeedbackScanResult struct{ Created, Enqueued, Skipped int }
@@ -107,6 +107,8 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 	userCounts := map[string]int{}
 	projectCounts := map[string]int{}
 	accountCounts := map[string]int{}
+	attributionCounts := map[string]int{}
+	createdThisScan := map[string]bool{}
 	// Load durable queued/running work before this scan. The in-memory counts
 	// below only cover jobs admitted by this pass; these counts enforce the
 	// same fairness limits across scheduler ticks and server instances.
@@ -150,7 +152,7 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 			continue
 		}
 		accountID := scope.AccountID
-		if feedbackLimitReached(userCounts[p.UserID], s.maxPerUser) || feedbackLimitReached(projectCounts[p.ID], s.maxPerProject) || feedbackLimitReached(accountCounts[accountID], s.maxPerAccount) {
+		if feedbackLimitReached(userCounts[p.UserID], s.maxPerUser) || feedbackLimitReached(projectCounts[p.ID], s.maxPerProject) {
 			continue
 		}
 		jobs, err := s.buildCadenceJobs(ctx, scope, cadence, at, override)
@@ -165,11 +167,27 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 			// single lease. This prevents a busy account from consuming workers
 			// across cadences while preserving tenant/project isolation.
 			if job.Status == model.FeedbackJobQueued {
-				running, err := s.repo.FeedbackLoop().ListRunningByAccount(ctx, accountID, "", 1)
+				accountLimit := s.maxPerAccount
+				if job.Trigger == FeedbackTriggerAutoAttribution {
+					accountLimit = 2
+				}
+				running, err := s.repo.FeedbackLoop().ListRunningByAccount(ctx, accountID, "", 20)
 				if err != nil {
 					return out, err
 				}
-				if len(running) > 0 || (s.maxPerAccount > 0 && accountCounts[accountID] >= s.maxPerAccount) {
+				autoRunning := 0
+				normalRunning := false
+				for _, runningJob := range running {
+					if runningJob != nil && createdThisScan[runningJob.ID] {
+						continue
+					}
+					if runningJob != nil && runningJob.Trigger == FeedbackTriggerAutoAttribution {
+						autoRunning++
+					} else {
+						normalRunning = true
+					}
+				}
+				if (job.Trigger == FeedbackTriggerAutoAttribution && (normalRunning || autoRunning+attributionCounts[accountID] >= accountLimit)) || (job.Trigger != FeedbackTriggerAutoAttribution && (normalRunning || autoRunning > 0 || accountCounts[accountID] >= accountLimit)) {
 					job.Status = model.FeedbackJobSkipped
 					job.SkipReason = model.FeedbackSkipResourceLimit
 					accountBlocked = true
@@ -183,6 +201,15 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 				PeriodEnd: job.PeriodEnd, AnalyticsRevision: job.AnalyticsRevision,
 				ContentSetDigest: job.ContentSetDigest, StrategyRevision: job.StrategyRevision,
 			})
+			if job.Trigger == FeedbackTriggerAutoAttribution {
+				job.Fingerprint = FeedbackJobFingerprint(FeedbackEligibilityInput{
+					ProjectID: job.ProjectID, Platform: job.Platform, AccountID: job.AccountID,
+					Operation: job.Operation, Cadence: job.Cadence, TargetContentID: job.TargetContentID, AttributionDirection: job.AttributionDirection,
+					PeriodStart: job.PeriodStart, PeriodEnd: job.PeriodEnd,
+					AnalyticsRevision: job.AnalyticsRevision, ContentSetDigest: job.ContentSetDigest,
+					StrategyRevision: job.StrategyRevision,
+				})
+			}
 			created, err := s.repo.FeedbackLoop().CreateJob(ctx, job)
 			if err != nil {
 				return out, err
@@ -222,6 +249,7 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 			}
 			if created {
 				out.Created++
+				createdThisScan[job.ID] = true
 			}
 			if job.Status != model.FeedbackJobQueued || s.enqueuer == nil {
 				out.Skipped++
@@ -240,7 +268,14 @@ func (s *FeedbackScheduler) runCadence(ctx context.Context, cadence string, at t
 			userCounts[p.UserID]++
 			projectCounts[p.ID]++
 			accountCounts[accountID]++
-			if feedbackLimitReached(userCounts[p.UserID], s.maxPerUser) || feedbackLimitReached(projectCounts[p.ID], s.maxPerProject) || feedbackLimitReached(accountCounts[accountID], s.maxPerAccount) {
+			if job.Trigger == FeedbackTriggerAutoAttribution {
+				attributionCounts[accountID]++
+			}
+			accountLimit := s.maxPerAccount
+			if job.Trigger == FeedbackTriggerAutoAttribution {
+				accountLimit = 2
+			}
+			if feedbackLimitReached(userCounts[p.UserID], s.maxPerUser) || feedbackLimitReached(projectCounts[p.ID], s.maxPerProject) || (job.Trigger == FeedbackTriggerAutoAttribution && feedbackLimitReached(attributionCounts[accountID], accountLimit)) || (job.Trigger != FeedbackTriggerAutoAttribution && feedbackLimitReached(accountCounts[accountID], accountLimit)) {
 				break
 			}
 		}
@@ -478,6 +513,13 @@ func (s *FeedbackScheduler) buildCadenceJobs(ctx context.Context, scope feedback
 			job.SkipReason = decision.SkipReason
 		}
 		jobs = append(jobs, job)
+	}
+	if cadence == FeedbackCadenceWeekly && state.Status == "ready" && !p.FeedbackPaused && p.Status == model.ProjectStatusActive {
+		attributionJobs, err := buildAttributionCandidateJobs(ctx, s.repo, scope, at, state)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, attributionJobs...)
 	}
 	return jobs, nil
 }

@@ -28,6 +28,12 @@ export const projectsApi = {
   feedback: (id: string, signal?: AbortSignal) =>
     unwrap<FeedbackDashboard>(http.get(`/projects/${id}/feedback`, { signal })),
 
+  confirmFeedbackInsight: (insightId: string) =>
+    unwrap(http.post(`/feedback/insights/${insightId}/confirm`)),
+
+  validateFeedbackInsight: (insightId: string) =>
+    unwrap(http.post(`/feedback/insights/${insightId}/validate`)),
+
   rerunFeedback: (id: string, cadence: 'daily' | 'weekly' | 'monthly', period?: { start: string; end: string }) =>
     unwrap<{ created: number; enqueued: number; skipped: number }>(http.post(`/projects/${id}/feedback/rerun`, undefined, {
       params: {

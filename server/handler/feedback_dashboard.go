@@ -102,6 +102,43 @@ func (h *FeedbackDashboardHandler) Get(c fiber.Ctx) error {
 	if strategy != nil {
 		response["strategy"] = fiber.Map{"id": strategy.ID, "revision": strategy.Revision, "source_revision": strategy.SourceRevision, "status": strategy.Status, "digest": strategy.Digest, "expires_at": strategy.ExpiresAt}
 	}
+	var insights []model.FeedbackInsight
+	if err := db.Where("project_id = ? AND target_content_id <> ''", project.ID).Order("created_at DESC").Limit(20).Find(&insights).Error; err != nil {
+		return Error(c, fiber.StatusInternalServerError, "failed to load attribution insights")
+	}
+	jobsByID := map[string]*model.FeedbackJob{}
+	for _, job := range jobs {
+		if job != nil {
+			jobsByID[job.ID] = job
+		}
+	}
+	attributionInsights := make([]fiber.Map, 0, len(insights))
+	for _, insight := range insights {
+		job := jobsByID[insight.JobID]
+		row := fiber.Map{
+			"id": insight.ID, "target_content_id": insight.TargetContentID, "analytics_revision": insight.AnalyticsRevision,
+			"profile_revision": insight.ProfileRevision, "evidence": insight.EvidenceJSON, "summary": insight.Summary,
+			"confidence": insight.Confidence, "limitations": insight.Limitations, "promotion_status": insight.PromotionStatus,
+			"kind": insight.Kind, "created_at": insight.CreatedAt,
+		}
+		if job != nil {
+			row["job_status"] = job.Status
+			row["sample_count"] = job.SampleCount
+			row["maturity_cutoff"] = job.MaturityCutoff
+			row["attribution_direction"] = job.AttributionDirection
+			row["performance_metric"] = job.PerformanceMetric
+			row["performance_percentile"] = job.PerformancePercentile
+		}
+		attributionInsights = append(attributionInsights, row)
+	}
+	attributionJobs := make([]fiber.Map, 0)
+	for _, job := range jobs {
+		if job != nil && job.Operation == "content_postmortem" {
+			attributionJobs = append(attributionJobs, fiber.Map{"id": job.ID, "target_content_id": job.TargetContentID, "status": job.Status, "skip_reason": job.SkipReason, "sample_count": job.SampleCount, "maturity_cutoff": job.MaturityCutoff, "direction": job.AttributionDirection, "analytics_revision": job.AnalyticsRevision, "performance_metric": job.PerformanceMetric, "performance_percentile": job.PerformancePercentile, "created_at": job.CreatedAt})
+		}
+	}
+	response["insights"] = attributionInsights
+	response["attribution_jobs"] = attributionJobs
 	return Success(c, response)
 }
 

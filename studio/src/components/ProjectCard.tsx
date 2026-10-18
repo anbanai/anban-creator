@@ -85,6 +85,19 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
     },
     onError: () => toast.error('反馈重跑失败'),
   })
+  const insightMutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'confirm' | 'validate' }) => action === 'confirm'
+      ? api.projects.confirmFeedbackInsight(id)
+      : api.projects.validateFeedbackInsight(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['project-feedback', project.id] })
+      toast.success('归因状态已更新')
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : ''
+      toast.error(message.includes('version') || message.includes('conflict') ? '画像已变化，请重新读取最新画像后重试' : '归因状态更新失败')
+    },
+  })
   const formatTime = (value?: string | null) => value
     ? new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '未运行'
@@ -180,6 +193,41 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
                     </div>
                     {feedbackQuery.data.queue.latest_skip && (
                       <p className="truncate text-muted-foreground" title={feedbackQuery.data.queue.latest_skip.reason}>最近跳过：{feedbackQuery.data.queue.latest_skip.reason}</p>
+                    )}
+                    {(feedbackQuery.data.insights ?? []).length > 0 && (
+                      <div className="space-y-2 border-t pt-2">
+                        <span className="font-medium text-foreground">内容归因</span>
+                        {(feedbackQuery.data.insights ?? []).map((insight) => {
+                          let evidence: Record<string, unknown> = {}
+                          try { evidence = JSON.parse(insight.evidence) as Record<string, unknown> } catch { /* Keep the summary visible if evidence is malformed. */ }
+                          return (
+                            <div key={insight.id} className="space-y-1 border-l-2 pl-2">
+                              <div className="flex flex-wrap items-center gap-1">
+                                <Badge variant="outline">{String(evidence.direction ?? '复盘')}</Badge>
+                                <Badge variant="secondary">{insight.promotion_status}</Badge>
+                                <span className="text-muted-foreground">rev {insight.analytics_revision} · 置信度 {insight.confidence}</span>
+                              </div>
+                              <p className="text-foreground">{insight.summary}</p>
+                              <p className="text-muted-foreground">证据覆盖：{String(evidence.sample_count ?? '—')} 条 · {String(evidence.metric ?? '指标未知')} · {insight.limitations}</p>
+                              {typeof evidence.analysis === 'object' && evidence.analysis !== null && (() => {
+                                const analysis = evidence.analysis as Record<string, unknown>
+                                const recommendations = analysis.dimension_recommendations as Record<string, { reason?: string; evidence?: string[]; updates?: Record<string, unknown> }> | undefined
+                                if (!recommendations) return null
+                                return <div className="space-y-1 text-muted-foreground">{Object.entries(recommendations).map(([dimension, recommendation]) => <p key={dimension}><span className="font-medium text-foreground">{dimension}</span>：{recommendation.reason ?? '建议'} · {Object.entries(recommendation.updates ?? {}).map(([key, value]) => `${key}=${String(value)}`).join('，')}</p>)}</div>
+                              })()}
+                              {insight.promotion_status === 'candidate' && <Button size="xs" variant="ghost" disabled={insightMutation.isPending} onClick={() => insightMutation.mutate({ id: insight.id, action: 'confirm' })}>确认</Button>}
+                              {insight.promotion_status === 'confirmed' && <Button size="xs" variant="ghost" disabled={insightMutation.isPending} onClick={() => insightMutation.mutate({ id: insight.id, action: 'validate' })}>验证并应用</Button>}
+                              {insight.promotion_status === 'validated' && <Button size="xs" variant="ghost" disabled={insightMutation.isPending} onClick={() => insightMutation.mutate({ id: insight.id, action: 'validate' })}>重试应用</Button>}
+                              {insight.promotion_status === 'promoted' && <span className="text-emerald-700">已应用到画像</span>}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {(feedbackQuery.data.attribution_jobs ?? []).some((job) => job.status === 'skipped') && (
+                      <div className="border-t pt-2 text-muted-foreground">
+                        {(feedbackQuery.data.attribution_jobs ?? []).filter((job) => job.status === 'skipped').slice(0, 2).map((job) => <p key={job.id}>{job.skip_reason === 'sample_too_small' ? '样本不足，等待至少 10 条成熟内容' : job.skip_reason === 'no_mature_content' ? '观察窗尚未成熟' : `归因跳过：${job.skip_reason ?? '数据不足'}`}</p>)}
+                      </div>
                     )}
                     <div className="flex flex-wrap gap-1">
                       <Button variant="ghost" size="xs" className="min-h-11" disabled={feedbackStateMutation.isPending} onClick={() => feedbackStateMutation.mutate(!feedbackQuery.data!.feedback_paused)}>

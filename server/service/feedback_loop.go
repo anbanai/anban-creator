@@ -76,6 +76,7 @@ const (
 	FeedbackCadenceWeekly           = "weekly"
 	FeedbackCadenceMonthly          = "monthly"
 	FeedbackTriggerUserAttribution  = "user_attribution"
+	FeedbackTriggerAutoAttribution  = "auto_performance_attribution"
 	FeedbackJobEligible             = "eligible"
 	FeedbackJobSkipped              = "skipped"
 	FeedbackSkipNoNewRevision       = "no_new_revision"
@@ -126,7 +127,7 @@ func feedbackSampleThreshold(operation string) int64 {
 
 type FeedbackEligibilityInput struct {
 	ProjectID, Platform, AccountID, Operation, Cadence                           string
-	TargetContentID                                                              string
+	TargetContentID, AttributionDirection                                        string
 	PeriodStart, PeriodEnd, ContentSetDigest                                     string
 	AnalyticsRevision, StrategyRevision                                          int64
 	HasNewRevision, HasMatureContent, HasValidObservations, MeetsSampleThreshold bool
@@ -159,7 +160,7 @@ func EvaluateFeedbackEligibility(in FeedbackEligibilityInput) FeedbackEligibilit
 }
 
 func FeedbackJobFingerprint(in FeedbackEligibilityInput) string {
-	raw := strings.Join([]string{in.ProjectID, in.Platform, in.AccountID, in.Operation, in.Cadence, in.TargetContentID, in.PeriodStart, in.PeriodEnd, fmt.Sprint(in.AnalyticsRevision), in.ContentSetDigest, fmt.Sprint(in.StrategyRevision)}, "|")
+	raw := strings.Join([]string{in.ProjectID, in.Platform, in.AccountID, in.Operation, in.Cadence, in.TargetContentID, in.AttributionDirection, in.PeriodStart, in.PeriodEnd, fmt.Sprint(in.AnalyticsRevision), in.ContentSetDigest, fmt.Sprint(in.StrategyRevision)}, "|")
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }

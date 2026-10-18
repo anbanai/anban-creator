@@ -25,25 +25,32 @@ const (
 // Feedback Agent and the Server finalizer. The Server owns all identity and
 // persistence fields; agent supplied identity is checked, never trusted.
 type feedbackAnalysisArtifact struct {
-	SchemaVersion     string          `json:"schema_version"`
-	Status            string          `json:"status"`
-	Source            string          `json:"source"`
-	DataAt            string          `json:"data_at"`
-	Missing           []string        `json:"missing"`
-	EvidencePaths     []string        `json:"evidence_paths"`
-	JobID             string          `json:"job_id,omitempty"`
-	ProjectID         string          `json:"project_id,omitempty"`
-	Operation         string          `json:"operation,omitempty"`
-	TargetContentID   string          `json:"target_content_id,omitempty"`
-	BaselineScope     string          `json:"baseline_scope,omitempty"`
-	Trigger           string          `json:"trigger,omitempty"`
-	AnalyticsRevision int64           `json:"analytics_revision,omitempty"`
-	Summary           string          `json:"summary,omitempty"`
-	Confidence        string          `json:"confidence,omitempty"`
-	Limitations       string          `json:"limitations,omitempty"`
-	PossibleFactors   []string        `json:"possible_factors,omitempty"`
-	Experiments       []string        `json:"experiments,omitempty"`
-	Recommendations   json.RawMessage `json:"recommendations,omitempty"`
+	SchemaVersion            string                                     `json:"schema_version"`
+	Status                   string                                     `json:"status"`
+	Source                   string                                     `json:"source"`
+	DataAt                   string                                     `json:"data_at"`
+	Missing                  []string                                   `json:"missing"`
+	EvidencePaths            []string                                   `json:"evidence_paths"`
+	JobID                    string                                     `json:"job_id,omitempty"`
+	ProjectID                string                                     `json:"project_id,omitempty"`
+	Operation                string                                     `json:"operation,omitempty"`
+	TargetContentID          string                                     `json:"target_content_id,omitempty"`
+	BaselineScope            string                                     `json:"baseline_scope,omitempty"`
+	Trigger                  string                                     `json:"trigger,omitempty"`
+	AnalyticsRevision        int64                                      `json:"analytics_revision,omitempty"`
+	Summary                  string                                     `json:"summary,omitempty"`
+	Confidence               string                                     `json:"confidence,omitempty"`
+	Limitations              string                                     `json:"limitations,omitempty"`
+	PossibleFactors          []string                                   `json:"possible_factors,omitempty"`
+	Experiments              []string                                   `json:"experiments,omitempty"`
+	Recommendations          json.RawMessage                            `json:"recommendations,omitempty"`
+	DimensionRecommendations map[string]feedbackDimensionRecommendation `json:"dimension_recommendations,omitempty"`
+}
+
+type feedbackDimensionRecommendation struct {
+	Reason   string         `json:"reason"`
+	Evidence []string       `json:"evidence"`
+	Updates  map[string]any `json:"updates"`
 }
 
 type feedbackEvidenceArtifact struct {
@@ -54,6 +61,8 @@ type feedbackEvidenceArtifact struct {
 	Missing           []string        `json:"missing"`
 	EvidencePaths     []string        `json:"evidence_paths"`
 	JobID             string          `json:"job_id,omitempty"`
+	ProjectID         string          `json:"project_id,omitempty"`
+	TargetContentID   string          `json:"target_content_id,omitempty"`
 	AnalyticsRevision int64           `json:"analytics_revision,omitempty"`
 	Evidence          json.RawMessage `json:"evidence,omitempty"`
 }
@@ -117,7 +126,12 @@ func (s *TaskService) finalizeFeedbackExecution(ctx context.Context, task *model
 	if err := validateFeedbackArtifacts(job, &analysis, &evidence); err != nil {
 		return s.failFeedbackFinalization(ctx, job, err.Error())
 	}
-	if analysis.Status == "skipped" || analysis.Status == "data_insufficient" {
+	if analysis.Status == "ready" && job.TargetContentID != "" && job.Trigger == FeedbackTriggerAutoAttribution {
+		if err := validateFeedbackDimensionRecommendations(analysis.DimensionRecommendations); err != nil {
+			return s.failFeedbackFinalization(ctx, job, err.Error())
+		}
+	}
+	if analysis.Status == "skipped" || analysis.Status == "data_insufficient" || (analysis.Status == "warning" && job.Operation == "content_postmortem") {
 		now := time.Now().UTC()
 		job.Status = model.FeedbackJobSkipped
 		job.SkipReason = analysis.Status
@@ -131,14 +145,23 @@ func (s *TaskService) finalizeFeedbackExecution(ctx context.Context, task *model
 		return s.failFeedbackFinalization(ctx, job, "feedback_evidence_invalid")
 	}
 	combinedEvidence["analysis"] = analysis
+	// These fields are copied from the frozen Server job so the persisted
+	// insight remains auditable even when the Agent only returns prose.
+	combinedEvidence["target_content_id"] = job.TargetContentID
+	combinedEvidence["direction"] = job.AttributionDirection
+	combinedEvidence["metric"] = job.PerformanceMetric
+	combinedEvidence["metric_basis"] = job.PerformanceMetricBasis
+	combinedEvidence["performance_score"] = job.PerformanceScore
+	combinedEvidence["performance_percentile"] = job.PerformancePercentile
+	combinedEvidence["sample_count"] = job.SampleCount
+	combinedEvidence["observation_window"] = map[string]any{"start": job.PeriodStart, "end": job.PeriodEnd, "maturity_cutoff": job.MaturityCutoff}
+	combinedEvidence["analytics_revision"] = job.AnalyticsRevision
+	combinedEvidence["profile_revision"] = job.ProfileRevision
 	combined, err := json.Marshal(combinedEvidence)
 	if err != nil {
 		return fmt.Errorf("marshal feedback evidence: %w", err)
 	}
-	promotion := model.FeedbackPromotionNone
-	if job.TargetContentID != "" && job.Operation == "content_postmortem" {
-		promotion = model.FeedbackPromotionCandidate
-	}
+	promotion := feedbackInsightPromotionStatus(job, analysis)
 	confidence := strings.TrimSpace(analysis.Confidence)
 	if confidence == "" {
 		confidence = confidenceForSample(job.SampleCount)
@@ -150,7 +173,8 @@ func (s *TaskService) finalizeFeedbackExecution(ctx context.Context, task *model
 	insight := &model.FeedbackInsight{
 		ID: uuid.NewString(), JobID: job.ID, ExecutionID: execution.ID, ProjectID: job.ProjectID,
 		AnalyticsRevision: job.AnalyticsRevision, TargetContentID: job.TargetContentID,
-		BaselineScope: firstNonEmpty(analysis.BaselineScope, "account_platform"), Trigger: job.Trigger,
+		ProfileRevision: job.ProfileRevision,
+		BaselineScope:   firstNonEmpty(analysis.BaselineScope, "account_platform"), Trigger: job.Trigger,
 		Kind: job.Operation, EvidenceJSON: string(combined), Summary: strings.TrimSpace(analysis.Summary),
 		Confidence: confidence, Limitations: limitations, PromotionStatus: promotion,
 		AgentPackDigest: execution.AgentPackDigest, AnalysisArtifactPath: feedbackAnalysisArtifactPath,
@@ -177,6 +201,17 @@ func (s *TaskService) finalizeFeedbackExecution(ctx context.Context, task *model
 	job.CompletedAt = &now
 	job.LastError = ""
 	return s.repo.FeedbackLoop().UpdateJob(ctx, job)
+}
+
+func feedbackInsightPromotionStatus(job *model.FeedbackJob, analysis feedbackAnalysisArtifact) string {
+	if feedbackInsightShouldPersist(job, analysis) && job.TargetContentID != "" && job.Operation == "content_postmortem" {
+		return model.FeedbackPromotionCandidate
+	}
+	return model.FeedbackPromotionNone
+}
+
+func feedbackInsightShouldPersist(job *model.FeedbackJob, analysis feedbackAnalysisArtifact) bool {
+	return job != nil && (job.Operation != "content_postmortem" || analysis.Status == "ready")
 }
 
 // FinalizeFeedbackExecution is exposed for focused service tests and recovery
@@ -208,7 +243,7 @@ func validateFeedbackArtifacts(job *model.FeedbackJob, analysis *feedbackAnalysi
 	if analysis.Status != "skipped" && analysis.Status != "data_insufficient" && (analysis.JobID != job.ID || analysis.ProjectID != job.ProjectID || analysis.Operation != job.Operation || analysis.TargetContentID != job.TargetContentID || analysis.AnalyticsRevision != job.AnalyticsRevision) {
 		return errors.New("feedback_artifact_job_mismatch")
 	}
-	if evidence.Status != "skipped" && evidence.Status != "data_insufficient" && (evidence.JobID != job.ID || evidence.AnalyticsRevision != job.AnalyticsRevision) {
+	if evidence.Status != "skipped" && evidence.Status != "data_insufficient" && (evidence.JobID != job.ID || evidence.ProjectID != job.ProjectID || evidence.TargetContentID != job.TargetContentID || evidence.AnalyticsRevision != job.AnalyticsRevision) {
 		return errors.New("feedback_artifact_revision_mismatch")
 	}
 	if analysis.Status != evidence.Status {
@@ -219,6 +254,22 @@ func validateFeedbackArtifacts(job *model.FeedbackJob, analysis *feedbackAnalysi
 	}
 	if len(evidence.Evidence) > 0 && !json.Valid(evidence.Evidence) {
 		return errors.New("feedback_evidence_payload_invalid")
+	}
+	return nil
+}
+
+func validateFeedbackDimensionRecommendations(values map[string]feedbackDimensionRecommendation) error {
+	allowed := map[string]bool{}
+	for _, dimension := range model.ProfileDimensions() {
+		allowed[dimension] = true
+	}
+	if len(values) == 0 {
+		return errors.New("feedback_profile_recommendations_missing")
+	}
+	for dimension, recommendation := range values {
+		if !allowed[dimension] || strings.TrimSpace(recommendation.Reason) == "" || len(recommendation.Evidence) == 0 || len(recommendation.Updates) == 0 {
+			return errors.New("feedback_profile_recommendations_invalid")
+		}
 	}
 	return nil
 }

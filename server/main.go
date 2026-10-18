@@ -449,6 +449,7 @@ func main() {
 			feedbackAttributionSvc.SetAgentProfileRegistry(agentProfiles)
 		}
 		feedbackPromotionSvc = service.NewFeedbackPromotionService(repo, projectMemoryStore)
+		feedbackPromotionSvc.SetProjectProfileMemory(projectMemoryStore)
 		wechatPublicationSvc.SetEnqueuer(asynqClient)
 
 		taskSvc = service.NewTaskService(repo, asynqClient, store, log, cfg.Claude.TaskLogDir, service.NewRedisPubSub(rdb, log), publishingSvc)
