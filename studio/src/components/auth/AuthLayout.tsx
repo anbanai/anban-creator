@@ -36,12 +36,12 @@ export default function AuthLayout({
           ✦ Anban Studio
         </div>
         <h1 className="text-5xl font-black leading-tight text-amber-900 dark:text-amber-100">
-          让创作
+          内容生产
           <br />
-          更简单
+          持续进化
         </h1>
         <p className="mt-4 max-w-sm text-base leading-relaxed text-amber-700 dark:text-amber-300">
-          从灵感到发布，AI 全程陪伴你的内容创作之旅。微信公众号、种草笔记，一站搞定。
+          从选题判断、内容与素材生成，到发布数据回流和效果复盘，帮助团队持续产出高质量内容。
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
           {featurePills.map((pill) => {
@@ -66,7 +66,7 @@ export default function AuthLayout({
           <div className="text-xs font-semibold tracking-widest text-amber-700 dark:text-amber-400">
             ✦ Anban Studio
           </div>
-          <div className="mt-2 text-2xl font-black text-amber-900 dark:text-amber-100">让创作更简单</div>
+          <div className="mt-2 text-2xl font-black text-amber-900 dark:text-amber-100">内容生成操作系统</div>
         </div>
 
         {/* Form header */}

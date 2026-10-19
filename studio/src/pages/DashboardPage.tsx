@@ -332,7 +332,7 @@ export default function DashboardPage() {
           <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
             今天想创作什么？
           </h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">选好创作项目，写下想法或上传素材，剩下的交给 AI 助手。</p>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">围绕项目定位开始创作，并在作品交付后查看表现与复盘线索。</p>
         </div>
 
         <div ref={composerRef} className="mx-auto w-full max-w-3xl">
