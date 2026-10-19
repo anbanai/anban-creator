@@ -289,7 +289,7 @@ func TestStageProjectCreatorDraftRejectsMissingRuntimeContext(t *testing.T) {
 	}
 }
 
-func TestInteractiveRuntimeCredentialCannotCallOtherMCPTools(t *testing.T) {
+func TestInteractiveRuntimeCredentialCanCallReadOnlyMCPTools(t *testing.T) {
 	factory := &interactiveMCPFactory{tokens: make(chan string, 1)}
 	svc := service.NewInteractiveServiceWithRuntime(nil, factory)
 	svc.SetEnabled(true)
@@ -308,14 +308,27 @@ func TestInteractiveRuntimeCredentialCannotCallOtherMCPTools(t *testing.T) {
 	if sessionID == "" || sess.ID == "" {
 		t.Fatal("MCP or interactive session ID is empty")
 	}
-	rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, "list_projects", `{}`)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("interactive tool call status = %d, body = %s; want 403", rec.Code, rec.Body.String())
+	rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, "list_trends", `{}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("interactive read-only tool call status = %d, body = %s; want 200", rec.Code, rec.Body.String())
 	}
-	batch := `[{"jsonrpc":"2.0","method":"tools/call","params":{"name":"stage_project_creator_draft","arguments":{}},"id":3},{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_projects","arguments":{}},"id":4}]`
+	for _, forbidden := range []struct {
+		name string
+		args string
+	}{
+		{name: "search_web", args: `{"query":"anban"}`},
+		{name: "fetch_web_page", args: `{"url":"https://example.com"}`},
+		{name: "search_images", args: `{"query":"anban"}`},
+	} {
+		search := callMCPToolForScopeTest(handler, runtimeToken, sessionID, forbidden.name, forbidden.args)
+		if search.Code != http.StatusForbidden {
+			t.Fatalf("interactive %s status = %d, body = %s; want 403", forbidden.name, search.Code, search.Body.String())
+		}
+	}
+	batch := `[{"jsonrpc":"2.0","method":"tools/call","params":{"name":"stage_project_creator_draft","arguments":{}},"id":3},{"jsonrpc":"2.0","method":"tools/call","params":{"name":"search_web","arguments":{"query":"anban"}},"id":4}]`
 	batchRec := postMCPForScopeTest(handler, runtimeToken, sessionID, batch)
 	if batchRec.Code != http.StatusForbidden {
-		t.Fatalf("interactive mixed batch status = %d, body = %s; want 403", batchRec.Code, batchRec.Body.String())
+		t.Fatalf("interactive mixed batch with search status = %d, body = %s; want 403", batchRec.Code, batchRec.Body.String())
 	}
 }
 

@@ -227,7 +227,7 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
   const event = isRecord(params.event) ? params.event : undefined;
   if (!event || typeof event.type !== "string") return [];
-  if (rootSessionId !== undefined && sessionId !== rootSessionId && event.type !== "tool/call") return [];
+  if (rootSessionId !== undefined && sessionId !== rootSessionId && event.type !== "tool/call" && event.type !== "tool/result") return [];
   const data = isRecord(event.data) ? event.data : {};
   if (event.type === "turn/start") {
     const turn = typeof data.turn === "number" ? data.turn : undefined;
@@ -286,7 +286,8 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
         event: "agent.activity",
         data: {
           session_id: sessionId,
-          name: name.replace(/^mcp__anban__/, "").slice(0, 128),
+          ...(typeof data.callId === "string" && data.callId.trim() !== "" ? { call_id: data.callId } : {}),
+          name: name.replace(/^mcp__(?:anban|creator)__/, "").slice(0, 128),
         },
       }];
     }
@@ -321,6 +322,27 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
         session_id: sessionId,
         call_id: callId,
         questions,
+      },
+    }];
+  }
+  if (event.type === "tool/result") {
+    const message = isRecord(data.message) ? data.message : {};
+    const callId = typeof message.toolCallId === "string" ? message.toolCallId.trim() : "";
+    if (!callId) return [];
+    const content = textFromContent(message.content);
+    const error = isRecord(data.error) ? data.error : {};
+    const code = typeof error.code === "string" && error.code.trim() !== "" ? error.code : undefined;
+    const turn = typeof data.turn === "number" ? data.turn : undefined;
+    return [{
+      event: "tool.result",
+      data: {
+        session_id: sessionId,
+        ...(turn === undefined ? {} : { turn }),
+        call_id: callId,
+        name: "",
+        ok: message.isError !== true,
+        message: content,
+        ...(code === undefined ? {} : { code }),
       },
     }];
   }

@@ -355,9 +355,31 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 	})
 }
 
+// interactiveMCPTools contains the user-scoped, read-only capabilities that
+// the DSH project-creator runtime may use before a project task exists. Search
+// and task-bound capabilities remain execution-scoped and are therefore
+// intentionally excluded from this list.
+var interactiveMCPTools = map[string]struct{}{
+	"stage_project_creator_draft": {},
+	"list_projects":               {},
+	"get_project":                 {},
+	"get_project_profile":         {},
+	"list_project_titles":         {},
+	"list_drafts":                 {},
+	"list_published_articles":     {},
+	"list_topics":                 {},
+	"list_trends":                 {},
+	"list_resources":              {},
+	"get_resource":                {},
+	"search_seednote_feeds":       {},
+	"get_seednote_feed_detail":    {},
+	"get_seednote_user_profile":   {},
+}
+
 // interactiveScopeMiddleware constrains the opaque credential issued to a
-// one-shot interactive runtime. The runtime can only stage the draft for its
-// own authenticated session; all other MCP tools remain user/API-key scoped.
+// one-shot interactive runtime. The runtime may stage its own draft and use
+// the explicitly listed user-scoped read capabilities; all other MCP tools
+// require an API-key or execution-scoped credential.
 func interactiveScopeMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		info := mcpauth.TokenInfoFromContext(r.Context())
@@ -383,7 +405,10 @@ func interactiveScopeMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		for _, request := range requests {
-			if request.Method == "tools/call" && request.Params.Name != "stage_project_creator_draft" {
+			if request.Method == "tools/call" {
+				if _, allowed := interactiveMCPTools[strings.TrimSpace(request.Params.Name)]; allowed {
+					continue
+				}
 				http.Error(w, "interactive runtime credential cannot call this MCP tool", http.StatusForbidden)
 				return
 			}

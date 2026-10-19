@@ -110,6 +110,52 @@ describe("DSH bridge protocol", () => {
     })).toEqual([{ event: "agent.activity", data: { session_id: "s", name: "get_project_profile" } }]);
   });
 
+  test("normalizes the DSH creator MCP namespace", () => {
+    expect(mapHarnessNotification({
+      method: "session.event",
+      params: {
+        sessionId: "s",
+        event: {
+          type: "tool/call",
+          data: { name: "mcp__creator__list_projects", callId: "call-projects" },
+        },
+      },
+    })).toEqual([{ event: "agent.activity", data: { session_id: "s", call_id: "call-projects", name: "list_projects" } }]);
+  });
+
+  test("maps tool results so the Studio can distinguish success from failure", () => {
+    expect(mapHarnessNotification({
+      method: "session.event",
+      params: {
+        sessionId: "s",
+        event: {
+          type: "tool/result",
+          data: {
+            turn: 2,
+            step: 3,
+            message: {
+              toolCallId: "call-stage",
+              content: [{ type: "text", text: "stage project creator draft: interactive session not found" }],
+              isError: true,
+            },
+            error: { code: "SESSION_NOT_FOUND" },
+          },
+        },
+      },
+    })).toEqual([{
+      event: "tool.result",
+      data: {
+        session_id: "s",
+        turn: 2,
+        call_id: "call-stage",
+        name: "",
+        ok: false,
+        message: "stage project creator draft: interactive session not found",
+        code: "SESSION_NOT_FOUND",
+      },
+    }]);
+  });
+
   test("maps terminal turn errors into a safe session diagnostic", () => {
     expect(mapHarnessNotification({
       method: "session.event",
