@@ -99,6 +99,31 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 	}
 }
 
+func TestKubernetesRuntimeFactoryUsesStandardResourceQuantities(t *testing.T) {
+	factory := KubernetesRuntimeFactory{Config: srvconfig.DshConfig{
+		Image: "registry.example/dsh@sha256:" + repeatHex(64), KubernetesNamespace: "anban",
+		KubernetesProjectMemoryClaim: "creator-project-memory", KubernetesProjectMemoryMount: "/workspace/project",
+		Resources: srvconfig.KubernetesResourceConfig{
+			Requests: map[string]string{"cpu": "500m", "memory": "512Mi"},
+			Limits:   map[string]string{"cpu": "500m", "memory": "512Mi"},
+		},
+	}}
+	pod := factory.pod(InteractiveRuntimeSpec{SessionID: "s-quantity"}, "anban", "anban-dsh-s-quantity")
+	resources := pod.Spec.Containers[0].Resources
+	if got := resources.Requests.Cpu().String(); got != "500m" {
+		t.Fatalf("CPU request = %q, want 500m", got)
+	}
+	if got := resources.Limits.Cpu().String(); got != "500m" {
+		t.Fatalf("CPU limit = %q, want 500m", got)
+	}
+	if got := resources.Requests.Memory().String(); got != "512Mi" {
+		t.Fatalf("memory request = %q, want 512Mi", got)
+	}
+	if got := resources.Limits.Memory().String(); got != "512Mi" {
+		t.Fatalf("memory limit = %q, want 512Mi", got)
+	}
+}
+
 func TestKubernetesRuntimeFactoryBuildsLongLivedJobWithAttachableBridge(t *testing.T) {
 	factory := KubernetesRuntimeFactory{ServiceAccount: "creator-agent-runner", Config: srvconfig.DshConfig{
 		KubernetesNamespace: "anban", KubernetesImagePullSecret: "acr-secret", KubernetesProjectMemoryClaim: "creator-project-memory",

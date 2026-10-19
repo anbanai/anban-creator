@@ -121,6 +121,15 @@ dsh:
   kubernetes_project_memory_mount: "/workspace/project"
   server_url: "${ANBAN_DSH_SERVER_URL:-http://server:8080}"
   server_instance_id: "${HOSTNAME:-local}"
+  # Kubernetes-native quantities. These are applied directly to each DSH Pod.
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  # Legacy Docker-only resource fields; keep these for local container mode.
   cpu_cores: 1
   memory_mb: 1024
   pids_limit: 256
