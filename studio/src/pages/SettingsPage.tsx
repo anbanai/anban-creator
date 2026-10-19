@@ -22,6 +22,7 @@ import { changePasswordSchema, type ChangePasswordFormValues } from '@/lib/schem
 import type { CreateAPIKeyResponse } from '@/types'
 import { tierLabels, tierDescriptions } from '@/lib/labels'
 import IlinkBindingSection from '@/components/settings/IlinkBindingSection'
+import PlatformSettingsSection from '@/components/settings/PlatformSettingsSection'
 import { buildSettingsReadinessItems, type SettingsReadinessListItem } from '@/lib/studio-ux'
 
 export default function SettingsPage() {
@@ -132,6 +133,13 @@ export default function SettingsPage() {
       />
       {/* WeChat bot binding — task notifications and commands */}
       <IlinkBindingSection />
+
+      <SettingsGroupTitle
+        id="platform-settings"
+        title="平台设置"
+        description="同一个人设可以关联多个平台账号；在这里按账号管理平台凭据、默认写作和发布配置。"
+      />
+      <PlatformSettingsSection />
 
       <SettingsGroupTitle
         id="account-security-settings"

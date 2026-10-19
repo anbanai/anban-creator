@@ -23,5 +23,6 @@ describe('SettingsPage password guidance', () => {
     render(<SettingsPage />)
 
     expect(screen.getByText('8-128 个字符，且不能与当前密码相同。修改成功后所有登录会话失效，需要用新密码重新登录。')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '平台设置' })).toBeInTheDocument()
   })
 })
