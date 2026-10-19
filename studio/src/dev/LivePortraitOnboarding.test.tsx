@@ -61,7 +61,7 @@ describe('live model-backed portrait onboarding', () => {
     expect(screen.getByRole('progressbar',{name:'画像信息完整度'})).toHaveAttribute('aria-valuenow','0')
     expect(screen.queryByRole('button', { name: '试用示例回答' })).not.toBeInTheDocument()
     await send(intro)
-    const portrait = screen.getByRole('complementary', { name: '正在形成的 IP 画像' })
+    const portrait = screen.getByRole('complementary', { name: '正在形成的身份画像' })
     expect(within(portrait).getByText('上班族')).toBeInTheDocument()
     expect(within(portrait).getAllByText('来自你的表述')).toHaveLength(3)
     expect(screen.getByRole('button', { name: '开始创作' })).toBeEnabled()

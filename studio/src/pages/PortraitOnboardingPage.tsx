@@ -35,7 +35,7 @@ function AccountInterview({ userId }: { userId: string }) {
     persist(next); setDraft(next)
   }
   return <>
-    <Link to="/projects" className="text-sm text-muted-foreground">返回项目</Link>
+    <div className="flex flex-wrap items-center gap-3 text-sm"><Link to="/portraits" className="font-medium text-primary underline underline-offset-4">查看已有画像</Link><span className="text-muted-foreground">这里用于新增创作身份；修改已有身份请进入画像库。</span></div>
     {warning && <p role="alert">{warning}</p>}
     <PortraitOnboarding key={draft.id} transport={onboardingApi} production onlineDelivery sessionId={draft.id}
       initialSession={draft.session} onReset={reset}

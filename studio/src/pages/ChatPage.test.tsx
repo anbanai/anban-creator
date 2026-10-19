@@ -1165,16 +1165,19 @@ describe('ChatPage', () => {
     expect(screen.getByText('主要受众为一二线城市白领')).toBeInTheDocument()
   })
 
-  it('returns to the existing project after confirming a profile update', async () => {
+  it.each([
+    ['', '/projects?edit=project-9'],
+    ['&return_to=portraits', '/portraits/project-9'],
+  ])('returns to the requested destination after confirming a profile update: %s', async (returnQuery, destination) => {
     interactiveMocks.commit.mockResolvedValueOnce({})
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 2, ready: true, confirmation_token: 'secret-token', memory_append: '补充：春茶系列将在四月上线。', project: { name: '茶品牌', platform: 'wechat' } } }) },
     ], signal))
-    renderChat('/chat?agent=project-creator&intent=update-project-profile&project_id=project-9')
+    renderChat(`/chat?agent=project-creator&intent=update-project-profile&project_id=project-9${returnQuery}`)
 
     fireEvent.click(await screen.findByRole('button', { name: '确认更新画像' }))
     await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/projects?edit=project-9'))
+    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent(destination))
     expect(screen.getByText('将追加到项目记忆的内容')).toBeInTheDocument()
     expect(screen.getByText('补充：春茶系列将在四月上线。')).toBeInTheDocument()
   })

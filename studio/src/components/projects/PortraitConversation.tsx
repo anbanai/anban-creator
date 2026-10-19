@@ -85,10 +85,10 @@ export function PortraitConversation({
   }
 
   return <div className="portrait-workspace">
-    <section className="portrait-chat" aria-label="聊出你的 IP">
+    <section className="portrait-chat" aria-label="聊出你的创作身份">
       <header className="portrait-chat-heading">
         <span className="portrait-eyebrow">从一次聊天开始</span>
-        <h1>聊一聊，让你的 IP 清晰起来。</h1>
+        <h1>聊一聊，让你的创作身份清晰起来。</h1>
         <p>说说你的故事。我们一起找到值得被看见的部分。</p>
       </header>
       <section className={`portrait-progress ${ready ? 'is-ready' : ''}`} aria-label="访谈进度">
@@ -144,8 +144,8 @@ export function PortraitConversation({
       </div>
     </section>
 
-    <aside className="portrait-sheet" aria-label="正在形成的 IP 画像">
-      <div className="portrait-sheet-top"><span>你的 IP 画像</span><span className="portrait-status">{ready ? '已初步清晰' : count ? '逐渐清晰' : '等待认识你'}</span></div>
+    <aside className="portrait-sheet" aria-label="正在形成的身份画像">
+      <div className="portrait-sheet-top"><span>你的身份画像</span><span className="portrait-status">{ready ? '已初步清晰' : count ? '逐渐清晰' : '等待认识你'}</span></div>
       <div className={`portrait-figure ${count ? 'has-story' : ''}`} role="img" aria-label={count ? '随着对话逐渐点亮的抽象人物形象，不代表真实外貌' : '尚未填入信息的空白人物轮廓'}>
         <div className="portrait-orbit" />
         <div className="portrait-person"><UserRound size={78} strokeWidth={1} /></div>

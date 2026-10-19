@@ -428,6 +428,7 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，服务不同类型的内容。">
+        <Button variant="outline" onClick={() => navigate('/portraits')}>画像库</Button>
         <Button variant="outline" aria-label="使用表单创建" onClick={openCreate}>
           <FilePlus2 className="h-4 w-4" />
           表单创建
