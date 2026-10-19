@@ -148,7 +148,7 @@ export default function TasksPage() {
   const shouldCreate = createIntent.shouldCreate
 
   const [statusFilter, setStatusFilter] = useState(initialStatus)
-  const [projectFilter, setProjectFilter] = useState('')
+  const [projectFilter, setProjectFilter] = useState(searchParams.get('project_id') || '')
   const [searchFilter, setSearchFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [createDialogIntent, setCreateDialogIntent] = useState<{ projectId?: string; type?: TaskType }>({})
@@ -162,6 +162,8 @@ export default function TasksPage() {
   useEffect(() => {
     const nextStatus = normalizeTaskStatusFilter(searchParams.get('status'))
     setStatusFilter((current) => (current === nextStatus ? current : nextStatus))
+    const nextProject = searchParams.get('project_id') || ''
+    setProjectFilter((current) => (current === nextProject ? current : nextProject))
   }, [searchParams])
 
   const projectsQuery = useQuery({
@@ -179,6 +181,24 @@ export default function TasksPage() {
     }
     return map
   }, [projects])
+
+  const filteredProjectQuery = useQuery({
+    queryKey: ['project', projectFilter],
+    queryFn: () => api.projects.get(projectFilter),
+    enabled: Boolean(projectFilter) && !projectsQuery.isPending && !projectMap[projectFilter],
+    staleTime: 60_000,
+  })
+  const filteredProject = projectMap[projectFilter] ?? filteredProjectQuery.data?.project
+
+  const clearProjectFilter = () => {
+    setProjectFilter('')
+    setSelectedTaskIds([])
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.delete('project_id')
+      return next
+    }, { replace: true })
+  }
 
   // Resolve create intent after project prerequisites are known.
   useEffect(() => {
@@ -490,6 +510,19 @@ export default function TasksPage() {
         </div>
       ) : null}
 
+      {projectFilter ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-3 py-2 text-sm">
+          <span>
+            正在查看「{filteredProject?.name ?? (filteredProjectQuery.isPending ? '人设' : `人设 ${projectFilter}`)}」的作品
+            {!isLoading && !isError ? <span className="ml-2 text-muted-foreground">当前筛选共 {totalTasks} 个作品</span> : null}
+          </span>
+          <div className="flex items-center gap-3">
+            <Link to="/projects" className="inline-flex min-h-11 items-center text-primary hover:underline">返回人设</Link>
+            <Button type="button" variant="ghost" size="sm" className="min-h-11" onClick={clearProjectFilter}>清除人设筛选</Button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Filters apply to the task queue; text search covers tasks loaded so far. */}
       <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3">
         {/* Status filter tabs */}
@@ -523,7 +556,15 @@ export default function TasksPage() {
         <div className="w-full sm:w-48">
           <ProjectSelector
             value={projectFilter}
-            onChange={(id) => setProjectFilter(id)}
+            onChange={(id) => {
+              setProjectFilter(id)
+              setSearchParams((current) => {
+                const next = new URLSearchParams(current)
+                if (id) next.set('project_id', id)
+                else next.delete('project_id')
+                return next
+              }, { replace: true })
+            }}
           />
         </div>
 
@@ -543,7 +584,12 @@ export default function TasksPage() {
           {(statusFilter !== 'all' || projectFilter || searchFilter) && (
             <Button variant="ghost" size="sm" className="min-h-11" onClick={() => {
               setStatusFilter('all'); setProjectFilter(''); setSearchFilter('')
-              setSearchParams((current) => { const next = new URLSearchParams(current); next.delete('status'); return next }, { replace: true })
+              setSearchParams((current) => {
+                const next = new URLSearchParams(current)
+                next.delete('status')
+                next.delete('project_id')
+                return next
+              }, { replace: true })
             }}>清空筛选</Button>
           )}
         </div>

@@ -110,6 +110,7 @@ vi.mock('@/lib/api', async () => {
       },
       projects: {
         ...actual.api.projects,
+        get: vi.fn(),
         list: vi.fn().mockResolvedValue([fixtures.project]),
         platformConfigs: vi.fn().mockResolvedValue([]),
       },
@@ -324,6 +325,25 @@ describe('TasksPage URL-driven recovery filters', () => {
       plan_id: 'plan-1', status: 'failed',
     })))
     expect(screen.getByText('正在查看此排期生成的作品')).toBeInTheDocument()
+  })
+
+  it('initializes and clears the persona filter from the URL', async () => {
+    renderTasksPage('/tasks?project_id=project-1')
+
+    await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: 'project-1' })))
+    expect(await screen.findByText('正在查看「公众号创作项目」的作品')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '清除人设筛选' }))
+    await waitFor(() => expect(api.tasks.list).toHaveBeenLastCalledWith(expect.objectContaining({ project_id: undefined })))
+    expect(screen.queryByText('正在查看「公众号创作项目」的作品')).not.toBeInTheDocument()
+  })
+
+  it('loads archived persona context for a filtered task list', async () => {
+    vi.mocked(api.projects.list).mockResolvedValue([])
+    vi.mocked(api.projects.get).mockResolvedValue({ project: { ...fixtures.project, status: 'archived' } } as never)
+    renderTasksPage('/tasks?project_id=project-1')
+
+    expect(await screen.findByText('正在查看「公众号创作项目」的作品')).toBeInTheDocument()
+    expect(api.projects.get).toHaveBeenCalledWith('project-1')
   })
 
   it('loads the next task batch from the scroll fallback control', async () => {
