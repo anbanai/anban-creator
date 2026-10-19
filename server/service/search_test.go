@@ -19,14 +19,26 @@ import (
 )
 
 type searchProviderStub struct {
-	response  *SearchResponse
+	response  *WebSearchResponse
 	err       error
-	responses []*SearchResponse
+	responses []*WebSearchResponse
 	errors    []error
 	calls     int
 }
 
-func (p *searchProviderStub) Search(_ context.Context, req SearchRequest) (*SearchResponse, error) {
+type fetchProviderStub struct {
+	response *PageFetchResponse
+	calls    int
+}
+
+func (p *fetchProviderStub) Fetch(_ context.Context, _ PageFetchRequest) (*PageFetchResponse, error) {
+	p.calls++
+	return p.response, nil
+}
+
+func (p *fetchProviderStub) Name() string { return "stub-fetch" }
+
+func (p *searchProviderStub) Search(_ context.Context, req WebSearchRequest) (*WebSearchResponse, error) {
 	call := p.calls
 	p.calls++
 	if call < len(p.errors) && p.errors[call] != nil {
@@ -38,16 +50,19 @@ func (p *searchProviderStub) Search(_ context.Context, req SearchRequest) (*Sear
 	if p.response != nil {
 		return p.response, p.err
 	}
-	return &SearchResponse{Provider: "stub", Query: req.Query}, p.err
+	return &WebSearchResponse{Provider: "stub", Query: req.Query}, p.err
 }
-func (p *searchProviderStub) Name() string                        { return "stub" }
-func (p *searchProviderStub) ValidateRequest(SearchRequest) error { return nil }
+func (p *searchProviderStub) Name() string                           { return "stub" }
+func (p *searchProviderStub) ValidateRequest(WebSearchRequest) error { return nil }
 
 func newSearchBillingFixture(t *testing.T) (repository.Repository, *gorm.DB, *BillingCatalogService, *BillingWalletService) {
 	t.Helper()
 	repo, db := newBillingServiceRepositoryWithDB(t)
 	bundle := testBillingBundle()
-	bundle.Products.SKUs = append(bundle.Products.SKUs, billing.SKUConfig{ID: "mcp.search_web", Operation: "mcp.search_web", ChargePolicy: "standalone_operation", PriceCredits: 0, Route: "search.web", Delivery: "search_results"})
+	bundle.Products.SKUs = append(bundle.Products.SKUs,
+		billing.SKUConfig{ID: "mcp.search_web", Operation: "mcp.search_web", ChargePolicy: "standalone_operation", PriceCredits: 0, Route: "search.web", Delivery: "search_results"},
+		billing.SKUConfig{ID: "mcp.fetch_web_page", Operation: "mcp.fetch_web_page", ChargePolicy: "standalone_operation", PriceCredits: 0, Route: "search.fetch", Delivery: "fetched_page"},
+	)
 	if err := repo.Users().Create(context.Background(), &model.User{ID: billingWalletUserID, Email: "search@example.com", Password: "fixture", InviteCode: "SEARCH01"}); err != nil {
 		t.Fatal(err)
 	}
@@ -78,11 +93,8 @@ func TestDoubaoCustomSearchProviderUsesOfficialWebContract(t *testing.T) {
 			t.Fatalf("custom request = %#v", request)
 		}
 		filter := request["Filter"].(map[string]any)
-		if filter["NeedUrl"] != true || filter["Sites"] != "example.com" || filter["TimeRange"] != "OneWeek" {
+		if filter["NeedContent"] != true || filter["Sites"] != "example.com" || filter["TimeRange"] != "2026-01-01..2026-02-01" {
 			t.Fatalf("custom filter = %#v", filter)
-		}
-		if request["QueryControl"].(map[string]any)["QueryRewrite"] != true {
-			t.Fatalf("custom query control = %#v", request["QueryControl"])
 		}
 		for _, field := range []string{"model", "input", "tools", "DocCount"} {
 			if _, ok := request[field]; ok {
@@ -98,10 +110,8 @@ func TestDoubaoCustomSearchProviderUsesOfficialWebContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL + "/search_api/web_search", APIKey: "secret", Timeout: time.Second, MaxWebResults: 10})
-	needURL := true
-	rewrite := true
-	result, err := provider.Search(context.Background(), SearchRequest{Query: "Anban", Limit: 3, TimeRange: "OneWeek", Domains: []string{"example.com"}, NeedURL: &needURL, QueryRewrite: &rewrite})
+	provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{CustomEndpoint: server.URL + "/search_api/web_search", APIKey: "secret", Timeout: time.Second, MaxResults: 10})
+	result, err := provider.Search(context.Background(), WebSearchRequest{Query: "Anban", Limit: 3, After: "2026-01-01", Before: "2026-02-01", Sites: []string{"example.com"}, IncludeContent: true})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -144,8 +154,8 @@ func TestDoubaoGlobalSearchProviderUsesOfficialGlobalContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL + "/search_api/global_search", APIKey: "global-secret", Timeout: time.Second, MaxWebResults: 10})
-	result, err := provider.Search(context.Background(), SearchRequest{Query: "Anban", Limit: 4})
+	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{GlobalEndpoint: server.URL + "/search_api/global_search", APIKey: "global-secret", Timeout: time.Second, MaxResults: 10})
+	result, err := provider.Search(context.Background(), WebSearchRequest{Query: "Anban", Limit: 4})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -170,7 +180,7 @@ func TestDeepSeekSearchProviderUsesOfficialSearchContract(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if request["query"] != "DeepSeek Search" || request["count"] != float64(3) || request["need_content"] != true || request["ori_question"] != "What is the latest DeepSeek Search API?" || request["localization"] != "203.0.113.10" {
+		if request["query"] != "DeepSeek Search" || request["count"] != float64(3) || request["need_content"] != true {
 			t.Fatalf("deepseek request = %#v", request)
 		}
 		for _, field := range []string{"model", "input", "tools", "SearchType", "Count", "DocCount"} {
@@ -193,9 +203,8 @@ func TestDeepSeekSearchProviderUsesOfficialSearchContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	needContent := true
-	provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{Endpoint: server.URL + "/v1/tools/search", APIKey: "deepseek-secret", Timeout: time.Second, MaxResults: 10})
-	result, err := provider.Search(context.Background(), SearchRequest{Query: "DeepSeek Search", Limit: 3, NeedContent: &needContent, OriginalQuestion: "What is the latest DeepSeek Search API?", Localization: "203.0.113.10"})
+	provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{SearchEndpoint: server.URL + "/v1/tools/search", APIKey: "deepseek-secret", Timeout: time.Second, MaxResults: 10})
+	result, err := provider.Search(context.Background(), WebSearchRequest{Query: "DeepSeek Search", Limit: 3, IncludeContent: true})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -209,13 +218,11 @@ func TestDeepSeekSearchProviderUsesOfficialSearchContract(t *testing.T) {
 }
 
 func TestDeepSeekSearchProviderRejectsUnsupportedFiltersAndInvalidQueries(t *testing.T) {
-	provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{Endpoint: "https://api.deepseek.com/v1/tools/search", APIKey: "secret", Timeout: time.Second, MaxResults: 50})
-	tests := []SearchRequest{
-		{Query: "q", Domains: []string{"example.com"}},
-		{Query: "q", TimeRange: "OneWeek"},
+	provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{SearchEndpoint: "https://api.deepseek.com/v1/tools/search", APIKey: "secret", Timeout: time.Second, MaxResults: 50})
+	tests := []WebSearchRequest{
 		{Query: strings.Repeat("q", 129)},
 		{Query: "q", Limit: 51},
-		{Query: "q", Localization: "CN"},
+		{Query: "q", Sites: make([]string, 21)},
 	}
 	for _, req := range tests {
 		if err := provider.ValidateRequest(req); err == nil {
@@ -272,8 +279,8 @@ func TestDeepSeekSearchProviderSanitizesFailuresAndAcceptsEmptyResults(t *testin
 		{path: "/timeout", timeout: 20 * time.Millisecond},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
-			provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{Endpoint: server.URL + tc.path, APIKey: "secret", Timeout: tc.timeout, MaxResults: 10})
-			result, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+			provider := NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{SearchEndpoint: server.URL + tc.path, APIKey: "secret", Timeout: tc.timeout, MaxResults: 10})
+			result, err := provider.Search(context.Background(), WebSearchRequest{Query: "test"})
 			if tc.wantResult {
 				if err != nil || result == nil || len(result.Results) != 0 {
 					t.Fatalf("Search() = %#v, %v; want valid empty result", result, err)
@@ -291,15 +298,15 @@ func TestDeepSeekSearchProviderSanitizesFailuresAndAcceptsEmptyResults(t *testin
 }
 
 func TestDoubaoGlobalSearchRejectsCustomOnlyFilters(t *testing.T) {
-	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: "https://example.com/search_api/global_search", APIKey: "secret", Timeout: time.Second})
-	if err := provider.ValidateRequest(SearchRequest{Query: "q", TimeRange: "OneWeek"}); err == nil {
-		t.Fatal("Global provider accepted a Custom-only filter")
+	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{GlobalEndpoint: "https://example.com/search_api/global_search", APIKey: "secret", Timeout: time.Second})
+	if err := provider.ValidateRequest(WebSearchRequest{Query: "q", After: "not-a-date"}); err == nil {
+		t.Fatal("Global provider accepted an invalid date filter")
 	}
 }
 
 func TestDoubaoCustomSearchAcceptsExplicitDateRange(t *testing.T) {
-	provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: "https://example.com/search_api/web_search", APIKey: "secret", Timeout: time.Second})
-	if err := provider.ValidateRequest(SearchRequest{Query: "q", TimeRange: "2026-09-01..2026-10-01"}); err != nil {
+	provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{CustomEndpoint: "https://example.com/search_api/web_search", APIKey: "secret", Timeout: time.Second})
+	if err := provider.ValidateRequest(WebSearchRequest{Query: "q", After: "2026-09-01", Before: "2026-10-01"}); err != nil {
 		t.Fatalf("ValidateRequest() rejected a valid date range: %v", err)
 	}
 }
@@ -312,8 +319,8 @@ func TestDoubaoGlobalSearchRejectsProviderResultError(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
-	_, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+	provider := NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{GlobalEndpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+	_, err := provider.Search(context.Background(), WebSearchRequest{Query: "test"})
 	if err == nil || !IsSearchProviderUnavailable(err) || strings.Contains(err.Error(), "upstream details") {
 		t.Fatalf("error = %v, want sanitized provider_unavailable", err)
 	}
@@ -335,11 +342,11 @@ func TestDoubaoSearchProviderRejectsMalformedResultPayloads(t *testing.T) {
 			defer server.Close()
 			var provider *DoubaoSearchProvider
 			if tc.edition == "custom" {
-				provider = NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+				provider = NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{CustomEndpoint: server.URL, APIKey: "secret", Timeout: time.Second})
 			} else {
-				provider = NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+				provider = NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{GlobalEndpoint: server.URL, APIKey: "secret", Timeout: time.Second})
 			}
-			_, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+			_, err := provider.Search(context.Background(), WebSearchRequest{Query: "test"})
 			if err == nil || !IsSearchProviderUnavailable(err) {
 				t.Fatalf("error = %v, want provider_unavailable", err)
 			}
@@ -361,31 +368,15 @@ func TestDoubaoSearchProviderAcceptsExplicitEmptyResults(t *testing.T) {
 			defer server.Close()
 			var provider *DoubaoSearchProvider
 			if tc.edition == "custom" {
-				provider = NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+				provider = NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{CustomEndpoint: server.URL, APIKey: "secret", Timeout: time.Second})
 			} else {
-				provider = NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+				provider = NewDoubaoGlobalSearchProvider(serverconfig.SearchDoubaoConfig{GlobalEndpoint: server.URL, APIKey: "secret", Timeout: time.Second})
 			}
-			result, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+			result, err := provider.Search(context.Background(), WebSearchRequest{Query: "test"})
 			if err != nil || result == nil || len(result.Results) != 0 {
 				t.Fatalf("Search() = %#v, %v; want a valid empty response", result, err)
 			}
 		})
-	}
-}
-
-func TestSearchProviderCostFiltersPreserveSearchConstraints(t *testing.T) {
-	needContent := true
-	rewrite := false
-	filters := searchProviderCostFilters(SearchRequest{
-		TimeRange: "OneWeek", Domains: []string{" example.com ", "example.com"}, BlockHosts: []string{"ads.example.com"},
-		NeedContent: &needContent, AuthInfoLevel: 1, ContentFormats: "markdown", Industry: "finance", QueryRewrite: &rewrite,
-	})
-	if filters["time_range"] != "OneWeek" || filters["auth_info_level"] != 1 || filters["content_formats"] != "markdown" || filters["industry"] != "finance" || filters["need_content"] != true || filters["query_rewrite"] != false {
-		t.Fatalf("filters = %#v", filters)
-	}
-	sites, ok := filters["sites"].([]string)
-	if !ok || len(sites) != 1 || sites[0] != "example.com" {
-		t.Fatalf("sites = %#v", filters["sites"])
 	}
 }
 
@@ -407,8 +398,8 @@ func TestDoubaoSearchProviderRejectsFailuresAndHidesSecrets(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer server.Close()
-			provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{Endpoint: server.URL, APIKey: "secret", Timeout: time.Second})
-			_, err := provider.Search(context.Background(), SearchRequest{Query: "test"})
+			provider := NewDoubaoCustomSearchProvider(serverconfig.SearchDoubaoConfig{CustomEndpoint: server.URL, APIKey: "secret", Timeout: time.Second})
+			_, err := provider.Search(context.Background(), WebSearchRequest{Query: "test"})
 			if err == nil || !IsSearchProviderUnavailable(err) {
 				t.Fatalf("error = %v, want provider unavailable", err)
 			}
@@ -422,10 +413,10 @@ func TestDoubaoSearchProviderRejectsFailuresAndHidesSecrets(t *testing.T) {
 func TestSearchServiceCreatesZeroPriceChargeAndReplaysIdempotently(t *testing.T) {
 	repo, db, catalog, wallet := newSearchBillingFixture(t)
 	defer repo.Close()
-	provider := &searchProviderStub{response: &SearchResponse{Provider: "stub", ProviderRequestID: "request-1", Query: "anban", Results: []SearchResultItem{}}}
-	cfg := &serverconfig.SearchConfig{Enabled: true, Provider: "stub", Custom: serverconfig.SearchDoubaoConfig{Timeout: 30 * time.Second}}
+	provider := &searchProviderStub{response: &WebSearchResponse{Provider: "stub", ProviderRequestID: "request-1", Query: "anban", Results: []SearchResultItem{}}}
+	cfg := &serverconfig.SearchConfig{Web: serverconfig.SearchCapabilityConfig{Enabled: true, Provider: "deepseek"}, Providers: serverconfig.SearchProvidersConfig{DeepSeek: serverconfig.SearchDeepSeekConfig{Timeout: 30 * time.Second}}}
 	svc := NewSearchService(cfg, provider, catalog, wallet, nil, repo.SearchOperations())
-	req := SearchOperationRequest{UserID: billingWalletUserID, ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1", Request: SearchRequest{Query: "anban", Limit: 3}}
+	req := SearchOperationRequest{UserID: billingWalletUserID, ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1", Request: WebSearchRequest{Query: "anban", Limit: 3}}
 	first, err := svc.Search(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -454,18 +445,45 @@ func TestSearchServiceCreatesZeroPriceChargeAndReplaysIdempotently(t *testing.T)
 }
 
 func TestSearchServiceOperationLeaseFollowsConfiguredProviderTimeout(t *testing.T) {
-	svc := &SearchService{config: &serverconfig.SearchConfig{Provider: "custom", Custom: serverconfig.SearchDoubaoConfig{Timeout: 10 * time.Minute}}}
+	svc := &SearchService{config: &serverconfig.SearchConfig{Web: serverconfig.SearchCapabilityConfig{Enabled: true, Provider: "doubao_custom"}, Providers: serverconfig.SearchProvidersConfig{Doubao: serverconfig.SearchDoubaoConfig{Timeout: 10 * time.Minute}}}}
 	if got := svc.operationLease(); got != 11*time.Minute {
 		t.Fatalf("operationLease() = %s", got)
 	}
-	if got := (&SearchService{config: &serverconfig.SearchConfig{Provider: "global", Global: serverconfig.SearchDoubaoConfig{Timeout: 10 * time.Minute}}}).operationLease(); got != 11*time.Minute {
+	if got := (&SearchService{config: &serverconfig.SearchConfig{Web: serverconfig.SearchCapabilityConfig{Enabled: true, Provider: "doubao_global"}, Providers: serverconfig.SearchProvidersConfig{Doubao: serverconfig.SearchDoubaoConfig{Timeout: 10 * time.Minute}}}}).operationLease(); got != 11*time.Minute {
 		t.Fatalf("global operationLease() = %s", got)
 	}
-	if got := (&SearchService{config: &serverconfig.SearchConfig{Provider: "deepseek", DeepSeek: serverconfig.SearchDeepSeekConfig{Timeout: 10 * time.Minute}}}).operationLease(); got != 11*time.Minute {
+	if got := (&SearchService{config: &serverconfig.SearchConfig{Web: serverconfig.SearchCapabilityConfig{Enabled: true, Provider: "deepseek"}, Providers: serverconfig.SearchProvidersConfig{DeepSeek: serverconfig.SearchDeepSeekConfig{Timeout: 10 * time.Minute}}}}).operationLease(); got != 11*time.Minute {
 		t.Fatalf("DeepSeek operationLease() = %s", got)
 	}
 	var nilService *SearchService
 	if got := nilService.operationLease(); got != 5*time.Minute {
 		t.Fatalf("nil operationLease() = %s", got)
+	}
+}
+
+func TestFetchServiceCreatesZeroPriceChargeAndReplaysIdempotently(t *testing.T) {
+	repo, db, catalog, wallet := newSearchBillingFixture(t)
+	defer repo.Close()
+	provider := &fetchProviderStub{response: &PageFetchResponse{Provider: "stub-fetch", ProviderRequestID: "fetch-request-1", URL: "https://example.com/article", ContentMarkdown: "# Article"}}
+	cfg := &serverconfig.SearchConfig{Fetch: serverconfig.SearchCapabilityConfig{Enabled: true, Provider: "deepseek"}, Providers: serverconfig.SearchProvidersConfig{DeepSeek: serverconfig.SearchDeepSeekConfig{Timeout: 30 * time.Second}}}
+	svc := NewFetchService(cfg, provider, catalog, wallet, nil, repo.SearchOperations())
+	req := FetchOperationRequest{UserID: billingWalletUserID, ProjectID: "project-1", TaskID: "task-1", ExecutionID: "execution-1", Request: PageFetchRequest{URL: "https://example.com/article"}}
+	first, err := svc.Fetch(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Fetch(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ProviderRequestID != second.ProviderRequestID || provider.calls != 1 {
+		t.Fatalf("replay = %#v calls=%d", second, provider.calls)
+	}
+	var charges int64
+	if err := db.Model(&model.BillingCharge{}).Where("user_id = ? AND sku_id = ?", billingWalletUserID, "mcp.fetch_web_page").Count(&charges).Error; err != nil {
+		t.Fatal(err)
+	}
+	if charges != 1 {
+		t.Fatalf("charge count = %d, want one", charges)
 	}
 }

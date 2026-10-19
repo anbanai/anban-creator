@@ -17,10 +17,12 @@ const (
 )
 
 // SearchOperation is the durable idempotency record for one execution-scoped
-// web search. The response snapshot lets a lost MCP response be replayed
-// without invoking the upstream provider a second time.
+// search capability call. The operation namespace distinguishes web search
+// from page fetch and future image search calls. The response snapshot lets a
+// lost MCP response be replayed without invoking the upstream provider again.
 type SearchOperation struct {
 	ID                 string                `gorm:"type:char(36);primaryKey" json:"id"`
+	Operation          string                `gorm:"type:varchar(80);index;not null;default:'mcp.search_web'" json:"operation"`
 	UserID             string                `gorm:"type:char(36);index;not null" json:"user_id"`
 	ProjectID          string                `gorm:"type:char(36);index;not null" json:"project_id"`
 	TaskID             string                `gorm:"type:char(36);index;not null" json:"task_id"`
@@ -39,6 +41,14 @@ type SearchOperation struct {
 func (SearchOperation) TableName() string { return "search_operations" }
 
 func (o SearchOperation) Validate() error {
+	if strings.TrimSpace(o.Operation) == "" {
+		o.Operation = "mcp.search_web"
+	}
+	switch strings.TrimSpace(o.Operation) {
+	case "mcp.search_web", "mcp.fetch_web_page", "mcp.search_images":
+	default:
+		return fmt.Errorf("unsupported search operation %q", o.Operation)
+	}
 	for field, value := range map[string]string{
 		"id": o.ID, "user_id": o.UserID, "project_id": o.ProjectID,
 		"task_id": o.TaskID, "execution_id": o.ExecutionID,

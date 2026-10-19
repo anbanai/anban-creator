@@ -183,6 +183,12 @@ spec:
                   name: anban-agent-profile-providers
                   key: deepseek-search-api-key
                   optional: true
+            - name: ANBAN_DOUBAO_SEARCH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anban-agent-profile-providers
+                  key: doubao-search-api-key
+                  optional: true
             - name: ANBAN_MOONSHOT_ANTHROPIC_BASE_URL
               value: https://api.moonshot.cn/anthropic
             - name: ANBAN_MOONSHOT_API_KEY

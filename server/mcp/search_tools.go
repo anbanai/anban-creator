@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -12,28 +13,21 @@ import (
 
 func registerSearchTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
-		Name:        "search_web",
-		Description: "Search the public web through the Server-configured search provider. Requires the current managed task execution and returns cited, normalized results. Agents must not select a provider or call search sites directly.",
-		InputSchema: map[string]any{
-			"type": "object", "additionalProperties": false,
-			"properties": map[string]any{
-				"query":           map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
-				"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
-				"ori_question":    map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
-				"localization":    map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
-				"time_range":      map[string]any{"type": "string"},
-				"sites":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20},
-				"block_hosts":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 5},
-				"need_content":    map[string]any{"type": "boolean"},
-				"need_url":        map[string]any{"type": "boolean"},
-				"auth_info_level": map[string]any{"type": "integer", "minimum": 0, "maximum": 1},
-				"content_formats": map[string]any{"type": "string", "enum": []any{"text", "markdown"}},
-				"industry":        map[string]any{"type": "string", "enum": []any{"finance", "game", "health", "gov"}},
-				"query_rewrite":   map[string]any{"type": "boolean"},
-			},
-			"required": []any{"query"},
-		},
+		Name: "search_web", Description: "Search the public web through the Server-configured provider. The Server owns provider selection and credentials; results include citations and freshness metadata.",
+		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
+			"query": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50},
+			"sites": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20}, "blocked_sites": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20},
+			"after": map[string]any{"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}, "before": map[string]any{"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}, "include_content": map[string]any{"type": "boolean"},
+		}, "required": []any{"query"}},
 	}, searchWebHandler)
+	server.AddTool(&mcp.Tool{
+		Name: "fetch_web_page", Description: "Fetch one public HTTP(S) page through the Server-configured page-fetch provider and return Markdown content.",
+		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"url": map[string]any{"type": "string", "format": "uri", "minLength": 1, "maxLength": 4096}}, "required": []any{"url"}},
+	}, fetchWebPageHandler)
+	server.AddTool(&mcp.Tool{
+		Name: "search_images", Description: "Search images by text or find visually similar images when the Server has enabled an official image-search provider.",
+		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"query": map[string]any{"type": "string", "minLength": 1, "maxLength": 2000}, "image_url": map[string]any{"type": "string", "format": "uri", "maxLength": 4096}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50}, "sites": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20}}},
+	}, searchImagesHandler)
 }
 
 func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -48,83 +42,192 @@ func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult(`{"code":"execution_identity_required","message":"search_web requires an execution-scoped credential"}`), nil
 	}
 	args := parseArgs(req.Params.Arguments)
-	query := strings.TrimSpace(stringArg(args, "query"))
-	if query == "" {
-		return errorResult(`{"code":"invalid_request","message":"query is required"}`), nil
-	}
-	originalQuestion, err := optionalSearchStringArg(args, "ori_question", 128)
-	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"ori_question must be a non-empty string of at most 128 characters"}`), nil
-	}
-	localization, err := optionalSearchStringArg(args, "localization", 128)
-	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"localization must be a non-empty string of at most 128 characters"}`), nil
-	}
-	if _, providerOverride := args["provider"]; providerOverride {
+	if hasProviderOverride(args) {
 		return errorResult(`{"code":"provider_selection_forbidden","message":"search provider is controlled by Server configuration"}`), nil
 	}
-	// A zero limit means "use the Server-configured provider default". Keeping
-	// that decision inside SearchService preserves the MCP one-capability boundary.
-	limit := 0
-	if rawLimit, present := args["limit"]; present {
-		value, ok := rawLimit.(float64)
-		if !ok || value != float64(int(value)) || value < 1 || value > 50 {
-			return errorResult(`{"code":"invalid_request","message":"limit must be an integer between 1 and 50"}`), nil
+	queryValue, queryPresent, queryOK := stringArgument(args, "query")
+	query := strings.TrimSpace(queryValue)
+	if !queryPresent || !queryOK || query == "" || len([]rune(query)) > 128 {
+		return errorResult(`{"code":"invalid_request","message":"query must be a non-empty string of at most 128 characters"}`), nil
+	}
+	for _, field := range []string{"ori_question", "localization", "time_range", "block_hosts", "need_content", "need_url", "auth_info_level", "content_formats", "industry", "query_rewrite"} {
+		if _, present := args[field]; present {
+			return errorResult(`{"code":"invalid_request","message":"provider-specific search parameters are not supported"}`), nil
 		}
-		limit = int(value)
 	}
-	needContent, err := optionalBoolArg(args, "need_content")
+	limit, err := optionalLimitArg(args)
 	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"need_content must be boolean"}`), nil
+		return errorResult(`{"code":"invalid_request","message":"limit must be an integer between 1 and 50"}`), nil
 	}
-	needURL, err := optionalBoolArg(args, "need_url")
-	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"need_url must be boolean"}`), nil
-	}
-	queryRewrite, err := optionalBoolArg(args, "query_rewrite")
-	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"query_rewrite must be boolean"}`), nil
-	}
-	authInfoLevel, authInfoLevelSet, err := optionalIntArg(args, "auth_info_level")
-	if err != nil || (authInfoLevel != 0 && authInfoLevel != 1) {
-		return errorResult(`{"code":"invalid_request","message":"auth_info_level must be 0 or 1"}`), nil
-	}
-	domains, err := parseSearchStringArray(args, "sites")
+	sites, err := parseSearchStringArray(args, "sites")
 	if err != nil {
 		return errorResult(`{"code":"invalid_request","message":"sites must be a string array of non-empty strings"}`), nil
 	}
-	blockHosts, err := parseSearchStringArray(args, "block_hosts")
+	blocked, err := parseSearchStringArray(args, "blocked_sites")
 	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"block_hosts must be a string array of non-empty strings"}`), nil
+		return errorResult(`{"code":"invalid_request","message":"blocked_sites must be a string array of non-empty strings"}`), nil
+	}
+	if len(sites) > 20 || len(blocked) > 20 {
+		return errorResult(`{"code":"invalid_request","message":"sites and blocked_sites support at most 20 entries"}`), nil
+	}
+	for _, key := range []string{"after", "before"} {
+		value, present, ok := stringArgument(args, key)
+		if present && !ok {
+			return errorResult(`{"code":"invalid_request","message":"after and before must be strings"}`), nil
+		}
+		if value = strings.TrimSpace(value); value != "" {
+			if _, err := time.Parse("2006-01-02", value); err != nil {
+				return errorResult(`{"code":"invalid_request","message":"after and before must use YYYY-MM-DD"}`), nil
+			}
+		}
+	}
+	afterValue, _, _ := stringArgument(args, "after")
+	beforeValue, _, _ := stringArgument(args, "before")
+	if after, before := strings.TrimSpace(afterValue), strings.TrimSpace(beforeValue); after != "" && before != "" && after > before {
+		return errorResult(`{"code":"invalid_request","message":"after must not be later than before"}`), nil
+	}
+	includeContent, err := optionalBoolArg(args, "include_content")
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"include_content must be boolean"}`), nil
+	}
+	searchReq := service.WebSearchRequest{Query: query, Limit: limit, Sites: sites, BlockedSites: blocked, After: stringArg(args, "after"), Before: stringArg(args, "before")}
+	if includeContent != nil {
+		searchReq.IncludeContent = *includeContent
 	}
 	if svcs == nil || svcs.SearchSvc == nil {
-		return errorResult(`{"code":"provider_unavailable","message":"search provider is not configured"}`), nil
+		return errorResult(`{"code":"provider_unavailable","message":"web search provider is not configured"}`), nil
 	}
-	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.SearchRequest{Query: query, Limit: limit, OriginalQuestion: originalQuestion, Localization: localization, TimeRange: stringArg(args, "time_range"), Domains: domains, BlockHosts: blockHosts, NeedContent: needContent, NeedURL: needURL, AuthInfoLevel: authInfoLevel, AuthInfoLevelSet: authInfoLevelSet, ContentFormats: stringArg(args, "content_formats"), Industry: stringArg(args, "industry"), QueryRewrite: queryRewrite}})
+	result, err := svcs.SearchSvc.Search(ctx, service.SearchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: searchReq})
 	if err != nil {
-		code := "search_failed"
-		if errors.Is(err, service.ErrSearchProviderUnavailable) {
-			code = "provider_unavailable"
-		}
-		return errorResult(searchErrorJSON(code, err.Error())), nil
+		return errorResult(searchErrorJSON(searchErrorCode(err, "search_failed"), safeCapabilityError(err))), nil
 	}
 	return textResult(result)
 }
 
-func optionalSearchStringArg(args map[string]any, key string, maxLength int) (string, error) {
+func fetchWebPageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("fetch_web_page request parameters are required"), nil
+	}
+	if failure := requireMCPExecutionIdentity(ctx, "fetch_web_page", "", "", ""); failure != nil {
+		return failure, nil
+	}
+	identity, _ := getMCPExecutionIdentity(ctx)
+	if strings.TrimSpace(identity.UserID) == "" {
+		return errorResult(`{"code":"execution_identity_required","message":"fetch_web_page requires an execution-scoped credential"}`), nil
+	}
+	args := parseArgs(req.Params.Arguments)
+	if hasProviderOverride(args) {
+		return errorResult(`{"code":"provider_selection_forbidden","message":"page fetch provider is controlled by Server configuration"}`), nil
+	}
+	urlRaw, urlPresent, urlOK := stringArgument(args, "url")
+	urlValue := strings.TrimSpace(urlRaw)
+	if !urlPresent || !urlOK || urlValue == "" || len([]rune(urlValue)) > 4096 {
+		return errorResult(`{"code":"invalid_request","message":"url is required and must be at most 4096 characters"}`), nil
+	}
+	if svcs == nil || svcs.FetchSvc == nil {
+		return errorResult(`{"code":"provider_unavailable","message":"page fetch provider is not configured"}`), nil
+	}
+	result, err := svcs.FetchSvc.Fetch(ctx, service.FetchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.PageFetchRequest{URL: urlValue}})
+	if err != nil {
+		return errorResult(searchErrorJSON(searchErrorCode(err, "fetch_failed"), safeCapabilityError(err))), nil
+	}
+	return textResult(result)
+}
+
+func searchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("search_images request parameters are required"), nil
+	}
+	if failure := requireMCPExecutionIdentity(ctx, "search_images", "", "", ""); failure != nil {
+		return failure, nil
+	}
+	identity, _ := getMCPExecutionIdentity(ctx)
+	if strings.TrimSpace(identity.UserID) == "" {
+		return errorResult(`{"code":"execution_identity_required","message":"search_images requires an execution-scoped credential"}`), nil
+	}
+	args := parseArgs(req.Params.Arguments)
+	if hasProviderOverride(args) {
+		return errorResult(`{"code":"provider_selection_forbidden","message":"image search provider is controlled by Server configuration"}`), nil
+	}
+	queryRaw, queryPresent, queryOK := stringArgument(args, "query")
+	imageRaw, imagePresent, imageOK := stringArgument(args, "image_url")
+	if (queryPresent && !queryOK) || (imagePresent && !imageOK) {
+		return errorResult(`{"code":"invalid_request","message":"query and image_url must be strings"}`), nil
+	}
+	query := strings.TrimSpace(queryRaw)
+	imageURL := strings.TrimSpace(imageRaw)
+	if (query == "") == (imageURL == "") {
+		return errorResult(`{"code":"invalid_request","message":"exactly one of query or image_url is required"}`), nil
+	}
+	if len([]rune(query)) > 2000 || len([]rune(imageURL)) > 4096 {
+		return errorResult(`{"code":"invalid_request","message":"query or image_url exceeds the allowed length"}`), nil
+	}
+	if svcs == nil || svcs.ImageSearchSvc == nil {
+		return errorResult(`{"code":"provider_unavailable","message":"image search provider is not configured"}`), nil
+	}
+	limit, err := optionalLimitArg(args)
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"limit must be an integer between 1 and 50"}`), nil
+	}
+	sites, err := parseSearchStringArray(args, "sites")
+	if err != nil {
+		return errorResult(`{"code":"invalid_request","message":"sites must be a string array of non-empty strings"}`), nil
+	}
+	if len(sites) > 20 {
+		return errorResult(`{"code":"invalid_request","message":"sites supports at most 20 entries"}`), nil
+	}
+	result, err := svcs.ImageSearchSvc.SearchImages(ctx, service.ImageSearchImagesRequest{Query: query, ImageURL: imageURL, Limit: limit, Sites: sites})
+	if err != nil {
+		return errorResult(searchErrorJSON(searchErrorCode(err, "image_search_failed"), safeCapabilityError(err))), nil
+	}
+	return textResult(result)
+}
+
+func searchErrorCode(err error, fallback string) string {
+	if errors.Is(err, service.ErrSearchProviderUnavailable) || errors.Is(err, service.ErrPageFetchUnavailable) || errors.Is(err, service.ErrImageSearchUnavailable) {
+		return "provider_unavailable"
+	}
+	return fallback
+}
+
+func hasProviderOverride(args map[string]any) bool {
+	for _, key := range []string{"provider", "model", "endpoint", "api_key", "apiKey", "base_url"} {
+		if _, present := args[key]; present {
+			return true
+		}
+	}
+	return false
+}
+
+func stringArgument(args map[string]any, key string) (string, bool, bool) {
 	raw, present := args[key]
 	if !present {
-		return "", nil
+		return "", false, true
 	}
 	value, ok := raw.(string)
-	if !ok {
-		return "", errors.New("string required")
+	return value, true, ok
+}
+
+func safeCapabilityError(err error) string {
+	if err == nil {
+		return "capability failed"
 	}
-	value = strings.TrimSpace(value)
-	if value == "" || len([]rune(value)) > maxLength {
-		return "", errors.New("invalid string length")
+	message := strings.TrimSpace(err.Error())
+	if message == "" {
+		return "capability failed"
 	}
-	return value, nil
+	return message
+}
+
+func optionalLimitArg(args map[string]any) (int, error) {
+	if raw, present := args["limit"]; present {
+		value, ok := raw.(float64)
+		if !ok || value != float64(int(value)) || value < 1 || value > 50 {
+			return 0, errors.New("invalid limit")
+		}
+		return int(value), nil
+	}
+	return 0, nil
 }
 
 func parseSearchStringArray(args map[string]any, key string) ([]string, error) {
@@ -164,18 +267,6 @@ func optionalBoolArg(args map[string]any, key string) (*bool, error) {
 		return nil, errors.New("boolean argument required")
 	}
 	return &value, nil
-}
-
-func optionalIntArg(args map[string]any, key string) (int, bool, error) {
-	raw, ok := args[key]
-	if !ok {
-		return 0, false, nil
-	}
-	value, ok := raw.(float64)
-	if !ok || value != float64(int(value)) {
-		return 0, true, errors.New("integer argument required")
-	}
-	return int(value), true, nil
 }
 
 func searchErrorJSON(code, message string) string {

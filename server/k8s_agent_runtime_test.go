@@ -388,6 +388,7 @@ func TestKubernetesAgentRuntime(t *testing.T) {
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_BILLING_ADMIN_API_KEY", "anban-billing-admin-api-key", "api-key")
 	assertDeploymentSecretEnv(t, deployment, "ANBAN_AGENT_EXECUTION_TOKEN_SECRET", "anban-agent-execution-token", "token-secret")
 	assertOptionalDeploymentSecretEnv(t, deployment, "ANBAN_DEEPSEEK_SEARCH_API_KEY", "anban-agent-profile-providers", "deepseek-search-api-key")
+	assertOptionalDeploymentSecretEnv(t, deployment, "ANBAN_DOUBAO_SEARCH_API_KEY", "anban-agent-profile-providers", "doubao-search-api-key")
 	for envName, secretKey := range map[string]string{
 		"ANBAN_DEEPSEEK_ANTHROPIC_BASE_URL": "deepseek-anthropic-base-url",
 		"ANBAN_DEEPSEEK_API_KEY":            "deepseek-api-key",

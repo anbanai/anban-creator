@@ -413,6 +413,8 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		"image.standard":     {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 300, route: "image_generation.capabilities.standard", delivery: "persisted_image"},
 		"image.professional": {operation: "image.generate", chargePolicy: "image_operation", priceCredits: 500, route: "image_generation.capabilities.professional", delivery: "persisted_image"},
 		"mcp.search_web":     {operation: "mcp.search_web", chargePolicy: "standalone_operation", priceCredits: 0, route: "search.web", delivery: "search_results"},
+		"mcp.fetch_web_page": {operation: "mcp.fetch_web_page", chargePolicy: "standalone_operation", priceCredits: 0, route: "search.fetch", delivery: "fetched_page"},
+		"mcp.search_images":  {operation: "mcp.search_images", chargePolicy: "standalone_operation", priceCredits: 0, route: "search.images", delivery: "image_search_results"},
 	}
 	taskTypes := []struct {
 		id, operation, delivery string

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -73,6 +74,7 @@ type BillingProviderCostEvent struct {
 	ID                  string                          `gorm:"type:char(36);primaryKey" json:"id"`
 	EventKind           BillingProviderCostEventKind    `gorm:"type:varchar(20);index;not null" json:"event_kind"`
 	IdentityKind        BillingProviderCostIdentityKind `gorm:"type:varchar(24);index" json:"identity_kind,omitempty"`
+	Operation           string                          `gorm:"type:varchar(80);index" json:"operation,omitempty"`
 	ExecutionID         string                          `gorm:"type:varchar(128);index" json:"execution_id,omitempty"`
 	ProviderRequestID   string                          `gorm:"type:varchar(256);index:idx_billing_provider_cost_request,priority:2" json:"provider_request_id,omitempty"`
 	TaskID              string                          `gorm:"type:char(36);index" json:"task_id,omitempty"`
@@ -118,6 +120,13 @@ func (e BillingProviderCostEvent) Validate() error {
 	if err := validateProviderCostEvidence(e); err != nil {
 		return err
 	}
+	if operation := strings.TrimSpace(e.Operation); operation != "" {
+		switch operation {
+		case "mcp.search_web", "mcp.fetch_web_page", "mcp.search_images":
+		default:
+			return fmt.Errorf("provider cost has unsupported operation %q", operation)
+		}
+	}
 	if strings.TrimSpace(e.Model) == "" {
 		var kind struct {
 			Kind string `json:"kind"`
@@ -155,7 +164,7 @@ func (e BillingProviderCostEvent) Validate() error {
 		default:
 			return fmt.Errorf("unsupported provider cost identity kind %q", e.IdentityKind)
 		}
-		expectedIdentity, err := ProviderCostBaseIdentityKey(e.IdentityKind, e.ExecutionID, e.Provider, e.Model, e.ProviderRequestID)
+		expectedIdentity, err := ProviderCostBaseIdentityKey(e.IdentityKind, e.ExecutionID, e.Provider, e.Model, e.ProviderRequestID, e.Operation)
 		if err != nil {
 			return err
 		}
@@ -365,6 +374,8 @@ func validateProviderCostEvidence(event BillingProviderCostEvent) error {
 		var evidence struct {
 			Kind                 string         `json:"kind"`
 			Query                string         `json:"query"`
+			URL                  string         `json:"url"`
+			Operation            string         `json:"operation"`
 			ResultCount          int            `json:"result_count"`
 			SearchCount          int            `json:"search_request_count"`
 			RequestIDSource      string         `json:"request_id_source"`
@@ -376,8 +387,11 @@ func validateProviderCostEvidence(event BillingProviderCostEvent) error {
 		if err := decodeStrictProviderCostJSON(event.UsageEvidence, &evidence); err != nil {
 			return fmt.Errorf("invalid search request provider cost evidence: %w", err)
 		}
-		if evidence.Kind != "search_request" || strings.TrimSpace(evidence.Query) == "" || evidence.ResultCount < 0 || evidence.SearchCount < 1 {
-			return fmt.Errorf("search request evidence requires query, positive request count, and nonnegative result count")
+		if evidence.Kind != "search_request" || (strings.TrimSpace(evidence.Query) == "" && strings.TrimSpace(evidence.URL) == "") || evidence.ResultCount < 0 || evidence.SearchCount < 1 {
+			return fmt.Errorf("search request evidence requires query or url, positive request count, and nonnegative result count")
+		}
+		if evidence.Operation != "" && evidence.Operation != "mcp.search_web" && evidence.Operation != "mcp.fetch_web_page" && evidence.Operation != "mcp.search_images" {
+			return fmt.Errorf("search request evidence has unsupported operation %q", evidence.Operation)
 		}
 		if evidence.RequestIDSource != "provider" && evidence.RequestIDSource != "search_attempt" {
 			return fmt.Errorf("search request evidence requires a provider or search-attempt request ID source")
@@ -458,17 +472,26 @@ func (c BillingExecutionCostReasonCode) Valid() bool {
 
 // ProviderCostBaseIdentityKey hashes a typed identity tuple. JSON field
 // boundaries prevent delimiter ambiguity and the digest keeps MySQL's unique
-// index narrow even when provider request IDs are long.
-func ProviderCostBaseIdentityKey(kind BillingProviderCostIdentityKind, executionID, provider, modelID, providerRequestID string) (string, error) {
+// index narrow even when provider request IDs are long. The optional operation
+// separates independent MCP capabilities that may share a provider request ID.
+func ProviderCostBaseIdentityKey(kind BillingProviderCostIdentityKind, executionID, provider, modelID, providerRequestID string, operations ...string) (string, error) {
 	type identityTuple struct {
 		Version           int                             `json:"version"`
 		Kind              BillingProviderCostIdentityKind `json:"kind"`
+		Operation         string                          `json:"operation,omitempty"`
 		ExecutionID       string                          `json:"execution_id,omitempty"`
 		Provider          string                          `json:"provider"`
 		Model             string                          `json:"model,omitempty"`
 		ProviderRequestID string                          `json:"provider_request_id,omitempty"`
 	}
-	tuple := identityTuple{Version: 1, Kind: kind, Provider: strings.TrimSpace(provider)}
+	operation := ""
+	if len(operations) > 1 {
+		return "", errors.New("provider cost identity accepts at most one operation")
+	}
+	if len(operations) == 1 {
+		operation = strings.TrimSpace(operations[0])
+	}
+	tuple := identityTuple{Version: 1, Kind: kind, Operation: operation, Provider: strings.TrimSpace(provider)}
 	switch kind {
 	case BillingProviderCostIdentityExecutionModel:
 		tuple.ExecutionID = strings.TrimSpace(executionID)
