@@ -108,8 +108,6 @@ spec:
               value: "${version_switch}"
             - name: TZ
               value: Asia/Shanghai
-            - name: ANBAN_SEEDNOTE_BASE_URL
-              value: http://sidecar-seednote:18060
             - name: ANBAN_ILINK_ENABLED
               value: "true"
             - name: ANBAN_ILINK_BASE_URL

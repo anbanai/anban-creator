@@ -161,11 +161,9 @@ const MANAGED_READONLY_WORKER_MCP_TOOLS: Record<string, string[]> = {
   "wechat-picture": ["mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends"],
   seednote: [
     "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
-    "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
   ],
   viral_analysis: [
     "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
-    "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
   ],
 };
 const MANAGED_READONLY_WORKER_SKILLS: Record<string, string[]> = {
@@ -174,7 +172,7 @@ const MANAGED_READONLY_WORKER_SKILLS: Record<string, string[]> = {
   seednote: ["seednote-research", "trending-topics", "seednote-viral-analysis"],
   viral_analysis: ["seednote-research", "trending-topics", "seednote-viral-analysis"],
 };
-const MANAGED_READONLY_WORKER_PROMPT = `You are the managed read-only research worker. Inspect sources and return concise findings to the main agent. Use the authenticated Anban MCP tools for public trend snapshots; never invent heat, freshness, or interaction data. Public trend discovery is research input only: leave trend-rider judgments, topic-evaluator decisions, final topic selection, and all workflow decisions to the main agent. Do not write or edit files, run commands, create tasks, invoke other agents, generate or upload media, publish, report progress, or submit completion metadata.`;
+const MANAGED_READONLY_WORKER_PROMPT = `You are the managed read-only research worker. Inspect public sources and return concise findings to the main agent. Use Anban MCP tools for public trend snapshots; never invent heat, freshness, or interaction data. Public trend discovery is research input only: leave trend-rider judgments, topic-evaluator decisions, final topic selection, and all workflow decisions to the main agent. Do not write or edit files, run commands, create tasks, invoke other agents, generate or upload media, publish, report progress, or submit completion metadata.`;
 const MANAGED_PARALLEL_WORKER_CONTRACT = `\n\nManaged parallel-worker contract: You remain the main agent and own all workflow decisions, file writes, task lifecycle, generation, publishing, feedback, progress, and completion. Delegate only when there are at least two independent research, material-analysis, or quality-review tasks. You may invoke exactly one worker type: \`${MANAGED_READONLY_WORKER}\`, with at most three concurrent Workers. Worker results must be consumed in this foreground turn. Do not request other worker types, model overrides, isolation, or background execution; worker calls are forced to \`run_in_background: false\`.`;
 const EXECUTION_IDENTITY_TOOLS = new Set(["generate_image", "upload_image", "analyze_image", "submit_completion_metadata"]);
 
@@ -564,17 +562,16 @@ function createManagedMCPBoundaryHook() {
     if (typeof value !== "string") return {};
 
     const lower = value.toLowerCase();
-    const directSeednote = lower.includes("sidecar-seednote:18060") || lower.includes("localhost:18060") || lower.includes("127.0.0.1:18060");
     const probesMCP = lower.includes("mcp-session-id")
       || lower.includes("mcp_client")
       || (lower.includes("/mcp") && ["curl", "wget", "python", "requests", "http", "mcporter", "jsonrpc"].some((needle) => lower.includes(needle)));
-    if (!directSeednote && !probesMCP) return {};
+    if (!probesMCP) return {};
 
     return {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: "Managed runtimes must use the authenticated anban MCP tools instead of calling MCP endpoints or the Seednote sidecar directly.",
+        permissionDecisionReason: "Managed runtimes must use the authenticated anban MCP tools instead of calling MCP endpoints directly.",
       },
     };
   };

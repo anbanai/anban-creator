@@ -20,8 +20,7 @@ Managed execution uses a separate image identity for every Agent Pack, including
 `creator-agent-wechat-article`, `creator-agent-wechat-picture`,
 `creator-agent-seednote`, and `creator-agent-montage`. Images share the same
 plugin tree and may reuse a Dockerfile when their system dependencies match.
-种草笔记 research flows through authenticated Anban Server MCP
-tools backed by the separately deployed `sidecar-seednote`.
+种草笔记 research flows through the Server's configured research capabilities.
 Their independent build definitions, together with the Server, Studio, and
 sidecar iLink definitions, live in `deploy/docker/` and use the repository root as the
 Docker build context.
@@ -70,7 +69,6 @@ flowchart LR
     subgraph integrations[External Services and Sidecars]
         llm[LLM and Image Providers]
         wechat[WeChat APIs]
-        seednoteSidecar[Seednote Sidecar]
         ilinkSidecar[iLink Sidecar]
         montage[OpenMontage / ffmpeg]
         hypit[Official Hypit Distribution]
@@ -111,7 +109,6 @@ flowchart LR
     pluginAssets -.->|packaged into runtime images| claudeRuntime
     pluginAssets -.->|preset and patch| dshRuntime
 
-    services -->|authenticated research tools| seednoteSidecar
     services -->|bot login, events, notifications| ilinkSidecar
     services -->|generation requests| llm
     services -->|finalization and publishing| wechat
@@ -140,7 +137,7 @@ The shared scheduler configuration is:
 - `ANBAN_AGENT_EXECUTOR`: `docker` or `kubernetes`.
 - `ANBAN_AGENT_IMAGE_WECHAT_ARTICLE`: the WeChat article Agent image.
 - `ANBAN_AGENT_IMAGE_WECHAT_PICTURE`: the WeChat picture Agent image.
-- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow image; its 种草笔记 research uses authenticated Anban Server MCP tools.
+- `ANBAN_AGENT_IMAGE_SEEDNOTE`: the independent Seednote workflow image; its research uses public sources and configured Server capabilities.
 - `ANBAN_AGENT_IMAGE_MONTAGE`: the OpenMontage, Remotion, and ffmpeg runtime image.
 - `ANBAN_AGENT_EXECUTION_TOKEN_SECRET`: a private value of at least 32 bytes used
   to mint short-lived workload tokens.

@@ -38,36 +38,6 @@ services:
       timeout: 5s
       retries: 5
 
-  sidecar-seednote:
-    build:
-      context: .
-      dockerfile: deploy/docker/Dockerfile.sidecar-seednote
-      no_cache: true
-      args:
-        SEEDNOTE_REF: main
-    image: anban-creator-sidecar-seednote:latest
-    pull_policy: build
-    platform: linux/amd64
-    container_name: anban-creator-sidecar-seednote
-    restart: unless-stopped
-    ports:
-      # Local login and inspection only. The API is unauthenticated; the Server
-      # reaches it through the Compose network at http://sidecar-seednote:18060.
-      - "127.0.0.1:18060:18060"
-    volumes:
-      - ./data/sidecar-seednote:/app/data
-    environment:
-      COOKIES_PATH: /app/data/cookies.json
-    networks:
-      - anban-creator-network
-    healthcheck:
-      # GET, not --spider (HEAD): this image returns 404 for HEAD /health but
-      # 200 for GET /health, so a HEAD-based probe falsely marks it unhealthy.
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:18060/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # iLink — WeChat bot sidecar. Built from the upstream
   # GitHub project (no official image). Holds logged-in WeChat sessions server-side;
   # Studio drives QR login, the server polls events for commands and pushes
@@ -124,8 +94,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      sidecar-seednote:
-        condition: service_started
       sidecar-ilink:
         condition: service_started
     # Compose uses the root .env for interpolation only unless it is also an
@@ -171,7 +139,6 @@ services:
       ANBAN_AGENT_IMAGE_HYPIT: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
       ANBAN_AGENT_DOCKER_NETWORK: "creator-runtime-network"
       ANBAN_AGENT_PROJECT_MEMORY_VOLUME: "creator-project-memory"
-      ANBAN_SEEDNOTE_BASE_URL: "http://sidecar-seednote:18060"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.
       ANBAN_ILINK_ENABLED: "true"
       ANBAN_ILINK_BASE_URL: "http://sidecar-ilink:18070"

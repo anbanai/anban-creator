@@ -49,7 +49,6 @@ type Services struct {
 	ContentRenderSvc       *service.ContentRenderService
 	PublishingSvc          *service.PublishingService
 	WechatPublicationSvc   *service.WechatPublicationService
-	SeednoteCapabilitySvc  *service.SeednoteCapabilityService
 	TopicPoolSvc           *service.TopicPoolService
 	TrendSvc               *service.TrendService
 	AgentFeedbackSvc       *service.AgentFeedbackService
@@ -78,7 +77,6 @@ func RegisterTools(server *mcp.Server) {
 	registerPublishingTools(server)
 	registerSeednoteFormatTools(server)
 	registerResourceTools(server)
-	registerSeednoteTools(server)
 	registerTopicPoolTools(server)
 	registerTrendTools(server)
 	registerSearchTools(server)

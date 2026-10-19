@@ -50,7 +50,6 @@ func TestExpandEnvVars(t *testing.T) {
 func TestNewConfigEnvInterpolation(t *testing.T) {
 	t.Setenv("ANBAN_TEST_REDIS", "redis:6379")
 	t.Setenv("ANBAN_TEST_ILINK_URL", "http://sidecar-ilink:18070")
-	t.Setenv("ANBAN_TEST_SEEDNOTE_URL", "http://sidecar-seednote:18060")
 	t.Setenv("ANBAN_TEST_DEEPSEEK_KEY", "existing-server-only-key")
 	t.Setenv("ANBAN_TEST_MEMORY_ROOT", filepath.ToSlash(t.TempDir()))
 	// An unrelated env var that must NOT leak into config.
@@ -79,8 +78,6 @@ dsh:
       model: deepseek-flash
   bridge_dir: ./runtime-dsh
   dsh_patch: ./harness/dsh/project-creator.patch.yml
-seednote:
-  base_url: "${ANBAN_TEST_SEEDNOTE_URL:-http://localhost:18060}"
 ilink:
   enabled: true
   base_url: "${ANBAN_TEST_ILINK_URL:-http://localhost:18070}"
@@ -127,9 +124,6 @@ claude:
 	}
 	if cfg.Ilink.BaseURL != "http://sidecar-ilink:18070" {
 		t.Errorf("ilink.base_url = %q, want http://sidecar-ilink:18070", cfg.Ilink.BaseURL)
-	}
-	if cfg.Seednote.BaseURL != "http://sidecar-seednote:18060" {
-		t.Errorf("seednote.base_url = %q, want http://sidecar-seednote:18060", cfg.Seednote.BaseURL)
 	}
 	if !cfg.Ilink.Enabled {
 		t.Errorf("ilink.enabled = false, want true")

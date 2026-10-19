@@ -53,7 +53,6 @@ func TestTaskAPIResponseHidesServerInternalFields(t *testing.T) {
 		ProgressLog: "[claude-code:unrecognized_model] {\"model\":\"deepseek-flash[1m]\"}\n" +
 			"选题研究完成，开始内容创作\n" +
 			"Using tool: mcp__anban__set_task_progress_plan\n" +
-			"Using tool: mcp__anban__search_seednote_feeds\n" +
 			"正在生成封面图\n",
 	}
 

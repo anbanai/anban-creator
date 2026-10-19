@@ -32,12 +32,8 @@ func TestMainUsesAsyncSidecarMonitors(t *testing.T) {
 		t.Fatal("main.go must not synchronously await optional sidecars during startup")
 	}
 	for _, want := range []string{
-		"seednoteMonitor := service.NewSidecarMonitor",
-		"go seednoteMonitor.Run(ctx)",
 		"ilinkMonitor = service.NewSidecarMonitor",
 		"go ilinkMonitor.Run(ctx)",
-		"projectHandler.SetSeednoteReadiness(seednoteMonitor)",
-		"NewSeednoteCapabilityService(seednoteClient, seednoteMonitor)",
 		"ilinkPoller.SetReadiness(ilinkMonitor)",
 		"ilinkWorker.SetReadiness(ilinkMonitor)",
 	} {

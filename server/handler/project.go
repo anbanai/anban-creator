@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/url"
 	"path"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,9 +20,7 @@ import (
 	"github.com/anbanai/anban-creator/server/config"
 	projectmemory "github.com/anbanai/anban-creator/server/memory"
 	"github.com/anbanai/anban-creator/server/model"
-	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
-	"github.com/anbanai/anban-creator/server/seednote"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 )
@@ -38,8 +35,6 @@ type ProjectHandler struct {
 	store             storage.Provider
 	uploadRepo        repository.Repository
 	referenceAssets   *service.ReferenceAssetService
-	seednoteClient    *seednote.Client
-	seednoteReady     service.Readiness
 	imageCapabilities map[string]config.ImageGenerationRouteConfig
 	projectMemory     interface {
 		ReadProject(context.Context, string) (projectmemory.ProjectView, error)
@@ -255,26 +250,6 @@ func (h *ProjectHandler) respondProjectUpdateError(c fiber.Ctx, projectID string
 	}
 	h.logger.Error().Err(err).Str("project_id", projectID).Msg("update project failed")
 	return Error(c, fiber.StatusInternalServerError, "failed to update project")
-}
-
-// SetSeednoteClient injects the Seednote SDK client.
-func (h *ProjectHandler) SetSeednoteClient(client *seednote.Client) {
-	h.seednoteClient = client
-}
-
-// SetSeednoteReadiness injects optional sidecar readiness state.
-func (h *ProjectHandler) SetSeednoteReadiness(readiness service.Readiness) {
-	h.seednoteReady = readiness
-}
-
-func (h *ProjectHandler) ensureSeednoteReady(c fiber.Ctx) (bool, error) {
-	if h.seednoteClient == nil {
-		return false, Error(c, fiber.StatusServiceUnavailable, "Seednote sidecar 未配置")
-	}
-	if h.seednoteReady != nil && !h.seednoteReady.Ready() {
-		return false, Error(c, fiber.StatusServiceUnavailable, "Seednote sidecar 暂不可用，正在后台连接")
-	}
-	return true, nil
 }
 
 // projectRequest is the shared request body for creating and updating a project.
@@ -1845,82 +1820,6 @@ func (h *ProjectHandler) GetPlatformConfigs(c fiber.Ctx) error {
 	return Success(c, visible)
 }
 
-// fetchProfileRequest is the request body for fetching a platform profile.
-type fetchProfileRequest struct {
-	Platform   string `json:"platform"`
-	ProfileURL string `json:"profile_url"`
-	// Optional WeChat credentials for article platforms.
-	WechatAppID  string `json:"wechat_app_id"`
-	WechatSecret string `json:"wechat_secret"`
-}
-
-// FetchProfile handles POST /projects/fetch-profile.
-// It fetches profile data from the specified platform using the profile URL.
-func (h *ProjectHandler) FetchProfile(c fiber.Ctx) error {
-	userID := GetUserID(c)
-	if userID == "" {
-		return Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-
-	var req fetchProfileRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return Error(c, fiber.StatusBadRequest, "invalid request body")
-	}
-
-	if req.Platform == "" {
-		return Error(c, fiber.StatusBadRequest, "platform is required")
-	}
-	if req.ProfileURL == "" {
-		return Error(c, fiber.StatusBadRequest, "profile_url is required")
-	}
-
-	if req.Platform != model.PlatformSeednote {
-		return Error(c, fiber.StatusBadRequest, "profile auto-fetch is only available for Seednote")
-	}
-	if ready, err := h.ensureSeednoteReady(c); !ready || err != nil {
-		return err
-	}
-
-	// Validate URL matches the platform's expected pattern.
-	pc := model.GetPlatformConfig(req.Platform)
-	if pc != nil && pc.ProfileURLPattern != "" {
-		matched, _ := regexp.MatchString(pc.ProfileURLPattern, req.ProfileURL)
-		if !matched {
-			re, err := regexp.Compile(pc.ProfileURLPattern)
-			if err != nil {
-				h.logger.Error().Err(err).Str("platform", req.Platform).Msg("invalid profile URL pattern")
-				return Error(c, fiber.StatusInternalServerError, "invalid platform profile URL configuration")
-			}
-			matched = re.FindString(req.ProfileURL) != ""
-			if !matched {
-				return Error(c, fiber.StatusBadRequest, "profile URL does not match expected pattern for "+pc.Label)
-			}
-		}
-	}
-
-	// Only pass credentials for publishing platforms.
-	var appID, secret string
-	if pc != nil && pc.SupportsPublishing {
-		appID = req.WechatAppID
-		secret = req.WechatSecret
-	}
-
-	provider := platform.NewProvider(req.Platform, appID, secret, h.seednoteClient)
-	if provider == nil {
-		return Error(c, fiber.StatusBadRequest, "unsupported platform: "+req.Platform)
-	}
-
-	profile, err := provider.FetchProfile(c.Context(), req.ProfileURL)
-	if err != nil {
-		h.logger.Error().Err(err).
-			Str("platform", req.Platform).
-			Str("profile_url", req.ProfileURL).
-			Msg("fetch profile failed")
-		return Error(c, fiber.StatusInternalServerError, "failed to fetch profile: "+err.Error())
-	}
-	return Success(c, profile)
-}
-
 // getRecommendedTemplates returns templates recommended for a project based on its profile keywords.
 func (h *ProjectHandler) getRecommendedTemplates(ctx context.Context, ch *model.Project) []*model.Template {
 	if ch.Keywords == "" {
@@ -2031,96 +1930,4 @@ func validateProjectImageRatio(platform, ratio string) error {
 		return errors.New(model.ValidImageRatioHint)
 	}
 	return nil
-}
-
-func requireProjectAdmin(c fiber.Ctx) (bool, error) {
-	userID := GetUserID(c)
-	if userID == "" {
-		return false, Error(c, fiber.StatusUnauthorized, "unauthorized")
-	}
-	if !projectUserIsAdmin(c) {
-		return false, Forbidden(c, "administrator access required")
-	}
-	return true, nil
-}
-
-// AdminSeednoteLoginStatus handles GET /seednote/account/login-status.
-func (h *ProjectHandler) AdminSeednoteLoginStatus(c fiber.Ctx) error {
-	if ok, err := requireProjectAdmin(c); !ok {
-		return err
-	}
-	c.Set(fiber.HeaderCacheControl, "no-store")
-
-	if h.seednoteClient == nil {
-		return Success(c, fiber.Map{
-			"available": false,
-			"logged_in": false,
-			"message":   "Seednote sidecar 未配置",
-		})
-	}
-	if h.seednoteReady != nil && !h.seednoteReady.Ready() {
-		return Success(c, fiber.Map{
-			"available": false,
-			"logged_in": false,
-			"message":   "Seednote sidecar 暂不可用，正在后台连接",
-		})
-	}
-
-	loggedIn, err := h.seednoteClient.CheckLoginStatus(c.Context())
-	if err != nil {
-		h.logger.Error().Err(err).Msg("check Seednote login status failed")
-		return Success(c, fiber.Map{
-			"available": false,
-			"logged_in": false,
-			"message":   "种草笔记登录状态检查失败",
-		})
-	}
-
-	msg := "已登录"
-	if !loggedIn {
-		msg = "未登录，请获取二维码并使用种草笔记客户端扫码"
-	}
-	return Success(c, fiber.Map{
-		"available": true,
-		"logged_in": loggedIn,
-		"message":   msg,
-	})
-}
-
-// AdminSeednoteLoginQRCode handles GET /seednote/account/login-qrcode.
-func (h *ProjectHandler) AdminSeednoteLoginQRCode(c fiber.Ctx) error {
-	if ok, err := requireProjectAdmin(c); !ok {
-		return err
-	}
-	c.Set(fiber.HeaderCacheControl, "no-store")
-	if ready, err := h.ensureSeednoteReady(c); !ready {
-		return err
-	}
-
-	qrcodeImage, err := h.seednoteClient.GetLoginQRCode(c.Context())
-	if err != nil {
-		h.logger.Error().Err(err).Msg("get Seednote login qrcode failed")
-		return Error(c, fiber.StatusBadGateway, "获取种草笔记登录二维码失败")
-	}
-	if strings.TrimSpace(qrcodeImage) == "" {
-		return Error(c, fiber.StatusBadGateway, "种草笔记登录二维码为空")
-	}
-	return Success(c, fiber.Map{"qrcode_image": qrcodeImage})
-}
-
-// AdminSeednoteLogout handles DELETE /seednote/account/login.
-func (h *ProjectHandler) AdminSeednoteLogout(c fiber.Ctx) error {
-	if ok, err := requireProjectAdmin(c); !ok {
-		return err
-	}
-	c.Set(fiber.HeaderCacheControl, "no-store")
-	if ready, err := h.ensureSeednoteReady(c); !ready {
-		return err
-	}
-
-	if err := h.seednoteClient.DeleteCookies(c.Context()); err != nil {
-		h.logger.Error().Err(err).Msg("delete Seednote login cookies failed")
-		return Error(c, fiber.StatusBadGateway, "退出种草笔记登录失败")
-	}
-	return Success(c, fiber.Map{"logged_in": false})
 }

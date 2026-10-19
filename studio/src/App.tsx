@@ -31,7 +31,6 @@ const AdminBillingPage = lazyWithRecovery(() => import('@/pages/AdminBillingPage
 const UsagePage = lazyWithRecovery(() => import('@/pages/UsagePage'))
 const SettingsPage = lazyWithRecovery(() => import('@/pages/SettingsPage'))
 const TemplatesPage = lazyWithRecovery(() => import('@/pages/TemplatesPage'))
-const SeednoteAdminPage = lazyWithRecovery(() => import('@/pages/SeednoteAdminPage'))
 const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
 const ContentAnalyticsPage = lazyWithRecovery(() => import('@/pages/ContentAnalyticsPage'))
 const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
@@ -159,14 +158,6 @@ function AppRoutes() {
             element={(
               <AdminRoute>
                 <LazyPage component={TemplatesPage} />
-              </AdminRoute>
-            )}
-          />
-          <Route
-            path="admin/seednote"
-            element={(
-              <AdminRoute>
-                <LazyPage component={SeednoteAdminPage} />
               </AdminRoute>
             )}
           />

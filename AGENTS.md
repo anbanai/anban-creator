@@ -111,8 +111,8 @@ Name every runtime variable after its profile, so `ANBAN_AGENT_IMAGE_<PROFILE>`
 and the Kubernetes `${<profile>_agent_image_repo}` substitution stay in a
 one-to-one mapping with `claude.runtime_images.<profile>`.
 `creator-agent-hypit` is reserved for video replication from unmodified official
-Hypit source. Seednote research flows through authenticated Anban Server MCP
-tools backed by the separately deployed `sidecar-seednote`. Keep the canonical
+Hypit source. Seednote research flows through the Server's configured research
+capabilities. Keep the canonical
 plugin tree intact in every image; image selection controls system dependencies,
 not which Skills are distributed.
 

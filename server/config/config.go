@@ -47,7 +47,6 @@ type Config struct {
 	Asynq              AsynqConfig                     `yaml:"asynq"`
 	Email              EmailConfig                     `yaml:"email"`
 	Invitation         InvitationConfig                `yaml:"invitation"`
-	Seednote           SeednoteConfig                  `yaml:"seednote"`
 	Worldtree          WorldtreeConfig                 `yaml:"worldtree"`
 	Ilink              IlinkConfig                     `yaml:"ilink"`
 	Trends             TrendsConfig                    `yaml:"trends"`
@@ -370,12 +369,6 @@ func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceC
 		}
 	}
 	return errs
-}
-
-// SeednoteConfig holds Seednote (种草笔记) sidecar configuration.
-type SeednoteConfig struct {
-	BaseURL string `yaml:"base_url"` // default "http://localhost:18060"
-	Timeout int    `yaml:"timeout"`  // default 30 (seconds)
 }
 
 // WorldtreeConfig holds the server-only credentials for the third-party
@@ -1579,13 +1572,6 @@ func (c *Config) applyDefaults() {
 	// Server-internal semantic route defaults.
 	if (c.ModelRoutes.ServerInternal.Model != "" || c.ModelRoutes.ServerInternal.Provider != "") && c.ModelRoutes.ServerInternal.Timeout == 0 {
 		c.ModelRoutes.ServerInternal.Timeout = 10 * time.Minute
-	}
-	// Seednote sidecar defaults.
-	if c.Seednote.BaseURL == "" {
-		c.Seednote.BaseURL = "http://localhost:18060"
-	}
-	if c.Seednote.Timeout == 0 {
-		c.Seednote.Timeout = 30
 	}
 	if c.Worldtree.BaseURL == "" {
 		c.Worldtree.BaseURL = "https://www.worldtreetech.cn"

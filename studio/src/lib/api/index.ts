@@ -23,7 +23,6 @@ import { aiEntryApi } from './ai-entry'
 import { uploadsApi } from './uploads'
 import { agentProfilesApi } from './agent-profiles'
 import { agentPacksApi } from './agent-packs'
-import { seednoteAdminApi } from './seednote-admin'
 import { seednoteImportApi } from './seednote-import'
 import { wechatAnalyticsImportApi } from './wechat-analytics-import'
 import { wechatAccountAnalyticsImportApi } from './wechat-account-analytics-import'
@@ -58,7 +57,6 @@ export const api = {
   uploads: uploadsApi,
   agentProfiles: agentProfilesApi,
   agentPacks: agentPacksApi,
-  seednoteAdmin: seednoteAdminApi,
   seednoteImport: seednoteImportApi,
   wechatAnalyticsImport: wechatAnalyticsImportApi,
   wechatAccountAnalyticsImport: wechatAccountAnalyticsImportApi,

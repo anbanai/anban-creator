@@ -9,7 +9,6 @@ import {
   Coins,
   LayoutGrid,
   PlugZap,
-  KeyRound,
   BarChart3,
   Flame,
   MessageCircle,
@@ -44,7 +43,6 @@ export const workspaceNavItems: NavItem[] = [
 
 export const adminNavItems: NavItem[] = [
   { to: '/templates', label: '模板库', icon: LayoutGrid, adminOnly: true },
-  { to: '/admin/seednote', label: '种草笔记账号', icon: KeyRound, adminOnly: true },
   { to: '/admin/billing', label: '充值管理', icon: Coins, adminOnly: true },
 ]
 

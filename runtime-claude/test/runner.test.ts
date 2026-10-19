@@ -143,10 +143,7 @@ describe("validateManagedInit", () => {
         "mcp__anban__finalize_task_title",
         "mcp__anban__generate_image",
         "mcp__anban__get_project_profile",
-        "mcp__anban__get_seednote_feed_detail",
-        "mcp__anban__get_seednote_user_profile",
         "mcp__anban__list_project_titles",
-        "mcp__anban__search_seednote_feeds",
         "mcp__anban__submit_agent_feedback",
       ],
       skills: [
@@ -159,7 +156,6 @@ describe("validateManagedInit", () => {
       ],
     };
     expect(() => validateManagedInit(message, "seednote")).not.toThrow();
-    message.tools = message.tools.filter((tool) => tool !== "mcp__anban__search_seednote_feeds");
     expect(() => validateManagedInit(message, "seednote")).not.toThrow();
     message.tools = message.tools.filter((tool) => tool !== "mcp__anban__generate_image");
     expect(() => validateManagedInit(message, "seednote")).toThrow("generate_image");
@@ -346,7 +342,6 @@ describe("buildQueryOptions", () => {
       expect(worker?.tools).toEqual([
         "Read", "Glob", "Grep",
         "mcp__anban__get_project_profile", "mcp__anban__list_project_titles", "mcp__anban__list_trends",
-        "mcp__anban__search_seednote_feeds", "mcp__anban__get_seednote_feed_detail", "mcp__anban__get_seednote_user_profile",
       ]);
       expect(worker?.skills).toEqual(["seednote-research", "trending-topics", "seednote-viral-analysis"]);
     }
@@ -517,10 +512,6 @@ describe("buildQueryOptions", () => {
 
     const boundary = articleHooks.PreToolUse[0].hooks[0];
     const hookOptions = { signal: new AbortController().signal };
-    const direct = await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl http://sidecar-seednote:18060/mcp" }, tool_use_id: "tool-1" }, "tool-1", hookOptions);
-    expect(direct).toMatchObject({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } });
-    const directRest = await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "curl http://sidecar-seednote:18060/api/v1/feeds" }, tool_use_id: "tool-rest" }, "tool-rest", hookOptions);
-    expect(directRest).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
     expect(await boundary({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "printf done" }, tool_use_id: "tool-2" }, "tool-2", hookOptions)).toEqual({});
 
     for (const taskType of ["seednote", "viral_analysis"]) {

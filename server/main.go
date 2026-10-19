@@ -37,7 +37,6 @@ import (
 	"github.com/anbanai/anban-creator/server/resources"
 	"github.com/anbanai/anban-creator/server/router"
 	"github.com/anbanai/anban-creator/server/scheduler"
-	"github.com/anbanai/anban-creator/server/seednote"
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/anbanai/anban-creator/server/storage"
 	"github.com/anbanai/anban-creator/server/wcf"
@@ -231,15 +230,6 @@ func main() {
 		log.Info().Msg("WeChat service initialized")
 	}
 
-	// 9.1 Create Seednote (种草笔记) sidecar client. The client is wired
-	// immediately; readiness is tracked asynchronously so optional sidecars never
-	// block the core HTTP server from binding its port.
-	seednoteClient := seednote.NewClient(cfg.Seednote.BaseURL, time.Duration(cfg.Seednote.Timeout)*time.Second)
-	seednoteMonitor := service.NewSidecarMonitor(service.SidecarMonitorConfig{
-		Name:        "seednote",
-		HealthCheck: seednoteClient.HealthCheck,
-	}, log)
-	log.Info().Str("base_url", cfg.Seednote.BaseURL).Msg("Seednote sidecar client configured")
 	worldtreeClient := worldtree.NewClient(cfg.Worldtree.BaseURL, cfg.Worldtree.Key, time.Duration(cfg.Worldtree.Timeout)*time.Second)
 	log.Info().Str("base_url", cfg.Worldtree.BaseURL).Bool("configured", worldtreeClient.Configured()).Msg("WorldTree Channels analytics client configured")
 
@@ -537,7 +527,7 @@ func main() {
 	}
 
 	if repo != nil {
-		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, platform.NewSeednoteProvider(seednoteClient), asynqClient, log)
+		seednoteTrackingSvc = service.NewSeednoteTrackingService(repo, nil, asynqClient, log)
 		wechatTrackingSvc = service.NewWechatTrackingService(repo, platform.NewWechatOfficialAnalyticsProvider(log, repo), asynqClient, log)
 		channelsTrackingSvc = service.NewChannelsTrackingService(repo, worldtreeClient, asynqClient, log)
 		log.Info().Msg("SeedNote tracking service initialized")
@@ -661,8 +651,6 @@ func main() {
 		if store != nil {
 			projectHandler.SetStore(store)
 		}
-		projectHandler.SetSeednoteClient(seednoteClient)
-		projectHandler.SetSeednoteReadiness(seednoteMonitor)
 		timelineHandler = handler.NewTimelineHandler(repo, log)
 		if apiKeySvc != nil {
 			apiKeyHandler = handler.NewAPIKeyHandler(apiKeySvc, log)
@@ -848,7 +836,6 @@ func main() {
 			ContentRenderSvc:       contentRenderSvc,
 			PublishingSvc:          publishingSvc,
 			WechatPublicationSvc:   wechatPublicationSvc,
-			SeednoteCapabilitySvc:  service.NewSeednoteCapabilityService(seednoteClient, seednoteMonitor),
 			TopicPoolSvc:           topicPoolSvc,
 			TrendSvc:               trendSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
@@ -1037,7 +1024,6 @@ func main() {
 		}()
 	}
 
-	go seednoteMonitor.Run(ctx)
 	if ilinkMonitor != nil {
 		go ilinkMonitor.Run(ctx)
 	}
