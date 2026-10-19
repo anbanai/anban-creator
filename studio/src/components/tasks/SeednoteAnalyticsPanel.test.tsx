@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import SeednoteAnalyticsPanel from './SeednoteAnalyticsPanel'
@@ -21,6 +21,21 @@ vi.mock('@/lib/api', async () => {
 })
 
 describe('SeednoteAnalyticsPanel', () => {
+  it('does not show a public note binding form when tracking is empty', async () => {
+    vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({
+      series: [],
+    })
+
+    render(<SeednoteAnalyticsPanel taskId="task-1" />)
+
+    await waitFor(() => {
+      expect(screen.queryByText('种草笔记公开数据加载中')).not.toBeInTheDocument()
+    })
+    expect(screen.queryByText('种草笔记数据')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '公开笔记链接或 ID' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '关联公开笔记' })).not.toBeInTheDocument()
+  })
+
   it('shows an empty tracking state when analytics endpoint returns 404', async () => {
     vi.mocked(api.seednoteAnalytics.getByTask).mockRejectedValue({
       response: { status: 404, data: { msg: 'task not found' } },
@@ -33,7 +48,7 @@ describe('SeednoteAnalyticsPanel', () => {
     expect(screen.queryByText('暂时无法加载种草笔记数据')).not.toBeInTheDocument()
   })
 
-  it('binds an unresolved publication with an explicit note URL', async () => {
+  it('does not show a public note binding form for unresolved tracking', async () => {
     vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({
       tracking: {
         status: 'unresolved',
@@ -42,21 +57,11 @@ describe('SeednoteAnalyticsPanel', () => {
       },
       series: [],
     })
-    vi.mocked(api.seednoteAnalytics.bind).mockResolvedValue({ tracking: true })
-
     render(<SeednoteAnalyticsPanel taskId="task-1" />)
 
-    const input = await screen.findByRole('textbox', { name: '公开笔记链接或 ID' })
-    expect(screen.getByText('尚未关联公开笔记，请补充笔记链接或 ID')).toBeInTheDocument()
-    expect(screen.queryByText(/自动识别|加载中/)).not.toBeInTheDocument()
-    fireEvent.change(input, { target: { value: 'https://www.xiaohongshu.com/explore/note-1' } })
-    expect(screen.getByRole('link', { name: '查看原文' })).toHaveAttribute('href', 'https://www.xiaohongshu.com/explore/note-1')
-    fireEvent.click(screen.getByRole('button', { name: '关联公开笔记' }))
-
-    await waitFor(() => {
-      expect(api.seednoteAnalytics.bind).toHaveBeenCalledWith('task-1', {
-        note_url: 'https://www.xiaohongshu.com/explore/note-1',
-      })
-    })
+    expect(await screen.findByText('种草笔记数据')).toBeInTheDocument()
+    expect(screen.getByText('尚未关联公开笔记')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '公开笔记链接或 ID' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '关联公开笔记' })).not.toBeInTheDocument()
   })
 })

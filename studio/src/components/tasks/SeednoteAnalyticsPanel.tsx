@@ -1,12 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import type { ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import {
   AlertCircle,
   Bookmark,
   Eye,
   Heart,
-  Link2,
   Loader2,
   MessageCircle,
   Share2,
@@ -25,10 +24,8 @@ import { api } from '@/lib/api'
 import { queryKeys } from '@/lib/query-keys'
 import { formatFullDateTimeCN } from '@/lib/labels'
 import type { SeednoteAnalytics, SeednoteTrackingStatus } from '@/types'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import ContentSourceLink from '@/components/common/ContentSourceLink'
 
 interface SeednoteAnalyticsPanelProps {
@@ -37,7 +34,7 @@ interface SeednoteAnalyticsPanelProps {
 
 const statusCopy: Record<SeednoteTrackingStatus, string> = {
   waiting_discovery: '历史记录等待关联',
-  unresolved: '尚未关联公开笔记，请补充笔记链接或 ID',
+  unresolved: '尚未关联公开笔记',
   tracking: '正在每日采集公开数据',
   stopped: '数据变化已趋缓，已停止自动采集',
   failed: '暂时无法识别或采集这篇笔记',
@@ -67,18 +64,6 @@ const chartColors = {
 }
 
 export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPanelProps) {
-  const queryClient = useQueryClient()
-  const [publicationIdentity, setPublicationIdentity] = useState('')
-  const bindMutation = useMutation({
-    mutationFn: (value: string) => api.seednoteAnalytics.bind(
-      taskId,
-      value.startsWith('http') ? { note_url: value } : { note_id: value },
-    ),
-    onSuccess: async () => {
-      setPublicationIdentity('')
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tasks.seednoteAnalytics(taskId) })
-    },
-  })
   const { data, error, isLoading, isError } = useQuery({
     queryKey: queryKeys.tasks.seednoteAnalytics(taskId),
     queryFn: () => api.seednoteAnalytics.getByTask(taskId),
@@ -122,52 +107,13 @@ export default function SeednoteAnalyticsPanel({ taskId }: SeednoteAnalyticsPane
   }
 
   if (!data?.tracking) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>种草笔记数据</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <p>填写可访问的公开笔记链接后开始每日采集。</p>
-          <SeednoteBindForm
-            value={publicationIdentity}
-            pending={bindMutation.isPending}
-            error={bindMutation.error}
-            onChange={setPublicationIdentity}
-            onSubmit={(value) => bindMutation.mutate(value)}
-          />
-        </CardContent>
-      </Card>
-    )
+    return null
   }
 
-  return (
-    <SeednoteAnalyticsContent
-      analytics={data}
-      publicationIdentity={publicationIdentity}
-      bindPending={bindMutation.isPending}
-      bindError={bindMutation.error}
-      onIdentityChange={setPublicationIdentity}
-      onBind={(value) => bindMutation.mutate(value)}
-    />
-  )
+  return <SeednoteAnalyticsContent analytics={data} />
 }
 
-function SeednoteAnalyticsContent({
-  analytics,
-  publicationIdentity,
-  bindPending,
-  bindError,
-  onIdentityChange,
-  onBind,
-}: {
-  analytics: SeednoteAnalytics
-  publicationIdentity: string
-  bindPending: boolean
-  bindError: Error | null
-  onIdentityChange: (value: string) => void
-  onBind: (value: string) => void
-}) {
+function SeednoteAnalyticsContent({ analytics }: { analytics: SeednoteAnalytics }) {
   const tracking = analytics.tracking!
 
   const status = tracking.status as SeednoteTrackingStatus
@@ -200,7 +146,7 @@ function SeednoteAnalyticsContent({
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
           <div className="space-y-3">
             <div>
-              <p className="text-sm font-medium text-foreground">{tracking.note_title || '等待绑定公开笔记'}</p>
+              <p className="text-sm font-medium text-foreground">{tracking.note_title || '等待识别公开笔记'}</p>
               <ContentSourceLink url={tracking.note_url} className="mt-1" />
               <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                 <span>最近采集：{formatDateTime(tracking.last_run_at)}</span>
@@ -209,15 +155,6 @@ function SeednoteAnalyticsContent({
                 <span>关联时间：{formatDateTime(tracking.discovered_at)}</span>
               </div>
             </div>
-            {status === 'unresolved' && (
-              <SeednoteBindForm
-                value={publicationIdentity}
-                pending={bindPending}
-                error={bindError}
-                onChange={onIdentityChange}
-                onSubmit={onBind}
-              />
-            )}
             {tracking.last_error && status !== 'unresolved' && (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
                 {friendlyTrackingError(tracking.last_error)}
@@ -267,46 +204,6 @@ function SeednoteAnalyticsContent({
         )}
       </CardContent>
     </Card>
-  )
-}
-
-function SeednoteBindForm({
-  value,
-  pending,
-  error,
-  onChange,
-  onSubmit,
-}: {
-  value: string
-  pending: boolean
-  error: Error | null
-  onChange: (value: string) => void
-  onSubmit: (value: string) => void
-}) {
-  return (
-    <div className="space-y-2">
-      <form
-        className="flex flex-col gap-2 sm:flex-row"
-        onSubmit={(event) => {
-          event.preventDefault()
-          const normalized = value.trim()
-          if (normalized) onSubmit(normalized)
-        }}
-      >
-        <Input
-          aria-label="公开笔记链接或 ID"
-          placeholder="公开笔记链接或 ID"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <Button type="submit" disabled={!value.trim() || pending}>
-          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-          {pending ? '验证中' : '关联公开笔记'}
-        </Button>
-      </form>
-      <ContentSourceLink url={value.trim().startsWith('http') ? value : undefined} noteId={value.trim()} />
-      {error && <p className="text-xs text-destructive">链接无法读取，请确认笔记为公开状态。</p>}
-    </div>
   )
 }
 
