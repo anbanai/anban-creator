@@ -113,7 +113,7 @@ vi.mock('@/lib/api', async () => {
 describe('ProjectsPage', () => {
   it('does not repeat workspace navigation already available in the sidebar', async () => {
     render(<ProjectsPage />)
-    await screen.findByRole('heading', { name: '项目' })
+    await screen.findByRole('heading', { name: '人设' })
     expect(screen.queryByRole('navigation', { name: '工作区导航' })).not.toBeInTheDocument()
   })
   it('separates form and AI project creation with distinct labeled actions', async () => {
