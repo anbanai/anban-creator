@@ -78,6 +78,7 @@ describe('Sidebar', () => {
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
       'AI助手',
       '新手引导',
+      '画像库',
       '项目',
       '作品',
       '排期',
