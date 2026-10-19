@@ -11,7 +11,7 @@ describe('ProjectIdentity', () => {
     expect(document.querySelector('[data-project-mark="true"] [data-platform-icon]')).not.toBeInTheDocument()
     expect(document.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(3)
     expect(screen.getByLabelText('关联 Agent：种草笔记、视频生成、视频复刻')).toBeInTheDocument()
-    expect(screen.queryByText('视频生成')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="project-capabilities"]')).toBeInTheDocument()
   })
 
   it('shows a project avatar, Agent icon, keywords, and description', async () => {
@@ -28,12 +28,36 @@ describe('ProjectIdentity', () => {
     expect(screen.getByText('每日')).toBeInTheDocument()
   })
 
-  it('keeps compact identity scannable with avatar and Agent icon', () => {
+  it('uses distinct icons for WeChat articles and picture posts', () => {
+    render(<ProjectIdentity project={{ id: 'wechat-types', name: '公众号矩阵', agent_ids: ['wechat-article', 'wechat-picture'] }} />)
+
+    expect(document.querySelector('[data-agent-id="wechat-article"] svg')).not.toHaveClass('lucide-images')
+    expect(document.querySelector('[data-agent-id="wechat-picture"] svg')).toHaveClass('lucide-images')
+    expect(screen.getByLabelText('关联 Agent：公众号文章、公众号贴图')).toBeInTheDocument()
+  })
+
+  it('keeps compact identity scannable with the Agent icon below the project name', () => {
     render(<ProjectIdentity compact project={{ id: 'project', name: 'Garden Notes', platform: 'seednote', agent_ids: ['seednote'], description: 'Seasonal planting' }} />)
     expect(screen.getByText('Garden Notes')).toBeInTheDocument()
     expect(screen.queryByText('Seasonal planting')).not.toBeInTheDocument()
     expect(document.querySelector('[data-agent-id="seednote"]')).toBeInTheDocument()
+    const identityDetails = screen.getByText('Garden Notes').parentElement?.parentElement
+    expect(identityDetails).toHaveClass('flex-col')
+    expect(identityDetails?.querySelector('[data-slot="project-capabilities"]')).toBeInTheDocument()
     expect(document.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
+    expect(screen.queryByText('种草笔记')).not.toBeInTheDocument()
+  })
+
+  it('collapses capability labels after three items while exposing the complete list', () => {
+    render(<ProjectIdentity showCapabilityLabels project={{ id: 'many', name: '内容矩阵', agent_ids: ['seednote', 'montage', 'hypit', 'wechat-article'] }} />)
+
+    expect(screen.getByText('种草笔记')).toBeInTheDocument()
+    expect(screen.getByText('视频生成')).toBeInTheDocument()
+    expect(screen.getByText('视频复刻')).toBeInTheDocument()
+    const overflow = screen.getByLabelText('支持的内容类型：种草笔记、视频生成、视频复刻、公众号文章')
+    expect(overflow).not.toHaveAttribute('tabindex')
+    expect(overflow).toHaveAttribute('title', '支持的内容类型：种草笔记、视频生成、视频复刻、公众号文章')
+    expect(screen.queryByText('公众号文章')).not.toBeInTheDocument()
   })
 
   it('uses the platform default Agent until a project has durable Agent activity', () => {

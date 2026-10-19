@@ -18,7 +18,7 @@ describe('AgentIconStack', () => {
     expect(document.querySelector('[data-agent-id="seednote"]')).toBeInTheDocument()
     expect(document.querySelector('[data-agent-id="montage"]')).toBeInTheDocument()
     expect(document.querySelector('[data-agent-id="hypit"]')).toBeInTheDocument()
-    expect(screen.getByText('+1')).toHaveAttribute('title', '其余 Agent：公众号文章')
+    expect(screen.getByText('+1')).toHaveAttribute('title', '支持的内容类型：种草笔记、视频生成、视频复刻、公众号文章')
     expect(document.querySelector('[data-agent-id="seednote"]')).not.toHaveAttribute('tabindex')
   })
 

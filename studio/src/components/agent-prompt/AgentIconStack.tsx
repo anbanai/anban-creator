@@ -45,6 +45,7 @@ interface AgentIconStackProps {
   agentIds?: readonly string[]
   maxVisible?: number
   compact?: boolean
+  showLabels?: boolean
   className?: string
   emptyLabel?: string
 }
@@ -53,6 +54,7 @@ export function AgentIconStack({
   agentIds = [],
   maxVisible = 4,
   compact = false,
+  showLabels = false,
   className,
   emptyLabel = '尚未关联 Agent',
 }: AgentIconStackProps) {
@@ -62,6 +64,7 @@ export function AgentIconStack({
   const overflow = ids.slice(visible.length)
   const names = ids.map(agentDisplayName)
   const stackLabel = names.length ? `关联 Agent：${names.join('、')}` : emptyLabel
+  const allCapabilitiesLabel = `支持的内容类型：${names.join('、')}`
   const shellClassName = compact
     ? 'size-5 rounded-md'
     : 'size-6 rounded-md'
@@ -84,7 +87,11 @@ export function AgentIconStack({
     <span
       data-slot="agent-icon-stack"
       aria-label={stackLabel}
-      className={cn('inline-flex min-w-0 items-center gap-1', className)}
+      className={cn(
+        showLabels ? 'flex max-w-full flex-wrap' : 'inline-flex',
+        'min-w-0 items-center gap-1',
+        className,
+      )}
     >
       {visible.map((agentID, index) => {
         const Icon = platformIcon[agentID] ?? Layers3
@@ -102,7 +109,7 @@ export function AgentIconStack({
                   aria-label={label}
                   className={cn(
                     'inline-flex shrink-0 items-center justify-center border border-border/70 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-                    shellClassName,
+                    showLabels ? 'min-h-6 gap-1 rounded-md px-1.5 text-[11px] font-medium' : shellClassName,
                     background,
                     foreground,
                   )}
@@ -113,6 +120,7 @@ export function AgentIconStack({
               }
             >
               <Icon aria-hidden="true" className={cn('shrink-0', iconClassName)} />
+              {showLabels ? <span className="max-w-24 truncate">{label}</span> : null}
             </TooltipTrigger>
             <TooltipContent>{label}</TooltipContent>
           </Tooltip>
@@ -125,10 +133,10 @@ export function AgentIconStack({
               <span
                 data-slot="agent-icon-overflow"
                 role="img"
-                aria-label={`其余 Agent：${overflow.map(agentDisplayName).join('、')}`}
-                title={`其余 Agent：${overflow.map(agentDisplayName).join('、')}`}
+                aria-label={allCapabilitiesLabel}
+                title={allCapabilitiesLabel}
                 className={cn(
-                  'inline-flex shrink-0 items-center justify-center border border-dashed border-border bg-muted text-[10px] font-semibold text-muted-foreground outline-none transition-transform focus-visible:ring-2 focus-visible:ring-ring hover:scale-105',
+                  'inline-flex shrink-0 items-center justify-center border border-dashed border-border bg-muted text-[10px] font-semibold text-muted-foreground transition-transform hover:scale-105',
                   shellClassName,
                 )}
               />
@@ -136,7 +144,7 @@ export function AgentIconStack({
           >
             +{overflow.length}
           </TooltipTrigger>
-          <TooltipContent>其余 Agent：{overflow.map(agentDisplayName).join('、')}</TooltipContent>
+          <TooltipContent>{allCapabilitiesLabel}</TooltipContent>
         </Tooltip>
       ) : null}
     </span>

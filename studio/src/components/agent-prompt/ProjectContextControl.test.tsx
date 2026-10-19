@@ -51,7 +51,7 @@ describe('ProjectContextControl', () => {
     expect(screen.getAllByRole('img', { name: '种草笔记' }).length).toBeGreaterThan(0)
     const selectedOption = screen.getByRole('option', { name: /Morning Brief.*Daily editorial briefing/ })
     expect(selectedOption).toHaveTextContent('Daily editorial briefing')
-    expect(selectedOption).not.toHaveTextContent('公众号创作项目')
+    expect(selectedOption).toHaveTextContent('公众号文章')
     expect(selectedOption).toHaveAttribute('aria-selected', 'true')
     expect(selectedOption).toHaveClass('min-h-11')
 
@@ -189,6 +189,9 @@ describe('ProjectContextControl', () => {
     expect(trigger).toHaveTextContent('Morning Brief')
     expect(trigger.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
     expect(trigger.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
+    expect(trigger.querySelector('[data-slot="project-capabilities"]')).toBeInTheDocument()
+    expect(trigger.querySelector('[data-slot="project-capabilities"]')).not.toHaveTextContent('公众号文章')
+    expect(trigger).toHaveClass('h-auto')
     expect(trigger).not.toHaveClass('border-border')
     expect(trigger).not.toHaveTextContent('Daily editorial briefing')
     expect(document.querySelector('[data-slot="project-context-control"]')).toHaveAttribute(
@@ -199,7 +202,44 @@ describe('ProjectContextControl', () => {
     fireEvent.click(trigger)
     const option = await screen.findByRole('option', { name: /Morning Brief.*Daily editorial briefing/ })
     expect(option).toHaveTextContent('Daily editorial briefing')
-    expect(option).not.toHaveTextContent('公众号创作项目')
+    expect(option).toHaveTextContent('公众号文章')
+  })
+
+  it('finds a project by its specific content capability', async () => {
+    render(
+      <ProjectContextControl
+        mode="select"
+        projects={[{ id: 'picture-project', name: '图片内容号', platform: 'wechat', agent_ids: ['wechat-picture'] }]}
+        value={null}
+        onValueChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: '创作项目上下文' }))
+    const search = screen.getByPlaceholderText('搜索创作项目...')
+    fireEvent.change(search, { target: { value: '公众号贴图' } })
+
+    expect(await screen.findByRole('option', { name: /图片内容号.*公众号贴图/ })).toBeInTheDocument()
+  })
+
+  it('announces every selected content capability on the trigger', () => {
+    render(
+      <ProjectContextControl
+        mode="select"
+        projects={[{
+          id: 'matrix',
+          name: '内容矩阵',
+          agent_ids: ['seednote', 'montage', 'hypit', 'wechat-article'],
+        }]}
+        value="matrix"
+        onValueChange={vi.fn()}
+        compact
+        ariaLabel="筛选创作项目"
+      />,
+    )
+
+    const trigger = screen.getByRole('combobox')
+    expect(trigger).toHaveAccessibleDescription('内容矩阵，支持的内容类型：种草笔记、视频生成、视频复刻、公众号文章')
   })
 
   it('selects legacy projects without showing their old platform identity', async () => {

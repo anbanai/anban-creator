@@ -33,6 +33,7 @@ interface ProjectIdentityProps {
   project: ProjectIdentityProject
   compact?: boolean
   showAgents?: boolean
+  showCapabilityLabels?: boolean
   className?: string
 }
 
@@ -116,6 +117,7 @@ export function ProjectIdentity({
   project,
   compact = false,
   showAgents = true,
+  showCapabilityLabels = false,
   className,
 }: ProjectIdentityProps) {
   const description = project.description || project.positioning || project.instructions
@@ -126,9 +128,10 @@ export function ProjectIdentity({
   const agentIds = projectAgentIDs(project)
     .map((id) => id.trim())
     .filter((id, index, all) => id && all.indexOf(id) === index)
+  const capabilityLabels = agentIds.map(agentDisplayName)
   const identityLabel = [
     project.name,
-    showAgents ? agentIds.map(agentDisplayName).join('、') : '',
+    showAgents ? capabilityLabels.join('、') : '',
     ...keywords,
     description,
   ].filter(Boolean).join('，')
@@ -141,7 +144,7 @@ export function ProjectIdentity({
       aria-label={identityLabel}
       className={cn(
         'flex min-w-0 items-center text-left',
-        compact ? 'h-6 gap-2' : 'min-h-10 gap-3',
+        compact ? 'min-h-10 gap-2' : 'min-h-10 gap-3',
         className,
       )}
     >
@@ -162,11 +165,21 @@ export function ProjectIdentity({
           fallbackIcon
         )}
       </span>
-      <span className={cn('flex min-w-0 flex-1', compact ? 'items-center' : 'flex-col gap-0.5')}>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
-          {showAgents ? <AgentIconStack agentIds={agentIds} compact={compact} maxVisible={compact ? 3 : 5} className="shrink-0" /> : null}
         </span>
+        {showAgents ? (
+          <span data-slot="project-capabilities" className="flex min-w-0 items-center">
+            <AgentIconStack
+              agentIds={agentIds}
+              compact={compact}
+              showLabels={!compact && showCapabilityLabels}
+              maxVisible={3}
+              className="max-w-full"
+            />
+          </span>
+        ) : null}
         {!compact && keywordTags.length ? (
           <span data-slot="project-identity-keywords" aria-label="关键词" className="flex min-w-0 flex-wrap items-center gap-1 pt-0.5">
             <span className="sr-only">关键词：</span>

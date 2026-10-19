@@ -154,7 +154,7 @@ describe('server analytics queries', () => {
     await waitFor(() => expect(contentAnalyticsApi.contents).toHaveBeenLastCalledWith('matrix', expect.objectContaining({ content_type: 'wechat-picture' }), expect.any(AbortSignal)))
   })
 
-  it('keeps Agent icons only in the analytics switcher', async () => {
+  it('shows project capabilities in the compact selector alongside the analytics switcher', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{
       id: 'matrix', platform: 'wechat', name: '内容矩阵', agent_ids: ['wechat-article', 'seednote', 'wechat-picture'],
     } as Project])
@@ -163,7 +163,7 @@ describe('server analytics queries', () => {
 
     const projectSelector = await screen.findByRole('combobox', { name: '筛选创作项目' })
     await waitFor(() => expect(projectSelector).toHaveTextContent('内容矩阵'))
-    expect(projectSelector.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(0)
+    expect(projectSelector.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(3)
     expect(screen.getByRole('group', { name: '选择分析 Agent' }).querySelectorAll('button')).toHaveLength(3)
   })
 

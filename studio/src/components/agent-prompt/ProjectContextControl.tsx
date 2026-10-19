@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useId, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { LoaderCircleIcon, PlusIcon } from 'lucide-react'
 
@@ -77,6 +77,26 @@ interface ProjectContextGroup {
   items: ProjectContextItem[]
 }
 
+function projectAgentNames(project: ProjectContextProject) {
+  return projectAgentIDs(project)
+    .map((id) => id.trim())
+    .filter((id, index, all) => id && all.indexOf(id) === index)
+    .map(agentDisplayName)
+}
+
+function projectContextSearchLabel(item: ProjectContextItem) {
+  if (item.kind === 'none') return item.name
+  return [
+    item.name,
+    item.description,
+    item.positioning,
+    item.instructions,
+    projectPlatformLabel(item.platform),
+    item.keywords,
+    ...projectAgentNames(item),
+  ].filter(Boolean).join(' ')
+}
+
 function isProjectContextItemEqual(item: ProjectContextItem, value: ProjectContextItem) {
   return item.kind === value.kind && item.id === value.id
 }
@@ -124,6 +144,16 @@ function SelectProjectContext({
       ? (allowNoProject ? noProjectItem : null)
       : projectItems.find((item) => item.kind === 'project' && item.id === value) ?? null
   ), [allowNoProject, noProjectItem, projectItems, value])
+  const selectionDescriptionId = useId()
+  const selectedAgentNames = selected?.kind === 'project' ? projectAgentNames(selected) : []
+  const selectionDescription = selected?.kind === 'project'
+    ? [
+        selected.name,
+        selectedAgentNames.length
+          ? `支持的内容类型：${selectedAgentNames.join('、')}`
+          : '尚未关联内容类型',
+      ].join('，')
+    : null
   const isDisabled = loading || disabled
 
   return (
@@ -138,11 +168,8 @@ function SelectProjectContext({
         items={groups}
         value={selected}
         disabled={isDisabled}
-        itemToStringValue={(item: ProjectContextItem) => (
-          item.kind === 'project'
-            ? [item.name, item.description, item.positioning, item.instructions, projectPlatformLabel(item.platform), item.keywords, ...projectAgentIDs(item).map(agentDisplayName)].filter(Boolean).join(' ')
-            : item.name
-        )}
+        itemToStringValue={projectContextSearchLabel}
+        itemToStringLabel={projectContextSearchLabel}
         isItemEqualToValue={isProjectContextItemEqual}
         onValueChange={(item: ProjectContextItem | null) => {
           if (!item || item.kind === 'none') {
@@ -159,17 +186,18 @@ function SelectProjectContext({
               type="button"
               variant={compact ? 'ghost' : 'outline'}
               aria-label={ariaLabel}
+              aria-describedby={selectionDescription ? selectionDescriptionId : undefined}
               disabled={isDisabled}
               className={cn(
                 'min-w-0 justify-between font-normal',
                 compact ? 'w-auto max-w-full min-h-11' : 'w-full',
-                compact ? 'h-8' : selected?.kind === 'project' ? 'h-auto min-h-14 py-2' : undefined,
+                compact ? 'h-auto min-h-11 py-1' : selected?.kind === 'project' ? 'h-auto min-h-14 py-2' : undefined,
                 compact && 'px-1.5 shadow-none hover:bg-muted/70',
               )}
             />
           }
         >
-          <span className="truncate">
+          <span className={compact ? 'min-w-0 max-w-full' : 'truncate'}>
             {loading ? (
               <span className="flex items-center gap-1.5">
                 <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
@@ -202,15 +230,11 @@ function SelectProjectContext({
                     <ComboboxItem
                       key={item.id}
                       value={item}
-                      aria-label={item.kind === 'project'
-                        ? [item.name, item.description, item.positioning, item.instructions, projectPlatformLabel(item.platform), item.keywords, ...projectAgentIDs(item).map(agentDisplayName)]
-                          .filter(Boolean)
-                          .join(' · ')
-                        : item.name}
+                      aria-label={projectContextSearchLabel(item)}
                       className="min-h-11 rounded-lg border border-transparent px-2 py-1 pr-9 aria-selected:border-border/70 aria-selected:bg-accent/70"
                     >
                       {item.kind === 'project' ? (
-                        <ProjectIdentity project={item} showAgents={showAgents} />
+                        <ProjectIdentity project={item} showAgents={showAgents} showCapabilityLabels />
                       ) : item.name}
                     </ComboboxItem>
                   )}
@@ -235,6 +259,9 @@ function SelectProjectContext({
           ) : null}
         </ComboboxContent>
       </Combobox>
+      {selectionDescription ? (
+        <span id={selectionDescriptionId} className="sr-only">{selectionDescription}</span>
+      ) : null}
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {loading ? '正在加载创作项目' : ''}
       </span>
