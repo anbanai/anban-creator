@@ -41,7 +41,7 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange }: Props 
     onSuccess: (result, credentials) => {
       void queryClient.invalidateQueries({ queryKey: ['project-wechat-platform-config', project.id], refetchType: 'none' })
       if (!active.current) return
-      toast.success('微信平台设置已保存')
+      toast.success('自动发布设置已保存')
       const clean = { appID: credentials.appID.trim(), secret: '' }
       setDraft(clean)
       setSaved(clean)
@@ -49,7 +49,7 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange }: Props 
       setCredentialsConflict(result.credentials_conflict)
     },
     onError: (error) => {
-      if (active.current) toast.error(getApiErrorMessage(error, '微信平台设置保存失败，请重试'))
+      if (active.current) toast.error(getApiErrorMessage(error, '自动发布设置保存失败，请重试'))
     },
   })
   const dirty = draft.appID !== saved.appID || draft.secret !== saved.secret
@@ -118,15 +118,15 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
     <><Dialog open onOpenChange={(open) => { if (!open) requestClose() }}>
       <DialogContent className="sm:max-w-lg" closeButtonDisabled={editorState.busy}>
         <DialogHeader>
-          <DialogTitle>平台设置</DialogTitle>
+          <DialogTitle>配置自动发布</DialogTitle>
           <DialogDescription className="space-y-2">
             <ProjectIdentity project={project} compact showAgents={false} className="max-w-full" />
-            <span className="block">管理此项目的发布账号。</span>
+            <span className="block">管理此项目的公众号自动发布账号。</span>
           </DialogDescription>
         </DialogHeader>
-        {configs.isPending || (!configs.isFetchedAfterMount && !configs.isError) ? <p role="status">正在加载平台设置…</p> : configs.isError ? (
+        {configs.isPending || (!configs.isFetchedAfterMount && !configs.isError) ? <p role="status">正在加载自动发布设置…</p> : configs.isError ? (
           <div role="alert" className="space-y-3">
-            <p>平台设置加载失败，请重试。</p>
+            <p>自动发布设置加载失败：{getApiErrorMessage(configs.error, '请重试')}</p>
             <Button variant="secondary" onClick={() => void configs.refetch()}>重试</Button>
           </div>
         ) : <ChannelConfigEditor project={project} config={configs.data} onClose={requestClose} onStateChange={onEditorStateChange} />}
@@ -134,7 +134,7 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
     </Dialog>
     <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
       <AlertDialogContent>
-        <AlertDialogHeader><AlertDialogTitle>放弃未保存的平台设置？</AlertDialogTitle><AlertDialogDescription>尚未保存的修改将丢失。</AlertDialogDescription></AlertDialogHeader>
+        <AlertDialogHeader><AlertDialogTitle>放弃未保存的自动发布设置？</AlertDialogTitle><AlertDialogDescription>尚未保存的修改将丢失。</AlertDialogDescription></AlertDialogHeader>
         <AlertDialogFooter><AlertDialogCancel>继续编辑</AlertDialogCancel><AlertDialogAction onClick={onClose}>放弃修改</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog></>

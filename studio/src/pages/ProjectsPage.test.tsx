@@ -506,10 +506,10 @@ describe('ProjectsPage', () => {
 
     await clickProjectAction('测试创作项目', '编辑项目')
     const dialog = await screen.findByRole('dialog', { name: '编辑项目' })
-    expect(within(dialog).getByRole('heading', { name: '公众号发布账号' })).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: '配置 AppID / Secret' }))
+    expect(within(dialog).getByRole('heading', { name: '公众号自动发布' })).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '配置自动发布' }))
 
-    const settings = await screen.findByRole('dialog', { name: '平台设置' })
+    const settings = await screen.findByRole('dialog', { name: '配置自动发布' })
     expect(await within(settings).findByLabelText('微信 AppID')).toHaveValue('wx-test')
     expect(within(settings).getByLabelText('微信 AppSecret')).toBeInTheDocument()
   })
@@ -524,7 +524,7 @@ describe('ProjectsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '创建' }))
     await waitFor(() => expect(api.projects.create).toHaveBeenCalledTimes(1))
 
-    const settings = await screen.findByRole('dialog', { name: '平台设置' })
+    const settings = await screen.findByRole('dialog', { name: '配置自动发布' })
     expect(await within(settings).findByLabelText('微信 AppID')).toHaveValue('wx-test')
   })
 

@@ -1049,11 +1049,16 @@ func supportsWechatPlatform(project *model.Project) bool {
 	if project == nil {
 		return false
 	}
-	if project.Platform == model.PlatformWechat {
+	// `article` is the pre-migration project platform. Treat it as WeChat
+	// while old rows are still present so account settings remain accessible.
+	if project.Platform == model.PlatformWechat || project.Platform == "article" {
 		return true
 	}
 	for _, agentID := range project.AgentIDs {
-		if agentID == model.AgentIDArticle || agentID == model.AgentIDWechatPicture {
+		// `article` and `wechat` are legacy task identities from before the
+		// multi-Agent channel migration. Keep them readable until all rows are
+		// backfilled, matching the repository's derived capability projection.
+		if agentID == model.AgentIDArticle || agentID == model.AgentIDWechatPicture || agentID == "article" || agentID == "wechat" {
 			return true
 		}
 	}

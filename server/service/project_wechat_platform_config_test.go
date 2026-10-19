@@ -220,6 +220,48 @@ func TestWechatPlatformConfigSupportsLegacyProjectDerivedFromTask(t *testing.T) 
 	}
 }
 
+func TestWechatPlatformConfigSupportsLegacyArticlePlatform(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	ensureTestUser(t, repo, userID)
+	projectID := createTestProject(t, repo, userID, "article")
+	svc := NewProjectService(repo, nil)
+
+	config, err := svc.GetWechatPlatformConfig(ctx, userID, projectID)
+	if err != nil {
+		t.Fatalf("get config for a legacy article platform: %v", err)
+	}
+	if config.ProjectID != projectID || config.Platform != model.PlatformWechat {
+		t.Fatalf("legacy article platform config = %#v", config)
+	}
+
+	if _, err := svc.UpsertWechatPlatformConfig(ctx, userID, projectID, "wx-legacy", "secret-legacy"); err != nil {
+		t.Fatalf("save config for a legacy article platform: %v", err)
+	}
+}
+
+func TestWechatPlatformConfigSupportsLegacyArticleTaskIdentity(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	ensureTestUser(t, repo, userID)
+	projectID := createTestProject(t, repo, userID, "")
+	if err := repo.Tasks().Create(ctx, &model.Task{
+		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
+		Type: "article", Status: model.TaskStatusCompleted,
+	}); err != nil {
+		t.Fatalf("create legacy article task: %v", err)
+	}
+	svc := NewProjectService(repo, nil)
+
+	if _, err := svc.GetWechatPlatformConfig(ctx, userID, projectID); err != nil {
+		t.Fatalf("get config for a legacy article task: %v", err)
+	}
+}
+
 func TestProjectUpdateAndWechatCredentialsRollBackTogether(t *testing.T) {
 	db := setupTaskTestDB(t)
 	repo := repository.New(db)

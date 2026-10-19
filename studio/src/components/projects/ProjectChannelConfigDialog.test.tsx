@@ -17,7 +17,7 @@ describe('ProjectChannelConfigDialog', () => {
   it('shows one WeChat platform and saves shared credentials for both content channels', async () => {
     render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
     await screen.findByDisplayValue('wx-shared')
-    expect(screen.getByRole('heading', { name: '平台设置' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '配置自动发布' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '微信平台' })).toBeInTheDocument()
     expect(screen.getByText('公众号长文与贴图内容共用此账号。')).toBeInTheDocument()
     expect(screen.queryByRole('group', { name: '发布渠道' })).not.toBeInTheDocument()
@@ -101,9 +101,10 @@ describe('ProjectChannelConfigDialog', () => {
   })
 
   it('blocks editing when existing settings cannot be loaded', async () => {
-    vi.mocked(api.projects.getWechatPlatformConfig).mockRejectedValue(new Error('unavailable'))
+    vi.mocked(api.projects.getWechatPlatformConfig).mockRejectedValue({ response: { data: { code: 40000, msg: '微信 AppID 和 AppSecret 配置无效' } } })
     render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
     await screen.findByText(/加载失败/)
+    expect(screen.getByText(/微信 AppID 和 AppSecret 配置无效/)).toBeInTheDocument()
     expect(screen.queryByLabelText('微信 AppID')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
   })

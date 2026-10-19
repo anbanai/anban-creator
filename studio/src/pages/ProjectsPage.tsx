@@ -565,13 +565,13 @@ export default function ProjectsPage() {
                         <MessagesSquare aria-hidden="true" className="size-4" />
                       </span>
                       <div className="min-w-0">
-                        <h3 id="wechat-publishing-title" className="text-sm font-medium">公众号发布账号</h3>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">公众号文章与贴图共用一个账号。AppSecret 只在保存时提交，之后不会回显。</p>
+                        <h3 id="wechat-publishing-title" className="text-sm font-medium">公众号自动发布</h3>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">文章与贴图共用一个公众号账号。AppSecret 只在保存时提交，之后不会回显。</p>
                       </div>
                     </div>
                     {editingProject ? (
                       <Button type="button" variant="outline" size="sm" onClick={() => setChannelProject(editingProject)}>
-                        <Settings2 />配置 AppID / Secret
+                        <Settings2 />配置自动发布
                       </Button>
                     ) : <span className="shrink-0 text-xs font-medium text-muted-foreground">创建后自动配置</span>}
                   </div>
