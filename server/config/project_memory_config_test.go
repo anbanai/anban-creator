@@ -95,6 +95,36 @@ func TestDshLegacyFractionalCPURequiresKubernetesQuantity(t *testing.T) {
 	}
 }
 
+func TestDshResourcesRejectUnknownNestedFields(t *testing.T) {
+	var dsh DshConfig
+	err := yaml.Unmarshal([]byte(`
+resources:
+  request:
+    cpu: 500m
+  limits:
+    cpu: 500m
+    memory: 512Mi
+`), &dsh)
+	if err == nil || !strings.Contains(err.Error(), "kubernetes resources.request") {
+		t.Fatalf("unknown DSH resource field error = %v, want nested field rejection", err)
+	}
+}
+
+func TestDshKubernetesResourcesRequireRequestsAndLimits(t *testing.T) {
+	cfg := DshConfig{
+		Executor:            "kubernetes",
+		Image:               "registry.example/dsh@sha256:" + strings.Repeat("a", 64),
+		KubernetesNamespace: "anban", KubernetesProjectMemoryClaim: "creator-project-memory",
+		KubernetesProjectMemoryMount: "/workspace/project", TimeoutSec: 3600,
+		ServerURL: "http://server:8080", ServerInstanceID: "server-1",
+		Resources: KubernetesResourceConfig{Requests: map[string]string{"cpu": "500m", "memory": "512Mi"}},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "dsh.resources.limits.cpu") || !strings.Contains(err.Error(), "dsh.resources.limits.memory") {
+		t.Fatalf("incomplete DSH resource error = %v, want limits requirements", err)
+	}
+}
+
 func TestDshDiagnosticRetentionDefaultsAndRejectsNegative(t *testing.T) {
 	cfg := &Config{}
 	cfg.applyDefaults()
