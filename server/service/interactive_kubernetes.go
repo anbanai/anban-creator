@@ -219,15 +219,7 @@ func (f KubernetesRuntimeFactory) logStartupStage(sessionID, message string, sta
 
 func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, name string) *corev1.Pod {
 	labels := map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.session_id": spec.SessionID, "com.anban.server_instance": strings.TrimSpace(f.ServerInstanceID)}
-	resources := corev1.ResourceRequirements{Requests: corev1.ResourceList{}, Limits: corev1.ResourceList{}}
-	if q, err := resource.ParseQuantity(fmt.Sprintf("%d", f.Config.CPUCores)); err == nil {
-		resources.Limits[corev1.ResourceCPU] = q
-		resources.Requests[corev1.ResourceCPU] = q
-	}
-	if q, err := resource.ParseQuantity(fmt.Sprintf("%dMi", f.Config.MemoryMB)); err == nil {
-		resources.Limits[corev1.ResourceMemory] = q
-		resources.Requests[corev1.ResourceMemory] = q
-	}
+	resources := dshResourceRequirements(f.Config)
 	projectMemoryMount := corev1.VolumeMount{Name: "project-memory", MountPath: f.Config.KubernetesProjectMemoryMount, ReadOnly: true}
 	volumeMounts := []corev1.VolumeMount{projectMemoryMount, {Name: "tmp", MountPath: "/tmp"}, {Name: "dsh-context", MountPath: "/var/run/anban-dsh-context", ReadOnly: true}}
 	volumes := []corev1.Volume{{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: quantityPtr("64Mi")}}}, {Name: "dsh-context", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: name + "-secret", Items: []corev1.KeyToPath{{Key: "initial-context", Path: "initial-context"}}}}}}
@@ -239,6 +231,33 @@ func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, na
 	}
 	deadline := int64(f.Config.TimeoutSec)
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, ActiveDeadlineSeconds: &deadline, ServiceAccountName: f.ServiceAccount, AutomountServiceAccountToken: dshBoolPtr(false), ImagePullSecrets: imagePullSecrets(f.Config.KubernetesImagePullSecret), SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: dshBoolPtr(true), RunAsUser: int64Ptr(1000), RunAsGroup: int64Ptr(1000), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}, Containers: []corev1.Container{{Name: "dsh", Image: f.Config.Image, ImagePullPolicy: corev1.PullIfNotPresent, Env: nil, Command: []string{"node", "/app/runtime-dsh/dist/dsh-bridge.js"}, Args: []string{"--provider", f.Provider, "--model", f.Model, "--route-api", f.API, "--base-url", f.BaseURL}, WorkingDir: "/workspace/project", Stdin: true, StdinOnce: false, TTY: false, Resources: resources, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: dshBoolPtr(false), ReadOnlyRootFilesystem: dshBoolPtr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, VolumeMounts: volumeMounts}}, Volumes: volumes}}
+}
+
+func dshResourceRequirements(cfg srvconfig.DshConfig) corev1.ResourceRequirements {
+	configured := cfg.Resources
+	if len(configured.Requests) == 0 && len(configured.Limits) == 0 {
+		configured = srvconfig.KubernetesResourceConfig{
+			Requests: map[string]string{
+				"cpu":    strconv.FormatInt(cfg.CPUCores, 10),
+				"memory": fmt.Sprintf("%dMi", cfg.MemoryMB),
+			},
+			Limits: map[string]string{
+				"cpu":    strconv.FormatInt(cfg.CPUCores, 10),
+				"memory": fmt.Sprintf("%dMi", cfg.MemoryMB),
+			},
+		}
+	}
+	parse := func(values map[string]string) corev1.ResourceList {
+		result := corev1.ResourceList{}
+		for name, raw := range values {
+			quantity, err := resource.ParseQuantity(strings.TrimSpace(raw))
+			if err == nil && quantity.Sign() > 0 {
+				result[corev1.ResourceName(name)] = quantity
+			}
+		}
+		return result
+	}
+	return corev1.ResourceRequirements{Requests: parse(configured.Requests), Limits: parse(configured.Limits)}
 }
 
 func (f KubernetesRuntimeFactory) job(spec InteractiveRuntimeSpec, namespace, name string) *batchv1.Job {
