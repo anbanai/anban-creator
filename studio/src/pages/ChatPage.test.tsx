@@ -72,6 +72,7 @@ describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     sessionStorage.clear()
+    localStorage.clear()
     interactiveMocks.agents.mockResolvedValue([agent])
     interactiveMocks.createSession.mockResolvedValue({ id: 'session-1', agent_id: agent.id, status: 'running' })
     interactiveMocks.message.mockResolvedValue({})
@@ -94,6 +95,82 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'create-project', undefined, expect.any(String)))
     expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
+  })
+
+  it('keeps the chat page inside the available app height', async () => {
+    renderChat('/projects/create')
+
+    await screen.findByRole('textbox', { name: '发送消息' })
+    const page = screen.getByTestId('chat-page')
+    expect(page.className).toContain('min-h-0')
+    expect(page.className).not.toContain('100dvh')
+  })
+
+  it('preserves history position and offers a jump when a message arrives above the bottom', async () => {
+    let release!: () => void
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
+      yield { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '历史消息' }) }
+      await new Promise<void>((resolve) => {
+        release = resolve
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      yield { id: '2', event: 'assistant.message', data: JSON.stringify({ text: '新消息' }) }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+    renderChat('/projects/create')
+
+    await screen.findByText('历史消息')
+    const scrollRegion = await screen.findByTestId('chat-scroll-region')
+    Object.defineProperties(scrollRegion, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    fireEvent.scroll(scrollRegion)
+    release()
+
+    expect(await screen.findByText('新消息')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /有 1 条新消息/ })).toBeInTheDocument()
+    expect(scrollRegion.scrollTop).toBe(0)
+  })
+
+  it('follows new messages when the reader is already near the bottom', async () => {
+    let release!: () => void
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
+      yield { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '第一条' }) }
+      await new Promise<void>((resolve) => {
+        release = resolve
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      yield { id: '2', event: 'assistant.message', data: JSON.stringify({ text: '第二条' }) }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+    renderChat('/projects/create')
+
+    await screen.findByText('第一条')
+    const scrollRegion = await screen.findByTestId('chat-scroll-region')
+    const scrollTo = vi.fn()
+    Object.defineProperties(scrollRegion, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 410 },
+      scrollTo: { configurable: true, value: scrollTo },
+    })
+    fireEvent.scroll(scrollRegion)
+    release()
+
+    await screen.findByText('第二条')
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 500, behavior: 'smooth' }))
+    expect(screen.queryByRole('button', { name: /有 1 条新消息/ })).not.toBeInTheDocument()
+  })
+
+  it('lets the reader mute and restore new-message sounds', async () => {
+    renderChat('/projects/create')
+
+    const soundButton = await screen.findByRole('button', { name: '关闭新消息声音' })
+    fireEvent.click(soundButton)
+    expect(screen.getByRole('button', { name: '开启新消息声音' })).toBeInTheDocument()
+    expect(localStorage.getItem('anban:chat:new-message-sound')).toBe('off')
   })
 
   it('asks before cancelling and preserves saved conversation material', async () => {

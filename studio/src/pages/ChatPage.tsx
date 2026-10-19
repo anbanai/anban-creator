@@ -15,6 +15,8 @@ import {
   Sparkles,
   SquarePen,
   UserRound,
+  Volume2,
+  VolumeX,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -52,6 +54,9 @@ type PendingSubmission =
 type RunState = 'idle' | 'starting' | 'running' | 'waiting_answer' | 'error' | 'expired' | 'closed'
 type TerminalRunState = Extract<RunState, 'error' | 'expired' | 'closed'>
 type JsonRecord = Record<string, unknown>
+
+const NEW_MESSAGE_SOUND_STORAGE_KEY = 'anban:chat:new-message-sound'
+const CHAT_SCROLL_THRESHOLD = 80
 
 interface BlockableNavigator {
   push?: (...args: unknown[]) => unknown
@@ -493,6 +498,14 @@ export default function ChatPage() {
   const [committed, setCommitted] = useState(false)
   const [sessionProject, setSessionProject] = useState<{ id?: string; name?: string } | null>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    try {
+      return localStorage.getItem(NEW_MESSAGE_SOUND_STORAGE_KEY) !== 'off'
+    } catch {
+      return true
+    }
+  })
+  const [newMessageCount, setNewMessageCount] = useState(0)
   const [restartNonce, setRestartNonce] = useState(0)
   const [recoveryAvailable, setRecoveryAvailable] = useState(() => Boolean(persistedSession?.draftNeedsReconfirmation || (!persistedSession?.sessionId && hasSavedMaterial(persistedSession))))
   const idempotencyKeyRef = useRef(crypto.randomUUID())
@@ -520,6 +533,10 @@ export default function ChatPage() {
   const messagesRef = useRef(messages)
   const questionBatchesRef = useRef(questionBatches)
   const timelineRef = useRef(timeline)
+  const scrollRegionRef = useRef<HTMLDivElement>(null)
+  const followTailRef = useRef(true)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const pendingSoundRef = useRef(false)
   const draftRef = useRef(draft)
   const draftReadyEventIdRef = useRef(draftReadyEventId)
   const lastEventIdRef = useRef(lastEventId)
@@ -546,6 +563,101 @@ export default function ChatPage() {
   }, [])
   const [sendingMessage, setSendingMessage] = useState(false)
   const [turnActive, setTurnActive] = useState(false)
+
+  const getAudioContext = useCallback(() => {
+    if (audioContextRef.current) return audioContextRef.current
+    const AudioContextConstructor = window.AudioContext
+      ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextConstructor) return null
+    const context = new AudioContextConstructor()
+    audioContextRef.current = context
+    return context
+  }, [])
+
+  const playNotificationSound = useCallback(() => {
+    if (!soundEnabled) return
+    const context = getAudioContext()
+    if (!context || context.state !== 'running') {
+      pendingSoundRef.current = true
+      return
+    }
+    const now = context.currentTime
+    const gain = context.createGain()
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.045, now + 0.015)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28)
+    gain.connect(context.destination)
+    for (const [frequency, offset] of [[660, 0], [880, 0.08]] as const) {
+      const oscillator = context.createOscillator()
+      oscillator.type = 'sine'
+      oscillator.frequency.setValueAtTime(frequency, now + offset)
+      oscillator.connect(gain)
+      oscillator.start(now + offset)
+      oscillator.stop(now + 0.3)
+    }
+  }, [getAudioContext, soundEnabled])
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (!soundEnabled) return
+      const context = getAudioContext()
+      if (!context) return
+      void context.resume().then(() => {
+        if (pendingSoundRef.current) {
+          pendingSoundRef.current = false
+          playNotificationSound()
+        }
+      }).catch(() => undefined)
+    }
+    window.addEventListener('pointerdown', unlockAudio)
+    window.addEventListener('keydown', unlockAudio)
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio)
+      window.removeEventListener('keydown', unlockAudio)
+    }
+  }, [getAudioContext, playNotificationSound, soundEnabled])
+
+  useEffect(() => () => {
+    void audioContextRef.current?.close().catch(() => undefined)
+  }, [])
+
+  const isNearBottom = useCallback(() => {
+    const element = scrollRegionRef.current
+    if (!element) return true
+    return element.scrollHeight - element.scrollTop - element.clientHeight <= CHAT_SCROLL_THRESHOLD
+  }, [])
+
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const element = scrollRegionRef.current
+    if (!element) return
+    followTailRef.current = true
+    setNewMessageCount(0)
+    if (typeof element.scrollTo === 'function') element.scrollTo({ top: element.scrollHeight, behavior })
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    const nearBottom = isNearBottom()
+    followTailRef.current = nearBottom
+    if (nearBottom) setNewMessageCount(0)
+  }, [isNearBottom])
+
+  const notifyIncomingMessage = useCallback(() => {
+    if (!followTailRef.current && !isNearBottom()) {
+      setNewMessageCount((count) => count + 1)
+    } else {
+      followTailRef.current = true
+    }
+    playNotificationSound()
+  }, [isNearBottom, playNotificationSound])
+
+  useEffect(() => {
+    const element = scrollRegionRef.current
+    if (!element || !followTailRef.current) return
+    const frame = window.requestAnimationFrame(() => {
+      if (followTailRef.current && typeof element.scrollTo === 'function') element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [timeline.length])
 
   const agentsQuery = useQuery({
     queryKey: ['interactive-agents'],
@@ -670,6 +782,8 @@ export default function ChatPage() {
       case 'assistant.message':
         {
           const message = streamedMessage('assistant')
+          const isNewMessage = !messagesRef.current.some((item) => item.id === message.id)
+          if (isNewMessage) notifyIncomingMessage()
           updateMessagesNow((items) => items.some((item) => item.id === message.id) ? items : [...items, message])
           updateTimelineNow((items) => upsertTimeline(items, { kind: 'message', message, eventId }, (item) => item.kind === 'message' && item.message.id === message.id))
         }
@@ -946,7 +1060,7 @@ export default function ChatPage() {
       default:
         break
     }
-  }, [isProjectUpdate, preserveLocalMaterialAfterLostSession, terminateConversation, updateMessagesNow, updateQuestionsNow, updateTimelineNow])
+  }, [isProjectUpdate, notifyIncomingMessage, preserveLocalMaterialAfterLostSession, terminateConversation, updateMessagesNow, updateQuestionsNow, updateTimelineNow])
 
   const sendRecoveryPrompt = useCallback(async (id: string, prompt: string) => {
     if (recoveryMessagePromiseRef.current) return recoveryMessagePromiseRef.current
@@ -1353,7 +1467,7 @@ export default function ChatPage() {
   const canCancelConversation = !committed && !committing && (Boolean(sessionId) || runState === 'starting')
 
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-[1500px] flex-col gap-4 lg:min-h-[calc(100dvh-4rem)]">
+    <div data-testid="chat-page" className="mx-auto flex min-h-0 w-full max-w-[1500px] flex-1 flex-col gap-4">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Sparkles className="size-4" /></div>
@@ -1366,6 +1480,24 @@ export default function ChatPage() {
           <Badge variant={runState === 'error' || runState === 'expired' ? 'destructive' : runState === 'closed' ? 'secondary' : 'outline'}>
             {runState === 'starting' ? '正在启动' : runState === 'waiting_answer' ? '等待回答' : runState === 'running' ? '进行中' : runState === 'error' ? '连接异常' : runState === 'expired' ? '已过期' : runState === 'closed' ? '已取消' : '准备就绪'}
           </Badge>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={soundEnabled ? '关闭新消息声音' : '开启新消息声音'}
+            title={soundEnabled ? '关闭新消息声音' : '开启新消息声音'}
+            onClick={() => {
+              const next = !soundEnabled
+              setSoundEnabled(next)
+              if (!next) pendingSoundRef.current = false
+              try {
+                localStorage.setItem(NEW_MESSAGE_SOUND_STORAGE_KEY, next ? 'on' : 'off')
+              } catch {
+                // Ignore storage policies such as private browsing.
+              }
+            }}
+          >
+            {soundEnabled ? <Volume2 /> : <VolumeX />}
+          </Button>
           {canCancelConversation && <Button variant="outline" size="sm" disabled={cancelling} onClick={() => { setCancelError(null); setCancelDialogOpen(true) }}><Ban className="size-4" />取消对话</Button>}
           <Button variant="outline" size="sm" disabled={selectableAgents.length === 0} onClick={() => setModeMenuOpen((open) => !open)} aria-expanded={modeMenuOpen}>
             <UserRound className="size-4" />
@@ -1409,8 +1541,8 @@ export default function ChatPage() {
         </section>
       ) : (
         <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <section className="flex min-h-0 flex-col rounded-xl border border-border bg-card">
-            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6" aria-live="polite">
+          <section className="relative flex min-h-0 flex-col rounded-xl border border-border bg-card">
+            <div ref={scrollRegionRef} data-testid="chat-scroll-region" onScroll={handleScroll} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6" aria-live="polite">
               {timeline.map((item) => {
                 if (item.kind === 'message') {
                   const { message } = item
@@ -1433,6 +1565,7 @@ export default function ChatPage() {
               {streamError && <Alert variant={streamError.startsWith('对话已取消') ? 'default' : 'destructive'}>{streamError.startsWith('对话已取消') ? <Ban className="size-4" /> : <AlertTriangle className="size-4" />}<AlertTitle>{streamError.startsWith('对话已取消') ? '对话已取消' : canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>本地保存的消息、问答和草稿仍然保留。</p><p>旧 runtime 上下文不会恢复。</p><p>保存草稿需要重新确认</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />恢复本地材料</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
             </div>
+            {newMessageCount > 0 && <Button type="button" variant="secondary" size="sm" className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 shadow-md" onClick={() => scrollToLatest()}><ChevronDown className="size-4" />有 {newMessageCount} 条新消息</Button>}
             <div className="border-t border-border p-3 sm:p-4">
               {liveStatus && <div role="status" className="mb-3 flex min-h-9 items-center gap-2 border-b border-border/60 pb-3 text-sm text-muted-foreground">{liveStatusLabel === '等待中' ? <MessageSquare className="size-4 shrink-0 text-muted-foreground" /> : <Loader2 className="size-4 shrink-0 animate-spin text-primary" />}<span className="min-w-0 flex-1 break-words">{liveStatus}</span><span className="shrink-0 text-xs">{liveStatusLabel}</span></div>}
               <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
