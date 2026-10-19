@@ -72,10 +72,28 @@ func TestWechatPublicationSchemaIsOnePerTaskAndHasLifecycleContract(t *testing.T
 		WechatPublicationStatusDrafting, WechatPublicationStatusDrafted, WechatPublicationStatusAwaitingManual, WechatPublicationStatusPublishSubmitting,
 		WechatPublicationStatusPublishing, WechatPublicationStatusPublished, WechatPublicationStatusNeedsSelection,
 		WechatPublicationStatusPublishFailed, WechatPublicationStatusUnsupported,
+		WechatPublicationStatusSkipped,
 	} {
 		if !IsWechatPublicationStatus(status) {
 			t.Errorf("status %q not recognized", status)
 		}
+	}
+}
+
+func TestWechatPublicationSchemaAcceptsSkippedDisposition(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&WechatPublication{}); err != nil {
+		t.Fatal(err)
+	}
+	publication := &WechatPublication{
+		ID: uuid.NewString(), TaskID: "task-skipped", UserID: "user-1", ProjectID: "project-1",
+		Source: WechatPublicationSourceWechatConsole, Status: "skipped",
+	}
+	if err := db.Create(publication).Error; err != nil {
+		t.Fatalf("create skipped publication: %v", err)
 	}
 }
 

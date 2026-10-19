@@ -441,6 +441,60 @@ func (s *WechatPublicationService) BindManualPublication(ctx context.Context, us
 	return publication, nil
 }
 
+func (s *WechatPublicationService) Skip(ctx context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	defer s.syncTaskLifecycle(ctx, taskID)
+	if _, _, err := s.ownedTaskProject(ctx, userID, taskID); err != nil {
+		return nil, err
+	}
+	publication, err := s.repo.WechatPublications().FindByTaskID(ctx, taskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWechatPublicationNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if publication.DraftMediaID == "" || hasWechatSubmissionEvidence(publication) {
+		return publication, ErrWechatPublicationConflict
+	}
+	won, err := s.repo.WechatPublications().TransitionToSkipped(ctx, publication.ID, publication.Status, publication.UpdatedAt)
+	if err != nil {
+		return publication, err
+	}
+	if !won {
+		return publication, ErrWechatPublicationConflict
+	}
+	return s.repo.WechatPublications().FindByID(ctx, publication.ID)
+}
+
+func (s *WechatPublicationService) RestoreSkipped(ctx context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	defer s.syncTaskLifecycle(ctx, taskID)
+	if _, _, err := s.ownedTaskProject(ctx, userID, taskID); err != nil {
+		return nil, err
+	}
+	publication, err := s.repo.WechatPublications().FindByTaskID(ctx, taskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWechatPublicationNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if publication.Status != model.WechatPublicationStatusSkipped {
+		return publication, ErrWechatPublicationConflict
+	}
+	targetStatus := model.WechatPublicationStatusDrafted
+	if publication.ManualPublishRequired {
+		targetStatus = model.WechatPublicationStatusAwaitingManual
+	}
+	won, err := s.repo.WechatPublications().TransitionFromSkipped(ctx, publication.ID, publication.UpdatedAt, targetStatus)
+	if err != nil {
+		return publication, err
+	}
+	if !won {
+		return publication, ErrWechatPublicationConflict
+	}
+	return s.repo.WechatPublications().FindByID(ctx, publication.ID)
+}
+
 func normalizeManualWechatURL(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
@@ -1598,7 +1652,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 	if err != nil {
 		return nil, err
 	}
-	if publication.Status == model.WechatPublicationStatusPublished || publication.Status == model.WechatPublicationStatusUnsupported || publication.Status == model.WechatPublicationStatusAwaitingManual {
+	if publication.Status == model.WechatPublicationStatusPublished || publication.Status == model.WechatPublicationStatusUnsupported || publication.Status == model.WechatPublicationStatusAwaitingManual || publication.Status == model.WechatPublicationStatusSkipped {
 		return publication, nil
 	}
 	deniedCode, denied, err := s.cachedDeniedFormalPublishCode(ctx, project.ID)

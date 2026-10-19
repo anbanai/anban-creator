@@ -87,7 +87,7 @@ func TestWechatPublicationStatusMySQL8(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, status := range []string{"drafting", "drafted", "awaiting_manual_publish", "ambiguous", "publishing", "published", "needs_selection", "publish_failed", "unsupported"} {
+	for _, status := range []string{"drafting", "drafted", "awaiting_manual_publish", "ambiguous", "publishing", "published", "needs_selection", "publish_failed", "unsupported", "skipped"} {
 		if err := db.Exec("INSERT INTO wechat_publications(id,status) VALUES (?,?)", status, status).Error; err != nil {
 			t.Fatal(err)
 		}

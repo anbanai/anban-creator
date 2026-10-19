@@ -17,6 +17,8 @@ type WechatPublicationActions interface {
 	RetryPublish(context.Context, string, string) (*model.WechatPublication, error)
 	Reconcile(context.Context, string, string) error
 	Select(context.Context, string, string, string) (*model.WechatPublication, error)
+	Skip(context.Context, string, string) (*model.WechatPublication, error)
+	RestoreSkipped(context.Context, string, string) (*model.WechatPublication, error)
 	Recover(context.Context, string, string) (model.TaskPublicationOutcome, error)
 }
 
@@ -165,6 +167,30 @@ func (h *WechatPublicationHandler) ManualBind(c fiber.Ctx) error {
 		return Error(c, fiber.StatusServiceUnavailable, "manual publication binding unavailable")
 	}
 	publication, err := manualBinder.BindManualPublication(c.Context(), userID, taskID, body.ArticleURL)
+	if err != nil {
+		return h.handleError(c, taskID, err)
+	}
+	return Success(c, publication)
+}
+
+func (h *WechatPublicationHandler) Skip(c fiber.Ctx) error {
+	userID, taskID, err := h.requestIdentity(c)
+	if err != nil {
+		return err
+	}
+	publication, err := h.service.Skip(c.Context(), userID, taskID)
+	if err != nil {
+		return h.handleError(c, taskID, err)
+	}
+	return Success(c, publication)
+}
+
+func (h *WechatPublicationHandler) RestoreSkipped(c fiber.Ctx) error {
+	userID, taskID, err := h.requestIdentity(c)
+	if err != nil {
+		return err
+	}
+	publication, err := h.service.RestoreSkipped(c.Context(), userID, taskID)
 	if err != nil {
 		return h.handleError(c, taskID, err)
 	}

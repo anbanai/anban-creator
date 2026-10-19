@@ -324,6 +324,35 @@ func (r *wechatPublicationRepository) TransitionToPublished(ctx context.Context,
 	return rows == 1, err
 }
 
+func (r *wechatPublicationRepository) TransitionToSkipped(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time) (bool, error) {
+	if expectedStatus != model.WechatPublicationStatusDrafted && expectedStatus != model.WechatPublicationStatusAwaitingManual {
+		return false, nil
+	}
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND updated_at = ? AND draft_media_id <> '' AND submit_attempted_at IS NULL AND publish_id = '' AND msg_data_id = '' AND msg_id = ''", id, expectedStatus, expectedUpdatedAt).
+			Updates(map[string]any{
+				"status":        model.WechatPublicationStatusSkipped,
+				"next_check_at": nil,
+				"last_error":    "",
+				"candidates":    nil,
+			})
+	})
+	return rows == 1, err
+}
+
+func (r *wechatPublicationRepository) TransitionFromSkipped(ctx context.Context, id string, expectedUpdatedAt time.Time, status string) (bool, error) {
+	if status != model.WechatPublicationStatusDrafted && status != model.WechatPublicationStatusAwaitingManual {
+		return false, nil
+	}
+	rows, err := runWechatClaimWrite(ctx, r.db.Dialector.Name(), func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&model.WechatPublication{}).
+			Where("id = ? AND status = ? AND updated_at = ?", id, model.WechatPublicationStatusSkipped, expectedUpdatedAt).
+			Update("status", status)
+	})
+	return rows == 1, err
+}
+
 func runWechatClaimWrite(ctx context.Context, dialect string, operation func() *gorm.DB) (int64, error) {
 	var rows int64
 	err := retryWechatSQLiteBusy(ctx, dialect, func() error {

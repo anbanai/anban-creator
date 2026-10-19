@@ -1997,6 +1997,44 @@ func TestBindManualPublicationCompletesDraftWithoutCallingProvider(t *testing.T)
 	}
 }
 
+func TestSkipPublicationStopsFollowupAndCanBeRestored(t *testing.T) {
+	f := newPublicationFixture(t)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusAwaitingManual
+	publication.ManualPublishRequired = true
+	publication.WechatStatusCode = 48001
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+
+	skipped, err := f.svc.Skip(context.Background(), f.userID, f.taskID)
+	if err != nil || skipped.Status != "skipped" || !skipped.ManualPublishRequired || skipped.NextCheckAt != nil {
+		t.Fatalf("Skip = %#v, %v", skipped, err)
+	}
+	if f.api.submitCalls != 0 {
+		t.Fatalf("skip submitted publication %d times", f.api.submitCalls)
+	}
+
+	restored, err := f.svc.RestoreSkipped(context.Background(), f.userID, f.taskID)
+	if err != nil || restored.Status != model.WechatPublicationStatusAwaitingManual || !restored.ManualPublishRequired {
+		t.Fatalf("RestoreSkipped = %#v, %v", restored, err)
+	}
+}
+
+func TestSkipPublicationRejectsSubmissionEvidence(t *testing.T) {
+	f := newPublicationFixture(t)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusAwaitingManual
+	publication.SubmitAttemptedAt = &f.now
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+
+	if skipped, err := f.svc.Skip(context.Background(), f.userID, f.taskID); !errors.Is(err, ErrWechatPublicationConflict) || skipped.Status != model.WechatPublicationStatusAwaitingManual {
+		t.Fatalf("Skip with submission evidence = %#v, %v", skipped, err)
+	}
+}
+
 func TestBindManualPublicationCanAttachURLAfterConfirmation(t *testing.T) {
 	f := newPublicationFixture(t)
 	publication := f.seedDrafted(t)

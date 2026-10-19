@@ -84,6 +84,10 @@ export const tasksApi = {
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/select`, { article_id: articleId })),
   bindManualWechatPublication: (id: string, articleUrl: string) =>
     unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/manual-bind`, { article_url: articleUrl, confirmed_published: true })),
+  skipWechatPublication: (id: string) =>
+    unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/skip`)),
+  restoreWechatPublication: (id: string) =>
+    unwrap<WechatPublication>(http.post(`/tasks/${id}/wechat-publication/restore`)),
 
   files: (id: string) =>
     unwrap<TaskFile[]>(http.get(`/tasks/${id}/files`)),

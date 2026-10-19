@@ -394,6 +394,8 @@ type WechatPublicationRepository interface {
 	TransitionDraftRecovered(ctx context.Context, id string, expectedUpdatedAt time.Time, draftMediaID string, nextCheckAt, lastCheckedAt *time.Time) (bool, error)
 	UpdateReconciliation(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
 	TransitionToPublished(ctx context.Context, publication *model.WechatPublication, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
+	TransitionToSkipped(ctx context.Context, id, expectedStatus string, expectedUpdatedAt time.Time) (bool, error)
+	TransitionFromSkipped(ctx context.Context, id string, expectedUpdatedAt time.Time, status string) (bool, error)
 	BindMsgID(ctx context.Context, id, msgID string) (bool, error)
 	Update(ctx context.Context, publication *model.WechatPublication) error
 	RetryUnsupportedDraft(ctx context.Context, id string, expectedUpdatedAt, claimedAt time.Time, claimToken string) (bool, error)

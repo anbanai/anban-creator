@@ -12,7 +12,7 @@ import (
 )
 
 func TestPublicationStatusReadinessChecksExactEnforcedConstraint(t *testing.T) {
-	current := "(`status` in (_utf8mb4'drafting',_utf8mb4'drafted',_utf8mb4'awaiting_manual_publish',_utf8mb4'ambiguous',_utf8mb4'publishing',_utf8mb4'published',_utf8mb4'needs_selection',_utf8mb4'publish_failed',_utf8mb4'unsupported'))"
+	current := "(`status` in (_utf8mb4'drafting',_utf8mb4'drafted',_utf8mb4'awaiting_manual_publish',_utf8mb4'ambiguous',_utf8mb4'publishing',_utf8mb4'published',_utf8mb4'needs_selection',_utf8mb4'publish_failed',_utf8mb4'unsupported',_utf8mb4'skipped'))"
 	for _, tc := range []struct {
 		name, clause, enforced string
 		valid                  bool
@@ -52,7 +52,7 @@ func TestPublicationStatusForwardMigrationOnlyChangesConstraint(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := string(raw)
-	for _, wanted := range []string{"information_schema.TABLE_CONSTRAINTS", "DROP CHECK `chk_wechat_publication_status`", "ADD CONSTRAINT `chk_wechat_publication_status`", "awaiting_manual_publish", "ambiguous", "PREPARE"} {
+	for _, wanted := range []string{"information_schema.TABLE_CONSTRAINTS", "DROP CHECK `chk_wechat_publication_status`", "ADD CONSTRAINT `chk_wechat_publication_status`", "awaiting_manual_publish", "ambiguous", "skipped", "PREPARE"} {
 		if !strings.Contains(sql, wanted) {
 			t.Errorf("missing %s", wanted)
 		}

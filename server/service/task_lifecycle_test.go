@@ -226,6 +226,8 @@ func TestWechatPublicationLifecycleMapping(t *testing.T) {
 		{name: "article selection needed", deliveryStatus: model.TaskExecutionDraftDeliverySucceeded, publication: &model.WechatPublication{Status: model.WechatPublicationStatusNeedsSelection, DraftMediaID: "draft-1"}, wantDraft: model.TaskLifecycleStateComplete, wantPublication: model.TaskLifecycleStateBlocked},
 		{name: "publish failed", deliveryStatus: model.TaskExecutionDraftDeliverySucceeded, publication: &model.WechatPublication{Status: model.WechatPublicationStatusPublishFailed, DraftMediaID: "draft-1", SubmitAttemptedAt: &now}, wantDraft: model.TaskLifecycleStateComplete, wantPublication: model.TaskLifecycleStateFailed},
 		{name: "published", deliveryStatus: model.TaskExecutionDraftDeliverySucceeded, publication: &model.WechatPublication{Status: model.WechatPublicationStatusPublished, DraftMediaID: "draft-1", ArticleURL: "https://mp.weixin.qq.com/s/example"}, wantDraft: model.TaskLifecycleStateComplete, wantPublication: model.TaskLifecycleStateComplete},
+		{name: "waiting for user to publish in WeChat", deliveryStatus: model.TaskExecutionDraftDeliverySucceeded, publication: &model.WechatPublication{Status: model.WechatPublicationStatusAwaitingManual, DraftMediaID: "draft-1", ManualPublishRequired: true}, wantDraft: model.TaskLifecycleStateComplete, wantPublication: model.TaskLifecycleStatePending},
+		{name: "user skipped publication", deliveryStatus: model.TaskExecutionDraftDeliverySucceeded, publication: &model.WechatPublication{Status: model.WechatPublicationStatusSkipped, DraftMediaID: "draft-1"}, wantDraft: model.TaskLifecycleStateComplete, wantPublication: model.TaskLifecycleStateSkipped},
 	}
 
 	for _, tt := range tests {

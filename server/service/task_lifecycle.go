@@ -353,6 +353,8 @@ func deriveWechatPublicationLifecycle(deliveryStatus string, publication *model.
 	switch publication.Status {
 	case model.WechatPublicationStatusPublished:
 		projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateComplete, LatestUpdate: "文章已正式发布"}
+	case model.WechatPublicationStatusSkipped:
+		projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateSkipped, LatestUpdate: "本次不再发布，公众号草稿仍保留"}
 	case model.WechatPublicationStatusPublishFailed:
 		projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateFailed, LatestUpdate: "正式发布失败，请前往公众号后台处理"}
 	case model.WechatPublicationStatusNeedsSelection:
@@ -360,7 +362,9 @@ func deriveWechatPublicationLifecycle(deliveryStatus string, publication *model.
 	case model.WechatPublicationStatusPublishSubmitting, model.WechatPublicationStatusPublishing:
 		projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateActive, LatestUpdate: "正在等待微信返回正式发布结果"}
 	case model.WechatPublicationStatusUnsupported, model.WechatPublicationStatusAwaitingManual:
-		if hasWechatSubmissionEvidence(publication) {
+		if publication.Status == model.WechatPublicationStatusAwaitingManual && !hasWechatSubmissionEvidence(publication) {
+			projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStatePending, LatestUpdate: "草稿已就绪，等待你在公众号后台发布"}
+		} else if hasWechatSubmissionEvidence(publication) {
 			projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateBlocked, LatestUpdate: "正式发布可能已提交，只能检测结果"}
 		} else {
 			projection.Publication = taskLifecycleStageProjection{State: model.TaskLifecycleStateBlocked, LatestUpdate: "当前发布能力不可用，可重试发布"}

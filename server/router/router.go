@@ -437,6 +437,8 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/tasks/:id/wechat-publication/recover", svc.WechatPublicationHandler.Recover)
 		apiV1.Post("/tasks/:id/wechat-publication/select", svc.WechatPublicationHandler.Select)
 		apiV1.Post("/tasks/:id/wechat-publication/manual-bind", svc.WechatPublicationHandler.ManualBind)
+		apiV1.Post("/tasks/:id/wechat-publication/skip", svc.WechatPublicationHandler.Skip)
+		apiV1.Post("/tasks/:id/wechat-publication/restore", svc.WechatPublicationHandler.RestoreSkipped)
 	}
 	if svc.WechatAnalyticsImportHandler != nil {
 		apiV1.Get("/wechat-analytics/imports/:batchId", svc.WechatAnalyticsImportHandler.GlobalDetail)
