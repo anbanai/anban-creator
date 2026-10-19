@@ -14,6 +14,7 @@ func TestArticleCoverDesignUsesDirectedPlanAndScopedReferences(t *testing.T) {
 
 	for _, reference := range []string{
 		"references/art-direction.md",
+		"references/presentation-strategy.md",
 		"references/portrait-reference.md",
 		"references/quality-gate.md",
 		"references/cover-effectiveness.md",
