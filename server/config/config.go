@@ -74,12 +74,17 @@ type DshConfig struct {
 	KubernetesProjectMemoryMount string `yaml:"kubernetes_project_memory_mount"`
 	ServerURL                    string `yaml:"server_url"`
 	ServerInstanceID             string `yaml:"server_instance_id"`
-	CPUCores                     int64  `yaml:"cpu_cores"`
-	MemoryMB                     int64  `yaml:"memory_mb"`
-	PidsLimit                    int64  `yaml:"pids_limit"`
-	TimeoutSec                   int    `yaml:"timeout_sec"`
-	IdleTimeoutSec               int    `yaml:"idle_timeout_sec"`
-	StartupTimeoutSec            int    `yaml:"startup_timeout_sec"`
+	// Resources is the Kubernetes-native resource contract for interactive DSH
+	// Pods. Quantities use Kubernetes syntax, for example "500m" and "1Gi".
+	Resources KubernetesResourceConfig `yaml:"resources"`
+	// CPUCores and MemoryMB are retained for the local container executor.
+	// Kubernetes execution uses Resources instead.
+	CPUCores          int64 `yaml:"cpu_cores"`
+	MemoryMB          int64 `yaml:"memory_mb"`
+	PidsLimit         int64 `yaml:"pids_limit"`
+	TimeoutSec        int   `yaml:"timeout_sec"`
+	IdleTimeoutSec    int   `yaml:"idle_timeout_sec"`
+	StartupTimeoutSec int   `yaml:"startup_timeout_sec"`
 	// RuntimeDiagnosticRetentionSeconds controls how long failed Kubernetes
 	// DSH resources remain available for pod logs and describe output.
 	RuntimeDiagnosticRetentionSeconds int                       `yaml:"runtime_diagnostic_retention_seconds"`
@@ -109,9 +114,19 @@ func (c *DshConfig) UnmarshalYAML(value *yaml.Node) error {
 		"kubernetes_namespace": true, "kubernetes_image_pull_secret": true,
 		"kubernetes_project_memory_claim": true, "kubernetes_project_memory_mount": true,
 		"server_instance_id": true, "cpu_cores": true, "memory_mb": true, "pids_limit": true,
+		"resources":   true,
 		"timeout_sec": true, "idle_timeout_sec": true, "startup_timeout_sec": true, "runtime_diagnostic_retention_seconds": true,
 	}); err != nil {
 		return err
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		key := value.Content[i].Value
+		if key != "cpu_cores" && key != "memory_mb" {
+			continue
+		}
+		if _, err := strconv.ParseInt(strings.TrimSpace(value.Content[i+1].Value), 10, 64); err != nil {
+			return fmt.Errorf("dsh.%s must be an integer for the container executor; use dsh.resources.requests/limits with Kubernetes quantities", key)
+		}
 	}
 	type plain DshConfig
 	if err := value.Decode((*plain)(c)); err != nil {
@@ -196,8 +211,16 @@ func (c DshConfig) Validate() error {
 		if mount == "" || !filepath.IsAbs(mount) {
 			errs = append(errs, "dsh.kubernetes_project_memory_mount must be an absolute path")
 		}
-		if c.CPUCores <= 0 || c.MemoryMB <= 0 || c.TimeoutSec <= 0 {
-			errs = append(errs, "dsh kubernetes resource limits must be positive")
+		if c.TimeoutSec <= 0 {
+			errs = append(errs, "dsh.timeout_sec must be positive for kubernetes executor")
+		}
+		errs = append(errs, validateKubernetesResourceConfig("dsh.resources", c.Resources)...)
+		for _, name := range []string{"cpu", "memory"} {
+			if _, requestSet := c.Resources.Requests[name]; !requestSet {
+				if _, limitSet := c.Resources.Limits[name]; !limitSet {
+					errs = append(errs, fmt.Sprintf("dsh.resources must define %s in requests or limits for kubernetes executor", name))
+				}
+			}
 		}
 		if strings.TrimSpace(c.ServerURL) == "" || strings.TrimSpace(c.ServerInstanceID) == "" {
 			errs = append(errs, "dsh.server_url and dsh.server_instance_id are required for kubernetes executor")
@@ -1381,6 +1404,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Dsh.MemoryMB == 0 {
 		c.Dsh.MemoryMB = 1024
+	}
+	if len(c.Dsh.Resources.Requests) == 0 && len(c.Dsh.Resources.Limits) == 0 {
+		c.Dsh.Resources = KubernetesResourceConfig{
+			Requests: map[string]string{
+				"cpu":    strconv.FormatInt(c.Dsh.CPUCores, 10),
+				"memory": fmt.Sprintf("%dMi", c.Dsh.MemoryMB),
+			},
+			Limits: map[string]string{
+				"cpu":    strconv.FormatInt(c.Dsh.CPUCores, 10),
+				"memory": fmt.Sprintf("%dMi", c.Dsh.MemoryMB),
+			},
+		}
 	}
 	if c.Dsh.PidsLimit == 0 {
 		c.Dsh.PidsLimit = 256

@@ -65,6 +65,36 @@ func TestDshKubernetesServiceAccountIsNotConfigurable(t *testing.T) {
 	}
 }
 
+func TestDshResourcesUseKubernetesQuantitySyntax(t *testing.T) {
+	var dsh DshConfig
+	if err := yaml.Unmarshal([]byte(`
+executor: kubernetes
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+`), &dsh); err != nil {
+		t.Fatalf("unmarshal DSH resources: %v", err)
+	}
+	if dsh.Resources.Requests["cpu"] != "500m" || dsh.Resources.Requests["memory"] != "512Mi" {
+		t.Fatalf("DSH resource requests = %#v", dsh.Resources.Requests)
+	}
+	if dsh.Resources.Limits["cpu"] != "500m" || dsh.Resources.Limits["memory"] != "512Mi" {
+		t.Fatalf("DSH resource limits = %#v", dsh.Resources.Limits)
+	}
+}
+
+func TestDshLegacyFractionalCPURequiresKubernetesQuantity(t *testing.T) {
+	var dsh DshConfig
+	err := yaml.Unmarshal([]byte("cpu_cores: 0.5\n"), &dsh)
+	if err == nil || !strings.Contains(err.Error(), "dsh.cpu_cores") || !strings.Contains(err.Error(), "dsh.resources") {
+		t.Fatalf("fractional legacy CPU error = %v, want migration guidance", err)
+	}
+}
+
 func TestDshDiagnosticRetentionDefaultsAndRejectsNegative(t *testing.T) {
 	cfg := &Config{}
 	cfg.applyDefaults()
