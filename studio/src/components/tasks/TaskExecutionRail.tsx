@@ -140,6 +140,8 @@ export interface TaskExecutionRailProps {
   onRetryFiles?: () => void
   /** Renders terminal failure details and recovery actions inside the stage rail. */
   showFailureSummary?: boolean
+  showCompletionSummary?: boolean
+  showFiles?: boolean
 }
 
 export function TaskExecutionRail({
@@ -157,6 +159,8 @@ export function TaskExecutionRail({
   filesError,
   onRetryFiles,
   showFailureSummary = true,
+  showCompletionSummary = true,
+  showFiles = true,
 }: TaskExecutionRailProps) {
   const queryClient = useQueryClient()
   const stages = lifecycle?.stages ?? []
@@ -182,7 +186,7 @@ export function TaskExecutionRail({
   const [expansion, setExpansion] = useState<{ scope: string; stages: Record<string, boolean> }>({ scope: expansionScope, stages: {} })
   const manualExpansion = expansion.scope === expansionScope ? expansion.stages : {}
   const fileProps = { taskId, taskType }
-  const fileFallback = (
+  const fileFallback = showFiles ? (
     <>
       {filesLoading && <p className="px-4 py-3 text-xs text-muted-foreground" role="status">正在加载产物…</p>}
       {filesError && <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="alert">产物暂时加载失败<Tooltip><TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onRetryFiles} aria-label="重新加载" />}><RefreshCw className="size-4" aria-hidden="true" /></TooltipTrigger><TooltipContent>重新加载</TooltipContent></Tooltip></div>}
@@ -196,8 +200,8 @@ export function TaskExecutionRail({
         <TaskStageFiles {...fileProps} files={groupedFiles.historical} />
       </section>}
     </>
-  )
-  const heading = <RailHeading onOpenLogs={onOpenLogs} taskId={taskId} files={files} stages={stages} />
+  ) : null
+  const heading = <RailHeading onOpenLogs={onOpenLogs} taskId={taskId} files={files} stages={stages} showFiles={showFiles} />
 
   const publicationQuery = useQuery({
     queryKey: ['wechat-publication', taskId],
@@ -325,7 +329,7 @@ export function TaskExecutionRail({
               ? { ...lifecycleStatePresentation.pending, label: '进度未确认' }
               : lifecycleStatePresentation[stage.state]
           const Icon = presentation.icon
-          const stageFiles = groupedFiles.byStage.get(stage.id) ?? []
+          const stageFiles = showFiles ? (groupedFiles.byStage.get(stage.id) ?? []) : []
           const isExpanded = manualExpansion[stage.id] ?? (expandedStages.has(stage.id) || stageFiles.length > 0 || (infrastructureFailure && stage.id === lastWorkStageId))
           const canExpand = stageFiles.length > 0 || (stage.state !== 'pending' && Boolean(
             stage.goal || stage.latest_update || stage.id === lastWorkStageId || stage.source === 'server',
@@ -399,7 +403,7 @@ export function TaskExecutionRail({
                     {isTerminalRecoveryPoint && status === 'cancelled' && stage.state !== 'cancelled' && (
                       <p className="text-xs text-muted-foreground">执行已停止，可从已有上下文继续。</p>
                     )}
-                    {stage.id === lastWorkStageId && <CompletionSummary workflow={workflow} outcome={outcome} />}
+                    {showCompletionSummary && stage.id === lastWorkStageId && <CompletionSummary workflow={workflow} outcome={outcome} />}
                     {stage.kind === 'publication' && publication?.status === 'needs_selection' && (
                       <CandidatePicker publication={publication} pending={selectArticle.isPending} onSelect={(articleId) => selectArticle.mutate(articleId)} />
                     )}
@@ -470,17 +474,17 @@ export function TaskExecutionRail({
   )
 }
 
-function RailHeading({ onOpenLogs, taskId, files, stages }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[] }) {
+function RailHeading({ onOpenLogs, taskId, files, stages, showFiles }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[]; showFiles: boolean }) {
   const completed = stages.filter((stage) => stage.state === 'complete').length
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 pb-4 sm:px-5">
       <div className="flex flex-wrap items-center gap-3">
         <h2 id="task-execution-heading" className="text-sm font-semibold text-foreground">执行进展</h2>
         {stages.length > 0 && <span className="text-xs text-muted-foreground">{completed} / {stages.length} 环节完成</span>}
-        {files.length > 0 && <span className="text-xs text-muted-foreground">{files.length} 个产物</span>}
+        {showFiles && files.length > 0 && <span className="text-xs text-muted-foreground">{files.length} 个产物</span>}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <TaskFileDownloads taskId={taskId} files={files} />
+        {showFiles ? <TaskFileDownloads taskId={taskId} files={files} /> : null}
         <Tooltip>
           <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onOpenLogs} aria-label="查看完整日志" />}>
             <ScrollText className="size-4" />
@@ -663,7 +667,7 @@ function FailureSummary({ failure }: { failure: ReturnType<typeof taskFailurePre
   )
 }
 
-function CompletionSummary({ workflow, outcome }: { workflow?: WorkflowStatus | string | null; outcome?: TaskOutcome }) {
+export function CompletionSummary({ workflow, outcome }: { workflow?: WorkflowStatus | string | null; outcome?: TaskOutcome }) {
   const review = useMemo(() => parseWorkflowStatus(workflow)?.review, [workflow])
   if (!review && !outcome) return null
   return (

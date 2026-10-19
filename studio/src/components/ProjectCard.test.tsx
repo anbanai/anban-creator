@@ -88,6 +88,12 @@ describe('ProjectCard', () => {
     expect(screen.queryByRole('button', { name: /创建作品/ })).not.toBeInTheDocument()
   })
 
+  it('links directly to the selected persona work list', () => {
+    render(<ProjectCard project={project({ id: 'project/one', name: '生活方式人设' })} />)
+
+    expect(screen.getByRole('link', { name: '查看作品：生活方式人设' })).toHaveAttribute('href', '/tasks?project_id=project%2Fone')
+  })
+
   it('does not expose WeChat platform settings for non-WeChat projects', () => {
     render(<ProjectCard project={project({ platform: 'seednote', agent_ids: ['seednote'] })} onChannelConfig={vi.fn()} />)
     expect(screen.queryByRole('button', { name: /平台设置/ })).not.toBeInTheDocument()

@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, Pause, Play, RefreshCw, RotateCcw, SquarePen } from 'lucide-react'
+import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, ListChecks, Pause, Play, RefreshCw, RotateCcw, SquarePen } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
@@ -296,6 +297,14 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
             </Tooltip>
           )}
         </div>
+        <Link
+            to={`/tasks?project_id=${encodeURIComponent(project.id)}`}
+            className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            aria-label={`查看作品：${project.name}`}
+          >
+            <ListChecks className="size-3.5" aria-hidden="true" />
+            查看全部作品
+        </Link>
       </div>
       <TopicPoolDialog project={project} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
       <ProjectMemoryDialog projectId={project.id} projectName={project.name} project={project} open={memoryOpen} onOpenChange={setMemoryOpen} onUpdateProfile={onUpdateProfile ? () => onUpdateProfile(project) : undefined} />
