@@ -614,6 +614,67 @@ describe('ChatPage', () => {
     expect(await screen.findByText('Agent 正在执行：get project profile')).toBeInTheDocument()
   })
 
+  it('shows a failed draft staging call as an error instead of completed work', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'agent.activity', data: JSON.stringify({ call_id: 'call-stage', name: 'stage_project_creator_draft' }) },
+      { id: '2', event: 'tool.result', data: JSON.stringify({ call_id: 'call-stage', ok: false, code: 'SESSION_NOT_FOUND', message: 'stage project creator draft: interactive session not found' }) },
+      { id: '3', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'completed' } }) },
+    ], signal))
+
+    renderChat()
+
+    expect(await screen.findByText('画像草稿暂存失败')).toBeInTheDocument()
+    expect(screen.getByText('创作会话已失效，项目尚未创建')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 正在执行：stage project creator draft')).not.toBeInTheDocument()
+  })
+
+  it('does not call a turn successful when one tool result failed', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'agent.activity', data: JSON.stringify({ call_id: 'call-read', name: 'get_project_profile' }) },
+      { id: '2', event: 'tool.result', data: JSON.stringify({ call_id: 'call-read', ok: false, code: 'UPSTREAM_FAILED', message: 'profile read failed' }) },
+      { id: '3', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'completed' } }) },
+    ], signal))
+
+    renderChat()
+
+    expect(await screen.findByText('Agent 本轮发生错误')).toBeInTheDocument()
+    expect(screen.getByText('Agent 工具执行失败')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 本轮已完成')).not.toBeInTheDocument()
+  })
+
+  it('scopes tool failures to the turn that produced them', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'agent.activity', data: JSON.stringify({ call_id: 'call-failed', name: 'get_project_profile' }) },
+      { id: '3', event: 'tool.result', data: JSON.stringify({ turn: 1, call_id: 'call-failed', ok: false, code: 'UPSTREAM_FAILED', message: 'profile read failed' }) },
+      { id: '4', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'completed' } }) },
+      { id: '5', event: 'turn.start', data: JSON.stringify({ turn: 2 }) },
+      { id: '6', event: 'agent.activity', data: JSON.stringify({ call_id: 'call-succeeded', name: 'update_project_profile' }) },
+      { id: '7', event: 'tool.result', data: JSON.stringify({ turn: 2, call_id: 'call-succeeded', ok: true, message: 'profile updated' }) },
+      { id: '8', event: 'turn.end', data: JSON.stringify({ turn: 2, reason: { kind: 'completed' } }) },
+    ], signal))
+
+    renderChat()
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Agent 本轮发生错误')).toHaveLength(1)
+      expect(screen.getAllByText('Agent 本轮已完成')).toHaveLength(1)
+    })
+  })
+
+  it('marks a turn failed when a tool result has no activity entry', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },
+      { id: '2', event: 'tool.result', data: JSON.stringify({ turn: 1, call_id: 'call-hidden', ok: false, code: 'UPSTREAM_FAILED', message: 'profile read failed' }) },
+      { id: '3', event: 'turn.end', data: JSON.stringify({ turn: 1, reason: { kind: 'completed' } }) },
+    ], signal))
+
+    renderChat()
+
+    expect(await screen.findByText('Agent 本轮发生错误')).toBeInTheDocument()
+    expect(screen.queryByText('Agent 本轮已完成')).not.toBeInTheDocument()
+  })
+
   it('keeps the agent activity history and completed state in the chat timeline', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { id: '1', event: 'turn.start', data: JSON.stringify({ turn: 1 }) },

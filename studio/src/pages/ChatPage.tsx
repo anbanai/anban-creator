@@ -45,7 +45,7 @@ type TimelineItem =
   | { kind: 'message'; message: Message; eventId?: number }
   | { kind: 'question'; callId: string; eventId?: number }
   | { kind: 'draft'; id: 'draft'; eventId?: number }
-  | { kind: 'activity'; id: string; eventId?: number; status: 'started' | 'running' | 'waiting' | 'completed' | 'stopped' | 'error'; text: string }
+  | { kind: 'activity'; id: string; eventId?: number; callId?: string; status: 'started' | 'running' | 'waiting' | 'completed' | 'stopped' | 'error'; text: string }
 type PendingSubmission =
   | { kind: 'message'; sessionId: string; message: Message; status: 'pending' | 'accepted' | 'failed' }
   | { kind: 'answer'; sessionId: string; callId: string; answers: DshQuestionAnswer['answers']; status: 'pending' | 'accepted' | 'failed' }
@@ -336,6 +336,12 @@ function formatAgentActivity(name?: string): string {
   return label ? `Agent 正在执行：${label}` : 'Agent 正在工作…'
 }
 
+function isLostInteractiveSession(data: JsonRecord): boolean {
+  const code = stringValue(data.code)?.toLowerCase() ?? ''
+  const message = stringValue(data.message)?.toLowerCase() ?? ''
+  return code === 'session_not_found' || code === 'session_closed' || /session (not found|closed)|会话(不存在|已关闭|已失效)/.test(message)
+}
+
 function normalizeDraft(raw: JsonRecord): InteractiveDraft {
   const draft = isRecord(raw.draft) ? raw.draft : raw
   const name = stringValue(draft.name)
@@ -506,6 +512,9 @@ export default function ChatPage() {
   const recoveryDraftRef = useRef<InteractiveDraft | null>(null)
   const sendingMessageRef = useRef(false)
   const pendingSubmissionRef = useRef<PendingSubmission | null>(null)
+  const currentTurnRef = useRef<number | undefined>(undefined)
+  const failedToolTurnsRef = useRef(new Set<number>())
+  const unscopedToolFailureRef = useRef(false)
   const legacyMessageCandidatesRef = useRef(legacyMessageCandidates(persistedSession?.messages))
   const messageAliasesRef = useRef(new Map<string, string>())
   const messagesRef = useRef(messages)
@@ -578,6 +587,9 @@ export default function ChatPage() {
     sendingMessageRef.current = false
     setSendingMessage(false)
     setTurnActive(false)
+    currentTurnRef.current = undefined
+    failedToolTurnsRef.current.clear()
+    unscopedToolFailureRef.current = false
     setRecoveryAvailable(false)
     recoveryPromptRef.current = null
     recoveryMessagePromiseRef.current = null
@@ -774,6 +786,7 @@ export default function ChatPage() {
         break
       case 'turn.start':
         setTurnActive(true)
+        currentTurnRef.current = typeof data.turn === 'number' && Number.isSafeInteger(data.turn) ? data.turn : undefined
         updateTimelineNow((items) => upsertTimeline(items, {
           kind: 'activity',
           id: `turn-start-${eventId ?? crypto.randomUUID()}`,
@@ -786,7 +799,12 @@ export default function ChatPage() {
         setTurnActive(false)
         {
           const reason = isRecord(data.reason) ? data.reason : {}
-          const status: Extract<TimelineItem, { kind: 'activity' }>['status'] = reason.kind === 'error' ? 'error' : reason.kind === 'aborted' || reason.kind === 'interrupted' || reason.kind === 'cancelled' ? 'stopped' : 'completed'
+          const turn = typeof data.turn === 'number' && Number.isSafeInteger(data.turn) ? data.turn : currentTurnRef.current
+          const toolFailed = unscopedToolFailureRef.current || (turn !== undefined && failedToolTurnsRef.current.has(turn))
+          if (turn !== undefined) failedToolTurnsRef.current.delete(turn)
+          unscopedToolFailureRef.current = false
+          if (currentTurnRef.current === turn) currentTurnRef.current = undefined
+          const status: Extract<TimelineItem, { kind: 'activity' }>['status'] = toolFailed || reason.kind === 'error' ? 'error' : reason.kind === 'aborted' || reason.kind === 'interrupted' || reason.kind === 'cancelled' ? 'stopped' : 'completed'
           const text = status === 'error' ? 'Agent 本轮发生错误' : status === 'stopped' ? 'Agent 本轮已停止' : 'Agent 本轮已完成'
           const completion: TimelineItem = { kind: 'activity', id: `turn-end-${eventId ?? crypto.randomUUID()}`, eventId, status, text }
           updateTimelineNow((items) => upsertTimeline(
@@ -833,11 +851,41 @@ export default function ChatPage() {
             return upsertTimeline(completedPrevious, {
               kind: 'activity',
               id: `activity-${eventId ?? crypto.randomUUID()}`,
+              callId: stringValue(data.call_id),
               eventId,
               status: 'running',
               text,
             }, (item) => item.kind === 'activity' && item.eventId === eventId && eventId !== undefined)
           })
+        }
+        break
+      case 'tool.result':
+        {
+          const callId = stringValue(data.call_id)
+          const ok = data.ok === true
+          const lostSession = !ok && isLostInteractiveSession(data)
+          if (!ok) {
+            const turn = typeof data.turn === 'number' && Number.isSafeInteger(data.turn) ? data.turn : currentTurnRef.current
+            if (turn === undefined) unscopedToolFailureRef.current = true
+            else failedToolTurnsRef.current.add(turn)
+          }
+          updateTimelineNow((items) => items.map((item) => {
+            if (!callId || item.kind !== 'activity' || item.callId !== callId) return item
+            return {
+              ...item,
+              status: ok ? 'completed' : 'error',
+              text: ok && item.text.includes('stage project creator draft')
+                ? '画像草稿已暂存，等待确认'
+                : !ok && lostSession
+                  ? '画像草稿暂存失败'
+                  : !ok
+                    ? 'Agent 工具执行失败'
+                    : item.text,
+            }
+          }))
+          if (lostSession) {
+            preserveLocalMaterialAfterLostSession('创作会话已失效，项目尚未创建', 'error')
+          }
         }
         break
       case 'question.answered':
