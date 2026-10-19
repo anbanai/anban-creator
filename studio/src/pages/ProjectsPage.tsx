@@ -427,7 +427,7 @@ export default function ProjectsPage() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   return (
     <div className="space-y-6">
-      <PageHeader title="项目" description="管理品牌与创作方向、素材和风格，服务不同类型的内容。">
+      <PageHeader title="项目" description="组织品牌与账号定位、素材和风格，为持续创作与复盘提供上下文。">
         <Button variant="outline" aria-label="使用表单创建" onClick={openCreate}>
           <FilePlus2 className="h-4 w-4" />
           表单创建

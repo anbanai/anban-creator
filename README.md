@@ -1,13 +1,19 @@
-# Anban 自媒体智能创作助手
+# Anban 内容生成操作系统
 
-Anban is a Studio-first content creation platform for WeChat articles and Seednote-oriented creation workflows. It combines a Web Studio, MCP tools, Claude Code agent execution, AI image generation, publishing helpers, task tracking, and credits into one repeatable creator workspace.
+Anban 面向自媒体与品牌内容团队，把选题判断、内容与素材生成、发布记录、数据回流和效果复盘放进同一个工作空间，帮助团队持续产出高质量内容，并改进下一轮创作。
+
+Anban is a content generation operating system: its Studio, Server, MCP capabilities, and managed Agents connect content production with publishing records and performance analysis.
+
+## 内容闭环
+
+围绕每个品牌或账号项目，Anban 将创作上下文、热点与选题、AI 内容生产、交付与发布状态、表现数据和复盘记录连接起来。数据分析用于观察内容效果并支持后续决策；归因洞察需要经过用户确认，并由后续独立的数据版本验证后才能成立。
 
 ## Product Surfaces
 
-- **Web Studio** — manage channels, plans, tasks, generated files, credits, model settings, and publishing state.
+- **Web Studio** — manage content projects, plans, generated works, performance analysis, credits, model settings, and publishing state.
 - **MCP Server** — exposes atomic writing, image, publishing, billing, and Seednote capabilities to connected agents.
 - **Agent Runtime** — dispatches `article`, `seednote`, and related managed work to one-shot containers.
-- **Creation Workflow v1** — turns task output into staged artifacts: topic, outline, draft, final content, visual assets, draft package, and review summary.
+- **Content Workflow** — connects topic research, drafts, final content, visual assets, delivery packages, publishing records, and performance review.
 - **Plugin Assets** — Claude Code and Codex share one plugin source under `harness/`, with native manifests and host adapters for each harness.
 
 Managed execution uses a separate image identity for every Agent Pack, including
