@@ -28,6 +28,17 @@ beforeEach(() => {
   vi.mocked(wechatAccountAnalyticsApi.trafficSources).mockResolvedValue({ revision: 8, from: '2026-09-01', to: '2026-09-30', metric: 'read_users', total: null, coverage: { covered_days: 0, expected_days: 30, complete: false }, covered_dates: [], data_quality: null, series: [], items: [] })
 })
 describe('server analytics queries', () => {
+  it('offers compact date presets for yesterday, recent days, and a custom range', async () => {
+    render(<ContentAnalyticsPage />)
+
+    expect(await screen.findByRole('button', { name: '昨日' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '近 7 天' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '近 30 天' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '自定义' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '本周' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '本月' })).not.toBeInTheDocument()
+  })
+
   it('exposes icon-only import actions with accessible names', async () => {
     render(<ContentAnalyticsPage />)
 
@@ -86,6 +97,7 @@ describe('server analytics queries', () => {
 
     await waitFor(() => expect(wechatAccountAnalyticsApi.overview).toHaveBeenCalledWith('wechat', { from: expect.any(String), to: expect.any(String) }, expect.any(AbortSignal)))
     expect(vi.mocked(wechatAccountAnalyticsApi.overview).mock.calls[0]?.[1]).not.toHaveProperty('source')
+    fireEvent.click(await screen.findByRole('button', { name: '流量来源' }))
     await waitFor(() => expect(wechatAccountAnalyticsApi.trafficSources).toHaveBeenCalledWith('wechat', expect.objectContaining({ source: 'search' }), expect.any(AbortSignal)))
   })
 

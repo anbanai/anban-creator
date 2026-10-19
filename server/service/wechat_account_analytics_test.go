@@ -50,6 +50,61 @@ func TestWechatAccountCoverageAndNullZeroSemantics(t *testing.T) {
 	}
 }
 
+func TestWechatAccountOverviewKeepsPartialMetricTotalsAndCoverage(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	ctx := context.Background()
+	project := &model.Project{ID: "project-partial", UserID: "user-partial", Platform: model.PlatformWechat, Name: "公众号"}
+	if err := repo.Projects().Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	for i, item := range []struct {
+		date  string
+		read  *int64
+		share *int64
+	}{
+		{date: "2026-10-01", read: testWechatInt64Ptr(10), share: testWechatInt64Ptr(0)},
+		{date: "2026-10-03", read: testWechatInt64Ptr(20)},
+	} {
+		batchID := fmt.Sprintf("batch-partial-%d", i)
+		batch := &model.WechatAccountAnalyticsBatch{ID: batchID, UserID: project.UserID, ProjectID: project.ID, IdempotencyKey: batchID, Status: model.WechatAccountAnalyticsBatchCompleted, ReceivedAt: time.Date(2026, 10, 4, i, 0, 0, 0, time.UTC), EffectiveAt: time.Date(2026, 10, 4, i, 0, 0, 0, time.UTC)}
+		if err := repo.WechatAccountAnalytics().CreateBatch(ctx, batch); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.WechatAccountAnalytics().CreateDays(ctx, []*model.WechatAccountAnalyticsDay{{ID: fmt.Sprintf("day-partial-%d", i), ProjectID: project.ID, BatchID: batchID, StatDate: item.date, ReadUsers: item.read, ShareUsers: item.share}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	overview, err := NewWechatAccountAnalyticsService(repo).Overview(ctx, project.UserID, project.ID, "2026-10-01", "2026-10-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overview.Totals["read_users"] == nil || *overview.Totals["read_users"] != 30 {
+		t.Fatalf("read total = %v, want partial total 30", overview.Totals["read_users"])
+	}
+	if overview.Totals["share_users"] == nil || *overview.Totals["share_users"] != 0 {
+		t.Fatalf("share total = %v, want observed zero", overview.Totals["share_users"])
+	}
+	if overview.MetricCoverage["read_users"].CoveredDays != 2 || overview.MetricCoverage["share_users"].CoveredDays != 1 {
+		t.Fatalf("metric coverage = %#v", overview.MetricCoverage)
+	}
+	if overview.Series[1]["read_users"] != nil {
+		t.Fatalf("missing date was filled: %#v", overview.Series[1])
+	}
+	if overview.Comparisons["read_users"].PreviousPeriod.Value != nil {
+		t.Fatalf("partial period comparison = %#v, want unavailable", overview.Comparisons["read_users"].PreviousPeriod)
+	}
+}
+
+func testWechatInt64Ptr(value int64) *int64 { return &value }
+
 func TestWechatAccountPreviousRangeAndZeroDenominator(t *testing.T) {
 	start, _ := time.ParseInLocation("2006-01-02", "2026-09-07", repository.AnalyticsLocation)
 	finish := start.AddDate(0, 0, 6)

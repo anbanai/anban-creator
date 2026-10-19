@@ -16,4 +16,18 @@ describe('analytics periods', () => {
     const series = bucketDailySeries([{ date: '2026-09-01', views: 20, rate: 0.2 }, { date: '2026-09-02', views: 30, rate: null }], 'week', [{ key: 'views', aggregation: 'sum' }, { key: 'rate', aggregation: 'mean' }], '2026-09-01', '2026-09-13')
     expect(series).toEqual([{ date: '2026-08-31', views: 50, rate: 0.2 }, { date: '2026-09-07', views: null, rate: null }])
   })
+  it('keeps all 30 daily points and leaves missing dates null', () => {
+    const series = bucketDailySeries(
+      [{ date: '2026-09-01', views: 20 }, { date: '2026-09-30', views: 30 }],
+      'day',
+      [{ key: 'views', aggregation: 'sum' }],
+      '2026-09-01',
+      '2026-09-30',
+    )
+
+    expect(series).toHaveLength(30)
+    expect(series[0]).toEqual({ date: '2026-09-01', views: 20 })
+    expect(series[14]).toEqual({ date: '2026-09-15', views: null })
+    expect(series[29]).toEqual({ date: '2026-09-30', views: 30 })
+  })
 })

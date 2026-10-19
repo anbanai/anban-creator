@@ -16,6 +16,10 @@ const overview: WechatAccountOverview = {
   data_through: '2026-09-03',
   covered_dates: ['2026-09-01', '2026-09-02', '2026-09-03'],
   coverage: { covered_days: 3, expected_days: 3, complete: true },
+  metric_coverage: {
+    read_users: { covered_days: 2, expected_days: 3, complete: false },
+    share_users: { covered_days: 1, expected_days: 3, complete: false },
+  },
   series: [
     { date: '2026-09-01', read_users: 10, share_users: 0 },
     { date: '2026-09-02', read_users: 20, share_users: null },
@@ -47,12 +51,24 @@ describe('WeChat account analytics contract', () => {
     render(<Fixture />)
     expect(screen.getByText('数据覆盖 2 / 3 天')).toBeInTheDocument()
     expect(screen.getByText('60')).toBeInTheDocument()
+    const metricCards = within(screen.getByLabelText('公众号账号关键指标')).getAllByRole('button')
+    expect(within(metricCards[0]).getByText(/天有值/)).toHaveTextContent('2/3 天有值')
     expect(screen.getByRole('button', { name: /分享人数2/ })).toBeInTheDocument()
+    expect(screen.queryByText(/较前一日/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /分享人数2/ }))
     expect(within(screen.getByText('查看趋势明细').closest('details')!).getByText('0')).toBeInTheDocument()
     const coverageStatus = screen.getAllByRole('status').find(element => element.textContent?.includes('数据覆盖'))
     expect(coverageStatus).toHaveTextContent('数据覆盖 2 / 3 天')
-    expect(coverageStatus).toHaveTextContent('比较值暂不可用。')
+    expect(coverageStatus).toHaveTextContent('比较仅在覆盖完整时显示。')
+  })
+
+  it('groups account trend rows by the selected week granularity', () => {
+    render(<WechatAccountOverviewPanel overview={overview} loading={false} selectedMetric="read_users" granularity="week" />)
+
+    fireEvent.click(screen.getByText('查看趋势明细'))
+    const details = screen.getByText('查看趋势明细').closest('details')!
+    expect(within(details).getByText('2026-08-31')).toBeInTheDocument()
+    expect(within(details).queryByText('2026-09-01')).not.toBeInTheDocument()
   })
 
   it('renders source shares from the server and filters source without deriving percentages', async () => {

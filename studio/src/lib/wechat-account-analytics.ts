@@ -30,6 +30,7 @@ export interface WechatAccountOverview {
   data_through?: string | null
   covered_dates: string[]
   coverage: WechatCoverage
+  metric_coverage?: Record<string, WechatCoverage>
   series: AnalyticsPoint[]
   totals: Record<string, number | null>
   comparisons?: Record<string, WechatComparisonSet | null>

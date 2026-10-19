@@ -53,6 +53,7 @@ type WechatAccountOverview struct {
 	DataThrough        *string                                `json:"data_through"`
 	CoveredDates       []string                               `json:"covered_dates"`
 	Coverage           WechatAccountCoverage                  `json:"coverage"`
+	MetricCoverage     map[string]WechatAccountCoverage       `json:"metric_coverage"`
 	Series             []map[string]any                       `json:"series"`
 	Totals             map[string]*int64                      `json:"totals"`
 	Comparisons        map[string]*WechatAccountComparisonSet `json:"comparisons,omitempty"`
@@ -171,6 +172,17 @@ func coverageFor(expected []string, days []*model.WechatAccountAnalyticsDay) (We
 	return WechatAccountCoverage{CoveredDays: len(covered), ExpectedDays: len(expected), Complete: len(covered) == len(expected)}, covered
 }
 
+func metricCoverageFor(expected []string, days []*model.WechatAccountAnalyticsDay, metric string) WechatAccountCoverage {
+	set := datesSet(days)
+	covered := 0
+	for _, date := range expected {
+		if day := set[date]; day != nil && wechatAccountMetricValue(day, metric) != nil {
+			covered++
+		}
+	}
+	return WechatAccountCoverage{CoveredDays: covered, ExpectedDays: len(expected), Complete: covered == len(expected)}
+}
+
 func sumWechatMetric(days []*model.WechatAccountAnalyticsDay, metric string) (*int64, string) {
 	var total int64
 	seen := false
@@ -181,6 +193,26 @@ func sumWechatMetric(days []*model.WechatAccountAnalyticsDay, metric string) (*i
 		value := wechatAccountMetricValue(day, metric)
 		if value == nil {
 			return nil, "该指标在所选日期范围内存在未提供的日期"
+		}
+		seen = true
+		total += *value
+	}
+	if !seen {
+		return nil, "该指标暂无可用数据"
+	}
+	return &total, ""
+}
+
+func sumAvailableWechatMetric(days []*model.WechatAccountAnalyticsDay, metric string) (*int64, string) {
+	var total int64
+	seen := false
+	for _, day := range days {
+		if day == nil {
+			continue
+		}
+		value := wechatAccountMetricValue(day, metric)
+		if value == nil {
+			continue
 		}
 		seen = true
 		total += *value
@@ -278,14 +310,11 @@ func (s *WechatAccountAnalyticsService) overview(ctx context.Context, userID, pr
 		series = append(series, point)
 	}
 	totals := make(map[string]*int64, len(wechatAccountMetrics))
+	metricCoverage := make(map[string]WechatAccountCoverage, len(wechatAccountMetrics))
 	unavailable := make(map[string]string)
 	for _, metric := range wechatAccountMetrics {
-		if !coverage.Complete {
-			totals[metric] = nil
-			unavailable[metric] = "所选日期范围内存在未提供的日期"
-			continue
-		}
-		value, reason := sumWechatMetric(current, metric)
+		metricCoverage[metric] = metricCoverageFor(expected, current, metric)
+		value, reason := sumAvailableWechatMetric(current, metric)
 		totals[metric] = value
 		if reason != "" {
 			unavailable[metric] = reason
@@ -299,18 +328,23 @@ func (s *WechatAccountAnalyticsService) overview(ctx context.Context, userID, pr
 	previousExpected := dateList(previousStart, previousFinish)
 	previousCoverage, _ := coverageFor(previousExpected, previous)
 	previousTotals := make(map[string]*int64, len(wechatAccountMetrics))
+	previousMetricCoverage := make(map[string]WechatAccountCoverage, len(wechatAccountMetrics))
 	for _, metric := range wechatAccountMetrics {
 		previousTotals[metric], _ = sumWechatMetric(previous, metric)
+		previousMetricCoverage[metric] = metricCoverageFor(previousExpected, previous, metric)
 	}
 	previousWeekStart, previousWeekFinish := previousWechatWeekRange(start, finish)
 	previousWeek, err := s.repo.WechatAccountAnalytics().ListWinningDays(ctx, projectID, formatWechatAccountDate(previousWeekStart), formatWechatAccountDate(previousWeekFinish))
 	if err != nil {
 		return nil, err
 	}
-	previousWeekCoverage, _ := coverageFor(dateList(previousWeekStart, previousWeekFinish), previousWeek)
+	previousWeekExpected := dateList(previousWeekStart, previousWeekFinish)
+	previousWeekCoverage, _ := coverageFor(previousWeekExpected, previousWeek)
 	previousWeekTotals := make(map[string]*int64, len(wechatAccountMetrics))
+	previousWeekMetricCoverage := make(map[string]WechatAccountCoverage, len(wechatAccountMetrics))
 	for _, metric := range wechatAccountMetrics {
 		previousWeekTotals[metric], _ = sumWechatMetric(previousWeek, metric)
+		previousWeekMetricCoverage[metric] = metricCoverageFor(previousWeekExpected, previousWeek, metric)
 	}
 	comparisons := make(map[string]*WechatAccountComparisonSet, len(wechatAccountMetrics))
 	periodLabel := fmt.Sprintf("较前一周期（%s 至 %s）", formatWechatAccountDate(previousStart), formatWechatAccountDate(previousFinish))
@@ -321,7 +355,7 @@ func (s *WechatAccountAnalyticsService) overview(ctx context.Context, userID, pr
 	for _, metric := range wechatAccountMetrics {
 		set := &WechatAccountComparisonSet{}
 		comparison := &WechatAccountComparison{Label: periodLabel, From: formatWechatAccountDate(previousStart), To: formatWechatAccountDate(previousFinish)}
-		if coverage.Complete && previousCoverage.Complete && totals[metric] != nil && previousTotals[metric] != nil {
+		if metricCoverage[metric].Complete && previousMetricCoverage[metric].Complete && previousCoverage.Complete && totals[metric] != nil && previousTotals[metric] != nil {
 			comparison.Value = percentChange(*totals[metric], *previousTotals[metric])
 		}
 		if previousStart.Equal(previousFinish) {
@@ -330,7 +364,7 @@ func (s *WechatAccountAnalyticsService) overview(ctx context.Context, userID, pr
 			set.PreviousPeriod = comparison
 		}
 		weekComparison := &WechatAccountComparison{Label: weekLabel, From: formatWechatAccountDate(previousWeekStart), To: formatWechatAccountDate(previousWeekFinish)}
-		if coverage.Complete && previousWeekCoverage.Complete && totals[metric] != nil && previousWeekTotals[metric] != nil {
+		if metricCoverage[metric].Complete && previousWeekMetricCoverage[metric].Complete && previousWeekCoverage.Complete && totals[metric] != nil && previousWeekTotals[metric] != nil {
 			weekComparison.Value = percentChange(*totals[metric], *previousWeekTotals[metric])
 		}
 		set.PreviousWeek = weekComparison
@@ -345,7 +379,7 @@ func (s *WechatAccountAnalyticsService) overview(ctx context.Context, userID, pr
 	if err != nil {
 		return nil, err
 	}
-	return &WechatAccountOverview{Revision: revision, From: from, To: to, DataThrough: dataThrough, CoveredDates: coveredDates, Coverage: coverage, Series: series, Totals: totals, Comparisons: comparisons, UnavailableMetrics: unavailable}, nil
+	return &WechatAccountOverview{Revision: revision, From: from, To: to, DataThrough: dataThrough, CoveredDates: coveredDates, Coverage: coverage, MetricCoverage: metricCoverage, Series: series, Totals: totals, Comparisons: comparisons, UnavailableMetrics: unavailable}, nil
 }
 
 var wechatTrafficLabels = map[model.WechatTrafficSource]string{
