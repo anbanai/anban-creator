@@ -221,10 +221,11 @@ describe('ProjectMemoryDialog', () => {
 
   it('does not show a profile tab for projects without profile support', async () => {
     vi.mocked(projectsApi.memory).mockResolvedValue({ status: 'empty', updated_at: null, partial: false, files: [] })
-    render(<ProjectMemoryDialog projectId="legacy" projectName="旧项目" project={profileProject({ platform: 'ecommerce', agent_ids: null })} open onOpenChange={() => {}} />)
+    render(<ProjectMemoryDialog projectId="legacy" projectName="旧项目" project={profileProject({ platform: 'ecommerce', agent_ids: null })} open onOpenChange={() => {}} onUpdateProfile={vi.fn()} />)
 
     expect(await screen.findByText('还没有项目记忆')).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '人设画像' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '对话更新画像' })).not.toBeInTheDocument()
   })
 
   it('retries a failed profile analysis from the profile tab', async () => {
@@ -262,7 +263,9 @@ describe('ProjectMemoryDialog', () => {
     vi.mocked(projectsApi.getAccountProfile).mockResolvedValue(accountProfile())
     render(<ProjectMemoryDialog projectId="profile-project" projectName="公众号创作项目" project={profileProject()} open onOpenChange={() => {}} onUpdateProfile={onUpdateProfile} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '对话更新画像' }))
+    const updateButton = await screen.findByRole('button', { name: '对话更新画像' })
+    expect(updateButton.closest('[data-slot="dialog-header"]')).not.toBeNull()
+    fireEvent.click(updateButton)
 
     expect(onUpdateProfile).toHaveBeenCalledOnce()
   })

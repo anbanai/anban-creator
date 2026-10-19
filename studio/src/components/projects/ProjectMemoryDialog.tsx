@@ -233,11 +233,14 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
             <Brain className="size-4 shrink-0 text-primary" />
             <DialogTitle className="truncate text-lg">项目记忆</DialogTitle>
           </div>
-          <DialogDescription className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            {project ? <ProjectIdentity project={project} compact /> : <span className="break-words font-medium text-foreground/80">{projectName}</span>}
-            <span aria-hidden="true">·</span>
-            <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的项目上下文'}</span>
-          </DialogDescription>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <DialogDescription className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+              {project ? <ProjectIdentity project={project} compact /> : <span className="break-words font-medium text-foreground/80">{projectName}</span>}
+              <span aria-hidden="true">·</span>
+              <span>{query.data?.updated_at ? `最近更新 ${formatUpdatedAt(query.data.updated_at)}` : '创作过程中积累的项目上下文'}</span>
+            </DialogDescription>
+            {profileSupported && onUpdateProfile && project?.status !== 'archived' && <Button variant="outline" size="sm" className="shrink-0" onClick={onUpdateProfile}><MessageSquareText />对话更新画像</Button>}
+          </div>
           <Tooltip>
             <TooltipTrigger render={<Button variant="outline" size="icon-md" className="absolute right-14 top-2" aria-label={refreshLabel} disabled={memoryRefreshing || profileRefreshing} onClick={() => {
               void query.refetch()
@@ -364,7 +367,6 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
                   {profile?.last_error && analysisFailed && <p className="mt-1 text-xs text-destructive">{profile.last_error}</p>}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {onUpdateProfile && project?.status !== 'archived' && <Button variant="outline" size="sm" onClick={onUpdateProfile}><MessageSquareText />对话更新画像</Button>}
                   {profile && <Button
                     variant="outline"
                     size="sm"
