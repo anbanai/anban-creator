@@ -88,8 +88,8 @@ vi.mock('@/lib/api', async () => {
         create: vi.fn(),
         getChannelConfig: vi.fn().mockResolvedValue({ id: "channel-1", project_id: "ch-1", channel: "wechat-article", secret_configured: true, config: { wechat_app_id: "wx-test" } }),
         upsertChannelConfig: vi.fn().mockResolvedValue({}),
-        getWechatPlatformConfig: vi.fn().mockResolvedValue({ project_id: 'ch-1', platform: 'wechat', app_id: 'wx-test', secret_configured: true, credentials_conflict: false }),
-        upsertWechatPlatformConfig: vi.fn().mockResolvedValue({ project_id: 'ch-1', platform: 'wechat', app_id: 'wx-test', secret_configured: true, credentials_conflict: false }),
+        getWechatPlatformConfig: vi.fn().mockResolvedValue({ project_id: 'ch-1', platform: 'wechat', app_id: 'wx-test', secret_configured: true, credentials_conflict: false, automatic_delivery_enabled: false }),
+        upsertWechatPlatformConfig: vi.fn().mockResolvedValue({ project_id: 'ch-1', platform: 'wechat', app_id: 'wx-test', secret_configured: true, credentials_conflict: false, automatic_delivery_enabled: false }),
         get: vi.fn(),
         update: vi.fn(),
       },
@@ -156,8 +156,8 @@ describe('ProjectsPage', () => {
     vi.mocked(api.projects.get).mockReset()
     vi.mocked(api.projects.getChannelConfig).mockReset().mockResolvedValue({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', secret_configured: true, config: { wechat_app_id: 'wx-test' } })
     vi.mocked(api.projects.upsertChannelConfig).mockReset().mockResolvedValue({ id: 'channel-1', project_id: 'ch-1', channel: 'wechat-article', secret_configured: true, config: {} })
-    vi.mocked(api.projects.getWechatPlatformConfig).mockReset().mockResolvedValue({ project_id: 'ch-1', platform: 'wechat', app_id: 'wx-test', secret_configured: true, credentials_conflict: false })
-    vi.mocked(api.projects.upsertWechatPlatformConfig).mockReset().mockResolvedValue({ project_id: 'ch-1', platform: 'wechat', app_id: 'wx-test', secret_configured: true, credentials_conflict: false })
+    vi.mocked(api.projects.getWechatPlatformConfig).mockReset().mockResolvedValue({ project_id: 'ch-1', platform: 'wechat', app_id: 'wx-test', secret_configured: true, credentials_conflict: false, automatic_delivery_enabled: false })
+    vi.mocked(api.projects.upsertWechatPlatformConfig).mockReset().mockResolvedValue({ project_id: 'ch-1', platform: 'wechat', app_id: 'wx-test', secret_configured: true, credentials_conflict: false, automatic_delivery_enabled: false })
     vi.mocked(api.projects.update).mockReset()
 		vi.mocked(api.agentPacks.list).mockReset().mockResolvedValue({ packs: [] })
     vi.mocked(api.montageCapabilities.list).mockReset().mockResolvedValue({

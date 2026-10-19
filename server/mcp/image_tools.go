@@ -246,9 +246,27 @@ func uploadImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 		TaskID: stringArg(args, "task_id"), FilePath: stringArg(args, "file_path"),
 	})
 	if err != nil {
-		return errorResult(err.Error()), nil
+		return uploadImageErrorResult(err), nil
 	}
 	return textResult(result)
+}
+
+type uploadImageFailure struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Hint      string `json:"hint"`
+	Retryable bool   `json:"retryable"`
+}
+
+func uploadImageErrorResult(err error) *mcp.CallToolResult {
+	if errors.Is(err, service.ErrWechatDeliveryModeUserAssisted) {
+		payload, _ := json.Marshal(uploadImageFailure{
+			Code: "wechat_delivery_mode_user_assisted", Message: "WeChat upload is disabled for this task",
+			Hint: "Do not retry; use the task image files for Studio copy", Retryable: false,
+		})
+		return errorResult(string(payload))
+	}
+	return errorResult(err.Error())
 }
 
 func compressImageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

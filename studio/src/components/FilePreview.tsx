@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video, RefreshCw, CheckCircle2 } from 'lucide-react'
+import { FileText, Download, Eye, Loader2, FileCode, File, ChevronLeft, ChevronRight, Video, RefreshCw, CheckCircle2, Copy, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import type { TaskFile } from '@/types'
 import { api } from '../lib/api'
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { articleMetadataFromFiles, articleMetadataValue, copyWechatArticle, downloadWechatArticleHTML, prepareWechatArticleHTMLForDownload, writeWechatPlainText } from '@/lib/wechat-clipboard'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -80,6 +81,25 @@ function filePreviewIcon(file: TaskFile) {
   return File
 }
 
+function ArticleMetadataCopy({ files, taskId, author }: { files: TaskFile[]; taskId: string; author?: string }) {
+  const copy = async (field: 'title' | 'digest' | 'author') => {
+    try {
+      const metadata = await articleMetadataFromFiles(files, (id) => api.tasks.previewFileBlob(taskId, id))
+      const value = articleMetadataValue(metadata, field, author)
+      if (!value) throw new Error(`交付包中没有文章${field === 'title' ? '标题' : field === 'digest' ? '摘要' : '作者'}`)
+      await writeWechatPlainText(value)
+      toast.success(`已复制${field === 'title' ? '标题' : field === 'digest' ? '摘要' : '作者'}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '复制失败')
+    }
+  }
+  return <>
+    <Button variant="ghost" size="sm" onClick={() => void copy('title')}>复制标题</Button>
+    <Button variant="ghost" size="sm" onClick={() => void copy('digest')}>复制摘要</Button>
+    <Button variant="ghost" size="sm" onClick={() => void copy('author')}>复制作者</Button>
+  </>
+}
+
 function fileDeliveryStatus(file: TaskFile) {
   const isDeliverable = file.is_deliverable === true
   return {
@@ -129,7 +149,10 @@ function taskFileRoleLabel(file: TaskFile, taskType?: string) {
 
 function FilePreviewModalContent({
   file,
+  files,
   taskId,
+  taskType,
+  articleAuthor,
   previewTitle,
   details,
   navigation,
@@ -137,7 +160,10 @@ function FilePreviewModalContent({
   children,
 }: {
   file: TaskFile
+  files: TaskFile[]
   taskId: string
+  taskType?: string
+  articleAuthor?: string
   previewTitle?: string
   details?: React.ReactNode
   navigation?: React.ReactNode
@@ -424,17 +450,30 @@ function FilePreviewModalContent({
             复制文本
           </Button>
         )}
-        {isHTML && htmlContent && (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              navigator.clipboard.writeText(htmlContent)
-              toast.success('已复制 HTML 源码')
-            }}
-          >
-            <FileCode className="h-3.5 w-3.5" />
-            复制 HTML
+        {isHTML && htmlContent && taskType === 'wechat-article' && <>
+          <Button variant="secondary" size="sm" onClick={async () => {
+            try {
+              await copyWechatArticle(htmlContent, files, (id) => api.tasks.previewFileBlob(taskId, id))
+              toast.success('正文已复制，切换到公众号后台按 Ctrl+V')
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : '复制正文失败')
+            }
+          }}><Copy className="size-3.5" />复制正文（含图片）</Button>
+          <Button variant="ghost" size="sm" onClick={async () => {
+            try {
+              const embeddedHTML = await prepareWechatArticleHTMLForDownload(htmlContent, files, (id) => api.tasks.previewFileBlob(taskId, id))
+              downloadWechatArticleHTML(embeddedHTML)
+              toast.success('已下载含图片的 HTML 文件，可在公众号后台手动处理')
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : '下载 HTML 失败')
+            }
+          }}><Download className="size-3.5" />下载含图片 HTML</Button>
+          <ArticleMetadataCopy files={files} taskId={taskId} author={articleAuthor} />
+          <Button variant="ghost" size="sm" onClick={() => window.open('https://mp.weixin.qq.com/', '_blank', 'noopener,noreferrer')}><ExternalLink className="size-3.5" />打开公众号后台</Button>
+        </>}
+        {isHTML && htmlContent && taskType !== 'wechat-article' && (
+          <Button variant="secondary" size="sm" onClick={() => void navigator.clipboard.writeText(htmlContent).then(() => toast.success('已复制 HTML 源码'))}>
+            <FileCode className="h-3.5 w-3.5" />复制 HTML 源码
           </Button>
         )}
         <Button variant="secondary" size="sm" className="min-h-11" disabled={downloading || !canDownload} title={!canDownload ? '仅支持预览' : undefined} onClick={handleDownload}>
@@ -451,6 +490,8 @@ function FilePreviewModalContent({
 
 export function FilePreviewGallery({
   files,
+  relatedFiles,
+  articleAuthor,
   taskId,
   taskType,
   inlineItemClassName,
@@ -460,6 +501,8 @@ export function FilePreviewGallery({
   compact = false,
 }: {
   files: TaskFile[]
+  relatedFiles?: TaskFile[]
+  articleAuthor?: string
   taskId: string
   taskType?: string
   inlineItemClassName?: string
@@ -529,7 +572,10 @@ export function FilePreviewGallery({
         <Dialog open={open} onOpenChange={setOpen}>
           <FilePreviewModalContent
             file={currentFile}
+            files={relatedFiles || files}
             taskId={taskId}
+            taskType={taskType}
+            articleAuthor={articleAuthor}
             previewTitle={previewTitle}
             details={renderPreviewDetails?.(currentFile)}
             onKeyDown={handleKeyDown}

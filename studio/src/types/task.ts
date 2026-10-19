@@ -94,6 +94,16 @@ export interface ProjectSnapshot {
   writer?: string
   theme?: string
   author?: string
+  wechat_delivery?: {
+    mode: 'automatic' | 'user_assisted'
+    automatic_enabled: boolean
+    app_id_configured: boolean
+    secret_configured: boolean
+    may_upload_material: boolean
+    may_create_draft: boolean
+    may_formally_publish: boolean
+    reason_codes?: string[]
+  }
   ecommerce_defaults?: {
     default_selected_modules?: Record<string, number>
     target_platform?: string

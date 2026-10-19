@@ -287,6 +287,7 @@ func newTaskArtifactTestService(t *testing.T) (*TaskService, repository.Reposito
 		Type:      model.TaskTypeWechatArticle,
 		Status:    model.TaskStatusRunning,
 	}
+	setAutomaticWechatDeliverySnapshot(task)
 	if err := repo.Tasks().Create(context.Background(), task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -1636,6 +1637,7 @@ func TestFinalizeTaskArtifactManifestPreservesWechatMetadataForSettledGeneratedI
 		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}
+	setAutomaticWechatDeliverySnapshot(task)
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1711,6 +1713,7 @@ func TestGeneratedCoverWechatMetadataSurvivesManifestAndReachesDraftAdd(t *testi
 		ArticleWithCover: &withCover, ArticleWithContentImages: &withContentImages,
 		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}
+	setAutomaticWechatDeliverySnapshot(task)
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -1823,6 +1826,7 @@ func TestFinalizeTaskArtifactManifestWorkspacePathWinsWithoutBreakingSettlement(
 		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}
+	setAutomaticWechatDeliverySnapshot(task)
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -2161,6 +2165,7 @@ func TestUploadExecutionTaskFileWithSettlementPersistsArtifactAndOutboxAtomicall
 		ID: uuid.NewString(), UserID: billingWalletUserID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 		BillingCatalogID: "retail-test-v1", BillingSKUID: "task.wechat_article.v1", BillingPricingTier: string(model.TierFree),
 	}
+	setAutomaticWechatDeliverySnapshot(task)
 	if err := fixture.repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

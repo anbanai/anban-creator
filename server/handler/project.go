@@ -356,8 +356,9 @@ type projectChannelConfigResponseBody struct {
 }
 
 type wechatPlatformConfigRequest struct {
-	AppID  string `json:"app_id"`
-	Secret string `json:"secret"`
+	AppID                    string `json:"app_id"`
+	Secret                   string `json:"secret"`
+	AutomaticDeliveryEnabled *bool  `json:"automatic_delivery_enabled,omitempty"`
 }
 
 type projectConfigRequest struct {
@@ -922,7 +923,16 @@ func (h *ProjectHandler) UpsertWechatPlatformConfig(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return Error(c, fiber.StatusBadRequest, "invalid WeChat platform config body")
 	}
-	config, err := h.service.UpsertWechatPlatformConfig(c.Context(), userID, c.Params("id"), req.AppID, req.Secret)
+	var config *service.WechatPlatformConfig
+	var err error
+	if req.AutomaticDeliveryEnabled != nil && strings.TrimSpace(req.AppID) == "" && strings.TrimSpace(req.Secret) == "" {
+		config, err = h.service.SetWechatAutomaticDelivery(c.Context(), userID, c.Params("id"), *req.AutomaticDeliveryEnabled)
+	} else {
+		config, err = h.service.UpsertWechatPlatformConfig(c.Context(), userID, c.Params("id"), req.AppID, req.Secret)
+		if err == nil && req.AutomaticDeliveryEnabled != nil {
+			config, err = h.service.SetWechatAutomaticDelivery(c.Context(), userID, c.Params("id"), *req.AutomaticDeliveryEnabled)
+		}
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrProjectChannelCredentialsConflict) {
 			return Error(c, fiber.StatusConflict, err.Error())

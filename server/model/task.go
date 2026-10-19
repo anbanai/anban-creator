@@ -173,6 +173,7 @@ type ProjectSnapshot struct {
 	HypitDefaults                 HypitDefaults            `json:"hypit_defaults,omitempty"`
 	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
 	ChannelConfig                 map[string]any           `json:"channel_config,omitempty"`
+	WechatDelivery                WechatDeliveryDecision   `json:"wechat_delivery,omitempty"`
 	Profile                       ProjectProfile           `json:"profile,omitempty"`
 }
 
@@ -332,7 +333,7 @@ func (s ProjectSnapshot) HasData() bool {
 		strings.TrimSpace(s.Writer) != "" ||
 		strings.TrimSpace(s.Theme) != "" ||
 		strings.TrimSpace(s.Author) != "" ||
-		s.Profile.SchemaVersion != 0 || len(s.ChannelConfig) > 0
+		s.Profile.SchemaVersion != 0 || len(s.ChannelConfig) > 0 || s.WechatDelivery.Mode != ""
 }
 
 func (t *Task) SetImageCapabilitySnapshot(snapshot ImageCapabilitySnapshot) {

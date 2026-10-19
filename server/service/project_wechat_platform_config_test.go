@@ -25,7 +25,7 @@ func TestWechatPlatformConfigUnifiesArticleAndPictureChannels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if initial.AppID != "" || initial.SecretConfigured || initial.CredentialsConflict {
+	if initial.AppID != "" || initial.SecretConfigured || initial.CredentialsConflict || initial.AutomaticDeliveryEnabled {
 		t.Fatalf("empty config = %#v", initial)
 	}
 
@@ -67,6 +67,35 @@ func TestWechatPlatformConfigUnifiesArticleAndPictureChannels(t *testing.T) {
 	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
 		if _, err := repo.ProjectChannelConfigs().Get(ctx, projectID, channel); !errors.Is(err, gorm.ErrRecordNotFound) {
 			t.Fatalf("delete through %s left a shared credential row: %v", channel, err)
+		}
+	}
+}
+
+func TestWechatPlatformConfigCanDisableAutomaticDelivery(t *testing.T) {
+	db := setupTaskTestDB(t)
+	repo := repository.New(db)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	ensureTestUser(t, repo, userID)
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	svc := NewProjectService(repo, nil)
+	if _, err := svc.UpsertWechatPlatformConfig(ctx, userID, projectID, "wx-shared", "secret-shared"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.SetWechatAutomaticDelivery(ctx, userID, projectID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AutomaticDeliveryEnabled {
+		t.Fatalf("automatic delivery remained enabled: %#v", updated)
+	}
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		config, getErr := repo.ProjectChannelConfigs().Get(ctx, projectID, channel)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if config.Config.Data()["automatic_delivery_enabled"] != false {
+			t.Fatalf("%s config = %#v", channel, config.Config.Data())
 		}
 	}
 }

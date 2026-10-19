@@ -364,8 +364,20 @@ func (s *TaskService) freezeProjectChannelConfig(ctx context.Context, projectID,
 	if s == nil || s.repo == nil || snapshot == nil {
 		return
 	}
+	values := map[string]any{}
 	if row, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel); err == nil && row != nil {
-		snapshot.ChannelConfig = redactFrozenConfig(row.Config.Data())
+		values = row.Config.Data()
+		snapshot.ChannelConfig = redactFrozenConfig(values)
+	}
+	if channel == model.ChannelArticle || channel == model.ChannelWechatPicture {
+		var automaticEnabled *bool
+		if value, ok := values["automatic_delivery_enabled"].(bool); ok {
+			automaticEnabled = &value
+		}
+		secret := strings.TrimSpace(mapStringValue(values, "wechat_secret"))
+		snapshot.WechatDelivery = model.ResolveWechatDeliveryDecision(
+			mapStringValue(values, "wechat_app_id"), secret != "", automaticEnabled,
+		).WithServerPublicationCapabilities()
 	}
 }
 
@@ -876,7 +888,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if strings.TrimSpace(snapshot.Platform) == "" {
 			snapshot.Platform = project.Platform
 		}
-		if p.ProjectSnapshot == nil {
+		if p.ProjectSnapshot == nil || !p.PreserveFrozenConfig {
 			s.freezeProjectChannelConfig(ctx, project.ID, channel, &snapshot)
 		}
 		task.SetProjectSnapshot(snapshot)

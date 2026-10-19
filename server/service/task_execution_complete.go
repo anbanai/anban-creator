@@ -692,6 +692,14 @@ func draftRetryEligible(publication *model.WechatPublication) bool {
 }
 
 func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
+	if decision := wechatDeliveryDecision(task); decision.IsUserAssisted() {
+		evidence, _ := json.Marshal(map[string]any{
+			"source": "server_finalizer", "status": model.TaskExecutionDraftDeliveryNotRequested,
+			"code": "wechat_delivery_mode_user_assisted", "attempted": false,
+			"wechat_delivery": decision,
+		})
+		return model.TaskExecutionDraftDeliveryNotRequested, evidence, nil
+	}
 	if _, err := s.repo.Projects().FindByID(ctx, task.ProjectID); err != nil {
 		return "", nil, fmt.Errorf("load article publication project: %w", err)
 	}
@@ -957,6 +965,14 @@ func isConcretePictureContentPath(path string) bool {
 }
 
 func (s *TaskService) finalizePicturePublication(ctx context.Context, task *model.Task, execution *model.TaskExecution) (string, []byte, error) {
+	if decision := wechatDeliveryDecision(task); decision.IsUserAssisted() {
+		evidence, _ := json.Marshal(map[string]any{
+			"source": "server_finalizer", "status": model.TaskExecutionDraftDeliveryNotRequested,
+			"code": "wechat_delivery_mode_user_assisted", "attempted": false,
+			"wechat_delivery": decision,
+		})
+		return model.TaskExecutionDraftDeliveryNotRequested, evidence, nil
+	}
 	block := func(code, action string) (string, []byte, error) {
 		return model.TaskExecutionDraftDeliveryBlocked, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryBlocked, code, false, action), nil
 	}

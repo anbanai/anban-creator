@@ -27,6 +27,9 @@ func (s *TaskService) RecoverWechatPublication(ctx context.Context, userID, task
 	if task.UserID != userID {
 		return model.TaskPublicationOutcome{}, ErrWechatPublicationForbidden
 	}
+	if wechatDeliveryDecision(task).IsUserAssisted() {
+		return model.TaskPublicationOutcome{}, ErrWechatDeliveryModeUserAssisted
+	}
 	if (strings.TrimSpace(task.Channel) != "" && task.Channel != model.ChannelArticle && task.Channel != model.ChannelWechatPicture) || (strings.TrimSpace(task.Channel) == "" && task.Type != model.TaskTypeWechatArticle && task.Type != model.TaskTypeWechatPicture) || task.Outcome == nil {
 		return model.TaskPublicationOutcome{}, ErrWechatPublicationRecoveryUnavailable
 	}

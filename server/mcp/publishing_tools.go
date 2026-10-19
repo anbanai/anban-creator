@@ -151,6 +151,8 @@ func classifyCreateDraftFailure(err error) createDraftFailure {
 		return createDraftFailure{Code: "create_draft_project_mismatch", Message: "task and project do not match", Hint: "Use the project_id associated with the task", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationExecutionMismatch):
 		return createDraftFailure{Code: "create_draft_execution_mismatch", Message: "draft creation is bound to the current task execution", Hint: "Continue from the task's current execution", Retryable: false}
+	case errors.Is(err, service.ErrWechatDeliveryModeUserAssisted):
+		return createDraftFailure{Code: "wechat_delivery_mode_user_assisted", Message: "WeChat automatic delivery is disabled for this task", Hint: "Do not retry WeChat actions; deliver the article files for Studio copy", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationForbidden):
 		return createDraftFailure{Code: "create_draft_forbidden", Message: "task or project is not owned by the authenticated user", Hint: "Use resources owned by the authenticated user", Retryable: false}
 	case errors.Is(err, service.ErrWechatPublicationModeConflict):

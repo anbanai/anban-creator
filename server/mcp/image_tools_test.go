@@ -272,3 +272,17 @@ func TestClassifyImageToolFailurePreservesBusinessRatioDetails(t *testing.T) {
 		t.Fatal("test error no longer exposes the typed capability failure")
 	}
 }
+
+func TestUploadImageUserAssistedFailureIsStructuredAndNonRetryable(t *testing.T) {
+	result := uploadImageErrorResult(service.ErrWechatDeliveryModeUserAssisted)
+	if result == nil || !result.IsError {
+		t.Fatalf("result = %#v, want tool error", result)
+	}
+	var failure uploadImageFailure
+	if err := json.Unmarshal([]byte(callToolText(result)), &failure); err != nil {
+		t.Fatalf("decode failure: %v (%q)", err, callToolText(result))
+	}
+	if failure.Code != "wechat_delivery_mode_user_assisted" || failure.Retryable || !strings.Contains(failure.Hint, "Do not retry") {
+		t.Fatalf("failure = %#v", failure)
+	}
+}
