@@ -21,11 +21,19 @@ recorded by the removed submodule:
 
 ```text
 repository=https://github.com/calesthio/OpenMontage.git
-commit=9327439db69021ab4b0e2776729bf3b58fdb5a87
+commit=c8066452325cb57c8fc1ba8c2a71b6e8842e6b65
 ```
 
-截至 2026-10-07，上游仓库没有 Release 标签；该提交是 `main` 的最新
+截至 2026-10-19，上游仓库没有 Release 标签；该提交是 `main` 的最新
 提交。生产构建固定完整 SHA，避免随分支移动而改变运行时。
+
+The pinned upstream Remotion lockfile has five npm advisories. The image applies
+`deploy/docker/openmontage-remotion-deps.patch`, generated with
+`npm audit fix --package-lock-only` against this exact upstream commit. It only
+updates vulnerable transitive lock entries, leaves upstream `package.json`
+unchanged, runs `npm ci`, and fails the build if production audit reports a
+moderate-or-higher advisory. Regenerate and review this patch whenever the
+OpenMontage source pin changes.
 
 Build the Agent image:
 
@@ -48,7 +56,7 @@ MONTAGE_AGENT_REF=chengdu.personal.cr.aliyuncs.com/bx_anbanai/creator-agent-mont
 docker build --pull \
   -f deploy/docker/Dockerfile.agent-montage \
   --build-arg OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git \
-  --build-arg OPENMONTAGE_REF=9327439db69021ab4b0e2776729bf3b58fdb5a87 \
+  --build-arg OPENMONTAGE_REF=c8066452325cb57c8fc1ba8c2a71b6e8842e6b65 \
   -t "$MONTAGE_AGENT_REF" .
 docker push "$MONTAGE_AGENT_REF"
 ```

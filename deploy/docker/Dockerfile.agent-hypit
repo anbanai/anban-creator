@@ -11,9 +11,9 @@ RUN npm run build && \
 FROM node:24.22.0-bookworm-slim
 
 ARG HYPIT_REPO=https://github.com/hypit-ai/hypit.git
-ARG HYPIT_REF=8efbac03ed10929b0f4a3c79fe2b3f77b6479daf
+ARG HYPIT_REF=dc2b7a8f31b1ef1443a79ca448548d69e3ceb6a0
 ARG PNPM_VERSION=10.33.0
-ARG UV_VERSION=0.10.4
+ARG UV_VERSION=0.13.1
 
 USER root
 RUN set -eux; \

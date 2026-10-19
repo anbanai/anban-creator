@@ -419,7 +419,10 @@ func TestMontageRuntimeImageContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ARG OPENMONTAGE_REPO=https://github.com/calesthio/OpenMontage.git",
-		"ARG OPENMONTAGE_REF=9327439db69021ab4b0e2776729bf3b58fdb5a87",
+		"ARG OPENMONTAGE_REF=c8066452325cb57c8fc1ba8c2a71b6e8842e6b65",
+		"COPY deploy/docker/openmontage-remotion-deps.patch /tmp/openmontage-remotion-deps.patch",
+		"git apply /tmp/openmontage-remotion-deps.patch",
+		"npm audit --omit=dev --audit-level=moderate",
 		"apt-get install -y --no-install-recommends",
 		"ca-certificates curl git jq ffmpeg fontconfig fonts-noto-cjk fonts-noto-color-emoji",
 		"libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2",
@@ -898,11 +901,25 @@ func TestDockerBuildInputsUseDeclaredImageTags(t *testing.T) {
 }
 
 func TestHypitRuntimePreparesProgramsWithExplicitProjectRoot(t *testing.T) {
-	path := filepath.Join(repositoryRoot(t), "deploy", "docker", "Dockerfile.agent-hypit")
+	root := repositoryRoot(t)
+	path := filepath.Join(root, "deploy", "docker", "Dockerfile.agent-hypit")
 	body := readTextFile(t, path)
-	want := "hypit programs prepare --project /opt/hypit --runtime /tmp/runtime-profile.json --endpoint html.local"
-	if !strings.Contains(body, want) {
-		t.Fatalf("%s must pass the official source root explicitly to Hypit project discovery", path)
+	for _, want := range []string{
+		"ARG HYPIT_REF=dc2b7a8f31b1ef1443a79ca448548d69e3ceb6a0",
+		"ARG PNPM_VERSION=10.33.0",
+		"ARG UV_VERSION=0.13.1",
+		"hypit programs prepare --project /opt/hypit --runtime /tmp/runtime-profile.json --endpoint html.local",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s missing current Hypit runtime contract %q", path, want)
+		}
+	}
+	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
+	smoke := readTextFile(t, filepath.Join(root, "deploy", "docker", "hypit-smoke.sh"))
+	for name, content := range map[string]string{"Makefile": makefile, "Hypit smoke script": smoke} {
+		if !strings.Contains(content, "dc2b7a8f31b1ef1443a79ca448548d69e3ceb6a0") {
+			t.Fatalf("%s does not use the Dockerfile's pinned Hypit revision", name)
+		}
 	}
 }
 
@@ -1173,7 +1190,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
 		"OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git",
-		"OPENMONTAGE_SOURCE_REF ?= 9327439db69021ab4b0e2776729bf3b58fdb5a87",
+		"OPENMONTAGE_SOURCE_REF ?= c8066452325cb57c8fc1ba8c2a71b6e8842e6b65",
 		"SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest",
 		"SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest",
 		"STUDIO_IMAGE := anban-creator-studio:latest",

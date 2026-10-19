@@ -137,6 +137,18 @@ v0.3.1 延续 v0.3.0 的运行时 Profile 和 Provider 结构；官方迁移说�
 `/opt/hypit` 作为 `--project`，避免 CLI 因源码仓库未位于带有
 `hypit.project: true` 的项目目录而拒绝准备外部程序。
 
+## Hypit 与 Claude SDK 上游更新（2026-10-19）
+
+Hypit 源码 pin 更新到上游 `main` 的 `dc2b7a8f31b1ef1443a79ca448548d69e3ceb6a0`
+（2026-10-14，`perf(media-local): reuse video frames that meet normalization requirements`）。
+该提交沿用 Hypit `0.3.1` 的包版本，并包含上游更新后的 frozen `pnpm-lock.yaml`；
+构建继续使用上游指定的 pnpm `10.33.0`，uv 更新到 `0.13.1`。
+
+Claude Agent SDK 更新到 `0.3.303`，与 Claude Code `2.1.303` 对齐；Anthropic SDK、
+MCP SDK、Zod 和 Node 类型包也更新到当前最新精确版本。Hypit 源码 pin、Make 默认值
+与 smoke 校验使用同一个完整 commit SHA。npm audit 修复了 runtime lock 中的
+`fast-uri`、`ip-address` 和 `proxy-addr` 传递依赖公告；生产依赖审计结果为 0 项。
+
 - 渲染 Provider 从 `@hypit/provider-hyperframes-local`（endpoint
   `hyperframes.local`）迁移为 `@hypit/provider-html-local`（endpoint
   `html.local`）；推荐浏览器版本键从
