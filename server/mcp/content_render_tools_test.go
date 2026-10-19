@@ -547,7 +547,7 @@ func TestScoreArticleHandler_ViaMCP(t *testing.T) {
 	}
 }
 
-func TestListProjectTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
+func TestListProjectTitlesHandler_ReturnsTitlesAndHistory(t *testing.T) {
 	db := repositoryTestDB(t)
 	repo := repository.New(db)
 	ctx := context.Background()
@@ -624,6 +624,17 @@ func TestListProjectTitlesHandler_ReturnsTitlesOnly(t *testing.T) {
 	if len(titles) != 1 || titles[0] != "新手咖啡豆怎么选" {
 		t.Fatalf("titles = %v, want [新手咖啡豆怎么选]", titles)
 	}
+	history, ok := payload["history"].([]any)
+	if !ok || len(history) != 1 {
+		t.Fatalf("history = %v, want one structured history record", payload["history"])
+	}
+	historyRecord, ok := history[0].(map[string]any)
+	if !ok || historyRecord["title"] != "新手咖啡豆怎么选" || historyRecord["created_at"] == nil {
+		t.Fatalf("history record = %v, want title and created_at", history[0])
+	}
+	if payload["history_older_truncated"] != false || payload["history_older_count"] != float64(1) {
+		t.Fatalf("older history metadata = %v/%v, want false/1", payload["history_older_truncated"], payload["history_older_count"])
+	}
 }
 
 func TestFinalizeTaskTitleHandler_ViaMCP(t *testing.T) {
@@ -697,6 +708,12 @@ func TestFinalizeTaskTitleHandler_RejectsDuplicateViaMCP(t *testing.T) {
 
 	userID := "user-finalize-duplicate-mcp"
 	projectID := "project-finalize-duplicate-mcp"
+	if err := repo.Projects().Create(ctx, &model.Project{
+		ID: projectID, UserID: userID, Platform: model.PlatformSeednote,
+		Name: "Seednote", Status: model.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
 	for _, task := range []*model.Task{
 		{
 			ID:        "task-finalize-duplicate-existing",

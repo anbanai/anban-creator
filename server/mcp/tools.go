@@ -207,7 +207,7 @@ func registerTaskTools(server *mcp.Server) {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "list_project_titles",
-		Description: "List all recorded content titles for a project for duplicate detection.",
+		Description: "List recorded content titles and structured topic history for project-level duplicate detection.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -225,6 +225,8 @@ func registerTaskTools(server *mcp.Server) {
 			"properties": map[string]any{
 				"task_id": map[string]any{"type": "string", "description": "Task ID"},
 				"title":   map[string]any{"type": "string", "description": "Final content title selected by the owning Agent"},
+				"topic":   map[string]any{"type": "string", "description": "Selected reader problem/topic; provide together with angle for WeChat articles"},
+				"angle":   map[string]any{"type": "string", "description": "Article angle and promised answer; provide together with topic for WeChat articles"},
 			},
 			"required": []any{"task_id", "title"},
 		},
@@ -420,11 +422,26 @@ func titleListHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallT
 		return errorResult("project_id is required"), nil
 	}
 
-	titles, err := svcs.TaskSvc.ListTitlesForUser(context.Background(), userID, projectID)
+	history, err := svcs.TaskSvc.ListTopicHistoryForUser(context.Background(), userID, projectID)
 	if err != nil {
-		return errorResult(fmt.Sprintf("list titles: %v", err)), nil
+		return errorResult(fmt.Sprintf("list topic history: %v", err)), nil
 	}
-	return textResult(map[string]any{"titles": titles, "count": len(titles)})
+	titles := make([]string, 0, len(history.History))
+	seen := make(map[string]struct{}, len(history.History))
+	for _, record := range history.History {
+		if record.Title == "" {
+			continue
+		}
+		if _, ok := seen[record.Title]; ok {
+			continue
+		}
+		seen[record.Title] = struct{}{}
+		titles = append(titles, record.Title)
+	}
+	return textResult(map[string]any{
+		"titles": titles, "count": len(titles), "history": history.History,
+		"history_older_count": history.OlderRecordCount, "history_older_truncated": history.OlderRecordsTruncated,
+	})
 }
 
 func titleFinalizeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -432,6 +449,8 @@ func titleFinalizeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	args := parseArgs(req.Params.Arguments)
 	taskID, _ := args["task_id"].(string)
 	title, _ := args["title"].(string)
+	topic, _ := args["topic"].(string)
+	angle, _ := args["angle"].(string)
 	if taskID == "" {
 		return errorResult("task_id is required"), nil
 	}
@@ -439,11 +458,11 @@ func titleFinalizeHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return errorResult("title is required"), nil
 	}
 
-	finalTitle, err := svcs.TaskSvc.FinalizeTitle(context.Background(), userID, taskID, title)
+	finalTitle, err := svcs.TaskSvc.FinalizeSelection(context.Background(), userID, taskID, title, topic, angle)
 	if err != nil {
 		return errorResult(fmt.Sprintf("finalize title: %v", err)), nil
 	}
-	return textResult(map[string]any{"task_id": taskID, "title": finalTitle, "updated": true})
+	return textResult(map[string]any{"task_id": taskID, "title": finalTitle, "topic": topic, "angle": angle, "updated": true})
 }
 
 func taskFilesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {

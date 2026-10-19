@@ -153,6 +153,7 @@ type TaskRepository interface {
 	Update(ctx context.Context, task *model.Task) error
 	UpdateInputAttachments(ctx context.Context, id string, attachments []model.EntryAttachment) error
 	UpdateTitle(ctx context.Context, id string, title string) error
+	UpdateTitleSelection(ctx context.Context, id, title, topic, angle string, lockedAt time.Time) error
 	SetStartedAt(ctx context.Context, id string) error
 	SetCompletedAt(ctx context.Context, id string) error
 	UpdateHeartbeat(ctx context.Context, id string) error
@@ -174,6 +175,9 @@ type TaskRepository interface {
 	ResetRetryableTaskForResume(ctx context.Context, taskID string, attachments []model.EntryAttachment) (bool, error)
 	FindTitlesByProjectID(ctx context.Context, projectID string) ([]string, error)
 	FindTitleTasksByProjectID(ctx context.Context, projectID string) ([]*model.Task, error)
+	FindRecentTitleTasksByProjectID(ctx context.Context, projectID string, since time.Time) ([]*model.Task, error)
+	FindRecentTitleTasksByProjectIDForUpdate(ctx context.Context, projectID string, since time.Time) ([]*model.Task, error)
+	CountOlderTitleTasksByProjectID(ctx context.Context, projectID string, before time.Time) (int64, error)
 	ClearTitles(ctx context.Context, titles []string) (int64, error)
 	UpdateWorkflowStatus(ctx context.Context, id string, workflowStatus string) error
 	UpdateOutcomeForExecution(ctx context.Context, id, executionID string, outcome model.TaskOutcome) (bool, error)

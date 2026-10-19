@@ -114,7 +114,21 @@ async function progressWorkspace(withResearchArtifact = false): Promise<string> 
 
 describe("validateManagedInit", () => {
   test("requires the configured remote MCP and article plugin skill", () => {
-    expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], tools: [], skills: [] }, "wechat-article")).toThrow("anban:humanizer");
+    expect(() => validateManagedInit({ type: "system", subtype: "init", mcp_servers: [{ name: "anban", status: "connected" }], plugins: [{ name: "anban", path: "/anbanai" }], tools: ["mcp__anban__finalize_task_title", "mcp__anban__list_project_titles"], skills: [] }, "wechat-article")).toThrow("anban:humanizer");
+  });
+
+  test("requires the article title persistence capability", () => {
+    const message = {
+      type: "system" as const,
+      subtype: "init" as const,
+      mcp_servers: [{ name: "anban", status: "connected" as const }],
+      plugins: [{ name: "anban", path: "/anbanai" }],
+      tools: ["mcp__anban__finalize_task_title", "mcp__anban__list_project_titles"],
+      skills: ["anban:humanizer", "anban:portrait-cover-design"],
+    };
+    expect(() => validateManagedInit(message, "wechat-article")).not.toThrow();
+    expect(() => validateManagedInit({ ...message, tools: ["mcp__anban__list_project_titles"] }, "wechat-article")).toThrow("finalize_task_title");
+    expect(() => validateManagedInit({ ...message, tools: ["mcp__anban__finalize_task_title"] }, "wechat-article")).toThrow("list_project_titles");
   });
 
   test("requires Seednote core tools and all publishing skills while research tools remain optional", () => {
@@ -201,9 +215,9 @@ describe("validateManagedInit", () => {
 
   test("does not implicitly require legacy progress for other managed task types", () => {
     const taskTypes = [
-      { taskType: "wechat-article", tool: "get_project_profile", skills: ["anban:humanizer", "anban:portrait-cover-design"] },
-      { taskType: "ecommerce", tool: "get_project_profile", skills: ["anban:humanizer"] },
-      { taskType: "moments", tool: "get_project_profile", skills: [] },
+      { taskType: "wechat-article", tools: ["finalize_task_title", "list_project_titles"], skills: ["anban:humanizer", "anban:portrait-cover-design"] },
+      { taskType: "ecommerce", tools: ["get_project_profile"], skills: ["anban:humanizer"] },
+      { taskType: "moments", tools: ["get_project_profile"], skills: [] },
     ];
     for (const fixture of taskTypes) {
       expect(() => validateManagedInit({
@@ -211,7 +225,7 @@ describe("validateManagedInit", () => {
         subtype: "init",
         mcp_servers: [{ name: "anban", status: "connected" }],
         plugins: [{ name: "anban", path: "/anbanai" }],
-        tools: [`mcp__anban__${fixture.tool}`],
+        tools: fixture.tools.map((tool) => `mcp__anban__${tool}`),
         skills: fixture.skills,
       }, fixture.taskType)).not.toThrow();
     }

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -543,6 +544,47 @@ func TestTaskRepository_FindTitlesByProjectID(t *testing.T) {
 		if titles[i] != want[i] {
 			t.Errorf("titles[%d] = %q, want %q", i, titles[i], want[i])
 		}
+	}
+}
+
+func TestTaskRepository_FindRecentTitleTasksByProjectIDIncludesCompleteWindow(t *testing.T) {
+	db := setupTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for i := 0; i < 205; i++ {
+		createdAt := now.Add(-time.Hour)
+		lockedAt := &createdAt
+		if i == 204 {
+			createdAt = now.Add(-120 * 24 * time.Hour)
+			freshLock := now.Add(-time.Hour)
+			lockedAt = &freshLock
+		}
+		task := &model.Task{
+			ID: "recent-title-" + strconv.Itoa(i), ProjectID: "project-recent-title",
+			UserID: "user-recent-title", Type: model.ScopeSeednote,
+			Status: model.TaskStatusCompleted, Title: "Recent topic " + strconv.Itoa(i),
+			SelectedTopic: "recent topic", SelectedAngle: strconv.Itoa(i),
+			TopicLockedAt: lockedAt, CreatedAt: createdAt,
+		}
+		if err := repo.Tasks().Create(ctx, task); err != nil {
+			t.Fatalf("create task %d: %v", i, err)
+		}
+	}
+
+	tasks, err := repo.Tasks().FindRecentTitleTasksByProjectID(ctx, "project-recent-title", now.Add(-90*24*time.Hour))
+	if err != nil {
+		t.Fatalf("FindRecentTitleTasksByProjectID: %v", err)
+	}
+	if len(tasks) != 205 {
+		t.Fatalf("recent task count = %d, want 205", len(tasks))
+	}
+	olderCount, err := repo.Tasks().CountOlderTitleTasksByProjectID(ctx, "project-recent-title", now.Add(-90*24*time.Hour))
+	if err != nil {
+		t.Fatalf("CountOlderTitleTasksByProjectID: %v", err)
+	}
+	if olderCount != 0 {
+		t.Fatalf("older task count = %d, want 0", olderCount)
 	}
 }
 

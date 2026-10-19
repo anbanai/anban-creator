@@ -464,6 +464,12 @@ func (r *taskRepository) UpdateTitle(ctx context.Context, id string, title strin
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("title", title).Error
 }
 
+func (r *taskRepository) UpdateTitleSelection(ctx context.Context, id, title, topic, angle string, lockedAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Updates(map[string]any{
+		"title": title, "selected_topic": topic, "selected_angle": angle, "topic_locked_at": lockedAt,
+	}).Error
+}
+
 func (r *taskRepository) SetStartedAt(ctx context.Context, id string) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).Model(&model.Task{}).Where("id = ?", id).Update("started_at", now).Error
@@ -580,6 +586,40 @@ func (r *taskRepository) FindTitleTasksByProjectID(ctx context.Context, projectI
 		Limit(200).
 		Find(&tasks).Error
 	return tasks, err
+}
+
+func (r *taskRepository) FindRecentTitleTasksByProjectID(ctx context.Context, projectID string, since time.Time) ([]*model.Task, error) {
+	return r.findRecentTitleTasksByProjectID(ctx, projectID, since, false)
+}
+
+func (r *taskRepository) FindRecentTitleTasksByProjectIDForUpdate(ctx context.Context, projectID string, since time.Time) ([]*model.Task, error) {
+	return r.findRecentTitleTasksByProjectID(ctx, projectID, since, true)
+}
+
+func (r *taskRepository) findRecentTitleTasksByProjectID(ctx context.Context, projectID string, since time.Time, forUpdate bool) ([]*model.Task, error) {
+	query := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
+		Where("project_id = ? AND title != ''", projectID).
+		Where("(topic_locked_at >= ? OR (topic_locked_at IS NULL AND created_at >= ?))", since, since).
+		Order("COALESCE(topic_locked_at, created_at) DESC").
+		Order("id DESC")
+	if forUpdate {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	var tasks []*model.Task
+	if err := query.Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (r *taskRepository) CountOlderTitleTasksByProjectID(ctx context.Context, projectID string, before time.Time) (int64, error) {
+	var count int64
+	err := excludeInternalFeedbackTasks(r.db.WithContext(ctx)).
+		Model(&model.Task{}).
+		Where("project_id = ? AND title != ''", projectID).
+		Where("(topic_locked_at < ? OR (topic_locked_at IS NULL AND created_at < ?))", before, before).
+		Count(&count).Error
+	return count, err
 }
 
 func (r *taskRepository) ClearTitles(ctx context.Context, titles []string) (int64, error) {

@@ -67,8 +67,8 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"taskFilesHandler":                        "svcs.TaskSvc.GetVisibleFilesForUser",
 	"taskGetHandler":                          "svcs.TaskSvc.GetByID",
 	"taskListHandler":                         "svcs.TaskSvc.List",
-	"titleFinalizeHandler":                    "svcs.TaskSvc.FinalizeTitle",
-	"titleListHandler":                        "svcs.TaskSvc.ListTitlesForUser",
+	"titleFinalizeHandler":                    "svcs.TaskSvc.FinalizeSelection",
+	"titleListHandler":                        "svcs.TaskSvc.ListTopicHistoryForUser",
 	"uploadImageHandler":                      "svcs.TaskImageOperationsSvc.Upload",
 }
 

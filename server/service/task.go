@@ -1504,6 +1504,86 @@ func (s *TaskService) ListTitlesForUser(ctx context.Context, userID, projectID s
 	return s.ListTitles(ctx, projectID)
 }
 
+type TopicHistoryRecord struct {
+	TaskID        string     `json:"task_id"`
+	Title         string     `json:"title,omitempty"`
+	Topic         string     `json:"topic,omitempty"`
+	Angle         string     `json:"angle,omitempty"`
+	TopicLockedAt *time.Time `json:"topic_locked_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+type TopicHistoryResult struct {
+	History               []TopicHistoryRecord `json:"history"`
+	OlderRecordCount      int64                `json:"history_older_count"`
+	OlderRecordsTruncated bool                 `json:"history_older_truncated"`
+}
+
+func (s *TaskService) ListTopicHistoryForUser(ctx context.Context, userID, projectID string) (*TopicHistoryResult, error) {
+	project, err := s.repo.Projects().FindByID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("find project: %w", err)
+	}
+	if project.UserID != userID {
+		return nil, fmt.Errorf("project not owned by user")
+	}
+	recentSince := time.Now().UTC().Add(-90 * 24 * time.Hour)
+	recent, err := s.repo.Tasks().FindRecentTitleTasksByProjectID(ctx, projectID, recentSince)
+	if err != nil {
+		return nil, fmt.Errorf("list topic history: %w", err)
+	}
+	olderCount, err := s.repo.Tasks().CountOlderTitleTasksByProjectID(ctx, projectID, recentSince)
+	if err != nil {
+		return nil, fmt.Errorf("count older topic history: %w", err)
+	}
+	older, err := s.repo.Tasks().FindTitleTasksByProjectID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing title tasks: %w", err)
+	}
+	includedOlderCount := int64(0)
+	for _, task := range older {
+		at := task.CreatedAt
+		if task.TopicLockedAt != nil {
+			at = *task.TopicLockedAt
+		}
+		if at.Before(recentSince) {
+			includedOlderCount++
+		}
+	}
+	byID := make(map[string]*model.Task, len(recent)+len(older))
+	for _, task := range append(recent, older...) {
+		byID[task.ID] = task
+	}
+	tasks := make([]*model.Task, 0, len(byID))
+	for _, task := range byID {
+		tasks = append(tasks, task)
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		at := tasks[i].CreatedAt
+		if tasks[i].TopicLockedAt != nil {
+			at = *tasks[i].TopicLockedAt
+		}
+		bt := tasks[j].CreatedAt
+		if tasks[j].TopicLockedAt != nil {
+			bt = *tasks[j].TopicLockedAt
+		}
+		if at.Equal(bt) {
+			return tasks[i].ID > tasks[j].ID
+		}
+		return at.After(bt)
+	})
+	history := make([]TopicHistoryRecord, 0, len(tasks))
+	for _, task := range tasks {
+		history = append(history, TopicHistoryRecord{
+			TaskID: task.ID, Title: task.Title, Topic: task.SelectedTopic, Angle: task.SelectedAngle,
+			TopicLockedAt: task.TopicLockedAt, CreatedAt: task.CreatedAt,
+		})
+	}
+	return &TopicHistoryResult{
+		History: history, OlderRecordCount: olderCount, OlderRecordsTruncated: olderCount > includedOlderCount,
+	}, nil
+}
+
 var artifactTaskTitles = map[string]struct{}{
 	"图片内容规划":    {},
 	"标题候选与评分":   {},
@@ -1513,6 +1593,12 @@ var artifactTaskTitles = map[string]struct{}{
 
 // FinalizeTitle records the owning Agent's final title as the canonical task title.
 func (s *TaskService) FinalizeTitle(ctx context.Context, userID, taskID, title string) (string, error) {
+	return s.FinalizeSelection(ctx, userID, taskID, title, "", "")
+}
+
+// FinalizeSelection persists a selected title and, when provided, the semantic
+// topic and angle used for rolling-window duplicate checks.
+func (s *TaskService) FinalizeSelection(ctx context.Context, userID, taskID, title, topic, angle string) (string, error) {
 	cleaned := cleanFinalTitle(title)
 	if cleaned == "" {
 		return "", fmt.Errorf("title is required")
@@ -1523,28 +1609,76 @@ func (s *TaskService) FinalizeTitle(ctx context.Context, userID, taskID, title s
 	if _, ok := artifactTaskTitles[cleaned]; ok {
 		return "", fmt.Errorf("artifact title is not allowed: %s", cleaned)
 	}
+	topic = cleanFinalTitle(topic)
+	angle = cleanFinalTitle(angle)
+	if (topic == "") != (angle == "") {
+		return "", fmt.Errorf("topic and angle must be provided together")
+	}
+	if len([]rune(topic)) > 512 || len([]rune(angle)) > 512 {
+		return "", fmt.Errorf("topic and angle must be <= 512 characters")
+	}
 
-	task, err := s.repo.Tasks().FindByID(ctx, taskID)
-	if err != nil {
-		return "", fmt.Errorf("task not found: %w", err)
-	}
-	if userID != "" && task.UserID != userID {
-		return "", fmt.Errorf("task not found")
-	}
-
-	tasks, err := s.repo.Tasks().FindTitleTasksByProjectID(ctx, task.ProjectID)
-	if err != nil {
-		return "", fmt.Errorf("list existing title tasks: %w", err)
-	}
-	normalized := normalizeTitleForDedup(cleaned)
-	for _, existing := range tasks {
-		if existing.ID != task.ID && normalizeTitleForDedup(existing.Title) == normalized {
-			return "", fmt.Errorf("duplicate title: %s", cleaned)
+	err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		task, err := tx.Tasks().FindByIDForUpdate(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("task not found: %w", err)
 		}
-	}
-
-	if err := s.repo.Tasks().UpdateTitle(ctx, taskID, cleaned); err != nil {
-		return "", fmt.Errorf("update task title: %w", err)
+		if userID != "" && task.UserID != userID {
+			return fmt.Errorf("task not found")
+		}
+		if task.Channel == model.ChannelArticle && topic == "" {
+			return fmt.Errorf("topic and angle are required for WeChat article selection")
+		}
+		if _, err := tx.Projects().FindByIDForUpdate(ctx, task.ProjectID); err != nil {
+			return fmt.Errorf("lock project for topic selection: %w", err)
+		}
+		titleTasks, err := tx.Tasks().FindTitleTasksByProjectID(ctx, task.ProjectID)
+		if err != nil {
+			return fmt.Errorf("list existing title tasks: %w", err)
+		}
+		normalizedTitle := normalizeTitleForDedup(cleaned)
+		now := time.Now().UTC()
+		for _, existing := range titleTasks {
+			if existing.ID == task.ID {
+				continue
+			}
+			if normalizedTitle != "" && normalizeTitleForDedup(existing.Title) == normalizedTitle {
+				return fmt.Errorf("duplicate title: %s", cleaned)
+			}
+		}
+		recentTasks, err := tx.Tasks().FindRecentTitleTasksByProjectIDForUpdate(ctx, task.ProjectID, now.Add(-30*24*time.Hour))
+		if err != nil {
+			return fmt.Errorf("list recent topic history: %w", err)
+		}
+		for _, existing := range recentTasks {
+			if existing.ID == task.ID {
+				continue
+			}
+			if topic == "" || existing.SelectedTopic == "" || existing.SelectedAngle == "" || existing.TopicLockedAt == nil {
+				continue
+			}
+			age := now.Sub(*existing.TopicLockedAt)
+			if age >= 0 && age <= 30*24*time.Hour && normalizeTitleForDedup(existing.SelectedTopic) == normalizeTitleForDedup(topic) && normalizeTitleForDedup(existing.SelectedAngle) == normalizeTitleForDedup(angle) {
+				return fmt.Errorf("duplicate topic angle within 30 days: %s", topic)
+			}
+		}
+		if topic == "" {
+			if err := tx.Tasks().UpdateTitle(ctx, taskID, cleaned); err != nil {
+				return fmt.Errorf("update task title: %w", err)
+			}
+		} else {
+			lockedAt := now
+			if task.TopicLockedAt != nil && normalizeTitleForDedup(task.SelectedTopic) == normalizeTitleForDedup(topic) && normalizeTitleForDedup(task.SelectedAngle) == normalizeTitleForDedup(angle) {
+				lockedAt = *task.TopicLockedAt
+			}
+			if err := tx.Tasks().UpdateTitleSelection(ctx, taskID, cleaned, topic, angle, lockedAt); err != nil {
+				return fmt.Errorf("update task title selection: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return cleaned, nil
 }

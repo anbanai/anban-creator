@@ -191,6 +191,9 @@ type Task struct {
 	Status                  string                                      `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
 	Prompt                  string                                      `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
 	Title                   string                                      `gorm:"type:varchar(200)" json:"title,omitempty"`
+	SelectedTopic           string                                      `gorm:"type:varchar(512);not null;default:'';index" json:"selected_topic,omitempty"`
+	SelectedAngle           string                                      `gorm:"type:varchar(512);not null;default:''" json:"selected_angle,omitempty"`
+	TopicLockedAt           *time.Time                                  `gorm:"index" json:"topic_locked_at,omitempty"`
 	ContentOrigin           string                                      `gorm:"type:varchar(40);not null;default:'';index" json:"-"`
 	ImageRatio              string                                      `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageCapabilityKey      string                                      `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`

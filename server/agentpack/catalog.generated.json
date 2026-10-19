@@ -1380,7 +1380,7 @@
       "id": "wechat-article",
       "channel": "wechat-article",
       "plan_task_kind": "content_generation",
-      "version": "2.0.7",
+      "version": "2.0.8",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -1615,7 +1615,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "ae0ee0f197e9b2593b4adf9e2bc1fd4fe4f7d9208ac19a8d3557a2231a70836f"
+      "digest": "97208f7370cc9fb4e0490dbf61348d6345bcd62280f62b43efb9e0161e9e4bc4"
     },
     {
       "id": "wechat-picture",

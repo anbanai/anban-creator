@@ -808,6 +808,78 @@ func TestTaskService_FinalizeTitleRejectsDuplicateEvenWhenCurrentTaskAlreadyHasT
 	}
 }
 
+func TestTaskService_FinalizeSelectionEnforcesRecentTopicAngle(t *testing.T) {
+	tests := []struct {
+		name    string
+		age     time.Duration
+		angle   string
+		wantErr bool
+	}{
+		{name: "same angle inside 30 days", age: 29 * 24 * time.Hour, angle: "充值前核验服务商信任", wantErr: true},
+		{name: "different angle inside 30 days", age: 2 * 24 * time.Hour, angle: "新手首次请求的接入步骤"},
+		{name: "same angle outside 30 days", age: 31 * 24 * time.Hour, angle: "充值前核验服务商信任"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo := setupTaskServiceWithEnqueuer(t)
+			ctx := context.Background()
+			userID := uuid.New().String()
+			projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+			lockedAt := time.Now().UTC().Add(-tt.age)
+			existing := &model.Task{
+				ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
+				AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+				Status: model.TaskStatusRunning, Title: "你不敢充值的真正原因，不是价格",
+				SelectedTopic: "充值前如何判斷大模型 API 服务商是否可信", SelectedAngle: "充值前核验服务商信任",
+				TopicLockedAt: &lockedAt,
+			}
+			current := &model.Task{
+				ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
+				AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration,
+				Status: model.TaskStatusRunning,
+			}
+			for _, task := range []*model.Task{existing, current} {
+				if err := repo.Tasks().Create(ctx, task); err != nil {
+					t.Fatalf("create task: %v", err)
+				}
+			}
+
+			_, err := svc.FinalizeSelection(ctx, userID, current.ID, "新标题", "充值前如何判斷大模型 API 服务商是否可信", tt.angle)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "duplicate topic angle") {
+					t.Fatalf("FinalizeSelection error = %v, want recent duplicate", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("FinalizeSelection: %v", err)
+			}
+			stored, err := repo.Tasks().FindByID(ctx, current.ID)
+			if err != nil {
+				t.Fatalf("find task: %v", err)
+			}
+			if stored.SelectedTopic == "" || stored.SelectedAngle != tt.angle || stored.TopicLockedAt == nil {
+				t.Fatalf("selection not persisted: topic=%q angle=%q locked_at=%v", stored.SelectedTopic, stored.SelectedAngle, stored.TopicLockedAt)
+			}
+		})
+	}
+}
+
+func TestTaskService_FinalizeSelectionRequiresTopicAndAngleForArticle(t *testing.T) {
+	svc, repo := setupTaskServiceWithEnqueuer(t)
+	ctx := context.Background()
+	userID := uuid.NewString()
+	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
+	task := &model.Task{ID: uuid.NewString(), UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle,
+		AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusRunning}
+	if err := repo.Tasks().Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := svc.FinalizeTitle(ctx, userID, task.ID, "公众号文章标题"); err == nil || !strings.Contains(err.Error(), "topic and angle are required") {
+		t.Fatalf("FinalizeTitle error = %v, want missing topic and angle", err)
+	}
+}
+
 func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	ctx := context.Background()
