@@ -42,7 +42,7 @@ describe('TasksPage recovery workspace contract', () => {
     expect(dialogSource).toContain('TaskComposerParameters')
     expect(dialogSource).not.toContain('ExecutionProfileToolbar')
     expect(dialogSource).not.toContain('ComposerQuantityControl')
-    expect(dialogSource).toContain('leadingTools=')
+    expect(dialogSource).toContain('projectContext')
     expect(dialogSource).not.toContain('ImageAspectRatioField')
     expect(dialogSource).not.toContain('01 类型')
   })

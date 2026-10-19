@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, useWatch, type FieldPath, type FieldPathValue, type Resolver } from 'react-hook-form'
 import { Link } from 'react-router-dom'
-import { Images, Minus, Package, Plus, Stamp } from 'lucide-react'
+import { CheckCircle2, Images, Minus, Package, Plus, Stamp } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AgentPromptInput } from '@/components/agent-prompt/AgentPromptInput'
@@ -48,6 +48,7 @@ import { contentTypeOptions } from '@/lib/labels'
 import { TaskComposerParameters } from './TaskComposerParameters'
 import { TaskTimePricingNotice } from '@/components/billing/TaskTimePricingNotice'
 import { SeednoteTemplateGallery } from '@/components/templates/SeednoteTemplateGallery'
+import { projectAgentIDs } from '@/lib/project-capabilities'
 
 const SEEDNOTE_ATTACHMENT_POLICY = {
   allowedTypes: ['image'],
@@ -66,6 +67,23 @@ function maxTaskQuantity(type: TaskType) {
   return BATCH_TASK_TYPES.has(type) ? 5 : 1
 }
 
+const taskTypeLabels = new Map(contentTypeOptions.map((option) => [option.value, option.label]))
+
+function projectTaskTypes(project?: Project | null): TaskType[] {
+  if (!project) return []
+  const supported = projectAgentIDs(project)
+    .map((id) => id === 'wechat' ? 'wechat-article' : id)
+    .filter((id): id is TaskType => taskTypeLabels.has(id))
+  if (supported.includes('seednote') && !supported.includes('viral_analysis')) supported.push('viral_analysis')
+  return supported.filter((type, index, all) => all.indexOf(type) === index)
+}
+
+function preferredProjectTaskType(project: Project, preferred?: string): TaskType {
+  const supported = projectTaskTypes(project)
+  if (preferred && supported.includes(preferred as TaskType)) return preferred as TaskType
+  return supported[0] ?? (project.platform === 'wechat' ? 'wechat-article' : project.platform || 'seednote') as TaskType
+}
+
 export interface TaskFormDialogProps {
   open: boolean
   mode: 'create' | 'clone'
@@ -79,13 +97,16 @@ export interface TaskFormDialogProps {
 
 function createInitialDefaults(project?: Project, initialType?: TaskType): TaskFormDefaults {
   const defaults = createTaskFormDefaults(project)
-  if (initialType === 'wechat-picture' && project?.platform === 'wechat') {
-    return { ...defaults, type: initialType, image_ratio: defaultTaskImageRatio(initialType, project) as TaskFormDefaults['image_ratio'] }
-  }
-  if (initialType === 'viral_analysis') {
-    return {
-      ...createTaskFormDefaults(project),
-      type: 'viral_analysis',
+  if (project) {
+    const projectType = preferredProjectTaskType(project, initialType)
+    if (projectType !== defaults.type) {
+      return {
+        ...defaults,
+        type: projectType,
+        image_ratio: defaultTaskImageRatio(projectType, project) as TaskFormDefaults['image_ratio'],
+        hypit_input: projectType === 'hypit' ? initialHypitInput('') : undefined,
+        montage_input: projectType === 'montage' ? initialMontageInput('') : undefined,
+      }
     }
   }
   if (project || !initialType || initialType === defaults.type) return defaults
@@ -211,6 +232,8 @@ export function TaskFormDialog({
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const availableProjects = projects
 	const selectedProject = projectMap.get(watchedProjectId ?? '')
+  const hasProjectOutputs = Boolean(selectedProject && projectTaskTypes(selectedProject).length > 0)
+  const selectedTypeSupported = Boolean(selectedProject && projectTaskTypes(selectedProject).includes(watchedType))
 	const selectedAgentPack = useMemo(
 		() => agentPacksQuery.data?.packs?.find((pack) => (pack.channel === watchedType || pack.id === watchedType || pack.bindings.task_kinds?.includes(watchedType))),
 		[agentPacksQuery.data, watchedType],
@@ -270,12 +293,21 @@ export function TaskFormDialog({
       ? (() => {
           const cloned = cloneTaskFormDefaults(sourceTask)
           const sourceProject = projectMap.get(sourceTask.project_id ?? '')
-          return sourceProject
-            ? (cloned.type === sourceProject.platform
-              || (sourceProject.platform === 'wechat' && (cloned.type === 'wechat-article' || cloned.type === 'wechat-picture')))
-              ? { ...cloned, project_id: sourceProject.id }
-              : switchTaskFormDefaults(cloned, sourceProject)
-            : { ...cloned, project_id: '' }
+          if (!sourceProject) return { ...cloned, project_id: '' }
+          const sourceSupportsType = projectTaskTypes(sourceProject).includes(cloned.type)
+          if (sourceSupportsType) return { ...cloned, project_id: sourceProject.id }
+          const fallbackType = preferredProjectTaskType(sourceProject)
+          const switched = switchTaskFormDefaults({
+            ...cloned,
+            type: fallbackType,
+            image_ratio: defaultTaskImageRatio(fallbackType, sourceProject) as TaskFormDefaults['image_ratio'],
+          }, sourceProject)
+          return {
+            ...switched,
+            type: fallbackType,
+            image_ratio: defaultTaskImageRatio(fallbackType, sourceProject) as TaskFormDefaults['image_ratio'],
+            project_id: sourceProject.id,
+          }
         })()
       : createInitialDefaults(project ?? (initialType === 'viral_analysis' ? firstProject : undefined), initialType)
     initializedKeyRef.current = initializationKey
@@ -363,8 +395,16 @@ export function TaskFormDialog({
     }
     // Project defaults may suggest a type, but must not override the user's explicit choice.
     const projectDefaults = switchTaskFormDefaults(current, project)
-    if (current.type === 'viral_analysis') projectDefaults.type = 'viral_analysis'
-    const switched = explicitTaskTypeRef.current && projectDefaults.type !== current.type
+    if (project) {
+      const nextType = preferredProjectTaskType(project, current.type)
+      projectDefaults.type = nextType
+      projectDefaults.image_ratio = defaultTaskImageRatio(nextType, project) as TaskFormDefaults['image_ratio']
+      if (nextType === 'hypit' && !projectDefaults.hypit_input) projectDefaults.hypit_input = initialHypitInput(current.prompt, undefined, project.hypit_defaults)
+      if (nextType === 'montage' && !projectDefaults.montage_input) projectDefaults.montage_input = initialMontageInput(current.prompt, undefined, project.montage_defaults)
+    }
+    if (current.type === 'viral_analysis' && (!project || projectTaskTypes(project).includes('viral_analysis'))) projectDefaults.type = 'viral_analysis'
+    const currentTypeSupported = Boolean(project && projectTaskTypes(project).includes(current.type))
+    const switched = explicitTaskTypeRef.current && currentTypeSupported && projectDefaults.type !== current.type
       ? {
           ...current,
           project_id: project?.id ?? '',
@@ -414,33 +454,37 @@ export function TaskFormDialog({
   const selectedExecutionProfileUnavailable = Boolean(watchedExecutionProfile)
     && !executionProfilesQuery.isLoading
     && selectedExecutionProfile?.available !== true
-  const creationBlocker = executionProfilesQuery.isError
-    ? { message: '执行配置暂时无法加载，请稍后重试。', href: '' }
-    : !watchedExecutionProfile
-      ? { message: '请选择可用的执行配置。', href: '' }
-      : selectedExecutionProfileUnavailable
-        ? { message: '当前执行配置不可用，请重新选择。', href: '' }
-      : usesImageSettings && imageCapabilitiesError
-        ? { message: '图像能力暂时无法加载，请稍后重试。', href: '' }
-      : usesImageSettings && imageCapabilitiesLoading
-        ? { message: '正在加载图像能力，请稍候。', href: '' }
-        : !costPreview.priceAvailable
-          ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
-          : mode === 'clone' && projectsLoading
-            ? { message: '正在加载可用创作项目，请稍候。', href: '' }
-            : mode === 'clone' && !selectedProject
-              ? { message: '源作品所属创作项目不可用，请选择一个有效创作项目。', href: '' }
-          : hasIncompatibleSeednoteAttachments
-            ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
-            : !selectedProject
-              ? { message: '请在提示框中选择一个创作项目。', href: '' }
-            : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
-              ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
-              : imageCapabilityUnavailable
-                ? { message: '当前图像能力不可用，请重新选择。', href: '' }
-                  : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
-                    ? { message: '电商出图需要先上传产品图。', href: '' }
-                    : null
+  const creationBlocker = mode === 'clone' && projectsLoading
+    ? { message: '正在加载可用创作项目，请稍候。', href: '' }
+    : mode === 'clone' && !selectedProject
+      ? { message: '源作品所属创作项目不可用，请选择一个有效创作项目。', href: '' }
+      : !selectedProject
+        ? { message: '先选择一个创作项目。', href: '' }
+        : !hasProjectOutputs
+          ? { message: '当前创作项目未配置可用输出方式，请先完善项目设置。', href: '/projects' }
+        : !selectedTypeSupported
+          ? { message: '当前输出方式与创作项目不匹配，请重新选择。', href: '' }
+        : executionProfilesQuery.isError
+          ? { message: '执行配置暂时无法加载，请稍后重试。', href: '' }
+          : !watchedExecutionProfile
+            ? { message: '请选择可用的执行配置。', href: '' }
+            : selectedExecutionProfileUnavailable
+              ? { message: '当前执行配置不可用，请重新选择。', href: '' }
+              : usesImageSettings && imageCapabilitiesError
+                ? { message: '图像能力暂时无法加载，请稍后重试。', href: '' }
+                : usesImageSettings && imageCapabilitiesLoading
+                  ? { message: '正在加载图像能力，请稍候。', href: '' }
+                  : !costPreview.priceAvailable
+                    ? { message: '固定价格目录暂不可用，请稍后重试。', href: '' }
+                    : hasIncompatibleSeednoteAttachments
+                      ? { message: SEEDNOTE_ATTACHMENT_BLOCKER, href: '' }
+                      : (billingWallet?.debt ?? 0) > 0 || costPreview.insufficient
+                        ? { message: '积分不足或存在欠费，充值后再创建。', href: '/billing' }
+                        : imageCapabilityUnavailable
+                          ? { message: '当前图像能力不可用，请重新选择。', href: '' }
+                          : watchedType === 'ecommerce' && (!watchedProductPhotos || watchedProductPhotos.length === 0)
+                            ? { message: '电商出图需要先上传产品图。', href: '' }
+                            : null
 
   const projectControl = (
     <ProjectContextControl
@@ -458,7 +502,7 @@ export function TaskFormDialog({
         : projectsLoading
           ? '创作项目：加载中'
           : '创作项目：未选择'}
-      compact
+      compact={false}
     />
   )
 
@@ -496,13 +540,13 @@ export function TaskFormDialog({
   )
 
   const taskTypeOptions = [...contentTypeOptions, { value: 'viral_analysis', label: '爆文拆解' }]
-    .filter((option) => option.value === watchedType || agentPacksQuery.data?.packs?.some((pack) => (
-      pack.surfaces.includes('task')
-      && (pack.channel === option.value || pack.id === option.value || pack.bindings.task_kinds?.includes(option.value))
-    )))
-  const agentControl = (
-    <section className="space-y-2">
-      <h3 className="text-sm font-semibold">创作类型</h3>
+    .filter((option) => selectedProject && projectTaskTypes(selectedProject).includes(option.value as TaskType))
+  const agentControl = selectedProject && taskTypeOptions.length > 1 ? (
+    <section className="space-y-2 rounded-xl border border-border/80 bg-muted/20 p-3">
+      <div>
+        <h3 className="text-sm font-semibold">输出方式</h3>
+        <p className="mt-1 text-xs text-muted-foreground">仅显示这个创作项目已配置的能力。</p>
+      </div>
       <CreationTypePicker
         options={taskTypeOptions.map((option) => ({ id: option.value, label: option.label }))}
         value={[watchedType]}
@@ -516,9 +560,49 @@ export function TaskFormDialog({
         }}
         disabled={isSubmitting || mode === 'clone'}
       />
-      {agentPacksQuery.isError ? <p role="alert" className="text-xs text-destructive">创作类型暂时无法加载，请稍后重试。</p> : null}
+      {agentPacksQuery.isError ? <p role="alert" className="text-xs text-destructive">输出能力暂时无法加载，请稍后重试。</p> : null}
+    </section>
+  ) : selectedProject && taskTypeOptions.length === 1 ? (
+    <div className="flex items-center gap-3 rounded-xl border border-border/80 bg-muted/20 px-3 py-2.5" aria-label={`已匹配输出方式：${taskTypeLabels.get(taskTypeOptions[0].value) ?? taskTypeOptions[0].value}`}>
+      <CheckCircle2 className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">已匹配输出方式</p>
+        <p className="truncate text-sm font-medium">{taskTypeLabels.get(taskTypeOptions[0].value) ?? taskTypeOptions[0].value}</p>
+      </div>
+    </div>
+  ) : null
+
+  const projectContext = (
+    <section className="rounded-xl border border-border/80 bg-muted/20 p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">创作项目</h3>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            先选项目，定位、风格和可用输出会自动带入。
+          </p>
+        </div>
+        <div className="w-full sm:w-[min(22rem,46%)]">{projectControl}</div>
+      </div>
+      {selectedProject ? (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/70 pt-3 text-xs text-muted-foreground">
+          <ProjectIdentity project={selectedProject} compact showAgents={false} className="font-medium" />
+          <span>可用输出：{taskTypeOptions.map((option) => option.label).join('、') || (hasProjectOutputs ? '加载中' : '未配置')}</span>
+          {!hasProjectOutputs ? <p role="alert" className="basis-full text-sm font-medium text-destructive">当前创作项目未配置可用输出方式，请先完善项目设置。</p> : null}
+        </div>
+      ) : (
+        <div className="mt-3 border-t border-border/70 pt-3">
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            {projectsLoading ? '正在加载可用创作项目，请稍候。' : '选择项目后才能开始配置创作内容。'}
+          </p>
+          {mode === 'clone' && !projectsLoading ? (
+            <p role="alert" className="mt-2 text-sm font-medium text-destructive">源作品所属创作项目不可用，请选择一个有效创作项目。</p>
+          ) : null}
+        </div>
+      )}
     </section>
   )
+
+  const canConfigureTask = hasProjectOutputs && selectedTypeSupported
 
   const promptComposer = isViralAnalysisTask ? (
     <div data-slot="viral-analysis-prompt" className="flex flex-col gap-2">
@@ -529,13 +613,9 @@ export function TaskFormDialog({
         placeholder="粘贴种草笔记链接或分享文本..."
         className="min-h-32 resize-y"
       />
-      <div className="flex min-w-0 flex-wrap items-center gap-1">
-        {projectControl}
-        {taskParametersControl}
-      </div>
     </div>
   ) : (
-    <AgentPromptInput
+      <AgentPromptInput
       value={{ prompt: watchedPrompt, attachments: watchedType === 'hypit' ? [] : attachmentController.attachments }}
       onChange={(value) => {
         setFormValue('prompt', value.prompt)
@@ -557,12 +637,6 @@ export function TaskFormDialog({
       submitting={isSubmitting}
       disabled={isSubmitting}
       submitDisabled={Boolean(creationBlocker) || (watchedType === 'whiteboard-animation' && !hasWhiteboardSubtitle) || portraitUploading || (isMontageTask && !montageReady)}
-      leadingTools={(
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
-          {projectControl}
-          {taskParametersControl}
-        </div>
-      )}
     />
   )
 
@@ -586,13 +660,14 @@ export function TaskFormDialog({
           </DialogHeader>
           <Form {...form}>
             <form id="task-create-form" onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+              {projectContext}
               {agentControl}
-              {selectedProject ? (
+              {canConfigureTask ? <div className="flex justify-end">{taskParametersControl}</div> : null}
+              {selectedProject && canConfigureTask ? (
                 <details className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
                   <summary className="cursor-pointer text-muted-foreground">
-                    <span className="ml-1 inline-flex flex-wrap gap-x-3 gap-y-1" aria-label="本次将使用">
-                      <ProjectIdentity project={selectedProject} compact className="font-medium text-foreground" />
-                      <span>{selectedExecutionProfile?.display_name || '执行配置加载中'}</span>
+                    <span className="ml-1 inline-flex flex-wrap gap-x-3 gap-y-1" aria-label="本次运行">
+                      <span>执行：{selectedExecutionProfile?.display_name || '加载中'}</span>
                       <span>预计费用：{costPreview.priceAvailable ? `${costPreview.totalCost.toLocaleString()} 积分` : '待确认'}</span>
                     </span>
                   </summary>
@@ -604,6 +679,20 @@ export function TaskFormDialog({
                 </details>
               ) : null}
 
+              {!canConfigureTask ? (
+                <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center">
+                  <p className="text-sm font-medium">
+                    {selectedProject
+                      ? hasProjectOutputs && !selectedTypeSupported ? '当前输出方式与创作项目不匹配' : '当前项目暂无可用输出方式'
+                      : '先选择创作项目'}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {selectedProject && hasProjectOutputs && !selectedTypeSupported
+                      ? '请在上方选择这个项目支持的输出方式。'
+                      : '项目会决定可用的输出方式、默认风格和执行配置。'}
+                  </p>
+                </div>
+              ) : <>
               <TaskTimePricingNotice
                 catalog={billingCatalog}
                 taskType={watchedType}
@@ -773,16 +862,18 @@ export function TaskFormDialog({
                   </div>
                 ) : null}
 
-                <PortraitCoverControl
-                  type={watchedType}
-                  project={selectedProject}
-                  value={(form.watch('portrait_reference_image') as ReferenceImageSelection | null) ?? null}
-                  onValueChange={(value) => setFormValue('portrait_reference_image', value)}
-                  onUploadingChange={setPortraitUploading}
-                  checked={coverUsePortrait}
-                  coverEnabled={watchedType !== 'wechat-article' || articleWithCover}
-                  onCheckedChange={(checked) => setFormValue('cover_use_portrait', checked)}
-                />
+                {selectedProject ? (
+                  <PortraitCoverControl
+                    type={watchedType}
+                    project={selectedProject}
+                    value={(form.watch('portrait_reference_image') as ReferenceImageSelection | null) ?? null}
+                    onValueChange={(value) => setFormValue('portrait_reference_image', value)}
+                    onUploadingChange={setPortraitUploading}
+                    checked={coverUsePortrait}
+                    coverEnabled={watchedType !== 'wechat-article' || articleWithCover}
+                    onCheckedChange={(checked) => setFormValue('cover_use_portrait', checked)}
+                  />
+                ) : null}
 
                 {watchedType === 'ecommerce' ? (
                   <div className="space-y-4 rounded-lg border border-border p-3">
@@ -886,8 +977,9 @@ export function TaskFormDialog({
                 />
 
               </div>
+              </>}
 
-              <div className="pt-1">
+              {canConfigureTask ? <div className="pt-1">
                 <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">固定价格</p>
                 <div className="space-y-1 rounded-md border border-border bg-muted/50 p-3 text-sm">
                   {costPreview.priceAvailable ? (
@@ -907,7 +999,7 @@ export function TaskFormDialog({
                     <p className="text-sm font-medium text-red-500">{creationBlocker.href ? <Link to={creationBlocker.href}>{creationBlocker.message}</Link> : creationBlocker.message}</p>
                   ) : null}
                 </div>
-              </div>
+              </div> : null}
             </form>
           </Form>
           <DialogFooter className="mx-0 mb-0 border-t border-border bg-popover px-4 py-3 sm:flex-row sm:items-center sm:justify-end">
