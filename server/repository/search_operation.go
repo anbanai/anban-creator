@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/anbanai/anban-creator/server/model"
@@ -32,6 +33,9 @@ func (r *searchOperationRepository) Claim(ctx context.Context, candidate *model.
 		return nil, false, errors.New("search operation candidate and lease are required")
 	}
 	expires := now.Add(lease)
+	if strings.TrimSpace(candidate.Operation) == "" {
+		candidate.Operation = "mcp.search_web"
+	}
 	candidate.Status = model.SearchOperationRunning
 	candidate.LeaseExpiresAt = &expires
 	candidate.CreatedAt = now
@@ -66,7 +70,7 @@ func (r *searchOperationRepository) Claim(ctx context.Context, candidate *model.
 	}
 	result := r.db.WithContext(ctx).Model(&model.SearchOperation{}).
 		Where("id = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)))", existing.ID, model.SearchOperationFailed, model.SearchOperationRunning, now).
-		Updates(map[string]any{"user_id": candidate.UserID, "project_id": candidate.ProjectID, "task_id": candidate.TaskID, "execution_id": candidate.ExecutionID, "attempt_id": candidate.AttemptID, "provider_request_id": "", "status": model.SearchOperationRunning, "response_snapshot": nil, "error_code": "", "lease_expires_at": expires, "updated_at": now})
+		Updates(map[string]any{"operation": candidate.Operation, "user_id": candidate.UserID, "project_id": candidate.ProjectID, "task_id": candidate.TaskID, "execution_id": candidate.ExecutionID, "attempt_id": candidate.AttemptID, "provider_request_id": "", "status": model.SearchOperationRunning, "response_snapshot": nil, "error_code": "", "lease_expires_at": expires, "updated_at": now})
 	if result.Error != nil {
 		return nil, false, result.Error
 	}

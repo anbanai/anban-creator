@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -29,42 +28,36 @@ var ErrSearchOperationInProgress = errors.New("search operation is already in pr
 
 func IsSearchProviderUnavailable(err error) bool { return errors.Is(err, ErrSearchProviderUnavailable) }
 
-type SearchRequest struct {
-	Query            string
-	Limit            int
-	OriginalQuestion string
-	Localization     string
-	TimeRange        string
-	Domains          []string
-	BlockHosts       []string
-	NeedContent      *bool
-	NeedURL          *bool
-	AuthInfoLevel    int
-	AuthInfoLevelSet bool
-	ContentFormats   string
-	Industry         string
-	QueryRewrite     *bool
+type WebSearchRequest struct {
+	Query          string
+	Limit          int
+	Sites          []string
+	BlockedSites   []string
+	After          string
+	Before         string
+	IncludeContent bool
 }
 
 type SearchResultItem struct {
-	Type        string  `json:"type,omitempty"`
-	Title       string  `json:"title"`
-	URL         string  `json:"url"`
-	Domain      string  `json:"domain,omitempty"`
-	Snippet     string  `json:"snippet,omitempty"`
-	Summary     string  `json:"summary,omitempty"`
-	Content     string  `json:"content,omitempty"`
-	PublishedAt string  `json:"published_at,omitempty"`
-	PageAge     string  `json:"page_age,omitempty"`
-	CitationID  string  `json:"citation_id,omitempty"`
-	SiteName    string  `json:"site_name,omitempty"`
-	SiteIcon    string  `json:"site_icon,omitempty"`
-	Authority   string  `json:"authority,omitempty"`
-	Rank        int     `json:"rank,omitempty"`
-	RankScore   float64 `json:"rank_score,omitempty"`
+	Type        string    `json:"type,omitempty"`
+	Title       string    `json:"title"`
+	URL         string    `json:"url"`
+	Domain      string    `json:"domain,omitempty"`
+	Snippet     string    `json:"snippet,omitempty"`
+	Summary     string    `json:"summary,omitempty"`
+	Content     string    `json:"content,omitempty"`
+	PublishedAt string    `json:"published_at,omitempty"`
+	PageAge     string    `json:"page_age,omitempty"`
+	CitationID  string    `json:"citation_id,omitempty"`
+	SiteName    string    `json:"site_name,omitempty"`
+	SiteIcon    string    `json:"site_icon,omitempty"`
+	Authority   string    `json:"authority,omitempty"`
+	Rank        int       `json:"rank,omitempty"`
+	RankScore   float64   `json:"rank_score,omitempty"`
+	FetchedAt   time.Time `json:"fetched_at,omitempty"`
 }
 
-type SearchResponse struct {
+type WebSearchResponse struct {
 	Provider          string             `json:"provider"`
 	ProviderRequestID string             `json:"provider_request_id,omitempty"`
 	Query             string             `json:"query"`
@@ -75,10 +68,55 @@ type SearchResponse struct {
 	ProviderMetadata  map[string]any     `json:"provider_metadata,omitempty"`
 }
 
-type SearchProvider interface {
-	Search(context.Context, SearchRequest) (*SearchResponse, error)
-	Name() string
-	ValidateRequest(SearchRequest) error
+type WebSearchProvider interface {
+	Search(context.Context, WebSearchRequest) (*WebSearchResponse, error)
+}
+
+type PageFetchRequest struct {
+	URL string
+}
+
+type PageFetchResponse struct {
+	Title             string         `json:"title,omitempty"`
+	URL               string         `json:"url"`
+	ContentMarkdown   string         `json:"content_markdown"`
+	FetchedAt         time.Time      `json:"fetched_at"`
+	Provider          string         `json:"provider"`
+	ProviderRequestID string         `json:"provider_request_id,omitempty"`
+	ProviderMetadata  map[string]any `json:"provider_metadata,omitempty"`
+}
+
+type PageFetchProvider interface {
+	Fetch(context.Context, PageFetchRequest) (*PageFetchResponse, error)
+}
+
+type ImageSearchImagesRequest struct {
+	Query    string
+	ImageURL string
+	Limit    int
+	Sites    []string
+}
+
+type ImageSearchResult struct {
+	Title            string         `json:"title,omitempty"`
+	ImageURL         string         `json:"image_url"`
+	SourceURL        string         `json:"source_url,omitempty"`
+	Domain           string         `json:"domain,omitempty"`
+	CitationID       string         `json:"citation_id,omitempty"`
+	FetchedAt        string         `json:"fetched_at,omitempty"`
+	ProviderMetadata map[string]any `json:"provider_metadata,omitempty"`
+}
+
+type ImageSearchResponse struct {
+	Provider          string              `json:"provider"`
+	ProviderRequestID string              `json:"provider_request_id,omitempty"`
+	Query             string              `json:"query,omitempty"`
+	Results           []ImageSearchResult `json:"results"`
+	FetchedAt         time.Time           `json:"fetched_at"`
+}
+
+type ImageSearchProvider interface {
+	SearchImages(context.Context, ImageSearchImagesRequest) (*ImageSearchResponse, error)
 }
 
 type DoubaoSearchProvider struct {
@@ -100,6 +138,10 @@ type DeepSeekSearchProvider struct {
 }
 
 func NewDeepSeekSearchProvider(cfg serverconfig.SearchDeepSeekConfig) *DeepSeekSearchProvider {
+	endpoint := cfg.SearchEndpoint
+	if endpoint == "" {
+		endpoint = "https://api.deepseek.com/v1/tools/search"
+	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -115,7 +157,7 @@ func NewDeepSeekSearchProvider(cfg serverconfig.SearchDeepSeekConfig) *DeepSeekS
 				return http.ErrUseLastResponse
 			},
 		},
-		endpoint:   strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/"),
+		endpoint:   strings.TrimRight(strings.TrimSpace(endpoint), "/"),
 		apiKey:     strings.TrimSpace(cfg.APIKey),
 		maxResults: max,
 	}
@@ -128,7 +170,7 @@ func (p *DeepSeekSearchProvider) Name() string {
 	return "deepseek"
 }
 
-func (p *DeepSeekSearchProvider) ValidateRequest(req SearchRequest) error {
+func (p *DeepSeekSearchProvider) ValidateRequest(req WebSearchRequest) error {
 	if p == nil {
 		return ErrSearchProviderUnavailable
 	}
@@ -142,42 +184,52 @@ func (p *DeepSeekSearchProvider) ValidateRequest(req SearchRequest) error {
 	if req.Limit < 0 || req.Limit > p.maxResults {
 		return fmt.Errorf("limit must be between 1 and %d", p.maxResults)
 	}
-	if req.TimeRange != "" || len(req.Domains) > 0 || len(req.BlockHosts) > 0 || req.NeedURL != nil || req.AuthInfoLevelSet || req.AuthInfoLevel != 0 || req.ContentFormats != "" || req.Industry != "" || req.QueryRewrite != nil {
-		return errors.New("the selected DeepSeek search provider does not support structured filters; use search syntax in query")
+	if len(req.Sites) > 20 || len(req.BlockedSites) > 20 {
+		return errors.New("sites and blocked_sites support at most 20 entries")
 	}
-	if len([]rune(strings.TrimSpace(req.OriginalQuestion))) > 128 {
-		return errors.New("ori_question exceeds the 128-character limit")
-	}
-	if len([]rune(strings.TrimSpace(req.Localization))) > 128 {
-		return errors.New("localization exceeds the 128-character limit")
-	}
-	if localization := strings.TrimSpace(req.Localization); localization != "" && net.ParseIP(localization) == nil {
-		return errors.New("localization must be an IP address")
+	if req.After != "" || req.Before != "" {
+		if req.After != "" && !validSearchDate(req.After) || req.Before != "" && !validSearchDate(req.Before) {
+			return errors.New("after and before must use YYYY-MM-DD")
+		}
+		if req.After != "" && req.Before != "" && strings.TrimSpace(req.After) > strings.TrimSpace(req.Before) {
+			return errors.New("after must not be later than before")
+		}
 	}
 	return nil
 }
 
-func (p *DeepSeekSearchProvider) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
+func deepSeekQuery(req WebSearchRequest) string {
+	query := strings.TrimSpace(req.Query)
+	for _, site := range normalizeStrings(req.Sites) {
+		query += " site:" + site
+	}
+	for _, site := range normalizeStrings(req.BlockedSites) {
+		query += " -site:" + site
+	}
+	if strings.TrimSpace(req.After) != "" {
+		query += " after:" + strings.TrimSpace(req.After)
+	}
+	if strings.TrimSpace(req.Before) != "" {
+		query += " before:" + strings.TrimSpace(req.Before)
+	}
+	return query
+}
+
+func (p *DeepSeekSearchProvider) Search(ctx context.Context, req WebSearchRequest) (*WebSearchResponse, error) {
 	if p == nil || p.client == nil || p.endpoint == "" || p.apiKey == "" {
 		return nil, ErrSearchProviderUnavailable
 	}
 	if err := p.ValidateRequest(req); err != nil {
 		return nil, err
 	}
-	query := strings.TrimSpace(req.Query)
+	query := deepSeekQuery(req)
 	limit := req.Limit
 	if limit <= 0 {
 		limit = p.maxResults
 	}
 	body := map[string]any{"query": query, "count": limit}
-	if value := strings.TrimSpace(req.OriginalQuestion); value != "" {
-		body["ori_question"] = value
-	}
-	if value := strings.TrimSpace(req.Localization); value != "" {
-		body["localization"] = value
-	}
-	if req.NeedContent != nil {
-		body["need_content"] = *req.NeedContent
+	if req.IncludeContent {
+		body["need_content"] = true
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -223,17 +275,18 @@ func (p *DeepSeekSearchProvider) Search(ctx context.Context, req SearchRequest) 
 		return nil, fmt.Errorf("%w: invalid response", ErrSearchProviderUnavailable)
 	}
 	items := make([]SearchResultItem, 0, len(*decoded.Results))
+	fetchedAt := time.Now().UTC()
 	for _, item := range *decoded.Results {
 		items = append(items, SearchResultItem{
 			Title: item.Title, URL: item.URL, Domain: domainOf(item.URL), Snippet: item.Snippet, Summary: item.Summary,
 			Content: item.Content, PublishedAt: item.Date, CitationID: item.URL,
-			SiteName: item.SiteName, SiteIcon: item.SiteIcon, Authority: strconv.Itoa(item.Authority), RankScore: item.RerankScore,
+			SiteName: item.SiteName, SiteIcon: item.SiteIcon, Authority: strconv.Itoa(item.Authority), RankScore: item.RerankScore, FetchedAt: fetchedAt,
 		})
 		if len(items) == limit {
 			break
 		}
 	}
-	return &SearchResponse{
+	return &WebSearchResponse{
 		Provider: "deepseek", ProviderRequestID: firstHeader(resp.Header, "X-Request-ID", "Request-ID"),
 		Query: query, TotalCount: len(items), Results: items, FetchedAt: time.Now().UTC(),
 		ProviderMetadata: map[string]any{"api": "search"},
@@ -261,7 +314,7 @@ func newDoubaoSearchProvider(cfg serverconfig.SearchDoubaoConfig, edition string
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	max := cfg.MaxWebResults
+	max := cfg.MaxResults
 	maxAllowed := 50
 	if edition == "global" {
 		maxAllowed = 20
@@ -269,7 +322,11 @@ func newDoubaoSearchProvider(cfg serverconfig.SearchDoubaoConfig, edition string
 	if max <= 0 || max > maxAllowed {
 		max = 10
 	}
-	return &DoubaoSearchProvider{client: &http.Client{Timeout: timeout}, endpoint: strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/"), apiKey: strings.TrimSpace(cfg.APIKey), edition: edition, maxWebResults: max}
+	endpoint := cfg.CustomEndpoint
+	if edition == "global" {
+		endpoint = cfg.GlobalEndpoint
+	}
+	return &DoubaoSearchProvider{client: &http.Client{Timeout: timeout}, endpoint: strings.TrimRight(strings.TrimSpace(endpoint), "/"), apiKey: strings.TrimSpace(cfg.APIKey), edition: edition, maxWebResults: max}
 }
 func (p *DoubaoSearchProvider) Name() string {
 	if p == nil {
@@ -277,7 +334,7 @@ func (p *DoubaoSearchProvider) Name() string {
 	}
 	return "doubao_" + p.edition
 }
-func (p *DoubaoSearchProvider) ValidateRequest(req SearchRequest) error {
+func (p *DoubaoSearchProvider) ValidateRequest(req WebSearchRequest) error {
 	if strings.TrimSpace(req.Query) == "" {
 		return errors.New("query is required")
 	}
@@ -287,52 +344,28 @@ func (p *DoubaoSearchProvider) ValidateRequest(req SearchRequest) error {
 	if req.Limit < 0 || req.Limit > p.maxWebResults {
 		return fmt.Errorf("limit must be between 1 and %d", p.maxWebResults)
 	}
-	if p.edition == "global" {
-		if req.OriginalQuestion != "" || req.Localization != "" || req.TimeRange != "" || len(req.Domains) > 0 || len(req.BlockHosts) > 0 || req.NeedContent != nil || req.NeedURL != nil || req.AuthInfoLevelSet || req.AuthInfoLevel != 0 || req.ContentFormats != "" || req.Industry != "" || req.QueryRewrite != nil {
-			return errors.New("the selected Global search edition does not support Custom filters")
+	if len(req.Sites) > 20 || len(req.BlockedSites) > 20 {
+		return errors.New("sites and blocked_sites support at most 20 entries")
+	}
+	if req.After != "" || req.Before != "" {
+		if req.After != "" && !validSearchDate(req.After) || req.Before != "" && !validSearchDate(req.Before) {
+			return errors.New("after and before must use YYYY-MM-DD")
+		}
+		if req.After != "" && req.Before != "" && strings.TrimSpace(req.After) > strings.TrimSpace(req.Before) {
+			return errors.New("after must not be later than before")
 		}
 	}
-	if p.edition == "custom" {
-		if req.OriginalQuestion != "" || req.Localization != "" {
-			return errors.New("the selected Doubao search provider does not support DeepSeek-only fields")
-		}
-		if len(req.Domains) > 20 {
-			return errors.New("domains supports at most 20 entries")
-		}
-		if len(req.BlockHosts) > 5 {
-			return errors.New("block_hosts supports at most 5 entries")
-		}
-		if req.TimeRange != "" && !validCustomTimeRange(req.TimeRange) {
-			return errors.New("invalid Custom time_range")
-		}
-		if req.AuthInfoLevel < 0 || req.AuthInfoLevel > 1 {
-			return errors.New("auth_info_level must be 0 or 1")
-		}
-		if req.ContentFormats != "" && req.ContentFormats != "text" && req.ContentFormats != "markdown" {
-			return errors.New("content_formats must be text or markdown")
-		}
-		if req.Industry != "" && !map[string]bool{"finance": true, "game": true, "health": true, "gov": true}[req.Industry] {
-			return errors.New("invalid industry")
-		}
-	} else if p.edition != "global" {
+	if p.edition != "custom" && p.edition != "global" {
 		return errors.New("unsupported Doubao search edition")
 	}
 	return nil
 }
-func validCustomTimeRange(v string) bool {
-	for _, item := range []string{"OneDay", "OneWeek", "OneMonth", "OneYear"} {
-		if v == item {
-			return true
-		}
-	}
-	if len(v) != 22 || v[10:12] != ".." {
-		return false
-	}
-	_, err1 := time.Parse("2006-01-02", v[:10])
-	_, err2 := time.Parse("2006-01-02", v[12:])
-	return err1 == nil && err2 == nil
+
+func validSearchDate(value string) bool {
+	_, err := time.Parse("2006-01-02", strings.TrimSpace(value))
+	return err == nil
 }
-func (p *DoubaoSearchProvider) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
+func (p *DoubaoSearchProvider) Search(ctx context.Context, req WebSearchRequest) (*WebSearchResponse, error) {
 	if p == nil || p.client == nil || p.endpoint == "" || p.apiKey == "" {
 		return nil, ErrSearchProviderUnavailable
 	}
@@ -340,6 +373,20 @@ func (p *DoubaoSearchProvider) Search(ctx context.Context, req SearchRequest) (*
 		return nil, err
 	}
 	query := strings.TrimSpace(req.Query)
+	if p.edition == "global" {
+		for _, site := range normalizeStrings(req.Sites) {
+			query += " site:" + site
+		}
+		for _, site := range normalizeStrings(req.BlockedSites) {
+			query += " -site:" + site
+		}
+		if req.After != "" {
+			query += " after:" + strings.TrimSpace(req.After)
+		}
+		if req.Before != "" {
+			query += " before:" + strings.TrimSpace(req.Before)
+		}
+	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = p.maxWebResults
@@ -348,35 +395,23 @@ func (p *DoubaoSearchProvider) Search(ctx context.Context, req SearchRequest) (*
 	if p.edition == "custom" {
 		body["Count"] = limit
 		filter := map[string]any{}
-		if req.NeedContent != nil {
-			filter["NeedContent"] = *req.NeedContent
+		if req.IncludeContent {
+			filter["NeedContent"] = true
 		}
-		if req.NeedURL != nil {
-			filter["NeedUrl"] = *req.NeedURL
+		sites := append([]string{}, req.Sites...)
+		if len(sites) > 0 {
+			filter["Sites"] = strings.Join(normalizeStrings(sites), "|")
 		}
-		if len(req.Domains) > 0 {
-			filter["Sites"] = strings.Join(normalizeStrings(req.Domains), "|")
-		}
-		if len(req.BlockHosts) > 0 {
-			filter["BlockHosts"] = strings.Join(normalizeStrings(req.BlockHosts), "|")
-		}
-		if req.AuthInfoLevelSet || req.AuthInfoLevel != 0 {
-			filter["AuthInfoLevel"] = req.AuthInfoLevel
-		}
-		if req.TimeRange != "" {
-			filter["TimeRange"] = req.TimeRange
-		}
-		if req.ContentFormats != "" {
-			filter["ContentFormats"] = req.ContentFormats
-		}
-		if req.Industry != "" {
-			filter["Industry"] = req.Industry
+		blocked := append([]string{}, req.BlockedSites...)
+		if len(blocked) > 0 {
+			filter["BlockHosts"] = strings.Join(normalizeStrings(blocked), "|")
 		}
 		if len(filter) > 0 {
 			body["Filter"] = filter
 		}
-		if req.QueryRewrite != nil {
-			body["QueryControl"] = map[string]any{"QueryRewrite": *req.QueryRewrite}
+		if req.After != "" || req.Before != "" {
+			filter["TimeRange"] = strings.TrimSpace(req.After) + ".." + strings.TrimSpace(req.Before)
+			body["Filter"] = filter
 		}
 	} else {
 		body["DocCount"] = limit
@@ -413,7 +448,7 @@ func (p *DoubaoSearchProvider) Search(ctx context.Context, req SearchRequest) (*
 	if !hasJSONValue(envelope.Result) || isJSONNull(envelope.Result) {
 		return nil, fmt.Errorf("%w: missing search result", ErrSearchProviderUnavailable)
 	}
-	var result SearchResponse
+	var result WebSearchResponse
 	var normalizeErr error
 	if p.edition == "custom" {
 		result, normalizeErr = normalizeCustomResponse(envelope, query, limit)
@@ -455,7 +490,7 @@ func isJSONNull(value json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
 }
 
-func normalizeCustomResponse(env doubaoSearchEnvelope, query string, limit int) (SearchResponse, error) {
+func normalizeCustomResponse(env doubaoSearchEnvelope, query string, limit int) (WebSearchResponse, error) {
 	var raw struct {
 		ResultCount *int `json:"ResultCount"`
 		WebResults  *[]struct {
@@ -473,25 +508,26 @@ func normalizeCustomResponse(env doubaoSearchEnvelope, query string, limit int) 
 		LogID    string `json:"LogId"`
 	}
 	if err := json.Unmarshal(env.Result, &raw); err != nil {
-		return SearchResponse{}, err
+		return WebSearchResponse{}, err
 	}
 	if raw.ResultCount == nil || raw.WebResults == nil || *raw.ResultCount < 0 {
-		return SearchResponse{}, errors.New("custom search result is missing required fields")
+		return WebSearchResponse{}, errors.New("custom search result is missing required fields")
 	}
 	items := make([]SearchResultItem, 0, len(*raw.WebResults))
+	fetchedAt := time.Now().UTC()
 	for _, item := range *raw.WebResults {
 		snippet := item.Summary
 		if snippet == "" {
 			snippet = item.Snippet
 		}
-		items = append(items, SearchResultItem{Title: item.Title, URL: item.URL, Domain: domainOf(item.URL), Snippet: snippet, Content: item.Content, PublishedAt: item.PublishTime, CitationID: item.ID, Authority: item.Auth, RankScore: item.Rank})
+		items = append(items, SearchResultItem{Title: item.Title, URL: item.URL, Domain: domainOf(item.URL), Snippet: snippet, Content: item.Content, PublishedAt: item.PublishTime, CitationID: item.ID, Authority: item.Auth, RankScore: item.Rank, FetchedAt: fetchedAt})
 	}
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	return SearchResponse{Provider: "doubao_custom", ProviderRequestID: env.ResponseMetadata.RequestID, Query: query, TotalCount: *raw.ResultCount, Results: items, FetchedAt: time.Now().UTC(), ProviderMetadata: map[string]any{"edition": "custom", "time_cost_ms": raw.TimeCost, "log_id": raw.LogID}}, nil
+	return WebSearchResponse{Provider: "doubao_custom", ProviderRequestID: env.ResponseMetadata.RequestID, Query: query, TotalCount: *raw.ResultCount, Results: items, FetchedAt: time.Now().UTC(), ProviderMetadata: map[string]any{"edition": "custom", "time_cost_ms": raw.TimeCost, "log_id": raw.LogID}}, nil
 }
-func normalizeGlobalResponse(env doubaoSearchEnvelope, query string, limit int) (SearchResponse, error) {
+func normalizeGlobalResponse(env doubaoSearchEnvelope, query string, limit int) (WebSearchResponse, error) {
 	var raw struct {
 		ErrorCode     *int   `json:"ErrorCode"`
 		ErrorMsg      string `json:"ErrorMsg"`
@@ -515,12 +551,13 @@ func normalizeGlobalResponse(env doubaoSearchEnvelope, query string, limit int) 
 		} `json:"Documents"`
 	}
 	if err := json.Unmarshal(env.Result, &raw); err != nil {
-		return SearchResponse{}, err
+		return WebSearchResponse{}, err
 	}
 	if raw.ErrorCode == nil || raw.TotalDocCount == nil || raw.Documents == nil || *raw.ErrorCode != 0 || *raw.TotalDocCount < 0 {
-		return SearchResponse{}, errors.New("global search returned an error")
+		return WebSearchResponse{}, errors.New("global search returned an error")
 	}
 	items := make([]SearchResultItem, 0, len(*raw.Documents))
+	fetchedAt := time.Now().UTC()
 	for _, doc := range *raw.Documents {
 		var parts []string
 		for _, snip := range doc.Snippet {
@@ -528,12 +565,12 @@ func normalizeGlobalResponse(env doubaoSearchEnvelope, query string, limit int) 
 				parts = append(parts, snip.Text)
 			}
 		}
-		items = append(items, SearchResultItem{Title: doc.Title, URL: doc.URL, Domain: domainOf(doc.URL), Snippet: strings.Join(parts, "\n"), PublishedAt: doc.Info.PublishTime, CitationID: doc.URL, Authority: doc.Host.Authority, Rank: doc.Rank, Type: doc.Info.Filetype})
+		items = append(items, SearchResultItem{Title: doc.Title, URL: doc.URL, Domain: domainOf(doc.URL), Snippet: strings.Join(parts, "\n"), PublishedAt: doc.Info.PublishTime, CitationID: doc.URL, Authority: doc.Host.Authority, Rank: doc.Rank, Type: doc.Info.Filetype, FetchedAt: fetchedAt})
 	}
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	return SearchResponse{Provider: "doubao_global", ProviderRequestID: env.ResponseMetadata.RequestID, Query: query, TotalCount: *raw.TotalDocCount, Results: items, FetchedAt: time.Now().UTC(), ProviderMetadata: map[string]any{"edition": "global"}}, nil
+	return WebSearchResponse{Provider: "doubao_global", ProviderRequestID: env.ResponseMetadata.RequestID, Query: query, TotalCount: *raw.TotalDocCount, Results: items, FetchedAt: time.Now().UTC(), ProviderMetadata: map[string]any{"edition": "global"}}, nil
 }
 func domainOf(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
@@ -543,9 +580,19 @@ func domainOf(raw string) string {
 	return u.Hostname()
 }
 
+func webProviderName(provider WebSearchProvider) string {
+	if provider == nil {
+		return ""
+	}
+	if named, ok := provider.(interface{ Name() string }); ok {
+		return strings.TrimSpace(named.Name())
+	}
+	return "unknown"
+}
+
 type SearchService struct {
 	config     *serverconfig.SearchConfig
-	provider   SearchProvider
+	provider   WebSearchProvider
 	catalog    *BillingCatalogService
 	wallet     *BillingWalletService
 	costs      *ProviderCostService
@@ -553,7 +600,7 @@ type SearchService struct {
 	logger     *zerolog.Logger
 }
 
-func NewSearchService(cfg *serverconfig.SearchConfig, provider SearchProvider, catalog *BillingCatalogService, wallet *BillingWalletService, costs *ProviderCostService, operations repository.SearchOperationRepository, logger ...*zerolog.Logger) *SearchService {
+func NewSearchService(cfg *serverconfig.SearchConfig, provider WebSearchProvider, catalog *BillingCatalogService, wallet *BillingWalletService, costs *ProviderCostService, operations repository.SearchOperationRepository, logger ...*zerolog.Logger) *SearchService {
 	var log *zerolog.Logger
 	if len(logger) > 0 {
 		log = logger[0]
@@ -564,12 +611,9 @@ func NewSearchService(cfg *serverconfig.SearchConfig, provider SearchProvider, c
 func (s *SearchService) operationLease() time.Duration {
 	lease := 5 * time.Minute
 	if s != nil && s.config != nil {
-		timeout := s.config.Custom.Timeout
-		switch strings.TrimSpace(s.config.Provider) {
-		case "global":
-			timeout = s.config.Global.Timeout
-		case "deepseek":
-			timeout = s.config.DeepSeek.Timeout
+		timeout := s.config.Providers.DeepSeek.Timeout
+		if strings.HasPrefix(strings.TrimSpace(s.config.Web.Provider), "doubao_") {
+			timeout = s.config.Providers.Doubao.Timeout
 		}
 		configured := timeout + time.Minute
 		if configured > lease {
@@ -584,11 +628,11 @@ type SearchOperationRequest struct {
 	ProjectID   string
 	TaskID      string
 	ExecutionID string
-	Request     SearchRequest
+	Request     WebSearchRequest
 }
 
-func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) (*SearchResponse, error) {
-	if s == nil || s.config == nil || !s.config.Enabled || strings.TrimSpace(s.config.Provider) == "" || s.provider == nil {
+func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) (*WebSearchResponse, error) {
+	if s == nil || s.config == nil || !webSearchEnabled(s.config) || s.provider == nil {
 		return nil, ErrSearchProviderUnavailable
 	}
 	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.ProjectID) == "" || strings.TrimSpace(req.TaskID) == "" || strings.TrimSpace(req.ExecutionID) == "" {
@@ -597,11 +641,13 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 	if strings.TrimSpace(req.Request.Query) == "" {
 		return nil, errors.New("query is required")
 	}
-	if len([]rune(req.Request.Query)) > 2000 {
-		return nil, errors.New("query exceeds the 2000-character limit")
+	if len([]rune(req.Request.Query)) > 128 {
+		return nil, errors.New("query exceeds the 128-character limit")
 	}
-	if err := s.provider.ValidateRequest(req.Request); err != nil {
-		return nil, err
+	if validator, ok := s.provider.(interface{ ValidateRequest(WebSearchRequest) error }); ok {
+		if err := validator.ValidateRequest(req.Request); err != nil {
+			return nil, err
+		}
 	}
 	fingerprint := searchFingerprint(req)
 	if s.operations != nil {
@@ -612,7 +658,7 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 		if existing != nil {
 			switch existing.Status {
 			case model.SearchOperationSucceeded:
-				var replay SearchResponse
+				var replay WebSearchResponse
 				if err := json.Unmarshal(existing.ResponseSnapshot, &replay); err != nil {
 					return nil, fmt.Errorf("decode search operation response: %w", err)
 				}
@@ -638,7 +684,7 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 	attemptID := "search-attempt-" + uuid.NewString()
 	var operation *model.SearchOperation
 	if s.operations != nil {
-		candidate := &model.SearchOperation{UserID: req.UserID, ProjectID: req.ProjectID, TaskID: req.TaskID, ExecutionID: req.ExecutionID, RequestFingerprint: fingerprint, AttemptID: attemptID}
+		candidate := &model.SearchOperation{Operation: "mcp.search_web", UserID: req.UserID, ProjectID: req.ProjectID, TaskID: req.TaskID, ExecutionID: req.ExecutionID, RequestFingerprint: fingerprint, AttemptID: attemptID}
 		var claimed bool
 		operation, claimed, err = s.operations.Claim(ctx, candidate, time.Now().UTC(), s.operationLease())
 		if err != nil {
@@ -646,7 +692,7 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 		}
 		if !claimed {
 			if operation != nil && operation.Status == model.SearchOperationSucceeded {
-				var replay SearchResponse
+				var replay WebSearchResponse
 				if err := json.Unmarshal(operation.ResponseSnapshot, &replay); err != nil {
 					return nil, fmt.Errorf("decode search operation response: %w", err)
 				}
@@ -684,17 +730,28 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 	return result, nil
 }
 
-func (s *SearchService) recordSearchProviderCost(ctx context.Context, operation SearchOperationRequest, fingerprint, attemptID, outcome string, result *SearchResponse) {
+func webSearchEnabled(cfg *serverconfig.SearchConfig) bool {
+	return cfg != nil && cfg.Web.Enabled && strings.TrimSpace(cfg.Web.Provider) != ""
+}
+
+func (s *SearchService) recordSearchProviderCost(ctx context.Context, operation SearchOperationRequest, fingerprint, attemptID, outcome string, result *WebSearchResponse) {
 	if s == nil || s.costs == nil || s.provider == nil {
 		return
 	}
-	providerName, modelName := s.provider.Name(), ""
+	providerName, modelName := webProviderName(s.provider), ""
 	providerRequestID := ""
 	resultCount := 0
 	var usage map[string]any
 	providerMetadata := map[string]any{
 		"search_type": "web",
-		"filters":     searchProviderCostFilters(operation.Request),
+		"filters": map[string]any{
+			"sites":           normalizedFingerprintStrings(operation.Request.Sites),
+			"blocked_sites":   normalizedFingerprintStrings(operation.Request.BlockedSites),
+			"after":           strings.TrimSpace(operation.Request.After),
+			"before":          strings.TrimSpace(operation.Request.Before),
+			"include_content": operation.Request.IncludeContent,
+		},
+		"query_length": len([]rune(strings.TrimSpace(operation.Request.Query))),
 	}
 	if result != nil {
 		if strings.TrimSpace(result.Provider) != "" {
@@ -712,76 +769,36 @@ func (s *SearchService) recordSearchProviderCost(ctx context.Context, operation 
 	_, costErr := s.costs.RecordSearchRequest(ctx, RecordSearchRequestCost{
 		TaskID: operation.TaskID, Provider: providerName, Model: modelName,
 		ProviderRequestID: providerRequestID, AttemptID: attemptID, RequestFingerprint: fingerprint,
-		Query: strings.TrimSpace(operation.Request.Query), ResultCount: resultCount, SearchRequestCount: 1,
-		Usage: usage, ProviderMetadata: providerMetadata, Outcome: outcome,
+		Query: redactSearchQuery(operation.Request.Query), ResultCount: resultCount, SearchRequestCount: 1,
+		Usage: usage, ProviderMetadata: providerMetadata, Outcome: outcome, Operation: "mcp.search_web",
 	})
 	if costErr != nil && s.logger != nil {
 		s.logger.Error().Err(costErr).Str("operation", "mcp.search_web").Msg("failed to record search provider cost; preserving operation outcome")
 	}
 }
 
-func searchProviderCostFilters(req SearchRequest) map[string]any {
-	filters := make(map[string]any)
-	if value := strings.TrimSpace(req.TimeRange); value != "" {
-		filters["time_range"] = value
-	}
-	if values := normalizeStrings(req.Domains); len(values) > 0 {
-		filters["sites"] = values
-	}
-	if values := normalizeStrings(req.BlockHosts); len(values) > 0 {
-		filters["block_hosts"] = values
-	}
-	if req.NeedContent != nil {
-		filters["need_content"] = *req.NeedContent
-	}
-	if req.NeedURL != nil {
-		filters["need_url"] = *req.NeedURL
-	}
-	if req.AuthInfoLevelSet || req.AuthInfoLevel != 0 {
-		filters["auth_info_level"] = req.AuthInfoLevel
-	}
-	if value := strings.TrimSpace(req.ContentFormats); value != "" {
-		filters["content_formats"] = value
-	}
-	if value := strings.TrimSpace(req.Industry); value != "" {
-		filters["industry"] = value
-	}
-	if req.QueryRewrite != nil {
-		filters["query_rewrite"] = *req.QueryRewrite
-	}
-	if value := strings.TrimSpace(req.OriginalQuestion); value != "" {
-		filters["ori_question"] = value
-	}
-	if value := strings.TrimSpace(req.Localization); value != "" {
-		filters["localization"] = value
-	}
-	return filters
+func redactSearchQuery(query string) string {
+	value := strings.TrimSpace(query)
+	digest := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func searchFingerprint(req SearchOperationRequest) string {
-	domains := normalizedFingerprintStrings(req.Request.Domains)
-	blockHosts := normalizedFingerprintStrings(req.Request.BlockHosts)
 	payload, _ := json.Marshal(struct {
-		Version          int      `json:"version"`
-		UserID           string   `json:"user_id"`
-		ProjectID        string   `json:"project_id"`
-		TaskID           string   `json:"task_id"`
-		ExecutionID      string   `json:"execution_id"`
-		Query            string   `json:"query"`
-		Limit            int      `json:"limit"`
-		OriginalQuestion string   `json:"ori_question"`
-		Localization     string   `json:"localization"`
-		TimeRange        string   `json:"time_range"`
-		Domains          []string `json:"domains"`
-		BlockHosts       []string `json:"block_hosts"`
-		NeedContent      *bool    `json:"need_content,omitempty"`
-		NeedURL          *bool    `json:"need_url,omitempty"`
-		AuthInfoLevel    int      `json:"auth_info_level"`
-		AuthInfoLevelSet bool     `json:"auth_info_level_set"`
-		ContentFormat    string   `json:"content_formats"`
-		Industry         string   `json:"industry"`
-		QueryRewrite     *bool    `json:"query_rewrite,omitempty"`
-	}{1, strings.TrimSpace(req.UserID), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ExecutionID), strings.TrimSpace(req.Request.Query), req.Request.Limit, strings.TrimSpace(req.Request.OriginalQuestion), strings.TrimSpace(req.Request.Localization), strings.TrimSpace(req.Request.TimeRange), domains, blockHosts, req.Request.NeedContent, req.Request.NeedURL, req.Request.AuthInfoLevel, req.Request.AuthInfoLevelSet, strings.TrimSpace(req.Request.ContentFormats), strings.TrimSpace(req.Request.Industry), req.Request.QueryRewrite})
+		Version        int      `json:"version"`
+		Operation      string   `json:"operation"`
+		UserID         string   `json:"user_id"`
+		ProjectID      string   `json:"project_id"`
+		TaskID         string   `json:"task_id"`
+		ExecutionID    string   `json:"execution_id"`
+		Query          string   `json:"query"`
+		Limit          int      `json:"limit"`
+		Sites          []string `json:"sites"`
+		BlockedSites   []string `json:"blocked_sites"`
+		After          string   `json:"after"`
+		Before         string   `json:"before"`
+		IncludeContent bool     `json:"include_content"`
+	}{2, "mcp.search_web", strings.TrimSpace(req.UserID), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ExecutionID), strings.TrimSpace(req.Request.Query), req.Request.Limit, normalizedFingerprintStrings(req.Request.Sites), normalizedFingerprintStrings(req.Request.BlockedSites), strings.TrimSpace(req.Request.After), strings.TrimSpace(req.Request.Before), req.Request.IncludeContent})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
@@ -800,12 +817,12 @@ func (s *BillingCatalogService) CatalogID() string {
 }
 
 type RecordSearchRequestCost struct {
-	TaskID, Provider, Model, ProviderRequestID, AttemptID, RequestFingerprint, Query string
-	ResultCount                                                                      int
-	SearchRequestCount                                                               int
-	Usage                                                                            map[string]any
-	ProviderMetadata                                                                 map[string]any
-	Outcome                                                                          string
+	TaskID, Provider, Model, ProviderRequestID, AttemptID, RequestFingerprint, Query, URL, Operation string
+	ResultCount                                                                                      int
+	SearchRequestCount                                                                               int
+	Usage                                                                                            map[string]any
+	ProviderMetadata                                                                                 map[string]any
+	Outcome                                                                                          string
 }
 
 func (s *ProviderCostService) RecordSearchRequest(ctx context.Context, req RecordSearchRequestCost) (*model.BillingProviderCostEvent, error) {
@@ -834,8 +851,14 @@ func (s *ProviderCostService) RecordSearchRequest(ctx context.Context, req Recor
 		"provider_metadata": req.ProviderMetadata, "request_id_source": requestIDSource,
 		"outcome": req.Outcome,
 	}
+	if operation := strings.TrimSpace(req.Operation); operation != "" {
+		evidence["operation"] = operation
+	}
+	if targetURL := strings.TrimSpace(req.URL); targetURL != "" {
+		evidence["url"] = targetURL
+	}
 	if fingerprint := strings.TrimSpace(req.RequestFingerprint); fingerprint != "" {
 		evidence["operation_fingerprint"] = fingerprint
 	}
-	return s.appendProviderRequestEvent(ctx, providerRequestEvent{TaskID: req.TaskID, Provider: provider, Model: modelID, ProviderRequestID: requestID, CatalogID: s.catalogID, IdempotencyKey: requestID, Source: model.BillingProviderCostSourceProviderResponse, Status: model.BillingProviderCostStatusUnreconciled, Evidence: evidence, Calculation: map[string]any{"version": 1, "reason_code": string(model.BillingExecutionCostReasonMissingProviderUsage)}})
+	return s.appendProviderRequestEvent(ctx, providerRequestEvent{TaskID: req.TaskID, Provider: provider, Model: modelID, ProviderRequestID: requestID, CatalogID: s.catalogID, IdempotencyKey: requestID, Operation: req.Operation, Source: model.BillingProviderCostSourceProviderResponse, Status: model.BillingProviderCostStatusUnreconciled, Evidence: evidence, Calculation: map[string]any{"version": 1, "reason_code": string(model.BillingExecutionCostReasonMissingProviderUsage)}})
 }

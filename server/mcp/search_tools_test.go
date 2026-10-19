@@ -72,6 +72,8 @@ func TestSearchWebHandlerRejectsProviderOverrideAndInvalidInput(t *testing.T) {
 	}{
 		{name: "provider override", args: map[string]any{"query": "q", "provider": "other"}, want: "provider_selection_forbidden"},
 		{name: "empty query", args: map[string]any{"query": "  "}, want: "invalid_request"},
+		{name: "non-string query", args: map[string]any{"query": 42}, want: "invalid_request"},
+		{name: "non-string after", args: map[string]any{"query": "q", "after": 20260101}, want: "invalid_request"},
 		{name: "non-string ori_question", args: map[string]any{"query": "q", "ori_question": 42}, want: "invalid_request"},
 		{name: "empty localization", args: map[string]any{"query": "q", "localization": "  "}, want: "invalid_request"},
 		{name: "oversized ori_question", args: map[string]any{"query": "q", "ori_question": strings.Repeat("x", 129)}, want: "invalid_request"},
@@ -88,6 +90,32 @@ func TestSearchWebHandlerRejectsProviderOverrideAndInvalidInput(t *testing.T) {
 				t.Fatal(err)
 			}
 			if result == nil || !result.IsError || !strings.Contains(toolResultText(result), tt.want) {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestFetchAndImageSearchHandlersRejectWrongStringTypes(t *testing.T) {
+	old := svcs
+	svcs = nil
+	t.Cleanup(func() { svcs = old })
+	ctx := withMCPExecutionIdentity(context.Background(), "user-1", "project-1", "task-1", "execution-1")
+	for _, tc := range []struct {
+		name    string
+		handler func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)
+		args    map[string]any
+	}{
+		{name: "fetch url", handler: fetchWebPageHandler, args: map[string]any{"url": 42}},
+		{name: "image query", handler: searchImagesHandler, args: map[string]any{"query": 42}},
+		{name: "image url", handler: searchImagesHandler, args: map[string]any{"image_url": 42}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := tc.handler(ctx, searchToolRequest(t, tc.args))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result == nil || !result.IsError || !strings.Contains(toolResultText(result), "invalid_request") {
 				t.Fatalf("result = %#v", result)
 			}
 		})
@@ -139,6 +167,28 @@ func TestSearchWebSchemaExposesSitesConstraint(t *testing.T) {
 	t.Fatal("search_web tool not registered")
 }
 
+func TestSearchCapabilityToolsExposeProviderNeutralContracts(t *testing.T) {
+	tools := listRegisteredTools(t, registerSearchTools)
+	want := map[string]bool{"search_web": false, "fetch_web_page": false, "search_images": false}
+	for _, tool := range tools {
+		if _, ok := want[tool.Name]; !ok {
+			continue
+		}
+		want[tool.Name] = true
+		properties := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		for _, forbidden := range []string{"provider", "model", "endpoint", "api_key", "base_url", "ori_question", "localization", "auth_info_level", "query_rewrite"} {
+			if _, ok := properties[forbidden]; ok {
+				t.Fatalf("%s schema exposes provider-specific field %q", tool.Name, forbidden)
+			}
+		}
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Fatalf("%s tool not registered", name)
+		}
+	}
+}
+
 func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {
 	for _, tc := range []struct {
 		name, edition string
@@ -152,9 +202,7 @@ func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {
 	}{
 		{name: "configured default limit", edition: "custom", args: map[string]any{"query": "q"}, wantCount: 3, wantField: "Count"},
 		{name: "sites constraint", edition: "custom", args: map[string]any{"query": "q", "limit": 2, "sites": []string{"example.com"}}, wantCount: 2, wantField: "Count", wantFilter: "Sites", wantValue: "example.com"},
-		{name: "explicit zero auth filter", edition: "custom", args: map[string]any{"query": "q", "limit": 2, "auth_info_level": 0}, wantCount: 2, wantField: "Count", wantFilter: "AuthInfoLevel", wantValue: float64(0)},
-		{name: "global rejects zero auth filter", edition: "global", args: map[string]any{"query": "q", "limit": 2, "auth_info_level": 0}, wantError: true},
-		{name: "DeepSeek fields", edition: "deepseek", args: map[string]any{"query": "q", "limit": 2, "ori_question": "original question", "localization": "203.0.113.10", "need_content": true}, wantField: "count", wantCount: 2, wantDeepSeek: map[string]any{"ori_question": "original question", "localization": "203.0.113.10", "need_content": true}},
+		{name: "DeepSeek neutral fields", edition: "deepseek", args: map[string]any{"query": "q", "limit": 2, "sites": []string{"example.com"}, "after": "2026-01-01", "include_content": true}, wantField: "count", wantCount: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requests := make(chan map[string]any, 1)
@@ -193,13 +241,13 @@ func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {
 			if _, err := catalog.Publish(ctx); err != nil {
 				t.Fatal(err)
 			}
-			cfg := &serverconfig.SearchConfig{Enabled: true, Provider: tc.edition, Custom: serverconfig.SearchDoubaoConfig{MaxWebResults: 3}, Global: serverconfig.SearchDoubaoConfig{MaxWebResults: 3}, DeepSeek: serverconfig.SearchDeepSeekConfig{MaxResults: 3}}
-			providerConfig := serverconfig.SearchDoubaoConfig{Endpoint: upstream.URL, APIKey: "fixture", Timeout: time.Second, MaxWebResults: 3}
-			var provider service.SearchProvider = service.NewDoubaoCustomSearchProvider(providerConfig)
+			cfg := &serverconfig.SearchConfig{Web: serverconfig.SearchCapabilityConfig{Enabled: true, Provider: map[string]string{"custom": "doubao_custom", "global": "doubao_global", "deepseek": "deepseek"}[tc.edition]}, Providers: serverconfig.SearchProvidersConfig{DeepSeek: serverconfig.SearchDeepSeekConfig{SearchEndpoint: upstream.URL + "/v1/tools/search", APIKey: "fixture", Timeout: time.Second, MaxResults: 3}, Doubao: serverconfig.SearchDoubaoConfig{CustomEndpoint: upstream.URL, GlobalEndpoint: upstream.URL, APIKey: "fixture", Timeout: time.Second, MaxResults: 3}}}
+			providerConfig := serverconfig.SearchDoubaoConfig{CustomEndpoint: upstream.URL, GlobalEndpoint: upstream.URL, APIKey: "fixture", Timeout: time.Second, MaxResults: 3}
+			var provider service.WebSearchProvider = service.NewDoubaoCustomSearchProvider(providerConfig)
 			if tc.edition == "global" {
 				provider = service.NewDoubaoGlobalSearchProvider(providerConfig)
 			} else if tc.edition == "deepseek" {
-				provider = service.NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{Endpoint: upstream.URL + "/v1/tools/search", APIKey: "fixture", Timeout: time.Second, MaxResults: 3})
+				provider = service.NewDeepSeekSearchProvider(serverconfig.SearchDeepSeekConfig{SearchEndpoint: upstream.URL + "/v1/tools/search", APIKey: "fixture", Timeout: time.Second, MaxResults: 3})
 			}
 			old := svcs
 			svcs = &Services{SearchSvc: service.NewSearchService(cfg, provider, catalog, service.NewBillingWalletService(repo, bundle, service.BillingWalletOptions{}), nil, repo.SearchOperations())}
@@ -213,8 +261,8 @@ func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.wantError {
-				if !strings.Contains(toolResultText(result), "Custom filters") || len(requests) != 0 || charges != 0 {
-					t.Fatalf("invalid Global filter reached billing/provider: result=%s requests=%d charges=%d", toolResultText(result), len(requests), charges)
+				if len(requests) != 0 || charges != 0 {
+					t.Fatalf("invalid request reached billing/provider: result=%s requests=%d charges=%d", toolResultText(result), len(requests), charges)
 				}
 				return
 			}

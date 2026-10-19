@@ -915,6 +915,7 @@ func boolPtr(value bool) *bool { return &value }
 
 type providerRequestEvent struct {
 	TaskID, Provider, Model, ProviderRequestID, CatalogID, IdempotencyKey string
+	Operation                                                             string
 	Source                                                                model.BillingProviderCostSource
 	Status                                                                model.BillingProviderCostStatus
 	CostMicroCNY                                                          int64
@@ -950,26 +951,37 @@ func (s *ProviderCostService) appendProviderRequestEvent(ctx context.Context, re
 	if err != nil {
 		return nil, fmt.Errorf("marshal provider request calculation: %w", err)
 	}
-	baseIdentity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityProviderRequest, "", req.Provider, req.Model, req.ProviderRequestID)
+	operation := strings.TrimSpace(req.Operation)
+	baseIdentity, err := model.ProviderCostBaseIdentityKey(model.BillingProviderCostIdentityProviderRequest, "", req.Provider, req.Model, req.ProviderRequestID, operation)
 	if err != nil {
 		return nil, err
 	}
 	fingerprint, err := providerCostFingerprint(struct {
-		TaskID, Provider, Model, ProviderRequestID, CatalogID, Source, Status string
-		CostMicroCNY                                                          int64
-		Evidence                                                              json.RawMessage
-	}{req.TaskID, req.Provider, req.Model, req.ProviderRequestID, req.CatalogID, string(req.Source), string(req.Status), req.CostMicroCNY, evidenceJSON})
+		TaskID, Provider, Model, ProviderRequestID, CatalogID, Operation, Source, Status string
+		CostMicroCNY                                                                     int64
+		Evidence                                                                         json.RawMessage
+	}{req.TaskID, req.Provider, req.Model, req.ProviderRequestID, req.CatalogID, operation, string(req.Source), string(req.Status), req.CostMicroCNY, evidenceJSON})
 	if err != nil {
 		return nil, err
 	}
 	return s.repo.AppendEvent(ctx, &model.BillingProviderCostEvent{
 		ID: uuid.NewString(), EventKind: model.BillingProviderCostEventKindBase,
 		IdentityKind: model.BillingProviderCostIdentityProviderRequest, ProviderRequestID: req.ProviderRequestID,
-		TaskID: req.TaskID, Provider: req.Provider, Model: req.Model, CatalogID: req.CatalogID,
-		IdempotencyScope: "provider_cost_base/" + req.Provider, IdempotencyKey: req.IdempotencyKey,
+		Operation: operation,
+		TaskID:    req.TaskID, Provider: req.Provider, Model: req.Model, CatalogID: req.CatalogID,
+		IdempotencyScope: providerCostRequestScope(operation, req.Provider), IdempotencyKey: req.IdempotencyKey,
 		BaseIdentityKey: &baseIdentity, RequestFingerprint: fingerprint, Source: req.Source, Status: req.Status,
 		CostMicroCNY: req.CostMicroCNY, UsageAt: usageAtPtr(req.UsageAt), UsageEvidence: datatypes.JSON(evidenceJSON), CalculationSnapshot: datatypes.JSON(calculationJSON),
 	})
+}
+
+func providerCostRequestScope(operation, provider string) string {
+	provider = strings.TrimSpace(provider)
+	operation = strings.TrimSpace(operation)
+	if operation == "" {
+		return "provider_cost_base/" + provider
+	}
+	return "provider_cost_base/" + operation + "/" + provider
 }
 
 func (s *ProviderCostService) MarkExecutionUnreconciled(ctx context.Context, executionID string, reasonCode model.BillingExecutionCostReasonCode) error {

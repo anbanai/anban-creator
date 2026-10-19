@@ -283,25 +283,38 @@ type TrendsConfig struct {
 // SearchConfig controls Server-owned web search providers. Credentials are
 // intentionally kept in server configuration and are never exposed to Agents.
 type SearchConfig struct {
-	Enabled  bool                 `yaml:"enabled"`
-	Provider string               `yaml:"provider"`
-	Custom   SearchDoubaoConfig   `yaml:"custom"`
-	Global   SearchDoubaoConfig   `yaml:"global"`
-	DeepSeek SearchDeepSeekConfig `yaml:"deepseek"`
+	// Web, Fetch and Images are capability routes. Provider credentials live in
+	// Providers and are never exposed to MCP callers.
+	Web       SearchCapabilityConfig `yaml:"web"`
+	Fetch     SearchCapabilityConfig `yaml:"fetch"`
+	Images    SearchCapabilityConfig `yaml:"images"`
+	Providers SearchProvidersConfig  `yaml:"providers"`
 }
 
 type SearchDoubaoConfig struct {
-	Endpoint      string        `yaml:"endpoint"`
-	APIKey        string        `yaml:"api_key"`
-	Timeout       time.Duration `yaml:"timeout"`
-	MaxWebResults int           `yaml:"max_web_results"`
+	APIKey         string        `yaml:"api_key" json:"-"`
+	CustomEndpoint string        `yaml:"custom_endpoint"`
+	GlobalEndpoint string        `yaml:"global_endpoint"`
+	Timeout        time.Duration `yaml:"timeout"`
+	MaxResults     int           `yaml:"max_results"`
 }
 
 type SearchDeepSeekConfig struct {
-	Endpoint   string        `yaml:"endpoint"`
-	APIKey     string        `yaml:"api_key" json:"-"`
-	Timeout    time.Duration `yaml:"timeout"`
-	MaxResults int           `yaml:"max_results"`
+	SearchEndpoint string        `yaml:"search_endpoint"`
+	FetchEndpoint  string        `yaml:"fetch_endpoint"`
+	APIKey         string        `yaml:"api_key" json:"-"`
+	Timeout        time.Duration `yaml:"timeout"`
+	MaxResults     int           `yaml:"max_results"`
+}
+
+type SearchCapabilityConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Provider string `yaml:"provider"`
+}
+
+type SearchProvidersConfig struct {
+	DeepSeek SearchDeepSeekConfig `yaml:"deepseek"`
+	Doubao   SearchDoubaoConfig   `yaml:"doubao"`
 }
 
 func validateKubernetesResourceConfig(configPath string, cfg KubernetesResourceConfig) []string {
@@ -1294,33 +1307,38 @@ func expandEnvVars(data []byte) []byte {
 
 // applyDefaults fills in zero-value fields with sensible defaults.
 func (c *Config) applyDefaults() {
-	applySearchDefaults := func(cfg *SearchDoubaoConfig, endpoint string) {
-		if cfg.Endpoint == "" {
-			cfg.Endpoint = endpoint
-		}
-		if cfg.Timeout == 0 {
-			cfg.Timeout = 30 * time.Second
-		}
-		if cfg.MaxWebResults == 0 {
-			cfg.MaxWebResults = 10
-		}
+	c.Search.Web.Provider = strings.ToLower(strings.TrimSpace(c.Search.Web.Provider))
+	c.Search.Fetch.Provider = strings.ToLower(strings.TrimSpace(c.Search.Fetch.Provider))
+	c.Search.Images.Provider = strings.ToLower(strings.TrimSpace(c.Search.Images.Provider))
+	if c.Search.Providers.Doubao.CustomEndpoint == "" {
+		c.Search.Providers.Doubao.CustomEndpoint = "https://open.feedcoopapi.com/search_api/web_search"
+	}
+	if c.Search.Providers.Doubao.GlobalEndpoint == "" {
+		c.Search.Providers.Doubao.GlobalEndpoint = "https://open.feedcoopapi.com/search_api/global_search"
+	}
+	if c.Search.Providers.Doubao.Timeout == 0 {
+		c.Search.Providers.Doubao.Timeout = 30 * time.Second
+	}
+	if c.Search.Providers.Doubao.MaxResults == 0 {
+		c.Search.Providers.Doubao.MaxResults = 10
+	}
+	if c.Search.Providers.DeepSeek.SearchEndpoint == "" {
+		c.Search.Providers.DeepSeek.SearchEndpoint = "https://api.deepseek.com/v1/tools/search"
+	}
+	if c.Search.Providers.DeepSeek.FetchEndpoint == "" {
+		c.Search.Providers.DeepSeek.FetchEndpoint = "https://api.deepseek.com/v1/tools/fetch"
+	}
+	if c.Search.Providers.DeepSeek.Timeout == 0 {
+		c.Search.Providers.DeepSeek.Timeout = 30 * time.Second
+	}
+	if c.Search.Providers.DeepSeek.MaxResults == 0 {
+		c.Search.Providers.DeepSeek.MaxResults = 10
 	}
 	if c.Onboarding.DailyUserLimit == 0 {
 		c.Onboarding.DailyUserLimit = 60
 	}
 	if c.Onboarding.DailyGlobalLimit == 0 {
 		c.Onboarding.DailyGlobalLimit = 1000
-	}
-	applySearchDefaults(&c.Search.Custom, "https://open.feedcoopapi.com/search_api/web_search")
-	applySearchDefaults(&c.Search.Global, "https://open.feedcoopapi.com/search_api/global_search")
-	if c.Search.DeepSeek.Endpoint == "" {
-		c.Search.DeepSeek.Endpoint = "https://api.deepseek.com/v1/tools/search"
-	}
-	if c.Search.DeepSeek.Timeout == 0 {
-		c.Search.DeepSeek.Timeout = 30 * time.Second
-	}
-	if c.Search.DeepSeek.MaxResults == 0 {
-		c.Search.DeepSeek.MaxResults = 10
 	}
 	if c.Dsh.BridgeDir == "" {
 		c.Dsh.BridgeDir = "./runtime-dsh"
@@ -1980,53 +1998,80 @@ func (c *Config) Validate() error {
 	if c.Trends.Timeout <= 0 {
 		errs = append(errs, "trends.timeout must be positive")
 	}
-	if c.Search.Enabled {
-		if strings.TrimSpace(c.Search.Provider) == "" {
-			errs = append(errs, "search.provider is required when search.enabled is true")
+	// Capability-level configuration is the current contract. Keep validation
+	// independent per capability so a disabled Fetch or Images route never
+	// requires credentials for another route.
+	validateSearchURL := func(path, raw string, required bool) {
+		if strings.TrimSpace(raw) == "" {
+			if required {
+				errs = append(errs, path+" is required when search capability is enabled")
+			}
+			return
 		}
-		var selected *SearchDoubaoConfig
-		switch strings.TrimSpace(c.Search.Provider) {
-		case "custom":
-			selected = &c.Search.Custom
-		case "global":
-			selected = &c.Search.Global
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			errs = append(errs, path+" must be an absolute HTTPS URL without credentials, query, or fragment")
+		}
+	}
+	validateProvider := func(capability string, route SearchCapabilityConfig, allow map[string]bool) {
+		if !route.Enabled {
+			return
+		}
+		provider := strings.ToLower(strings.TrimSpace(route.Provider))
+		if !allow[provider] {
+			errs = append(errs, "search."+capability+".provider "+fmt.Sprintf("%q is unsupported", route.Provider))
+		}
+	}
+	validateProvider("web", c.Search.Web, map[string]bool{"deepseek": true, "doubao_custom": true, "doubao_global": true})
+	validateProvider("fetch", c.Search.Fetch, map[string]bool{"deepseek": true})
+	validateProvider("images", c.Search.Images, map[string]bool{"doubao": true})
+	if c.Search.Images.Enabled {
+		errs = append(errs, "search.images is not available until the official Doubao image-search contract is implemented")
+	}
+	if c.Search.Web.Enabled {
+		switch strings.ToLower(strings.TrimSpace(c.Search.Web.Provider)) {
 		case "deepseek":
-			selectedDeepSeek := &c.Search.DeepSeek
-			if strings.TrimSpace(selectedDeepSeek.Endpoint) == "" {
-				errs = append(errs, "search.deepseek.endpoint is required when search is enabled")
-			} else if endpoint, err := url.Parse(strings.TrimSpace(selectedDeepSeek.Endpoint)); err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-				errs = append(errs, "search.deepseek.endpoint must be an absolute HTTPS URL without credentials, query, or fragment")
+			validateSearchURL("search.providers.deepseek.search_endpoint", c.Search.Providers.DeepSeek.SearchEndpoint, true)
+			if strings.TrimSpace(c.Search.Providers.DeepSeek.APIKey) == "" {
+				errs = append(errs, "search.providers.deepseek.api_key is required when web search is enabled")
 			}
-			if strings.TrimSpace(selectedDeepSeek.APIKey) == "" {
-				errs = append(errs, "search.deepseek.api_key is required when search is enabled")
+		case "doubao_custom":
+			validateSearchURL("search.providers.doubao.custom_endpoint", c.Search.Providers.Doubao.CustomEndpoint, true)
+			if strings.TrimSpace(c.Search.Providers.Doubao.APIKey) == "" {
+				errs = append(errs, "search.providers.doubao.api_key is required when web search is enabled")
 			}
-			if selectedDeepSeek.Timeout <= 0 {
-				errs = append(errs, "search.deepseek.timeout must be positive when search is enabled")
+		case "doubao_global":
+			validateSearchURL("search.providers.doubao.global_endpoint", c.Search.Providers.Doubao.GlobalEndpoint, true)
+			if strings.TrimSpace(c.Search.Providers.Doubao.APIKey) == "" {
+				errs = append(errs, "search.providers.doubao.api_key is required when web search is enabled")
 			}
-			if selectedDeepSeek.MaxResults <= 0 || selectedDeepSeek.MaxResults > 50 {
-				errs = append(errs, "search.deepseek.max_results must be between 1 and 50 when search is enabled")
-			}
-		default:
-			errs = append(errs, fmt.Sprintf("search.provider %q is unsupported", c.Search.Provider))
 		}
-		if selected != nil {
-			prefix := "search." + strings.TrimSpace(c.Search.Provider)
-			if strings.TrimSpace(selected.Endpoint) == "" {
-				errs = append(errs, prefix+".endpoint is required when search is enabled")
-			}
-			if strings.TrimSpace(selected.APIKey) == "" {
-				errs = append(errs, prefix+".api_key is required when search is enabled")
-			}
-			if selected.Timeout <= 0 {
-				errs = append(errs, prefix+".timeout must be positive when search is enabled")
-			}
+		if c.Search.Providers.DeepSeek.Timeout <= 0 && strings.EqualFold(strings.TrimSpace(c.Search.Web.Provider), "deepseek") {
+			errs = append(errs, "search.providers.deepseek.timeout must be positive when web search is enabled")
+		}
+		if strings.EqualFold(strings.TrimSpace(c.Search.Web.Provider), "deepseek") && (c.Search.Providers.DeepSeek.MaxResults <= 0 || c.Search.Providers.DeepSeek.MaxResults > 50) {
+			errs = append(errs, "search.providers.deepseek.max_results must be between 1 and 50 when web search is enabled")
+		}
+		if c.Search.Providers.Doubao.Timeout <= 0 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.Search.Web.Provider)), "doubao_") {
+			errs = append(errs, "search.providers.doubao.timeout must be positive when web search is enabled")
+		}
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.Search.Web.Provider)), "doubao_") {
 			maxResults := 50
-			if strings.TrimSpace(c.Search.Provider) == "global" {
+			if strings.EqualFold(strings.TrimSpace(c.Search.Web.Provider), "doubao_global") {
 				maxResults = 20
 			}
-			if selected.MaxWebResults <= 0 || selected.MaxWebResults > maxResults {
-				errs = append(errs, fmt.Sprintf("%s.max_web_results must be between 1 and %d when search is enabled", prefix, maxResults))
+			if c.Search.Providers.Doubao.MaxResults <= 0 || c.Search.Providers.Doubao.MaxResults > maxResults {
+				errs = append(errs, fmt.Sprintf("search.providers.doubao.max_results must be between 1 and %d when web search is enabled", maxResults))
 			}
+		}
+	}
+	if c.Search.Fetch.Enabled {
+		validateSearchURL("search.providers.deepseek.fetch_endpoint", c.Search.Providers.DeepSeek.FetchEndpoint, true)
+		if strings.TrimSpace(c.Search.Providers.DeepSeek.APIKey) == "" {
+			errs = append(errs, "search.providers.deepseek.api_key is required when fetch is enabled")
+		}
+		if c.Search.Providers.DeepSeek.Timeout <= 0 {
+			errs = append(errs, "search.providers.deepseek.timeout must be positive when fetch is enabled")
 		}
 	}
 	if err := c.Claude.Validate(); err != nil {

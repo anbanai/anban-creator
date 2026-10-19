@@ -810,6 +810,7 @@ func main() {
 		var imageSvc *service.ImageService
 		var contentRenderSvc *service.ContentRenderService
 		var searchSvc *service.SearchService
+		var fetchSvc *service.FetchService
 
 		if store != nil {
 			imageSvc = service.NewImageService(defaultImageAPI, store, repo, log)
@@ -820,19 +821,22 @@ func main() {
 		if repo != nil {
 			contentRenderSvc = service.NewContentRenderService(repo, log)
 		}
-		if cfg.Search.Enabled {
-			var searchProvider service.SearchProvider
-			switch strings.TrimSpace(cfg.Search.Provider) {
-			case "custom":
-				searchProvider = service.NewDoubaoCustomSearchProvider(cfg.Search.Custom)
-			case "global":
-				searchProvider = service.NewDoubaoGlobalSearchProvider(cfg.Search.Global)
+		if cfg.Search.Web.Enabled {
+			var searchProvider service.WebSearchProvider
+			switch strings.TrimSpace(cfg.Search.Web.Provider) {
 			case "deepseek":
-				searchProvider = service.NewDeepSeekSearchProvider(cfg.Search.DeepSeek)
+				searchProvider = service.NewDeepSeekSearchProvider(cfg.Search.Providers.DeepSeek)
+			case "doubao_custom":
+				searchProvider = service.NewDoubaoCustomSearchProvider(cfg.Search.Providers.Doubao)
+			case "doubao_global":
+				searchProvider = service.NewDoubaoGlobalSearchProvider(cfg.Search.Providers.Doubao)
 			}
 			if searchProvider != nil {
 				searchSvc = service.NewSearchService(&cfg.Search, searchProvider, fixedBilling.Catalog, fixedBilling.Wallet, fixedBilling.Cost, repo.SearchOperations(), log)
 			}
+		}
+		if cfg.Search.Fetch.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Search.Fetch.Provider), "deepseek") {
+			fetchSvc = service.NewFetchService(&cfg.Search, service.NewDeepSeekFetchProvider(cfg.Search.Providers.DeepSeek), fixedBilling.Catalog, fixedBilling.Wallet, fixedBilling.Cost, repo.SearchOperations(), log)
 		}
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
@@ -864,6 +868,8 @@ func main() {
 			}, log),
 			InteractiveSvc: interactiveSvc,
 			SearchSvc:      searchSvc,
+			FetchSvc:       fetchSvc,
+			ImageSearchSvc: service.NewImageSearchService(false, nil),
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)

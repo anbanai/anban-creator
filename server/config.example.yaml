@@ -71,23 +71,28 @@ mcp:
     generate_image: 10m
 
 search:
-  enabled: ${ANBAN_SEARCH_ENABLED:-false}
-  provider: "${ANBAN_SEARCH_PROVIDER:-custom}"
-  custom:
-    endpoint: "${ANBAN_DOUBAO_CUSTOM_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/web_search}"
-    api_key: "${ANBAN_DOUBAO_CUSTOM_SEARCH_API_KEY:-}"
-    timeout: 30s
-    max_web_results: 10
-  global:
-    endpoint: "${ANBAN_DOUBAO_GLOBAL_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/global_search}"
-    api_key: "${ANBAN_DOUBAO_GLOBAL_SEARCH_API_KEY:-}"
-    timeout: 30s
-    max_web_results: 10
-  deepseek:
-    endpoint: "${ANBAN_DEEPSEEK_SEARCH_ENDPOINT:-https://api.deepseek.com/v1/tools/search}"
-    api_key: "${ANBAN_DEEPSEEK_SEARCH_API_KEY:-}"
-    timeout: 30s
-    max_results: 10
+  web:
+    enabled: ${ANBAN_SEARCH_WEB_ENABLED:-false}
+    provider: "${ANBAN_SEARCH_WEB_PROVIDER:-deepseek}"
+  fetch:
+    enabled: ${ANBAN_SEARCH_FETCH_ENABLED:-false}
+    provider: "${ANBAN_SEARCH_FETCH_PROVIDER:-deepseek}"
+  images:
+    enabled: false
+    provider: "doubao"
+  providers:
+    deepseek:
+      api_key: "${ANBAN_DEEPSEEK_SEARCH_API_KEY:-}"
+      search_endpoint: "${ANBAN_DEEPSEEK_SEARCH_ENDPOINT:-https://api.deepseek.com/v1/tools/search}"
+      fetch_endpoint: "${ANBAN_DEEPSEEK_FETCH_ENDPOINT:-https://api.deepseek.com/v1/tools/fetch}"
+      timeout: 30s
+      max_results: 10
+    doubao:
+      api_key: "${ANBAN_DOUBAO_SEARCH_API_KEY:-}"
+      custom_endpoint: "${ANBAN_DOUBAO_CUSTOM_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/web_search}"
+      global_endpoint: "${ANBAN_DOUBAO_GLOBAL_SEARCH_ENDPOINT:-https://open.feedcoopapi.com/search_api/global_search}"
+      timeout: 30s
+      max_results: 10
 
 # Optional interactive Project Creator runtime. Sessions are process-local and
 # are discarded when the runtime exits or its lease expires. DSH routing is

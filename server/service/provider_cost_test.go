@@ -456,6 +456,38 @@ func TestProviderCostRecordSearchRequestIsUnreconciledAndIdempotent(t *testing.T
 	}
 }
 
+func TestProviderCostRecordSearchRequestSeparatesOperationNamespaces(t *testing.T) {
+	fixture := newProviderCostFixture(t)
+	base := RecordSearchRequestCost{
+		TaskID: "task-search", Provider: "deepseek", ProviderRequestID: "shared-request-1",
+		Query: "anban search", ResultCount: 1, Operation: "mcp.search_web",
+	}
+	searchEvent, err := fixture.service.RecordSearchRequest(context.Background(), base)
+	if err != nil {
+		t.Fatalf("record search cost: %v", err)
+	}
+
+	fetch := base
+	fetch.Operation = "mcp.fetch_web_page"
+	fetch.URL = "https://example.com/article"
+	fetch.Query = "sha256:redacted"
+	fetch.ResultCount = 1
+	fetch.ProviderMetadata = map[string]any{"fetch_type": "web_page"}
+	fetchEvent, err := fixture.service.RecordSearchRequest(context.Background(), fetch)
+	if err != nil {
+		t.Fatalf("record fetch cost with shared provider request id: %v", err)
+	}
+	if searchEvent.ID == fetchEvent.ID {
+		t.Fatalf("search and fetch cost events reused the same event: %s", searchEvent.ID)
+	}
+	if searchEvent.Operation != "mcp.search_web" || fetchEvent.Operation != "mcp.fetch_web_page" {
+		t.Fatalf("operation namespaces not persisted: search=%q fetch=%q", searchEvent.Operation, fetchEvent.Operation)
+	}
+	if searchEvent.RequestFingerprint == fetchEvent.RequestFingerprint {
+		t.Fatal("search and fetch cost events reused the same request fingerprint")
+	}
+}
+
 func TestProviderCostRecordTokenUsageIsIdempotentAndRejectsDrift(t *testing.T) {
 	fixture := newProviderCostFixture(t)
 	req := RecordTokenCostRequest{

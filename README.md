@@ -346,16 +346,17 @@ control variables are optional and may be removed to use provider defaults.
 Invalid or incomplete configured profiles fail closed; execution never falls
 back to another profile or model.
 
-Server-owned web research is configured independently under `search`. Set
-`search.enabled: true` and choose exactly one `search.provider`: `custom` or
-`global` for Doubao Search, or `deepseek` for DeepSeek Search. DeepSeek uses
-`ANBAN_DEEPSEEK_SEARCH_API_KEY` and the official
-`https://api.deepseek.com/v1/tools/search` endpoint; it does not use an Agent
-model and does not reuse `ANBAN_DEEPSEEK_API_KEY`. Agents call only the
-execution-scoped `search_web` MCP tool, which keeps the existing quote,
-idempotency, charge, and provider-cost records. On Kubernetes, the Server reads
-the search key from `deepseek-search-api-key` in the
-`anban-agent-profile-providers` Secret.
+Server-owned web research is configured independently under capability-level
+`search.web`, `search.fetch`, and `search.images` routes. Enable web search with
+`search.web.enabled: true` and choose `deepseek`, `doubao_custom`, or
+`doubao_global`; enable page fetching separately with
+`search.fetch.enabled: true` and provider `deepseek`. Credentials and endpoint
+URLs live under `search.providers` and never reach an Agent. DeepSeek Search
+and Fetch do not use a model parameter. Agents use only the execution-scoped
+`search_web`, `fetch_web_page`, and (when an official image contract is enabled)
+`search_images` MCP tools. Each capability has its own zero-priced SKU, quote,
+charge, idempotency namespace, and provider-cost evidence. Image search remains
+disabled until its provider request and response contract is verified.
 
 DSH interactive sessions run in one isolated workload per session and have an independent route table under `dsh.routes`. Use `executor: kubernetes` with a digest-pinned image on ACK; the Server creates a non-restarting Pod and attaches through `pods/exec`. Use `executor: container` for local Docker development.
 `dsh.route` selects one route for the next session; it does not read or modify
