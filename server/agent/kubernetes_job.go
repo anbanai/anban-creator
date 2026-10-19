@@ -288,7 +288,7 @@ func kubernetesExecutionLabels(execution *model.TaskExecution, task *model.Task)
 		// Kubernetes label values are limited to 63 characters. Keep the
 		// full digest in the runtime configuration and encode the label with
 		// the same bounded identity helper used for other execution labels.
-		kubernetesCatalogDigestLabel:  kubernetesLabelValue(agentpack.CatalogDigest()),
+		kubernetesCatalogDigestLabel: kubernetesLabelValue(agentpack.CatalogDigest()),
 	}
 	if task != nil {
 		labels[kubernetesTaskIDLabel] = kubernetesLabelValue(task.ID)

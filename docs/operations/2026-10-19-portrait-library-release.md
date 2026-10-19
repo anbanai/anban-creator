@@ -19,6 +19,7 @@
 ## 发布与回退
 
 - 仅 Studio 前端变更；不更新 Server、runtime-dsh、Agent、Harness 或数据库。
+- 附带修复主分支已有的两处 gofmt 检查失败（kubernetes_job.go、repository.go）；仅空白对齐，忽略空白后的 diff 为空，不涉及后端行为。
 - 流水线：`creator.anbanai.com-prod`。从合并后的 main 构建，构建文件 `deploy/docker/Dockerfile.studio`。
 - 保留流水线现有后端地址、TLS、密钥、人工卡点；本功能无新增环境变量或 API Key。
 - 按现有 Dockerfile 要求，将 `STUDIO_PREVIOUS_IMAGE` 保持为当前生产前端的不可变镜像引用，避免已打开页面的旧静态资源失效。
