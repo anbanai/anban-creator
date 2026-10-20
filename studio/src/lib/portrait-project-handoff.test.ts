@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { portraitCreationBrief, portraitToProjectProfile, preparePortraitProject } from './portrait-project-handoff'
+import { clearPortraitCreationHandoff, portraitCreationBrief, portraitToProjectProfile, preparePortraitProject, readPortraitCreationHandoff, savePortraitCreationHandoff } from './portrait-project-handoff'
 import type { PortraitCandidate } from './portrait-chat-contract'
 import type { ProjectProfile } from '@/types'
 
@@ -8,6 +8,16 @@ const fact = (text: string) => ({text, certainty:'stated' as const,evidence:[{me
 const candidate: PortraitCandidate = { reply:'请核对画像。',name:null,summary:'花店主，为上班族分享花艺。',facets:{identity:fact('花店主'),audience:fact('上班族'),platforms:fact('公众号'),style:null,preferences:null,experience:null},creationIdea:fact('第一篇写周末插花') }
 
 describe('portrait handoff to existing project contracts',()=>{
+  it('keeps the one-time creation idea in a project-scoped browser handoff', () => {
+    savePortraitCreationHandoff('project-1', '写一篇插花指南')
+    expect(readPortraitCreationHandoff('project-1')).toBe('写一篇插花指南')
+    expect(readPortraitCreationHandoff('project-2')).toBeUndefined()
+    clearPortraitCreationHandoff('project-1')
+    expect(readPortraitCreationHandoff('project-1')).toBeUndefined()
+    savePortraitCreationHandoff('project-1', '旧意向')
+    savePortraitCreationHandoff('project-1', '  ')
+    expect(readPortraitCreationHandoff('project-1')).toBeUndefined()
+  })
   it('separates a single work from the long-term project and does not invent a platform binding',()=>{
     const prepared=preparePortraitProject(candidate,[{id:'u-1',role:'user',text:input}])
     expect(prepared.project.platform).toBeUndefined()

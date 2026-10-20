@@ -148,6 +148,29 @@ describe('ChatPage', () => {
     expect(streamMock).not.toHaveBeenCalled()
   })
 
+  it('sends a one-time portrait idea into the scoped creation session', async () => {
+    assistantMocks.bootstrap.mockResolvedValueOnce({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划并创建作品任务', available: true },
+        { id: 'review', displayName: '复盘模式', description: '分析已有作品', available: false },
+      ],
+      projects: [{ id: 'project-1', name: '花艺', platform: 'wechat', profileReady: true, profileRevision: 1, works: [] }],
+    })
+    sessionStorage.setItem('anban:portrait-creation-handoff:project-1', JSON.stringify({ idea: '写周末插花指南' }))
+
+    renderChat('/chat?mode=creation&project_id=project-1')
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect((composer as HTMLTextAreaElement).value).toContain('写周末插花指南'))
+    expect(assistantMocks.message).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(assistantMocks.message).toHaveBeenCalledWith('session-1', expect.stringContaining('写周末插花指南')))
+    expect(sessionStorage.getItem('anban:portrait-creation-handoff:project-1')).toBeNull()
+    expect(assistantMocks.commit).not.toHaveBeenCalled()
+  })
+
   it('offers only checkpoints that match the selected project scope', async () => {
     assistantMocks.bootstrap.mockResolvedValueOnce({
       defaultModeId: 'creation',

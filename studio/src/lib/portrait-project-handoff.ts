@@ -1,6 +1,39 @@
 import type { CreateProjectRequest, ProfileDimension, ProjectProfile } from '@/types'
 import { validatePortraitCandidate, type PortraitCandidate, type PortraitChatMessage } from './portrait-chat-contract'
 
+const PORTRAIT_CREATION_HANDOFF_PREFIX = 'anban:portrait-creation-handoff:'
+
+export function portraitCreationHandoffKey(projectId: string): string {
+  return `${PORTRAIT_CREATION_HANDOFF_PREFIX}${projectId}`
+}
+
+/** Keep a one-time creation intention out of the durable project portrait. */
+export function savePortraitCreationHandoff(projectId: string, idea: string): void {
+  const value = idea.trim()
+  if (!value) {
+    clearPortraitCreationHandoff(projectId)
+    return
+  }
+  sessionStorage.setItem(portraitCreationHandoffKey(projectId), JSON.stringify({ idea: value }))
+}
+
+export function readPortraitCreationHandoff(projectId: string): string | undefined {
+  try {
+    const raw = sessionStorage.getItem(portraitCreationHandoffKey(projectId))
+    if (!raw) return undefined
+    const value: unknown = JSON.parse(raw)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const idea = (value as { idea?: unknown }).idea
+    return typeof idea === 'string' && idea.trim() ? idea : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function clearPortraitCreationHandoff(projectId: string): void {
+  sessionStorage.removeItem(portraitCreationHandoffKey(projectId))
+}
+
 /** Only call after the user confirms the current conversation revision. */
 export function preparePortraitProject(candidate: PortraitCandidate, messages: PortraitChatMessage[]) {
   const checked = validatePortraitCandidate(candidate, messages)

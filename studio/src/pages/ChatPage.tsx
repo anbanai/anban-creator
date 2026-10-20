@@ -39,6 +39,7 @@ import type {
 } from '@/lib/api/interactive'
 import type { AssistantModeID } from '@/lib/api/assistant'
 import { streamInteractiveSession } from '@/lib/interactive-events'
+import { clearPortraitCreationHandoff, readPortraitCreationHandoff } from '@/lib/portrait-project-handoff'
 import { useAuth } from '@/contexts/AuthContext'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer, type DshQuestionOption } from '@/components/dsh-user-questions/DshQuestionComposer'
 import AssistantHome from './AssistantHome'
@@ -566,6 +567,7 @@ function ChatConversation() {
   const confirmationTokenRef = useRef<string | null>(null)
   const recoveryPromptRef = useRef<string | null>(null)
   const recoveryMessagePromiseRef = useRef<Promise<void> | null>(null)
+  const portraitHandoffIdeaRef = useRef<string | null>(null)
   const recoveryDraftRef = useRef<InteractiveDraft | null>(null)
   const sendingMessageRef = useRef(false)
   const pendingSubmissionRef = useRef<PendingSubmission | null>(null)
@@ -744,6 +746,15 @@ function ChatConversation() {
   const answerAssistantQuestion = useCallback((id: string, callId: string, answers: DshQuestionAnswer['answers']) => assistantSession
     ? api.assistant.answer(id, callId, answers)
     : api.interactive.answer(id, callId, answers), [assistantSession])
+
+  useEffect(() => {
+    if (!assistantSession || assistantModeId !== 'creation' || !projectId || !sessionId || composer.trim()) return
+    if (portraitHandoffIdeaRef.current) return
+    const idea = readPortraitCreationHandoff(projectId)
+    if (!idea) return
+    portraitHandoffIdeaRef.current = idea
+    setComposer(`这是我刚完成画像初始化后的一次性创作意向。请基于项目画像先与我核对并制定创作计划，不要直接创建作品任务。\n\n本次创作意向：${idea}`)
+  }, [assistantModeId, assistantSession, composer, projectId, sessionId])
 
   const persistAssistantCheckpoint = useCallback((id: string, status: 'draft' | 'ready' = 'draft', currentDraft = draftRef.current) => {
     if (!assistantSession || !assistantModeId) return Promise.resolve(null)
@@ -1468,6 +1479,10 @@ function ChatConversation() {
     try {
       await sendAssistantMessage(sessionId, text)
       if (sessionRef.current !== sessionId) return
+      if (portraitHandoffIdeaRef.current && projectId && text.includes(portraitHandoffIdeaRef.current)) {
+        clearPortraitCreationHandoff(projectId)
+        portraitHandoffIdeaRef.current = null
+      }
       if (pendingSubmissionRef.current === pendingSubmission) pendingSubmission.status = 'accepted'
     } catch (error) {
       if (sessionRef.current !== sessionId) return
@@ -1748,7 +1763,7 @@ function ChatConversation() {
             {newMessageCount > 0 && <Button type="button" variant="secondary" size="sm" className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 shadow-md" onClick={() => scrollToLatest()}><ChevronDown className="size-4" />有 {newMessageCount} 条新消息</Button>}
             <div className="border-t border-border p-3 sm:p-4">
               {liveStatus && <div role="status" className="mb-3 flex min-h-9 items-center gap-2 border-b border-border/60 pb-3 text-sm text-muted-foreground">{liveStatusLabel === '等待中' ? <MessageSquare className="size-4 shrink-0 text-muted-foreground" /> : <Loader2 className="size-4 shrink-0 animate-spin text-primary" />}<span className="min-w-0 flex-1 break-words">{liveStatus}</span><span className="shrink-0 text-xs">{liveStatusLabel}</span></div>}
-              <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
+              <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => { const value = event.target.value; if (portraitHandoffIdeaRef.current && !value.includes(portraitHandoffIdeaRef.current) && projectId) { clearPortraitCreationHandoff(projectId); portraitHandoffIdeaRef.current = null }; setComposer(value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
             </div>
           </section>
           <ProgressRail draft={draft} mode={assistantSession ? assistantModeId : 'profile'} />
