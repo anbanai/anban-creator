@@ -16,6 +16,7 @@ import (
 // Task type constants for Asynq.
 const (
 	TypeContentGenerate            = "content:generate"
+	TypeContentReuse               = "content:reuse"
 	TypePlanTrigger                = "plan:trigger"
 	TypeSeednoteCaptureMetrics     = "seednote:capture_metrics"
 	TypeWechatCaptureMetrics       = "wechat:capture_metrics"
@@ -167,6 +168,7 @@ type TaskProcessor struct {
 type ImageAnalysisHandler func(ctx context.Context, jobID string, generation int64) error
 type AnalyticsRebuildHandler func(ctx context.Context, jobID string) error
 type FeedbackHandler func(ctx context.Context, jobID string) error
+type ContentReuseHandler func(ctx context.Context, runID string) error
 
 func (tp *TaskProcessor) RegisterImageAnalysisHandler(handler ImageAnalysisHandler, logger *zerolog.Logger) {
 	if tp == nil || handler == nil {
@@ -181,6 +183,24 @@ func (tp *TaskProcessor) RegisterImageAnalysisHandler(handler ImageAnalysisHandl
 			return fmt.Errorf("invalid image analysis payload")
 		}
 		return handler(ctx, payload.JobID, payload.Generation)
+	})
+}
+
+func (tp *TaskProcessor) RegisterContentReuseHandler(handler ContentReuseHandler, logger *zerolog.Logger) {
+	if tp == nil || handler == nil {
+		return
+	}
+	tp.mux.HandleFunc(TypeContentReuse, func(ctx context.Context, task *asynq.Task) error {
+		var payload struct {
+			RunID string `json:"run_id"`
+		}
+		if err := json.Unmarshal(task.Payload(), &payload); err != nil || payload.RunID == "" {
+			return fmt.Errorf("invalid content reuse payload")
+		}
+		if logger != nil {
+			logger.Info().Str("run_id", payload.RunID).Msg("processing content reuse run")
+		}
+		return handler(ctx, payload.RunID)
 	})
 }
 

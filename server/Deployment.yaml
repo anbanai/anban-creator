@@ -144,6 +144,8 @@ spec:
               value: "${moments_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_ECOMMERCE
               value: "${ecommerce_agent_image_repo}"
+            - name: ANBAN_AGENT_IMAGE_CONTENT_PLANNING
+              value: "${content_planning_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS
               value: "${profile_analysis_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS

@@ -58,6 +58,7 @@ const (
 	AgentIDHypit            = "hypit"
 	AgentIDFeedbackAnalysis = "feedback-analysis"
 	AgentIDProfileAnalysis  = "profile-analysis"
+	AgentIDContentPlanning  = "content-planning"
 	AgentIDWhiteboard       = "whiteboard-animation"
 )
 
@@ -71,6 +72,7 @@ const (
 	ChannelMoments          = "moments"
 	ChannelEcommerce        = "ecommerce"
 	ChannelProfileAnalysis  = "profile-analysis"
+	ChannelContentPlanning  = "content-planning"
 	ChannelMontage          = "montage"
 	ChannelFeedbackAnalysis = "feedback-analysis"
 	ChannelWhiteboard       = "whiteboard-animation"
@@ -81,19 +83,25 @@ const (
 	TaskKindContentGeneration = "content_generation"
 	TaskKindViralAnalysis     = "viral_analysis"
 	TaskKindProfileAnalysis   = "profile_analysis"
+	TaskKindContentResearch   = "content_research"
+	TaskKindContentValidation = "content_validation"
+	TaskKindContentScript     = "content_script"
 	TaskKindFeedbackAnalysis  = "feedback_analysis"
 )
 
 // Managed task types that are not project platforms (legacy aliases retained
 // for historical rows and migration readers).
 const (
-	TaskTypeViralAnalysis   = "viral_analysis"
-	TaskTypeProfileAnalysis = "profile_analysis"
+	TaskTypeViralAnalysis     = "viral_analysis"
+	TaskTypeProfileAnalysis   = "profile_analysis"
+	TaskTypeContentResearch   = TaskKindContentResearch
+	TaskTypeContentValidation = TaskKindContentValidation
+	TaskTypeContentScript     = TaskKindContentScript
 )
 
 func IsChannel(value string) bool {
 	switch value {
-	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard:
+	case ChannelContentPlanning, ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard:
 		return true
 	default:
 		return false
@@ -102,7 +110,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard:
+	case AgentIDContentPlanning, AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard:
 		return true
 	default:
 		return false
@@ -111,6 +119,8 @@ func IsAgentID(value string) bool {
 
 func AgentChannel(agentID string) (string, bool) {
 	switch agentID {
+	case AgentIDContentPlanning:
+		return ChannelContentPlanning, true
 	case AgentIDArticle:
 		return ChannelArticle, true
 	case AgentIDSeednote:
@@ -135,7 +145,7 @@ func AgentChannel(agentID string) (string, bool) {
 // product identity and routing must use Channel directly.
 func PlatformForChannel(channel string) string {
 	switch channel {
-	case ChannelArticle, ChannelWechatPicture:
+	case ChannelContentPlanning, ChannelArticle, ChannelWechatPicture:
 		return PlatformWechat
 	case ChannelSeednote:
 		return PlatformSeednote
@@ -177,7 +187,7 @@ func DefaultImageRatioForChannel(channel string) string {
 
 func IsTaskKind(value string) bool {
 	switch value {
-	case TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis,
+	case TaskKindContentResearch, TaskKindContentValidation, TaskKindContentScript, TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis,
 		TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit,
 		TaskTypeWechatArticle, TaskTypeWechatPicture:
 		return true
@@ -247,7 +257,7 @@ func IsAdminOnlyProjectPlatform(value string) bool {
 
 // IsTaskType reports whether value is an explicitly implemented task type.
 func IsTaskType(value string) bool {
-	return value == TaskTypeWechatArticle || value == TaskTypeWechatPicture || IsProjectPlatform(value) || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis
+	return IsContentPlanningTask(value) || value == TaskTypeWechatArticle || value == TaskTypeWechatPicture || IsProjectPlatform(value) || value == TaskTypeViralAnalysis || value == TaskTypeProfileAnalysis
 }
 
 func IsMontagePlatform(platform string) bool {
@@ -448,3 +458,7 @@ const (
 	ViralAnalysisSourceNote    = "note"
 	ViralAnalysisSourceProfile = "profile"
 )
+
+func IsContentPlanningTask(value string) bool {
+	return value == TaskTypeContentResearch || value == TaskTypeContentValidation || value == TaskTypeContentScript
+}

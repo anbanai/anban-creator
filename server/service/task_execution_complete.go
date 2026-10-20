@@ -234,6 +234,21 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 		if err != nil {
 			return "", "", nil, err
 		}
+		if validation.Valid && model.IsContentPlanningTask(task.Type) {
+			if reportErr := s.validateContentPlanningArtifacts(ctx, task, execution); reportErr != nil {
+				validation.Valid = false
+				validation.Reason = reportErr.Error()
+			}
+		}
+		if validation.Valid && !model.IsContentPlanningTask(task.Type) && strings.TrimSpace(task.ReuseRunID) != "" {
+			validation = validateContentReuseArtifacts(task, files)
+			if validation.Valid {
+				if reportErr := s.validateContentReuseReports(ctx, task, execution); reportErr != nil {
+					validation.Valid = false
+					validation.Reason = reportErr.Error()
+				}
+			}
+		}
 		var deliveryErr error
 		if !validation.Valid {
 			deliveryErr = errors.New(validation.Error())
@@ -299,9 +314,46 @@ func (s *TaskService) cloudTerminalOutcome(ctx context.Context, task *model.Task
 	return model.TaskExecutionFailed, failureReason, result, nil
 }
 
+func validateContentReuseArtifacts(task *model.Task, files []*model.TaskFile) agent.ArtifactValidation {
+	result := agent.ArtifactValidation{Valid: true}
+	if task == nil || model.IsContentPlanningTask(task.Type) || strings.TrimSpace(task.ReuseRunID) == "" {
+		return result
+	}
+	present := make(map[string]bool, len(files))
+	for _, file := range files {
+		if file == nil || file.FileSize <= 0 || (file.State != model.TaskFileStatePending && file.State != model.TaskFileStateDelivered) {
+			continue
+		}
+		present[file.FilePath] = true
+	}
+	for _, required := range []string{"output/content-reuse-brief.json", "output/topic-analysis.md", "output/content-lineage.json", "output/quality-report.json"} {
+		if !present[required] {
+			result.Missing = append(result.Missing, required)
+		}
+	}
+	if len(result.Missing) > 0 {
+		result.Valid = false
+		result.Reason = "content reuse missing required artifacts: " + strings.Join(result.Missing, ", ")
+	}
+	return result
+}
+
 func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model.Task, execution *model.TaskExecution) (err error) {
 	if execution.FinalizationStatus == model.TaskExecutionFinalizationDone {
-		return s.ensureTerminalExecutionAuthority(ctx, task.ID, execution.ID)
+		if err := s.ensureTerminalExecutionAuthority(ctx, task.ID, execution.ID); err != nil {
+			return err
+		}
+		if s.reuseRunFinalizer != nil && strings.TrimSpace(task.ReuseRunID) != "" {
+			if err := s.reuseRunFinalizer(context.WithoutCancel(ctx), task); err != nil {
+				return fmt.Errorf("finalize content reuse run: %w", err)
+			}
+		}
+		if s.researchJobFinalizer != nil && strings.TrimSpace(task.ResearchJobID) != "" {
+			if err := s.researchJobFinalizer(context.WithoutCancel(ctx), task); err != nil {
+				return fmt.Errorf("finalize content research job: %w", err)
+			}
+		}
+		return nil
 	}
 	if err := s.ensureExecutionAuthority(ctx, task.ID, execution.ID); err != nil {
 		return err
@@ -381,6 +433,16 @@ func (s *TaskService) finalizeTaskFromExecution(ctx context.Context, task *model
 			if err := s.finalizationAfterAdvance(stage); err != nil {
 				return err
 			}
+		}
+	}
+	if s.reuseRunFinalizer != nil && strings.TrimSpace(task.ReuseRunID) != "" {
+		if err := s.reuseRunFinalizer(context.WithoutCancel(ctx), task); err != nil {
+			return fmt.Errorf("finalize content reuse run: %w", err)
+		}
+	}
+	if s.researchJobFinalizer != nil && strings.TrimSpace(task.ResearchJobID) != "" {
+		if err := s.researchJobFinalizer(context.WithoutCancel(ctx), task); err != nil {
+			return fmt.Errorf("finalize content research job: %w", err)
 		}
 	}
 	return nil
@@ -706,6 +768,16 @@ func (s *TaskService) finalizeArticlePublication(ctx context.Context, task *mode
 	block := func(code, action string) (string, []byte, error) {
 		return model.TaskExecutionDraftDeliveryBlocked, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryBlocked, code, false, action), nil
 	}
+	publicationPolicy, policyErr := contentReusePublicationPolicy(ctx, s.repo, task)
+	if policyErr != nil {
+		if strings.TrimSpace(task.ReuseRunID) != "" {
+			return block("content_reuse_policy_unavailable", "resume_reuse_run")
+		}
+		publicationPolicy = contentReusePublicationPolicySnapshot{DraftEnabled: true, PublishEnabled: true}
+	}
+	if !publicationPolicy.DraftEnabled {
+		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
+	}
 	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
 	if err != nil {
 		return "", nil, err
@@ -975,6 +1047,16 @@ func (s *TaskService) finalizePicturePublication(ctx context.Context, task *mode
 	}
 	block := func(code, action string) (string, []byte, error) {
 		return model.TaskExecutionDraftDeliveryBlocked, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryBlocked, code, false, action), nil
+	}
+	publicationPolicy, policyErr := contentReusePublicationPolicy(ctx, s.repo, task)
+	if policyErr != nil {
+		if strings.TrimSpace(task.ReuseRunID) != "" {
+			return block("content_reuse_policy_unavailable", "resume_reuse_run")
+		}
+		publicationPolicy = contentReusePublicationPolicySnapshot{DraftEnabled: true, PublishEnabled: true}
+	}
+	if !publicationPolicy.DraftEnabled {
+		return model.TaskExecutionDraftDeliveryNotRequested, encodedPublicationDeliveryEvidence("server_finalizer", model.TaskExecutionDraftDeliveryNotRequested, "draft_disabled", false, ""), nil
 	}
 	if input := task.AgentInput.Data(); input != nil {
 		if publish, ok := input["picture_publish_draft"].(bool); ok && !publish {
@@ -1331,6 +1413,14 @@ func (s *TaskService) buildCloudTaskOutcome(ctx context.Context, task *model.Tas
 		}
 	}
 
+	if task.Status == model.TaskStatusCompleted && task.ReuseRunID != "" && !taskUsesChannel(task, model.ChannelArticle) && !taskUsesChannel(task, model.ChannelWechatPicture) {
+		if err := s.validateContentReuseReports(ctx, task, execution); err == nil {
+			outcome.Review.Status = model.TaskReviewPassed
+		} else {
+			outcome.Warnings = append(outcome.Warnings, model.TaskOutcomeWarning{Code: "reuse_review_unavailable", Stage: "review", Message: "复用审核证据不可用，自动生产已暂停。"})
+		}
+	}
+
 	if diagnostic := publicExecutionDiagnostic(execution, result); diagnostic != nil {
 		outcome.Diagnostic = diagnostic
 		if result != nil && (result.ErrorCode == "provider_content_policy" || result.ErrorCode == "provider_policy_rejection") {
@@ -1427,7 +1517,7 @@ func publicationTaskOutcome(execution *model.TaskExecution) model.TaskPublicatio
 
 func safePublicationOutcomeAction(action string) string {
 	switch strings.TrimSpace(action) {
-	case "retry_visuals", "retry_draft", "fix_project_config", "review_content", "check_wechat":
+	case "retry_visuals", "retry_draft", "fix_project_config", "review_content", "check_wechat", "resume_reuse_run":
 		return strings.TrimSpace(action)
 	default:
 		return ""
@@ -1437,6 +1527,7 @@ func safePublicationOutcomeAction(action string) string {
 func safePublicationOutcomeCode(code string) string {
 	switch strings.TrimSpace(code) {
 	case "create_draft_invalid_payload",
+		"content_reuse_policy_unavailable",
 		"create_draft_marketing_blocked",
 		"create_draft_not_found",
 		"create_draft_project_mismatch",
@@ -1474,6 +1565,8 @@ func safePublicationOutcomeCode(code string) string {
 
 func publicationOutcomeMessage(status model.TaskPublicationStatus, code string) string {
 	switch code {
+	case "content_reuse_policy_unavailable":
+		return "复用运行已暂停，恢复后继续发布检查。"
 	case "create_draft_invalid_payload":
 		return "草稿内容或图片不符合公众号投递要求。"
 	case "create_draft_marketing_blocked":

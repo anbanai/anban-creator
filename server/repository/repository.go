@@ -50,6 +50,7 @@ type Repository interface {
 	ViralAnalyses() ViralAnalysisRepository
 	PosterTasks() PosterTaskRepository
 	TopicPools() TopicPoolRepository
+	ContentAssets() ContentAssetRepository
 	TrendSnapshots() TrendSnapshotRepository
 	AgentFeedbacks() AgentFeedbackRepository
 	FeedbackLoop() FeedbackLoopRepository
@@ -133,6 +134,8 @@ type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	FindByID(ctx context.Context, id string) (*model.Task, error)
 	FindByAssistantCheckpointID(ctx context.Context, userID, checkpointID string) (*model.Task, error)
+	FindByReuseRun(ctx context.Context, userID, reuseRunID string) (*model.Task, error)
+	FindByReuseStage(ctx context.Context, userID, reuseStageID string) (*model.Task, error)
 	FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindLatestByPlanIDs(ctx context.Context, userID string, planIDs []string) ([]*model.Task, error)
@@ -493,6 +496,85 @@ type TopicPoolRepository interface {
 	Delete(ctx context.Context, id uint) error
 }
 
+type ContentAssetListFilter struct {
+	UserID    string
+	Status    string
+	Query     string
+	Platform  string
+	Source    string
+	Lifecycle string
+	ProjectID string
+	Offset    int
+	Limit     int
+}
+
+type ContentReuseRunListFilter struct {
+	UserID          string
+	AssetID         string
+	TargetProjectID string
+	TargetPlatform  string
+	Status          string
+	Stage           string
+	Offset          int
+	Limit           int
+}
+
+type ContentAssetRepository interface {
+	Create(context.Context, *model.ContentAsset) error
+	FindByID(context.Context, string, string) (*model.ContentAsset, error)
+	FindByTitle(context.Context, string, string) (*model.ContentAsset, error)
+	List(context.Context, string, string, string, int, int) ([]*model.ContentAsset, int64, error)
+	ListWithFilters(context.Context, ContentAssetListFilter) ([]*model.ContentAsset, int64, error)
+	Update(context.Context, *model.ContentAsset) error
+	CreateEvidence(context.Context, *model.ContentAssetEvidence) error
+	MergeAsset(context.Context, string, string, string) error
+	ListEvidence(context.Context, string, string) ([]*model.ContentAssetEvidence, error)
+	CreateLink(context.Context, *model.ContentAssetLink) error
+	CreateScoreSnapshot(context.Context, *model.ContentAssetScoreSnapshot) error
+	ListScoreSnapshots(context.Context, string, string) ([]*model.ContentAssetScoreSnapshot, error)
+	FindLink(context.Context, string, string, string, string, string) (*model.ContentAssetLink, error)
+	ListLinks(context.Context, string, string) ([]*model.ContentAssetLink, error)
+	ListLinksByContent(context.Context, string, string, string, string) ([]*model.ContentAssetLink, error)
+	CreateReuseRun(context.Context, *model.ContentReuseRun) error
+	FindReuseRun(context.Context, string, string) (*model.ContentReuseRun, error)
+	FindReuseRunByID(context.Context, string) (*model.ContentReuseRun, error)
+	FindLatestReuseRun(context.Context, string, string) (*model.ContentReuseRun, error)
+	FindReuseRunByIdempotency(context.Context, string, string) (*model.ContentReuseRun, error)
+	ListReuseRuns(context.Context, ContentReuseRunListFilter) ([]*model.ContentReuseRun, int64, error)
+	ListRecoverableReuseRuns(context.Context, time.Time, int) ([]*model.ContentReuseRun, error)
+	ClaimReuseRun(context.Context, string) (bool, error)
+	BindReuseTask(context.Context, *model.Task) error
+	BindReuseStageTask(context.Context, *model.Task) error
+	CreateResearchJob(context.Context, *model.ContentAssetResearchJob) error
+	FindResearchJobByFingerprint(context.Context, string, string) (*model.ContentAssetResearchJob, error)
+	FindResearchJobByID(context.Context, string, string) (*model.ContentAssetResearchJob, error)
+	UpdateResearchJob(context.Context, *model.ContentAssetResearchJob) error
+	TransitionResearchJob(context.Context, *model.ContentAssetResearchJob, *model.ContentReuseAuditEvent) error
+	BindResearchJobTask(context.Context, *model.Task) error
+	CreateReuseStage(context.Context, *model.ContentReuseStageExecution) error
+	FindReuseStage(context.Context, string, string) (*model.ContentReuseStageExecution, error)
+	FindReuseStageByID(context.Context, string) (*model.ContentReuseStageExecution, error)
+	UpdateReuseStage(context.Context, *model.ContentReuseStageExecution) error
+	TransitionReuseStage(context.Context, *model.ContentReuseStageExecution, *model.ContentReuseAuditEvent) error
+	AppendReuseAudit(context.Context, *model.ContentReuseAuditEvent) error
+	ListReuseAudit(context.Context, string, string) ([]*model.ContentReuseAuditEvent, error)
+	ReserveReuseRunBudget(context.Context, string, int64, int64, time.Time) (bool, error)
+	ReserveReuseOperationBudget(context.Context, *model.Task, string, string, int64, bool) error
+	ReleaseReuseOperationBudget(context.Context, string, string) error
+	SettleReuseOperationBudget(context.Context, *model.Task, string) error
+	ReuseRunWalletCost(context.Context, *model.ContentReuseRun) (int64, error)
+	FindReuseOperationBudget(context.Context, string, string) (*model.ContentReuseOperationBudget, error)
+	MarkReuseOperationAmbiguous(context.Context, string, string) error
+	RecoverReuseOperationBudgets(context.Context, time.Time) error
+	ReconcileReuseOperationHold(context.Context, string, string) (bool, error)
+	UpdateReuseRun(context.Context, *model.ContentReuseRun) error
+	GetPolicy(context.Context, string) (*model.ContentAutopilotPolicy, error)
+	LockPolicy(context.Context, string) (*model.ContentAutopilotPolicy, error)
+	ListEnabledPolicies(context.Context, int) ([]*model.ContentAutopilotPolicy, error)
+	ListEnabledPoliciesAfter(context.Context, string, int) ([]*model.ContentAutopilotPolicy, error)
+	UpsertPolicy(context.Context, *model.ContentAutopilotPolicy) error
+}
+
 // AgentFeedbackRepository provides access to the agent_feedbacks table.
 type AgentFeedbackRepository interface {
 	Create(ctx context.Context, feedback *model.AgentFeedback) error
@@ -538,6 +620,7 @@ type ContentMetadataRepository interface {
 }
 
 type SearchOperationRepository interface {
+	ListSucceeded(ctx context.Context, userID, projectID, taskID, executionID string) ([]*model.SearchOperation, error)
 	FindByFingerprint(ctx context.Context, fingerprint string) (*model.SearchOperation, error)
 	Claim(ctx context.Context, candidate *model.SearchOperation, now time.Time, lease time.Duration) (*model.SearchOperation, bool, error)
 	MarkSucceeded(ctx context.Context, id, attemptID, providerRequestID string, response []byte, now time.Time) error
@@ -588,6 +671,7 @@ type repository struct {
 	viralAnalyses             ViralAnalysisRepository
 	posterTasks               PosterTaskRepository
 	topicPools                TopicPoolRepository
+	contentAssets             ContentAssetRepository
 	trendSnapshots            TrendSnapshotRepository
 	agentFeedbacks            AgentFeedbackRepository
 	feedbackLoop              FeedbackLoopRepository
@@ -632,6 +716,7 @@ func New(db *gorm.DB) Repository {
 	viralAnalyses := newViralAnalysisRepository(db)
 	posterTasks := newPosterTaskRepository(db)
 	topicPools := newTopicPoolRepository(db)
+	contentAssets := newContentAssetRepository(db)
 	trendSnapshots := newTrendSnapshotRepository(db)
 	agentFeedbacks := newAgentFeedbackRepository(db)
 	feedbackLoop := newFeedbackLoopRepository(db)
@@ -681,6 +766,7 @@ func New(db *gorm.DB) Repository {
 		viralAnalyses:             viralAnalyses,
 		posterTasks:               posterTasks,
 		topicPools:                topicPools,
+		contentAssets:             contentAssets,
 		trendSnapshots:            trendSnapshots,
 		agentFeedbacks:            agentFeedbacks,
 		feedbackLoop:              feedbackLoop,
@@ -757,6 +843,7 @@ func (r *repository) FeedbackLoop() FeedbackLoopRepository       { return r.feed
 func (r *repository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
 func (r *repository) TopicPools() TopicPoolRepository         { return r.topicPools }
+func (r *repository) ContentAssets() ContentAssetRepository   { return r.contentAssets }
 func (r *repository) TrendSnapshots() TrendSnapshotRepository { return r.trendSnapshots }
 func (r *repository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings
@@ -829,6 +916,7 @@ type txRepository struct {
 	viralAnalyses           ViralAnalysisRepository
 	posterTasks             PosterTaskRepository
 	topicPools              TopicPoolRepository
+	contentAssets           ContentAssetRepository
 	trendSnapshots          TrendSnapshotRepository
 	agentFeedbacks          AgentFeedbackRepository
 	feedbackLoop            FeedbackLoopRepository
@@ -879,6 +967,7 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		viralAnalyses:           newViralAnalysisRepository(tx),
 		posterTasks:             newPosterTaskRepository(tx),
 		topicPools:              newTopicPoolRepository(tx),
+		contentAssets:           newContentAssetRepository(tx),
 		trendSnapshots:          newTrendSnapshotRepository(tx),
 		agentFeedbacks:          newAgentFeedbackRepository(tx),
 		feedbackLoop:            newFeedbackLoopRepository(tx),
@@ -957,6 +1046,7 @@ func (r *txRepository) FeedbackLoop() FeedbackLoopRepository       { return r.fe
 func (r *txRepository) ContentMetadata() ContentMetadataRepository { return r.contentMetadata }
 
 func (r *txRepository) TopicPools() TopicPoolRepository         { return r.topicPools }
+func (r *txRepository) ContentAssets() ContentAssetRepository   { return r.contentAssets }
 func (r *txRepository) TrendSnapshots() TrendSnapshotRepository { return r.trendSnapshots }
 func (r *txRepository) IlinkBindings() IlinkBindingRepository {
 	return r.ilinkBindings

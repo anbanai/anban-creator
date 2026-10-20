@@ -159,8 +159,8 @@ describe('ProjectCard', () => {
     fireEvent.click(screen.getByRole('button', { name: '归档项目：公众号创作项目' }))
     expect(onArchive).toHaveBeenCalledWith('project-1')
 
-    fireEvent.click(screen.getByRole('button', { name: '选题池：公众号创作项目，剩余 6 个' }))
-    expect(await screen.findByRole('dialog', { name: /选题池 - 公众号创作项目/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '选题资产：公众号创作项目，待研究 6 个' }))
+    expect(await screen.findByRole('dialog', { name: /选题资产 - 公众号创作项目/ })).toBeInTheDocument()
   })
 
   it('lists project actions directly without a more menu and uses accessible icon targets', async () => {
@@ -189,7 +189,7 @@ describe('ProjectCard', () => {
   it('does not report zero remaining topics before stats are available', () => {
     render(<ProjectCard project={project()} />)
 
-    const topicPoolButton = screen.getByRole('button', { name: '选题池：公众号创作项目' })
+    const topicPoolButton = screen.getByRole('button', { name: '选题资产：公众号创作项目' })
     expect(topicPoolButton.querySelector('svg')).toBeInTheDocument()
     expect(topicPoolButton).not.toHaveTextContent('0')
   })

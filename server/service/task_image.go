@@ -205,6 +205,11 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	if file, snapshot, replayErr := s.tasks.FindExecutionTaskFileSettlement(ctx, req.TaskID, req.ExecutionID, operationID, fingerprint, "image", taskImageSettlementScope); replayErr != nil {
 		return nil, fmt.Errorf("replay fixed image operation: %w", replayErr)
 	} else if len(snapshot) > 0 {
+		if task.ReuseRunID != "" {
+			if _, err := s.tasks.repo.ContentAssets().ReconcileReuseOperationHold(ctx, task.UserID, task.ReuseRunID); err != nil {
+				return nil, fmt.Errorf("reconcile fixed image operation: %w", err)
+			}
+		}
 		return s.replayAsset(ctx, file, snapshot)
 	}
 
@@ -215,10 +220,33 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 	if cleanupReferences != nil {
 		defer cleanupReferences()
 	}
+	budgetKey := billingFingerprint(req.TaskID, req.ExecutionID, operationID)
+	if err := s.tasks.repo.ContentAssets().ReserveReuseOperationBudget(ctx, task, budgetKey, fingerprint, pricing.PriceCredits, false); err != nil {
+		return nil, fmt.Errorf("reserve image budget: %w", err)
+	}
+	persistedOperation := false
+	ambiguousOperation := true
+	defer func() {
+		if !persistedOperation && task.ReuseRunID != "" {
+			if ambiguousOperation {
+				_ = s.tasks.repo.ContentAssets().MarkReuseOperationAmbiguous(context.WithoutCancel(ctx), task.ReuseRunID, budgetKey)
+			} else {
+				_ = s.tasks.repo.ContentAssets().ReleaseReuseOperationBudget(context.WithoutCancel(ctx), task.ReuseRunID, budgetKey)
+			}
+		}
+	}()
 
 	req.Prompt = appendStrictImageRatioRequirement(req.Prompt, req.AspectRatio)
 	result, err := s.generator.GenerateImage(ctx, req.UserID, req.ProjectID, req.Prompt, req.ImageType, req.OutputPath, "", referencePaths, req.TaskID, req.AspectRatio, resolved, req.Watermark)
 	if err != nil {
+		var providerError *appimage.GenerateError
+		ambiguousOperation = true
+		if errors.As(err, &providerError) {
+			switch providerError.Code {
+			case "unauthorized", "rate_limit", "safety_blocked", "bad_request", "payment_required", "not_found", "refer_error", "mask_error", "client_error":
+				ambiguousOperation = false
+			}
+		}
 		return nil, fmt.Errorf("generate image: %w", err)
 	}
 	if result == nil {
@@ -249,8 +277,10 @@ func (s *TaskImageService) Generate(ctx context.Context, req GenerateTaskImageRe
 
 	asset, err := s.persist(ctx, req, operationID, fingerprint, pricing, result)
 	if err != nil {
+		ambiguousOperation = true
 		return nil, err
 	}
+	persistedOperation = true
 	if s.logger != nil {
 		s.logger.Info().
 			Str("task_id", req.TaskID).

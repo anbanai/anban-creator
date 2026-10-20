@@ -330,3 +330,19 @@ func normalizeJSONNumber(value any) any {
 	}
 	return value
 }
+
+// ValidateOutput validates one Pack-owned structured result document.
+func ValidateOutput(pack Manifest, value any) error {
+	if pack.Schemas == nil || len(pack.Schemas.Output) == 0 {
+		return fmt.Errorf("Pack output schema unavailable")
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var decoded any
+	if err = json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	return validateSchemaValue(pack.Schemas.Output, decoded, "output", 0)
+}

@@ -179,24 +179,33 @@ type ProjectSnapshot struct {
 
 // Task represents a content generation task.
 type Task struct {
-	ID        string  `gorm:"type:char(36);primaryKey" json:"id"`
-	UserID    string  `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
-	ProjectID string  `gorm:"type:char(36);index" json:"project_id"`
+	ID                    string  `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID                string  `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
+	ProjectID             string  `gorm:"type:char(36);index" json:"project_id"`
 	AssistantCheckpointID *string `gorm:"type:char(36);uniqueIndex" json:"-"`
-	PlanID    *string `gorm:"type:char(36);index" json:"plan_id,omitempty"`
+	PlanID                *string `gorm:"type:char(36);index" json:"plan_id,omitempty"`
 	// New identity fields. Type is legacy storage used only by the migration and
 	// old read models; new admission and runtime code use AgentID/Channel/TaskKind.
-	AgentID                 string                                      `gorm:"type:varchar(80);index" json:"agent_id"`
-	Channel                 string                                      `gorm:"type:varchar(40);index" json:"channel"`
-	TaskKind                string                                      `gorm:"type:varchar(80);index" json:"task_kind"`
-	Type                    string                                      `gorm:"type:varchar(20);not null" json:"-"`
-	Status                  string                                      `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
-	Prompt                  string                                      `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
-	Title                   string                                      `gorm:"type:varchar(200)" json:"title,omitempty"`
-	SelectedTopic           string                                      `gorm:"type:varchar(512);not null;default:'';index" json:"selected_topic,omitempty"`
-	SelectedAngle           string                                      `gorm:"type:varchar(512);not null;default:''" json:"selected_angle,omitempty"`
-	TopicLockedAt           *time.Time                                  `gorm:"index" json:"topic_locked_at,omitempty"`
-	ContentOrigin           string                                      `gorm:"type:varchar(40);not null;default:'';index" json:"-"`
+	AgentID          string     `gorm:"type:varchar(80);index" json:"agent_id"`
+	Channel          string     `gorm:"type:varchar(40);index" json:"channel"`
+	TaskKind         string     `gorm:"type:varchar(80);index" json:"task_kind"`
+	Type             string     `gorm:"type:varchar(20);not null" json:"-"`
+	Status           string     `gorm:"type:varchar(20);default:pending;index:idx_user_status,priority:2" json:"status"`
+	Prompt           string     `gorm:"column:topic;type:varchar(5120)" json:"prompt"`
+	Title            string     `gorm:"type:varchar(200)" json:"title,omitempty"`
+	SelectedTopic    string     `gorm:"type:varchar(512);not null;default:'';index" json:"selected_topic,omitempty"`
+	SelectedAngle    string     `gorm:"type:varchar(512);not null;default:''" json:"selected_angle,omitempty"`
+	TopicLockedAt    *time.Time `gorm:"index" json:"topic_locked_at,omitempty"`
+	ContentOrigin    string     `gorm:"type:varchar(40);not null;default:'';index" json:"-"`
+	ContentAssetID   string     `gorm:"type:char(36);index" json:"asset_id,omitempty"`
+	SourceContentRef string     `gorm:"type:varchar(255)" json:"source_content_ref,omitempty"`
+	ReuseRunID       string     `gorm:"type:char(36);index" json:"reuse_run_id,omitempty"`
+	ReuseStageID     string     `gorm:"type:char(36);index" json:"reuse_stage_id,omitempty"`
+	ResearchJobID    string     `gorm:"type:char(36);index" json:"-"`
+	// ReuseRunKey is nullable so ordinary tasks do not collide with one
+	// another. Reuse tasks set it to the run ID and the unique index makes
+	// task admission idempotent across concurrent workers and replicas.
+	ReuseRunKey             *string                                     `gorm:"type:char(36);uniqueIndex" json:"-"`
 	ImageRatio              string                                      `gorm:"type:varchar(10);default:''" json:"image_ratio,omitempty"`
 	ImageCapabilityKey      string                                      `gorm:"type:varchar(50);default:''" json:"image_capability_key,omitempty"`
 	ImageCapabilitySnapshot datatypes.JSONType[ImageCapabilitySnapshot] `gorm:"type:json" json:"-"`

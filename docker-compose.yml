@@ -133,6 +133,7 @@ services:
       ANBAN_AGENT_IMAGE_MONTAGE: "creator-agent-montage:latest"
       ANBAN_AGENT_IMAGE_MOMENTS: "creator-agent-moments:latest"
       ANBAN_AGENT_IMAGE_ECOMMERCE: "creator-agent-ecommerce:latest"
+      ANBAN_AGENT_IMAGE_CONTENT_PLANNING: "${ANBAN_AGENT_IMAGE_CONTENT_PLANNING:-}"
       ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS: "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}"
       ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
       ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"

@@ -55,6 +55,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&ViralAnalysis{},
 		&PosterTask{},
 		&TopicPool{},
+		&ContentAsset{}, &ContentAssetEvidence{}, &ContentAssetLink{}, &ContentAssetScoreSnapshot{}, &ContentReuseRun{}, &ContentReuseStageExecution{}, &ContentAssetResearchJob{}, &ContentReuseAuditEvent{}, &ContentAutopilotPolicy{}, &ContentReuseOperationBudget{},
 		&TrendSnapshot{},
 		&AgentFeedback{},
 		&ContentMetadataReport{},

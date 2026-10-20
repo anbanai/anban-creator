@@ -344,6 +344,31 @@ func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repos
 		}
 	}
 	charge := newOperationCharge(req, sku, pricing, accepted, now)
+	var reuseTask *model.Task
+	budgetKey := req.IdempotencyKey
+	if accepted {
+		budgetKey = billingFingerprint(req.TaskID, req.AttemptID, req.ToolCallID)
+	}
+	if req.TaskID != "" {
+		task, taskErr := tx.Tasks().FindByID(ctx, req.TaskID)
+		if taskErr != nil && !errors.Is(taskErr, gorm.ErrRecordNotFound) {
+			return nil, taskErr
+		}
+		if task != nil && task.ReuseRunID != "" {
+			if task.UserID != req.UserID {
+				return nil, ErrBillingQuoteMismatch
+			}
+			if err := tx.ContentAssets().ReserveReuseOperationBudget(ctx, task, budgetKey, req.RequestFingerprint, pricing.PriceCredits, true); err != nil {
+				return nil, err
+			}
+			if reservation, err := tx.ContentAssets().FindReuseOperationBudget(ctx, task.ReuseRunID, budgetKey); err == nil {
+				charge.CreatedAt = reservation.CreatedAt.UTC()
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
+			reuseTask = task
+		}
+	}
 	allocations, entries, paid, promotional, debt, spendErr := s.consumeForCharge(ctx, billingRepo, account, *sku, charge, accepted)
 	if spendErr != nil {
 		if accepted || !errors.Is(spendErr, errBillingSpendInsufficient) {
@@ -372,6 +397,11 @@ func (s *BillingWalletService) chargeOperationInTx(ctx context.Context, tx repos
 	}
 	if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
 		return nil, err
+	}
+	if reuseTask != nil {
+		if err := tx.ContentAssets().SettleReuseOperationBudget(ctx, reuseTask, budgetKey); err != nil {
+			return nil, err
+		}
 	}
 	return charge, nil
 }
@@ -803,6 +833,17 @@ func (s *BillingWalletService) reverseCharge(ctx context.Context, chargeID, reas
 		if err := updateBillingAccount(ctx, billingRepo, account); err != nil {
 			return err
 		}
+		if original.OperationTaskID != nil {
+			task, err := tx.Tasks().FindByID(ctx, *original.OperationTaskID)
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if task != nil && task.ReuseRunID != "" {
+				if err := tx.ContentAssets().SettleReuseOperationBudget(ctx, task, ""); err != nil {
+					return err
+				}
+			}
+		}
 		result = reversal
 		return nil
 	})
@@ -1201,6 +1242,9 @@ func newOperationCharge(req OperationChargeRequest, sku *model.BillingSKU, prici
 		charge.OperationTaskID, charge.AttemptID, charge.ToolCallID = stringPtr(req.TaskID), stringPtr(req.AttemptID), stringPtr(req.ToolCallID)
 	} else {
 		charge.QuoteID = stringPtr(req.QuoteID)
+		if req.TaskID != "" {
+			charge.OperationTaskID = stringPtr(req.TaskID)
+		}
 	}
 	applyResolvedPricing(charge, pricing)
 	return charge

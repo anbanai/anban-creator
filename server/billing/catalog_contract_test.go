@@ -457,6 +457,9 @@ func initialRetailCatalogContractError(catalog ProductCatalog) error {
 		}
 	}
 	for _, profile := range []string{"effective", "balanced", "quality"} {
+		for _, kind := range []string{"content_research", "content_validation", "content_script"} {
+			want["task."+kind+"."+profile] = skuSnapshot{operation: "task." + kind, executionProfile: profile, chargePolicy: "task_admission", priceCredits: 1200, delivery: kind + "_artifacts_verified"}
+		}
 		want["task.viral-analysis."+profile] = skuSnapshot{
 			operation: "task.viral_analysis", executionProfile: profile, chargePolicy: "task_admission", priceCredits: 1200,
 			delivery: "viral_analysis_report_verified",

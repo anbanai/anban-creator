@@ -915,7 +915,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile-analysis" && profile != "feedback-analysis" {
+		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile-analysis" && profile != "feedback-analysis" && profile != "content-planning" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}

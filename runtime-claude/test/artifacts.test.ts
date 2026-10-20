@@ -194,3 +194,22 @@ describe("scanWorkspaceArtifacts", () => {
     }
   });
 });
+
+test("planning subtitles use the frozen SRT delivery MIME", async () => {
+  const root = await mkdtemp(join(tmpdir(), "planning-srt-"));
+  roots.push(root);
+  await mkdir(join(root, "output"));
+  await writeFile(join(root, "output", "video-subtitles.srt"), "1\n00:00:00,000 --> 00:00:02,000\nEvidence.\n");
+  let reportedType = "";
+  const reporter = {
+    progress: async () => {},
+    prepareArtifactUpload: async () => { throw new Error("unexpected direct upload"); },
+    streamArtifactContent: async (metadata: { relative_path: string; content_type: string; size: number; sha256: string }) => {
+      reportedType = metadata.content_type;
+      return { object_key: "planning/subtitles.srt", content_type: metadata.content_type, size: metadata.size, sha256: metadata.sha256 };
+    },
+    reportArtifactManifest: async () => {},
+  };
+  expect(await uploadWorkspaceArtifacts(root, { artifact_transport: { mode: "stream" } } as BootstrapResponse, reporter)).toEqual({ uploaded: 1, failures: [] });
+  expect(reportedType).toBe("application/x-subrip");
+});

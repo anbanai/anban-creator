@@ -27,6 +27,7 @@ var supportedChannels = map[string]struct{}{
 	"seednote":             {},
 	"wechat-picture":       {},
 	"profile-analysis":     {},
+	"content-planning":     {},
 	"feedback-analysis":    {},
 	"whiteboard-animation": {},
 	"hypit":                {},
@@ -438,7 +439,7 @@ func requiresContentTagging(manifest *Manifest) bool {
 	}
 	for _, taskKind := range manifest.Bindings.TaskKinds {
 		switch strings.TrimSpace(taskKind) {
-		case "profile_analysis", "feedback_analysis", "viral_analysis":
+		case "profile_analysis", "feedback_analysis", "viral_analysis", "content_research", "content_validation", "content_script":
 			continue
 		default:
 			// Any ordinary product/task binding is a content Pack unless it is

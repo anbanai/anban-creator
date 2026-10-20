@@ -103,6 +103,7 @@ type TimeWindow struct {
 }
 
 type SKUConfig struct {
+	PriceSource      string `yaml:"price_source" json:"price_source,omitempty"`
 	ID               string `yaml:"id" json:"id"`
 	Operation        string `yaml:"operation" json:"operation"`
 	ExecutionProfile string `yaml:"execution_profile" json:"execution_profile,omitempty"`

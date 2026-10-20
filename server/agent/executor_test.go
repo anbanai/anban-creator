@@ -927,3 +927,16 @@ func TestBuildUserPrompt_MontageCoverPortraitIndependentOfVideoMaterial(t *testi
 		}
 	}
 }
+
+func TestContentReuseRuntimeControlsUseServerIdentity(t *testing.T) {
+	prompt := BuildUserPrompt(UserPromptParams{TaskType: model.TaskTypeWechatArticle, TaskID: "task-1", ProjectID: "project-1", ReuseRunID: "run-1", ContentAssetID: "asset-1"})
+	for _, want := range []string{"reuse_run_id=run-1", "asset_id=asset-1"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing runtime control %q: %s", want, prompt)
+		}
+	}
+	ordinary := BuildUserPrompt(UserPromptParams{TaskType: model.TaskTypeWechatArticle})
+	if strings.Contains(ordinary, "reuse_run_id=") {
+		t.Fatal("ordinary task must not activate content reuse")
+	}
+}

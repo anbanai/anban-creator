@@ -109,3 +109,14 @@ func jsonValid(data []byte) bool {
 	var value any
 	return json.Unmarshal(data, &value) == nil
 }
+
+// ListSucceeded is deliberately owner AND exact-execution scoped. Receipts from
+// another retry of the same task cannot authorize citations in this execution.
+func (r *searchOperationRepository) ListSucceeded(ctx context.Context, userID, projectID, taskID, executionID string) ([]*model.SearchOperation, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(projectID) == "" || strings.TrimSpace(taskID) == "" || strings.TrimSpace(executionID) == "" {
+		return nil, errors.New("receipt scope is required")
+	}
+	var result []*model.SearchOperation
+	err := r.db.WithContext(ctx).Where("user_id = ? AND project_id = ? AND task_id = ? AND execution_id = ? AND status = ? AND operation IN ?", userID, projectID, taskID, executionID, model.SearchOperationSucceeded, []string{"mcp.search_web", "mcp.fetch_web_page"}).Order("created_at ASC, id ASC").Limit(100).Find(&result).Error
+	return result, err
+}

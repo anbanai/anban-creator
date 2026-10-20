@@ -1463,6 +1463,49 @@ func (s *WechatPublicationService) autoPublishDraft(ctx context.Context, userID,
 	if publication.Status != model.WechatPublicationStatusDrafted || publication.DraftArticleType == "newspic" {
 		return publication, nil
 	}
+	task, _, err := s.ownedTaskProject(ctx, userID, taskID)
+	if err != nil {
+		return publication, err
+	}
+	policy, policyErr := contentReusePublicationPolicy(ctx, s.repo, task)
+	if policyErr != nil {
+		if errors.Is(policyErr, ErrContentReuseRunStopped) {
+			return publication, nil
+		}
+		if strings.TrimSpace(task.ReuseRunID) == "" {
+			policy = contentReusePublicationPolicySnapshot{DraftEnabled: true, PublishEnabled: true}
+		} else {
+			return publication, policyErr
+		}
+	}
+	if !policy.PublishEnabled {
+		return publication, nil
+	}
+	if strings.TrimSpace(task.ReuseRunID) != "" {
+		allowed, next := contentReusePublishWindow(s.now().UTC(), policy.PublishWindows)
+		if allowed {
+			next = nil
+		} else {
+			if next != nil {
+				expectedStatus, expectedUpdatedAt := publication.Status, publication.UpdatedAt
+				publication.NextCheckAt = next
+				publication.LastError = "automatic formal publish is waiting for the configured publish window"
+				won, err := s.repo.WechatPublications().UpdateReconciliation(ctx, publication, expectedStatus, expectedUpdatedAt)
+				if err != nil {
+					return publication, err
+				}
+				if !won {
+					latest, reloadErr := s.repo.WechatPublications().FindByID(ctx, publication.ID)
+					if reloadErr != nil {
+						return publication, reloadErr
+					}
+					publication = latest
+				}
+				s.enqueueReconcile(publication.ProjectID, publication.NextCheckAt)
+			}
+			return publication, nil
+		}
+	}
 	published, err := s.Publish(ctx, userID, taskID)
 	if err == nil {
 		return published, nil

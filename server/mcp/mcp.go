@@ -356,6 +356,18 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 			http.Error(w, "execution token is not authorized for the current task execution", http.StatusForbidden)
 			return
 		}
+		if policy, ok := authorizer.(interface {
+			ValidateAgentExecutionToolAccess(context.Context, string, string, string, string, string) error
+		}); ok {
+			for _, request := range requests {
+				if request.Method == "tools/call" {
+					if err := policy.ValidateAgentExecutionToolAccess(r.Context(), info.UserID, projectID, taskID, executionID, request.Params.Name); err != nil {
+						http.Error(w, "task capability access denied", http.StatusForbidden)
+						return
+					}
+				}
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -444,6 +456,7 @@ type executionToolScope struct {
 }
 
 var executionToolScopes = map[string]executionToolScope{
+	"get_content_reuse_context": {RequireProjectID: true, RequireTaskID: true},
 	// User-wide enumeration and scheduling are never part of one task's
 	// execution authority.
 	"list_projects": {Denied: true},
@@ -493,13 +506,14 @@ var executionToolScopes = map[string]executionToolScope{
 	// These tools are deterministic or read-only. The
 	// central authorizer still runs before dispatch, so stale executions cannot
 	// use them.
-	"score_article":   {},
-	"export_seednote": {},
-	"list_resources":  {},
-	"get_resource":    {},
-	"search_web":      {},
-	"fetch_web_page":  {},
-	"search_images":   {},
+	"score_article":        {},
+	"export_seednote":      {},
+	"list_resources":       {},
+	"get_resource":         {},
+	"search_web":           {},
+	"list_search_receipts": {},
+	"fetch_web_page":       {},
+	"search_images":        {},
 }
 
 func validateExecutionToolScope(toolName string, arguments map[string]any, projectID, taskID, executionID string) error {

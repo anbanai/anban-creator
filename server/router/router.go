@@ -75,6 +75,7 @@ type Services struct {
 	PosterHandler                       *handler.PosterHandler
 	ResourceHandler                     *handler.ResourceHandler
 	TopicPoolHandler                    *handler.TopicPoolHandler
+	ContentAssetHandler                 *handler.ContentAssetHandler
 	TrendsHandler                       *handler.TrendsHandler
 	IlinkHandler                        *handler.IlinkHandler
 	MCPHandler                          http.Handler
@@ -343,6 +344,27 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/projects/:project_id/topics", svc.TopicPoolHandler.Create)
 		apiV1.Delete("/projects/:project_id/topics/:id", svc.TopicPoolHandler.Delete)
 		apiV1.Patch("/projects/:project_id/topics/:id/reset", svc.TopicPoolHandler.Reset)
+	}
+	if svc.ContentAssetHandler != nil {
+		apiV1.Get("/content-assets", svc.ContentAssetHandler.List)
+		apiV1.Get("/content-assets/by-content", svc.ContentAssetHandler.GetLineageByContent)
+		apiV1.Get("/content-assets/recommendations", svc.ContentAssetHandler.Recommendations)
+		apiV1.Get("/content-reuse-runs", svc.ContentAssetHandler.ListReuseRuns)
+		apiV1.Post("/content-assets", svc.ContentAssetHandler.Create)
+		apiV1.Post("/content-assets/ingest", svc.ContentAssetHandler.Ingest)
+		apiV1.Get("/content-assets/:id/lineage", svc.ContentAssetHandler.GetLineage)
+		apiV1.Get("/content-assets/:id", svc.ContentAssetHandler.Get)
+		apiV1.Post("/content-assets/:id/score", svc.ContentAssetHandler.Score)
+		apiV1.Patch("/content-assets/:id", svc.ContentAssetHandler.Update)
+		apiV1.Post("/content-assets/:id/links", svc.ContentAssetHandler.Link)
+		apiV1.Post("/content-assets/:id/reuse-runs", svc.ContentAssetHandler.CreateReuseRun)
+		apiV1.Get("/content-reuse-runs/:id", svc.ContentAssetHandler.GetReuseRun)
+		apiV1.Post("/content-reuse-runs/:id/:status", svc.ContentAssetHandler.SetReuseRunStatus)
+		apiV1.Post("/content-reuse-runs/:id/pause", svc.ContentAssetHandler.PauseReuseRun)
+		apiV1.Post("/content-reuse-runs/:id/resume", svc.ContentAssetHandler.ResumeReuseRun)
+		apiV1.Post("/content-reuse-runs/:id/cancel", svc.ContentAssetHandler.CancelReuseRun)
+		apiV1.Get("/content-autopilot-policy", svc.ContentAssetHandler.GetPolicy)
+		apiV1.Put("/content-autopilot-policy", svc.ContentAssetHandler.UpdatePolicy)
 	}
 	if svc.TrendsHandler != nil {
 		apiV1.Get("/trends", svc.TrendsHandler.List)

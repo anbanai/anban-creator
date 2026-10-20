@@ -81,6 +81,11 @@ export default function DashboardPage() {
     queryFn: () => api.trends.list({ platforms: 'weibo,douyin', limit: 3 }),
     staleTime: 30_000,
   })
+  const reusableAssetsQuery = useQuery({
+    queryKey: ['content-assets', 'dashboard-reuse'],
+    queryFn: () => api.contentAssets.recommendations(5),
+    staleTime: 60_000,
+  })
   const activeProjects = useMemo(() => projects.filter((project) => project.status === 'active'), [projects])
   const selectedProject = activeProjects.find((project) => project.id === selectedProjectId) ?? activeProjects[0]
 	const usesImageSettings = Boolean(selectedProject)
@@ -414,6 +419,14 @@ export default function DashboardPage() {
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">{(dashboardTrendsQuery.data?.items || []).map((group) => <div key={group.platform}><p className="mb-1 text-xs font-medium text-muted-foreground">{group.label}{group.stale ? ' · stale' : ''}</p>{group.items.map((item) => <button key={item.title} type="button" className="block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted" onClick={() => navigate('/', { state: { project_id: selectedProjectId, trend_title: item.title, trend_url: item.url, content_origin: 'hot_search' } })}>{item.rank}. {item.title}</button>)}</div>)}</div>
         </section>
+
+        {reusableAssetsQuery.data?.items.length ? <section aria-label="值得继续复用的选题" className="mx-auto w-full max-w-3xl rounded-xl border border-border bg-card p-4">
+          <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium">值得继续复用的选题</p><p className="mt-1 text-xs text-muted-foreground">来自已研究或正在生产的选题资产，平台评分以 Server 分析快照为准。</p></div><Link to="/content-assets" className="text-xs font-medium text-primary hover:underline">查看全部</Link></div>
+          <div className="mt-3 divide-y divide-border">{reusableAssetsQuery.data.items.slice(0, 3).map((item) => <Link key={item.asset.id} to="/content-assets" className="block py-3 text-sm hover:text-primary">
+            <div className="flex items-center justify-between gap-3"><span className="min-w-0 truncate font-medium">{item.asset.title}</span><span className="shrink-0 text-xs text-muted-foreground">{item.recommended_platform || '待选择平台'} · {item.score ? (item.score.status === 'scored' ? `${item.score.score.toFixed(0)} 分` : item.score.status === 'exploratory' ? `探索信号 ${item.score.score.toFixed(0)}` : '数据不足') : '数据不足'}</span></div>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"><span>{item.recommendation_reason || '等待更多证据'}</span>{item.estimated_cost_credits > 0 && <span>预计 {item.estimated_cost_credits.toLocaleString()} 积分</span>}{item.evidence_as_of && <span>数据截至 {new Date(item.evidence_as_of).toLocaleDateString('zh-CN')}</span>}{item.automation_status && <span>{item.automation_status === 'running' ? '自动生产中' : item.automation_status === 'paused' ? '已暂停' : item.automation_status === 'completed' ? '已完成' : item.automation_stage || item.automation_status}</span>}</div>
+          </Link>)}</div>
+        </section> : null}
 
         {!prompt.trim() && (
           <section aria-label="创作灵感" className="mx-auto w-full max-w-3xl">

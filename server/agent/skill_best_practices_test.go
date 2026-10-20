@@ -166,10 +166,10 @@ func TestClaudeCodePluginAgentsDeclareOwnedSkills(t *testing.T) {
 	expected := map[string][]string{
 		"ecommerce":      {"content-tagging", "ecommerce-product-analysis", "ecommerce-copywriting", "ecommerce-visual-design", "ecommerce-platform-specs"},
 		"moments":        {"content-tagging", "moments"},
-		"hypit":          {"content-tagging", "project-profile-context"},
-		"montage":        {"content-tagging", "project-profile-context", "montage"},
-		"seednote":       {"content-tagging", "project-profile-context", "seednote-research", "seednote-writing", "seednote-visual-design"},
-		"wechat-article": {"content-tagging", "project-profile-context", "content-writing", "article-visual-design", "article-cover-design", "article-research"},
+		"hypit":          {"content-reuse", "content-tagging", "project-profile-context"},
+		"montage":        {"content-reuse", "content-tagging", "project-profile-context", "montage"},
+		"seednote":       {"content-reuse", "content-tagging", "project-profile-context", "seednote-research", "seednote-writing", "seednote-visual-design"},
+		"wechat-article": {"content-reuse", "content-tagging", "project-profile-context", "content-writing", "article-visual-design", "article-cover-design", "article-research"},
 	}
 
 	for agentName, want := range expected {
@@ -296,6 +296,7 @@ func TestArticleCodexAgentDeclaresOwnedSkills(t *testing.T) {
 		"portrait-cover-design",
 		"project-profile-context",
 		"content-tagging",
+		"content-reuse",
 	}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("%s skills = %q, want %q", path, got, want)

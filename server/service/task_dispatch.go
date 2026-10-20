@@ -529,7 +529,7 @@ func (s *TaskService) validateFrozenTaskImageCapability(ctx context.Context, tas
 
 func taskUsesFrozenImageCapability(taskType string) bool {
 	trimmed := strings.TrimSpace(taskType)
-	return trimmed != model.TaskTypeViralAnalysis && trimmed != model.TaskTypeProfileAnalysis && trimmed != model.TaskKindFeedbackAnalysis
+	return !model.IsContentPlanningTask(trimmed) && trimmed != model.TaskTypeViralAnalysis && trimmed != model.TaskTypeProfileAnalysis && trimmed != model.TaskKindFeedbackAnalysis
 }
 
 func resumeExecutionLineage(ctx context.Context, repo repository.Repository, task *model.Task) (*model.TaskExecution, string, bool, error) {

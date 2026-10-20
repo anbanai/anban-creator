@@ -178,6 +178,71 @@ skus:
     price_credits: 1200
     delivery: "viral_analysis_report_verified"
 
+  # Initial text-stage base tariffs equal the published same-profile text analysis SKU.
+  - id: "task.content_research.effective"
+    operation: "task.content_research"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.effective"
+    delivery: "content_research_artifacts_verified"
+  - id: "task.content_research.balanced"
+    operation: "task.content_research"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.balanced"
+    delivery: "content_research_artifacts_verified"
+  - id: "task.content_research.quality"
+    operation: "task.content_research"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.quality"
+    delivery: "content_research_artifacts_verified"
+  - id: "task.content_validation.effective"
+    operation: "task.content_validation"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.effective"
+    delivery: "content_validation_artifacts_verified"
+  - id: "task.content_validation.balanced"
+    operation: "task.content_validation"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.balanced"
+    delivery: "content_validation_artifacts_verified"
+  - id: "task.content_validation.quality"
+    operation: "task.content_validation"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.quality"
+    delivery: "content_validation_artifacts_verified"
+  - id: "task.content_script.effective"
+    operation: "task.content_script"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.effective"
+    delivery: "content_script_artifacts_verified"
+  - id: "task.content_script.balanced"
+    operation: "task.content_script"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.balanced"
+    delivery: "content_script_artifacts_verified"
+  - id: "task.content_script.quality"
+    operation: "task.content_script"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 1200
+    price_source: "task.viral-analysis.quality"
+    delivery: "content_script_artifacts_verified"
+
   - id: "task.profile-analysis.effective"
     operation: "task.profile_analysis"
     execution_profile: "effective"

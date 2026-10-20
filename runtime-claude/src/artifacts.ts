@@ -294,6 +294,7 @@ function contentTypeFor(path: string, header: Uint8Array): string {
     case ".md": return "text/markdown";
     case ".markdown": return "text/markdown";
     case ".json": return "application/json";
+    case ".srt": return "application/x-subrip";
     case ".png": return "image/png";
     case ".jpg": case ".jpeg": return "image/jpeg";
     case ".gif": return "image/gif";

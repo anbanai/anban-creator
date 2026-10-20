@@ -255,6 +255,9 @@ func (p *DeepSeekSearchProvider) Search(ctx context.Context, req WebSearchReques
 		return nil, fmt.Errorf("%w: response too large", ErrSearchProviderUnavailable)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return nil, &providerRequestRejectedError{cause: fmt.Errorf("%w: HTTP %d", ErrSearchProviderUnavailable, resp.StatusCode)}
+		}
 		return nil, fmt.Errorf("%w: HTTP %d", ErrSearchProviderUnavailable, resp.StatusCode)
 	}
 	var decoded struct {
@@ -436,6 +439,9 @@ func (p *DoubaoSearchProvider) Search(ctx context.Context, req WebSearchRequest)
 		return nil, fmt.Errorf("%w: read response failed", ErrSearchProviderUnavailable)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return nil, &providerRequestRejectedError{cause: fmt.Errorf("%w: HTTP %d", ErrSearchProviderUnavailable, resp.StatusCode)}
+		}
 		return nil, fmt.Errorf("%w: HTTP %d", ErrSearchProviderUnavailable, resp.StatusCode)
 	}
 	var envelope doubaoSearchEnvelope
@@ -443,7 +449,7 @@ func (p *DoubaoSearchProvider) Search(ctx context.Context, req WebSearchRequest)
 		return nil, fmt.Errorf("%w: invalid response", ErrSearchProviderUnavailable)
 	}
 	if hasJSONValue(envelope.ResponseMetadata.Error) && !isJSONNull(envelope.ResponseMetadata.Error) {
-		return nil, fmt.Errorf("%w: provider request rejected", ErrSearchProviderUnavailable)
+		return nil, &providerRequestRejectedError{cause: fmt.Errorf("%w: provider request rejected", ErrSearchProviderUnavailable)}
 	}
 	if !hasJSONValue(envelope.Result) || isJSONNull(envelope.Result) {
 		return nil, fmt.Errorf("%w: missing search result", ErrSearchProviderUnavailable)
@@ -662,9 +668,17 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 				if err := json.Unmarshal(existing.ResponseSnapshot, &replay); err != nil {
 					return nil, fmt.Errorf("decode search operation response: %w", err)
 				}
+				if err := s.wallet.reconcileReuseOperationHold(ctx, req.UserID, req.TaskID); err != nil {
+					return nil, fmt.Errorf("reconcile search operation: %w", err)
+				}
 				return &replay, nil
 			case model.SearchOperationRunning:
 				if existing.LeaseExpiresAt != nil && existing.LeaseExpiresAt.After(time.Now().UTC()) {
+					return nil, ErrSearchOperationInProgress
+				}
+				if stopped, err := s.wallet.stopStaleReuseOperation(ctx, req.UserID, req.TaskID); err != nil {
+					return nil, err
+				} else if stopped {
 					return nil, ErrSearchOperationInProgress
 				}
 			}
@@ -674,11 +688,16 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 		return nil, errors.New("search billing is not configured")
 	}
 	catalogID := s.catalog.CatalogID()
-	quote, err := s.catalog.CreateQuote(ctx, QuoteRequest{UserID: req.UserID, CatalogID: catalogID, Operation: "mcp.search_web", Route: "search.web", SKUID: "mcp.search_web", RequestFingerprint: fingerprint, IdempotencyScope: "mcp.search_quote", IdempotencyKey: fingerprint})
+	reuseTask, billingKey, err := s.wallet.reuseStandaloneOperationIdentity(ctx, req.UserID, req.TaskID, "mcp.search_charge", fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	quote, err := s.catalog.CreateQuote(ctx, QuoteRequest{UserID: req.UserID, CatalogID: catalogID, Operation: "mcp.search_web", Route: "search.web", SKUID: "mcp.search_web", RequestFingerprint: fingerprint, IdempotencyScope: "mcp.search_quote", IdempotencyKey: billingKey})
 	if err != nil {
 		return nil, fmt.Errorf("quote search: %w", err)
 	}
-	if _, err := s.wallet.ChargeStandaloneOperation(ctx, OperationChargeRequest{UserID: req.UserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID, ResourceType: "search", ResourceID: fingerprint, RequestFingerprint: fingerprint, IdempotencyScope: "mcp.search_charge", IdempotencyKey: fingerprint, ActorType: "managed_agent", ActorID: req.ExecutionID, SourceService: "mcp.search_web", TaskID: req.TaskID}); err != nil {
+	charge, err := s.wallet.ChargeStandaloneOperation(ctx, OperationChargeRequest{UserID: req.UserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID, ResourceType: "search", ResourceID: fingerprint, RequestFingerprint: fingerprint, IdempotencyScope: "mcp.search_charge", IdempotencyKey: billingKey, ActorType: "managed_agent", ActorID: req.ExecutionID, SourceService: "mcp.search_web", TaskID: req.TaskID})
+	if err != nil {
 		return nil, fmt.Errorf("charge search: %w", err)
 	}
 	attemptID := "search-attempt-" + uuid.NewString()
@@ -696,6 +715,9 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 				if err := json.Unmarshal(operation.ResponseSnapshot, &replay); err != nil {
 					return nil, fmt.Errorf("decode search operation response: %w", err)
 				}
+				if err := s.wallet.reconcileReuseOperationHold(ctx, req.UserID, req.TaskID); err != nil {
+					return nil, fmt.Errorf("reconcile search operation: %w", err)
+				}
 				return &replay, nil
 			}
 			return nil, ErrSearchOperationInProgress
@@ -704,6 +726,9 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 	result, err := s.provider.Search(ctx, req.Request)
 	if err != nil {
 		s.recordSearchProviderCost(ctx, req, fingerprint, attemptID, "provider_error", nil)
+		if failureErr := s.wallet.failReuseStandaloneOperation(ctx, reuseTask, charge, err); failureErr != nil {
+			return nil, errors.Join(err, failureErr)
+		}
 		if operation != nil {
 			_ = s.operations.MarkFailed(ctx, operation.ID, attemptID, "provider_unavailable", time.Now().UTC())
 		}
@@ -711,6 +736,9 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 	}
 	if result == nil {
 		err = fmt.Errorf("%w: provider returned an empty response", ErrSearchProviderUnavailable)
+		if failureErr := s.wallet.failReuseStandaloneOperation(ctx, reuseTask, charge, err); failureErr != nil {
+			return nil, errors.Join(err, failureErr)
+		}
 		s.recordSearchProviderCost(ctx, req, fingerprint, attemptID, "provider_error", nil)
 		if operation != nil {
 			_ = s.operations.MarkFailed(ctx, operation.ID, attemptID, "provider_unavailable", time.Now().UTC())
@@ -725,6 +753,9 @@ func (s *SearchService) Search(ctx context.Context, req SearchOperationRequest) 
 		}
 		if markErr := s.operations.MarkSucceeded(ctx, operation.ID, attemptID, result.ProviderRequestID, payload, time.Now().UTC()); markErr != nil {
 			return nil, fmt.Errorf("persist search operation response: %w", markErr)
+		}
+		if err := s.wallet.reconcileReuseOperationHold(ctx, req.UserID, req.TaskID); err != nil {
+			return nil, fmt.Errorf("reconcile search operation: %w", err)
 		}
 	}
 	return result, nil

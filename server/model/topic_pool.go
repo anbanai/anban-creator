@@ -15,6 +15,7 @@ type TopicPool struct {
 	Topic     string     `gorm:"type:varchar(500);not null" json:"topic"`
 	Status    string     `gorm:"type:varchar(20);default:'unused'" json:"status"`
 	TaskID    *string    `gorm:"type:char(36)" json:"task_id,omitempty"`
+	ContentAssetID *string    `gorm:"type:char(36);index" json:"content_asset_id,omitempty"`
 	UsedAt    *time.Time `json:"used_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`

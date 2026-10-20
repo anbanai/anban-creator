@@ -1029,6 +1029,7 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 	root := repositoryRoot(t)
 	got := trackedDockerfiles(t, root)
 	want := []string{
+		"deploy/docker/Dockerfile.agent-content-planning",
 		"deploy/docker/Dockerfile.agent-ecommerce",
 		"deploy/docker/Dockerfile.agent-feedback-analysis",
 		"deploy/docker/Dockerfile.agent-hypit",

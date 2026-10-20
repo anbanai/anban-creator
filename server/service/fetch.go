@@ -66,21 +66,36 @@ func (s *FetchService) Fetch(ctx context.Context, req FetchOperationRequest) (*P
 				if err := json.Unmarshal(existing.ResponseSnapshot, &replay); err != nil {
 					return nil, fmt.Errorf("decode fetch operation response: %w", err)
 				}
+				if err := s.wallet.reconcileReuseOperationHold(ctx, req.UserID, req.TaskID); err != nil {
+					return nil, fmt.Errorf("reconcile fetch operation: %w", err)
+				}
 				return &replay, nil
 			}
 			if existing.Status == model.SearchOperationRunning && existing.LeaseExpiresAt != nil && existing.LeaseExpiresAt.After(time.Now().UTC()) {
 				return nil, ErrSearchOperationInProgress
+			}
+			if existing.Status == model.SearchOperationRunning {
+				if stopped, err := s.wallet.stopStaleReuseOperation(ctx, req.UserID, req.TaskID); err != nil {
+					return nil, err
+				} else if stopped {
+					return nil, ErrSearchOperationInProgress
+				}
 			}
 		}
 	}
 	if s.catalog == nil || s.wallet == nil {
 		return nil, errors.New("fetch billing is not configured")
 	}
-	quote, err := s.catalog.CreateQuote(ctx, QuoteRequest{UserID: req.UserID, CatalogID: s.catalog.CatalogID(), Operation: "mcp.fetch_web_page", Route: "search.fetch", SKUID: "mcp.fetch_web_page", RequestFingerprint: fingerprint, IdempotencyScope: "mcp.fetch_quote", IdempotencyKey: fingerprint})
+	reuseTask, billingKey, err := s.wallet.reuseStandaloneOperationIdentity(ctx, req.UserID, req.TaskID, "mcp.fetch_charge", fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	quote, err := s.catalog.CreateQuote(ctx, QuoteRequest{UserID: req.UserID, CatalogID: s.catalog.CatalogID(), Operation: "mcp.fetch_web_page", Route: "search.fetch", SKUID: "mcp.fetch_web_page", RequestFingerprint: fingerprint, IdempotencyScope: "mcp.fetch_quote", IdempotencyKey: billingKey})
 	if err != nil {
 		return nil, fmt.Errorf("quote fetch: %w", err)
 	}
-	if _, err := s.wallet.ChargeStandaloneOperation(ctx, OperationChargeRequest{UserID: req.UserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID, ResourceType: "fetch", ResourceID: fingerprint, RequestFingerprint: fingerprint, IdempotencyScope: "mcp.fetch_charge", IdempotencyKey: fingerprint, ActorType: "managed_agent", ActorID: req.ExecutionID, SourceService: "mcp.fetch_web_page", TaskID: req.TaskID}); err != nil {
+	charge, err := s.wallet.ChargeStandaloneOperation(ctx, OperationChargeRequest{UserID: req.UserID, QuoteID: quote.ID, CatalogID: quote.CatalogID, SKUID: quote.SKUID, ResourceType: "fetch", ResourceID: fingerprint, RequestFingerprint: fingerprint, IdempotencyScope: "mcp.fetch_charge", IdempotencyKey: billingKey, ActorType: "managed_agent", ActorID: req.ExecutionID, SourceService: "mcp.fetch_web_page", TaskID: req.TaskID})
+	if err != nil {
 		return nil, fmt.Errorf("charge fetch: %w", err)
 	}
 	attemptID := "fetch-attempt-" + uuid.NewString()
@@ -98,6 +113,9 @@ func (s *FetchService) Fetch(ctx context.Context, req FetchOperationRequest) (*P
 				if err := json.Unmarshal(operation.ResponseSnapshot, &replay); err != nil {
 					return nil, fmt.Errorf("decode fetch operation response: %w", err)
 				}
+				if err := s.wallet.reconcileReuseOperationHold(ctx, req.UserID, req.TaskID); err != nil {
+					return nil, fmt.Errorf("reconcile fetch operation: %w", err)
+				}
 				return &replay, nil
 			}
 			return nil, ErrSearchOperationInProgress
@@ -106,6 +124,9 @@ func (s *FetchService) Fetch(ctx context.Context, req FetchOperationRequest) (*P
 	result, err := s.provider.Fetch(ctx, req.Request)
 	if err != nil {
 		s.recordFetchCost(ctx, req, fingerprint, attemptID, "provider_error", nil)
+		if failureErr := s.wallet.failReuseStandaloneOperation(ctx, reuseTask, charge, err); failureErr != nil {
+			return nil, errors.Join(err, failureErr)
+		}
 		if operation != nil {
 			_ = s.operations.MarkFailed(ctx, operation.ID, attemptID, "provider_unavailable", time.Now().UTC())
 		}
@@ -113,6 +134,9 @@ func (s *FetchService) Fetch(ctx context.Context, req FetchOperationRequest) (*P
 	}
 	if result == nil || strings.TrimSpace(result.ContentMarkdown) == "" {
 		err = fmt.Errorf("%w: provider returned no markdown content", ErrPageFetchUnavailable)
+		if failureErr := s.wallet.failReuseStandaloneOperation(ctx, reuseTask, charge, err); failureErr != nil {
+			return nil, errors.Join(err, failureErr)
+		}
 		s.recordFetchCost(ctx, req, fingerprint, attemptID, "provider_error", nil)
 		if operation != nil {
 			_ = s.operations.MarkFailed(ctx, operation.ID, attemptID, "provider_unavailable", time.Now().UTC())
@@ -127,6 +151,9 @@ func (s *FetchService) Fetch(ctx context.Context, req FetchOperationRequest) (*P
 		}
 		if err := s.operations.MarkSucceeded(ctx, operation.ID, attemptID, result.ProviderRequestID, payload, time.Now().UTC()); err != nil {
 			return nil, fmt.Errorf("persist fetch operation response: %w", err)
+		}
+		if err := s.wallet.reconcileReuseOperationHold(ctx, req.UserID, req.TaskID); err != nil {
+			return nil, fmt.Errorf("reconcile fetch operation: %w", err)
 		}
 	}
 	return result, nil

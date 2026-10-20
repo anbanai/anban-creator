@@ -11,6 +11,7 @@ SEEDNOTE_AGENT_IMAGE ?= creator-agent-seednote:latest
 MONTAGE_AGENT_IMAGE ?= creator-agent-montage:latest
 MOMENTS_AGENT_IMAGE ?= creator-agent-moments:latest
 ECOMMERCE_AGENT_IMAGE ?= creator-agent-ecommerce:latest
+CONTENT_PLANNING_AGENT_IMAGE ?= creator-agent-content-planning:latest
 PROFILE_ANALYSIS_AGENT_IMAGE ?= creator-agent-profile-analysis:latest
 FEEDBACK_ANALYSIS_AGENT_IMAGE ?= creator-agent-feedback-analysis:latest
 WHITEBOARD_ANIMATION_AGENT_IMAGE ?= creator-agent-whiteboard-animation:latest
@@ -371,3 +372,7 @@ help:
 	@echo "  make docker-images      - Build all supported images"
 	@echo "  make docker-image       - Build agent image (alias)"
 	@echo "  make agent-runtime-release-manifest - Validate immutable Server/Agent images and write release/agent-runtime-manifest.json"
+
+.PHONY: docker-content-planning-agent-image
+docker-content-planning-agent-image: docker-agent-build-check
+	docker build -f deploy/docker/Dockerfile.agent-content-planning -t $(CONTENT_PLANNING_AGENT_IMAGE) .

@@ -81,15 +81,29 @@ type TaskService struct {
 	// persistTimeout bounds the post-execution DB writes (result/files/status),
 	// decoupled from the execution ctx so completed work is saved even on overrun.
 	// Default 10m; override via SetExecutionTimeouts.
-	persistTimeout    time.Duration
-	nasResumeEnabled  bool
-	taskWorkspace     TaskWorkspaceLifecycle
-	referenceAssets   *ReferenceAssetService
-	providerCostSvc   *ProviderCostService
-	billingWalletSvc  *BillingWalletService
-	billingCatalogSvc *BillingCatalogService
-	agentProfiles     *AgentProfileRegistry
-	imageCapabilities *ImageCapabilityResolver
+	persistTimeout       time.Duration
+	nasResumeEnabled     bool
+	taskWorkspace        TaskWorkspaceLifecycle
+	referenceAssets      *ReferenceAssetService
+	providerCostSvc      *ProviderCostService
+	billingWalletSvc     *BillingWalletService
+	billingCatalogSvc    *BillingCatalogService
+	agentProfiles        *AgentProfileRegistry
+	imageCapabilities    *ImageCapabilityResolver
+	reuseRunFinalizer    func(context.Context, *model.Task) error
+	researchJobFinalizer func(context.Context, *model.Task) error
+}
+
+func (s *TaskService) SetResearchJobFinalizer(finalizer func(context.Context, *model.Task) error) {
+	if s != nil {
+		s.researchJobFinalizer = finalizer
+	}
+}
+
+func (s *TaskService) SetReuseRunFinalizer(finalizer func(context.Context, *model.Task) error) {
+	if s != nil {
+		s.reuseRunFinalizer = finalizer
+	}
 }
 
 type TaskWorkspaceLifecycle interface {
@@ -398,6 +412,11 @@ type CreateManualParams struct {
 	TaskKind          string
 	RequestedTaskType string
 	ContentOrigin     string
+	ContentAssetID    string
+	SourceContentRef  string
+	ReuseRunID        string
+	ReuseStageID      string
+	ResearchJobID     string
 	// FrozenTaskType and PreserveFrozenConfig are internal clone controls. They
 	// keep a clone on the source task contract even when the project changes.
 	FrozenTaskType       string
@@ -683,6 +702,15 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	if err != nil {
 		return nil, err
 	}
+	if model.IsContentPlanningTask(taskType) {
+		if err := s.validatePlanningAdmission(ctx, p, project, taskType, agentInput); err != nil {
+			return nil, err
+		}
+		quantity = 1
+		if err := s.freezePlanningInternalSources(ctx, p.UserID, agentInput); err != nil {
+			return nil, err
+		}
+	}
 	// The profile revision is Server-owned admission state. Inject it after
 	// Pack schema validation so the frozen task input carries the exact
 	// revision reserved by this transaction without allowing callers to forge
@@ -817,6 +845,10 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 	for i := 0; i < quantity; i++ {
 		taskID := generateTaskID()
+		var reuseRunKey *string
+		if reuseRunID := strings.TrimSpace(p.ReuseRunID); reuseRunID != "" && strings.TrimSpace(p.ReuseStageID) == "" {
+			reuseRunKey = &reuseRunID
+		}
 
 		// Topic pool: when the caller supplied no prompt and the project is a
 		// topic-driven platform (article/seednote/moments), claim the next unused topic
@@ -872,6 +904,12 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 			Status:                   model.TaskStatusPending,
 			Prompt:                   taskPrompt,
 			ContentOrigin:            p.ContentOrigin,
+			ContentAssetID:           strings.TrimSpace(p.ContentAssetID),
+			SourceContentRef:         strings.TrimSpace(p.SourceContentRef),
+			ReuseRunID:               strings.TrimSpace(p.ReuseRunID),
+			ReuseStageID:             strings.TrimSpace(p.ReuseStageID),
+			ResearchJobID:            strings.TrimSpace(p.ResearchJobID),
+			ReuseRunKey:              reuseRunKey,
 			ImageRatio:               effectiveImageRatio,
 			ImageCapabilityKey:       effectiveImageCapabilityKey,
 			ReferenceImageAssetID:    effectiveReferenceImageAssetID,
@@ -1032,6 +1070,22 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		return nil
 	}
 	createTask := func(repo repository.Repository, task *model.Task) error {
+		if task.ResearchJobID != "" {
+			if err := repo.ContentAssets().BindResearchJobTask(ctx, task); err != nil {
+				return err
+			}
+		}
+		if task.ReuseRunID != "" {
+			var err error
+			if task.ReuseStageID != "" {
+				err = repo.ContentAssets().BindReuseStageTask(ctx, task)
+			} else {
+				err = repo.ContentAssets().BindReuseTask(ctx, task)
+			}
+			if err != nil {
+				return err
+			}
+		}
 		if err := repo.Tasks().Create(ctx, task); err != nil {
 			return err
 		}
@@ -1161,8 +1215,23 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 				if quote.UserID != item.task.UserID || quote.RequestFingerprint != item.fingerprint {
 					return ErrBillingQuoteMismatch
 				}
+				expectedOperation := "task.profile_analysis"
+				if item.task.ReuseRunID != "" {
+					run, err := tx.ContentAssets().FindReuseRunByID(ctx, item.task.ReuseRunID)
+					if err != nil {
+						return err
+					}
+					if run.BillingQuoteID != quote.ID || run.BillingFingerprint != item.fingerprint {
+						return ErrBillingQuoteMismatch
+					}
+					var supported bool
+					expectedOperation, supported = agentTaskOperation(item.task.Type)
+					if !supported {
+						return ErrBillingQuoteMismatch
+					}
+				}
 				var pinned billing.SKUConfig
-				if err := json.Unmarshal(quote.SKUSnapshot, &pinned); err != nil || pinned.Operation != "task.profile_analysis" || pinned.ExecutionProfile != item.task.ExecutionProfile {
+				if err := json.Unmarshal(quote.SKUSnapshot, &pinned); err != nil || pinned.Operation != expectedOperation || pinned.ExecutionProfile != item.task.ExecutionProfile {
 					return ErrBillingQuoteMismatch
 				}
 				item.quote = quote
