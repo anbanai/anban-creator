@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,15 +13,22 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/storage"
+	"gorm.io/gorm"
 )
 
 type ContentMetadataService struct {
 	repo   repository.Repository
 	logger *zerolog.Logger
+	store  storage.Provider
 }
 
-func NewContentMetadataService(repo repository.Repository, logger *zerolog.Logger) *ContentMetadataService {
-	return &ContentMetadataService{repo: repo, logger: logger}
+func NewContentMetadataService(repo repository.Repository, logger *zerolog.Logger, stores ...storage.Provider) *ContentMetadataService {
+	var store storage.Provider
+	if len(stores) > 0 {
+		store = stores[0]
+	}
+	return &ContentMetadataService{repo: repo, logger: logger, store: store}
 }
 
 type ContentMetadataInput struct {
@@ -99,7 +107,8 @@ func (s *ContentMetadataService) submit(ctx context.Context, input ContentMetada
 		return nil, fmt.Errorf("schema_version and taxonomy_version must be %s", model.ContentTaxonomyVersion)
 	}
 	payload.Tags = nil
-	for _, subject := range payload.Subjects {
+	for i := range payload.Subjects {
+		subject := &payload.Subjects[i]
 		if strings.TrimSpace(subject.ArtifactRole) == "" {
 			return nil, fmt.Errorf("artifact_role is required")
 		}
@@ -601,10 +610,90 @@ func normalizeTagValue(value string) string {
 
 func (s *ContentMetadataService) RecomputeTags(ctx context.Context, authenticatedUserID, taskID, executionID string) (*model.ContentMetadataReport, error) {
 	report, err := s.Find(ctx, taskID, executionID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if report != nil {
+		return s.submit(ctx, ContentMetadataInput{AuthenticatedUserID: authenticatedUserID, TaskID: report.TaskID, ExecutionID: report.ExecutionID, TaxonomyVersion: report.TaxonomyVersion, SourceDigest: report.SourceDigest, RawMetadata: report.RawMetadata}, true, false)
+	}
+
+	metadata, sourceDigest, err := s.loadHistoricalContentTags(ctx, taskID, executionID)
 	if err != nil {
 		return nil, err
 	}
-	return s.submit(ctx, ContentMetadataInput{AuthenticatedUserID: authenticatedUserID, TaskID: report.TaskID, ExecutionID: report.ExecutionID, TaxonomyVersion: report.TaxonomyVersion, SourceDigest: report.SourceDigest, RawMetadata: report.RawMetadata}, true, false)
+	return s.submit(ctx, ContentMetadataInput{AuthenticatedUserID: authenticatedUserID, TaskID: taskID, ExecutionID: executionID, TaxonomyVersion: model.ContentTaxonomyVersion, SourceDigest: sourceDigest, RawMetadata: metadata}, true, false)
+}
+
+const maxHistoricalContentTagsBytes = 2 * 1024 * 1024
+
+// loadHistoricalContentTags rebuilds the completion handoff for executions
+// whose first metadata submission failed before a report was persisted.
+func (s *ContentMetadataService) loadHistoricalContentTags(ctx context.Context, taskID, executionID string) ([]byte, string, error) {
+	if s.store == nil {
+		return nil, "", fmt.Errorf("content metadata storage provider is unavailable")
+	}
+	execution, err := s.repo.TaskExecutions().FindByID(ctx, strings.TrimSpace(executionID))
+	if err != nil || execution == nil || execution.TaskID != strings.TrimSpace(taskID) {
+		return nil, "", fmt.Errorf("execution does not belong to task")
+	}
+	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, execution.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("find content tags artifact: %w", err)
+	}
+	var tagsFile *model.TaskFile
+	artifactPaths := []string{"output/completion-metadata.json", "output/content-tags.json"}
+	for _, artifactPath := range artifactPaths {
+		for _, file := range files {
+			if file == nil {
+				continue
+			}
+			if file.FilePath == artifactPath {
+				tagsFile = file
+				break
+			}
+		}
+		if tagsFile != nil {
+			break
+		}
+	}
+	if tagsFile == nil || strings.TrimSpace(tagsFile.OSSKey) == "" {
+		return nil, "", fmt.Errorf("content tags artifact not found")
+	}
+	if provider := strings.TrimSpace(tagsFile.StorageProvider); provider != "" && provider != s.store.Name() {
+		return nil, "", fmt.Errorf("content tags artifact storage provider %q is unavailable", provider)
+	}
+	raw, err := storage.ReadObject(ctx, s.store, tagsFile.OSSKey, maxHistoricalContentTagsBytes)
+	if err != nil {
+		return nil, "", fmt.Errorf("read content tags artifact: %w", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, "", fmt.Errorf("decode content tags artifact: %w", err)
+	}
+	if payload["schema_version"] != model.ContentTaxonomyVersion || payload["taxonomy_version"] != model.ContentTaxonomyVersion {
+		return nil, "", fmt.Errorf("content tags artifact has unsupported schema or taxonomy version")
+	}
+	if _, ok := payload["task_id"]; !ok {
+		payload["task_id"] = taskID
+	}
+	if _, ok := payload["execution_id"]; !ok {
+		payload["execution_id"] = executionID
+	}
+	if _, ok := payload["tagging_status"]; !ok {
+		if status, exists := payload["status"]; exists {
+			payload["tagging_status"] = status
+		} else {
+			payload["tagging_status"] = model.ContentMetadataSucceeded
+		}
+	}
+	if _, ok := payload["feedback_status"]; !ok {
+		payload["feedback_status"] = model.ContentMetadataSucceeded
+	}
+	metadata, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", fmt.Errorf("encode historical content metadata: %w", err)
+	}
+	return metadata, tagsFile.ContentHash, nil
 }
 
 func (s *ContentMetadataService) RecomputeFeedback(ctx context.Context, authenticatedUserID, taskID, executionID string) (*model.ContentMetadataReport, error) {
