@@ -11,6 +11,12 @@ file, `CLAUDE.md`, project profiles, prompts, or an active generation context.
 
 This file provides guidance to AI coding assistants when working in this repository.
 
+## Change Isolation And Worktrees
+
+- Any large or potentially conflicting change MUST use an isolated Git worktree before the first code edit. Treat multi-file, cross-area, API/schema/database/configuration, dependency/build/deployment, or uncertain-scope work as large.
+- Before large work, detect whether the current checkout is already a linked worktree. Otherwise create or enter a task worktree (prefer the host's native tool; otherwise use the ignored `.worktrees/` directory). Do not start large work in the shared checkout.
+- Preserve unrelated changes from other sessions; never reset, clean, overwrite, or copy them. One-file, low-conflict documentation or formatting edits may stay in the current checkout after checking status, but work that grows beyond that scope must move to a worktree.
+
 ## Project Overview
 
 **Anban 自媒体智能创作助手** is a Studio-first content creation platform for WeChat articles, Seednote-style notes, live slicing, AI image work, and agent-assisted publishing workflows.
