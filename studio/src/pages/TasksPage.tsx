@@ -57,13 +57,6 @@ function TaskStatusMark({ status, className = 'size-4' }: { status: TaskStatus; 
   return <Icon aria-hidden="true" className={`${className} shrink-0 ${status === 'completed' ? 'text-emerald-600' : status === 'failed' ? 'text-destructive' : status === 'running' ? 'animate-spin text-primary motion-reduce:animate-none' : 'text-muted-foreground'}`} />
 }
 
-function taskStatusTextClass(status: TaskStatus) {
-  if (status === 'completed') return 'text-emerald-700 dark:text-emerald-300'
-  if (status === 'failed') return 'text-destructive'
-  if (status === 'running') return 'text-primary'
-  return 'text-muted-foreground'
-}
-
 export type TaskActionDefinition = {
   id: string
   label: string
@@ -122,7 +115,7 @@ export function TaskActionToolbar({
   const orderedActions = [...actions].sort((a, b) => b.priority - a.priority)
 
   return (
-    <div data-testid="task-action-rail" data-status={status} role="group" aria-label="作品操作" className="flex max-w-full basis-full shrink-0 flex-wrap items-center justify-end gap-1 sm:basis-auto sm:border-l sm:border-border/70 sm:pl-3">
+    <div data-testid="task-action-rail" data-status={status} role="group" aria-label="作品操作" className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
       {orderedActions.map((action) => <TaskActionControl key={action.id} action={action} />)}
     </div>
   )
@@ -752,47 +745,51 @@ export default function TasksPage() {
                         </div>
                       </div>
                     </Link>
-                    <TaskActionToolbar
-                      status={task.status}
-                      actions={[
-                        ...(task.status === 'failed' ? [{
-                          id: 'retry',
-                          label: '重试',
-                          ariaLabel: `重试作品：${task.title || '未命名作品'}`,
-                          priority: 100,
-                          icon: <RotateCcw className="size-4" />,
-                          className: 'font-semibold text-primary hover:text-primary',
-                          onSelect: () => setRetrySourceTask(task),
-                        }] : []),
-                        ...(task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? [{
-                          id: 'analytics',
-                          label: '查看内容分析',
-                          ariaLabel: `查看内容分析：${task.title || '未命名作品'}`,
-                          priority: 90,
-                          icon: <BarChart3 className="size-4" />,
-                          href: taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type),
-                        }] : []),
-                        ...(task.status === 'completed' ? [{
-                          id: 'download',
-                          label: '下载作品文件',
-                          ariaLabel: `下载作品：${task.title || '未命名作品'}`,
-                          priority: 80,
-                          icon: <Download className="size-4" />,
-                          loading: downloadingTaskIds.has(task.id),
-                          onSelect: () => downloadTaskMutation.mutate(task),
-                        }] : []),
-                      ]}
-                    />
-                    <div
-                      data-testid="task-status-mark"
-                      data-status={task.status}
-                      role="img"
-                      aria-label={`任务状态：${taskStatusLabel[task.status] || task.status}`}
-                      className={`ml-auto flex min-h-11 w-20 shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-semibold ${taskStatusTextClass(task.status)}`}
-                      title={taskStatusLabel[task.status] || task.status}
-                    >
-                      <TaskStatusMark status={task.status} className="size-4" />
-                      <span>{taskStatusLabel[task.status] || task.status}</span>
+                    <div className="ml-auto flex max-w-full basis-full shrink-0 items-center justify-end gap-2 sm:basis-auto sm:gap-3">
+                      <TaskActionToolbar
+                        status={task.status}
+                        actions={[
+                          ...(task.status === 'failed' ? [{
+                            id: 'retry',
+                            label: '重试',
+                            ariaLabel: `重试作品：${task.title || '未命名作品'}`,
+                            priority: 100,
+                            icon: <RotateCcw className="size-4" />,
+                            className: 'font-semibold text-primary hover:text-primary',
+                            onSelect: () => setRetrySourceTask(task),
+                          }] : []),
+                          ...(task.status === 'completed' && (task.type === 'wechat-article' || task.type === 'seednote') ? [{
+                            id: 'analytics',
+                            label: '查看内容分析',
+                            ariaLabel: `查看内容分析：${task.title || '未命名作品'}`,
+                            priority: 90,
+                            icon: <BarChart3 className="size-4" />,
+                            href: taskContentAnalyticsHref(task.project_id, task.id, task.channel || task.type),
+                          }] : []),
+                          ...(task.status === 'completed' ? [{
+                            id: 'download',
+                            label: '下载作品文件',
+                            ariaLabel: `下载作品：${task.title || '未命名作品'}`,
+                            priority: 80,
+                            icon: <Download className="size-4" />,
+                            loading: downloadingTaskIds.has(task.id),
+                            onSelect: () => downloadTaskMutation.mutate(task),
+                          }] : []),
+                        ]}
+                      />
+                      <div
+                        data-testid="task-status-mark"
+                        data-status={task.status}
+                        role="img"
+                        aria-label={`任务状态：${taskStatusLabel[task.status] || task.status}`}
+                        className={cn(
+                          'flex size-11 shrink-0 items-center justify-center',
+                          (task.status === 'failed' || task.status === 'completed') && 'border-l border-border/70',
+                        )}
+                        title={taskStatusLabel[task.status] || task.status}
+                      >
+                        <TaskStatusMark status={task.status} className="size-4" />
+                      </div>
                     </div>
                   </div>
                 </div>

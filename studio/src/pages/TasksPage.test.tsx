@@ -512,7 +512,10 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(screen.getAllByTestId('task-status-mark')).toHaveLength(2)
     expect(screen.getAllByTestId('task-status-mark').every((node) => node.className.includes('items-center'))).toBe(true)
     expect(screen.getAllByTestId('task-action-rail')).toHaveLength(2)
-    expect(screen.getAllByTestId('task-action-rail').every((node) => node.className.includes('sm:border-l'))).toBe(true)
+    for (const rail of screen.getAllByTestId('task-action-rail')) {
+      expect(rail.className).not.toMatch(/border-l/)
+      expect(rail.parentElement).toHaveClass('basis-full', 'sm:basis-auto', 'justify-end')
+    }
     expect(screen.getByRole('button', { name: '重试作品：失败文章' })).not.toHaveTextContent('重试')
   })
 
@@ -526,11 +529,15 @@ describe('TasksPage URL-driven recovery filters', () => {
 
     const statusMarks = await screen.findAllByTestId('task-status-mark')
     expect(statusMarks[0]).toHaveAttribute('data-status', 'failed')
-    expect(statusMarks[0]).toHaveClass('w-20')
+    expect(statusMarks[0]).toHaveAttribute('aria-label', '任务状态：失败')
+    expect(statusMarks[0]).toHaveTextContent(/^$/)
+    expect(statusMarks[0]).toHaveClass('size-11', 'border-l')
     expect(statusMarks[0]).not.toHaveClass('rounded-lg', 'border', 'shadow-sm')
     expect(statusMarks[0].className).not.toMatch(/(?:^|\s)bg-/)
     expect(statusMarks[1]).toHaveAttribute('data-status', 'completed')
-    expect(statusMarks[1]).toHaveClass('w-20')
+    expect(statusMarks[1]).toHaveAttribute('aria-label', '任务状态：已完成')
+    expect(statusMarks[1]).toHaveTextContent(/^$/)
+    expect(statusMarks[1]).toHaveClass('size-11', 'border-l')
     expect(statusMarks[1]).not.toHaveClass('rounded-lg', 'border', 'shadow-sm')
     expect(statusMarks[1].className).not.toMatch(/(?:^|\s)bg-/)
 
@@ -543,6 +550,23 @@ describe('TasksPage URL-driven recovery filters', () => {
     expect(actionRails[1]).toHaveClass('gap-1')
     expect(actionRails[1]).not.toHaveClass('rounded-lg', 'border', 'bg-muted/30')
     expect(actionRails[1].nextElementSibling).toBe(statusMarks[1])
+  })
+
+  it.each(['pending', 'running', 'cancelled'] as const)('keeps %s status accessible without an orphan separator', async (status) => {
+    vi.mocked(api.tasks.list).mockResolvedValue({
+      items: [{ ...fixtures.failedTask, status } as Task],
+      total: 1,
+    })
+
+    renderTasksPage()
+
+    const mark = await screen.findByTestId('task-status-mark')
+    expect(mark).toHaveAttribute('data-status', status)
+    expect(mark).toHaveAccessibleName(/^任务状态：.+/)
+    expect(mark).toHaveAttribute('title')
+    expect(mark).toHaveTextContent(/^$/)
+    expect(mark).not.toHaveClass('border-l')
+    expect(screen.queryByTestId('task-action-rail')).not.toBeInTheDocument()
   })
 
   it('keeps row action controls transparent and borderless', async () => {
