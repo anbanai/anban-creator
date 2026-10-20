@@ -839,7 +839,7 @@ func main() {
 			TopicPoolSvc:           topicPoolSvc,
 			TrendSvc:               trendSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
-			ContentMetadataSvc:     service.NewContentMetadataService(repo, log),
+			ContentMetadataSvc:     service.NewContentMetadataService(repo, log, store),
 			AgentProjectProfileSvc: service.NewAgentProjectProfileService(projectSvc, taskSvc, resources.Manager(), cfg.Montage, imageCapabilityResolver, repo),
 			ArticleScoreSvc:        service.NewArticleScoreService(),
 			SeednoteExportSvc:      service.NewSeednoteExportService(),
