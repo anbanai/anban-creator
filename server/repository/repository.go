@@ -26,6 +26,8 @@ type Repository interface {
 	ProjectProfileRevisions() ProjectProfileRevisionRepository
 	ProjectProfileStates() ProjectProfileStateRepository
 	InteractiveCommitReceipts() InteractiveCommitReceiptRepository
+	AssistantCheckpoints() AssistantCheckpointRepository
+	AssistantSessions() AssistantSessionRepository
 	ProjectChannelConfigs() ProjectChannelConfigRepository
 	APIKeys() APIKeyRepository
 	Feedbacks() FeedbackRepository
@@ -130,10 +132,12 @@ type PlanEntryRepository interface {
 type TaskRepository interface {
 	Create(ctx context.Context, task *model.Task) error
 	FindByID(ctx context.Context, id string) (*model.Task, error)
+	FindByAssistantCheckpointID(ctx context.Context, userID, checkpointID string) (*model.Task, error)
 	FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error)
 	FindByUserID(ctx context.Context, userID string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
 	FindLatestByPlanIDs(ctx context.Context, userID string, planIDs []string) ([]*model.Task, error)
 	FindByUserIDAndStatus(ctx context.Context, userID, status string, projectID string, planID string, offset, limit int) ([]*model.Task, error)
+	HasCompletedWorkInProjects(ctx context.Context, userID string, projectIDs []string) (bool, error)
 	FindByUserIDBefore(ctx context.Context, userID string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error)
 	FindByUserIDAndStatusBefore(ctx context.Context, userID, status string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error)
 	FindByCreatedAtRange(ctx context.Context, from, to time.Time, offset, limit int) ([]*model.Task, error)
@@ -545,51 +549,53 @@ type SearchOperationRepository interface {
 // -----------------------------------------------------------------------------
 
 type repository struct {
-	db                      *gorm.DB
-	users                   UserRepository
-	sessions                SessionRepository
-	plans                   PlanRepository
-	planEntries             PlanEntryRepository
-	tasks                   TaskRepository
-	taskExecutions          TaskExecutionRepository
-	files                   TaskFileRepository
-	uploadSessions          UploadSessionRepository
-	assets                  AssetRepository
-	imageAnalyses           ImageAnalysisRepository
-	projects                ProjectRepository
-	projectProfileRevisions ProjectProfileRevisionRepository
-	projectProfileStates    ProjectProfileStateRepository
+	db                        *gorm.DB
+	users                     UserRepository
+	sessions                  SessionRepository
+	plans                     PlanRepository
+	planEntries               PlanEntryRepository
+	tasks                     TaskRepository
+	taskExecutions            TaskExecutionRepository
+	files                     TaskFileRepository
+	uploadSessions            UploadSessionRepository
+	assets                    AssetRepository
+	imageAnalyses             ImageAnalysisRepository
+	projects                  ProjectRepository
+	projectProfileRevisions   ProjectProfileRevisionRepository
+	projectProfileStates      ProjectProfileStateRepository
+	assistantCheckpoints      AssistantCheckpointRepository
+	assistantSessions         AssistantSessionRepository
 	interactiveCommitReceipts InteractiveCommitReceiptRepository
-	projectChannelConfigs   ProjectChannelConfigRepository
-	apiKeys                 APIKeyRepository
-	feedbacks               FeedbackRepository
-	taskFeedbacks           TaskFeedbackRepository
-	seednoteTrackings       SeednoteTrackingRepository
-	seednoteMetricSnapshots SeednoteMetricSnapshotRepository
-	seednoteImports         SeednoteImportRepository
-	seednotePosts           SeednotePostRepository
-	seednotePostAliases     SeednotePostAliasRepository
-	seednoteMetricVersions  SeednoteMetricVersionRepository
-	wechatTrackings         WechatTrackingRepository
-	wechatPublications      WechatPublicationRepository
-	wechatMetricSnapshots   WechatMetricSnapshotRepository
-	wechatAnalyticsImports  WechatAnalyticsImportRepository
-	wechatAccountAnalytics  WechatAccountAnalyticsRepository
-	wechatCapabilities      WechatCapabilityRepository
-	channelsTrackings       ChannelsTrackingRepository
-	channelsMetricSnapshots ChannelsMetricSnapshotRepository
-	templates               TemplateRepository
-	viralAnalyses           ViralAnalysisRepository
-	posterTasks             PosterTaskRepository
-	topicPools              TopicPoolRepository
-	trendSnapshots          TrendSnapshotRepository
-	agentFeedbacks          AgentFeedbackRepository
-	feedbackLoop            FeedbackLoopRepository
-	contentMetadata         ContentMetadataRepository
-	ilinkBindings           IlinkBindingRepository
-	ilinkNotifications      IlinkNotificationRepository
-	billing                 BillingRepository
-	searchOperations        SearchOperationRepository
+	projectChannelConfigs     ProjectChannelConfigRepository
+	apiKeys                   APIKeyRepository
+	feedbacks                 FeedbackRepository
+	taskFeedbacks             TaskFeedbackRepository
+	seednoteTrackings         SeednoteTrackingRepository
+	seednoteMetricSnapshots   SeednoteMetricSnapshotRepository
+	seednoteImports           SeednoteImportRepository
+	seednotePosts             SeednotePostRepository
+	seednotePostAliases       SeednotePostAliasRepository
+	seednoteMetricVersions    SeednoteMetricVersionRepository
+	wechatTrackings           WechatTrackingRepository
+	wechatPublications        WechatPublicationRepository
+	wechatMetricSnapshots     WechatMetricSnapshotRepository
+	wechatAnalyticsImports    WechatAnalyticsImportRepository
+	wechatAccountAnalytics    WechatAccountAnalyticsRepository
+	wechatCapabilities        WechatCapabilityRepository
+	channelsTrackings         ChannelsTrackingRepository
+	channelsMetricSnapshots   ChannelsMetricSnapshotRepository
+	templates                 TemplateRepository
+	viralAnalyses             ViralAnalysisRepository
+	posterTasks               PosterTaskRepository
+	topicPools                TopicPoolRepository
+	trendSnapshots            TrendSnapshotRepository
+	agentFeedbacks            AgentFeedbackRepository
+	feedbackLoop              FeedbackLoopRepository
+	contentMetadata           ContentMetadataRepository
+	ilinkBindings             IlinkBindingRepository
+	ilinkNotifications        IlinkNotificationRepository
+	billing                   BillingRepository
+	searchOperations          SearchOperationRepository
 }
 
 // New creates a new Repository backed by the given *gorm.DB.
@@ -636,51 +642,53 @@ func New(db *gorm.DB) Repository {
 	searchOperations := newSearchOperationRepository(db)
 
 	return &repository{
-		db:                      db,
-		users:                   users,
-		sessions:                sessions,
-		plans:                   plans,
-		planEntries:             newPlanEntryRepository(db),
-		tasks:                   tasks,
-		taskExecutions:          taskExecutions,
-		files:                   files,
-		uploadSessions:          uploadSessions,
-		assets:                  assets,
-		imageAnalyses:           imageAnalyses,
-		projects:                projects,
-		projectProfileRevisions: newProjectProfileRevisionRepository(db),
-		projectProfileStates:    newProjectProfileStateRepository(db),
+		db:                        db,
+		users:                     users,
+		sessions:                  sessions,
+		plans:                     plans,
+		planEntries:               newPlanEntryRepository(db),
+		tasks:                     tasks,
+		taskExecutions:            taskExecutions,
+		files:                     files,
+		uploadSessions:            uploadSessions,
+		assets:                    assets,
+		imageAnalyses:             imageAnalyses,
+		projects:                  projects,
+		projectProfileRevisions:   newProjectProfileRevisionRepository(db),
+		projectProfileStates:      newProjectProfileStateRepository(db),
+		assistantCheckpoints:      newAssistantCheckpointRepository(db),
+		assistantSessions:         newAssistantSessionRepository(db),
 		interactiveCommitReceipts: newInteractiveCommitReceiptRepository(db),
-		projectChannelConfigs:   projectChannelConfigs,
-		apiKeys:                 apiKeys,
-		feedbacks:               feedbacks,
-		taskFeedbacks:           taskFeedbacks,
-		seednoteTrackings:       seednoteTrackings,
-		seednoteMetricSnapshots: seednoteMetricSnapshots,
-		seednoteImports:         seednoteImports,
-		seednotePosts:           seednotePosts,
-		seednotePostAliases:     seednotePostAliases,
-		seednoteMetricVersions:  seednoteMetricVersions,
-		wechatTrackings:         wechatTrackings,
-		wechatPublications:      wechatPublications,
-		wechatMetricSnapshots:   wechatMetricSnapshots,
-		wechatAnalyticsImports:  wechatAnalyticsImports,
-		wechatAccountAnalytics:  wechatAccountAnalytics,
-		wechatCapabilities:      wechatCapabilities,
-		channelsTrackings:       channelsTrackings,
-		channelsMetricSnapshots: channelsMetricSnapshots,
-		templates:               templates,
-		viralAnalyses:           viralAnalyses,
-		posterTasks:             posterTasks,
-		topicPools:              topicPools,
-		trendSnapshots:          trendSnapshots,
-		agentFeedbacks:          agentFeedbacks,
-		feedbackLoop:            feedbackLoop,
-		contentMetadata:         contentMetadata,
-		ilinkBindings:           ilinkBindings,
-		ilinkNotifications:      ilinkNotifications,
-		billing:                 billing,
-		searchOperations:        searchOperations,
+		projectChannelConfigs:     projectChannelConfigs,
+		apiKeys:                   apiKeys,
+		feedbacks:                 feedbacks,
+		taskFeedbacks:             taskFeedbacks,
+		seednoteTrackings:         seednoteTrackings,
+		seednoteMetricSnapshots:   seednoteMetricSnapshots,
+		seednoteImports:           seednoteImports,
+		seednotePosts:             seednotePosts,
+		seednotePostAliases:       seednotePostAliases,
+		seednoteMetricVersions:    seednoteMetricVersions,
+		wechatTrackings:           wechatTrackings,
+		wechatPublications:        wechatPublications,
+		wechatMetricSnapshots:     wechatMetricSnapshots,
+		wechatAnalyticsImports:    wechatAnalyticsImports,
+		wechatAccountAnalytics:    wechatAccountAnalytics,
+		wechatCapabilities:        wechatCapabilities,
+		channelsTrackings:         channelsTrackings,
+		channelsMetricSnapshots:   channelsMetricSnapshots,
+		templates:                 templates,
+		viralAnalyses:             viralAnalyses,
+		posterTasks:               posterTasks,
+		topicPools:                topicPools,
+		trendSnapshots:            trendSnapshots,
+		agentFeedbacks:            agentFeedbacks,
+		feedbackLoop:              feedbackLoop,
+		contentMetadata:           contentMetadata,
+		ilinkBindings:             ilinkBindings,
+		ilinkNotifications:        ilinkNotifications,
+		billing:                   billing,
+		searchOperations:          searchOperations,
 	}
 }
 
@@ -705,6 +713,10 @@ func (r *repository) ProjectProfileStates() ProjectProfileStateRepository {
 func (r *repository) InteractiveCommitReceipts() InteractiveCommitReceiptRepository {
 	return r.interactiveCommitReceipts
 }
+func (r *repository) AssistantCheckpoints() AssistantCheckpointRepository {
+	return r.assistantCheckpoints
+}
+func (r *repository) AssistantSessions() AssistantSessionRepository { return r.assistantSessions }
 func (r *repository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs
 }
@@ -792,6 +804,8 @@ type txRepository struct {
 	imageAnalyses           ImageAnalysisRepository
 	projects                ProjectRepository
 	projectProfileRevisions ProjectProfileRevisionRepository
+	assistantCheckpoints    AssistantCheckpointRepository
+	assistantSessions       AssistantSessionRepository
 	projectProfileStates    ProjectProfileStateRepository
 	projectChannelConfigs   ProjectChannelConfigRepository
 	apiKeys                 APIKeyRepository
@@ -840,6 +854,8 @@ func newTxRepository(tx *gorm.DB) *txRepository {
 		imageAnalyses:           newImageAnalysisRepository(tx),
 		projects:                newProjectRepository(tx),
 		projectProfileRevisions: newProjectProfileRevisionRepository(tx),
+		assistantCheckpoints:    newAssistantCheckpointRepository(tx),
+		assistantSessions:       newAssistantSessionRepository(tx),
 		projectProfileStates:    newProjectProfileStateRepository(tx),
 		projectChannelConfigs:   newProjectChannelConfigRepository(tx),
 		apiKeys:                 newAPIKeyRepository(tx),
@@ -895,6 +911,10 @@ func (r *txRepository) ProjectProfileStates() ProjectProfileStateRepository {
 func (r *txRepository) InteractiveCommitReceipts() InteractiveCommitReceiptRepository {
 	return newInteractiveCommitReceiptRepository(r.db)
 }
+func (r *txRepository) AssistantCheckpoints() AssistantCheckpointRepository {
+	return r.assistantCheckpoints
+}
+func (r *txRepository) AssistantSessions() AssistantSessionRepository { return r.assistantSessions }
 func (r *txRepository) ProjectChannelConfigs() ProjectChannelConfigRepository {
 	return r.projectChannelConfigs
 }

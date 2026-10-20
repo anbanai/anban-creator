@@ -12,6 +12,14 @@ function routeDefinition(path: string): string {
 }
 
 describe('administrator routes', () => {
+  it.each(['projects/new/interview', 'projects/create'])(
+    'merges /%s into the Assistant profile home without starting a session',
+    (path) => {
+      expect(routeDefinition(path)).toContain('<Navigate to="/chat?mode=profile" replace />')
+      expect(routeDefinition(path)).not.toContain('assistant_session')
+    },
+  )
+
   it.each(['timeline', 'templates', 'admin/billing'])(
     'protects /%s with AdminRoute',
     (path) => {

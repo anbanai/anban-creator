@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { UNSAFE_NavigationContext, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Streamdown } from 'streamdown'
 import {
   AlertTriangle,
@@ -37,9 +37,12 @@ import type {
   InteractiveAgent,
   InteractiveDraft,
 } from '@/lib/api/interactive'
+import type { AssistantModeID } from '@/lib/api/assistant'
 import { streamInteractiveSession } from '@/lib/interactive-events'
 import { useAuth } from '@/contexts/AuthContext'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer, type DshQuestionOption } from '@/components/dsh-user-questions/DshQuestionComposer'
+import AssistantHome from './AssistantHome'
+import { AssistantDraftSummary, assistantDraftFields } from '@/components/assistant/AssistantDraftSummary'
 
 type Message = { id: string; role: 'assistant' | 'user'; text: string }
 type QuestionBatch = { callId: string; questions: DshQuestion[]; answers?: DshQuestionAnswer['answers']; eventId?: number }
@@ -128,8 +131,8 @@ type PersistedInteractiveSession = {
   draft?: InteractiveDraft | null
 }
 
-function interactiveSessionStorageKey(agentId: string, intent: string, projectId?: string): string {
-  return `anban:interactive-session:${agentId}:${intent}:${projectId ?? 'new'}`
+function assistantSessionStorageKey(userId: string, mode: string, projectId?: string, contentId?: string): string {
+  return `anban:assistant-session:${[userId, mode, projectId ?? 'new', contentId ?? 'none'].map(encodeURIComponent).join(':')}`
 }
 
 function readPersistedInteractiveSession(key: string): PersistedInteractiveSession | null {
@@ -370,6 +373,7 @@ function normalizeDraft(raw: JsonRecord): InteractiveDraft {
     ready: Boolean(draft.ready),
     name,
     fields,
+    payload: isRecord(draft.payload) ? draft.payload : undefined,
     memory_append: stringValue(draft.memory_append),
   }
 }
@@ -466,17 +470,54 @@ function dimensionStatus(value?: string) {
   return { label: '待开始', className: 'text-muted-foreground' }
 }
 
-export default function ChatPage() {
-  const { token } = useAuth()
+function assistantCheckpointPayload(draft: InteractiveDraft, mode: AssistantModeID): Record<string, unknown> {
+  if (mode !== 'profile') {
+    if (draft.payload && isRecord(draft.payload)) return draft.payload
+    const fields = draft.fields ?? {}
+    return mode === 'creation' ? { plan: fields } : { review: fields }
+  }
+  return Object.fromEntries(Object.entries({
+    revision: draft.revision,
+    project: draft.project,
+    profile: draft.profile,
+    progress: draft.progress,
+    missing_fields: draft.missing_fields,
+    inferred_fields: draft.inferred_fields,
+    ready: draft.ready,
+    name: draft.name,
+    fields: draft.fields,
+    memory_append: draft.memory_append,
+  }).filter(([, value]) => value !== undefined))
+}
+
+function assistantCheckpointSummary(mode: AssistantModeID, draft: InteractiveDraft): string {
+  const label = mode === 'profile' ? '画像' : mode === 'creation' ? '创作计划' : '复盘'
+  const name = draft.name ?? (isRecord(draft.project) ? stringValue(draft.project.name) : undefined)
+  const fieldCount = Object.keys(mode === 'profile' ? draft.fields ?? draft.progress ?? {} : assistantDraftFields(draft, mode)).length
+  return name ? `${label}草稿：${name}` : `${label}草稿，已整理 ${fieldCount} 项`
+}
+
+function ChatConversation() {
+  const { token, user } = useAuth()
+  const queryClient = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const requestedAgent = params.get('agent') || ''
-  const intent = params.get('intent') || 'create-project'
+  const assistantSession = params.get('assistant_session') === '1'
+  const rawAssistantMode = params.get('mode')
+  const assistantModeId = rawAssistantMode === 'profile' || rawAssistantMode === 'creation' || rawAssistantMode === 'review'
+    ? rawAssistantMode as AssistantModeID
+    : undefined
+  const intent = assistantSession
+    ? assistantModeId === 'creation' ? 'plan-creation' : assistantModeId === 'review' ? 'review-content' : params.get('project_id') ? 'update-project-profile' : 'create-project'
+    : params.get('intent') || 'create-project'
   const projectId = params.get('project_id') || undefined
+  const contentId = params.get('content_id') || undefined
+  const checkpointId = params.get('checkpoint_id') || undefined
   const isProjectUpdate = intent === 'update-project-profile'
-  const [selectedAgent, setSelectedAgent] = useState(requestedAgent || (location.pathname === '/projects/create' ? 'project-creator' : ''))
-  const sessionStorageKey = interactiveSessionStorageKey(selectedAgent, intent, projectId)
+  const [selectedAgent, setSelectedAgent] = useState(assistantModeId ?? (requestedAgent || (location.pathname === '/projects/create' ? 'project-creator' : '')))
+  const sessionStorageKey = assistantSessionStorageKey(user?.id ?? 'signed-out', assistantModeId ?? selectedAgent, projectId, contentId)
   const [persistedSessionKey] = useState(sessionStorageKey)
   const [persistedSession] = useState(() => readPersistedInteractiveSession(sessionStorageKey))
   const [sessionId, setSessionId] = useState<string | null>(persistedSession?.terminalState ? null : persistedSession?.sessionId ?? null)
@@ -496,6 +537,7 @@ export default function ChatPage() {
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [committed, setCommitted] = useState(false)
+  const [createdTaskId, setCreatedTaskId] = useState<string | null>(null)
   const [sessionProject, setSessionProject] = useState<{ id?: string; name?: string } | null>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [soundEnabled, setSoundEnabled] = useState(() => {
@@ -506,7 +548,9 @@ export default function ChatPage() {
     }
   })
   const [newMessageCount, setNewMessageCount] = useState(0)
+  const [modeSwitchError, setModeSwitchError] = useState<string | null>(null)
   const [restartNonce, setRestartNonce] = useState(0)
+  const [checkpointRecoveryPending, setCheckpointRecoveryPending] = useState(false)
   const [recoveryAvailable, setRecoveryAvailable] = useState(() => Boolean(persistedSession?.draftNeedsReconfirmation || (!persistedSession?.sessionId && hasSavedMaterial(persistedSession))))
   const idempotencyKeyRef = useRef(crypto.randomUUID())
   const createIdempotencyKeyRef = useRef(persistedSession?.createIdempotencyKey ?? crypto.randomUUID())
@@ -659,25 +703,76 @@ export default function ChatPage() {
     return () => window.cancelAnimationFrame(frame)
   }, [timeline.length])
 
+  const bootstrapQuery = useQuery({
+    queryKey: ['assistant-bootstrap'],
+    queryFn: api.assistant.bootstrap,
+    enabled: assistantSession,
+    staleTime: 30_000,
+  })
   const agentsQuery = useQuery({
     queryKey: ['interactive-agents'],
     queryFn: api.interactive.agents,
+    enabled: !assistantSession,
     staleTime: 30_000,
   })
   const agents = agentsQuery.data ?? []
-  const selectableAgents = agents.filter((agent) => agent.available !== false)
+  const selectableAgents: InteractiveAgent[] = assistantSession
+    ? (bootstrapQuery.data?.modes ?? []).map((mode) => ({ id: mode.id, display_name: mode.displayName, description: mode.description, available: mode.available }))
+    : agents.filter((agent) => agent.available !== false)
   const activeAgent = selectableAgents.find((agent) => agent.id === selectedAgent)
   const pendingQuestions = questionBatches.filter((batch) => !batch.answers)
+  const assistantMode = bootstrapQuery.data?.modes.find((mode) => mode.id === assistantModeId)
+  const assistantCheckpointQuery = useQuery({
+    queryKey: ['assistant-checkpoint', assistantModeId ?? '', projectId ?? '', contentId ?? ''],
+    queryFn: () => api.assistant.latestCheckpoint({
+      mode_id: assistantModeId!,
+      ...(projectId ? { project_id: projectId } : {}),
+      ...(contentId ? { content_id: contentId } : {}),
+    }),
+    enabled: assistantSession && Boolean(assistantMode?.available)
+      && (assistantModeId === 'profile' || Boolean(projectId))
+      && (assistantModeId !== 'review' || Boolean(contentId)),
+    staleTime: 30_000,
+  })
+  const assistantRecoveryCheckpoint = assistantSession ? assistantCheckpointQuery.data : undefined
   const dirty = Boolean(sessionId && !committed)
 
   useNavigationWarning(dirty, committedRef, isProjectUpdate ? '当前项目画像更新尚未完成，离开后将丢失，确定离开吗？' : '当前创作项目创建尚未完成，离开后将丢失，确定离开吗？')
 
-  const resetConversation = useCallback(() => {
+  const closeAssistantSession = useCallback((id: string) => assistantSession ? api.assistant.close(id) : api.interactive.close(id), [assistantSession])
+  const sendAssistantMessage = useCallback((id: string, text: string) => assistantSession ? api.assistant.message(id, text) : api.interactive.message(id, text), [assistantSession])
+  const answerAssistantQuestion = useCallback((id: string, callId: string, answers: DshQuestionAnswer['answers']) => assistantSession
+    ? api.assistant.answer(id, callId, answers)
+    : api.interactive.answer(id, callId, answers), [assistantSession])
+
+  const persistAssistantCheckpoint = useCallback((id: string, status: 'draft' | 'ready' = 'draft', currentDraft = draftRef.current) => {
+    if (!assistantSession || !assistantModeId) return Promise.resolve(null)
+    const payload = currentDraft ? assistantCheckpointPayload(currentDraft, assistantModeId) : {}
+    return api.assistant.checkpoint(id, {
+      schema_version: '1.0',
+      payload,
+      summary: currentDraft ? assistantCheckpointSummary(assistantModeId, currentDraft) : `${assistantModeId === 'profile' ? '画像' : assistantModeId === 'creation' ? '创作' : '复盘'}模式草稿`,
+      status,
+    }).then((checkpoint) => {
+      queryClient.setQueryData(['assistant-checkpoint', assistantModeId, projectId ?? '', contentId ?? ''], {
+        id: checkpoint.id, summary: checkpoint.summary, status: checkpoint.status, updatedAt: new Date().toISOString(),
+      })
+      return checkpoint
+    })
+  }, [assistantModeId, assistantSession, contentId, projectId, queryClient])
+
+  const closeSessionWithCheckpoint = useCallback(async (id: string) => {
+    if (committedRef.current) return
+    if (assistantSession) await persistAssistantCheckpoint(id, draftRef.current?.ready ? 'ready' : 'draft')
+    await closeAssistantSession(id)
+  }, [assistantSession, closeAssistantSession, persistAssistantCheckpoint])
+
+  const resetConversation = useCallback((closePrevious = true) => {
     runGenerationRef.current += 1
     streamAbortRef.current?.abort()
     const previousId = sessionRef.current
     if (startPromiseRef.current) abandonedStartKeysRef.current.add(createIdempotencyKeyRef.current)
-    if (previousId && !committedRef.current) void api.interactive.close(previousId).catch(() => undefined)
+    if (previousId && !committedRef.current && closePrevious) void closeSessionWithCheckpoint(previousId).catch(() => undefined)
     clearPersistedInteractiveSession(sessionStorageKey)
     sessionRef.current = null
     setSessionId(null)
@@ -693,6 +788,7 @@ export default function ChatPage() {
     setStreamError(null)
     setCommitError(null)
     setCommitted(false)
+    setCreatedTaskId(null)
     committedRef.current = false
     hasInputRef.current = false
     setCommitting(false)
@@ -712,7 +808,7 @@ export default function ChatPage() {
     setDraftReadyEventId(undefined)
     idempotencyKeyRef.current = crypto.randomUUID()
     createIdempotencyKeyRef.current = crypto.randomUUID()
-  }, [sessionStorageKey])
+  }, [closeSessionWithCheckpoint, sessionStorageKey, assistantSession])
 
   const preserveLocalMaterialAfterLostSession = useCallback((message: string, activityStatus: 'stopped' | 'error' = 'stopped', terminalState: TerminalRunState = 'error') => {
     runGenerationRef.current += 1
@@ -757,7 +853,8 @@ export default function ChatPage() {
 
   const terminateConversation = useCallback((state: TerminalRunState, message: string) => {
     preserveLocalMaterialAfterLostSession(message, state === 'error' ? 'error' : 'stopped', state)
-  }, [preserveLocalMaterialAfterLostSession])
+    if (assistantSession) void queryClient.invalidateQueries({ queryKey: ['assistant-checkpoint'] })
+  }, [assistantSession, preserveLocalMaterialAfterLostSession, queryClient])
 
   const processEvent = useCallback((event: { event: string; data: string; id?: string }) => {
     const data = parseData(event.data)
@@ -1046,7 +1143,7 @@ export default function ChatPage() {
         {
           const sessionId = sessionRef.current
           preserveLocalMaterialAfterLostSession(stringValue(data.message) ?? '创作会话发生错误', 'error')
-          if (sessionId && !committedRef.current) void api.interactive.close(sessionId).catch(() => undefined)
+          if (sessionId && !committedRef.current) void closeSessionWithCheckpoint(sessionId).catch(() => undefined)
         }
         break
       case 'expired':
@@ -1060,14 +1157,14 @@ export default function ChatPage() {
       default:
         break
     }
-  }, [isProjectUpdate, notifyIncomingMessage, preserveLocalMaterialAfterLostSession, terminateConversation, updateMessagesNow, updateQuestionsNow, updateTimelineNow])
+  }, [closeSessionWithCheckpoint, isProjectUpdate, notifyIncomingMessage, preserveLocalMaterialAfterLostSession, terminateConversation, updateMessagesNow, updateQuestionsNow, updateTimelineNow])
 
   const sendRecoveryPrompt = useCallback(async (id: string, prompt: string) => {
     if (recoveryMessagePromiseRef.current) return recoveryMessagePromiseRef.current
     const promise = (async () => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
-          await api.interactive.message(id, prompt)
+          await sendAssistantMessage(id, prompt)
           recoveryPromptRef.current = null
           return
         } catch (error) {
@@ -1100,6 +1197,7 @@ export default function ChatPage() {
       const persisted = readPersistedInteractiveSession(sessionStorageKey)
       for await (const event of streamInteractiveSession(id, token, controller.signal, {
         lastEventId: persisted?.sessionId === id ? resumeEventId(persisted) : undefined,
+        ...(assistantSession ? { endpoint: '/assistant' as const } : {}),
         onConnected: () => {
           if (disposedRef.current || generation !== runGenerationRef.current) return
           setStreamError(null)
@@ -1124,7 +1222,7 @@ export default function ChatPage() {
       const terminal = /^SSE connection failed: (401|404|410)$/.test(message) || message === '会话历史已失效，请重新开始创建'
       if (terminal) {
         if (/^SSE connection failed: (404|410)$/.test(message) || message === '会话历史已失效，请重新开始创建') {
-          preserveLocalMaterialAfterLostSession('原会话已失效，本地材料仍已保留')
+          preserveLocalMaterialAfterLostSession(assistantSession ? '原运行时已失效，正在检查服务端保存的结构化草稿' : '原会话已失效，本地材料仍已保留')
         } else {
           setStreamError(message)
           setRunState('error')
@@ -1137,7 +1235,7 @@ export default function ChatPage() {
         setRunState('error')
       }
     }
-  }, [isProjectUpdate, preserveLocalMaterialAfterLostSession, processEvent, sendRecoveryPrompt, sessionStorageKey, terminateConversation, token])
+  }, [assistantSession, isProjectUpdate, preserveLocalMaterialAfterLostSession, processEvent, sendRecoveryPrompt, sessionStorageKey, terminateConversation, token])
 
   const reconnectSession = useCallback(() => {
     const id = sessionRef.current
@@ -1150,6 +1248,17 @@ export default function ChatPage() {
   }, [connectStream])
 
   const recoverSavedDraft = useCallback(() => {
+    if (assistantSession) {
+      if (!assistantRecoveryCheckpoint) return
+      setCheckpointRecoveryPending(true)
+      resetConversation(false)
+      setRecoveryAvailable(true)
+      startPromiseRef.current = null
+      const nextParams = new URLSearchParams(location.search)
+      nextParams.set('checkpoint_id', assistantRecoveryCheckpoint.id)
+      navigate({ pathname: location.pathname, search: `?${nextParams.toString()}` }, { replace: true })
+      return
+    }
     const saved = readPersistedInteractiveSession(sessionStorageKey)
     if (!saved || !hasSavedMaterial(saved)) return
     recoveryPromptRef.current = recoveryPrompt(saved)
@@ -1171,7 +1280,7 @@ export default function ChatPage() {
     setStreamError(null)
     setRunState('idle')
     setRestartNonce((value) => value + 1)
-  }, [sessionStorageKey])
+  }, [assistantRecoveryCheckpoint, assistantSession, location.pathname, location.search, navigate, resetConversation, sessionStorageKey])
 
   const startSession = useCallback((agent: InteractiveAgent) => {
     const key = `${agent.id}:${intent}:${projectId ?? ''}:${restartNonce}`
@@ -1183,13 +1292,17 @@ export default function ChatPage() {
     setStreamError(null)
     persistInteractiveSession(sessionStorageKey, { createIdempotencyKey: createRequestKey })
     const promise = (projectId
-      ? api.interactive.createSession(agent.id, intent, projectId, createRequestKey)
-      : api.interactive.createSession(agent.id, intent, undefined, createRequestKey)
+      ? assistantSession
+        ? api.assistant.createSession({ mode_id: agent.id as AssistantModeID, project_id: projectId, ...(contentId ? { content_id: contentId } : {}), ...(checkpointId ? { checkpoint_id: checkpointId } : {}) }, createRequestKey)
+        : api.interactive.createSession(agent.id, intent, projectId, createRequestKey)
+      : assistantSession
+        ? api.assistant.createSession({ mode_id: agent.id as AssistantModeID, ...(checkpointId ? { checkpoint_id: checkpointId } : {}) }, createRequestKey)
+        : api.interactive.createSession(agent.id, intent, undefined, createRequestKey)
     ).then(async (session) => {
       if (disposedRef.current || generation !== runGenerationRef.current) {
         if (abandonedStartKeysRef.current.has(createRequestKey) || createIdempotencyKeyRef.current !== createRequestKey) {
           abandonedStartKeysRef.current.delete(createRequestKey)
-          await api.interactive.close(session.id).catch(() => undefined)
+          await closeSessionWithCheckpoint(session.id).catch(() => undefined)
         } else {
           persistInteractiveSession(sessionStorageKey, { sessionId: session.id })
         }
@@ -1208,7 +1321,7 @@ export default function ChatPage() {
     })
     startPromiseRef.current = { key, promise }
     return promise
-  }, [connectStream, intent, isProjectUpdate, projectId, restartNonce, sessionStorageKey])
+  }, [assistantSession, checkpointId, closeSessionWithCheckpoint, connectStream, contentId, intent, isProjectUpdate, projectId, restartNonce, sessionStorageKey])
 
   useEffect(() => {
     if (sessionStorageKey !== persistedSessionKey || !persistedSession?.sessionId || persistedSession.terminalState || !token) return
@@ -1223,9 +1336,16 @@ export default function ChatPage() {
   }, [connectStream, persistedSession, persistedSessionKey, sessionStorageKey, token])
 
   useEffect(() => {
-    if (!selectedAgent || agentsQuery.isLoading || !activeAgent || sessionId || recoveryAvailable || ['starting', 'error', 'expired', 'closed'].includes(runState)) return
+    const loading = assistantSession ? bootstrapQuery.isLoading : agentsQuery.isLoading
+    if (committedRef.current || !selectedAgent || loading || !activeAgent || sessionId || recoveryAvailable || ['starting', 'error', 'expired', 'closed'].includes(runState)) return
     void startSession(activeAgent)
-  }, [activeAgent, agentsQuery.isLoading, recoveryAvailable, runState, selectedAgent, sessionId, startSession])
+  }, [activeAgent, agentsQuery.isLoading, assistantSession, bootstrapQuery.isLoading, recoveryAvailable, runState, selectedAgent, sessionId, startSession])
+
+  useEffect(() => {
+    if (!checkpointRecoveryPending || !checkpointId) return
+    setCheckpointRecoveryPending(false)
+    setRecoveryAvailable(false)
+  }, [checkpointId, checkpointRecoveryPending])
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -1272,8 +1392,40 @@ export default function ChatPage() {
     })
   }, [draft, draftNeedsReconfirmation, draftReadyEventId, lastEventId, messages, persistedSession, questionBatches, runState, sessionId, sessionStorageKey, streamError, timeline, turnActive])
 
-  const selectAgent = (agent: InteractiveAgent) => {
-    if (agent.id === selectedAgent) return
+  const selectAgent = async (agent: InteractiveAgent) => {
+    if (committing || cancelling || agent.id === selectedAgent) return
+    if (assistantSession) {
+      if (!agent.available) {
+        setModeSwitchError(bootstrapQuery.data?.modes.find((mode) => mode.id === agent.id)?.disabledReason ?? '该模式当前不可用。')
+        return
+      }
+      setModeSwitchError(null)
+      if (sessionId) {
+        try {
+          await closeSessionWithCheckpoint(sessionId)
+        } catch (error) {
+          setModeSwitchError(error instanceof Error ? error.message : '保存当前草稿失败，请重试。')
+          return
+        }
+      }
+        void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'], refetchType: 'active' })
+        void queryClient.invalidateQueries({ queryKey: ['assistant-checkpoint'] })
+      resetConversation(false)
+        setModeMenuOpen(false)
+      startPromiseRef.current = null
+        const nextParams = new URLSearchParams({ mode: agent.id })
+      const mode = agent.id as AssistantModeID
+      const nextProjectId = projectId ?? bootstrapQuery.data?.projects[0]?.id
+      if (nextProjectId && (mode !== 'profile' || projectId)) nextParams.set('project_id', nextProjectId)
+      if (mode === 'review' && nextProjectId) {
+        const nextProject = bootstrapQuery.data?.projects.find((project) => project.id === nextProjectId)
+        const nextContentId = contentId ?? nextProject?.works[0]?.id
+        if (nextContentId) nextParams.set('content_id', nextContentId)
+      }
+      committedRef.current = true
+      navigate({ pathname: '/chat', search: `?${nextParams.toString()}` })
+      return
+    }
     if ((hasInputRef.current || draft) && !window.confirm(`切换 Agent 会丢弃当前${isProjectUpdate ? '更新' : '创建'}草稿，确定继续吗？`)) return
     resetConversation()
     startPromiseRef.current = null
@@ -1286,10 +1438,11 @@ export default function ChatPage() {
   }
 
   useEffect(() => {
-    if (!agentsQuery.isLoading && selectedAgent && !activeAgent) {
+    const loading = assistantSession ? bootstrapQuery.isLoading : agentsQuery.isLoading
+    if (!loading && selectedAgent && !activeAgent) {
       setSelectedAgent('')
     }
-  }, [activeAgent, agentsQuery.isLoading, selectedAgent])
+  }, [activeAgent, agentsQuery.isLoading, assistantSession, bootstrapQuery.isLoading, selectedAgent])
 
   const sendMessage = async () => {
     const text = composer.trim()
@@ -1313,7 +1466,7 @@ export default function ChatPage() {
     const persisted = readPersistedInteractiveSession(sessionStorageKey)
     persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
     try {
-      await api.interactive.message(sessionId, text)
+      await sendAssistantMessage(sessionId, text)
       if (sessionRef.current !== sessionId) return
       if (pendingSubmissionRef.current === pendingSubmission) pendingSubmission.status = 'accepted'
     } catch (error) {
@@ -1345,7 +1498,7 @@ export default function ChatPage() {
     const persisted = readPersistedInteractiveSession(sessionStorageKey)
     persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
     try {
-      await api.interactive.answer(sessionId, batch.callId, answer.answers)
+      await answerAssistantQuestion(sessionId, batch.callId, answer.answers)
       if (sessionRef.current !== sessionId) return
       if (pendingSubmissionRef.current === pendingSubmission) pendingSubmission.status = 'accepted'
     } catch (error) {
@@ -1365,16 +1518,37 @@ export default function ChatPage() {
 
   const commitProject = async () => {
     const confirmationToken = confirmationTokenRef.current
-    if (!sessionId || !draft?.ready || !confirmationToken || committing) return
+    if (!sessionId || !draft?.ready || (assistantModeId === 'profile' && !confirmationToken) || committedRef.current || committing || turnActive || sendingMessage || pendingQuestions.length > 0) return
     setCommitting(true)
     setCommitError(null)
     try {
-      const result = await api.interactive.commit(sessionId, confirmationToken, idempotencyKeyRef.current, draft?.memory_append)
+      const checkpoint = assistantSession && assistantModeId !== 'profile'
+        ? await persistAssistantCheckpoint(sessionId, 'ready', draft)
+        : null
+      if (assistantSession && assistantModeId && assistantModeId !== 'profile') {
+        if (!checkpoint?.id || !checkpoint.payload_digest) throw new Error('草稿确认信息未就绪，请重新保存后再确认。')
+        if (!draftRef.current?.ready || JSON.stringify(assistantCheckpointPayload(draftRef.current, assistantModeId)) !== JSON.stringify(assistantCheckpointPayload(draft, assistantModeId))) {
+          throw new Error('草稿已更新，请阅读最新内容后重新确认。')
+        }
+      }
+      const result = assistantSession
+        ? await api.assistant.commit(sessionId, assistantModeId === 'profile'
+          ? { confirmation_token: confirmationToken ?? '', idempotency_key: idempotencyKeyRef.current }
+          : { checkpoint_id: checkpoint!.id, checkpoint_digest: checkpoint!.payload_digest, idempotency_key: idempotencyKeyRef.current })
+        : await api.interactive.commit(sessionId, confirmationToken ?? '', idempotencyKeyRef.current, draft?.memory_append)
       committedRef.current = true
       setCommitted(true)
+      if ('task' in result && isRecord(result.task)) setCreatedTaskId(stringValue(result.task.id) ?? null)
       clearPersistedInteractiveSession(sessionStorageKey)
       const id = result.project?.id ?? (isProjectUpdate ? projectId : undefined)
-      navigate(id ? isProjectUpdate ? `/projects?edit=${encodeURIComponent(id)}` : `/projects?onboarding=${encodeURIComponent(id)}` : '/projects')
+      if (assistantSession) await queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
+      if (!assistantSession || assistantModeId === 'profile') {
+          if (assistantSession && assistantModeId === 'profile' && id && !isProjectUpdate) {
+            navigate(`/chat?mode=creation&project_id=${encodeURIComponent(id)}`)
+          } else {
+            navigate(id ? isProjectUpdate ? `/projects?edit=${encodeURIComponent(id)}` : `/projects?onboarding=${encodeURIComponent(id)}` : '/projects')
+          }
+      }
     } catch (error) {
       setCommitError(error instanceof Error ? error.message : `创作项目${isProjectUpdate ? '更新' : '创建'}失败，请重试。`)
     } finally {
@@ -1398,7 +1572,7 @@ export default function ChatPage() {
     const message = '对话已取消。已保存的消息、问答和草稿仍保留。'
     if (previousId) {
       try {
-        await api.interactive.close(previousId)
+        await closeSessionWithCheckpoint(previousId)
       } catch (error) {
         setCancelError(error instanceof Error ? error.message : '取消对话失败，请重试。')
         setCancelling(false)
@@ -1462,8 +1636,12 @@ export default function ChatPage() {
         ? currentActivity?.text ?? 'Agent 正在工作…'
         : null
   const liveStatusLabel = runState === 'starting' ? '准备中' : runState === 'waiting_answer' ? '等待中' : '进行中'
-  const emptyRegistry = !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
-  const canRecoverSavedDraft = recoveryAvailable && hasSavedMaterial(readPersistedInteractiveSession(sessionStorageKey))
+  const emptyRegistry = assistantSession
+    ? !bootstrapQuery.isLoading && (bootstrapQuery.isError || selectableAgents.length === 0)
+    : !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
+  const canRecoverSavedDraft = recoveryAvailable && (assistantSession
+    ? Boolean(assistantRecoveryCheckpoint)
+    : hasSavedMaterial(readPersistedInteractiveSession(sessionStorageKey)))
   const canCancelConversation = !committed && !committing && (Boolean(sessionId) || runState === 'starting')
 
   return (
@@ -1472,8 +1650,8 @@ export default function ChatPage() {
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Sparkles className="size-4" /></div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">创作工作台</p>
-            <p className="truncate text-xs text-muted-foreground">与 Agent 对话，整理一个可长期使用的创作项目画像</p>
+            <p className="truncate text-sm font-semibold">AI 助手</p>
+            <p className="truncate text-xs text-muted-foreground">{activeAgent?.display_name ?? '选择画像、创作或复盘模式'}</p>
           </div>
         </div>
         <div className="relative flex items-center gap-2">
@@ -1499,23 +1677,25 @@ export default function ChatPage() {
             {soundEnabled ? <Volume2 /> : <VolumeX />}
           </Button>
           {canCancelConversation && <Button variant="outline" size="sm" disabled={cancelling} onClick={() => { setCancelError(null); setCancelDialogOpen(true) }}><Ban className="size-4" />取消对话</Button>}
-          <Button variant="outline" size="sm" disabled={selectableAgents.length === 0} onClick={() => setModeMenuOpen((open) => !open)} aria-expanded={modeMenuOpen}>
+          <Button variant="outline" size="sm" disabled={selectableAgents.length === 0 || committing || cancelling} onClick={() => setModeMenuOpen((open) => !open)} aria-expanded={modeMenuOpen}>
             <UserRound className="size-4" />
-            {activeAgent?.display_name ?? '选择 Agent'}
+            {activeAgent?.display_name ?? '选择模式'}
             <ChevronDown className="size-3.5" />
           </Button>
           {modeMenuOpen && (
             <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-border bg-popover p-2 shadow-lg" role="menu">
               {selectableAgents.map((agent) => (
-                <button key={agent.id} type="button" role="menuitem" className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left hover:bg-muted" onClick={() => selectAgent(agent)}>
+                <button key={agent.id} type="button" role="menuitem" disabled={committing || cancelling} className="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left hover:bg-muted disabled:pointer-events-none disabled:opacity-50" onClick={() => void selectAgent(agent)}>
                   <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
-                  <span className="min-w-0"><span className="block text-sm font-medium">{agent.display_name}</span><span className="mt-0.5 block text-xs text-muted-foreground">{agent.description}</span></span>
+                  <span className="min-w-0"><span className="block text-sm font-medium">{agent.display_name}</span><span className="mt-0.5 block text-xs text-muted-foreground">{agent.available === false ? bootstrapQuery.data?.modes.find((mode) => mode.id === agent.id)?.disabledReason : agent.description}</span></span>
                 </button>
               ))}
             </div>
           )}
         </div>
       </header>
+
+      {modeSwitchError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertDescription>{modeSwitchError}</AlertDescription></Alert>}
 
       {isProjectUpdate && (
         <Alert className="border-primary/25 bg-primary/[0.035]">
@@ -1559,11 +1739,11 @@ export default function ChatPage() {
                   const text = active ? item.text.replace(/^Agent /, '') : item.status === 'waiting' ? '等待你的回答' : item.text
                   return <div key={`activity-${item.id}`} className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground"><Loader2 className={`size-4 shrink-0 ${active ? 'animate-spin text-primary' : 'hidden'}`} /><span className="min-w-0 flex-1 break-words">{text}</span><span className="shrink-0 text-xs">{statusLabel}</span></div>
                 }
-                if (!draft?.ready) return null
-                return <ConfirmCard key="draft-card" draft={draft} isProjectUpdate={isProjectUpdate} needsReconfirmation={draftNeedsReconfirmation} canCommit={Boolean(confirmationTokenRef.current) && !draftNeedsReconfirmation} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await api.interactive.message(sessionId, '继续编辑创作项目画像').catch(() => undefined) }} />
+                if (!draft?.ready || committed) return null
+                return <ConfirmCard key="draft-card" draft={draft} mode={assistantSession ? assistantModeId : 'profile'} isProjectUpdate={isProjectUpdate} needsReconfirmation={draftNeedsReconfirmation} canCommit={!turnActive && !sendingMessage && pendingQuestions.length === 0 && !draftNeedsReconfirmation && (assistantSession && assistantModeId !== 'profile' ? draft.ready === true : Boolean(confirmationTokenRef.current))} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await sendAssistantMessage(sessionId, '继续编辑当前草稿').catch(() => undefined) }} />
               })}
-              {streamError && <Alert variant={streamError.startsWith('对话已取消') ? 'default' : 'destructive'}>{streamError.startsWith('对话已取消') ? <Ban className="size-4" /> : <AlertTriangle className="size-4" />}<AlertTitle>{streamError.startsWith('对话已取消') ? '对话已取消' : canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>本地保存的消息、问答和草稿仍然保留。</p><p>旧 runtime 上下文不会恢复。</p><p>保存草稿需要重新确认</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />恢复本地材料</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
-              {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>正在打开创作项目详情。</AlertDescription></Alert>}
+              {streamError && <Alert variant={streamError.startsWith('对话已取消') ? 'default' : 'destructive'}>{streamError.startsWith('对话已取消') ? <Ban className="size-4" /> : <AlertTriangle className="size-4" />}<AlertTitle>{streamError.startsWith('对话已取消') ? '对话已取消' : canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>{assistantSession ? '将从服务端保存的结构化草稿继续。' : '本地保存的消息、问答和草稿仍然保留。'}</p><p>{assistantSession ? '新对话会沿用草稿摘要，逐字聊天不会回放。' : '旧 runtime 上下文不会恢复。'}</p><p>保存草稿需要重新确认</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />{assistantSession ? '恢复已保存草稿' : '恢复本地材料'}</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
+              {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{assistantSession && assistantModeId === 'review' ? '复盘已确认，待数据验证' : assistantSession && assistantModeId === 'creation' ? '创作计划已确认' : isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>{assistantSession && assistantModeId === 'review' ? '这条建议会在后续独立数据分析验证后，才更新六维画像。' : assistantSession && assistantModeId === 'creation' ? '作品任务已创建，可以查看创作进度。' : '正在打开创作项目详情。'}{createdTaskId && <Button className="mt-3" size="sm" onClick={() => navigate(`/tasks/${encodeURIComponent(createdTaskId)}`)}>查看作品任务<ArrowRight className="size-4" /></Button>}</AlertDescription></Alert>}
             </div>
             {newMessageCount > 0 && <Button type="button" variant="secondary" size="sm" className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 shadow-md" onClick={() => scrollToLatest()}><ChevronDown className="size-4" />有 {newMessageCount} 条新消息</Button>}
             <div className="border-t border-border p-3 sm:p-4">
@@ -1571,14 +1751,14 @@ export default function ChatPage() {
               <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
             </div>
           </section>
-          <ProgressRail draft={draft} />
+          <ProgressRail draft={draft} mode={assistantSession ? assistantModeId : 'profile'} />
         </div>
       )}
       <AlertDialog open={cancelDialogOpen} onOpenChange={(open) => { if (!cancelling) setCancelDialogOpen(open) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>取消当前对话？</AlertDialogTitle>
-            <AlertDialogDescription>Agent 会立即停止。当前已保存的消息、问答和草稿会保留，你可以恢复到新会话中继续。</AlertDialogDescription>
+            <AlertDialogDescription>{assistantSession ? 'Agent 会立即停止。先保存当前结构化草稿，之后可在新对话中继续。' : 'Agent 会立即停止。当前已保存的消息、问答和草稿会保留，你可以恢复到新会话中继续。'}</AlertDialogDescription>
           </AlertDialogHeader>
           {cancelError && <p role="alert" className="text-sm text-destructive">取消失败：{cancelError}</p>}
           <AlertDialogFooter>
@@ -1594,11 +1774,27 @@ export default function ChatPage() {
   )
 }
 
-function ProgressRail({ draft }: { draft: InteractiveDraft | null }) {
-  return <aside className="order-first overflow-x-auto rounded-xl border border-border bg-card p-4 lg:order-last lg:overflow-visible"><div className="flex min-w-max gap-5 lg:min-w-0 lg:flex-col lg:gap-4"><div className="min-w-48 lg:min-w-0"><p className="text-sm font-semibold">创作项目画像</p><p className="mt-1 text-xs text-muted-foreground">六个维度逐步收集</p></div>{DIMENSIONS.map(([key, label]) => { const status = dimensionStatus(draft?.progress?.[key]); return <div key={key} className="min-w-28 border-l border-border pl-3 lg:min-w-0 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-3"><div className="flex items-center justify-between gap-2"><span className="text-sm">{label}</span><span className={`text-xs ${status.className}`}>{status.label}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-muted"><div className={`h-full transition-all ${status.label === '待开始' ? 'w-0' : status.label === '已确认' ? 'w-full bg-emerald-500' : 'w-2/3 bg-primary'}`} /></div></div> })}</div></aside>
+export default function ChatPage() {
+  const [params] = useSearchParams()
+  const { user } = useAuth()
+  if (params.get('assistant_session') !== '1') return <AssistantHome />
+  const scope = assistantSessionStorageKey(user?.id ?? 'signed-out', params.get('mode') ?? 'profile', params.get('project_id') || undefined, params.get('content_id') || undefined)
+  return <ChatConversation key={`${scope}:${params.get('checkpoint_id') ?? ''}`} />
 }
 
-function ConfirmCard({ draft, isProjectUpdate, needsReconfirmation = false, canCommit, committing, error, onCommit, onContinue }: { draft: InteractiveDraft; isProjectUpdate: boolean; needsReconfirmation?: boolean; canCommit: boolean; committing: boolean; error: string | null; onCommit: () => void; onContinue: () => void }) {
+function ProgressRail({ draft, mode = 'profile' }: { draft: InteractiveDraft | null; mode?: AssistantModeID }) {
+  if (mode !== 'profile') {
+    const label = mode === 'creation' ? '创作计划' : '复盘结论'
+    return <aside className="order-first rounded-lg border border-border bg-card p-4 lg:order-last"><p className="text-sm font-semibold">{label}</p><p className="mt-1 text-xs text-muted-foreground">{draft?.ready ? '等待确认' : '随对话持续整理'}</p><div className="mt-4"><AssistantDraftSummary draft={draft} mode={mode} compact /></div>{mode === 'review' && <p className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">确认后进入独立数据验证，不会立即修改画像。</p>}</aside>
+  }
+  return <aside className="order-first overflow-x-auto rounded-lg border border-border bg-card p-4 lg:order-last lg:overflow-visible"><div className="flex min-w-max gap-5 lg:min-w-0 lg:flex-col lg:gap-4"><div className="min-w-48 lg:min-w-0"><p className="text-sm font-semibold">创作画像</p><p className="mt-1 text-xs text-muted-foreground">六个维度逐步收集</p></div>{DIMENSIONS.map(([key, label]) => { const status = dimensionStatus(draft?.progress?.[key]); return <div key={key} className="min-w-28 border-l border-border pl-3 lg:min-w-0 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-3"><div className="flex items-center justify-between gap-2"><span className="text-sm">{label}</span><span className={`text-xs ${status.className}`}>{status.label}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-muted"><div className={`h-full transition-all ${status.label === '待开始' ? 'w-0' : status.label === '已确认' ? 'w-full bg-emerald-500' : 'w-2/3 bg-primary'}`} /></div></div> })}</div></aside>
+}
+
+function ConfirmCard({ draft, mode = 'profile', isProjectUpdate, needsReconfirmation = false, canCommit, committing, error, onCommit, onContinue }: { draft: InteractiveDraft; mode?: AssistantModeID; isProjectUpdate: boolean; needsReconfirmation?: boolean; canCommit: boolean; committing: boolean; error: string | null; onCommit: () => void; onContinue: () => void }) {
+  if (mode !== 'profile') {
+    const title = mode === 'creation' ? '确认创作计划' : '确认复盘结论'
+    return <Card className="border-primary/25"><CardHeader><CardTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />{title}</CardTitle><CardDescription>{mode === 'creation' ? '确认后会创建正式作品任务，创作计划将作为该任务的固定输入。' : '确认后会生成待验证的画像改进建议，不会立即改写六维画像。'}</CardDescription></CardHeader><CardContent className="space-y-4"><AssistantDraftSummary draft={draft} mode={mode} />{error && <p className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button onClick={onCommit} disabled={committing || !canCommit}>{committing && <Loader2 className="size-4 animate-spin" />}{mode === 'creation' ? '确认并创建作品任务' : '确认复盘建议'}</Button><Button variant="outline" onClick={onContinue} disabled={committing}><SquarePen className="size-4" />继续编辑</Button></div></CardContent></Card>
+  }
   const project = draft.project ?? {}
   const dimensions = isRecord(draft.profile?.dimensions) ? draft.profile.dimensions : {}
   return <Card className="border-emerald-500/30 bg-emerald-500/[0.035]"><CardHeader><CardTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />{needsReconfirmation ? '已保存的画像草稿' : isProjectUpdate ? '确认更新创作项目画像' : '确认创作项目画像'}</CardTitle><CardDescription>{needsReconfirmation ? '这是本地保留的旧草稿，仅供参考。旧会话确认凭据不会恢复，请先由 Agent 核对并重新生成草稿。' : isProjectUpdate ? '信息已整理完成，确认后会更新现有项目画像并保存变更。' : '信息已整理完成，确认后会创建创作项目并保存六维画像。'}</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 rounded-lg border border-border bg-background/70 p-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">创作项目名称</span><p className="font-medium">{String(project.name ?? draft.name ?? '未命名创作项目')}</p></div><div><span className="text-xs text-muted-foreground">平台</span><p className="font-medium">{String(project.platform ?? '待设定')}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">定位</span><p className="mt-1 leading-5">{String(project.instructions ?? project.description ?? '已收集')}</p></div></div><div><p className="text-xs font-medium text-muted-foreground">六维画像摘要</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{DIMENSIONS.map(([key, label]) => <div key={key} className="rounded-lg border border-border bg-background/60 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm leading-5">{summarizeDimension(dimensions[key])}</p></div>)}</div></div>{(draft.missing_fields?.length || draft.inferred_fields?.length) ? <div className="grid gap-3 sm:grid-cols-2"><div><p className="text-xs font-medium text-muted-foreground">待补充字段</p><p className="mt-1 text-sm leading-5">{draft.missing_fields?.length ? draft.missing_fields.join('、') : '暂无'}</p></div><div><p className="text-xs font-medium text-muted-foreground">推断字段</p><p className="mt-1 text-sm leading-5">{draft.inferred_fields?.length ? draft.inferred_fields.join('、') : '暂无'}</p></div></div> : null}{draft.memory_append && <div className="rounded-lg border border-border bg-background/70 p-3"><p className="text-xs font-medium text-muted-foreground">将追加到项目记忆的内容</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5">{draft.memory_append}</p></div>}{needsReconfirmation ? <p className="text-sm text-amber-700 dark:text-amber-400">保存草稿需要重新确认</p> : !canCommit && <p className="text-sm text-muted-foreground">确认凭据尚未就绪，请等待会话继续同步。</p>}{error && <p className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button onClick={onCommit} disabled={committing || !canCommit}>{committing && <Loader2 className="size-4 animate-spin" />}{needsReconfirmation ? '等待重新确认' : `确认${isProjectUpdate ? '更新画像' : '创建创作项目'}`}</Button><Button variant="outline" onClick={onContinue} disabled={committing}><SquarePen className="size-4" />继续编辑</Button></div></CardContent></Card>

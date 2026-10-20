@@ -386,9 +386,11 @@ func (s *TaskService) freezeProjectChannelConfig(ctx context.Context, projectID,
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID           string
-	ProjectID        string
-	ExecutionProfile string
+	UserID                   string
+	ProjectID                string
+	AssistantCheckpointID    string
+	AssistantProfileRevision *int64
+	ExecutionProfile         string
 	// AgentID, Channel, and TaskKind are required explicit task identity.
 	// Project account context never supplies any of these values.
 	AgentID           string
@@ -621,6 +623,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	taskType := taskTypeForIdentity(agentID, channel, taskKind)
 	effectiveReferenceImageAssetID := p.ReferenceImageAssetID
+	if p.AssistantProfileRevision != nil && projectProfileFor(project).Version != *p.AssistantProfileRevision {
+		return nil, ErrAssistantCheckpointConflict
+	}
 	taskProjectSnapshot := model.SnapshotProject(project)
 	if p.ProjectSnapshot != nil {
 		taskProjectSnapshot = *p.ProjectSnapshot
@@ -857,6 +862,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 		task := &model.Task{
 			ID:                       taskID,
+			AssistantCheckpointID:    assistantCheckpointIDPointer(p.AssistantCheckpointID),
 			UserID:                   p.UserID,
 			ProjectID:                p.ProjectID,
 			AgentID:                  agentID,
@@ -986,6 +992,9 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		}
 		if project.Status != model.ProjectStatusActive || project.DeletingAt != nil {
 			return fmt.Errorf("project is not active")
+		}
+		if manualAdmission != nil && manualAdmission.AssistantProfileRevision != nil && projectProfileFor(project).Version != *manualAdmission.AssistantProfileRevision {
+			return ErrAssistantCheckpointConflict
 		}
 		for _, task := range tasks {
 			if task.ProjectID != project.ID || task.UserID != project.UserID {

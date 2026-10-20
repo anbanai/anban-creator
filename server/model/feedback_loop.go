@@ -113,6 +113,8 @@ func (FeedbackLease) TableName() string { return "feedback_leases" }
 // FeedbackInsight stores explainable deterministic facts or LLM interpretations.
 type FeedbackInsight struct {
 	ID                   string     `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID               string     `gorm:"type:char(36);index;not null;default:''" json:"user_id,omitempty"`
+	SourceSessionID      string     `gorm:"type:char(36);index;not null;default:''" json:"source_session_id,omitempty"`
 	JobID                string     `gorm:"type:char(36);uniqueIndex:idx_feedback_insight_job_kind;index;not null" json:"job_id"`
 	ExecutionID          string     `gorm:"type:char(36);index;not null;default:''" json:"execution_id,omitempty"`
 	ProjectID            string     `gorm:"type:char(36);index;not null" json:"project_id"`

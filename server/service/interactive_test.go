@@ -1479,6 +1479,62 @@ func TestInteractiveCommitMatchesProjectCreateDefaults(t *testing.T) {
 	}
 }
 
+func TestAssistantProfileCommitConfirmsNewProfile(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "assistant-profile-commit.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Project{}, &model.ProjectProfileRevision{}, &model.ProjectProfileState{}, &model.InteractiveCommitReceipt{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	sess := newInteractiveTestSession()
+	sess.ModeID = AssistantModeProfile
+	svc := newInteractiveTestService(sess)
+	svc.repo = repo
+	if err := svc.StageDraftForSession(sess.ID, InteractiveStageInput{
+		Project: InteractiveProject{Name: "Assistant profile", Platform: model.PlatformWechat},
+		Profile: model.NewProjectProfile(), Progress: InteractiveProgress{
+			"identity": "collected", "style": "collected", "audience": "collected",
+			"platforms": "collected", "preferences": "collected", "memory": "collected",
+		}, Ready: true,
+	}); err != nil {
+		t.Fatalf("StageDraftForSession() error = %v", err)
+	}
+	history, _, closeEvents, err := svc.Events(sess.UserID, sess.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeEvents()
+	var token string
+	for _, event := range history {
+		if event.Type == "draft.ready" {
+			if draft, ok := event.Data.(InteractiveDraft); ok {
+				token = draft.ConfirmationToken
+			}
+		}
+	}
+	if token == "" {
+		t.Fatal("ready draft did not issue a confirmation token")
+	}
+
+	result, err := svc.Commit(context.Background(), sess.UserID, sess.ID, InteractiveCommitRequest{
+		ConfirmationToken: token,
+		IdempotencyKey:    "assistant-profile-commit",
+	})
+	if err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	restarted := NewInteractiveService(repo)
+	replay, err := restarted.CommitAssistant(context.Background(), sess.UserID, sess.ID, AssistantCommitRequest{ConfirmationToken: token, IdempotencyKey: "assistant-profile-commit"}, nil, repo)
+	if err != nil || replay.Project == nil || replay.Project.ID != result.Project.ID {
+		t.Fatalf("profile receipt replay after restart = %#v, %v", replay, err)
+	}
+	if !result.Profile.IsConfirmed() || result.Profile.ApplicationSource != model.ProfileApplicationSourceUserConfirmation {
+		t.Fatalf("Assistant profile = %#v, want confirmed user profile", result.Profile)
+	}
+}
+
 func TestInteractiveCommitRejectsMemoryAppendForNewProjectWithoutStickingBusy(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "interactive-memory-append.db")), &gorm.Config{})
 	if err != nil {

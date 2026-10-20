@@ -726,14 +726,23 @@ func main() {
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL,
 		}
+		runtimeReady := true
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH containers")
+			runtimeReady = false
+		}
+		if repo == nil || repo.AssistantSessions() == nil {
+			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
+			runtimeReady = false
+		} else if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
+			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
+			runtimeReady = false
 		}
 		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
 		if projectSvc != nil {
 			interactiveSvc.SetProjectService(projectSvc)
 		}
-		interactiveSvc.SetEnabled(true)
+		interactiveSvc.SetEnabled(runtimeReady)
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "kubernetes") {
 		restConfig, err := rest.InClusterConfig()
 		if err != nil {
@@ -749,14 +758,23 @@ func main() {
 			ServerInstanceID: cfg.Dsh.ServerInstanceID, Provider: route.Provider, API: route.API,
 			BaseURL: route.BaseURL, APIKey: route.APIKey, Model: route.Model, MCPURL: cfg.Dsh.MCPURL, Logger: log,
 		}
+		runtimeReady := true
 		if err := dshFactory.CleanupOrphans(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("failed to clean orphaned interactive DSH jobs")
+			runtimeReady = false
+		}
+		if repo == nil || repo.AssistantSessions() == nil {
+			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
+			runtimeReady = false
+		} else if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
+			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
+			runtimeReady = false
 		}
 		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, dshFactory)
 		if projectSvc != nil {
 			interactiveSvc.SetProjectService(projectSvc)
 		}
-		interactiveSvc.SetEnabled(true)
+		interactiveSvc.SetEnabled(runtimeReady)
 	} else if cfg.Dsh.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Dsh.Executor), "process") && strings.TrimSpace(cfg.Dsh.BridgeCommand) != "" {
 		route := cfg.Dsh.Routes[cfg.Dsh.Route]
 		interactiveSvc = service.NewInteractiveServiceWithRuntime(repo, service.ExecRuntimeFactory{
@@ -774,8 +792,25 @@ func main() {
 		if projectSvc != nil {
 			interactiveSvc.SetProjectService(projectSvc)
 		}
-		interactiveSvc.SetEnabled(true)
+		runtimeReady := repo != nil && repo.AssistantSessions() != nil
+		if runtimeReady {
+			if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
+				log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
+				runtimeReady = false
+			}
+		} else {
+			log.Error().Msg("cannot recover Assistant sessions without durable session storage")
+		}
+		interactiveSvc.SetEnabled(runtimeReady)
+	} else if repo != nil && repo.AssistantSessions() != nil {
+		// No runtime branch owns startup recovery in this configuration. Release
+		// durable Assistant leases so a disabled or unsupported executor cannot
+		// strand sessions across a restart.
+		if err := repo.AssistantSessions().InterruptActive(context.Background(), time.Now().UTC()); err != nil {
+			log.Error().Err(err).Msg("failed to recover interrupted Assistant sessions")
+		}
 	}
+	interactiveSvc.SetTaskService(taskSvc)
 	// Apply authorization policy after selecting the runtime-backed service so
 	// enabling the bridge cannot silently drop admin-only access control.
 	if cfg.Dsh.TimeoutSec > 0 {
@@ -944,6 +979,7 @@ func main() {
 	}
 
 	interactiveHandler := handler.NewInteractiveHandler(interactiveSvc)
+	assistantHandler := handler.NewAssistantHandler(interactiveSvc, taskSvc, repo)
 
 	// 16. Build Services struct.
 	svcs := &router.Services{
@@ -975,6 +1011,7 @@ func main() {
 		ChannelsAnalyticsHandler:            channelsAnalyticsHandler,
 		AgentHandler:                        agentHandler,
 		InteractiveHandler:                  interactiveHandler,
+		AssistantHandler:                    assistantHandler,
 		AgentProfileHandler:                 agentProfileHandler,
 		AgentPackHandler:                    agentPackHandler,
 		BillingHandler:                      fixedBilling.Handler,
