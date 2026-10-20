@@ -1,0 +1,250 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/service"
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+	"gorm.io/datatypes"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+type assistantHandlerRuntime struct{}
+
+func (assistantHandlerRuntime) Command(context.Context, string, any) error { return nil }
+func (assistantHandlerRuntime) Close() error                               { return nil }
+
+type assistantHandlerRuntimeFactory struct{ starts atomic.Int32 }
+
+func (f *assistantHandlerRuntimeFactory) Start(context.Context, string, string, string, func(string, any)) (service.Runtime, error) {
+	f.starts.Add(1)
+	return assistantHandlerRuntime{}, nil
+}
+
+func newAssistantHandlerTestRepo(t *testing.T) repository.Repository {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Project{}, &model.Task{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AnalyticsState{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	return repository.New(db)
+}
+
+func newAssistantHandlerTestApp(h *AssistantHandler) *fiber.App {
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", "user-1")
+		return c.Next()
+	})
+	app.Get("/assistant/bootstrap", h.Bootstrap)
+	app.Get("/assistant/projects/:projectId/works", h.Works)
+	app.Get("/assistant/checkpoint", h.LatestCheckpoint)
+	app.Post("/assistant/sessions", h.Create)
+	return app
+}
+
+func TestAssistantBootstrapDoesNotStartRuntime(t *testing.T) {
+	repo := newAssistantHandlerTestRepo(t)
+	factory := &assistantHandlerRuntimeFactory{}
+	svc := service.NewInteractiveServiceWithRuntime(repo, factory)
+	svc.SetEnabled(true)
+	app := newAssistantHandlerTestApp(NewAssistantHandler(svc, nil, repo))
+
+	req := httptest.NewRequest(http.MethodGet, "/assistant/bootstrap", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("bootstrap status = %d, body = %s", resp.StatusCode, body)
+	}
+	var envelope struct {
+		Data service.AssistantBootstrap `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Modes) != 3 || envelope.Data.DefaultModeID != service.AssistantModeProfile {
+		t.Fatalf("bootstrap = %#v, want three modes and profile default", envelope.Data)
+	}
+	if got := factory.starts.Load(); got != 0 {
+		t.Fatalf("runtime starts on bootstrap = %d, want 0", got)
+	}
+}
+
+func TestAssistantWorksAndCheckpointRoutesUseSelectedScope(t *testing.T) {
+	repo := newAssistantHandlerTestRepo(t)
+	profile := model.NewProjectProfile()
+	profile.Status = model.ProfileStatusConfirmed
+	profile.InitializationStatus = model.ProfileInitializationReady
+	profile.Version = 1
+	project := &model.Project{ID: "project-1", UserID: "user-1", Platform: "wechat", Name: "画像", Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(profile)}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := repo.Tasks().Create(context.Background(), &model.Task{ID: fmt.Sprintf("work-%d", i), UserID: "user-1", ProjectID: project.ID, Type: "article", Status: model.TaskStatusCompleted, Title: fmt.Sprintf("作品 %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkpoint := &model.AssistantCheckpoint{
+		ID: "checkpoint-1", UserID: "user-1", ModeID: service.AssistantModeReview, ProjectID: project.ID, ContentID: "work-0",
+		SchemaVersion: "1.0", Payload: []byte(`{"review":{"summary":"草稿"}}`), Summary: "复盘草稿",
+		Status: model.AssistantCheckpointDraft, SourceSessionID: "session-1", ExpiresAt: time.Now().Add(time.Hour),
+	}
+	if err := repo.AssistantCheckpoints().UpsertBySourceSession(context.Background(), checkpoint); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := service.NewInteractiveServiceWithRuntime(repo, &assistantHandlerRuntimeFactory{})
+	svc.SetEnabled(true)
+	app := newAssistantHandlerTestApp(NewAssistantHandler(svc, nil, repo))
+
+	worksResponse, err := app.Test(httptest.NewRequest(http.MethodGet, "/assistant/projects/project-1/works?limit=1", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer worksResponse.Body.Close()
+	var worksEnvelope struct {
+		Data service.AssistantWorkPage `json:"data"`
+	}
+	if err := json.NewDecoder(worksResponse.Body).Decode(&worksEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if worksResponse.StatusCode != fiber.StatusOK || len(worksEnvelope.Data.Items) != 1 || !worksEnvelope.Data.HasMore || worksEnvelope.Data.NextCursor == nil {
+		t.Fatalf("works response = %d %#v", worksResponse.StatusCode, worksEnvelope.Data)
+	}
+
+	checkpointResponse, err := app.Test(httptest.NewRequest(http.MethodGet, "/assistant/checkpoint?mode_id=review&project_id=project-1&content_id=work-0", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkpointResponse.Body.Close()
+	var checkpointEnvelope struct {
+		Data *service.AssistantCheckpointSummary `json:"data"`
+	}
+	if err := json.NewDecoder(checkpointResponse.Body).Decode(&checkpointEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if checkpointResponse.StatusCode != fiber.StatusOK || checkpointEnvelope.Data == nil || checkpointEnvelope.Data.ID != checkpoint.ID {
+		t.Fatalf("checkpoint response = %d %#v", checkpointResponse.StatusCode, checkpointEnvelope.Data)
+	}
+}
+
+func TestAssistantCreateAcceptsModeContractAndRejectsAgentSelection(t *testing.T) {
+	repo := newAssistantHandlerTestRepo(t)
+	factory := &assistantHandlerRuntimeFactory{}
+	svc := service.NewInteractiveServiceWithRuntime(repo, factory)
+	svc.SetEnabled(true)
+	app := newAssistantHandlerTestApp(NewAssistantHandler(svc, nil, repo))
+
+	badReq := httptest.NewRequest(http.MethodPost, "/assistant/sessions", strings.NewReader(`{"mode_id":"profile","agent_id":"project-creator"}`))
+	badReq.Header.Set("Content-Type", "application/json")
+	badResp, err := app.Test(badReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = badResp.Body.Close()
+	if badResp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("agent selection status = %d, want 400", badResp.StatusCode)
+	}
+	if got := factory.starts.Load(); got != 0 {
+		t.Fatalf("runtime starts after invalid request = %d, want 0", got)
+	}
+
+	goodReq := httptest.NewRequest(http.MethodPost, "/assistant/sessions", strings.NewReader(`{"mode_id":"profile"}`))
+	goodReq.Header.Set("Content-Type", "application/json")
+	goodReq.Header.Set("Idempotency-Key", "start-profile-1")
+	goodResp, err := app.Test(goodReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer goodResp.Body.Close()
+	if goodResp.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(goodResp.Body)
+		t.Fatalf("create status = %d, body = %s", goodResp.StatusCode, body)
+	}
+	deadline := time.Now().Add(time.Second)
+	for factory.starts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := factory.starts.Load(); got != 1 {
+		t.Fatalf("runtime starts after session create = %d, want 1", got)
+	}
+	var envelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(goodResp.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := repo.AssistantSessions().FindByIDForUser(context.Background(), "user-1", envelope.Data.ID)
+	if err != nil || persisted.Status != "starting" || persisted.ModeID != service.AssistantModeProfile {
+		t.Fatalf("persisted assistant session = %#v, %v", persisted, err)
+	}
+	if _, err := repo.AssistantSessions().FindLeaseBySession(context.Background(), envelope.Data.ID); err != nil {
+		t.Fatalf("active session lease lookup: %v", err)
+	}
+	if err := svc.Close("user-1", envelope.Data.ID); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	persisted, err = repo.AssistantSessions().FindByIDForUser(context.Background(), "user-1", envelope.Data.ID)
+	if err != nil || persisted.Status != "closed" || persisted.ClosedAt == nil {
+		t.Fatalf("closed assistant session = %#v, %v", persisted, err)
+	}
+	if _, err := repo.AssistantSessions().FindLeaseBySession(context.Background(), envelope.Data.ID); err == nil {
+		t.Fatal("session lease remains after close")
+	}
+}
+
+func TestInteractiveErrorMapsAssistantErrorsToClientStatuses(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "mode unavailable", err: service.ErrAssistantModeUnavailable, want: fiber.StatusConflict},
+		{name: "checkpoint conflict", err: service.ErrAssistantCheckpointConflict, want: fiber.StatusConflict},
+		{name: "checkpoint not found", err: service.ErrAssistantCheckpointNotFound, want: fiber.StatusNotFound},
+		{name: "runtime context too large", err: service.ErrAssistantRuntimeContextTooLarge, want: fiber.StatusRequestEntityTooLarge},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := fiber.New()
+			app.Get("/error", func(c fiber.Ctx) error { return interactiveError(c, errors.Join(errors.New("wrapped"), tc.err)) })
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/error", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+		})
+	}
+}

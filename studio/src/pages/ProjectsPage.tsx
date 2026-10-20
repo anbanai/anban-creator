@@ -319,11 +319,11 @@ export default function ProjectsPage() {
   }
 
   function openCreator() {
-    navigate('/chat?agent=project-creator&intent=create-project')
+    navigate('/chat?mode=profile')
   }
 
   function openProfileCreator(project: Project) {
-    navigate(`/chat?agent=project-creator&intent=update-project-profile&project_id=${encodeURIComponent(project.id)}`)
+    navigate(`/chat?mode=profile&project_id=${encodeURIComponent(project.id)}`)
   }
 
   useEffect(() => {

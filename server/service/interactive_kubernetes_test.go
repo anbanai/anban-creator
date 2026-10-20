@@ -18,7 +18,10 @@ import (
 )
 
 func TestDshSecretEnvDefaultsToServerMCPRoute(t *testing.T) {
-	envs := dshSecretEnv("session-secret", "session-1", "", "https://creator-server:8443")
+	envs, err := dshSecretEnv("session-secret", "session-1", "", "https://creator-server:8443", "project-creator")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, env := range envs {
 		if env.Name == "ANBAN_DSH_BRIDGE_MCP_URL" {
 			if env.Value != "https://creator-server:8443/mcp" {
@@ -37,7 +40,10 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 		KubernetesProjectMemoryClaim: "creator-project-memory",
 		KubernetesProjectMemoryMount: "/workspace/project", CPUCores: 1, MemoryMB: 512,
 	}, ServiceAccount: "creator-agent-runner", ServerInstanceID: "server-1"}
-	pod := factory.pod(InteractiveRuntimeSpec{SessionID: "s-1", ProjectID: "p-1", RuntimeToken: "token"}, "anban", "anban-dsh-s-1")
+	pod, err := factory.pod(InteractiveRuntimeSpec{SessionID: "s-1", ProjectID: "p-1", AgentPackID: "project-creator", RuntimeToken: "token"}, "anban", "anban-dsh-s-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if pod.Spec.RestartPolicy != corev1.RestartPolicyNever || pod.Spec.ServiceAccountName != "creator-agent-runner" {
 		t.Fatalf("pod lifecycle = %q/%q", pod.Spec.RestartPolicy, pod.Spec.ServiceAccountName)
 	}
@@ -83,7 +89,11 @@ func TestKubernetesRuntimeFactoryPodIsolatedAndReadOnly(t *testing.T) {
 		t.Fatalf("context Secret volume = %#v", contextVolume)
 	}
 	hasContextPath := false
-	for _, env := range dshSecretEnv(secret.Name, "s-1", "http://mcp", "http://server") {
+	envs, err := dshSecretEnv(secret.Name, "s-1", "http://mcp", "http://server", "project-creator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range envs {
 		if env.Name == "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN" && env.Value != "" {
 			t.Fatal("runtime token must not be in Pod env.value")
 		}
@@ -108,7 +118,10 @@ func TestKubernetesRuntimeFactoryUsesStandardResourceQuantities(t *testing.T) {
 			Limits:   map[string]string{"cpu": "500m", "memory": "512Mi"},
 		},
 	}}
-	pod := factory.pod(InteractiveRuntimeSpec{SessionID: "s-quantity"}, "anban", "anban-dsh-s-quantity")
+	pod, err := factory.pod(InteractiveRuntimeSpec{SessionID: "s-quantity", AgentPackID: "creation-planner"}, "anban", "anban-dsh-s-quantity")
+	if err != nil {
+		t.Fatal(err)
+	}
 	resources := pod.Spec.Containers[0].Resources
 	if got := resources.Requests.Cpu().String(); got != "500m" {
 		t.Fatalf("CPU request = %q, want 500m", got)
@@ -129,7 +142,10 @@ func TestKubernetesRuntimeFactoryBuildsLongLivedJobWithAttachableBridge(t *testi
 		KubernetesNamespace: "anban", KubernetesImagePullSecret: "acr-secret", KubernetesProjectMemoryClaim: "creator-project-memory",
 		KubernetesProjectMemoryMount: "/workspace/project", Image: "registry.example/creator-dsh@sha256:" + repeatHex(64), CPUCores: 1, MemoryMB: 512, TimeoutSec: 600,
 	}}
-	job := factory.job(InteractiveRuntimeSpec{SessionID: "session-1", AgentPackID: "project-creator", RuntimeToken: "token"}, "anban", "anban-dsh-session-1")
+	job, err := factory.job(InteractiveRuntimeSpec{SessionID: "session-1", AgentPackID: "project-creator", RuntimeToken: "token"}, "anban", "anban-dsh-session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if job.Kind != "Job" || job.Spec.Completions == nil || *job.Spec.Completions != 1 || job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 {
 		t.Fatalf("job completion policy = %#v, want one completion and one parallel pod", job.Spec)
 	}
@@ -143,19 +159,63 @@ func TestKubernetesRuntimeFactoryBuildsLongLivedJobWithAttachableBridge(t *testi
 	if !container.Stdin || container.StdinOnce || container.TTY {
 		t.Fatalf("bridge stdio = stdin:%v stdinOnce:%v tty:%v, want attachable stdin", container.Stdin, container.StdinOnce, container.TTY)
 	}
+	if got := envValue(container.Env, "ANBAN_DSH_BRIDGE_PRESET_ID"); got != "project-creator" {
+		t.Fatalf("preset env = %q, want project-creator", got)
+	}
+	if got := envValue(container.Env, "ANBAN_DSH_BRIDGE_PATCH"); got != "/app/harness/dsh/project-creator.patch.yml" {
+		t.Fatalf("patch env = %q", got)
+	}
 	if job.Spec.Template.Labels["com.anban.session_id"] != "session-1" || job.Spec.Template.Labels["com.anban.runtime"] != "dsh-interactive" {
 		t.Fatalf("job pod labels = %#v", job.Spec.Template.Labels)
 	}
 }
 
+func TestKubernetesRuntimeFactoryInjectsAllowlistedPresetAndMatchingPatch(t *testing.T) {
+	factory := KubernetesRuntimeFactory{Config: srvconfig.DshConfig{Image: "registry.example/dsh", KubernetesNamespace: "anban"}}
+	for _, presetID := range []string{"project-creator", "creation-planner", "postmortem-review"} {
+		job, err := factory.job(InteractiveRuntimeSpec{SessionID: "session-" + presetID, AgentPackID: presetID}, "anban", "anban-dsh-"+presetID)
+		if err != nil {
+			t.Fatalf("job(%q): %v", presetID, err)
+		}
+		container := job.Spec.Template.Spec.Containers[0]
+		if got := envValue(container.Env, "ANBAN_DSH_BRIDGE_PRESET_ID"); got != presetID {
+			t.Errorf("preset env = %q, want %q", got, presetID)
+		}
+		if got, want := envValue(container.Env, "ANBAN_DSH_BRIDGE_PATCH"), "/app/harness/dsh/"+presetID+".patch.yml"; got != want {
+			t.Errorf("patch env = %q, want %q", got, want)
+		}
+		if got := job.Labels["com.anban.preset_id"]; got != presetID {
+			t.Errorf("preset label = %q, want %q", got, presetID)
+		}
+	}
+	if _, err := factory.job(InteractiveRuntimeSpec{SessionID: "session-invalid", AgentPackID: "unknown-preset"}, "anban", "anban-dsh-invalid"); err == nil {
+		t.Fatal("unknown preset was accepted")
+	}
+}
+
+func envValue(envs []corev1.EnvVar, name string) string {
+	for _, env := range envs {
+		if env.Name == name {
+			return env.Value
+		}
+	}
+	return ""
+}
+
 func TestKubernetesRuntimeFactoryCleanupOrphans(t *testing.T) {
-	client := fake.NewSimpleClientset(&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "dsh-1", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive"}}})
-	factory := KubernetesRuntimeFactory{Kube: client, REST: &rest.Config{}, Config: srvconfig.DshConfig{KubernetesNamespace: "anban"}}
+	client := fake.NewSimpleClientset(
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "dsh-old-server", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-old"}}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "orphan-secret", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-old", "com.anban.session_id": "orphan"}}},
+	)
+	factory := KubernetesRuntimeFactory{Kube: client, REST: &rest.Config{}, ServerInstanceID: "server-new", Config: srvconfig.DshConfig{KubernetesNamespace: "anban"}}
 	if err := factory.CleanupOrphans(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.BatchV1().Jobs("anban").Get(context.Background(), "dsh-1", metav1.GetOptions{}); err == nil {
+	if _, err := client.BatchV1().Jobs("anban").Get(context.Background(), "dsh-old-server", metav1.GetOptions{}); err == nil {
 		t.Fatal("orphan Job was not deleted")
+	}
+	if _, err := client.CoreV1().Secrets("anban").Get(context.Background(), "orphan-secret", metav1.GetOptions{}); err == nil {
+		t.Fatal("orphan Secret from an old Server instance was not deleted")
 	}
 }
 
@@ -168,7 +228,7 @@ func TestKubernetesRuntimeFactoryCleanupOrphansRetainsDiagnosticResourcesUntilDe
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "active-secret", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1", "com.anban.session_id": "active"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(active, 10)}}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "expired-secret", Namespace: "anban", Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.server_instance": "server-1", "com.anban.session_id": "expired"}, Annotations: map[string]string{dshDiagnosticRetentionAnnotation: strconv.FormatInt(expired, 10)}}},
 	)
-	factory := KubernetesRuntimeFactory{Kube: client, REST: &rest.Config{}, ServerInstanceID: "server-1", Config: srvconfig.DshConfig{KubernetesNamespace: "anban"}}
+	factory := KubernetesRuntimeFactory{Kube: client, REST: &rest.Config{}, ServerInstanceID: "server-2", Config: srvconfig.DshConfig{KubernetesNamespace: "anban"}}
 	if err := factory.CleanupOrphans(context.Background()); err != nil {
 		t.Fatal(err)
 	}

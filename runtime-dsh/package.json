@@ -12,7 +12,7 @@
     "patch:dependencies": "node scripts/patch-dsh-dependencies.mjs",
     "test": "npm run patch:dependencies && bun test",
     "start": "node dist/dsh-bridge.js",
-    "test:startup": "bun run build && node test/fixtures/project-creator-start.mjs"
+    "test:startup": "bun run build && node test/fixtures/project-creator-start.mjs && node test/fixtures/assistant-presets-start.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-sdk-client": "file:vendor/@deepseek-ai/dsh-sdk-client",

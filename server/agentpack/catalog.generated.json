@@ -163,6 +163,44 @@
       "digest": "1886fee8d7efcb24b82db59561ce41c6a08c35cece3f7c8242d5717f9049909a"
     },
     {
+      "id": "creation-planner",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "创作模式",
+      "description": "通过持续对话制定可执行的作品计划，并在用户确认后交给 Server 创建正式创作任务。",
+      "agent": {
+        "name": "creation-planner",
+        "skills": [
+          "creation-planning"
+        ],
+        "max_turns": 80
+      },
+      "interaction": {
+        "user_questions": true,
+        "capabilities": [
+          "ask_user_question",
+          "stage_assistant_draft"
+        ],
+        "intents": [
+          "plan-creation"
+        ]
+      },
+      "bindings": {},
+      "runtime": {
+        "profile": "creation-planner",
+        "adapter": "standard",
+        "max_turns": 80
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "interactive-creation-planning"
+      ],
+      "ui": {},
+      "digest": "899f1024142e2598f204fb766d0905d15d3a2511d33b761785a149e7f761cd08"
+    },
+    {
       "id": "feedback-analysis",
       "channel": "feedback-analysis",
       "version": "1.0.2",
@@ -679,6 +717,44 @@
         ]
       },
       "digest": "ff3069f5d7394d7721cf025eddd3e9659d07db9533daa62abe2539c8682e1047"
+    },
+    {
+      "id": "postmortem-review",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "复盘模式",
+      "description": "围绕已完成作品和只读分析证据进行交互式复盘，形成等待独立数据验证的画像改进候选。",
+      "agent": {
+        "name": "postmortem-review",
+        "skills": [
+          "postmortem-review"
+        ],
+        "max_turns": 80
+      },
+      "interaction": {
+        "user_questions": true,
+        "capabilities": [
+          "ask_user_question",
+          "stage_assistant_draft"
+        ],
+        "intents": [
+          "review-content"
+        ]
+      },
+      "bindings": {},
+      "runtime": {
+        "profile": "postmortem-review",
+        "adapter": "standard",
+        "max_turns": 80
+      },
+      "surfaces": [
+        "plugin"
+      ],
+      "features": [
+        "interactive-postmortem-review"
+      ],
+      "ui": {},
+      "digest": "f03b4537158ab401661ebe25f35c98fc676622a1663b6be4f0b2948bfbfa3178"
     },
     {
       "id": "profile-analysis",
@@ -1615,7 +1691,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "97208f7370cc9fb4e0490dbf61348d6345bcd62280f62b43efb9e0161e9e4bc4"
+      "digest": "651f26c87194fe1b7e6d8bd10f70a61b7ecb16b408514dfd1dd648db990276aa"
     },
     {
       "id": "wechat-picture",

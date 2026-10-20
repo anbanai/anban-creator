@@ -54,6 +54,14 @@ func (r *taskRepository) FindByID(ctx context.Context, id string) (*model.Task, 
 	return &task, nil
 }
 
+func (r *taskRepository) FindByAssistantCheckpointID(ctx context.Context, userID, checkpointID string) (*model.Task, error) {
+	var task model.Task
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND assistant_checkpoint_id = ?", userID, checkpointID).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 func (r *taskRepository) FindByIDForUpdate(ctx context.Context, id string) (*model.Task, error) {
 	var task model.Task
 	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&task).Error; err != nil {
@@ -119,6 +127,20 @@ func (r *taskRepository) FindByUserIDAndStatus(ctx context.Context, userID, stat
 		return nil, err
 	}
 	return tasks, nil
+}
+
+func (r *taskRepository) HasCompletedWorkInProjects(ctx context.Context, userID string, projectIDs []string) (bool, error) {
+	if strings.TrimSpace(userID) == "" || len(projectIDs) == 0 {
+		return false, nil
+	}
+	var result struct{ ID string }
+	err := excludeInternalFeedbackTasks(r.db.WithContext(ctx).Model(&model.Task{})).
+		Where("user_id = ? AND status = ? AND project_id IN ?", userID, model.TaskStatusCompleted, projectIDs).
+		Select("id").Take(&result).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (r *taskRepository) FindByUserIDBefore(ctx context.Context, userID string, projectID string, planID string, beforeCreatedAt time.Time, beforeID string, limit int) ([]*model.Task, error) {

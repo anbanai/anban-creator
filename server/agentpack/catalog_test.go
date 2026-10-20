@@ -1027,8 +1027,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 11 {
-		t.Fatalf("Pack count = %d, want 11", len(catalog.Packs))
+	if len(catalog.Packs) != 13 {
+		t.Fatalf("Pack count = %d, want 13", len(catalog.Packs))
 	}
 	contentPacks := []string{"wechat-article", "seednote", "ecommerce", "moments", "montage", "hypit", "wechat-picture", "whiteboard-animation"}
 	for _, id := range contentPacks {
@@ -1045,7 +1045,7 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 			t.Errorf("content Pack %q tagging = %#v", id, pack.Tagging)
 		}
 	}
-	for _, id := range []string{"feedback-analysis", "profile-analysis", "project-creator"} {
+	for _, id := range []string{"feedback-analysis", "profile-analysis", "project-creator", "creation-planner", "postmortem-review"} {
 		pack, ok := catalog.Pack(id)
 		if !ok {
 			t.Errorf("non-content Pack %q missing", id)
@@ -1073,6 +1073,33 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	}
 	if _, ok := catalog.ForChannel("project-creator"); ok {
 		t.Fatal("project-creator must not resolve as an ordinary channel")
+	}
+	for _, tc := range []struct {
+		id, displayName, intent string
+	}{
+		{id: "creation-planner", displayName: "创作模式", intent: "plan-creation"},
+		{id: "postmortem-review", displayName: "复盘模式", intent: "review-content"},
+	} {
+		pack, ok := catalog.Pack(tc.id)
+		if !ok {
+			t.Errorf("interactive Pack %q missing", tc.id)
+			continue
+		}
+		if pack.DisplayName != tc.displayName || pack.Interaction == nil || !pack.Interaction.UserQuestions {
+			t.Errorf("%s metadata = %#v", tc.id, pack)
+		}
+		if pack.Channel != "" || len(pack.Bindings.TaskKinds) != 0 || len(pack.Surfaces) != 1 || pack.Surfaces[0] != "plugin" {
+			t.Errorf("%s routing = %#v", tc.id, pack)
+		}
+		if pack.Agent.Name != tc.id || pack.Agent.DSHSource == "" || pack.Runtime.Profile != tc.id || pack.Interaction == nil || !containsString(pack.Interaction.Intents, tc.intent) || !containsString(pack.Interaction.Capabilities, "stage_assistant_draft") {
+			t.Errorf("%s runtime/interaction contract = %#v", tc.id, pack)
+		}
+		if _, ok := catalog.ForTaskType(tc.id); ok {
+			t.Errorf("%s must not resolve as an ordinary task type", tc.id)
+		}
+		if _, ok := catalog.ForChannel(tc.id); ok {
+			t.Errorf("%s must not resolve as an ordinary channel", tc.id)
+		}
 	}
 
 	wantRoutes := map[string]struct {

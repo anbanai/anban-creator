@@ -2,7 +2,7 @@ import { HarnessClient, type HarnessNotification } from "@deepseek-ai/dsh-sdk-cl
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 
 type JsonRecord = Record<string, unknown>;
 const DSH_BRIDGE_PROVIDER_API_KEY_ENV = "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY";
@@ -43,6 +43,17 @@ interface InteractiveRuntimeCapabilities {
 }
 
 export const INTERACTIVE_PRESET_ID = "project-creator";
+export const INTERACTIVE_PRESET_IDS = ["project-creator", "creation-planner", "postmortem-review"] as const;
+export type InteractivePresetId = typeof INTERACTIVE_PRESET_IDS[number];
+const DSH_BRIDGE_PRESET_ID_ENV = "ANBAN_DSH_BRIDGE_PRESET_ID";
+
+export function validateInteractivePresetId(value: string): InteractivePresetId {
+  const presetId = value.trim();
+  if (!INTERACTIVE_PRESET_IDS.includes(presetId as InteractivePresetId)) {
+    throw new Error(`unsupported interactive DSH preset: ${presetId || "(empty)"}`);
+  }
+  return presetId as InteractivePresetId;
+}
 
 export interface InteractiveRuntimeClient {
   start(): void;
@@ -156,12 +167,21 @@ export function redactInteractiveSecrets(
   return redacted;
 }
 
-export function resolveInteractivePatchPath(raw = process.env.ANBAN_DSH_BRIDGE_PATCH, cwd = process.cwd()): string {
+export function resolveInteractivePatchPath(
+  raw = process.env.ANBAN_DSH_BRIDGE_PATCH,
+  cwd = process.cwd(),
+  presetId: string = INTERACTIVE_PRESET_ID,
+): string {
   const value = raw?.trim() ?? "";
   if (!value) throw new Error("ANBAN_DSH_BRIDGE_PATCH is required");
+  const selectedPreset = validateInteractivePresetId(presetId);
   const path = resolve(cwd, value);
   if (!existsSync(path) || !statSync(path).isFile()) {
     throw new Error(`interactive DSH patch does not exist: ${path}`);
+  }
+  const expectedPatch = `${selectedPreset}.patch.yml`;
+  if (basename(path) !== expectedPatch) {
+    throw new Error(`interactive DSH patch ${basename(path)} does not match preset ${selectedPreset}`);
   }
   return path;
 }
@@ -358,13 +378,17 @@ export class DshBridge {
   private commandQueue: Promise<unknown> = Promise.resolve();
   private closed = false;
   private readonly route: InteractiveRouteConfig;
+  private readonly presetId: string;
 
   constructor(
     private readonly write: (event: StableBridgeEvent) => void,
     private readonly clientFactory?: () => InteractiveRuntimeClient,
     private readonly rootSessionId = process.env.ANBAN_DSH_BRIDGE_SESSION_ID?.trim() ?? "",
     route?: InteractiveRouteConfig,
+    presetId = process.env[DSH_BRIDGE_PRESET_ID_ENV]?.trim() ?? (clientFactory ? INTERACTIVE_PRESET_ID : ""),
   ) {
+    this.presetId = presetId.trim();
+    validateInteractivePresetId(this.presetId);
     this.route = route ?? (clientFactory ? {
       provider: "deepseek-official", model: "deepseek-flash", api: "deepseek-messages",
       baseURL: "https://api.deepseek.com/anthropic",
@@ -385,11 +409,12 @@ export class DshBridge {
     if (this.closed) throw new Error("DSH bridge is closed");
     if (this.runtimeReady) return this.runtimeReady;
     this.runtimeReady = (async () => {
+      const presetId = validateInteractivePresetId(this.presetId);
       const route = this.route;
       const client = this.clientFactory?.() ?? (() => {
         const dshHome = process.env.ANBAN_DSH_BRIDGE_HOME?.trim();
         if (!dshHome) throw new Error("ANBAN_DSH_BRIDGE_HOME is required");
-        const patchPath = resolveInteractivePatchPath();
+        const patchPath = resolveInteractivePatchPath(process.env.ANBAN_DSH_BRIDGE_PATCH, process.cwd(), presetId);
         writeDshRouteSettings(dshHome, route);
         return new HarnessClient({
           dshHome,
@@ -441,12 +466,19 @@ export class DshBridge {
   private validateCommand(command: InteractiveCommand): void {
     if (!this.rootSessionId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID is required");
     if (command.method === "shutdown") return;
+    const configuredPreset = validateInteractivePresetId(this.presetId);
     const sessionId = command.params.sessionId;
     if (sessionId !== this.rootSessionId) {
       throw new Error(`${command.method} must target the configured interactive session`);
     }
-    if (command.method === "session/start" && command.params.presetId !== INTERACTIVE_PRESET_ID) {
-      throw new Error(`session/start must use the ${INTERACTIVE_PRESET_ID} preset`);
+    if (command.method === "session/start") {
+      if (typeof command.params.presetId !== "string") {
+        throw new Error("session/start requires the configured interactive preset");
+      }
+      const requestedPreset = validateInteractivePresetId(command.params.presetId);
+      if (requestedPreset !== configuredPreset) {
+        throw new Error(`session/start preset ${requestedPreset} does not match configured preset ${configuredPreset}`);
+      }
     }
   }
 

@@ -16,7 +16,7 @@ func TestExecRuntimeFactoryPassesInteractiveCredentialsToBridge(t *testing.T) {
 		t.Skip("bridge process test uses a POSIX shell")
 	}
 	output := filepath.Join(t.TempDir(), "env.txt")
-	script := "printf '%s\\n%s\\n%s\\n%s\\n' \"$ANBAN_DSH_BRIDGE_SESSION_ID\" \"$ANBAN_DSH_BRIDGE_RUNTIME_TOKEN\" \"$ANBAN_DSH_BRIDGE_PATCH\" \"$ANBAN_DSH_BRIDGE_HOME\" > \"$1\"; read line"
+	script := "printf '%s\\n%s\\n%s\\n%s\\n%s\\n' \"$ANBAN_DSH_BRIDGE_SESSION_ID\" \"$ANBAN_DSH_BRIDGE_RUNTIME_TOKEN\" \"$ANBAN_DSH_BRIDGE_PATCH\" \"$ANBAN_DSH_BRIDGE_HOME\" \"$ANBAN_DSH_BRIDGE_PRESET_ID\" > \"$1\"; read line"
 	factory := ExecRuntimeFactory{
 		Command:  "sh",
 		Args:     []string{"-c", script, "bridge", output},
@@ -38,7 +38,7 @@ func TestExecRuntimeFactoryPassesInteractiveCredentialsToBridge(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
-	if len(lines) != 4 || lines[0] != "session-1" || lines[1] != "runtime-secret" || lines[2] != factory.DSHPatch || lines[3] == "" {
+	if len(lines) != 5 || lines[0] != "session-1" || lines[1] != "runtime-secret" || lines[2] != factory.DSHPatch || lines[3] == "" || lines[4] != "project-creator" {
 		t.Fatalf("bridge environment = %#v, want session/token/patch/home", lines)
 	}
 	if _, err := os.Stat(lines[3]); err != nil {
@@ -49,6 +49,78 @@ func TestExecRuntimeFactoryPassesInteractiveCredentialsToBridge(t *testing.T) {
 	}
 	if _, err := os.Stat(lines[3]); !os.IsNotExist(err) {
 		t.Fatalf("interactive DSH home still exists after runtime close: err=%v", err)
+	}
+}
+
+func TestExecRuntimeFactoryUsesAllowlistedAssistantPresetPatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bridge process test uses a POSIX shell")
+	}
+	output := filepath.Join(t.TempDir(), "env.txt")
+	script := "printf '%s\\n%s\\n' \"$ANBAN_DSH_BRIDGE_PRESET_ID\" \"$ANBAN_DSH_BRIDGE_PATCH\" > \"$1\"; read line"
+	factory := ExecRuntimeFactory{
+		Command: "sh", Args: []string{"-c", script, "bridge", output},
+		DSHPatch: "/runtime/harness/dsh/project-creator.patch.yml",
+	}
+	rt, err := factory.StartSession(context.Background(), InteractiveRuntimeSpec{
+		SessionID: "session-1", AgentPackID: "creation-planner", RuntimeToken: "runtime-secret",
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	deadline := time.Now().Add(time.Second)
+	var data []byte
+	for time.Now().Before(deadline) {
+		data, _ = os.ReadFile(output)
+		if len(data) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(lines) != 2 || lines[0] != "creation-planner" || lines[1] != "/runtime/harness/dsh/creation-planner.patch.yml" {
+		t.Fatalf("bridge preset environment = %#v", lines)
+	}
+	if _, err := factory.StartSession(context.Background(), InteractiveRuntimeSpec{AgentPackID: "unknown-preset"}, nil); err == nil {
+		t.Fatal("unknown Assistant preset was accepted")
+	}
+}
+
+func TestExecRuntimeFactoryStartWithContextUsesRequestedAssistantPreset(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bridge process test uses a POSIX shell")
+	}
+	for _, preset := range []string{"creation-planner", "postmortem-review"} {
+		t.Run(preset, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "env.txt")
+			script := "printf '%s\\n%s\\n' \"$ANBAN_DSH_BRIDGE_PRESET_ID\" \"$ANBAN_DSH_BRIDGE_PATCH\" > \"$1\"; read line"
+			factory := ExecRuntimeFactory{
+				Command: "sh", Args: []string{"-c", script, "bridge", output},
+				DSHPatch: "/runtime/harness/dsh/project-creator.patch.yml",
+			}
+			rt, err := factory.StartWithContext(context.Background(), "session-1", preset, "runtime-secret", "{}", nil)
+			if err != nil {
+				t.Fatalf("StartWithContext() error = %v", err)
+			}
+			t.Cleanup(func() { _ = rt.Close() })
+			deadline := time.Now().Add(time.Second)
+			var data []byte
+			for time.Now().Before(deadline) {
+				data, _ = os.ReadFile(output)
+				if len(data) > 0 {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			if len(lines) != 2 || lines[0] != preset || lines[1] != "/runtime/harness/dsh/"+preset+".patch.yml" {
+				t.Fatalf("bridge preset environment = %#v", lines)
+			}
+		})
+	}
+	if _, err := (ExecRuntimeFactory{Command: "sh"}).StartWithContext(context.Background(), "session-1", "untrusted-agent", "token", "{}", nil); err == nil {
+		t.Fatal("StartWithContext() accepted an unknown preset")
 	}
 }
 

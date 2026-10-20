@@ -61,6 +61,9 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 	if strings.TrimSpace(spec.SessionID) == "" || strings.TrimSpace(spec.RuntimeToken) == "" {
 		return nil, errors.New("interactive session id and runtime token are required")
 	}
+	if _, err := interactivePresetPatchPath(spec.AgentPackID); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(f.ServiceAccount) == "" {
 		return nil, errors.New("Claude Kubernetes service account is required")
 	}
@@ -96,8 +99,19 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 	}
 	f.logStartupStage(spec.SessionID, "created DSH session Secret", stageStarted)
 	stageStarted = time.Now()
-	job := f.job(spec, namespace, name)
-	job.Spec.Template.Spec.Containers[0].Env = dshSecretEnv(secretName, spec.SessionID, f.MCPURL, f.Config.ServerURL)
+	job, err := f.job(spec, namespace, name)
+	if err != nil {
+		abort()
+		_ = f.deleteSecret(context.Background(), namespace, secretName)
+		return nil, err
+	}
+	envs, err := dshSecretEnv(secretName, spec.SessionID, f.MCPURL, f.Config.ServerURL, spec.AgentPackID)
+	if err != nil {
+		abort()
+		_ = f.deleteSecret(context.Background(), namespace, secretName)
+		return nil, err
+	}
+	job.Spec.Template.Spec.Containers[0].Env = envs
 	created, err := f.Kube.BatchV1().Jobs(namespace).Create(ctx, job, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		abort()
@@ -217,8 +231,12 @@ func (f KubernetesRuntimeFactory) logStartupStage(sessionID, message string, sta
 		Msg(message)
 }
 
-func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, name string) *corev1.Pod {
-	labels := map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.session_id": spec.SessionID, "com.anban.server_instance": strings.TrimSpace(f.ServerInstanceID)}
+func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, name string) (*corev1.Pod, error) {
+	patchPath, err := interactivePresetPatchPath(spec.AgentPackID)
+	if err != nil {
+		return nil, err
+	}
+	labels := map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.session_id": spec.SessionID, "com.anban.preset_id": spec.AgentPackID, "com.anban.server_instance": strings.TrimSpace(f.ServerInstanceID)}
 	resources := dshResourceRequirements(f.Config)
 	projectMemoryMount := corev1.VolumeMount{Name: "project-memory", MountPath: f.Config.KubernetesProjectMemoryMount, ReadOnly: true}
 	volumeMounts := []corev1.VolumeMount{projectMemoryMount, {Name: "tmp", MountPath: "/tmp"}, {Name: "dsh-context", MountPath: "/var/run/anban-dsh-context", ReadOnly: true}}
@@ -230,7 +248,7 @@ func (f KubernetesRuntimeFactory) pod(spec InteractiveRuntimeSpec, namespace, na
 		volumes = append(volumes, corev1.Volume{Name: "project-memory", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 	}
 	deadline := int64(f.Config.TimeoutSec)
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, ActiveDeadlineSeconds: &deadline, ServiceAccountName: f.ServiceAccount, AutomountServiceAccountToken: dshBoolPtr(false), ImagePullSecrets: imagePullSecrets(f.Config.KubernetesImagePullSecret), SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: dshBoolPtr(true), RunAsUser: int64Ptr(1000), RunAsGroup: int64Ptr(1000), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}, Containers: []corev1.Container{{Name: "dsh", Image: f.Config.Image, ImagePullPolicy: corev1.PullIfNotPresent, Env: nil, Command: []string{"node", "/app/runtime-dsh/dist/dsh-bridge.js"}, Args: []string{"--provider", f.Provider, "--model", f.Model, "--route-api", f.API, "--base-url", f.BaseURL}, WorkingDir: "/workspace/project", Stdin: true, StdinOnce: false, TTY: false, Resources: resources, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: dshBoolPtr(false), ReadOnlyRootFilesystem: dshBoolPtr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, VolumeMounts: volumeMounts}}, Volumes: volumes}}
+	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, ActiveDeadlineSeconds: &deadline, ServiceAccountName: f.ServiceAccount, AutomountServiceAccountToken: dshBoolPtr(false), ImagePullSecrets: imagePullSecrets(f.Config.KubernetesImagePullSecret), SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: dshBoolPtr(true), RunAsUser: int64Ptr(1000), RunAsGroup: int64Ptr(1000), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}}, Containers: []corev1.Container{{Name: "dsh", Image: f.Config.Image, ImagePullPolicy: corev1.PullIfNotPresent, Env: []corev1.EnvVar{{Name: "ANBAN_DSH_BRIDGE_PRESET_ID", Value: spec.AgentPackID}, {Name: "ANBAN_DSH_BRIDGE_PATCH", Value: patchPath}}, Command: []string{"node", "/app/runtime-dsh/dist/dsh-bridge.js"}, Args: []string{"--provider", f.Provider, "--model", f.Model, "--route-api", f.API, "--base-url", f.BaseURL}, WorkingDir: "/workspace/project", Stdin: true, StdinOnce: false, TTY: false, Resources: resources, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: dshBoolPtr(false), ReadOnlyRootFilesystem: dshBoolPtr(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, VolumeMounts: volumeMounts}}, Volumes: volumes}}, nil
 }
 
 func dshResourceRequirements(cfg srvconfig.DshConfig) corev1.ResourceRequirements {
@@ -260,8 +278,11 @@ func dshResourceRequirements(cfg srvconfig.DshConfig) corev1.ResourceRequirement
 	return corev1.ResourceRequirements{Requests: parse(configured.Requests), Limits: parse(configured.Limits)}
 }
 
-func (f KubernetesRuntimeFactory) job(spec InteractiveRuntimeSpec, namespace, name string) *batchv1.Job {
-	pod := f.pod(spec, namespace, name)
+func (f KubernetesRuntimeFactory) job(spec InteractiveRuntimeSpec, namespace, name string) (*batchv1.Job, error) {
+	pod, err := f.pod(spec, namespace, name)
+	if err != nil {
+		return nil, err
+	}
 	labels := map[string]string{}
 	for key, value := range pod.Labels {
 		labels[key] = value
@@ -279,7 +300,7 @@ func (f KubernetesRuntimeFactory) job(spec InteractiveRuntimeSpec, namespace, na
 			Selector:              &metav1.LabelSelector{MatchLabels: map[string]string{"job-name": name}},
 			Template:              corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: pod.Spec},
 		},
-	}
+	}, nil
 }
 
 func (f KubernetesRuntimeFactory) secret(spec InteractiveRuntimeSpec, namespace, name string) *corev1.Secret {
@@ -287,11 +308,15 @@ func (f KubernetesRuntimeFactory) secret(spec InteractiveRuntimeSpec, namespace,
 	return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"com.anban.runtime": "dsh-interactive", "com.anban.session_id": spec.SessionID, "com.anban.server_instance": strings.TrimSpace(f.ServerInstanceID)}}, Type: corev1.SecretTypeOpaque, StringData: data}
 }
 
-func dshSecretEnv(secretName, sessionID, mcpURL, serverURL string) []corev1.EnvVar {
+func dshSecretEnv(secretName, sessionID, mcpURL, serverURL, presetID string) ([]corev1.EnvVar, error) {
+	patchPath, err := interactivePresetPatchPath(presetID)
+	if err != nil {
+		return nil, err
+	}
 	ref := func(key string) *corev1.EnvVarSource {
 		return &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: key}}
 	}
-	return []corev1.EnvVar{{Name: "HOME", Value: "/tmp/dsh-home"}, {Name: "DSH_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_SESSION_ID", Value: sessionID}, {Name: "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN", ValueFrom: ref("runtime-token")}, {Name: "ANBAN_DSH_BRIDGE_MCP_URL", Value: strings.TrimRight(dshFirstNonEmpty(mcpURL, serverURL+"/mcp"), "/")}, {Name: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY", ValueFrom: ref("provider-api-key")}, {Name: "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE", Value: "/var/run/anban-dsh-context/initial-context"}, {Name: "ANBAN_DSH_BRIDGE_PATCH", Value: "/app/harness/dsh/project-creator.patch.yml"}}
+	return []corev1.EnvVar{{Name: "HOME", Value: "/tmp/dsh-home"}, {Name: "DSH_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_HOME", Value: "/tmp/dsh-home"}, {Name: "ANBAN_DSH_BRIDGE_SESSION_ID", Value: sessionID}, {Name: "ANBAN_DSH_BRIDGE_PRESET_ID", Value: presetID}, {Name: "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN", ValueFrom: ref("runtime-token")}, {Name: "ANBAN_DSH_BRIDGE_MCP_URL", Value: strings.TrimRight(dshFirstNonEmpty(mcpURL, serverURL+"/mcp"), "/")}, {Name: "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY", ValueFrom: ref("provider-api-key")}, {Name: "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE", Value: "/var/run/anban-dsh-context/initial-context"}, {Name: "ANBAN_DSH_BRIDGE_PATCH", Value: patchPath}}, nil
 }
 
 func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {
@@ -299,29 +324,31 @@ func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {
 	if f.Kube == nil || ns == "" {
 		return nil
 	}
-	list, err := f.Kube.BatchV1().Jobs(ns).List(ctx, metav1.ListOptions{LabelSelector: "com.anban.runtime=dsh-interactive"})
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	list, err := f.Kube.BatchV1().Jobs(ns).List(cleanupCtx, metav1.ListOptions{LabelSelector: "com.anban.runtime=dsh-interactive"})
 	if err != nil {
 		return fmt.Errorf("list orphaned DSH jobs: %w", err)
 	}
 	for _, job := range list.Items {
-		if instance := strings.TrimSpace(f.ServerInstanceID); instance != "" && job.Labels["com.anban.server_instance"] != instance {
-			continue
-		}
 		if diagnosticRetentionActive(job.Annotations, time.Now()) {
 			continue
 		}
-		if err := f.deleteJob(ctx, ns, job.Name); err != nil {
+		if err := f.deleteJob(cleanupCtx, ns, job.Name); err != nil {
+			return err
+		}
+		if err := f.waitForJobDeletion(cleanupCtx, ns, job.Name); err != nil {
 			return err
 		}
 	}
-	secrets, err := f.Kube.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{LabelSelector: "com.anban.runtime=dsh-interactive"})
+	secrets, err := f.Kube.CoreV1().Secrets(ns).List(cleanupCtx, metav1.ListOptions{LabelSelector: "com.anban.runtime=dsh-interactive"})
 	if err != nil {
 		return fmt.Errorf("list orphaned DSH secrets: %w", err)
 	}
 	for _, secret := range secrets.Items {
-		if instance := strings.TrimSpace(f.ServerInstanceID); instance != "" && secret.Labels["com.anban.server_instance"] != instance {
-			continue
-		}
 		if diagnosticRetentionActive(secret.Annotations, time.Now()) {
 			continue
 		}
@@ -329,15 +356,34 @@ func (f KubernetesRuntimeFactory) CleanupOrphans(ctx context.Context) error {
 		if sessionID == "" {
 			continue
 		}
-		_, jobErr := f.Kube.BatchV1().Jobs(ns).Get(ctx, "anban-dsh-"+safeContainerPart(sessionID), metav1.GetOptions{})
+		_, jobErr := f.Kube.BatchV1().Jobs(ns).Get(cleanupCtx, "anban-dsh-"+safeContainerPart(sessionID), metav1.GetOptions{})
 		if jobErr == nil || !apierrors.IsNotFound(jobErr) {
 			continue
 		}
-		if err := f.deleteSecret(ctx, ns, secret.Name); err != nil {
+		if err := f.deleteSecret(cleanupCtx, ns, secret.Name); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (f KubernetesRuntimeFactory) waitForJobDeletion(ctx context.Context, namespace, name string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, err := f.Kube.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("check deleted DSH job %s: %w", name, err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for DSH job %s deletion: %w", name, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (f KubernetesRuntimeFactory) deleteJob(ctx context.Context, namespace, name string) error {

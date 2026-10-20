@@ -4,6 +4,7 @@ import {
   parseInteractiveCommand,
   redactInteractiveSecrets,
   resolveInteractivePatchPath,
+  validateInteractivePresetId,
   assertInteractiveRuntimeCapabilities,
   DshBridge,
   parseInteractiveRouteArgs,
@@ -259,8 +260,34 @@ describe("DSH bridge protocol", () => {
     await expect(bridge.command({ method: "session/prompt", params: { sessionId: "other" } }))
       .rejects.toThrow("must target the configured interactive session");
     await expect(bridge.command({ method: "session/start", params: { sessionId: "root", presetId: "profile-analysis" } }))
-      .rejects.toThrow("must use the project-creator preset");
+      .rejects.toThrow("unsupported interactive DSH preset");
+    await expect(bridge.command({ method: "session/start", params: { sessionId: "root", presetId: "creation-planner" } }))
+      .rejects.toThrow("does not match configured preset project-creator");
     await bridge.dispose();
+  });
+
+  test("accepts only Server-configured Assistant presets for session/start", async () => {
+    for (const presetId of ["project-creator", "creation-planner", "postmortem-review"] as const) {
+      const calls: Array<{ method: string; params?: object }> = [];
+      const client = {
+        start: () => undefined,
+        initialize: async () => ({ capabilities: { sessionStart: true, sessionAnswer: true } }),
+        request: async (method: string, params?: object) => { calls.push({ method, params }); return {}; },
+        subscribeSessionTree: () => ({ next: async () => new Promise<never>(() => undefined), close: () => undefined }),
+        close: async () => undefined,
+      };
+      const bridge = new DshBridge(() => undefined, () => client, "root", undefined, presetId);
+      await bridge.command({ method: "session/start", params: { sessionId: "root", presetId } });
+      expect(calls).toEqual([{ method: "session/start", params: { sessionId: "root", presetId } }]);
+      await bridge.dispose();
+    }
+  });
+
+  test("rejects an unknown Server-injected preset before initializing DSH", () => {
+    expect(() => new DshBridge(() => undefined, () => {
+      throw new Error("client must not be created");
+    }, "root", undefined, "unknown-preset")).toThrow("unsupported interactive DSH preset");
+    expect(() => validateInteractivePresetId("unknown-preset")).toThrow("unsupported interactive DSH preset");
   });
 
   test("announces runtime liveness after initialization", async () => {
@@ -323,7 +350,19 @@ describe("DSH bridge protocol", () => {
     const patch = join(dir, "project-creator.patch.yml");
     writeFileSync(patch, "- insert: []\n");
     expect(resolveInteractivePatchPath(patch, "/tmp")).toBe(patch);
+    expect(() => resolveInteractivePatchPath(patch, "/tmp", "creation-planner")).toThrow("does not match preset creation-planner");
     expect(() => resolveInteractivePatchPath("missing.patch.yml", dir)).toThrow("does not exist");
+  });
+
+  test("maps each allowlisted preset to a matching patch filename", () => {
+    const dir = `/tmp/anban-dsh-preset-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    mkdirSync(dir, { recursive: true });
+    for (const presetId of ["project-creator", "creation-planner", "postmortem-review"] as const) {
+      const patch = join(dir, `${presetId}.patch.yml`);
+      writeFileSync(patch, "- insert: []\n");
+      expect(resolveInteractivePatchPath(patch, "/tmp", presetId)).toBe(patch);
+      expect(validateInteractivePresetId(presetId)).toBe(presetId);
+    }
   });
 
   test("requires a configured DSH patch", () => {

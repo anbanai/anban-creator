@@ -52,7 +52,7 @@ func (s *FeedbackPromotionService) Confirm(ctx context.Context, insightID, userI
 	if err != nil {
 		return nil, err
 	}
-	if userID != "" && job.UserID != userID {
+	if userID != "" && !feedbackInsightOwnedBy(insight, job, userID) {
 		return nil, ErrFeedbackInsightNotFound
 	}
 	if insight.PromotionStatus != model.FeedbackPromotionCandidate || insight.TargetContentID == "" || insight.Kind != "content_postmortem" {
@@ -73,7 +73,7 @@ func (s *FeedbackPromotionService) Validate(ctx context.Context, insightID, user
 	if err != nil {
 		return nil, err
 	}
-	if userID != "" && job.UserID != userID {
+	if userID != "" && !feedbackInsightOwnedBy(insight, job, userID) {
 		return nil, ErrFeedbackInsightNotFound
 	}
 	if insight.PromotionStatus != model.FeedbackPromotionConfirmed && insight.PromotionStatus != model.FeedbackPromotionValidated {
@@ -84,11 +84,18 @@ func (s *FeedbackPromotionService) Validate(ctx context.Context, insightID, user
 		if err != nil {
 			return nil, err
 		}
+		analytics, err := s.repo.Analytics().State(ctx, insight.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 		independent := false
 		for _, other := range insights {
 			if other != nil && other.ID != insight.ID && other.TargetContentID == insight.TargetContentID && other.Kind == "content_postmortem" && other.AnalyticsRevision > insight.AnalyticsRevision && other.PromotionStatus != model.FeedbackPromotionRejected {
 				otherJob, jobErr := s.repo.FeedbackLoop().FindJobByIDOrFingerprint(ctx, other.JobID)
-				if jobErr != nil || otherJob == nil || otherJob.Status != model.FeedbackJobSucceeded || other.ExecutionID == insight.ExecutionID {
+				if jobErr != nil || otherJob == nil || otherJob.Status != model.FeedbackJobSucceeded ||
+					otherJob.ProjectID != insight.ProjectID || otherJob.TargetContentID != insight.TargetContentID ||
+					otherJob.AnalyticsRevision != other.AnalyticsRevision || analytics.Revision < other.AnalyticsRevision ||
+					other.ExecutionID == "" || otherJob.ExecutionID != other.ExecutionID || other.ExecutionID == insight.ExecutionID {
 					continue
 				}
 				independent = true
@@ -99,6 +106,22 @@ func (s *FeedbackPromotionService) Validate(ctx context.Context, insightID, user
 			return nil, ErrFeedbackInsightNotValidated
 		}
 		now := time.Now().UTC()
+		if insight.SourceSessionID != "" {
+			if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+				if err := s.applyProfileRecommendationsTx(ctx, tx, insight, nil); err != nil {
+					return err
+				}
+				insight.PromotionStatus = model.FeedbackPromotionPromoted
+				insight.ValidatedAt = &now
+				return tx.FeedbackLoop().UpdateInsight(ctx, insight)
+			}); err != nil {
+				return nil, err
+			}
+			if project, err := s.repo.Projects().FindByID(ctx, insight.ProjectID); err == nil {
+				s.reconcilePromotedProfile(ctx, insight.ProjectID, projectProfileFor(project))
+			}
+			return insight, nil
+		}
 		insight.PromotionStatus = model.FeedbackPromotionValidated
 		insight.ValidatedAt = &now
 		if err := s.repo.FeedbackLoop().UpdateInsight(ctx, insight); err != nil {
@@ -128,15 +151,30 @@ func (s *FeedbackPromotionService) Validate(ctx context.Context, insightID, user
 }
 
 func (s *FeedbackPromotionService) applyProfileRecommendationsTx(ctx context.Context, tx repository.Repository, insight *model.FeedbackInsight, job *model.FeedbackJob) error {
-	if insight == nil || insight.Trigger != FeedbackTriggerAutoAttribution || job == nil {
+	if insight == nil {
 		return nil
+	}
+	expectedProfileRevision := insight.ProfileRevision
+	sourceTaskID := ""
+	sourceLabel := "[链接分析]"
+	if insight.SourceSessionID != "" {
+		if insight.Trigger != assistantReviewTrigger {
+			return ErrFeedbackInsightNotValidated
+		}
+		sourceLabel = "[复盘模式]"
+	} else {
+		if insight.Trigger != FeedbackTriggerAutoAttribution || job == nil {
+			return nil
+		}
+		expectedProfileRevision = job.ProfileRevision
+		sourceTaskID = job.TaskID
 	}
 	project, err := tx.Projects().FindByIDForUpdate(ctx, insight.ProjectID)
 	if err != nil {
 		return err
 	}
 	profile := projectProfileFor(project)
-	if profile.Version != job.ProfileRevision {
+	if profile.Version != expectedProfileRevision {
 		return ErrProjectProfileVersionConflict
 	}
 	var envelope struct {
@@ -164,7 +202,7 @@ func (s *FeedbackPromotionService) applyProfileRecommendationsTx(ctx context.Con
 		for key, value := range recommendation.Updates {
 			dimension.Content[key] = value
 		}
-		dimension.Sources = appendUniqueProfileValue(dimension.Sources, "[链接分析]")
+		dimension.Sources = appendUniqueProfileValue(dimension.Sources, sourceLabel)
 		dimension.Evidence = appendUniqueProfileValue(dimension.Evidence, fmt.Sprintf("feedback insight %s, analytics revision %d: %s", insight.ID, insight.AnalyticsRevision, strings.Join(recommendation.Evidence, "; ")))
 		setProfileDimension(&profile, name, dimension)
 	}
@@ -187,7 +225,7 @@ func (s *FeedbackPromotionService) applyProfileRecommendationsTx(ctx context.Con
 	if err != nil {
 		return err
 	}
-	if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: insight.ProjectID, Revision: profile.Version, SixDimensions: dimensions, ProfileSnapshot: encoded, SourceTaskID: job.TaskID}); err != nil {
+	if err := tx.ProjectProfileRevisions().Create(ctx, &model.ProjectProfileRevision{ID: uuid.NewString(), ProjectID: insight.ProjectID, Revision: profile.Version, SixDimensions: dimensions, ProfileSnapshot: encoded, SourceTaskID: sourceTaskID}); err != nil {
 		return err
 	}
 	return persistProfileState(ctx, tx, insight.ProjectID, profile)
@@ -255,8 +293,17 @@ func (s *FeedbackPromotionService) Promote(ctx context.Context, insightID, userI
 	if err != nil {
 		return nil, err
 	}
-	if userID != "" && job.UserID != userID {
+	if userID != "" && !feedbackInsightOwnedBy(insight, job, userID) {
 		return nil, ErrFeedbackInsightNotFound
+	}
+	if insight.SourceSessionID != "" {
+		if insight.Trigger != assistantReviewTrigger {
+			return nil, ErrFeedbackInsightNotValidated
+		}
+		if insight.PromotionStatus == model.FeedbackPromotionPromoted {
+			return insight, nil
+		}
+		return nil, ErrFeedbackInsightNotValidated
 	}
 	if insight.PromotionStatus == model.FeedbackPromotionPromoted {
 		return insight, nil
@@ -346,9 +393,29 @@ func (s *FeedbackPromotionService) loadInsight(ctx context.Context, insightID st
 	if err != nil || insight == nil {
 		return nil, nil, ErrFeedbackInsightNotFound
 	}
+	if insight.SourceSessionID != "" {
+		project, projectErr := s.repo.Projects().FindByID(ctx, insight.ProjectID)
+		if projectErr != nil || project.UserID != insight.UserID || insight.UserID == "" {
+			return nil, nil, ErrFeedbackInsightNotFound
+		}
+		return insight, nil, nil
+	}
 	job, err := s.repo.FeedbackLoop().FindJobByIDOrFingerprint(ctx, insight.JobID)
 	if err != nil || job == nil {
 		return nil, nil, ErrFeedbackInsightNotFound
 	}
 	return insight, job, nil
+}
+
+func feedbackInsightOwnedBy(insight *model.FeedbackInsight, job *model.FeedbackJob, userID string) bool {
+	if userID == "" {
+		return true
+	}
+	if insight == nil {
+		return false
+	}
+	if insight.SourceSessionID != "" {
+		return insight.UserID == userID
+	}
+	return job != nil && job.UserID == userID
 }

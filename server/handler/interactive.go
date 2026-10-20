@@ -223,6 +223,14 @@ func interactiveError(c fiber.Ctx, err error) error {
 		return Error(c, 410, err.Error())
 	case errors.Is(err, service.ErrInteractiveEventGap):
 		return Error(c, 409, err.Error())
+	case errors.Is(err, service.ErrAssistantModeUnavailable), errors.Is(err, service.ErrAssistantCheckpointConflict):
+		return Error(c, 409, err.Error())
+	case errors.Is(err, service.ErrAssistantCheckpointNotFound):
+		return Error(c, 404, err.Error())
+	case errors.Is(err, service.ErrAssistantRuntimeContextTooLarge):
+		return Error(c, 413, err.Error())
+	case errors.Is(err, service.ErrAssistantCheckpointInvalid):
+		return Error(c, 400, err.Error())
 	case errors.Is(err, service.ErrProjectProfileVersionConflict), errors.Is(err, service.ErrProjectMemoryConflict):
 		return Error(c, 409, err.Error())
 	case errors.Is(err, service.ErrInteractiveAgent):

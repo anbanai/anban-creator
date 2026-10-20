@@ -39,6 +39,7 @@ export interface InteractiveQuestion {
 
 export interface InteractiveDraft {
   revision: number
+  payload?: Record<string, unknown>
   project?: Record<string, unknown>
   profile?: Record<string, unknown>
   progress?: Record<string, string>

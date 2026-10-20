@@ -131,7 +131,14 @@ describe('ProjectsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     fireEvent.click(aiAction)
     await waitFor(() => expect(window.location.pathname).toBe('/chat'))
-    expect(new URLSearchParams(window.location.search)).toEqual(new URLSearchParams('agent=project-creator&intent=create-project'))
+    expect(new URLSearchParams(window.location.search)).toEqual(new URLSearchParams('mode=profile'))
+  })
+  it('opens profile mode with the current project when updating its profile by conversation', async () => {
+    render(<ProjectsPage />)
+    await clickProjectAction('测试创作项目', '项目记忆')
+    fireEvent.click(await screen.findByRole('button', { name: '对话更新画像' }))
+    await waitFor(() => expect(window.location.pathname).toBe('/chat'))
+    expect(new URLSearchParams(window.location.search)).toEqual(new URLSearchParams('mode=profile&project_id=ch-1'))
   })
   beforeEach(() => {
     vi.clearAllMocks()

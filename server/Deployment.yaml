@@ -58,7 +58,11 @@ metadata:
     version: "${version_switch}"
 spec:
   # Interactive sessions are process-local; keep one control-plane replica.
+  # DSH control-plane state is process-local. Startup interrupts old durable
+  # sessions and reaps orphan workloads, so old/new Server Pods must not overlap.
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: "${micro_service_name}"
