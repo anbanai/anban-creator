@@ -371,6 +371,11 @@ montage:
       subtitles: "burned_in"
       audio_processing: "auto"
 
+# Experimental local-life material remix Agent. Keep disabled until the
+# performance, cost, quality and commercial asset authorization checks pass.
+local_life:
+  enabled: ${ANBAN_LOCAL_LIFE_ENABLED:-false}
+
 billing_runtime:
   config_dir: "./billing"
   admin_api_key: "${ANBAN_BILLING_ADMIN_API_KEY}"
@@ -475,6 +480,7 @@ claude:
     feedback-analysis: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
     whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
     hypit: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
+    local-life: "${ANBAN_AGENT_IMAGE_LOCAL_LIFE:-creator-agent-local-life:latest}"
   # Server 签发短期执行 JWT 的密钥，生产环境必须由 Secret 注入且至少 32 字节。
   execution_token_secret: "${ANBAN_AGENT_EXECUTION_TOKEN_SECRET}"
   # 是否启用 agent 沙箱隔离。生产建议 true。

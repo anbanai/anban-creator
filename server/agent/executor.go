@@ -301,6 +301,21 @@ func writeMontageInputJSON(workDir string, task *model.Task) error {
 	return nil
 }
 
+func writeLocalLifeInputJSON(workDir string, task *model.Task) error {
+	if task == nil || !model.IsLocalLifePlatform(task.Type) {
+		return nil
+	}
+	input := task.LocalLifeInput.Data()
+	data, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal local-life input: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "local-life-input.json"), data, 0o644); err != nil {
+		return fmt.Errorf("write local-life-input.json: %w", err)
+	}
+	return nil
+}
+
 func writeMontageRuntimeFiles(workDir string, opts *ExecutionOptions) error {
 	if opts == nil || opts.Task == nil || !model.IsMontagePlatform(opts.Task.Type) {
 		return nil

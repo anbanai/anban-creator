@@ -390,6 +390,7 @@ func main() {
 	var feedbackPromotionSvc *service.FeedbackPromotionService
 	hypitCapabilitySvc := service.NewHypitCapabilityService(cfg.Hypit)
 	montageCapabilitySvc := service.NewMontageCapabilityService(cfg.Montage)
+	localLifeCapabilitySvc := service.NewLocalLifeCapabilityService(cfg.LocalLife.Enabled)
 	if repo != nil {
 		analyticsRebuildManager = service.NewAnalyticsRebuildManager(repo)
 		planSvc = service.NewPlanService(repo, log)
@@ -457,6 +458,7 @@ func main() {
 		taskSvc.SetHypitConfig(cfg.Hypit)
 		taskSvc.SetMontageConfig(cfg.Montage)
 		taskSvc.SetMontageCapabilityService(montageCapabilitySvc)
+		taskSvc.SetLocalLifeCapabilityService(localLifeCapabilitySvc)
 		taskSvc.SetExecutionTimeouts(cfg.Asynq.ContentGenerateTimeout, cfg.Asynq.PersistTimeout)
 		taskSvc.SetRuntimeDispatcher(runtimeDispatcher)
 		workspaceLifecycle, ok := runtimeDispatcher.(service.TaskWorkspaceLifecycle)
@@ -595,6 +597,7 @@ func main() {
 	var feedbackHandler *handler.FeedbackHandler
 	var imageCapabilityHandler *handler.ImageCapabilityHandler
 	var montageCapabilityHandler *handler.MontageCapabilityHandler
+	var localLifeCapabilityHandler *handler.LocalLifeCapabilityHandler
 	var templateHandler *handler.TemplateHandler
 	var imageAnalysisHandler *handler.ImageAnalysisHandler
 	var viralAnalysisHandler *handler.ViralAnalysisHandler
@@ -702,6 +705,7 @@ func main() {
 	hypitCapabilityHandler := handler.NewHypitCapabilityHandler(hypitCapabilitySvc)
 	hypitCapabilityHandler.SetTaskService(taskSvc)
 	montageCapabilityHandler = handler.NewMontageCapabilityHandler(montageCapabilitySvc)
+	localLifeCapabilityHandler = handler.NewLocalLifeCapabilityHandler(localLifeCapabilitySvc)
 	// Wire capability routing + repo into task/plan handlers for tier-gated validation.
 	if taskHandler != nil {
 		taskHandler.SetImageCapabilities(cfg.ModelRoutes.ImageGeneration)
@@ -987,6 +991,7 @@ func main() {
 		FeedbackHandler:                     feedbackHandler,
 		ImageCapabilityHandler:              imageCapabilityHandler,
 		MontageCapabilityHandler:            montageCapabilityHandler,
+		LocalLifeCapabilityHandler:          localLifeCapabilityHandler,
 		HypitCapabilityHandler:              hypitCapabilityHandler,
 		TemplateHandler:                     templateHandler,
 		ImageAnalysisHandler:                imageAnalysisHandler,

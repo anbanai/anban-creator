@@ -6,6 +6,7 @@ export function taskOperation(type: string) {
   // long-form article workflow unless the picture task is selected explicitly.
   if (type === 'wechat' || type === 'wechat-article') return 'task.wechat_article'
   if (type === 'wechat-picture') return 'task.wechat_picture'
+  if (type === 'local-life') return 'task.local_life'
   return `task.${type}`
 }
 

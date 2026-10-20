@@ -181,6 +181,13 @@ export type {
   MontagePreferences,
 	MontageSourceRequirement,
 } from './montage'
+export type {
+  LocalLifeAssetType,
+  LocalLifeAsset,
+  LocalLifeInput,
+  LocalLifeMixType,
+  LocalLifeCapabilityListResponse,
+} from './local-life'
 
 // Topic Pool
 export type { TopicPoolStatus, TopicPool } from './topic-pool'

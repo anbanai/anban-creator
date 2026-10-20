@@ -492,6 +492,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 		return nil, err
 	}
 	files = append(files, montageFiles...)
+	localLifeFiles, err := s.buildLocalLifeFiles(ctx, task, credentialDeadline)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, localLifeFiles...)
 	hypitFiles, err := s.buildHypitFiles(ctx, task, credentialDeadline, workloadDeadline)
 	if err != nil {
 		return nil, err
@@ -824,6 +829,78 @@ func (s *AgentBootstrapService) buildMontageFiles(ctx context.Context, task *mod
 		}
 		files = append(files, BootstrapFile{Path: value.path, Text: string(raw), Mode: 0644})
 	}
+	return files, nil
+}
+
+func (s *AgentBootstrapService) buildLocalLifeFiles(ctx context.Context, task *model.Task, credentialDeadline time.Time) ([]BootstrapFile, error) {
+	if task == nil || !model.IsLocalLifePlatform(task.Type) {
+		return nil, nil
+	}
+	input := task.LocalLifeInput.Data()
+	input.SourceAssets = append([]model.LocalLifeAsset(nil), input.SourceAssets...)
+	files := make([]BootstrapFile, 0, len(input.SourceAssets)+1)
+	totalBytes := int64(0)
+	for i := range input.SourceAssets {
+		asset := &input.SourceAssets[i]
+		assetName := serveragent.InputAttachmentFilename(i+1, model.EntryAttachment{FileName: asset.FileName, ContentType: asset.MimeType})
+		rel := path.Join(".anban-creator/local-life-assets", assetName)
+		if fileID := strings.TrimSpace(asset.TaskFileID); fileID != "" {
+			if s.repo == nil || s.cfg.Store == nil {
+				return nil, fmt.Errorf("%w: local-life source material storage is unavailable", ErrAgentBootstrapUnavailable)
+			}
+			file, err := s.repo.TaskFiles().FindByID(ctx, fileID)
+			if err != nil || file == nil {
+				return nil, fmt.Errorf("%w: local-life source task file %q is unavailable", ErrAgentBootstrapConflict, fileID)
+			}
+			sourceTask, err := s.repo.Tasks().FindByID(ctx, file.TaskID)
+			if err != nil || sourceTask == nil || sourceTask.UserID != task.UserID || !montageSourceTaskAuthorized(sourceTask, task.ProjectID, montageSourceTaskTrust{taskID: task.InputSourceTaskID, projectID: task.InputSourceProjectID, includeLineage: true}) {
+				return nil, fmt.Errorf("%w: local-life source task file %q is not authorized", ErrAgentBootstrapConflict, fileID)
+			}
+			if !montageSourceTaskFileTypeMatches(asset.Type, file.MimeType) {
+				return nil, fmt.Errorf("%w: local-life source task file %q does not match asset type %q", ErrAgentBootstrapConflict, fileID, asset.Type)
+			}
+			if err := validateMontageSourceTaskFileMaterializable(file, s.cfg.Store.Name()); err != nil {
+				return nil, fmt.Errorf("%w: local-life source task file %q %v", ErrAgentBootstrapConflict, fileID, err)
+			}
+			if file.FileSize > montageSourceTotalMaxBytes-totalBytes {
+				return nil, fmt.Errorf("%w: local-life source assets exceed the runtime aggregate size limit", ErrAgentBootstrapConflict)
+			}
+			totalBytes += file.FileSize
+			signed, err := s.signedBootstrapObjectKey(ctx, file.OSSKey, credentialDeadline)
+			if err != nil {
+				return nil, fmt.Errorf("sign local-life source task file %q: %w", fileID, err)
+			}
+			files = append(files, BootstrapFile{Path: rel, DownloadURL: signed, ContentSHA256: file.ContentHash, Mode: 0644, ExpectedSize: file.FileSize, MaxBytes: montageSourceMaxBytes})
+			asset.URL, asset.TaskFileID, asset.FileName, asset.MimeType, asset.FileSize = rel, "", file.FileName, file.MimeType, file.FileSize
+			continue
+		}
+		rawURL := strings.TrimSpace(asset.URL)
+		if rawURL == "" {
+			return nil, fmt.Errorf("%w: local-life source asset %d has no URL or task file", ErrAgentBootstrapConflict, i+1)
+		}
+		if s.cfg.Store == nil || !s.cfg.Store.IsOwnedURL(rawURL) {
+			return nil, fmt.Errorf("%w: local-life source asset %d is not a Server-owned storage URL", ErrAgentBootstrapConflict, i+1)
+		}
+		key, ok := storage.StorageKeyFromURL(rawURL)
+		if !ok || !strings.HasPrefix(strings.TrimPrefix(key, "/"), "assets/users/"+task.UserID+"/") {
+			return nil, fmt.Errorf("%w: local-life source asset %d is outside the task user's storage namespace", ErrAgentBootstrapConflict, i+1)
+		}
+		if asset.FileSize > montageSourceTotalMaxBytes-totalBytes {
+			return nil, fmt.Errorf("%w: local-life source assets exceed the runtime aggregate size limit", ErrAgentBootstrapConflict)
+		}
+		totalBytes += asset.FileSize
+		signed, err := s.signedBootstrapObjectKey(ctx, strings.TrimPrefix(key, "/"), credentialDeadline)
+		if err != nil {
+			return nil, fmt.Errorf("sign local-life source asset %d: %w", i+1, err)
+		}
+		files = append(files, BootstrapFile{Path: rel, DownloadURL: signed, Mode: 0644, ExpectedSize: asset.FileSize, MaxBytes: montageSourceMaxBytes})
+		asset.URL = rel
+	}
+	raw, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal local-life input: %w", err)
+	}
+	files = append(files, BootstrapFile{Path: "local-life-input.json", Text: string(raw), Mode: 0644})
 	return files, nil
 }
 

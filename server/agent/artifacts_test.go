@@ -80,6 +80,33 @@ func TestValidateViralAnalysisArtifactsFromTaskFiles(t *testing.T) {
 	}
 }
 
+func TestValidateLocalLifeArtifactsRequiresSharedAudioAndSubtitles(t *testing.T) {
+	task := &model.Task{Type: model.PlatformLocalLife}
+	base := []string{"batch-manifest.json", "quality-report.json", "content-tags.json", "script.txt", "001.mp4"}
+	for _, missing := range []string{"", "audio.mp3", "subtitle.srt"} {
+		files := make([]*model.TaskFile, 0, len(base)+2)
+		for _, name := range base {
+			path := name
+			if name == "001.mp4" {
+				path = "output/videos/001.mp4"
+			}
+			files = append(files, &model.TaskFile{FileName: filepath.Base(path), FilePath: path})
+		}
+		for _, name := range []string{"audio.mp3", "subtitle.srt"} {
+			if name != missing {
+				files = append(files, &model.TaskFile{FileName: name, FilePath: "output/" + name})
+			}
+		}
+		got := ValidateTaskArtifactsFromTaskFiles(task, files)
+		if got.Valid != (missing == "") {
+			t.Fatalf("missing %q: validation = %#v", missing, got)
+		}
+		if missing != "" && !containsArtifactName(got.Missing, missing) {
+			t.Fatalf("missing %q: expected missing artifact, got %#v", missing, got)
+		}
+	}
+}
+
 func TestValidateMomentsArtifactsRequiresGeneratedImage(t *testing.T) {
 	required := []string{
 		"material-analysis.md",

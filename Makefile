@@ -15,6 +15,7 @@ PROFILE_ANALYSIS_AGENT_IMAGE ?= creator-agent-profile-analysis:latest
 FEEDBACK_ANALYSIS_AGENT_IMAGE ?= creator-agent-feedback-analysis:latest
 WHITEBOARD_ANIMATION_AGENT_IMAGE ?= creator-agent-whiteboard-animation:latest
 HYPIT_AGENT_IMAGE ?= creator-agent-hypit:latest
+LOCAL_LIFE_AGENT_IMAGE ?= creator-agent-local-life:latest
 DSH_RUNTIME_IMAGE ?= creator-dsh-runtime:latest
 HYPIT_SOURCE_REPO ?= https://github.com/hypit-ai/hypit.git
 HYPIT_SOURCE_REF ?= dc2b7a8f31b1ef1443a79ca448548d69e3ceb6a0
@@ -36,7 +37,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
+        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
         agent-runtime-release-manifest
 
 .PHONY: docker-runtime-smoke docker-hypit-smoke docker-agent-build-check
@@ -258,6 +259,11 @@ docker-hypit-agent-image: docker-agent-build-check
 		--build-arg HYPIT_REF="$(HYPIT_SOURCE_REF)" \
 		-t $(HYPIT_AGENT_IMAGE) .
 
+docker-local-life-agent-image: docker-agent-build-check
+	@echo "Building $(LOCAL_LIFE_AGENT_IMAGE)..." && \
+	docker build -f deploy/docker/Dockerfile.agent-local-life -t $(LOCAL_LIFE_AGENT_IMAGE) . && \
+	echo "Image build complete: $(LOCAL_LIFE_AGENT_IMAGE)"
+
 docker-hypit-smoke:
 	@deploy/docker/hypit-smoke.sh "$(HYPIT_AGENT_IMAGE)" "$(HYPIT_SOURCE_REF)"
 
@@ -293,7 +299,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
+docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-local-life-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
 
 # Validate and record one release set for the Server and every managed Agent
 # runtime. Pass image references through the existing
@@ -311,6 +317,7 @@ agent-runtime-release-manifest:
 	AGENT_IMAGE_FEEDBACK_ANALYSIS="$(FEEDBACK_ANALYSIS_AGENT_IMAGE)" \
 	AGENT_IMAGE_WHITEBOARD_ANIMATION="$(WHITEBOARD_ANIMATION_AGENT_IMAGE)" \
 	AGENT_IMAGE_HYPIT="$(HYPIT_AGENT_IMAGE)" \
+	AGENT_IMAGE_LOCAL_LIFE="$(LOCAL_LIFE_AGENT_IMAGE)" \
 	DSH_IMAGE="$(DSH_RUNTIME_IMAGE)" \
 	scripts/agent-runtime-release.sh $(if $(AGENT_RUNTIME_RELEASE_MANIFEST),--output "$(AGENT_RUNTIME_RELEASE_MANIFEST)",)
 

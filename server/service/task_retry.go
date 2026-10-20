@@ -43,6 +43,7 @@ type CloneTaskOverrides struct {
 	Ecommerce                     *model.EcommerceConfig
 	MontageInput                  *model.MontageInput
 	HypitInput                    *model.HypitInput
+	LocalLifeInput                *model.LocalLifeInput
 }
 
 func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams CloneTaskParams) ([]*model.Task, error) {
@@ -138,6 +139,7 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			Ecommerce:                     override.Ecommerce,
 			MontageInput:                  override.MontageInput,
 			HypitInput:                    override.HypitInput,
+			LocalLifeInput:                override.LocalLifeInput,
 			MontageSourceTaskID:           src.ID,
 		}
 		tasks, err := s.CreateManual(ctx, params)
@@ -238,6 +240,13 @@ func (s *TaskService) Clone(ctx context.Context, taskID string, cloneParams Clon
 			input.Brief = prompt
 		}
 		params.MontageInput = &input
+	}
+	if model.IsLocalLifePlatform(src.Type) {
+		input := src.LocalLifeInput.Data()
+		if cloneParams.Prompt != nil {
+			input.Brief = prompt
+		}
+		params.LocalLifeInput = &input
 	}
 
 	tasks, err := s.CreateManual(ctx, params)

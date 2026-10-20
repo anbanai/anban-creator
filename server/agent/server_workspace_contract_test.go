@@ -82,6 +82,8 @@ func TestShippedWorkflowsUseCanonicalServerTaskOutput(t *testing.T) {
 		{path: "harness/agents/ecommerce.toml", outputs: []string{"output/product-bible.md", "output/copywriting.md", "output/manifest.json"}},
 		{path: "harness/agents/montage.md", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
 		{path: "harness/agents/montage.toml", outputs: []string{"output/montage-project.json", "output/delivery-manifest.json", "output/final.mp4", "output/cover.png"}},
+		{path: "harness/agents/local-life.md", outputs: []string{"output/batch-manifest.json", "output/quality-report.json", "output/content-tags.json", "output/videos/*.mp4", "output/script.txt"}},
+		{path: "harness/agents/local-life.toml", outputs: []string{"output/batch-manifest.json", "output/quality-report.json", "output/content-tags.json", "output/videos/*.mp4", "output/script.txt"}},
 	}
 	for _, workflow := range workflowOutputs {
 		relativePath := workflow.path

@@ -59,6 +59,7 @@ const (
 	AgentIDFeedbackAnalysis = "feedback-analysis"
 	AgentIDProfileAnalysis  = "profile-analysis"
 	AgentIDWhiteboard       = "whiteboard-animation"
+	AgentIDLocalLife        = "local-life"
 )
 
 // Channel constants. Keep these values provider-neutral; labels belong to the
@@ -74,6 +75,7 @@ const (
 	ChannelMontage          = "montage"
 	ChannelFeedbackAnalysis = "feedback-analysis"
 	ChannelWhiteboard       = "whiteboard-animation"
+	ChannelLocalLife        = "local-life"
 )
 
 // Task kinds are workflow identities within one Agent/channel.
@@ -93,7 +95,7 @@ const (
 
 func IsChannel(value string) bool {
 	switch value {
-	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard:
+	case ChannelArticle, ChannelSeednote, ChannelWechatPicture, ChannelHypit, ChannelMoments, ChannelEcommerce, ChannelMontage, ChannelFeedbackAnalysis, ChannelProfileAnalysis, ChannelWhiteboard, ChannelLocalLife:
 		return true
 	default:
 		return false
@@ -102,7 +104,7 @@ func IsChannel(value string) bool {
 
 func IsAgentID(value string) bool {
 	switch value {
-	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard:
+	case AgentIDArticle, AgentIDSeednote, AgentIDWechatPicture, AgentIDMontage, AgentIDHypit, AgentIDFeedbackAnalysis, AgentIDProfileAnalysis, AgentIDWhiteboard, AgentIDLocalLife:
 		return true
 	default:
 		return false
@@ -125,6 +127,8 @@ func AgentChannel(agentID string) (string, bool) {
 		return ChannelFeedbackAnalysis, true
 	case AgentIDWhiteboard:
 		return ChannelWhiteboard, true
+	case AgentIDLocalLife:
+		return ChannelLocalLife, true
 	default:
 		return "", false
 	}
@@ -141,6 +145,8 @@ func PlatformForChannel(channel string) string {
 		return PlatformSeednote
 	case ChannelWhiteboard:
 		return PlatformWhiteboardAnimation
+	case ChannelLocalLife:
+		return PlatformLocalLife
 	default:
 		return ""
 	}
@@ -170,6 +176,8 @@ func DefaultImageRatioForChannel(channel string) string {
 		return "16:9"
 	case ChannelSeednote:
 		return "3:4"
+	case ChannelLocalLife:
+		return "9:16"
 	default:
 		return "3:4"
 	}
@@ -178,7 +186,7 @@ func DefaultImageRatioForChannel(channel string) string {
 func IsTaskKind(value string) bool {
 	switch value {
 	case TaskKindContentGeneration, TaskKindViralAnalysis, TaskKindProfileAnalysis,
-		TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit,
+		TaskKindFeedbackAnalysis, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife,
 		TaskTypeWechatArticle, TaskTypeWechatPicture:
 		return true
 	default:
@@ -221,6 +229,7 @@ const (
 	PlatformMontage             = "montage"
 	PlatformWhiteboardAnimation = "whiteboard-animation"
 	PlatformHypit               = "hypit"
+	PlatformLocalLife           = "local-life"
 )
 
 // IsProjectPlatform reports whether value is an explicitly implemented
@@ -228,7 +237,7 @@ const (
 // identities, but must not create new business identities by themselves.
 func IsProjectPlatform(value string) bool {
 	switch value {
-	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit:
+	case PlatformWechat, PlatformSeednote, PlatformMoments, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit, PlatformLocalLife:
 		return true
 	default:
 		return false
@@ -254,10 +263,14 @@ func IsMontagePlatform(platform string) bool {
 	return platform == PlatformMontage
 }
 
+func IsLocalLifePlatform(platform string) bool {
+	return platform == PlatformLocalLife
+}
+
 // SupportsPortraitCover identifies workflows with an independently selected project portrait cover.
 func SupportsPortraitCover(taskType string) bool {
 	switch taskType {
-	case TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMontage, PlatformHypit:
+	case TaskTypeWechatArticle, TaskTypeWechatPicture, PlatformSeednote, PlatformMontage, PlatformHypit, PlatformLocalLife:
 		return true
 	default:
 		return false

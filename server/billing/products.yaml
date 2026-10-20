@@ -140,6 +140,25 @@ skus:
     price_credits: 6000
     delivery: "montage_artifacts_verified"
 
+  - id: "task.local_life.effective"
+    operation: "task.local_life"
+    execution_profile: "effective"
+    charge_policy: "task_admission"
+    price_credits: 1920
+    delivery: "local_life_artifacts_verified"
+  - id: "task.local_life.balanced"
+    operation: "task.local_life"
+    execution_profile: "balanced"
+    charge_policy: "task_admission"
+    price_credits: 2400
+    delivery: "local_life_artifacts_verified"
+  - id: "task.local_life.quality"
+    operation: "task.local_life"
+    execution_profile: "quality"
+    charge_policy: "task_admission"
+    price_credits: 7200
+    delivery: "local_life_artifacts_verified"
+
   - id: "task.whiteboard-animation.effective"
     operation: "task.whiteboard-animation"
     execution_profile: "effective"

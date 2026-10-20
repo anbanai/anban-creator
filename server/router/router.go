@@ -68,6 +68,7 @@ type Services struct {
 	ImageCapabilityHandler              *handler.ImageCapabilityHandler
 	HypitCapabilityHandler              *handler.HypitCapabilityHandler
 	MontageCapabilityHandler            *handler.MontageCapabilityHandler
+	LocalLifeCapabilityHandler          *handler.LocalLifeCapabilityHandler
 	TemplateHandler                     *handler.TemplateHandler
 	ImageAnalysisHandler                *handler.ImageAnalysisHandler
 	ViralAnalysisHandler                *handler.ViralAnalysisHandler
@@ -513,6 +514,9 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 	if svc.MontageCapabilityHandler != nil {
 		apiV1.Get("/montage-capabilities", svc.MontageCapabilityHandler.List)
+	}
+	if svc.LocalLifeCapabilityHandler != nil {
+		apiV1.Get("/local-life-capabilities", svc.LocalLifeCapabilityHandler.List)
 	}
 
 	// ---------------------------------------------------------------------------

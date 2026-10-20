@@ -137,6 +137,7 @@ services:
       ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
       ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"
       ANBAN_AGENT_IMAGE_HYPIT: "${ANBAN_AGENT_IMAGE_HYPIT:-creator-agent-hypit:latest}"
+      ANBAN_AGENT_IMAGE_LOCAL_LIFE: "${ANBAN_AGENT_IMAGE_LOCAL_LIFE:-creator-agent-local-life:latest}"
       ANBAN_AGENT_DOCKER_NETWORK: "creator-runtime-network"
       ANBAN_AGENT_PROJECT_MEMORY_VOLUME: "creator-project-memory"
       # ilink WeChat assistant channel. Uses the compose service name, not localhost.

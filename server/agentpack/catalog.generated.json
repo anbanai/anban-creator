@@ -438,6 +438,155 @@
       "digest": "b2d5281b58c43d02a7feee0bc507b0409f2927bed2487d1006759465ff879ed7"
     },
     {
+      "id": "local-life",
+      "channel": "local-life",
+      "version": "2.0.3",
+      "kind": "managed",
+      "display_name": "素材混剪",
+      "description": "根据门店或线下活动素材批量生成多条短视频变体。",
+      "agent": {
+        "name": "local-life",
+        "skills": [
+          "local-life-video",
+          "moneyprinter-turbo"
+        ],
+        "max_turns": 120
+      },
+      "bindings": {
+        "task_kinds": [
+          "content_generation",
+          "local-life"
+        ]
+      },
+      "runtime": {
+        "profile": "local-life",
+        "adapter": "standard",
+        "max_turns": 120
+      },
+      "surfaces": [
+        "plugin",
+        "task"
+      ],
+      "features": [
+        "video-generation",
+        "source-assets",
+        "batch-variants"
+      ],
+      "billing_operations": {
+        "content_generation": "task.local_life",
+        "local-life": "task.local_life"
+      },
+      "artifacts": [
+        {
+          "role": "batch_manifest",
+          "path": "output/batch-manifest.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json",
+          "required": true
+        },
+        {
+          "role": "final_video",
+          "path": "output/videos/*.mp4",
+          "mime_type": "video/mp4",
+          "required": true
+        },
+        {
+          "role": "script",
+          "path": "output/script.txt",
+          "mime_type": "text/plain",
+          "required": true
+        },
+        {
+          "role": "subtitles",
+          "path": "output/subtitle.srt",
+          "mime_type": "application/x-subrip",
+          "required": true
+        },
+        {
+          "role": "audio",
+          "path": "output/audio.mp3",
+          "mime_type": "audio/mpeg",
+          "required": true
+        },
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "failure_diagnosis",
+          "path": "output/failure-diagnosis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        }
+      ],
+      "delivery": [
+        {
+          "role": "final_video",
+          "path": "output/videos/*.mp4",
+          "mime_type": "video/mp4"
+        },
+        {
+          "role": "batch_manifest",
+          "path": "output/batch-manifest.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "content_tags",
+          "path": "output/content-tags.json",
+          "mime_type": "application/json"
+        },
+        {
+          "role": "script",
+          "path": "output/script.txt",
+          "mime_type": "text/plain"
+        },
+        {
+          "role": "subtitles",
+          "path": "output/subtitle.srt",
+          "mime_type": "application/x-subrip"
+        },
+        {
+          "role": "audio",
+          "path": "output/audio.mp3",
+          "mime_type": "audio/mpeg"
+        }
+      ],
+      "ui": {
+        "renderer": "custom:local-life"
+      },
+      "tagging": {
+        "enabled": true,
+        "profile": "generic-content",
+        "required_artifact": "output/content-tags.json",
+        "subject_roles": [
+          "final_video"
+        ],
+        "extensions": [
+          "presentation_device",
+          "funnel_stage"
+        ]
+      },
+      "digest": "50e56cb4a58e85b5f508d063a4c9bf49d70d752cda391a1b1f837b245369176f"
+    },
+    {
       "id": "moments",
       "version": "2.0.3",
       "kind": "plugin",
@@ -1133,7 +1282,7 @@
       "ui": {
         "renderer": "custom:project-creator"
       },
-      "digest": "92375d6bf87947f1961a97dead1593bd95a4025226b355e6ac6f80f7a558cf3e"
+      "digest": "cbe4bb89d5276b368be45778ca9807aa0b6f576d69cce8de12a28a9c0668ba6a"
     },
     {
       "id": "seednote",
@@ -1374,7 +1523,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "9dfe72f8d57651d8ee15506bdff1881607d3e28c4a00e19d151fb1c5be59e144"
+      "digest": "895ad62a6ed29ccb8b9afe3eabaf15558fb6ff80ef175392b998f76b8965f9e3"
     },
     {
       "id": "wechat-article",
@@ -1615,7 +1764,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "97208f7370cc9fb4e0490dbf61348d6345bcd62280f62b43efb9e0161e9e4bc4"
+      "digest": "319252d76e9479e84a4fd0009551f165b3e862bd4643a64632f320c9c2cad2de"
     },
     {
       "id": "wechat-picture",

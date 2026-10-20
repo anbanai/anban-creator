@@ -3,7 +3,7 @@ import type { MontagePreferences } from './montage'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { ImageAnalysis } from './image-analysis'
 
-export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
+export type ProjectPlatform = 'wechat' | 'seednote' | 'moments' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit' | 'local-life'
 // The open string branch keeps migrated/plugin-only rows readable while the
 // product picker exposes only the three supported channels above.
 export type OutputChannel = 'wechat-article' | 'seednote' | 'wechat-picture' | 'whiteboard-animation' | (string & {})

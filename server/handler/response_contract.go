@@ -40,6 +40,37 @@ func validateMontageSourceAssetURLs(input *model.MontageInput) error {
 	return nil
 }
 
+func localLifeSourceAssetURLs(input *model.LocalLifeInput) []string {
+	if input == nil {
+		return nil
+	}
+	urls := make([]string, 0, len(input.SourceAssets))
+	for _, asset := range input.SourceAssets {
+		if strings.TrimSpace(asset.URL) != "" {
+			urls = append(urls, asset.URL)
+		}
+	}
+	return urls
+}
+
+func rewriteFinalizedLocalLifeAssetURLs(input *model.LocalLifeInput, rewrites map[string]string) {
+	if input == nil {
+		return
+	}
+	for i := range input.SourceAssets {
+		input.SourceAssets[i].URL = rewriteFinalizedUploadURL(input.SourceAssets[i].URL, rewrites)
+	}
+}
+
+func validateLocalLifeSourceAssetURLs(input *model.LocalLifeInput) error {
+	for _, rawURL := range localLifeSourceAssetURLs(input) {
+		if !validAttachmentURL(rawURL) {
+			return fmt.Errorf("local_life_input.source_assets.url must be an internal file path or an http(s) URL")
+		}
+	}
+	return nil
+}
+
 func taskAPIResponses(tasks []*model.Task, store storage.Provider) []map[string]any {
 	items := make([]map[string]any, 0, len(tasks))
 	for _, task := range tasks {

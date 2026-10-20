@@ -239,6 +239,7 @@ type Task struct {
 	HypitRuntimeSnapshot datatypes.JSON                        `gorm:"type:json" json:"-"`
 	HypitInput           datatypes.JSONType[HypitInput]        `gorm:"type:json" json:"hypit_input"`
 	MontageInput         datatypes.JSONType[MontageInput]      `gorm:"type:json" json:"montage_input"`
+	LocalLifeInput       datatypes.JSONType[LocalLifeInput]    `gorm:"type:json" json:"local_life_input"`
 	AgentInput           datatypes.JSONType[map[string]any]    `gorm:"type:json" json:"agent_input"`
 	ProgressLog          string                                `gorm:"type:longtext" json:"progress_log,omitempty"`
 	Lifecycle            datatypes.JSONType[TaskLifecycle]     `gorm:"type:json" json:"lifecycle"`

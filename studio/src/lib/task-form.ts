@@ -2,6 +2,7 @@ import type { AgentExecutionProfileID, CreateTaskRequest, HypitDefaults, Project
 import type { CreateTaskFormValues } from '@/lib/schemas'
 import { buildHypitInputForSubmit, initialHypitInput } from '@/lib/hypit-form'
 import { buildMontageInputForSubmit, initialMontageInput } from '@/lib/montage-form'
+import { buildLocalLifeInputForSubmit, initialLocalLifeInput } from '@/lib/local-life-form'
 import { supportsPortraitCover } from '@/lib/portrait-cover'
 import { defaultTaskImageRatio, getProjectCreationDefaults } from '@/lib/studio-ux'
 
@@ -26,6 +27,8 @@ function taskIdentity(type: TaskType): { agent_id: string; channel: NonNullable<
       return { agent_id: 'whiteboard-animation', channel: 'whiteboard-animation', task_kind: 'whiteboard-animation' }
     case 'wechat-article':
       return { agent_id: 'wechat-article', channel: 'wechat-article', task_kind: 'content_generation' }
+    case 'local-life':
+      return { agent_id: 'local-life', channel: 'local-life', task_kind: 'content_generation' }
     default:
       return { agent_id: type, channel: type, task_kind: type }
   }
@@ -46,6 +49,11 @@ function cloneValue<T>(value: T): T {
 function projectMontageInput(project?: Project | null, brief = ''): TaskFormDefaults['montage_input'] {
   if (project?.platform !== 'montage') return undefined
   return cloneValue(initialMontageInput(brief, undefined, project.montage_defaults))
+}
+
+function projectLocalLifeInput(project?: Project | null, brief = ''): TaskFormDefaults['local_life_input'] {
+  if (project?.platform !== 'local-life') return undefined
+  return initialLocalLifeInput(brief)
 }
 
 export function createTaskFormDefaults(project?: Project | null): TaskFormDefaults {
@@ -78,6 +86,7 @@ export function createTaskFormDefaults(project?: Project | null): TaskFormDefaul
     language: '',
     hypit_input: project?.platform === 'hypit' ? initialHypitInput('', undefined, project.hypit_defaults) : undefined,
     montage_input: projectMontageInput(project),
+    local_life_input: projectLocalLifeInput(project),
   }
 }
 
@@ -132,6 +141,7 @@ export function switchTaskFormDefaults(
     watermark: current.watermark,
     hypit_input: project?.platform === 'hypit' ? initialHypitInput(current.prompt, undefined, project.hypit_defaults) : undefined,
     montage_input: projectMontageInput(project, current.prompt),
+    local_life_input: projectLocalLifeInput(project, current.prompt),
   }
 }
 
@@ -195,6 +205,9 @@ export function cloneTaskFormDefaults(task: Task): TaskFormDefaults {
     hypit_input: task.hypit_input ? cloneValue(initialHypitInput(task.prompt, task.hypit_input)) : undefined,
     montage_input: task.montage_input
       ? cloneValue(initialMontageInput(task.prompt, task.montage_input))
+      : undefined,
+    local_life_input: task.local_life_input
+      ? cloneValue(initialLocalLifeInput(task.prompt, task.local_life_input))
       : undefined,
   }
 }
@@ -260,6 +273,9 @@ export function taskFormValuesToRequest(values: TaskFormDefaults, hypitDefaults?
     ...(values.type === 'hypit' ? { hypit_input: buildHypitInputForSubmit(prompt ?? '', cloneValue(values.hypit_input), hypitDefaults) } : {}),
     ...(values.type === 'montage'
       ? { montage_input: cloneValue(buildMontageInputForSubmit(values.prompt, values.montage_input)) }
+      : {}),
+    ...(values.type === 'local-life'
+      ? { local_life_input: cloneValue(buildLocalLifeInputForSubmit(values.prompt, values.local_life_input, values.input_attachments)) }
       : {}),
   }
 }

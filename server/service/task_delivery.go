@@ -13,11 +13,16 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -190,7 +195,13 @@ func (s *TaskService) validateStoredDeliveryObject(ctx context.Context, task *mo
 		return s.validateStoredDeliveryMarkdown(ctx, file, info)
 	}
 	if expectedMIME == "video/mp4" {
-		return s.validateStoredDeliveryMP4(ctx, file, info)
+		if err := s.validateStoredDeliveryMP4(ctx, file, info); err != nil {
+			return err
+		}
+		if task != nil && model.IsLocalLifePlatform(task.Type) {
+			return s.validateLocalLifeVideo(ctx, task, file)
+		}
+		return nil
 	}
 	if !strings.HasPrefix(expectedMIME, "image/") {
 		return nil
@@ -222,6 +233,101 @@ func (s *TaskService) validateStoredDeliveryObject(ctx context.Context, task *mo
 		if !strings.EqualFold(file.ContentHash, digest) {
 			return fmt.Errorf("%w: %s content hash does not match image bytes", ErrTaskDeliveryObjectInvalid, file.FilePath)
 		}
+	}
+	return nil
+}
+
+type localLifeProbe struct {
+	Streams []struct {
+		CodecType string `json:"codec_type"`
+		Width     int    `json:"width"`
+		Height    int    `json:"height"`
+	} `json:"streams"`
+	Format struct {
+		Duration string `json:"duration"`
+	} `json:"format"`
+}
+
+func (s *TaskService) validateLocalLifeVideo(ctx context.Context, task *model.Task, file *model.TaskFile) error {
+	opener, ok := s.store.(storage.ObjectStreamProvider)
+	if !ok {
+		return fmt.Errorf("%w: %s cannot be streamed for local-life media validation", ErrTaskDeliveryObjectInvalid, file.FilePath)
+	}
+	stream, err := opener.OpenObject(ctx, file.OSSKey)
+	if err != nil {
+		return fmt.Errorf("%w: open %s for local-life media validation: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+	temp, err := os.CreateTemp("", "anban-local-life-*.mp4")
+	if err != nil {
+		_ = stream.Close()
+		return fmt.Errorf("%w: create local-life media validation file: %v", ErrTaskDeliveryObjectInvalid, err)
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if _, err := io.Copy(temp, stream); err != nil {
+		_ = temp.Close()
+		_ = stream.Close()
+		return fmt.Errorf("%w: read %s for local-life media validation: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+	if err := temp.Close(); err != nil {
+		_ = stream.Close()
+		return fmt.Errorf("%w: close %s for local-life media validation: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+	if err := stream.Close(); err != nil {
+		return fmt.Errorf("%w: close object %s for local-life media validation: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	probeCmd := exec.CommandContext(probeCtx, "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", tempPath)
+	probeOutput, err := probeCmd.Output()
+	if err != nil {
+		return fmt.Errorf("%w: %s failed ffprobe validation: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+	var probe localLifeProbe
+	if err := json.Unmarshal(probeOutput, &probe); err != nil {
+		return fmt.Errorf("%w: %s ffprobe output is invalid: %v", ErrTaskDeliveryObjectInvalid, file.FilePath, err)
+	}
+	videoFound, audioFound := false, false
+	width, height := 0, 0
+	for _, stream := range probe.Streams {
+		switch stream.CodecType {
+		case "video":
+			if !videoFound {
+				videoFound, width, height = true, stream.Width, stream.Height
+			}
+		case "audio":
+			audioFound = true
+		}
+	}
+	if !videoFound || !audioFound || width <= 0 || height <= 0 {
+		return fmt.Errorf("%w: %s must contain decodable video and audio streams", ErrTaskDeliveryObjectInvalid, file.FilePath)
+	}
+	duration, err := strconv.ParseFloat(probe.Format.Duration, 64)
+	if err != nil || math.IsNaN(duration) || math.IsInf(duration, 0) || duration <= 0 || duration > 90 {
+		return fmt.Errorf("%w: %s has invalid duration %q", ErrTaskDeliveryObjectInvalid, file.FilePath, probe.Format.Duration)
+	}
+	input := task.LocalLifeInput.Data()
+	if input.TargetDurationSeconds > 0 {
+		target := float64(input.TargetDurationSeconds)
+		lower, upper := math.Max(5, target*0.5), math.Min(90, target*1.5)
+		if duration < lower || duration > upper {
+			return fmt.Errorf("%w: %s duration %.2fs is outside requested target range %.0f-%.0fs", ErrTaskDeliveryObjectInvalid, file.FilePath, duration, lower, upper)
+		}
+	}
+	expectedRatio := map[string]float64{"9:16": 9.0 / 16.0, "16:9": 16.0 / 9.0, "1:1": 1}[input.AspectRatio]
+	if expectedRatio == 0 || math.Abs(float64(width)/float64(height)-expectedRatio) > 0.04 {
+		return fmt.Errorf("%w: %s aspect ratio %dx%d does not match requested %q", ErrTaskDeliveryObjectInvalid, file.FilePath, width, height, input.AspectRatio)
+	}
+	decodeCtx, decodeCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer decodeCancel()
+	decodeCmd := exec.CommandContext(decodeCtx, "ffmpeg", "-v", "error", "-i", tempPath, "-f", "null", "-")
+	if output, err := decodeCmd.CombinedOutput(); err != nil {
+		message := strings.TrimSpace(string(output))
+		if len(message) > 400 {
+			message = message[len(message)-400:]
+		}
+		return fmt.Errorf("%w: %s failed full decode: %v %s", ErrTaskDeliveryObjectInvalid, file.FilePath, err, message)
 	}
 	return nil
 }

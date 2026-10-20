@@ -75,6 +75,9 @@ export const queryKeys = {
   montageCapabilities: {
     all: ['montage-capabilities'] as const,
   },
+  localLifeCapabilities: {
+    all: ['local-life-capabilities'] as const,
+  },
   agentProfiles: {
     all: ['agent', 'execution-profiles'] as const,
   },

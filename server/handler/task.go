@@ -200,13 +200,14 @@ type createTaskRequest struct {
 	// fee, and selected modules only guide later image/vision MCP usage.
 	// ProductPhotos are browser-upload URLs finalized into immutable task input
 	// attachments before creation.
-	ProductPhotos   []string            `json:"product_photos,omitempty"`
-	SelectedModules map[string]int      `json:"selected_modules,omitempty"`
-	TargetPlatform  string              `json:"target_platform,omitempty"`
-	SellingPoints   string              `json:"selling_points,omitempty"`
-	Language        string              `json:"language,omitempty"`
-	MontageInput    *model.MontageInput `json:"montage_input,omitempty"`
-	HypitInput      *model.HypitInput   `json:"hypit_input,omitempty"`
+	ProductPhotos   []string              `json:"product_photos,omitempty"`
+	SelectedModules map[string]int        `json:"selected_modules,omitempty"`
+	TargetPlatform  string                `json:"target_platform,omitempty"`
+	SellingPoints   string                `json:"selling_points,omitempty"`
+	Language        string                `json:"language,omitempty"`
+	MontageInput    *model.MontageInput   `json:"montage_input,omitempty"`
+	HypitInput      *model.HypitInput     `json:"hypit_input,omitempty"`
+	LocalLifeInput  *model.LocalLifeInput `json:"local_life_input,omitempty"`
 }
 
 type cloneTaskRequest struct {
@@ -235,6 +236,7 @@ type cloneTaskRequest struct {
 	Language                  string                           `json:"language,omitempty"`
 	MontageInput              *model.MontageInput              `json:"montage_input,omitempty"`
 	HypitInput                *model.HypitInput                `json:"hypit_input,omitempty"`
+	LocalLifeInput            *model.LocalLifeInput            `json:"local_life_input,omitempty"`
 }
 
 type resumeTaskRequest struct {
@@ -372,7 +374,7 @@ func taskCreationReferencePurposes(source *model.Task, selection service.Referen
 	return allowed
 }
 
-func validateTaskCreationSourceReuse(store storage.Provider, source *model.Task, attachments []model.EntryAttachment, productPhotos []string, montageInput *model.MontageInput) error {
+func validateTaskCreationSourceReuse(store storage.Provider, source *model.Task, attachments []model.EntryAttachment, productPhotos []string, montageInput *model.MontageInput, localLifeInput *model.LocalLifeInput) error {
 	trusted := trustedTaskCreationSource(source)
 	validate := func(raw string, keyOnly bool) (parsedTaskCreationInput, error) {
 		parsed, err := parseTaskScopedCreationInput(store, raw, keyOnly)
@@ -406,6 +408,11 @@ func validateTaskCreationSourceReuse(store storage.Provider, source *model.Task,
 		}
 	}
 	for _, rawURL := range montageSourceAssetURLs(montageInput) {
+		if _, err := validate(rawURL, false); err != nil {
+			return err
+		}
+	}
+	for _, rawURL := range localLifeSourceAssetURLs(localLifeInput) {
 		if _, err := validate(rawURL, false); err != nil {
 			return err
 		}
@@ -594,6 +601,20 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 	if err := validateMontageSourceAssetURLs(req.MontageInput); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
+	if err := validateLocalLifeSourceAssetURLs(req.LocalLifeInput); err != nil {
+		return nil, Error(c, fiber.StatusBadRequest, err.Error())
+	}
+	if req.LocalLifeInput != nil {
+		store := h.service.Storage()
+		for _, rawURL := range localLifeSourceAssetURLs(req.LocalLifeInput) {
+			if strings.HasPrefix(rawURL, "/files/") || strings.HasPrefix(rawURL, "/api/v1/files/") {
+				continue
+			}
+			if store == nil || !store.IsOwnedURL(rawURL) {
+				return nil, Error(c, fiber.StatusBadRequest, "local_life_input.source_assets must use Server-owned uploaded media")
+			}
+		}
+	}
 	if strings.TrimSpace(req.ImageCapabilityKey) == "" && requestedChannel == model.ChannelEcommerce {
 		req.ImageCapabilityKey = strings.TrimSpace(project.EcommerceDefaults.Data().ImageCapabilityKey)
 	}
@@ -642,8 +663,15 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			}
 			rewriteFinalizedMontageAssetURLs(req.MontageInput, rewrites)
 		}
+		if requestedChannel == model.ChannelLocalLife {
+			rewrites, err = finalizeUploadSessionURLs(c.Context(), finalizationStore, h.repo, userID, service.DirectUploadPurposeMontageAsset, localLifeSourceAssetURLs(req.LocalLifeInput))
+			if err != nil {
+				return nil, respondUploadSessionFinalizeError(c, h.logger, err)
+			}
+			rewriteFinalizedLocalLifeAssetURLs(req.LocalLifeInput, rewrites)
+		}
 	}
-	if err := validateTaskCreationSourceReuse(h.service.Storage(), source, req.InputAttachments, req.ProductPhotos, req.MontageInput); err != nil {
+	if err := validateTaskCreationSourceReuse(h.service.Storage(), source, req.InputAttachments, req.ProductPhotos, req.MontageInput, req.LocalLifeInput); err != nil {
 		return nil, Error(c, fiber.StatusBadRequest, err.Error())
 	}
 
@@ -688,6 +716,7 @@ func (h *TaskHandler) prepareTaskCreation(c fiber.Ctx, userID string, req *creat
 			Ecommerce:                     ecommerceCfg,
 			MontageInput:                  req.MontageInput,
 			HypitInput:                    req.HypitInput,
+			LocalLifeInput:                req.LocalLifeInput,
 		},
 	}, nil
 }
@@ -707,6 +736,9 @@ func (h *TaskHandler) respondTaskCreationServiceError(c fiber.Ctx, userID string
 	}
 	if errors.Is(err, service.ErrInvalidAgentInput) {
 		return Error(c, fiber.StatusBadRequest, "invalid_agent_input: "+err.Error())
+	}
+	if errors.Is(err, service.ErrLocalLifeDisabled) {
+		return Error(c, fiber.StatusServiceUnavailable, err.Error())
 	}
 	if isReferenceAssetError(err) {
 		return respondReferenceAssetError(c, h.logger, err)
@@ -1090,6 +1122,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			Language:                  req.Language,
 			MontageInput:              req.MontageInput,
 			HypitInput:                req.HypitInput,
+			LocalLifeInput:            req.LocalLifeInput,
 		}
 		if req.AgentInput != nil {
 			creationReq.AgentInput = *req.AgentInput
@@ -1120,6 +1153,7 @@ func (h *TaskHandler) Clone(c fiber.Ctx) error {
 			Ecommerce:                     prepared.params.Ecommerce,
 			MontageInput:                  prepared.params.MontageInput,
 			HypitInput:                    prepared.params.HypitInput,
+			LocalLifeInput:                prepared.params.LocalLifeInput,
 		}})
 		if err != nil {
 			return h.respondTaskCreationServiceError(c, userID, err, "editable clone task failed", "克隆任务失败")

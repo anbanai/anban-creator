@@ -7,6 +7,7 @@ const customRendererKeys = new Set([
   'montage',
   'whiteboard-animation',
   'hypit',
+  'local-life',
 ])
 
 export function registeredAgentPackForm(renderer?: string): string | null {

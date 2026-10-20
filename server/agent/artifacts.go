@@ -15,6 +15,7 @@ var seednoteContentImagePattern = regexp.MustCompile(`^image_\d+\.(png|jpe?g|web
 var wechatPictureContentImagePattern = regexp.MustCompile(`^image_\d+\.png$`)
 var whiteboardSceneImagePattern = regexp.MustCompile(`^scene-\d+\.png$`)
 var whiteboardSceneAnnotationPattern = regexp.MustCompile(`^scene-\d+\.annotation\.json$`)
+var localLifeVideoPattern = regexp.MustCompile(`^output/videos/\d+\.mp4$`)
 
 type ArtifactValidation struct {
 	Valid               bool
@@ -131,6 +132,34 @@ func validateTaskArtifacts(task *model.Task, files map[string]bool, meaningful i
 		if len(missing) > 0 {
 			result.Missing = missing
 			result.Reason = "montage missing required deliverables: " + strings.Join(missing, ", ")
+			return result
+		}
+		result.Valid = true
+		return result
+	}
+	if task != nil && model.IsLocalLifePlatform(task.Type) {
+		if files["failure-state.json"] {
+			result.Missing = []string{"successful local-life batch"}
+			result.Reason = "local-life reported a recoverable or partial failure; inspect failure-state.json"
+			return result
+		}
+		for _, name := range []string{"batch-manifest.json", "quality-report.json", "content-tags.json", "script.txt", "subtitle.srt", "audio.mp3"} {
+			if !files[name] && !files["output/"+name] {
+				result.Missing = append(result.Missing, name)
+			}
+		}
+		videoFound := false
+		for name := range files {
+			if localLifeVideoPattern.MatchString(name) || strings.HasPrefix(name, "videos/") && strings.HasSuffix(name, ".mp4") {
+				videoFound = true
+				break
+			}
+		}
+		if !videoFound {
+			result.Missing = append(result.Missing, "output/videos/*.mp4")
+		}
+		if len(result.Missing) > 0 {
+			result.Reason = "local-life missing required deliverables: " + strings.Join(result.Missing, ", ")
 			return result
 		}
 		result.Valid = true

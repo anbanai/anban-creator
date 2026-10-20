@@ -425,7 +425,7 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	app, repo, _ := setupProjectHandlerTest(t)
 	userID := uuid.NewString()
 	projectIDs := make(map[string]string)
-	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformWhiteboardAnimation, model.PlatformHypit} {
+	for _, platform := range []string{model.PlatformWechat, model.PlatformSeednote, model.PlatformMoments, model.PlatformEcommerce, model.PlatformMontage, model.PlatformLocalLife, model.PlatformWhiteboardAnimation, model.PlatformHypit} {
 		projectID := uuid.NewString()
 		if err := repo.Projects().Create(t.Context(), &model.Project{
 			ID: projectID, UserID: userID, Platform: platform,
@@ -441,8 +441,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("list status = %d", resp.StatusCode)
 	}
 	items := decodeBody(t, resp)["data"].([]any)
-	if len(items) != 4 {
-		t.Fatalf("non-admin projects = %#v, want article, seednote, montage, and whiteboard-animation", items)
+	if len(items) != 5 {
+		t.Fatalf("non-admin projects = %#v, want article, seednote, montage, local-life, and whiteboard-animation", items)
 	}
 	for _, item := range items {
 		platformValue := item.(map[string]any)["platform"]
@@ -485,8 +485,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 		t.Fatalf("non-admin platform configs status = %d, want 200", resp.StatusCode)
 	}
 	configs := decodeBody(t, resp)["data"].([]any)
-	if len(configs) != 4 {
-		t.Fatalf("non-admin platform configs = %#v, want article, seednote, montage, and whiteboard-animation", configs)
+	if len(configs) != 5 {
+		t.Fatalf("non-admin platform configs = %#v, want article, seednote, montage, local-life, and whiteboard-animation", configs)
 	}
 	for _, item := range configs {
 		platform := item.(map[string]any)["id"].(string)
@@ -499,8 +499,8 @@ func TestProjectHandlerAdminOnlyPlatforms(t *testing.T) {
 	if resp.StatusCode != fiber.StatusOK {
 		t.Fatalf("admin platform configs status = %d, want 200", resp.StatusCode)
 	}
-	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 7 {
-		t.Fatalf("admin platform configs = %#v, want all seven configured platforms", configs)
+	if configs := decodeBody(t, resp)["data"].([]any); len(configs) != 8 {
+		t.Fatalf("admin platform configs = %#v, want all eight configured platforms", configs)
 	}
 }
 

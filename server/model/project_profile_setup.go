@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	MaxProjectAgentIDs           = 6
+	MaxProjectAgentIDs           = 7
 	MaxProfileAccountLinks       = 10
 	MaxProfileAccountURLBytes    = 500
 	MaxProfileAccountNameBytes   = 200
@@ -22,7 +22,7 @@ const (
 
 var projectAgentIDs = map[string]struct{}{
 	AgentIDArticle: {}, AgentIDWechatPicture: {}, AgentIDSeednote: {},
-	AgentIDMontage: {}, AgentIDHypit: {}, AgentIDWhiteboard: {},
+	AgentIDMontage: {}, AgentIDHypit: {}, AgentIDWhiteboard: {}, AgentIDLocalLife: {},
 }
 
 var profileAccountPlatforms = map[string]struct{}{
@@ -82,6 +82,8 @@ func DefaultProjectAgentIDs(platform string) []string {
 		return []string{AgentIDHypit}
 	case PlatformWhiteboardAnimation:
 		return []string{AgentIDWhiteboard}
+	case PlatformLocalLife:
+		return []string{AgentIDLocalLife}
 	default:
 		return nil
 	}

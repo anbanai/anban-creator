@@ -118,6 +118,15 @@ var PlatformConfigs = map[string]*PlatformConfig{
 			{Key: "image_ratio", Label: "视频比例", Placeholder: "9:16（短视频默认）", Type: "select", Group: "advanced"},
 		},
 	},
+	PlatformLocalLife: {
+		ID: PlatformLocalLife, Label: "素材混剪", BadgeVariant: "secondary", SupportsPublishing: false, SupportsAutoFetch: false,
+		DefaultImageRatio: "9:16", SupportedImageRatios: []string{"9:16", "16:9", "1:1"},
+		Fields: []PlatformFieldConfig{
+			{Key: "name", Label: "项目名称", Placeholder: "例如 XX 火锅素材混剪", Required: true, Type: "text", Group: "basic"},
+			{Key: "instructions", Label: "创作要求", Placeholder: "例如 突出菜品、环境和到店理由", Type: "textarea", Group: "basic"},
+			{Key: "image_ratio", Label: "视频比例", Placeholder: "9:16（短视频默认）", Type: "select", Group: "advanced"},
+		},
+	},
 	PlatformWhiteboardAnimation: {
 		ID:                   PlatformWhiteboardAnimation,
 		Label:                "白板动画",
@@ -144,7 +153,7 @@ func GetPlatformConfig(platform string) *PlatformConfig {
 
 // GetAllPlatformConfigs returns a slice of all platform configs in deterministic order.
 func GetAllPlatformConfigs() []*PlatformConfig {
-	order := []string{PlatformSeednote, PlatformMoments, PlatformWechat, PlatformEcommerce, PlatformMontage, PlatformWhiteboardAnimation, PlatformHypit}
+	order := []string{PlatformSeednote, PlatformMoments, PlatformWechat, PlatformEcommerce, PlatformMontage, PlatformLocalLife, PlatformWhiteboardAnimation, PlatformHypit}
 	configs := make([]*PlatformConfig, 0, len(order))
 	for _, key := range order {
 		if pc, ok := PlatformConfigs[key]; ok {

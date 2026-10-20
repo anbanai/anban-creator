@@ -148,6 +148,8 @@ spec:
               value: "${whiteboard_animation_agent_image_repo}"
             - name: ANBAN_AGENT_IMAGE_HYPIT
               value: "${hypit_agent_image_repo}"
+            - name: ANBAN_AGENT_IMAGE_LOCAL_LIFE
+              value: "${local_life_agent_image_repo}"
             - name: ANBAN_DSH_IMAGE
               value: "${dsh_image_repo}"
             - name: ANBAN_AGENT_SERVICE_ACCOUNT

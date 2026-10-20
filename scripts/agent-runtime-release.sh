@@ -72,6 +72,7 @@ image_entries=(
   "feedback-analysis=${AGENT_IMAGE_FEEDBACK_ANALYSIS:?AGENT_IMAGE_FEEDBACK_ANALYSIS must be set}"
   "whiteboard-animation=${AGENT_IMAGE_WHITEBOARD_ANIMATION:?AGENT_IMAGE_WHITEBOARD_ANIMATION must be set}"
   "hypit=${AGENT_IMAGE_HYPIT:?AGENT_IMAGE_HYPIT must be set}"
+  "local-life=${AGENT_IMAGE_LOCAL_LIFE:?AGENT_IMAGE_LOCAL_LIFE must be set}"
   "dsh=${DSH_IMAGE:?DSH_IMAGE must be set}"
 )
 

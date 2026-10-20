@@ -35,6 +35,7 @@ type Config struct {
 	MCP                MCPConfig                       `yaml:"mcp"`
 	Hypit              HypitConfig                     `yaml:"hypit"`
 	Montage            MontageConfig                   `yaml:"montage"`
+	LocalLife          LocalLifeConfig                 `yaml:"local_life"`
 	ServerInternal     ModelRuntimeConfig              `yaml:"-"`
 	ModelProviders     map[string]ModelProviderConfig  `yaml:"model_providers"`
 	ModelRoutes        ModelRoutesConfig               `yaml:"model_routes"`
@@ -457,6 +458,13 @@ type MontageConfig struct {
 	Env                map[string]string                      `yaml:"env"`
 	ToolPolicy         map[string]MontageToolCapabilityPolicy `yaml:"tool_policy"`
 	PipelineDefaults   map[string]map[string]any              `yaml:"pipeline_defaults"`
+}
+
+// LocalLifeConfig controls the experimental local-life material remix Agent.
+// It is deliberately disabled by default until performance, cost, quality and
+// commercial asset licensing have been validated.
+type LocalLifeConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type MontageToolCapabilityPolicy struct {
@@ -909,7 +917,7 @@ func (c ClaudeConfig) Validate() error {
 		}
 	}
 	for profile := range c.RuntimeImages {
-		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != "profile-analysis" && profile != "feedback-analysis" {
+		if profile != "wechat-article" && profile != "wechat-picture" && profile != model.PlatformSeednote && profile != model.PlatformMontage && profile != "moments" && profile != "ecommerce" && profile != model.PlatformWhiteboardAnimation && profile != model.PlatformHypit && profile != model.PlatformLocalLife && profile != "profile-analysis" && profile != "feedback-analysis" {
 			errs = append(errs, fmt.Sprintf("claude.runtime_images contains unsupported profile %q", profile))
 		}
 	}
@@ -1228,6 +1236,7 @@ func rejectDeprecatedConfigKeys(data []byte) error {
 		"storage":         true,
 		"mcp":             true,
 		"montage":         true,
+		"local_life":      true,
 		"hypit":           true,
 		"model_providers": true,
 		"model_routes":    true,
@@ -1459,6 +1468,9 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation]) == "" {
 		c.Claude.RuntimeImages[model.PlatformWhiteboardAnimation] = "creator-agent-whiteboard-animation:latest"
+	}
+	if strings.TrimSpace(c.Claude.RuntimeImages[model.PlatformLocalLife]) == "" {
+		c.Claude.RuntimeImages[model.PlatformLocalLife] = "creator-agent-local-life:latest"
 	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080

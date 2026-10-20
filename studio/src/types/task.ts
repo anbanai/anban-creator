@@ -1,11 +1,12 @@
 import type { HypitInput } from './hypit'
 import type { MontageInput } from './montage'
+import type { LocalLifeInput } from './local-life'
 import type { InputAttachment } from './input-attachment'
 import type { ReferenceAssetView, ReferenceImageSelection } from './asset'
 import type { AgentExecutionProfileID, AgentProfileSnapshot } from './agent-profile'
 import type { ProjectPlatform, OutputChannel } from './project'
 
-export type TaskType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit'
+export type TaskType = 'seednote' | 'wechat-article' | 'wechat-picture' | 'moments' | 'viral_analysis' | 'profile_analysis' | 'ecommerce' | 'montage' | 'whiteboard-animation' | 'hypit' | 'local-life'
 
 // E-commerce package config carried on a task (server model.EcommerceConfig).
 // `selected_modules` maps module key → quantity. Delivery module selection
@@ -146,6 +147,7 @@ export interface Task {
   input_source_task_id?: string
   hypit_input?: HypitInput
   montage_input?: MontageInput
+  local_life_input?: LocalLifeInput
   billing_quote_id?: string
   billing_catalog_id?: string
   billing_sku_id?: string
@@ -314,6 +316,7 @@ export interface CreateTaskRequest {
   input_source_task_id?: string
   hypit_input?: HypitInput
   montage_input?: MontageInput
+  local_life_input?: LocalLifeInput
 }
 
 // Cloning creates another task through the same complete creation contract.

@@ -6,6 +6,7 @@ export const profileLabAgents = [
   { id: 'seednote', label: '种草笔记', detail: '笔记文案与多页内容' },
   { id: 'montage', label: '视频生成', detail: '从创意到完整视频' },
   { id: 'hypit', label: '视频复刻', detail: '基于参考视频拆解复刻' },
+  { id: 'local-life', label: '素材混剪', detail: '本地素材批量混剪视频' },
   { id: 'whiteboard-animation', label: '白板视频', detail: '讲解型动画内容' },
 ] as const
 

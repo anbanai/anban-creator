@@ -18,6 +18,7 @@ import { usePromptAttachments } from '@/components/agent-prompt/usePromptAttachm
 import { defaultTaskImageRatio } from '@/lib/studio-ux'
 import { Button } from '@/components/common/button'
 import { MontageCreationPanel } from '@/components/montage/MontageCreationPanel'
+import { LocalLifeCreationPanel } from '@/components/local-life/LocalLifeCreationPanel'
 import { MultiImageUpload } from '@/components/projects/MultiImageUpload'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -37,6 +38,7 @@ import { projectsReturnHref } from '@/lib/command-center'
 import { getApiErrorMessage } from '@/lib/http-client'
 import { ecommerceLanguageOptions, ecommerceModuleCatalog, ecommerceTargetPlatformOptions } from '@/lib/labels'
 import { initialMontageInput } from '@/lib/montage-form'
+import { initialLocalLifeInput } from '@/lib/local-life-form'
 import { cheapestAvailableExecutionProfile } from '@/lib/pricing'
 import { queryKeys } from '@/lib/query-keys'
 import { createTaskSchema } from '@/lib/schemas'
@@ -106,6 +108,7 @@ function createInitialDefaults(project?: Project, initialType?: TaskType): TaskF
         image_ratio: defaultTaskImageRatio(projectType, project) as TaskFormDefaults['image_ratio'],
         hypit_input: projectType === 'hypit' ? initialHypitInput('') : undefined,
         montage_input: projectType === 'montage' ? initialMontageInput('') : undefined,
+        local_life_input: projectType === 'local-life' ? initialLocalLifeInput('') : undefined,
       }
     }
   }
@@ -117,6 +120,7 @@ function createInitialDefaults(project?: Project, initialType?: TaskType): TaskF
     montage_input: initialType === 'montage'
       ? initialMontageInput('')
       : undefined,
+    local_life_input: initialType === 'local-life' ? initialLocalLifeInput('') : undefined,
   }
 }
 
@@ -220,8 +224,9 @@ export function TaskFormDialog({
   const picturePublishDraft = (watchedAgentInput as Record<string, unknown>).picture_publish_draft !== false
   const watchedProductPhotos = useWatch({ control: form.control, name: 'product_photos' })
   const isMontageTask = watchedType === 'montage' || watchedType === 'hypit'
+  const isLocalLifeTask = watchedType === 'local-life'
   const isViralAnalysisTask = watchedType === 'viral_analysis'
-	const usesImageSettings = !isViralAnalysisTask && watchedType !== 'hypit'
+  const usesImageSettings = !isViralAnalysisTask && watchedType !== 'hypit' && !isLocalLifeTask
   const { items: imageCapabilityOptions, defaultCapability, isLoading: imageCapabilitiesLoading, isError: imageCapabilitiesError } = useImageCapabilities(usesImageSettings)
   const hasIncompatibleSeednoteAttachments = watchedType === 'seednote'
     && attachmentController.attachments.some((attachment) => attachment.type !== 'image')
@@ -557,6 +562,7 @@ export function TaskFormDialog({
           setFormValue('quantity', Math.min(quantity, maxTaskQuantity(type)))
           if (type === 'hypit' && !form.getValues('hypit_input')) setFormValue('hypit_input', initialHypitInput(watchedPrompt))
           if (type === 'montage' && !form.getValues('montage_input')) setFormValue('montage_input', initialMontageInput(watchedPrompt))
+          if (type === 'local-life' && !form.getValues('local_life_input')) setFormValue('local_life_input', initialLocalLifeInput(watchedPrompt))
         }}
         disabled={isSubmitting || mode === 'clone'}
       />
@@ -624,6 +630,9 @@ export function TaskFormDialog({
         }
         if (watchedType === 'montage') {
           form.setValue('montage_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
+        }
+        if (watchedType === 'local-life') {
+          form.setValue('local_life_input.brief', value.prompt, { shouldDirty: true, shouldValidate: true })
         }
       }}
       onSubmit={() => handleSubmit()}
@@ -709,7 +718,7 @@ export function TaskFormDialog({
                     className="mb-4"
                   />
                 ) : null}
-                {!isMontageTask ? promptComposer : null}
+                {!isMontageTask && !isLocalLifeTask ? promptComposer : null}
                 {hasIncompatibleSeednoteAttachments ? (
                   <p role="alert" className="mt-2 text-sm font-medium text-red-500">{SEEDNOTE_ATTACHMENT_BLOCKER}</p>
                 ) : null}
@@ -726,6 +735,8 @@ export function TaskFormDialog({
                     onReadyChange={setMontageReady}
                     briefField={promptComposer}
                   />
+                ) : isLocalLifeTask ? (
+                  <LocalLifeCreationPanel form={form} onReadyChange={setMontageReady} onUploadingChange={setMontageUploading} briefField={promptComposer} />
                 ) : null}
 
                 {!isMontageTask && !isViralAnalysisTask ? (

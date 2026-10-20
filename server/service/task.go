@@ -70,6 +70,7 @@ type TaskService struct {
 	montageCfg               srvconfig.MontageConfig
 	hypitCapabilities        *HypitCapabilityService
 	montageCapabilities      *MontageCapabilityService
+	localLifeCapabilities    *LocalLifeCapabilityService
 	// ilinkNotifier enqueues task success/failure/cancel messages for delivery
 	// through the platform WeChat assistant. Nil when ilink is disabled.
 	ilinkNotifier *IlinkNotifier
@@ -217,6 +218,12 @@ func (s *TaskService) SetMontageConfig(cfg srvconfig.MontageConfig) {
 func (s *TaskService) SetMontageCapabilityService(capabilities *MontageCapabilityService) {
 	if s != nil {
 		s.montageCapabilities = capabilities
+	}
+}
+
+func (s *TaskService) SetLocalLifeCapabilityService(capabilities *LocalLifeCapabilityService) {
+	if s != nil {
+		s.localLifeCapabilities = capabilities
 	}
 }
 
@@ -447,8 +454,9 @@ type CreateManualParams struct {
 	Ecommerce *model.EcommerceConfig
 	// MontageInput carries the Montage-specific creation contract.
 	// It is only valid for montage projects.
-	MontageInput *model.MontageInput
-	HypitInput   *model.HypitInput
+	MontageInput   *model.MontageInput
+	HypitInput     *model.HypitInput
+	LocalLifeInput *model.LocalLifeInput
 	// MontageSourceTaskID is an internal clone authorization for task-file
 	// locators that originate from the source task rather than the destination
 	// project.
@@ -636,6 +644,30 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 	}
 	isMontageTask := model.IsMontagePlatform(taskType)
+	isLocalLifeTask := model.IsLocalLifePlatform(taskType)
+	if p.LocalLifeInput != nil && !isLocalLifeTask {
+		return nil, fmt.Errorf("local_life_input 仅适用于素材混剪任务")
+	}
+	if isLocalLifeTask {
+		if s.localLifeCapabilities == nil || !s.localLifeCapabilities.Enabled() {
+			return nil, ErrLocalLifeDisabled
+		}
+		quantity = 1
+		if p.LocalLifeInput == nil {
+			return nil, fmt.Errorf("local_life_input is required")
+		}
+		input := *p.LocalLifeInput
+		if err := input.Validate(); err != nil {
+			return nil, fmt.Errorf("validate local_life_input: %w", err)
+		}
+		p.LocalLifeInput = &input
+		if err := validateMaterializableLocalLifeSourceTaskFiles(ctx, s.repo, s.StorageProviderName(), p.UserID, p.ProjectID, input.SourceAssets,
+			montageSourceTaskTrust{taskID: p.MontageSourceTaskID},
+			montageSourceTaskTrust{taskID: p.InputSourceTaskID, projectID: p.InputSourceProjectID, includeLineage: true},
+		); err != nil {
+			return nil, err
+		}
+	}
 	if taskType == model.PlatformWhiteboardAnimation {
 		if err := validateWhiteboardAnimationInputs(p.InputAttachments); err != nil {
 			return nil, err
@@ -903,6 +935,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		}
 		if isMontageTask && p.MontageInput != nil {
 			task.SetMontageInput(*p.MontageInput)
+		}
+		if isLocalLifeTask && p.LocalLifeInput != nil {
+			task.SetLocalLifeInput(*p.LocalLifeInput)
 		}
 
 		tasks = append(tasks, task)
@@ -1409,6 +1444,8 @@ func taskTypeForIdentity(agentID, channel, taskKind string) string {
 		return model.PlatformMontage
 	case model.AgentIDWhiteboard:
 		return model.PlatformWhiteboardAnimation
+	case model.AgentIDLocalLife:
+		return model.PlatformLocalLife
 	default:
 		return ""
 	}

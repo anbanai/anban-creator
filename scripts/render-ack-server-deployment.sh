@@ -84,6 +84,7 @@ if [[ -f "$manifest_path" ]]; then
   feedback_analysis_agent_image_repo=${feedback_analysis_agent_image_repo:-$(jq -r '.images["feedback-analysis"] // empty' "$manifest_path")}
   whiteboard_animation_agent_image_repo=${whiteboard_animation_agent_image_repo:-$(jq -r '.images["whiteboard-animation"] // empty' "$manifest_path")}
   hypit_agent_image_repo=${hypit_agent_image_repo:-$(jq -r '.images.hypit // empty' "$manifest_path")}
+  local_life_agent_image_repo=${local_life_agent_image_repo:-$(jq -r '.images["local-life"] // empty' "$manifest_path")}
   dsh_image_repo=${dsh_image_repo:-$(jq -r '.images.dsh // empty' "$manifest_path")}
 fi
 
@@ -104,7 +105,7 @@ export wechat_article_agent_image_repo wechat_picture_agent_image_repo
 export seednote_agent_image_repo montage_agent_image_repo moments_agent_image_repo
 export ecommerce_agent_image_repo profile_analysis_agent_image_repo
 export feedback_analysis_agent_image_repo whiteboard_animation_agent_image_repo
-export hypit_agent_image_repo
+export hypit_agent_image_repo local_life_agent_image_repo
 export dsh_image_repo
 
 render_template() {

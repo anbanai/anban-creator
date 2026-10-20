@@ -18,6 +18,7 @@ import { topicPoolApi } from './topic-pool'
 import { imageCapabilitiesApi } from './image-capabilities'
 import { hypitCapabilitiesApi } from './hypit-capabilities'
 import { montageCapabilitiesApi } from './montage-capabilities'
+import { localLifeCapabilitiesApi } from './local-life-capabilities'
 import { ilinkApi } from './ilink'
 import { aiEntryApi } from './ai-entry'
 import { uploadsApi } from './uploads'
@@ -52,6 +53,7 @@ export const api = {
   imageCapabilities: imageCapabilitiesApi,
   hypitCapabilities: hypitCapabilitiesApi,
   montageCapabilities: montageCapabilitiesApi,
+  localLifeCapabilities: localLifeCapabilitiesApi,
   ilink: ilinkApi,
   aiEntry: aiEntryApi,
   uploads: uploadsApi,
