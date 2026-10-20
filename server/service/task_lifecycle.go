@@ -304,6 +304,17 @@ func (s *TaskService) SyncWechatPublicationLifecycle(ctx context.Context, taskID
 	if changed {
 		s.publishLifecycle(ctx, taskID, result)
 	}
+	if s.reuseRunFinalizer != nil {
+		task, err := s.repo.Tasks().FindByID(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task.ReuseRunID != "" {
+			if err := s.reuseRunFinalizer(ctx, task); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return &result, nil
 }
 

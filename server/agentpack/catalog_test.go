@@ -1027,8 +1027,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 14 {
-		t.Fatalf("Pack count = %d, want 14", len(catalog.Packs))
+	if len(catalog.Packs) != 15 {
+		t.Fatalf("Pack count = %d, want 15", len(catalog.Packs))
 	}
 	contentPacks := []string{"wechat-article", "seednote", "ecommerce", "moments", "montage", "hypit", "local-life", "wechat-picture", "whiteboard-animation"}
 	for _, id := range contentPacks {
@@ -1749,5 +1749,60 @@ func assertFileContent(t *testing.T, path, want string) {
 	}
 	if string(got) != want {
 		t.Fatalf("%s = %q, want %q", path, got, want)
+	}
+}
+
+func TestVideoReusePacksDeclareSkillAndArtifacts(t *testing.T) {
+	pluginRoot := filepath.Clean(filepath.Join("..", "..", "harness"))
+	catalog, err := LoadCatalog(pluginRoot)
+	if err != nil {
+		t.Fatalf("LoadCatalog repository Packs: %v", err)
+	}
+	requiredReuseArtifacts := []string{
+		"output/content-reuse-brief.json",
+		"output/topic-analysis.md",
+		"output/content-lineage.json",
+		"output/quality-report.json",
+	}
+	for _, id := range []string{"hypit", "montage", "whiteboard-animation"} {
+		t.Run(id, func(t *testing.T) {
+			pack, ok := catalog.Pack(id)
+			if !ok {
+				t.Fatalf("video reuse Pack %q missing", id)
+			}
+			if !slices.Contains(pack.Agent.Skills, "content-reuse") {
+				t.Errorf("Agent skills %v do not include content-reuse", pack.Agent.Skills)
+			}
+			packDir := filepath.Join(pluginRoot, "packs", id)
+			claudeAgent, err := os.ReadFile(filepath.Join(packDir, pack.Agent.ClaudeSource))
+			if err != nil {
+				t.Fatalf("read Claude Agent source: %v", err)
+			}
+			if !strings.Contains(string(claudeAgent), "  - content-reuse\n") {
+				t.Error("Claude Agent source does not preload content-reuse")
+			}
+			codexAgent, err := os.ReadFile(filepath.Join(packDir, pack.Agent.CodexSource))
+			if err != nil {
+				t.Fatalf("read Codex Agent source: %v", err)
+			}
+			if !strings.Contains(string(codexAgent), "__PLUGIN_ROOT__/skills/content-reuse/SKILL.md") {
+				t.Error("Codex Agent source does not declare content-reuse")
+			}
+			for _, path := range requiredReuseArtifacts {
+				found := false
+				for _, artifact := range pack.Artifacts {
+					if artifact.Path == path {
+						found = true
+						if artifact.Required && path != "output/quality-report.json" {
+							t.Errorf("reuse artifact %q must remain optional for ordinary tasks", path)
+						}
+						break
+					}
+				}
+				if !found {
+					t.Errorf("reuse artifact %q is not declared", path)
+				}
+			}
+		})
 	}
 }

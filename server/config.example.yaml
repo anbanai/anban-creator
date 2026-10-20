@@ -476,6 +476,8 @@ claude:
     montage: "${ANBAN_AGENT_IMAGE_MONTAGE:-creator-agent-montage:latest}"
     moments: "${ANBAN_AGENT_IMAGE_MOMENTS:-creator-agent-moments:latest}"
     ecommerce: "${ANBAN_AGENT_IMAGE_ECOMMERCE:-creator-agent-ecommerce:latest}"
+    # Optional while content autopilot is disabled; admission fails explicitly when absent.
+    content-planning: "${ANBAN_AGENT_IMAGE_CONTENT_PLANNING:-}"
     profile-analysis: "${ANBAN_AGENT_IMAGE_PROFILE_ANALYSIS:-creator-agent-profile-analysis:latest}"
     feedback-analysis: "${ANBAN_AGENT_IMAGE_FEEDBACK_ANALYSIS:-creator-agent-feedback-analysis:latest}"
     whiteboard-animation: "${ANBAN_AGENT_IMAGE_WHITEBOARD_ANIMATION:-creator-agent-whiteboard-animation:latest}"

@@ -134,6 +134,9 @@ func main() {
 		} else {
 			log.Info().Msg("database migration completed")
 		}
+		if err := service.MigrateTopicPoolToContentAssets(context.Background(), mysqlDB, log); err != nil {
+			log.Fatal().Err(err).Msg("failed to migrate topic pool content assets")
+		}
 		if err := service.AssertExecutableIdentityReadiness(context.Background(), mysqlDB); err != nil {
 			log.Fatal().Err(err).Msg("database executable identity is not ready")
 		}
@@ -604,9 +607,11 @@ func main() {
 	var posterHandler *handler.PosterHandler
 	var resourceHandler *handler.ResourceHandler
 	var topicPoolHandler *handler.TopicPoolHandler
+	var contentAssetHandler *handler.ContentAssetHandler
 	var trendsHandler *handler.TrendsHandler
 	var trendSvc *service.TrendService
 	var topicPoolSvc *service.TopicPoolService
+	var contentAssetSvc *service.ContentAssetService
 	var agentFeedbackSvc *service.AgentFeedbackService
 	var ilinkHandler *handler.IlinkHandler
 
@@ -688,6 +693,18 @@ func main() {
 		posterHandler = handler.NewPosterHandler(posterSvc, log)
 		topicPoolSvc = service.NewTopicPoolService(repo, log)
 		topicPoolHandler = handler.NewTopicPoolHandler(topicPoolSvc, log)
+		contentAssetSvc = service.NewContentAssetService(repo)
+		if asynqClient != nil {
+			contentAssetSvc.SetEnqueuer(asynqClient)
+		}
+		contentAssetSvc.SetTaskService(taskSvc)
+		if fixedBilling != nil {
+			contentAssetSvc.SetBillingCatalogService(fixedBilling.Catalog)
+			contentAssetSvc.SetBillingWalletService(fixedBilling.Wallet)
+		}
+		taskSvc.SetReuseRunFinalizer(contentAssetSvc.FinalizeReuseTask)
+		taskSvc.SetResearchJobFinalizer(contentAssetSvc.FinalizeResearchTask)
+		contentAssetHandler = handler.NewContentAssetHandler(contentAssetSvc, log)
 		trendSvc = service.NewTrendService(repo, rdb, cfg.Trends, log)
 		trendsHandler = handler.NewTrendsHandler(trendSvc, log)
 		if taskSvc != nil {
@@ -876,6 +893,7 @@ func main() {
 			PublishingSvc:          publishingSvc,
 			WechatPublicationSvc:   wechatPublicationSvc,
 			TopicPoolSvc:           topicPoolSvc,
+			ContentAssetSvc:        contentAssetSvc,
 			TrendSvc:               trendSvc,
 			AgentFeedbackSvc:       agentFeedbackSvc,
 			ContentMetadataSvc:     service.NewContentMetadataService(repo, log, store),
@@ -922,7 +940,7 @@ func main() {
 	// 15. Start Asynq worker if Redis is available.
 	var asynqServer *scheduler.TaskProcessor
 	if rdb != nil && taskSvc != nil {
-		asynqServer = startAsynqServer(repo, taskSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, cfg, log, rdb)
+		asynqServer = startAsynqServer(repo, taskSvc, contentAssetSvc, imageAnalysisSvc, wechatPublicationSvc, seednoteTrackingSvc, wechatTrackingSvc, channelsTrackingSvc, analyticsRebuildManager, feedbackScheduler, feedbackAttributionSvc, cfg, log, rdb)
 		startAnalyticsRebuildRecovery(ctx, repo, asynqClient, log)
 	}
 
@@ -934,6 +952,9 @@ func main() {
 	}
 	if feedbackScheduler != nil {
 		go startFeedbackCadenceLoop(ctx, feedbackScheduler, log)
+	}
+	if contentAssetSvc != nil {
+		go startContentAutopilotLoop(ctx, contentAssetSvc, log)
 	}
 	if asynqClient != nil {
 		if imageAnalysisSvc != nil {
@@ -1036,6 +1057,7 @@ func main() {
 		PosterHandler:                       posterHandler,
 		ResourceHandler:                     resourceHandler,
 		TopicPoolHandler:                    topicPoolHandler,
+		ContentAssetHandler:                 contentAssetHandler,
 		TrendsHandler:                       trendsHandler,
 		IlinkHandler:                        ilinkHandler,
 		MCPHandler:                          mcpHandler,
@@ -1504,7 +1526,7 @@ func buildBillingRuntime(ctx context.Context, db *gorm.DB, repo repository.Repos
 }
 
 // startAsynqServer starts the Asynq task processor in a background goroutine.
-func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, cfg *config.Config, log *zerolog.Logger, rdb *redis.Client) *scheduler.TaskProcessor {
+func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, contentAssetSvc *service.ContentAssetService, imageAnalysisSvc *service.ImageAnalysisService, wechatPublicationSvc *service.WechatPublicationService, seednoteTrackingSvc *service.SeednoteTrackingService, wechatTrackingSvc *service.WechatTrackingService, channelsTrackingSvc *service.ChannelsTrackingService, analyticsRebuildManager *service.AnalyticsRebuildManager, feedbackScheduler *service.FeedbackScheduler, feedbackAttributionSvc *service.FeedbackAttributionService, cfg *config.Config, log *zerolog.Logger, rdb *redis.Client) *scheduler.TaskProcessor {
 	var seednoteCaptureHandler scheduler.SeednoteTrackingHandler
 	if seednoteTrackingSvc != nil {
 		seednoteCaptureHandler = func(ctx context.Context, trackingID string) error {
@@ -1553,6 +1575,9 @@ func startAsynqServer(repo repository.Repository, taskSvc *service.TaskService, 
 	)
 	if imageAnalysisSvc != nil {
 		srv.RegisterImageAnalysisHandler(imageAnalysisSvc.Process, log)
+	}
+	if contentAssetSvc != nil {
+		srv.RegisterContentReuseHandler(contentAssetSvc.ProcessReuseRun, log)
 	}
 	if analyticsRebuildManager != nil {
 		srv.RegisterAnalyticsRebuildHandler(analyticsRebuildManager.Run, log)
@@ -1652,6 +1677,32 @@ func startFeedbackCadenceLoop(ctx context.Context, feedbackScheduler *service.Fe
 				continue
 			}
 			log.Info().Str("cadence", cadence).Int("created", result.Created).Int("enqueued", result.Enqueued).Int("skipped", result.Skipped).Msg("feedback cadence scan completed")
+		}
+	}
+	run()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+func startContentAutopilotLoop(ctx context.Context, contentAssets *service.ContentAssetService, log *zerolog.Logger) {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	run := func() {
+		created, err := contentAssets.RunAutopilotTick(ctx, time.Now().UTC())
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Error().Err(err).Msg("content autopilot scan failed")
+			}
+			return
+		}
+		if created > 0 {
+			log.Info().Int("created", created).Msg("content autopilot scan completed")
 		}
 	}
 	run()

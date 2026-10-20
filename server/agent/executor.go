@@ -15,10 +15,12 @@ import (
 )
 
 type UserPromptParams struct {
-	TaskType  string // model.PlatformWechat / model.PlatformSeednote / model.PlatformMoments / ...
-	Topic     string // user prompt; empty triggers autonomous research mode
-	TaskID    string // injected as task_id=<x> into the prompt body
-	ProjectID string // injected as project_id=<x> into the prompt body
+	ReuseRunID     string
+	ContentAssetID string
+	TaskType       string // model.PlatformWechat / model.PlatformSeednote / model.PlatformMoments / ...
+	Topic          string // user prompt; empty triggers autonomous research mode
+	TaskID         string // injected as task_id=<x> into the prompt body
+	ProjectID      string // injected as project_id=<x> into the prompt body
 	// ImageRatio and HasReferenceImage describe the frozen Montage video and
 	// portrait inputs. They are ignored for non-Montage task types.
 	ImageRatio        string
@@ -122,6 +124,9 @@ func AppendResumeContextFileToPrompt(prompt, workDir, relativePath string) strin
 // does not duplicate workflow prose.
 func describeRuntimeControls(p UserPromptParams) string {
 	var controls []string
+	if p.ReuseRunID != "" && p.ContentAssetID != "" {
+		controls = append(controls, "reuse_run_id="+p.ReuseRunID, "asset_id="+p.ContentAssetID)
+	}
 	switch p.TaskType {
 	case model.PlatformSeednote:
 		controls = append(controls, "seednote_image_mode="+seednoteImageMode(p.HasContentImage, p.HasTailImage))

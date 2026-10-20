@@ -4028,3 +4028,34 @@ func TestWechatPublicationLoadsOnlyTaskChannelCredentials(t *testing.T) {
 		t.Fatalf("must not reuse article credentials: %#v, %v", project, err)
 	}
 }
+
+func TestPausedReuseDraftDoesNotAbortProjectReconciliation(t *testing.T) {
+	for _, state := range []string{model.ContentReuseRunStatusPaused, model.ContentReuseRunStatusCancelled} {
+		t.Run(state, func(t *testing.T) {
+			f := newPublicationFixture(t)
+			ctx := context.Background()
+			run := model.NewContentReuseRun(f.userID, "asset", f.projectID, model.PlatformWechat)
+			run.Status, run.TaskID = state, f.taskID
+			run.PolicySnapshot = []byte(`{"draft_enabled":true,"publish_enabled":true}`)
+			if err := f.repo.ContentAssets().CreateReuseRun(ctx, run); err != nil {
+				t.Fatal(err)
+			}
+			task, err := f.repo.Tasks().FindByID(ctx, f.taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			task.ReuseRunID = run.ID
+			if err := f.repo.Tasks().Update(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			publication := &model.WechatPublication{ID: "draft", TaskID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Status: model.WechatPublicationStatusDrafted, DraftMediaID: "media"}
+			got, err := f.svc.autoPublishDraft(ctx, f.userID, f.taskID, publication)
+			if err != nil {
+				t.Fatalf("stopped run must be skipped without aborting reconciliation: %v", err)
+			}
+			if got.Status != model.WechatPublicationStatusDrafted || f.api.submitCalls != 0 {
+				t.Fatalf("stopped run published: %#v", got)
+			}
+		})
+	}
+}

@@ -163,6 +163,1145 @@
       "digest": "1886fee8d7efcb24b82db59561ce41c6a08c35cece3f7c8242d5717f9049909a"
     },
     {
+      "id": "content-planning",
+      "channel": "content-planning",
+      "version": "1.0.0",
+      "kind": "managed",
+      "display_name": "内容研究与文本验证",
+      "description": "生成可追溯研究、语义验证文章和视频脚本，禁止媒体生产与发布。",
+      "agent": {
+        "name": "content-planning",
+        "skills": [
+          "content-planning-evidence"
+        ],
+        "max_turns": 80
+      },
+      "bindings": {
+        "task_kinds": [
+          "content_research",
+          "content_validation",
+          "content_script"
+        ]
+      },
+      "runtime": {
+        "profile": "content-planning",
+        "adapter": "standard",
+        "max_turns": 80
+      },
+      "surfaces": [
+        "plugin",
+        "task"
+      ],
+      "features": [
+        "content-planning"
+      ],
+      "billing_operations": {
+        "content_research": "task.content_research",
+        "content_script": "task.content_script",
+        "content_validation": "task.content_validation"
+      },
+      "artifacts": [
+        {
+          "role": "failure_state",
+          "path": "output/failure-state.json",
+          "mime_type": "application/json",
+          "required": false
+        }
+      ],
+      "artifacts_by_task_type": {
+        "content_research": [
+          {
+            "role": "research",
+            "path": "output/content-research.json",
+            "mime_type": "application/json",
+            "required": true
+          },
+          {
+            "role": "evidence",
+            "path": "output/research-evidence.json",
+            "mime_type": "application/json",
+            "required": true
+          },
+          {
+            "role": "failure_state",
+            "path": "output/failure-state.json",
+            "mime_type": "application/json",
+            "required": false
+          }
+        ],
+        "content_script": [
+          {
+            "role": "script",
+            "path": "output/video-script.json",
+            "mime_type": "application/json",
+            "required": true
+          },
+          {
+            "role": "final_markdown",
+            "path": "output/video-script.md",
+            "mime_type": "text/markdown",
+            "required": true
+          },
+          {
+            "role": "subtitles",
+            "path": "output/video-subtitles.srt",
+            "mime_type": "application/x-subrip",
+            "required": true
+          },
+          {
+            "role": "review",
+            "path": "output/script-review.json",
+            "mime_type": "application/json",
+            "required": true
+          },
+          {
+            "role": "failure_state",
+            "path": "output/failure-state.json",
+            "mime_type": "application/json",
+            "required": false
+          }
+        ],
+        "content_validation": [
+          {
+            "role": "final_markdown",
+            "path": "output/validation-article.md",
+            "mime_type": "text/markdown",
+            "required": true
+          },
+          {
+            "role": "review",
+            "path": "output/validation-review.json",
+            "mime_type": "application/json",
+            "required": true
+          },
+          {
+            "role": "failure_state",
+            "path": "output/failure-state.json",
+            "mime_type": "application/json",
+            "required": false
+          }
+        ]
+      },
+      "delivery_by_task_type": {
+        "content_research": [
+          {
+            "role": "research",
+            "path": "output/content-research.json",
+            "mime_type": "application/json"
+          },
+          {
+            "role": "evidence",
+            "path": "output/research-evidence.json",
+            "mime_type": "application/json"
+          }
+        ],
+        "content_script": [
+          {
+            "role": "script",
+            "path": "output/video-script.json",
+            "mime_type": "application/json"
+          },
+          {
+            "role": "final_markdown",
+            "path": "output/video-script.md",
+            "mime_type": "text/markdown"
+          },
+          {
+            "role": "subtitles",
+            "path": "output/video-subtitles.srt",
+            "mime_type": "application/x-subrip"
+          },
+          {
+            "role": "review",
+            "path": "output/script-review.json",
+            "mime_type": "application/json"
+          }
+        ],
+        "content_validation": [
+          {
+            "role": "final_markdown",
+            "path": "output/validation-article.md",
+            "mime_type": "text/markdown"
+          },
+          {
+            "role": "review",
+            "path": "output/validation-review.json",
+            "mime_type": "application/json"
+          }
+        ]
+      },
+      "schemas": {
+        "task_input": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            },
+            "task_kind": {
+              "type": "string",
+              "enum": [
+                "content_research",
+                "content_validation",
+                "content_script"
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "asset_id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "source_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "title"
+                ]
+              }
+            },
+            "accepted_artifacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "task_id": {
+                    "type": "string"
+                  },
+                  "execution_id": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "content_sha256": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "task_id",
+                  "execution_id",
+                  "path",
+                  "content_sha256"
+                ]
+              }
+            },
+            "target_requirements": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "wechat",
+                    "seednote",
+                    "moments",
+                    "ecommerce",
+                    "montage",
+                    "whiteboard-animation",
+                    "hypit"
+                  ]
+                },
+                "duration_seconds": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 3600
+                },
+                "aspect_ratio": {
+                  "type": "string",
+                  "enum": [
+                    "9:16",
+                    "16:9",
+                    "1:1",
+                    "3:4",
+                    "4:3"
+                  ]
+                }
+              },
+              "required": [
+                "platform"
+              ]
+            },
+            "internal_sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "project_id": {
+                    "type": "string"
+                  },
+                  "content_id": {
+                    "type": "string"
+                  },
+                  "analytics_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "project_id",
+                  "content_id",
+                  "analytics_revision"
+                ]
+              }
+            }
+          },
+          "required": [
+            "schema_version",
+            "task_kind",
+            "candidates",
+            "accepted_artifacts"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            },
+            "task_id": {
+              "type": "string"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "task_kind": {
+              "type": "string",
+              "enum": [
+                "content_research",
+                "content_validation",
+                "content_script"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ready",
+                "blocked",
+                "data_insufficient"
+              ]
+            },
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "semantic_kernel": {
+                    "type": "string"
+                  },
+                  "source_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "merge_asset_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "target_fit": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "score": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "rationale": {
+                        "type": "string"
+                      },
+                      "source_refs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "score",
+                      "rationale",
+                      "source_refs"
+                    ]
+                  },
+                  "transferability": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "score": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "rationale": {
+                        "type": "string"
+                      },
+                      "source_refs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "score",
+                      "rationale",
+                      "source_refs"
+                    ]
+                  },
+                  "angles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "production_cost": {
+                    "type": "string"
+                  },
+                  "material_risk": {
+                    "type": "string"
+                  },
+                  "compliance_risk": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "semantic_kernel",
+                  "source_refs",
+                  "merge_asset_ids",
+                  "target_fit",
+                  "transferability",
+                  "angles",
+                  "production_cost",
+                  "material_risk",
+                  "compliance_risk"
+                ]
+              }
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "operation_id": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "published_at": {
+                    "type": "string"
+                  },
+                  "fetched_at": {
+                    "type": "string"
+                  },
+                  "facts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "internal_reference": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "project_id": {
+                        "type": "string"
+                      },
+                      "content_id": {
+                        "type": "string"
+                      },
+                      "analytics_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "project_id",
+                      "content_id",
+                      "analytics_revision"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "operation_id",
+                  "url",
+                  "published_at",
+                  "fetched_at",
+                  "facts"
+                ]
+              }
+            },
+            "validation_kind": {
+              "type": "string",
+              "enum": [
+                "semantic_only"
+              ]
+            },
+            "content_sha256": {
+              "type": "string"
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "enum": [
+                      "facts",
+                      "evidence",
+                      "compliance",
+                      "target_fit",
+                      "timing",
+                      "materials"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "blocked"
+                    ]
+                  },
+                  "rationale": {
+                    "type": "string"
+                  },
+                  "source_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "status",
+                  "rationale",
+                  "source_refs"
+                ]
+              }
+            },
+            "source_refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "platform": {
+              "type": "string",
+              "enum": [
+                "wechat",
+                "seednote",
+                "moments",
+                "ecommerce",
+                "montage",
+                "whiteboard-animation",
+                "hypit"
+              ]
+            },
+            "spoken_text": {
+              "type": "string"
+            },
+            "scenes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "index": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "start_seconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "end_seconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "spoken_text": {
+                    "type": "string"
+                  },
+                  "visuals": {
+                    "type": "string"
+                  },
+                  "material_requirements": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "source_refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "index",
+                  "start_seconds",
+                  "end_seconds",
+                  "spoken_text",
+                  "visuals",
+                  "material_requirements",
+                  "source_refs"
+                ]
+              }
+            }
+          },
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "type": "string",
+                  "enum": [
+                    "1.0"
+                  ]
+                },
+                "task_id": {
+                  "type": "string"
+                },
+                "execution_id": {
+                  "type": "string"
+                },
+                "task_kind": {
+                  "type": "string",
+                  "enum": [
+                    "content_research",
+                    "content_validation",
+                    "content_script"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "blocked",
+                    "data_insufficient"
+                  ]
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "candidates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "semantic_kernel": {
+                        "type": "string"
+                      },
+                      "source_refs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "merge_asset_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "target_fit": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "score": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 100
+                          },
+                          "rationale": {
+                            "type": "string"
+                          },
+                          "source_refs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "score",
+                          "rationale",
+                          "source_refs"
+                        ]
+                      },
+                      "transferability": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "score": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 100
+                          },
+                          "rationale": {
+                            "type": "string"
+                          },
+                          "source_refs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "score",
+                          "rationale",
+                          "source_refs"
+                        ]
+                      },
+                      "angles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "production_cost": {
+                        "type": "string"
+                      },
+                      "material_risk": {
+                        "type": "string"
+                      },
+                      "compliance_risk": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "title",
+                      "semantic_kernel",
+                      "source_refs",
+                      "merge_asset_ids",
+                      "target_fit",
+                      "transferability",
+                      "angles",
+                      "production_cost",
+                      "material_risk",
+                      "compliance_risk"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "schema_version",
+                "task_id",
+                "execution_id",
+                "task_kind",
+                "status",
+                "missing",
+                "candidates"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "type": "string",
+                  "enum": [
+                    "1.0"
+                  ]
+                },
+                "task_id": {
+                  "type": "string"
+                },
+                "execution_id": {
+                  "type": "string"
+                },
+                "task_kind": {
+                  "type": "string",
+                  "enum": [
+                    "content_research",
+                    "content_validation",
+                    "content_script"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "blocked",
+                    "data_insufficient"
+                  ]
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "operation_id": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "published_at": {
+                        "type": "string"
+                      },
+                      "fetched_at": {
+                        "type": "string"
+                      },
+                      "facts": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "internal_reference": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "project_id": {
+                            "type": "string"
+                          },
+                          "content_id": {
+                            "type": "string"
+                          },
+                          "analytics_revision": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        },
+                        "required": [
+                          "project_id",
+                          "content_id",
+                          "analytics_revision"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "operation_id",
+                      "url",
+                      "published_at",
+                      "fetched_at",
+                      "facts"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "schema_version",
+                "task_id",
+                "execution_id",
+                "task_kind",
+                "status",
+                "missing",
+                "sources"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "type": "string",
+                  "enum": [
+                    "1.0"
+                  ]
+                },
+                "task_id": {
+                  "type": "string"
+                },
+                "execution_id": {
+                  "type": "string"
+                },
+                "task_kind": {
+                  "type": "string",
+                  "enum": [
+                    "content_research",
+                    "content_validation",
+                    "content_script"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "blocked",
+                    "data_insufficient"
+                  ]
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "validation_kind": {
+                  "type": "string",
+                  "enum": [
+                    "semantic_only"
+                  ]
+                },
+                "content_sha256": {
+                  "type": "string"
+                },
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "enum": [
+                          "facts",
+                          "evidence",
+                          "compliance",
+                          "target_fit",
+                          "timing",
+                          "materials"
+                        ]
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "pass",
+                          "blocked"
+                        ]
+                      },
+                      "rationale": {
+                        "type": "string"
+                      },
+                      "source_refs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "status",
+                      "rationale",
+                      "source_refs"
+                    ]
+                  }
+                },
+                "source_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "schema_version",
+                "task_id",
+                "execution_id",
+                "task_kind",
+                "status",
+                "missing",
+                "validation_kind",
+                "content_sha256",
+                "checks",
+                "source_refs"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "type": "string",
+                  "enum": [
+                    "1.0"
+                  ]
+                },
+                "task_id": {
+                  "type": "string"
+                },
+                "execution_id": {
+                  "type": "string"
+                },
+                "task_kind": {
+                  "type": "string",
+                  "enum": [
+                    "content_research",
+                    "content_validation",
+                    "content_script"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "blocked",
+                    "data_insufficient"
+                  ]
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "platform": {
+                  "type": "string",
+                  "enum": [
+                    "wechat",
+                    "seednote",
+                    "moments",
+                    "ecommerce",
+                    "montage",
+                    "whiteboard-animation",
+                    "hypit"
+                  ]
+                },
+                "spoken_text": {
+                  "type": "string"
+                },
+                "scenes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "index": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "start_seconds": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "end_seconds": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "spoken_text": {
+                        "type": "string"
+                      },
+                      "visuals": {
+                        "type": "string"
+                      },
+                      "material_requirements": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "source_refs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "index",
+                      "start_seconds",
+                      "end_seconds",
+                      "spoken_text",
+                      "visuals",
+                      "material_requirements",
+                      "source_refs"
+                    ]
+                  }
+                },
+                "source_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "schema_version",
+                "task_id",
+                "execution_id",
+                "task_kind",
+                "status",
+                "missing",
+                "platform",
+                "spoken_text",
+                "scenes",
+                "source_refs"
+              ]
+            }
+          ]
+        }
+      },
+      "ui": {
+        "renderer": "custom:content-planning"
+      },
+      "digest": "64bd22496a0f9ad7f6f03830c7b58b711cf472beaa9ac9ab30525fd0380c8b98"
+    },
+    {
       "id": "creation-planner",
       "version": "1.0.0",
       "kind": "managed",
@@ -285,7 +1424,7 @@
     {
       "id": "hypit",
       "channel": "hypit",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "kind": "managed",
       "display_name": "视频复刻",
       "description": "根据参考视频和替换要求生成成片，保留完整工程用于再次改编。",
@@ -293,7 +1432,8 @@
         "name": "hypit",
         "skills": [
           "project-profile-context",
-          "portrait-cover-design"
+          "portrait-cover-design",
+          "content-reuse"
         ],
         "max_turns": 180
       },
@@ -409,6 +1549,24 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        },
+        {
+          "role": "reuse_brief",
+          "path": "output/content-reuse-brief.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "topic_analysis",
+          "path": "output/topic-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "content_lineage",
+          "path": "output/content-lineage.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -473,7 +1631,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "b2d5281b58c43d02a7feee0bc507b0409f2927bed2487d1006759465ff879ed7"
+      "digest": "ac41cc99a6a6d3f90d5ffaa953f1fdba27697e47fc1512a4ff4c0a5841cba516"
     },
     {
       "id": "local-life",
@@ -736,7 +1894,7 @@
     {
       "id": "montage",
       "channel": "montage",
-      "version": "2.0.5",
+      "version": "2.0.6",
       "kind": "managed",
       "display_name": "视频生成",
       "description": "从素材和业务输入生成最终视频与交付清单。",
@@ -745,7 +1903,8 @@
         "skills": [
           "project-profile-context",
           "montage",
-          "portrait-cover-design"
+          "portrait-cover-design",
+          "content-reuse"
         ],
         "max_turns": 180
       },
@@ -836,6 +1995,30 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        },
+        {
+          "role": "reuse_brief",
+          "path": "output/content-reuse-brief.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "topic_analysis",
+          "path": "output/topic-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "content_lineage",
+          "path": "output/content-lineage.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -865,7 +2048,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "ff3069f5d7394d7721cf025eddd3e9659d07db9533daa62abe2539c8682e1047"
+      "digest": "9387ab6b0d15f101f8de54477bcb7aeb7970d174ac39a4ad9853957f1ea0a3ff"
     },
     {
       "id": "postmortem-review",
@@ -1364,7 +2547,7 @@
       "id": "seednote",
       "channel": "seednote",
       "plan_task_kind": "content_generation",
-      "version": "2.0.6",
+      "version": "2.0.7",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -1381,7 +2564,8 @@
           "seednote-viral-analysis",
           "seednote-writing",
           "seednote-visual-design",
-          "content-tagging"
+          "content-tagging",
+          "content-reuse"
         ],
         "max_turns": 20
       },
@@ -1530,6 +2714,24 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        },
+        {
+          "role": "reuse_brief",
+          "path": "output/content-reuse-brief.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "content_lineage",
+          "path": "output/content-lineage.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "artifacts_by_task_type": {
@@ -1599,13 +2801,13 @@
           "funnel_stage"
         ]
       },
-      "digest": "235d217e9270fec4d5103092e254886fda1450e05a164fc48308415b00941bba"
+      "digest": "435e09557427edafd0c2cd30fb99c697e3e13f346e4e14677b9058d27be92c6b"
     },
     {
       "id": "wechat-article",
       "channel": "wechat-article",
       "plan_task_kind": "content_generation",
-      "version": "2.0.8",
+      "version": "2.0.9",
       "kind": "managed",
       "display_name": "微信公众号文章",
       "description": "从选题研究、写作和视觉设计到文章交付物的完整创作流程。",
@@ -1625,7 +2827,8 @@
           "topic-evaluator",
           "seo-optimization",
           "article-viral-strategy",
-          "article-publishing"
+          "article-publishing",
+          "content-reuse"
         ],
         "max_turns": 300
       },
@@ -1801,6 +3004,30 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        },
+        {
+          "role": "reuse_brief",
+          "path": "output/content-reuse-brief.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "topic_analysis",
+          "path": "output/topic-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "content_lineage",
+          "path": "output/content-lineage.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "quality_report",
+          "path": "output/quality-report.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -1840,7 +3067,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "c3bfa7262844303a38e83cfb14042288b1a0273aa6a4f5f30fc72dcb3b7bd818"
+      "digest": "1267eb0f488c9af99888543920923fd1ebbd6c5e4f2525a767227e10261c3b18"
     },
     {
       "id": "wechat-picture",
@@ -2024,14 +3251,15 @@
     {
       "id": "whiteboard-animation",
       "channel": "whiteboard-animation",
-      "version": "2.0.3",
+      "version": "2.0.4",
       "kind": "managed",
       "display_name": "白板动画",
       "description": "根据 SRT 字幕生成分镜、白板手绘场景和最终动画视频。",
       "agent": {
         "name": "whiteboard-animation",
         "skills": [
-          "whiteboard-animation"
+          "whiteboard-animation",
+          "content-reuse"
         ],
         "max_turns": 120
       },
@@ -2130,6 +3358,24 @@
           "path": "output/progress-state.json",
           "mime_type": "application/json",
           "required": false
+        },
+        {
+          "role": "reuse_brief",
+          "path": "output/content-reuse-brief.json",
+          "mime_type": "application/json",
+          "required": false
+        },
+        {
+          "role": "topic_analysis",
+          "path": "output/topic-analysis.md",
+          "mime_type": "text/markdown",
+          "required": false
+        },
+        {
+          "role": "content_lineage",
+          "path": "output/content-lineage.json",
+          "mime_type": "application/json",
+          "required": false
         }
       ],
       "delivery": [
@@ -2179,7 +3425,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "8cf01926088c305cdd23643d827e9df53c14fa026a046ac5844627c6a5d72b8b"
+      "digest": "8c758d454277ce1f20e4dd31e40adaeaa5b14ddc9771f3e9e8c028f637cd5655"
     }
   ]
 }

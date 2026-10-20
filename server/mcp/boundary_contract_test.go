@@ -23,6 +23,7 @@ import (
 )
 
 var reviewedMCPHandlerCapabilities = map[string]string{
+	"contentReuseContextHandler":              "svcs.ContentAssetSvc.GetReuseContext",
 	"accountInfoHandler":                      "svcs.AgentProjectProfileSvc.Get",
 	"addTopicHandler":                         "svcs.TopicPoolSvc.Add",
 	"agentFeedbackSubmitHandler":              "svcs.AgentFeedbackSvc.CreateForExecution",
@@ -55,6 +56,7 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"createDraftHandler":                      "svcs.WechatPublicationSvc.CreateDraftInteractive",
 	"renderTemplateHandler":                   "svcs.ContentRenderSvc.RenderTemplate",
 	"scoreArticleHandler":                     "svcs.ArticleScoreSvc.Score",
+	"listSearchReceiptsHandler":               "svcs.TaskSvc.ListSearchReceipts",
 	"searchWebHandler":                        "svcs.SearchSvc.Search",
 	"fetchWebPageHandler":                     "svcs.FetchSvc.Fetch",
 	"searchImagesHandler":                     "svcs.ImageSearchSvc.SearchImages",

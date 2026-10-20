@@ -84,6 +84,7 @@ describe('Sidebar', () => {
       '插件',
       '设置',
       '内容分析',
+      '选题资产',
       '热点雷达',
     ])
     expect(navigation.queryByText('创作')).not.toBeInTheDocument()

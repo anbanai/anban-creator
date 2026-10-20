@@ -142,7 +142,7 @@ export type RegisterFormValues = z.infer<typeof registerSchema>
 export const createTaskSchema = z.object({
   project_id: z.string().optional().default(""),
   execution_profile: executionProfileSchema,
-  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral_analysis", "profile_analysis", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life"]),
+  type: z.enum(["seednote", "wechat-article", "wechat-picture", "moments", "viral_analysis", "profile_analysis", "content_research", "content_validation", "content_script", "ecommerce", "montage", "whiteboard-animation", "hypit", "local-life"]),
   topic: promptSchema.optional(),
   prompt: promptSchema.optional(),
   quantity: z.number().int().min(1).max(5).default(1),

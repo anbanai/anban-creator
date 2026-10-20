@@ -54,6 +54,22 @@ func (r *taskRepository) FindByID(ctx context.Context, id string) (*model.Task, 
 	return &task, nil
 }
 
+func (r *taskRepository) FindByReuseRun(ctx context.Context, userID, reuseRunID string) (*model.Task, error) {
+	var task model.Task
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND reuse_run_id = ? AND COALESCE(reuse_stage_id, '') = ''", userID, reuseRunID).Order("created_at ASC").First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (r *taskRepository) FindByReuseStage(ctx context.Context, userID, reuseStageID string) (*model.Task, error) {
+	var task model.Task
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND reuse_stage_id = ?", userID, reuseStageID).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 func (r *taskRepository) FindByAssistantCheckpointID(ctx context.Context, userID, checkpointID string) (*model.Task, error) {
 	var task model.Task
 	if err := r.db.WithContext(ctx).Where("user_id = ? AND assistant_checkpoint_id = ?", userID, checkpointID).First(&task).Error; err != nil {

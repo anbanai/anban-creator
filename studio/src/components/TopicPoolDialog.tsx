@@ -83,7 +83,7 @@ export function TopicPoolDialog({ project, open, onOpenChange }: TopicPoolDialog
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex min-w-0 items-center gap-2">选题池 - <ProjectIdentity project={project} compact /></DialogTitle>
+          <DialogTitle className="flex min-w-0 items-center gap-2">选题资产 - <ProjectIdentity project={project} compact /></DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">

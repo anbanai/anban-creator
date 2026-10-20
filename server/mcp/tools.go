@@ -40,6 +40,7 @@ type ContentMetadataManager interface {
 
 // Services holds the service instances needed by MCP tools.
 type Services struct {
+	ContentAssetSvc        *service.ContentAssetService
 	ProjectSvc             *service.ProjectService
 	TaskSvc                *service.TaskService
 	PlanSvc                *service.PlanService
@@ -80,9 +81,11 @@ func RegisterTools(server *mcp.Server) {
 	registerTopicPoolTools(server)
 	registerTrendTools(server)
 	registerSearchTools(server)
+	registerSearchReceiptTools(server)
 	registerProgressTools(server)
 	registerAgentFeedbackTools(server)
 	registerProfileTools(server)
+	registerContentReuseTools(server)
 	registerContentMetadataTools(server)
 	registerInteractiveTools(server)
 }

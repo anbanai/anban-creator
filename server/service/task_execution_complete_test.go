@@ -2332,3 +2332,143 @@ func TestCancelCloudBlocksPermanentCleanupConflict(t *testing.T) {
 		t.Fatalf("blocked cleanup reclaimed = %v, %v", won, err)
 	}
 }
+
+func TestCloudReuseCompletionValidatesPendingArtifactsAndReportIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, runID string
+		wantSuccess         bool
+	}{
+		{"ready pending files", "ready", "run-1", true},
+		{"blocked review", "blocked", "run-1", false},
+		{"wrong run evidence", "ready", "other-run", false},
+		{"unknown review status", "success", "run-1", false},
+		{"missing required checks", "ready", "run-1", false},
+		{"duplicate checks", "ready", "run-1", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, task, execution := setupCloudCompletionTest(t, true)
+			task.ReuseRunID, task.ContentAssetID = "run-1", "asset-1"
+			if err := repo.Tasks().Update(context.Background(), task); err != nil {
+				t.Fatal(err)
+			}
+			report := fmt.Sprintf(`{"schema_version":1,"status":%q,"reuse_run_id":%q,"asset_id":"asset-1","task_id":%q,"target_platform":"wechat","checks":[{"id":"fact_sources","status":"passed"},{"id":"core_consistency","status":"passed"},{"id":"platform_fit","status":"passed"},{"id":"compliance","status":"passed"},{"id":"material_rights","status":"passed"}]}`, tc.status, tc.runID, task.ID)
+			if tc.name == "missing required checks" {
+				report = strings.Replace(report, `{"id":"material_rights","status":"passed"}`, `{"id":"unrelated","status":"passed"}`, 1)
+			}
+			if tc.name == "duplicate checks" {
+				report = strings.Replace(report, `{"id":"material_rights","status":"passed"}`, `{"id":"compliance","status":"passed"}`, 1)
+			}
+
+			report = completeReuseReportFixture(t, report, task)
+			for _, name := range []string{"content-reuse-brief.json", "content-lineage.json", "quality-report.json"} {
+				addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/"+name, "application/json", []byte(report))
+			}
+			addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/topic-analysis.md", "text/markdown", []byte("# Evidence\nInternal source checked.\n"))
+			if err := repo.TaskFiles().ReplacePendingCurrentExecutionPreservingMCPArtifacts(context.Background(), task.ID, execution.ID, nil); err != nil {
+				t.Fatal(err)
+			}
+			execution, err := repo.TaskExecutions().FindByID(context.Background(), execution.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, _, result, err := svc.cloudTerminalOutcome(context.Background(), task, execution, &agent.ExecutionResult{Success: true, RemoteArtifacts: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (status == model.TaskExecutionSucceeded) != tc.wantSuccess {
+				t.Fatalf("terminal=%s, success=%v, result=%#v", status, tc.wantSuccess, result)
+			}
+		})
+	}
+}
+
+func TestCompletedNonWechatReuseTasksUseValidatedQualityEvidence(t *testing.T) {
+	for _, platform := range []string{model.PlatformSeednote, model.PlatformMontage, model.PlatformHypit, model.PlatformWhiteboardAnimation} {
+		t.Run(platform, func(t *testing.T) {
+			svc, repo, task, execution := setupCloudCompletionTest(t, false)
+			task.Type = platform
+			task.AgentID, task.Channel, task.TaskKind, _ = contentReuseIdentity(platform)
+			task.Status = model.TaskStatusCompleted
+			task.ReuseRunID, task.ContentAssetID = "run-1", "asset-1"
+			report := fmt.Sprintf(`{"schema_version":1,"status":"ready","reuse_run_id":"run-1","asset_id":"asset-1","task_id":%q,"target_platform":%q,"checks":[{"id":"fact_sources","status":"passed"},{"id":"core_consistency","status":"passed"},{"id":"platform_fit","status":"passed"},{"id":"compliance","status":"passed"},{"id":"material_rights","status":"passed"}]}`, task.ID, platform)
+			report = completeReuseReportFixture(t, report, task)
+			for _, name := range []string{"content-reuse-brief.json", "content-lineage.json", "quality-report.json"} {
+				addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/"+name, "application/json", []byte(report))
+			}
+			if platform == model.PlatformHypit {
+				addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/semantic-report.json", "application/json", []byte(`{"content_reuse":`+report+`}`))
+			}
+			outcome, err := svc.buildCloudTaskOutcome(context.Background(), task, execution, &agent.ExecutionResult{Success: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome.Review.Status != model.TaskReviewPassed {
+				t.Fatalf("completed %s review=%s", platform, outcome.Review.Status)
+			}
+		})
+	}
+}
+
+func completeReuseReportFixture(t *testing.T, report string, task *model.Task) string {
+	t.Helper()
+	var value map[string]any
+	if err := json.Unmarshal([]byte(report), &value); err != nil {
+		t.Fatal(err)
+	}
+	value["source"] = "Server frozen reuse context"
+	value["data_at"] = "2026-01-01T00:00:00Z"
+	value["missing"], value["evidence_paths"], value["confidence"] = []string{}, []string{"output/topic-analysis.md"}, "medium"
+	value["source_content"] = nil
+	value["angle"], value["semantic_kernel"] = "practical guide", "core claim"
+	value["core_points"], value["replaceable_examples"] = []string{"supported claim"}, []string{}
+	value["format_requirements"] = map[string]any{"form": "article", "title_strategy": "question", "opening_strategy": "example", "length": "800 words", "visual_or_spoken_requirements": "one diagram"}
+	value["cost_level"] = "L2"
+	value["material_requirements"], value["compliance_constraints"] = []string{}, []string{"cite sources"}
+	value["relation"], value["target_content"] = "derived_from", map[string]string{"kind": "task", "id": task.ID}
+	for _, check := range value["checks"].([]any) {
+		item := check.(map[string]any)
+		item["reason"], item["evidence_paths"] = "verified against sources", []string{"output/topic-analysis.md"}
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+func TestReuseReportsValidatePlatformBriefAndEvidenceContract(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"missing confidence", func(v map[string]any) { delete(v, "confidence") }},
+		{"invented high confidence", func(v map[string]any) { v["confidence"] = "high"; v["missing"] = []string{"external_research"} }},
+		{"invalid data timestamp", func(v map[string]any) { v["data_at"] = "unknown" }},
+		{"absent core points", func(v map[string]any) { delete(v, "core_points") }},
+		{"absent platform format", func(v map[string]any) { delete(v, "format_requirements") }},
+		{"incorrect target lineage", func(v map[string]any) { v["target_content"] = map[string]string{"kind": "task", "id": "foreign-task"} }},
+		{"unsupported cost tier", func(v map[string]any) { v["cost_level"] = "L9" }},
+		{"missing check explanation", func(v map[string]any) { delete(v["checks"].([]any)[0].(map[string]any), "reason") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, task, execution := setupCloudCompletionTest(t, false)
+			task.ReuseRunID, task.ContentAssetID = "run-1", "asset-1"
+			report := completeReuseReportFixture(t, fmt.Sprintf(`{"schema_version":1,"status":"ready","reuse_run_id":"run-1","asset_id":"asset-1","task_id":%q,"target_platform":"wechat","checks":[{"id":"fact_sources","status":"passed"},{"id":"core_consistency","status":"passed"},{"id":"platform_fit","status":"passed"},{"id":"compliance","status":"passed"},{"id":"material_rights","status":"passed"}]}`, task.ID), task)
+			var value map[string]any
+			if err := json.Unmarshal([]byte(report), &value); err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(value)
+			body, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"content-reuse-brief.json", "content-lineage.json", "quality-report.json"} {
+				addCloudOutcomeArtifact(t, svc, repo, task, execution, "output/"+name, "application/json", body)
+			}
+			if err := svc.validateContentReuseReports(context.Background(), task, execution); err == nil {
+				t.Fatal("invalid reuse artifact contract accepted")
+			}
+		})
+	}
+}

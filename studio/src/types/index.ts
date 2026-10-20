@@ -191,6 +191,7 @@ export type {
 
 // Topic Pool
 export type { TopicPoolStatus, TopicPool } from './topic-pool'
+export type { ContentAssetStatus, ContentAssetLifecycle, ContentAsset, ContentAssetEvidence, ContentAssetLink, ContentAssetScoreSnapshot, ContentReuseRun, ContentReuseStageExecution, ContentReuseAuditEvent, ContentAssetDetail, ContentAssetLineage, ContentAssetPlatformContent, ContentAssetPlatformPerformance, ContentAssetRecommendation, ContentAutopilotPolicy } from './content-asset'
 export type { TrendItem, TrendPlatformResult, TrendQueryResult } from './trends'
 
 // Viral Analysis

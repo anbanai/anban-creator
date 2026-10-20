@@ -80,6 +80,7 @@ if [[ -f "$manifest_path" ]]; then
   montage_agent_image_repo=${montage_agent_image_repo:-$(jq -r '.images.montage // empty' "$manifest_path")}
   moments_agent_image_repo=${moments_agent_image_repo:-$(jq -r '.images.moments // empty' "$manifest_path")}
   ecommerce_agent_image_repo=${ecommerce_agent_image_repo:-$(jq -r '.images.ecommerce // empty' "$manifest_path")}
+  content_planning_agent_image_repo=${content_planning_agent_image_repo:-$(jq -r '.images["content-planning"] // empty' "$manifest_path")}
   profile_analysis_agent_image_repo=${profile_analysis_agent_image_repo:-$(jq -r '.images["profile-analysis"] // empty' "$manifest_path")}
   feedback_analysis_agent_image_repo=${feedback_analysis_agent_image_repo:-$(jq -r '.images["feedback-analysis"] // empty' "$manifest_path")}
   whiteboard_animation_agent_image_repo=${whiteboard_animation_agent_image_repo:-$(jq -r '.images["whiteboard-animation"] // empty' "$manifest_path")}
@@ -105,6 +106,7 @@ export wechat_article_agent_image_repo wechat_picture_agent_image_repo
 export seednote_agent_image_repo montage_agent_image_repo moments_agent_image_repo
 export ecommerce_agent_image_repo profile_analysis_agent_image_repo
 export feedback_analysis_agent_image_repo whiteboard_animation_agent_image_repo
+export content_planning_agent_image_repo=${content_planning_agent_image_repo:-}
 export hypit_agent_image_repo local_life_agent_image_repo
 export dsh_image_repo
 
@@ -114,6 +116,7 @@ render_template() {
   body=$(<"$path")
   while IFS= read -r template_variable; do
     [[ -z "$template_variable" ]] && continue
+    if [[ "$template_variable" == "content_planning_agent_image_repo" ]]; then continue; fi
     if [[ -z "${!template_variable:-}" ]]; then
       echo "ACK deployment variable is unset or empty: $template_variable" >&2
       return 1

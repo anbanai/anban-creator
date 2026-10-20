@@ -101,6 +101,11 @@ func applyAgentPackIdentity(execution *model.TaskExecution, agentID string) erro
 			execution.TaskKind = model.TaskKindFeedbackAnalysis
 		case model.AgentIDWhiteboard:
 			execution.TaskKind = model.PlatformWhiteboardAnimation
+		case model.AgentIDContentPlanning:
+			if !model.IsContentPlanningTask(requestedKind) {
+				return fmt.Errorf("planning task kind required")
+			}
+			execution.TaskKind = requestedKind
 		case model.AgentIDProfileAnalysis:
 			execution.TaskKind = model.TaskKindProfileAnalysis
 		default:
@@ -208,7 +213,7 @@ func hasCompleteAgentPackIdentity(execution *model.TaskExecution) bool {
 
 func isContentTaskKind(taskKind string) bool {
 	switch strings.TrimSpace(taskKind) {
-	case model.TaskTypeViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis:
+	case model.TaskTypeContentResearch, model.TaskTypeContentValidation, model.TaskTypeContentScript, model.TaskTypeViralAnalysis, model.TaskKindProfileAnalysis, model.TaskKindFeedbackAnalysis:
 		return false
 	default:
 		return strings.TrimSpace(taskKind) != ""

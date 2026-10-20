@@ -26,6 +26,7 @@ import (
 
 // mimeTypes maps file extensions to MIME types.
 var mimeTypes = map[string]string{
+	".srt":      "application/x-subrip",
 	".html":     "text/html",
 	".htm":      "text/html",
 	".css":      "text/css",

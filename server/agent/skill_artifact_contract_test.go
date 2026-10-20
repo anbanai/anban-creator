@@ -118,6 +118,10 @@ func TestJSONOutputContractsDeclareSharedMetadata(t *testing.T) {
 				continue
 			}
 			fields := []string{"schema_version", "status", "source", "data_at", "missing", "evidence_paths"}
+			if pack.ID == "content-planning" {
+				// Planning uses a closed execution-scoped schema; provenance resides in sources and source_refs.
+				fields = []string{"schema_version", "task_id", "execution_id", "task_kind", "status", "missing", "source_refs"}
+			}
 			if pack.ID == "profile-analysis" {
 				// The profile result has its own closed Pack Schema. Provenance
 				// lives in dimensions; it is not an analytics delivery envelope.

@@ -76,6 +76,11 @@ image_entries=(
   "dsh=${DSH_IMAGE:?DSH_IMAGE must be set}"
 )
 
+# Planning is optional for manual-only installations; release it when configured.
+if [[ -n "${AGENT_IMAGE_CONTENT_PLANNING:-}" ]]; then
+  image_entries+=("content-planning=$AGENT_IMAGE_CONTENT_PLANNING")
+fi
+
 images_json='{}'
 for entry in "${image_entries[@]}"; do
   profile=${entry%%=*}

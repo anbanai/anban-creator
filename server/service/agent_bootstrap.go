@@ -425,8 +425,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	// Every execution receives a read-only snapshot. The database profile is
 	// authoritative; versioned NAS projections are used only when current.
 	profile := projectProfileForAgentContext(project)
+	if model.IsContentPlanningTask(task.Type) {
+		profile = task.ProjectSnapshot.Data().Profile
+	}
 	memoryFiles := map[string]BootstrapFile{}
-	if s.cfg.ProjectMemory != nil && strings.TrimSpace(task.ProjectID) != "" {
+	if !model.IsContentPlanningTask(task.Type) && s.cfg.ProjectMemory != nil && strings.TrimSpace(task.ProjectID) != "" {
 		loaded, err := readProjectBootstrapFiles(ctx, s.cfg.ProjectMemory, task.ProjectID)
 		if err != nil {
 			return nil, fmt.Errorf("read project memory context: %w", err)
@@ -482,6 +485,11 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 			ExpectedSize: projectStyleReferenceAsset.Size, MaxBytes: 10 << 20,
 		})
 	}
+	planningFiles, err := s.buildContentPlanningFiles(ctx, execution, task, credentialDeadline)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, planningFiles...)
 	attachmentFiles, err := s.buildAttachmentFiles(ctx, execution.ID, task, attachments, credentialDeadline)
 	if err != nil {
 		return nil, err
@@ -529,6 +537,7 @@ func (s *AgentBootstrapService) buildResponse(ctx context.Context, execution *mo
 	}
 	prompt := serveragent.BuildUserPrompt(serveragent.UserPromptParams{
 		TaskType: bootstrapTaskType, Topic: task.Prompt, TaskID: task.ID, ProjectID: task.ProjectID,
+		ReuseRunID: task.ReuseRunID, ContentAssetID: task.ContentAssetID,
 		ImageRatio: task.ImageRatio, HasReferenceImage: taskReferenceAsset != nil,
 		HasContentImage: task.HasContentImage, HasTailImage: task.HasTailImage,
 		ArticleWithCover: task.ArticleWithCover, ArticleWithContentImages: task.ArticleWithContentImages,

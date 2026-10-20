@@ -37,6 +37,7 @@ import { taskStatusLabel, platformDisplayName } from '@/lib/labels'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
 import { normalizeProjectProfile } from '@/lib/project-profile'
 import { supportsProfileLab } from '@/lib/project-capabilities'
+import ContentLineagePanel from '@/components/tasks/ContentLineagePanel'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { AgentIconStack, agentDisplayName } from '@/components/agent-prompt/AgentIconStack'
@@ -784,6 +785,7 @@ export default function TaskDetailPage() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
+          {task.asset_id && <ContentLineagePanel assetID={task.asset_id} runID={task.reuse_run_id} taskID={task.id} />}
           <TaskDeliverablesPanel
             taskId={task.id}
             taskStatus={task.status}

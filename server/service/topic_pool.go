@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"gorm.io/gorm"
 )
 
 // TopicPoolService manages the topic pool per project.
@@ -112,9 +114,30 @@ func (s *TopicPoolService) Add(ctx context.Context, userID, projectID string, to
 	if len(items) == 0 {
 		return []*model.TopicPool{}, nil
 	}
-
-	if err := s.repo.TopicPools().CreateBatch(ctx, items); err != nil {
-		return nil, fmt.Errorf("create topics: %w", err)
+	if err := s.repo.WithTx(ctx, func(tx repository.Repository) error {
+		for _, item := range items {
+			asset, findErr := tx.ContentAssets().FindByTitle(ctx, userID, item.Topic)
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				asset = model.NewContentAsset(userID, item.Topic)
+				findErr = tx.ContentAssets().Create(ctx, asset)
+			}
+			if findErr != nil {
+				// Older migration fixtures and rolling deployments may not have the
+				// optional asset table yet; the legacy topic-pool path remains usable.
+				message := strings.ToLower(findErr.Error())
+				if !strings.Contains(message, "no such table") && !strings.Contains(message, "doesn't exist") {
+					return fmt.Errorf("create content asset for topic: %w", findErr)
+				}
+				continue
+			}
+			item.ContentAssetID = &asset.ID
+		}
+		if err := tx.TopicPools().CreateBatch(ctx, items); err != nil {
+			return fmt.Errorf("create topics: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return items, nil
 }

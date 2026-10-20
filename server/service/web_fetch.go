@@ -166,6 +166,9 @@ func (p *DeepSeekFetchProvider) Fetch(ctx context.Context, req PageFetchRequest)
 		return nil, fmt.Errorf("%w: response too large or unreadable", ErrPageFetchUnavailable)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return nil, &providerRequestRejectedError{cause: fmt.Errorf("%w: upstream status %d", ErrPageFetchUnavailable, resp.StatusCode)}
+		}
 		return nil, fmt.Errorf("%w: upstream status %d", ErrPageFetchUnavailable, resp.StatusCode)
 	}
 	if contentType := strings.ToLower(resp.Header.Get("Content-Type")); contentType != "" && !strings.Contains(contentType, "application/json") {

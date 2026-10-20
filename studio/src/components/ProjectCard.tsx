@@ -261,10 +261,10 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
             </Tooltip>
           )}
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setTopicPoolOpen(true)} aria-label={unusedTopics === undefined ? `选题池：${project.name}` : `选题池：${project.name}，剩余 ${unusedTopics} 个`} />}>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => setTopicPoolOpen(true)} aria-label={unusedTopics === undefined ? `选题资产：${project.name}` : `选题资产：${project.name}，待研究 ${unusedTopics} 个`} />}>
               <Lightbulb />
             </TooltipTrigger>
-            <TooltipContent>{unusedTopics === undefined ? '选题池' : `选题池：剩余 ${unusedTopics} 个`}</TooltipContent>
+            <TooltipContent>{unusedTopics === undefined ? '选题资产' : `选题资产：待研究 ${unusedTopics} 个`}</TooltipContent>
           </Tooltip>
           {onChannelConfig && (project.platform === 'wechat' || project.agent_ids?.some((id) => id === 'wechat-article' || id === 'wechat-picture')) && (
             <Tooltip>

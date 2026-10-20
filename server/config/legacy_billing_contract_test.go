@@ -23,6 +23,8 @@ func TestProductionSourcesRejectLegacyDynamicBillingContracts(t *testing.T) {
 		"recharge_tiers:", "credit_cost:",
 	}
 	allowedProviderErrors := map[string]map[string]bool{
+		// Task image admission preserves typed provider rejection codes for budget reservation release.
+		filepath.Join("server", "service", "task_image.go"):      {"payment_required": true},
 		filepath.Join("server", "app", "image", "openai.go"):     {"payment_required": true},
 		filepath.Join("server", "app", "image", "volcengine.go"): {"payment_required": true},
 	}

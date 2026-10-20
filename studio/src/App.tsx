@@ -32,6 +32,8 @@ const UsagePage = lazyWithRecovery(() => import('@/pages/UsagePage'))
 const SettingsPage = lazyWithRecovery(() => import('@/pages/SettingsPage'))
 const TemplatesPage = lazyWithRecovery(() => import('@/pages/TemplatesPage'))
 const PluginsPage = lazyWithRecovery(() => import('@/pages/PluginsPage'))
+const ContentAssetsPage = lazyWithRecovery(() => import('@/pages/ContentAssetsPage'))
+const ContentAutopilotSettingsPage = lazyWithRecovery(() => import('@/pages/ContentAutopilotSettingsPage'))
 const ContentAnalyticsPage = lazyWithRecovery(() => import('@/pages/ContentAnalyticsPage'))
 const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
 const ChatPage = lazyWithRecovery(() => import('@/pages/ChatPage'))
@@ -176,6 +178,8 @@ function AppRoutes() {
           <Route path="usage" element={<LazyPage component={UsagePage} />} />
           <Route path="settings" element={<LazyPage component={SettingsPage} />} />
           <Route path="content-analytics" element={<LazyPage component={ContentAnalyticsPage} />} />
+          <Route path="content-assets" element={<LazyPage component={ContentAssetsPage} />} />
+          <Route path="content-assets/settings" element={<LazyPage component={ContentAutopilotSettingsPage} />} />
           <Route path="trends" element={<LazyPage component={TrendsPage} />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
