@@ -1027,8 +1027,8 @@ func TestRepositoryAgentPacksCoverCurrentNativeAgentsAndManagedRoutes(t *testing
 	if err != nil {
 		t.Fatalf("LoadCatalog repository Packs: %v", err)
 	}
-	if len(catalog.Packs) != 12 {
-		t.Fatalf("Pack count = %d, want 12", len(catalog.Packs))
+	if len(catalog.Packs) != 14 {
+		t.Fatalf("Pack count = %d, want 14", len(catalog.Packs))
 	}
 	contentPacks := []string{"wechat-article", "seednote", "ecommerce", "moments", "montage", "hypit", "local-life", "wechat-picture", "whiteboard-animation"}
 	for _, id := range contentPacks {
