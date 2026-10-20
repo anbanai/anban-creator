@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, BarChart3, Ban, FolderOpen, Loader2, MessageSquare, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowLeft, BarChart3, Ban, Copy, FolderOpen, Loader2, MessageSquare, Trash2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -751,14 +751,14 @@ export default function TaskDetailPage() {
                     variant="ghost"
                     size="icon-md"
                     className="hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent"
-                    aria-label={task.type === 'hypit' ? '再次改编' : '克隆作品'}
+                    aria-label={task.type === 'hypit' ? '再次改编' : '复刻作品'}
                     onClick={openCloneDialog}
                   />
                 }
               >
-                <RefreshCw className="size-4" aria-hidden="true" />
+                <Copy className="size-4" aria-hidden="true" />
               </TooltipTrigger>
-              <TooltipContent>{task.type === 'hypit' ? '再次改编' : '克隆作品'}</TooltipContent>
+              <TooltipContent>{task.type === 'hypit' ? '再次改编' : '复刻作品'}</TooltipContent>
             </Tooltip>
           ) : null}
           {canClone ? (

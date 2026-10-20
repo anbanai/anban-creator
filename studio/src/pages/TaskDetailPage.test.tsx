@@ -230,7 +230,7 @@ async function openResumeDialog() {
 }
 
 async function openCloneDialog() {
-  fireEvent.click(await screen.findByRole('button', { name: '克隆作品' }))
+  fireEvent.click(await screen.findByRole('button', { name: '复刻作品' }))
   const title = await screen.findByRole('heading', { name: '克隆作品' })
   return title.closest('[data-slot="dialog-content"]') as HTMLElement
 }
@@ -528,7 +528,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('模型超时')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
     expect(screen.getByRole('button', { name: '继续执行' })).not.toHaveTextContent('继续执行')
-    expect(screen.queryByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '复刻作品' })).toBeInTheDocument()
   })
 
   it('renders header actions as borderless icon-only controls', async () => {
@@ -536,9 +536,10 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const clone = await screen.findByRole('button', { name: '克隆作品' })
+    const clone = await screen.findByRole('button', { name: '复刻作品' })
     const deleteButton = screen.getByRole('button', { name: '删除作品' })
-    expect(clone).not.toHaveTextContent('克隆作品')
+    expect(clone).not.toHaveTextContent('复刻作品')
+    expect(clone.querySelector('svg')).toHaveClass('lucide-copy')
     expect(deleteButton).not.toHaveTextContent('删除作品')
     expect(clone).toHaveClass('size-11')
     expect(deleteButton).toHaveClass('size-11')
@@ -1639,7 +1640,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(api.projects.list).not.toHaveBeenCalled()
     expect(api.billing.wallet).not.toHaveBeenCalled()
     expect(api.billing.catalog).not.toHaveBeenCalled()
@@ -1705,10 +1706,10 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    await screen.findByRole('button', { name: '克隆作品' })
+    await screen.findByRole('button', { name: '复刻作品' })
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
   })
@@ -1759,7 +1760,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '查看内容分析' })).not.toBeInTheDocument()
   })
 
@@ -2010,7 +2011,7 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByRole('button', { name: '取消作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '克隆作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '复刻作品' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除作品' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
     expect(api.projects.list).not.toHaveBeenCalled()
@@ -2027,7 +2028,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
@@ -2045,7 +2046,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
