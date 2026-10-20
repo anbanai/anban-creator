@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,15 +9,11 @@ import (
 	"path"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/gofiber/fiber/v3"
 	"github.com/rs/zerolog"
 
 	"github.com/anbanai/anban-creator/server/model"
-	"github.com/anbanai/anban-creator/server/platform"
 	"github.com/anbanai/anban-creator/server/repository"
-	"github.com/anbanai/anban-creator/server/seednote"
 	"github.com/anbanai/anban-creator/server/storage"
 )
 
@@ -200,71 +195,6 @@ func (f *fakeStorageProvider) IsOwnedURL(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "/api/v1/files/") ||
 		strings.HasPrefix(rawURL, "https://cdn.example.com/") ||
 		strings.HasPrefix(rawURL, "https://fake-bucket.oss-cn-hangzhou.aliyuncs.com/")
-}
-
-func TestProjectFetchProfilePreservesProviderFieldsWithoutLLMEnrichment(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/user/profile" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(seednote.APIResponse[seednote.UserProfile]{
-			Success: true,
-			Data: seednote.UserProfile{UserBasicInfo: seednote.UserBasicInfo{
-				Nickname: "原始昵称",
-				Desc:     "原始简介",
-				Avatar:   "https://cdn.example.com/avatar.png",
-				RedID:    "red-1",
-			}},
-		})
-	}))
-	defer upstream.Close()
-
-	h := NewProjectHandler(nil, testProjectLogger(t))
-	h.SetSeednoteClient(seednote.NewClient(upstream.URL, time.Second))
-	app := fiber.New()
-	app.Post("/fetch", func(c fiber.Ctx) error {
-		c.Locals("user_id", "user-1")
-		return h.FetchProfile(c)
-	})
-
-	resp, err := app.Test(httptestJSON("POST", "/fetch", `{"platform":"seednote","profile_url":"https://www.xiaohongshu.com/user/profile/user-1"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != fiber.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	var envelope struct {
-		Data platform.PlatformProfile `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.Data.Name != "原始昵称" || envelope.Data.RawData["desc"] != "原始简介" {
-		t.Fatalf("provider profile changed: %#v", envelope.Data)
-	}
-	if _, exists := envelope.Data.RawData["analysis"]; exists {
-		t.Fatal("hidden LLM analysis remains")
-	}
-}
-
-func TestProjectFetchProfileRejectsNonSeednoteAutoFetch(t *testing.T) {
-	h := NewProjectHandler(nil, testProjectLogger(t))
-	app := fiber.New()
-	app.Post("/fetch", func(c fiber.Ctx) error {
-		c.Locals("user_id", "user-1")
-		return h.FetchProfile(c)
-	})
-
-	resp, err := app.Test(httptestJSON("POST", "/fetch", `{"platform":"article","profile_url":"https://mp.weixin.qq.com/test"}`))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	if resp.StatusCode != fiber.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusBadRequest)
-	}
 }
 
 func httptestJSON(method, target, body string) *http.Request {

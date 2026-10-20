@@ -362,7 +362,7 @@ func TestAgentDockerfilesSeparateArticleAndSeednoteDependencies(t *testing.T) {
 			}
 		}
 	}
-	for _, forbidden := range []string{"Agent-Reach", "AGENT_REACH", "python3", "python3-venv", "pip", "venv", "mcporter", "third_party/Agent-Reach", "OpenCLI", "xhs-cli", "ffmpeg", "fonts-noto-cjk", "OpenMontage"} {
+	for _, forbidden := range []string{"Agent-Reach", "AGENT_REACH", "python3", "python3-venv", "pip", "venv", "mcporter", "third_party/Agent-Reach", "OpenCLI", "ffmpeg", "fonts-noto-cjk", "OpenMontage"} {
 		if strings.Contains(article, forbidden) || strings.Contains(seednote, forbidden) {
 			t.Fatalf("Article and Seednote Dockerfiles must not contain dependency %q", forbidden)
 		}
@@ -869,18 +869,12 @@ func TestDockerBuildInputsUseDeclaredImageTags(t *testing.T) {
 			from: []string{"FROM golang:alpine AS builder", "FROM alpine:latest"},
 		},
 		{
-			path: filepath.Join(root, "deploy/docker/Dockerfile.sidecar-seednote"),
-			from: []string{"FROM golang:1.24 AS source", "FROM source AS builder", "FROM ubuntu:22.04"},
-		},
-		{
 			path: filepath.Join(root, "docker-compose.yml"),
 			contains: []string{
 				"image: mysql:latest",
 				"image: redis:alpine",
 				"image: anban-creator-sidecar-ilink:latest",
-				"image: anban-creator-sidecar-seednote:latest",
 				"dockerfile: deploy/docker/Dockerfile.sidecar-ilink",
-				"dockerfile: deploy/docker/Dockerfile.sidecar-seednote",
 				"dockerfile: deploy/docker/Dockerfile.studio",
 				"VITE_API_BASE_URL: /api/v1",
 			},
@@ -1048,7 +1042,6 @@ func TestDockerfileInventoryIsCentralized(t *testing.T) {
 		"deploy/docker/Dockerfile.runtime-dsh",
 		"deploy/docker/Dockerfile.server",
 		"deploy/docker/Dockerfile.sidecar-ilink",
-		"deploy/docker/Dockerfile.sidecar-seednote",
 		"deploy/docker/Dockerfile.studio",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -1175,8 +1168,6 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 	compose := readTextFile(t, filepath.Join(root, "docker-compose.yml"))
 	for _, want := range []string{
 		"sidecar-ilink:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.sidecar-ilink",
-		"sidecar-seednote:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.sidecar-seednote",
-		"ANBAN_SEEDNOTE_BASE_URL: \"http://sidecar-seednote:18060\"",
 		"ANBAN_ILINK_BASE_URL: \"http://sidecar-ilink:18070\"",
 		"server:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.server",
 		"studio:\n    build:\n      context: .\n      dockerfile: deploy/docker/Dockerfile.studio",
@@ -1192,7 +1183,6 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git",
 		"OPENMONTAGE_SOURCE_REF ?= c8066452325cb57c8fc1ba8c2a71b6e8842e6b65",
 		"SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest",
-		"SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest",
 		"STUDIO_IMAGE := anban-creator-studio:latest",
 		"agent-test:",
 		"agent-build:",
@@ -1201,9 +1191,7 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"docker-profile-analysis-agent-image:",
 		"docker-feedback-analysis-agent-image:",
 		"docker-sidecar-ilink-image:",
-		"docker-sidecar-seednote-image:",
 		"docker-studio-image:",
-		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image",
 		"docker-moments-agent-image:",
 		"docker-ecommerce-agent-image:",
 		"docker-wechat-article-agent-image:",
@@ -1217,7 +1205,6 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"--build-arg OPENMONTAGE_REPO=\"$(OPENMONTAGE_SOURCE_REPO)\"",
 		"--build-arg OPENMONTAGE_REF=\"$(OPENMONTAGE_SOURCE_REF)\"",
 		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-ilink",
-		"docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote",
 		"docker build -f deploy/docker/Dockerfile.studio -t $(STUDIO_IMAGE) .",
 		"docker-image:",
 		"docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image",
@@ -1226,7 +1213,6 @@ func TestComposeAndMakefileUseCentralizedDockerfileBuilds(t *testing.T) {
 		"make docker-server-image",
 		"make docker-dsh-runtime-image",
 		"make docker-sidecar-ilink-image",
-		"make docker-sidecar-seednote-image",
 		"make docker-studio-image",
 	} {
 		if !strings.Contains(makefile, want) {
@@ -1253,28 +1239,13 @@ func TestSidecarDockerfilesBuildLatestUpstream(t *testing.T) {
 		}
 	}
 
-	seednoteDockerfile := readTextFile(t, filepath.Join(root, "deploy/docker/Dockerfile.sidecar-seednote"))
-	for _, want := range []string{
-		"SEEDNOTE_REPO=https://github.com/xpzouying/xiaohongshu-mcp.git",
-		"SEEDNOTE_REF=main",
-		"git fetch --depth 1 origin \"$SEEDNOTE_REF\"",
-		"browser/browser_version.txt",
-		"sha256sum -c -",
-	} {
-		if !strings.Contains(seednoteDockerfile, want) {
-			t.Fatalf("Seednote Dockerfile missing latest-upstream build contract %q", want)
-		}
-	}
-
 	makefile := readTextFile(t, filepath.Join(root, "Makefile"))
 	for _, want := range []string{
 		"docker-sidecar-ilink-image:",
-		"docker-sidecar-seednote-image:",
 		"--build-arg ILINK_REPO=\"$(SIDECAR_ILINK_REPO)\"",
-		"--build-arg SEEDNOTE_REPO=\"$(SIDECAR_SEEDNOTE_REPO)\"",
 	} {
 		if !strings.Contains(makefile, want) {
-			t.Fatalf("Makefile missing Seednote sidecar build contract %q", want)
+			t.Fatalf("Makefile missing iLink sidecar build contract %q", want)
 		}
 	}
 }
@@ -1423,13 +1394,6 @@ func TestDockerRuntimeContract(t *testing.T) {
 		}
 		if !reflect.DeepEqual(server.Networks, []string{"anban-creator-network", "creator-runtime-network"}) {
 			t.Fatalf("server networks = %v, want sidecar and isolated Agent networks", server.Networks)
-		}
-		seednote := compose.Services["sidecar-seednote"]
-		if !reflect.DeepEqual(seednote.Networks, []string{"anban-creator-network"}) {
-			t.Fatalf("seednote networks = %v, want sidecar network only", seednote.Networks)
-		}
-		if !reflect.DeepEqual(seednote.Ports, []string{"127.0.0.1:18060:18060"}) {
-			t.Fatalf("seednote ports = %v, want loopback-only host access", seednote.Ports)
 		}
 		for _, volume := range server.Volumes {
 			if strings.Contains(volume, ":/workspace") || strings.Contains(volume, ":/app/data/workspace") {

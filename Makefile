@@ -22,11 +22,8 @@ OPENMONTAGE_SOURCE_REPO ?= https://github.com/calesthio/OpenMontage.git
 OPENMONTAGE_SOURCE_REF ?= c8066452325cb57c8fc1ba8c2a71b6e8842e6b65
 SERVER_IMAGE := anban-creator-server:latest
 SIDECAR_ILINK_IMAGE ?= anban-creator-sidecar-ilink:latest
-SIDECAR_SEEDNOTE_IMAGE ?= anban-creator-sidecar-seednote:latest
 SIDECAR_ILINK_REPO ?= https://github.com/lich0821/wcfLink.git
 SIDECAR_ILINK_REF ?= master
-SIDECAR_SEEDNOTE_REPO ?= https://github.com/xpzouying/xiaohongshu-mcp.git
-SIDECAR_SEEDNOTE_REF ?= main
 STUDIO_IMAGE := anban-creator-studio:latest
 SERVER_CONFIG := server/config.yaml
 DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null || stat -L -f '%g' /var/run/docker.sock 2>/dev/null || echo 0)
@@ -39,7 +36,7 @@ DOCKER_SOCKET_GID := $(shell stat -L -c '%g' /var/run/docker.sock 2>/dev/null ||
         agent-install agent-test agent-build \
         web-install web-dev web-build \
         docker-up docker-down docker-logs docker-image \
-	        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image docker-images \
+        docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image docker-images \
         agent-runtime-release-manifest
 
 .PHONY: docker-runtime-smoke docker-hypit-smoke docker-agent-build-check
@@ -289,14 +286,6 @@ docker-sidecar-ilink-image:
 		-t $(SIDECAR_ILINK_IMAGE) . && \
 	echo "Image build complete: $(SIDECAR_ILINK_IMAGE)"
 
-docker-sidecar-seednote-image:
-	@echo "Building $(SIDECAR_SEEDNOTE_IMAGE)..." && \
-	docker build --pull --no-cache -f deploy/docker/Dockerfile.sidecar-seednote \
-		--build-arg SEEDNOTE_REPO="$(SIDECAR_SEEDNOTE_REPO)" \
-		--build-arg SEEDNOTE_REF="$(SIDECAR_SEEDNOTE_REF)" \
-		-t $(SIDECAR_SEEDNOTE_IMAGE) . && \
-	echo "Image build complete: $(SIDECAR_SEEDNOTE_IMAGE)"
-
 # Build the Studio Docker image from the repository-root build context.
 docker-studio-image:
 	@echo "Building $(STUDIO_IMAGE)..." && \
@@ -304,7 +293,7 @@ docker-studio-image:
 	echo "Image build complete: $(STUDIO_IMAGE)"
 
 # Build all supported images.
-docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-sidecar-seednote-image docker-studio-image
+docker-images: docker-wechat-article-agent-image docker-wechat-picture-agent-image docker-seednote-agent-image docker-montage-agent-image docker-moments-agent-image docker-ecommerce-agent-image docker-profile-analysis-agent-image docker-feedback-analysis-agent-image docker-whiteboard-animation-agent-image docker-hypit-agent-image docker-dsh-runtime-image docker-server-image docker-sidecar-ilink-image docker-studio-image
 
 # Validate and record one release set for the Server and every managed Agent
 # runtime. Pass image references through the existing
@@ -378,7 +367,6 @@ help:
 	@echo "  make docker-runtime-smoke - Run isolated Docker dispatch smoke coverage"
 	@echo "  make docker-server-image - Build server image (Go binary)"
 	@echo "  make docker-sidecar-ilink-image - Build latest upstream iLink sidecar image"
-	@echo "  make docker-sidecar-seednote-image - Build latest upstream Seednote sidecar image"
 	@echo "  make docker-studio-image - Build Studio image (Bun + nginx)"
 	@echo "  make docker-images      - Build all supported images"
 	@echo "  make docker-image       - Build agent image (alias)"

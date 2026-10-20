@@ -281,17 +281,6 @@ func NewRouter(svc *Services) *fiber.App {
 	}
 
 	// ---------------------------------------------------------------------------
-	// Seednote account administration
-	// ---------------------------------------------------------------------------
-
-	if svc.ProjectHandler != nil {
-		seednoteAccount := apiV1.Group("/seednote/account")
-		seednoteAccount.Get("/login-status", svc.ProjectHandler.AdminSeednoteLoginStatus)
-		seednoteAccount.Get("/login-qrcode", svc.ProjectHandler.AdminSeednoteLoginQRCode)
-		seednoteAccount.Delete("/login", svc.ProjectHandler.AdminSeednoteLogout)
-	}
-
-	// ---------------------------------------------------------------------------
 	// Project management
 	// ---------------------------------------------------------------------------
 
@@ -300,7 +289,6 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Get("/projects", svc.ProjectHandler.List)
 		apiV1.Get("/projects/stats", svc.ProjectHandler.Stats)
 		apiV1.Post("/projects", svc.ProjectHandler.Create)
-		apiV1.Post("/projects/fetch-profile", svc.ProjectHandler.FetchProfile)
 		apiV1.Get("/projects/:id", svc.ProjectHandler.Get)
 		apiV1.Get("/projects/:id/channel-configs", svc.ProjectHandler.ListChannelConfigs)
 		apiV1.Get("/projects/:id/channel-configs/:channel", svc.ProjectHandler.GetChannelConfig)

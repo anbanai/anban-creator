@@ -561,10 +561,6 @@ email:
   code_ttl: 5m
   code_length: 6
 
-seednote:
-  base_url: "${ANBAN_SEEDNOTE_BASE_URL:-http://sidecar-seednote:18060}"
-  timeout: 30
-
 # 视频号公开视频数据由世界树科技第三方 API 提供，并非微信官方接口。
 # 密钥仅由 Server 使用，不会下发给 Agent 或 Studio。
 worldtree:

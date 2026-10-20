@@ -45,7 +45,6 @@ describe('navigation IA', () => {
   it('defines administrator navigation in approved order', () => {
     expect(adminNavItems.map((item) => item.label)).toEqual([
       '模板库',
-      '种草笔记账号',
       '充值管理',
     ])
     expect(adminNavItems.every((item) => item.adminOnly)).toBe(true)
@@ -65,7 +64,6 @@ describe('navigation IA', () => {
       '/content-analytics',
       '/trends',
       '/templates',
-      '/admin/seednote',
       '/admin/billing',
     ])
     expect(visibleNavItems(allNavItems, false)).toEqual(mvpNavItems)

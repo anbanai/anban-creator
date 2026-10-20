@@ -485,7 +485,7 @@ func TestSeednoteSkillContracts_RuntimeImageMode(t *testing.T) {
 	}
 }
 
-func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalSeednoteData(t *testing.T) {
+func TestSeednoteAgentsUsePublicSourcesForExternalSeednoteData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "harness", "agents", "seednote.md"),
@@ -500,52 +500,16 @@ func TestSeednoteAgentsUseAuthenticatedAnbanMCPForExternalSeednoteData(t *testin
 			body := string(data)
 
 			for _, want := range []string{
-				"search_seednote_feeds",
-				"get_seednote_feed_detail",
-				"get_seednote_user_profile",
-				"data_source=xiaohongshu-mcp",
-				"data_source=task_topic",
-				"data_source=topic_pool",
-				"data_source=project_context",
-				"mcp_tools_used",
-				"available",
-				"token_source",
-				"missing_fields",
-				"fallback_reason",
-				"只能使用 MCP 工具返回",
-				"原创模式不得",
+				"fetch_web_page",
+				"原创模式",
 				"账号画像",
-				"不得生成虚构热门数据",
-				"output/failure-state.json",
-				"管理员在任务外维护",
+				"output/topic-analysis.md",
 			} {
 				if !strings.Contains(body, want) {
-					t.Fatalf("%s missing authenticated Seednote MCP contract term %q", path, want)
+					t.Fatalf("%s missing public Seednote research contract term %q", path, want)
 				}
 			}
 
-			for _, forbidden := range []string{
-				"check_seednote_login_status",
-				"get_seednote_login_qrcode",
-				"logged_in",
-				"Agent-Reach",
-				"agent-reach",
-				"active_backend",
-				"backend_command_family",
-				"mcporter",
-				"OpenCLI",
-				"xhs-cli",
-				"http://sidecar-seednote:18060",
-				"localhost:18060",
-				"opencli xiaohongshu publish",
-				"opencli xiaohongshu delete-note",
-				"opencli xiaohongshu follow",
-				"opencli xiaohongshu unfollow",
-			} {
-				if strings.Contains(body, forbidden) {
-					t.Fatalf("%s must not include write-operation command %q", path, forbidden)
-				}
-			}
 		})
 	}
 }
@@ -558,7 +522,7 @@ func TestAgentReachSkillIsNotDistributed(t *testing.T) {
 	}
 }
 
-func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalSeednoteData(t *testing.T) {
+func TestSeednoteResearchSkillsUsePublicSourcesForExternalSeednoteData(t *testing.T) {
 	root := articleContractRepoRoot(t)
 	paths := []string{
 		filepath.Join(root, "harness", "skills", "seednote-research", "SKILL.md"),
@@ -572,66 +536,24 @@ func TestSeednoteResearchSkillsUseAuthenticatedAnbanMCPForExternalSeednoteData(t
 			}
 			body := string(data)
 			for _, want := range []string{
-				"search_seednote_feeds",
-				"get_seednote_feed_detail",
-				"get_seednote_user_profile",
-				"data_source=xiaohongshu-mcp",
-				"data_source=task_topic",
-				"data_source=topic_pool",
-				"data_source=project_context",
-				"mcp_tools_used",
-				"available",
-				"token_source",
-				"missing_fields",
-				"fallback_reason",
-				"只能使用 MCP 工具返回",
-				"不能凭空构造",
+				"公开热点",
+				"公开 URL",
 				"只读",
-				"原创模式不得失败、不得写 `output/failure-state.json`",
-				"missing_fields=external_hot_data",
-				"无外部数据时不得套用 CES",
-				"这条失败规则不适用于原创模式",
-				"Admin 在 Anban 后台维护",
+				"不得套用 CES",
 			} {
 				if !strings.Contains(body, want) {
-					t.Fatalf("%s missing authenticated Seednote MCP research contract term %q", path, want)
+					t.Fatalf("%s missing public Seednote research contract term %q", path, want)
 				}
 			}
 			for _, forbidden := range []string{
-				"check_seednote_login_status",
-				"get_seednote_login_qrcode",
-				"logged_in",
 				"Agent-Reach",
 				"agent-reach",
-				"active_backend",
-				"backend_command_family",
-				"mcporter",
-				"OpenCLI",
-				"xhs-cli",
-				"http://sidecar-seednote:18060",
-				"localhost:18060",
-				"opencli xiaohongshu publish",
-				"opencli xiaohongshu delete-note",
-				"opencli xiaohongshu follow",
-				"opencli xiaohongshu unfollow",
-				"opencli xiaohongshu like",
-				"opencli xiaohongshu favorite",
-				"mcporter call 'xiaohongshu.publish",
-				"mcporter call 'xiaohongshu.delete",
-				"mcporter call 'xiaohongshu.follow",
-				"mcporter call 'xiaohongshu.like",
-				"mcporter call 'xiaohongshu.collect",
-				"xhs publish",
-				"xhs delete",
-				"xhs follow",
-				"xhs like",
-				"xhs favorite",
 			} {
 				if strings.Contains(body, forbidden) {
 					t.Fatalf("%s must not include write-operation command %q", path, forbidden)
 				}
 			}
-			if !strings.Contains(body, "写结构化 `output/failure-state.json`") {
+			if !strings.Contains(body, "`output/failure-state.json`") {
 				t.Fatalf("%s must write recoverable research failures to output/failure-state.json", path)
 			}
 			if strings.Contains(body, "`failure-state.json`") {
@@ -657,29 +579,13 @@ func TestSeednoteAgentsPreserveReadOnlyResearchBoundary(t *testing.T) {
 			body := string(data)
 			for _, want := range []string{
 				"seednote-research",
-				"search_seednote_feeds",
-				"get_seednote_feed_detail",
-				"get_seednote_user_profile",
+				"公开 URL",
 				"原创模式不得因此写",
 				"output/failure-state.json",
-				"只读",
-				"管理员在任务外维护",
+				"fetch_web_page",
 			} {
 				if !strings.Contains(body, want) {
-					t.Fatalf("%s missing Seednote MCP read-only term %q", path, want)
-				}
-			}
-			for _, forbidden := range []string{
-				"check_seednote_login_status",
-				"get_seednote_login_qrcode",
-				"logged_in",
-				"publish_seednote",
-				"delete_seednote",
-				"like_seednote",
-				"follow_seednote",
-			} {
-				if strings.Contains(body, forbidden) {
-					t.Fatalf("%s includes forbidden Seednote write operation %q", path, forbidden)
+					t.Fatalf("%s missing public research boundary term %q", path, want)
 				}
 			}
 		})

@@ -32,7 +32,7 @@ const server = createServer(async (req, res) => {
     if (data.method === 'initialize') result = { protocolVersion: data.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'smoke', version: '1' } }
     else if (data.method === 'tools/list') result = { tools: [
       { name: 'stage_project_creator_draft', description: 'Stage draft', inputSchema: { type: 'object', properties: {} } },
-      ...['list_projects', 'get_project', 'get_project_profile', 'list_project_titles', 'list_drafts', 'list_published_articles', 'list_topics', 'list_trends', 'list_resources', 'get_resource', 'search_seednote_feeds', 'get_seednote_feed_detail', 'get_seednote_user_profile'].map(name => ({ name, description: name, inputSchema: { type: 'object', properties: {} } })),
+      ...['list_projects', 'get_project', 'get_project_profile', 'list_project_titles', 'list_drafts', 'list_published_articles', 'list_topics', 'list_trends', 'list_resources', 'get_resource'].map(name => ({ name, description: name, inputSchema: { type: 'object', properties: {} } })),
       { name: 'forbidden_tool', description: 'Must be hidden', inputSchema: { type: 'object', properties: {} } },
     ] }
     else if (data.method === 'ping') result = {}
@@ -79,8 +79,6 @@ try {
     'mcp__creator__get_project',
     'mcp__creator__get_project_profile',
     'mcp__creator__get_resource',
-    'mcp__creator__get_seednote_feed_detail',
-    'mcp__creator__get_seednote_user_profile',
     'mcp__creator__list_drafts',
     'mcp__creator__list_project_titles',
     'mcp__creator__list_projects',
@@ -88,7 +86,6 @@ try {
     'mcp__creator__list_resources',
     'mcp__creator__list_topics',
     'mcp__creator__list_trends',
-    'mcp__creator__search_seednote_feeds',
     'mcp__creator__stage_project_creator_draft',
     'skill',
   ])

@@ -371,9 +371,6 @@ var interactiveMCPTools = map[string]struct{}{
 	"list_trends":                 {},
 	"list_resources":              {},
 	"get_resource":                {},
-	"search_seednote_feeds":       {},
-	"get_seednote_feed_detail":    {},
-	"get_seednote_user_profile":   {},
 }
 
 // interactiveScopeMiddleware constrains the opaque credential issued to a
@@ -481,20 +478,16 @@ var executionToolScopes = map[string]executionToolScope{
 	"analyze_image":                  {RequireProjectID: true, RequireTaskID: true},
 	"analyze_video":                  {RequireProjectID: true, RequireTaskID: true},
 
-	// These tools are deterministic, read-only, or operate on the external
-	// Seednote capability already selected for the current execution. The
+	// These tools are deterministic or read-only. The
 	// central authorizer still runs before dispatch, so stale executions cannot
 	// use them.
-	"score_article":             {},
-	"export_seednote":           {},
-	"list_resources":            {},
-	"get_resource":              {},
-	"search_seednote_feeds":     {},
-	"get_seednote_feed_detail":  {},
-	"get_seednote_user_profile": {},
-	"search_web":                {},
-	"fetch_web_page":            {},
-	"search_images":             {},
+	"score_article":   {},
+	"export_seednote": {},
+	"list_resources":  {},
+	"get_resource":    {},
+	"search_web":      {},
+	"fetch_web_page":  {},
+	"search_images":   {},
 }
 
 func validateExecutionToolScope(toolName string, arguments map[string]any, projectID, taskID, executionID string) error {
