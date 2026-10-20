@@ -45,6 +45,21 @@ describe('task lifecycle helpers', () => {
     })).toBe(false)
   })
 
+  it('keeps completed tasks labeled as completed while publication is pending', () => {
+    expect(taskStageSummary({
+      status: 'completed',
+      lifecycle: {
+        version: 1,
+        revision: 3,
+        updated_at: '2026-09-17T08:00:00Z',
+        stages: [
+          { id: 'writing', title: '完成创作', source: 'agent', kind: 'work', state: 'complete' },
+          { id: 'system_publication', title: '正式发布', source: 'server', kind: 'publication', state: 'pending' },
+        ],
+      },
+    })).toEqual({ title: '作品已完成', state: 'complete' })
+  })
+
   it('reports the cancelled execution point instead of a later skipped stage', () => {
     expect(taskStageSummary({
       status: 'cancelled',

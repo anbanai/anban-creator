@@ -21,6 +21,9 @@ vi.mock('@/lib/api', async () => {
         retryWechatPublish: vi.fn(),
         selectWechatArticle: vi.fn(),
         recoverWechatPublication: vi.fn(),
+        bindManualWechatPublication: vi.fn(),
+        skipWechatPublication: vi.fn(),
+        restoreWechatPublication: vi.fn(),
       },
     },
   }
@@ -77,6 +80,15 @@ describe('TaskExecutionRail', () => {
       id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'publishing',
     })
     vi.mocked(api.tasks.recoverWechatPublication).mockResolvedValue({ status: 'blocked', attempted: false })
+    vi.mocked(api.tasks.bindManualWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'wechat_console', status: 'published',
+    })
+    vi.mocked(api.tasks.skipWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'skipped',
+    })
+    vi.mocked(api.tasks.restoreWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api', status: 'drafted',
+    })
   })
 
   it('shows a single planning state before the agent declares stages', () => {
@@ -206,6 +218,77 @@ describe('TaskExecutionRail', () => {
     expect(screen.getByRole('heading', { name: '确认正式发布' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认发布' }))
     await waitFor(() => expect(api.tasks.publishWechat).toHaveBeenCalledWith('task-1'))
+  })
+
+  it('lets users confirm a manual WeChat publication without requiring a URL', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api',
+      status: 'awaiting_manual_publish', draft_media_id: 'draft-1', manual_publish_required: true,
+    })
+    const manualLifecycle: TaskLifecycle = {
+      ...lifecycle,
+      stages: [
+        ...lifecycle.stages.map((stage) => ({ ...stage, state: 'complete' as const })),
+        { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'complete' },
+        { id: 'system_publication', title: '正式发布', source: 'server', kind: 'publication', state: 'pending', latest_update: '草稿已就绪，等待你在公众号后台发布' },
+      ],
+    }
+
+    render(<TaskExecutionRail taskId="task-1" status="completed" lifecycle={manualLifecycle} onOpenLogs={vi.fn()} />)
+
+    const publicationStep = await screen.findByRole('button', { name: '正式发布，待发布' })
+    expect(publicationStep).not.toHaveAttribute('aria-current')
+    fireEvent.click(await screen.findByRole('button', { name: '我已发布' }))
+    expect(screen.getByRole('heading', { name: '确认已在公众号发布' })).toBeInTheDocument()
+    expect(screen.getByText('文章链接（选填）')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认已发布' }))
+    await waitFor(() => expect(api.tasks.bindManualWechatPublication).toHaveBeenCalledWith('task-1', ''))
+  })
+
+  it('lets users attach an article URL after confirming manual publication', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'wechat_console',
+      status: 'published', draft_media_id: 'draft-1',
+    })
+    const publishedLifecycle: TaskLifecycle = {
+      ...lifecycle,
+      stages: [
+        ...lifecycle.stages.map((stage) => ({ ...stage, state: 'complete' as const })),
+        { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'complete' },
+        { id: 'system_publication', title: '正式发布', source: 'server', kind: 'publication', state: 'complete' },
+      ],
+    }
+
+    render(<TaskExecutionRail taskId="task-1" status="completed" lifecycle={publishedLifecycle} onOpenLogs={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '补充文章链接' }))
+    expect(screen.getByRole('heading', { name: '补充文章链接' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关联文章' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('文章链接'), { target: { value: 'https://mp.weixin.qq.com/s/example' } })
+    expect(screen.getByRole('button', { name: '关联文章' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '关联文章' }))
+    await waitFor(() => expect(api.tasks.bindManualWechatPublication).toHaveBeenCalledWith('task-1', 'https://mp.weixin.qq.com/s/example'))
+  })
+
+  it('explains that skipping publication preserves both the task and WeChat draft', async () => {
+    vi.mocked(api.tasks.getWechatPublication).mockResolvedValue({
+      id: 'publication-1', task_id: 'task-1', project_id: 'project-1', source: 'anban_api',
+      status: 'awaiting_manual_publish', draft_media_id: 'draft-1', manual_publish_required: true,
+    })
+    const manualLifecycle: TaskLifecycle = {
+      ...lifecycle,
+      stages: [
+        ...lifecycle.stages.map((stage) => ({ ...stage, state: 'complete' as const })),
+        { id: 'system_draft', title: '创建公众号草稿', source: 'server', kind: 'draft', state: 'complete' },
+        { id: 'system_publication', title: '正式发布', source: 'server', kind: 'publication', state: 'pending' },
+      ],
+    }
+
+    render(<TaskExecutionRail taskId="task-1" status="completed" lifecycle={manualLifecycle} onOpenLogs={vi.fn()} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '不再发布' }))
+    expect(screen.getByRole('heading', { name: '将这篇作品标记为不再发布？' })).toBeInTheDocument()
+    expect(screen.getByText(/作品和公众号草稿都会保留，系统将停止跟踪这次发布/)).toBeInTheDocument()
   })
 
   it('never offers a blind retry when formal submission evidence exists', async () => {

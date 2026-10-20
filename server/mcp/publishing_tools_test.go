@@ -85,7 +85,11 @@ func newPublishingToolFixture(t *testing.T) *publishingToolFixture {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformWechat, Name: "Article", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted, CurrentExecutionID: &f.executionID}); err != nil {
+	task := &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted, CurrentExecutionID: &f.executionID}
+	task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, MayUploadMaterial: true,
+	}})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{

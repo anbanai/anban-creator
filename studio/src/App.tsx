@@ -20,8 +20,8 @@ import { lazyWithRecovery } from '@/lib/lazy-with-recovery'
 const LoginPage = lazyWithRecovery(() => import('@/pages/LoginPage'))
 const RegisterPage = lazyWithRecovery(() => import('@/pages/RegisterPage'))
 const DashboardPage = lazyWithRecovery(() => import('@/pages/DashboardPage'))
+const AssistantHome = lazyWithRecovery(() => import('@/pages/AssistantHome'))
 const TimelinePage = lazyWithRecovery(() => import('@/pages/TimelinePage'))
-const PortraitOnboardingPage = lazyWithRecovery(() => import('@/pages/PortraitOnboardingPage'))
 const ProjectsPage = lazyWithRecovery(() => import('@/pages/ProjectsPage'))
 const PlansPage = lazyWithRecovery(() => import('@/pages/PlansPage'))
 const TasksPage = lazyWithRecovery(() => import('@/pages/TasksPage'))
@@ -137,7 +137,9 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<LazyPage component={DashboardPage} />} />
+          <Route index element={<LazyPage component={AssistantHome} />} />
+          <Route path="assistant" element={<Navigate to="/" replace />} />
+          <Route path="dashboard" element={<LazyPage component={DashboardPage} />} />
           <Route
             path="timeline"
             element={(
@@ -146,9 +148,9 @@ function AppRoutes() {
               </AdminRoute>
             )}
           />
-          <Route path="projects/new/interview" element={<LazyPage component={PortraitOnboardingPage} />} />
+          <Route path="projects/new/interview" element={<Navigate to="/chat?mode=profile" replace />} />
           <Route path="projects" element={<LazyPage component={ProjectsPage} />} />
-          <Route path="projects/create" element={<LazyPage component={ChatPage} />} />
+          <Route path="projects/create" element={<Navigate to="/chat?mode=profile" replace />} />
           <Route path="chat" element={<LazyPage component={ChatPage} />} />
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />

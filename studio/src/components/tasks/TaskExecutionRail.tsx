@@ -18,6 +18,7 @@ import {
   RefreshCw,
   ScrollText,
   Send,
+  CheckCircle2,
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
@@ -28,6 +29,7 @@ import { parseWorkflowStatus, readinessValueLabel } from '@/lib/workflow-readine
 import { cn } from '@/lib/utils'
 import { groupTaskStageFiles } from '@/lib/task-stage-files'
 import { TaskFileDownloads, TaskStageFiles } from './TaskStageFiles'
+import { Input } from '@/components/ui/input'
 import type {
   TaskFile,
   TaskLifecycle,
@@ -65,7 +67,7 @@ const lifecycleStatePresentation: Record<TaskLifecycleStageState, {
   skipped: { label: '已跳过', icon: Minus, iconClassName: 'border-border bg-muted text-muted-foreground', textClassName: 'text-muted-foreground' },
 }
 
-const terminalPublicationStatuses = new Set(['published', 'publish_failed', 'unsupported', 'awaiting_manual_publish'])
+const terminalPublicationStatuses = new Set(['published', 'publish_failed', 'unsupported', 'awaiting_manual_publish', 'skipped'])
 
 function formatStageTime(value?: string) {
   if (!value) return null
@@ -138,6 +140,8 @@ export interface TaskExecutionRailProps {
   onRetryFiles?: () => void
   /** Renders terminal failure details and recovery actions inside the stage rail. */
   showFailureSummary?: boolean
+  showCompletionSummary?: boolean
+  showFiles?: boolean
 }
 
 export function TaskExecutionRail({
@@ -155,10 +159,15 @@ export function TaskExecutionRail({
   filesError,
   onRetryFiles,
   showFailureSummary = true,
+  showCompletionSummary = true,
+  showFiles = true,
 }: TaskExecutionRailProps) {
   const queryClient = useQueryClient()
   const stages = lifecycle?.stages ?? []
   const [confirmPublish, setConfirmPublish] = useState(false)
+  const [confirmManualPublished, setConfirmManualPublished] = useState(false)
+  const [confirmSkipPublication, setConfirmSkipPublication] = useState(false)
+  const [manualArticleUrl, setManualArticleUrl] = useState('')
   const hasServerPublicationStages = stages.some((stage) => stage.source === 'server')
   const publicationStageSignature = stages
     .filter((stage) => stage.source === 'server')
@@ -177,7 +186,7 @@ export function TaskExecutionRail({
   const [expansion, setExpansion] = useState<{ scope: string; stages: Record<string, boolean> }>({ scope: expansionScope, stages: {} })
   const manualExpansion = expansion.scope === expansionScope ? expansion.stages : {}
   const fileProps = { taskId, taskType }
-  const fileFallback = (
+  const fileFallback = showFiles ? (
     <>
       {filesLoading && <p className="px-4 py-3 text-xs text-muted-foreground" role="status">正在加载产物…</p>}
       {filesError && <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground" role="alert">产物暂时加载失败<Tooltip><TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onRetryFiles} aria-label="重新加载" />}><RefreshCw className="size-4" aria-hidden="true" /></TooltipTrigger><TooltipContent>重新加载</TooltipContent></Tooltip></div>}
@@ -191,8 +200,8 @@ export function TaskExecutionRail({
         <TaskStageFiles {...fileProps} files={groupedFiles.historical} />
       </section>}
     </>
-  )
-  const heading = <RailHeading onOpenLogs={onOpenLogs} taskId={taskId} files={files} stages={stages} />
+  ) : null
+  const heading = <RailHeading onOpenLogs={onOpenLogs} taskId={taskId} files={files} stages={stages} showFiles={showFiles} />
 
   const publicationQuery = useQuery({
     queryKey: ['wechat-publication', taskId],
@@ -233,11 +242,35 @@ export function TaskExecutionRail({
     mutationFn: (articleId: string) => api.tasks.selectWechatArticle(taskId, articleId),
     onSuccess: invalidatePublication,
   })
-  const publicationActionPending = reconcile.isPending || publish.isPending || retryPublish.isPending || recoverDraft.isPending || selectArticle.isPending
-  const publicationActionFailed = reconcile.isError || publish.isError || retryPublish.isError || recoverDraft.isError || selectArticle.isError
+  const bindManualPublication = useMutation({
+    mutationFn: () => api.tasks.bindManualWechatPublication(taskId, manualArticleUrl.trim()),
+    onSuccess: () => {
+      setConfirmManualPublished(false)
+      setManualArticleUrl('')
+      return invalidatePublication()
+    },
+  })
+  const attachingManualArticleUrl = publication?.status === 'published'
+    && publication.source === 'wechat_console'
+    && !publication.article_url
+  const skipPublication = useMutation({
+    mutationFn: () => api.tasks.skipWechatPublication(taskId),
+    onSuccess: () => {
+      setConfirmSkipPublication(false)
+      return invalidatePublication()
+    },
+  })
+  const restorePublication = useMutation({
+    mutationFn: () => api.tasks.restoreWechatPublication(taskId),
+    onSuccess: invalidatePublication,
+  })
+  const publicationActionPending = reconcile.isPending || publish.isPending || retryPublish.isPending || recoverDraft.isPending || selectArticle.isPending || bindManualPublication.isPending || skipPublication.isPending || restorePublication.isPending
+  const publicationActionFailed = reconcile.isError || publish.isError || retryPublish.isError || recoverDraft.isError || selectArticle.isError || bindManualPublication.isError || skipPublication.isError || restorePublication.isError
 
   const announcement = currentStage
-    ? `${currentStage.title}，${lifecycleStatePresentation[currentStage.state].label}`
+    ? status === 'completed' && currentStage.kind === 'publication' && publication?.status === 'awaiting_manual_publish'
+      ? '作品已完成，公众号草稿待发布'
+      : `${currentStage.title}，${lifecycleStatePresentation[currentStage.state].label}`
     : status === 'running' ? '正在制定执行计划' : ''
 
   if (stages.length === 0) {
@@ -286,16 +319,22 @@ export function TaskExecutionRail({
       <ol className="mx-4 mt-5 sm:mx-5" aria-label="执行阶段">
         {stages.map((stage, index) => {
           const unconfirmed = infrastructureFailure && stage.source === 'agent' && (stage.state === 'active' || stage.state === 'pending')
-          const presentation = unconfirmed
-            ? { ...lifecycleStatePresentation.pending, label: '进度未确认' }
-            : lifecycleStatePresentation[stage.state]
+          const waitingForManualWechatPublish = status === 'completed'
+            && stage.kind === 'publication'
+            && publication?.status === 'awaiting_manual_publish'
+            && stage.state === 'pending'
+          const presentation = waitingForManualWechatPublish
+            ? { ...lifecycleStatePresentation.pending, label: '待发布' }
+            : unconfirmed
+              ? { ...lifecycleStatePresentation.pending, label: '进度未确认' }
+              : lifecycleStatePresentation[stage.state]
           const Icon = presentation.icon
-          const stageFiles = groupedFiles.byStage.get(stage.id) ?? []
+          const stageFiles = showFiles ? (groupedFiles.byStage.get(stage.id) ?? []) : []
           const isExpanded = manualExpansion[stage.id] ?? (expandedStages.has(stage.id) || stageFiles.length > 0 || (infrastructureFailure && stage.id === lastWorkStageId))
           const canExpand = stageFiles.length > 0 || (stage.state !== 'pending' && Boolean(
             stage.goal || stage.latest_update || stage.id === lastWorkStageId || stage.source === 'server',
           ))
-          const isCurrent = index === currentIndex
+          const isCurrent = index === currentIndex && !waitingForManualWechatPublish
           const isInfrastructureRecoveryPoint = infrastructureFailure && stage.id === lastWorkStageId
           const isTerminalRecoveryPoint = !infrastructureFailure && isCurrent && stage.kind === 'work' && (status === 'failed' || status === 'cancelled')
           const isRecoveryPoint = isTerminalRecoveryPoint || isInfrastructureRecoveryPoint
@@ -341,6 +380,10 @@ export function TaskExecutionRail({
                       onRetryPublish={() => retryPublish.mutate()}
                       onReconcile={() => reconcile.mutate()}
                       onRecoverDraft={() => recoverDraft.mutate()}
+                      onManualPublished={() => setConfirmManualPublished(true)}
+                      onAddManualArticleUrl={() => setConfirmManualPublished(true)}
+                      onSkipPublication={() => setConfirmSkipPublication(true)}
+                      onRestorePublication={() => restorePublication.mutate()}
                     />
                   )}
                   {showFailureSummary && isRecoveryPoint && onResume && (
@@ -360,7 +403,7 @@ export function TaskExecutionRail({
                     {isTerminalRecoveryPoint && status === 'cancelled' && stage.state !== 'cancelled' && (
                       <p className="text-xs text-muted-foreground">执行已停止，可从已有上下文继续。</p>
                     )}
-                    {stage.id === lastWorkStageId && <CompletionSummary workflow={workflow} outcome={outcome} />}
+                    {showCompletionSummary && stage.id === lastWorkStageId && <CompletionSummary workflow={workflow} outcome={outcome} />}
                     {stage.kind === 'publication' && publication?.status === 'needs_selection' && (
                       <CandidatePicker publication={publication} pending={selectArticle.isPending} onSelect={(articleId) => selectArticle.mutate(articleId)} />
                     )}
@@ -395,21 +438,53 @@ export function TaskExecutionRail({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={confirmManualPublished} onOpenChange={setConfirmManualPublished}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{attachingManualArticleUrl ? '补充文章链接' : '确认已在公众号发布'}</DialogTitle>
+            <DialogDescription>{attachingManualArticleUrl
+              ? '提供文章链接后，平台会关联后续数据。'
+              : '平台会记录你已在公众号后台发布。文章链接可选；补充链接后才能关联后续数据。'}</DialogDescription>
+          </DialogHeader>
+          <label className="grid gap-2 text-sm font-medium" htmlFor="manual-wechat-article-url">
+            {attachingManualArticleUrl ? '文章链接' : '文章链接（选填）'}
+            <Input id="manual-wechat-article-url" type="url" inputMode="url" placeholder="https://mp.weixin.qq.com/s/..." value={manualArticleUrl} onChange={(event) => setManualArticleUrl(event.target.value)} />
+          </label>
+          {bindManualPublication.isError && <p className="text-sm text-destructive" role="alert">确认失败，请检查链接后重试。</p>}
+          <DialogFooter>
+            <Button className="min-h-11" variant="outline" onClick={() => setConfirmManualPublished(false)}>取消</Button>
+            <Button className="min-h-11" disabled={attachingManualArticleUrl && !manualArticleUrl.trim()} loading={bindManualPublication.isPending} onClick={() => bindManualPublication.mutate()}><CheckCircle2 className="size-4" />{attachingManualArticleUrl ? '关联文章' : '确认已发布'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmSkipPublication} onOpenChange={setConfirmSkipPublication}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>将这篇作品标记为不再发布？</DialogTitle>
+            <DialogDescription>作品和公众号草稿都会保留，系统将停止跟踪这次发布。之后仍可恢复发布跟踪。</DialogDescription>
+          </DialogHeader>
+          {skipPublication.isError && <p className="text-sm text-destructive" role="alert">操作失败，请重试。</p>}
+          <DialogFooter>
+            <Button className="min-h-11" variant="outline" onClick={() => setConfirmSkipPublication(false)}>返回</Button>
+            <Button className="min-h-11" variant="destructive" loading={skipPublication.isPending} onClick={() => skipPublication.mutate()}>不再发布</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }
 
-function RailHeading({ onOpenLogs, taskId, files, stages }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[] }) {
+function RailHeading({ onOpenLogs, taskId, files, stages, showFiles }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[]; showFiles: boolean }) {
   const completed = stages.filter((stage) => stage.state === 'complete').length
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 pb-4 sm:px-5">
       <div className="flex flex-wrap items-center gap-3">
         <h2 id="task-execution-heading" className="text-sm font-semibold text-foreground">执行进展</h2>
         {stages.length > 0 && <span className="text-xs text-muted-foreground">{completed} / {stages.length} 环节完成</span>}
-        {files.length > 0 && <span className="text-xs text-muted-foreground">{files.length} 个产物</span>}
+        {showFiles && files.length > 0 && <span className="text-xs text-muted-foreground">{files.length} 个产物</span>}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <TaskFileDownloads taskId={taskId} files={files} />
+        {showFiles ? <TaskFileDownloads taskId={taskId} files={files} /> : null}
         <Tooltip>
           <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onOpenLogs} aria-label="查看完整日志" />}>
             <ScrollText className="size-4" />
@@ -430,6 +505,10 @@ function PublicationStageActions({
   onRetryPublish,
   onReconcile,
   onRecoverDraft,
+  onManualPublished,
+  onAddManualArticleUrl,
+  onSkipPublication,
+  onRestorePublication,
 }: {
   stage: TaskLifecycleStage
   publication?: WechatPublication | null
@@ -439,6 +518,10 @@ function PublicationStageActions({
   onRetryPublish: () => void
   onReconcile: () => void
   onRecoverDraft: () => void
+  onManualPublished: () => void
+  onAddManualArticleUrl: () => void
+  onSkipPublication: () => void
+  onRestorePublication: () => void
 }) {
   const retryAction = (label: string, onClick: () => void) => (
     <Tooltip>
@@ -482,8 +565,21 @@ function PublicationStageActions({
   }
 
   if (stage.kind !== 'publication') return null
+  if (stage.state === 'skipped' || publication?.status === 'skipped') {
+    return <Button size="sm" variant="outline" className="min-h-11 shrink-0" loading={pending} onClick={onRestorePublication}>恢复发布跟踪</Button>
+  }
   if (stage.state === 'complete') {
-    if (!publication?.article_url) return backendLink
+    if (!publication?.article_url) {
+      if (publication?.status === 'published' && publication.source === 'wechat_console') {
+        return (
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button size="sm" variant="outline" className="min-h-11" onClick={onAddManualArticleUrl}>补充文章链接</Button>
+            {backendLink}
+          </div>
+        )
+      }
+      return backendLink
+    }
     return (
       <Tooltip>
         <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" nativeButton={false} render={<a href={publication.article_url} target="_blank" rel="noreferrer" aria-label="打开文章" />} />}>
@@ -497,6 +593,24 @@ function PublicationStageActions({
   if (publication?.status === 'needs_selection') return null
 
   const submitted = hasSubmissionEvidence(publication)
+  const canConfirmManualPublication = !submitted && publication?.draft_media_id
+    && (publication.status === 'drafted' || publication.status === 'awaiting_manual_publish')
+  if (canConfirmManualPublication) {
+    return (
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {publication.status === 'awaiting_manual_publish' ? backendLink : stage.state === 'pending' && publication.status === 'drafted' ? (
+          <Tooltip>
+            <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" loading={pending} onClick={onPublish} aria-label="正式发布" />}>
+              {pending ? null : <Send className="size-4" aria-hidden="true" />}
+            </TooltipTrigger>
+            <TooltipContent>通过平台正式发布</TooltipContent>
+          </Tooltip>
+        ) : null}
+        <Button size="sm" variant="secondary" className="min-h-11" loading={pending} onClick={onManualPublished}>我已发布</Button>
+        <Button size="sm" variant="ghost" className="min-h-11 text-muted-foreground" loading={pending} onClick={onSkipPublication}>不再发布</Button>
+      </div>
+    )
+  }
   if (stage.state === 'pending' && publication?.status === 'drafted' && !submitted) {
     return (
       <Tooltip>
@@ -553,7 +667,7 @@ function FailureSummary({ failure }: { failure: ReturnType<typeof taskFailurePre
   )
 }
 
-function CompletionSummary({ workflow, outcome }: { workflow?: WorkflowStatus | string | null; outcome?: TaskOutcome }) {
+export function CompletionSummary({ workflow, outcome }: { workflow?: WorkflowStatus | string | null; outcome?: TaskOutcome }) {
   const review = useMemo(() => parseWorkflowStatus(workflow)?.review, [workflow])
   if (!review && !outcome) return null
   return (

@@ -102,6 +102,7 @@ vi.mock('@/lib/api', async () => {
       projects: {
         ...actual.api.projects,
         get: vi.fn().mockResolvedValue(mockProjectDetail),
+        getAccountProfile: vi.fn(),
         list: vi.fn(),
         platformConfigs: vi.fn().mockResolvedValue([]),
       },
@@ -229,7 +230,7 @@ async function openResumeDialog() {
 }
 
 async function openCloneDialog() {
-  fireEvent.click(await screen.findByRole('button', { name: '克隆作品' }))
+  fireEvent.click(await screen.findByRole('button', { name: '复刻作品' }))
   const title = await screen.findByRole('heading', { name: '克隆作品' })
   return title.closest('[data-slot="dialog-content"]') as HTMLElement
 }
@@ -261,6 +262,22 @@ describe('TaskDetailPage', () => {
       id: 'feedback-1', task_id: 'task-1', user_id: 'user-1', rating: 4, content: '', created_at: '', updated_at: '',
     })
     vi.mocked(api.projects.get).mockResolvedValue(mockProjectDetail)
+    vi.mocked(api.projects.getAccountProfile).mockResolvedValue({
+      schema_version: 1,
+      status: 'confirmed',
+      initialization_status: 'ready',
+      version: 3,
+      dimensions: {
+        identity: { content: { summary: '帮助职场人写出清晰的公众号文章' }, sources: [], evidence: [], missing_fields: [] },
+        style: { content: { summary: '真诚、克制、结构清晰' }, sources: [], evidence: [], missing_fields: [] },
+        audience: { content: { summary: '关注效率的职场读者' }, sources: [], evidence: [], missing_fields: [] },
+        platforms: { content: { summary: '微信公众号' }, sources: [], evidence: [], missing_fields: [] },
+        preferences: { content: { summary: '避免夸张标题' }, sources: [], evidence: [], missing_fields: [] },
+        memory: { content: { summary: '保留已验证的选题经验' }, sources: [], evidence: [], missing_fields: [] },
+      },
+      analysis_limits: [],
+      follow_up_questions: [],
+    })
     vi.mocked(api.projects.list).mockResolvedValue(mockProjects)
     vi.mocked(api.billing.wallet).mockResolvedValue(mockBillingWallet)
     vi.mocked(api.billing.catalog).mockResolvedValue(mockBillingCatalog)
@@ -320,6 +337,102 @@ describe('TaskDetailPage', () => {
     expect(status).toHaveAttribute('data-status', 'completed')
     expect(status).toHaveTextContent('已完成')
     expect(status.querySelector('svg')).toBeInTheDocument()
+  })
+
+  it('shows delivered files before a collapsed execution process when completed', async () => {
+    mockTask(taskWith({ status: 'completed' }))
+    vi.mocked(api.tasks.files).mockResolvedValue([{
+      id: 'deliverable-result', task_id: 'task-1', state: 'delivered', role: 'output',
+      file_name: 'article.html', mime_type: 'text/html', file_size: 128, url: '/article.html',
+      is_deliverable: true, created_at: '2026-09-20T00:54:05Z',
+    }])
+
+    render(<TaskDetailPage />)
+
+    const result = await screen.findByRole('region', { name: '交付结果' })
+    const process = await screen.findByRole('button', { name: '执行过程' })
+    expect(result.compareDocumentPosition(process) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(process).toHaveAttribute('aria-expanded', 'false')
+    expect(within(process).getByText(/阶段：完成创作 · 状态：已完成 · 下一步：检查交付结果/)).toBeVisible()
+    fireEvent.click(process)
+    expect(await screen.findByRole('button', { name: '完成创作，已完成' })).toBeInTheDocument()
+  })
+
+  it('opens execution process by default while work is running', async () => {
+    mockTask(taskWith({ status: 'running' }))
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('opens execution process when a completed task has only stage files', async () => {
+    mockTask(taskWith({ status: 'completed' }))
+    vi.mocked(api.tasks.files).mockResolvedValue([{
+      id: 'stage-result', task_id: 'task-1', state: 'delivered', role: 'research',
+      file_name: 'research.md', mime_type: 'text/markdown', file_size: 128, url: '/research.md',
+      is_deliverable: false, created_at: '2026-09-20T00:54:05Z',
+    }])
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('shows live persona profile details and distinguishes the task snapshot', async () => {
+    mockTask(taskWith({
+      status: 'completed',
+      project_snapshot: { project_name: '创建时人设快照', platform: 'wechat', keywords: '快照关键词' },
+    }))
+    render(<TaskDetailPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /查看人设详情：测试创作项目/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('已就绪 · v3')).toBeInTheDocument()
+    expect(within(dialog).getByText('帮助职场人写出清晰的公众号文章')).toBeInTheDocument()
+    expect(within(dialog).getByText('偏好与红线')).toBeInTheDocument()
+    expect(within(dialog).getByText(/冻结配置/)).toBeInTheDocument()
+  })
+
+  it('shows a retry state when persona profile loading fails', async () => {
+    mockTask(taskWith({ status: 'completed' }))
+    vi.mocked(api.projects.getAccountProfile)
+      .mockRejectedValueOnce(new Error('profile unavailable'))
+      .mockResolvedValueOnce({
+        schema_version: 1,
+        status: 'confirmed',
+        initialization_status: 'ready',
+        version: 4,
+        dimensions: {
+          identity: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          style: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          audience: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          platforms: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          preferences: { content: {}, sources: [], evidence: [], missing_fields: [] },
+          memory: { content: {}, sources: [], evidence: [], missing_fields: [] },
+        },
+        analysis_limits: [],
+        follow_up_questions: [],
+      })
+    render(<TaskDetailPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /查看人设详情：测试创作项目/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('画像资料加载失败')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '重试' }))
+    expect(await within(dialog).findByText('已就绪 · v4')).toBeInTheDocument()
+  })
+
+  it('distinguishes deliverable loading errors from an empty result and retries', async () => {
+    mockTask(taskWith({ status: 'completed' }))
+    vi.mocked(api.tasks.files).mockRejectedValueOnce(new Error('temporary failure'))
+    render(<TaskDetailPage />)
+
+    const result = await screen.findByRole('region', { name: '交付结果' })
+    expect(await within(result).findByRole('alert')).toHaveTextContent('暂时无法确认是否有交付文件')
+    expect(screen.getByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true')
+    vi.mocked(api.tasks.files).mockResolvedValueOnce([])
+    fireEvent.click(within(result).getByRole('button', { name: '重试' }))
+    expect(await within(result).findByText('当前作品没有可交付文件。')).toBeInTheDocument()
   })
 
   it('renders independent terminal outcome warnings and sanitized provider diagnostics', async () => {
@@ -415,7 +528,7 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('模型超时')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '继续执行' })).toHaveLength(1)
     expect(screen.getByRole('button', { name: '继续执行' })).not.toHaveTextContent('继续执行')
-    expect(screen.queryByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '复刻作品' })).toBeInTheDocument()
   })
 
   it('renders header actions as borderless icon-only controls', async () => {
@@ -423,9 +536,10 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    const clone = await screen.findByRole('button', { name: '克隆作品' })
+    const clone = await screen.findByRole('button', { name: '复刻作品' })
     const deleteButton = screen.getByRole('button', { name: '删除作品' })
-    expect(clone).not.toHaveTextContent('克隆作品')
+    expect(clone).not.toHaveTextContent('复刻作品')
+    expect(clone.querySelector('svg')).toHaveClass('lucide-copy')
     expect(deleteButton).not.toHaveTextContent('删除作品')
     expect(clone).toHaveClass('size-11')
     expect(deleteButton).toHaveClass('size-11')
@@ -793,6 +907,7 @@ describe('TaskDetailPage', () => {
       progress_log: 'B 持久化日志',
     })
     const view = renderWithCachedTasks(taskA, taskB)
+    await waitFor(() => expect(screen.getByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true'))
     fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     const initialLogs = await screen.findByRole('region', { name: '执行动态' })
 
@@ -808,6 +923,7 @@ describe('TaskDetailPage', () => {
     })
     expect(streamSignals.get('task-1')).toHaveProperty('aborted', true)
 
+    await waitFor(() => expect(screen.getByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true'))
     fireEvent.click(screen.getByRole('button', { name: '查看完整日志' }))
     const logSection = await screen.findByRole('region', { name: '执行动态' })
     expect(logSection).toHaveTextContent('B 持久化日志')
@@ -1125,8 +1241,9 @@ describe('TaskDetailPage', () => {
     await screen.findByRole('button', { name: '预览 article.html' })
     const review = await screen.findByText('内容验收')
     const files = await screen.findByText('交付成果 (1)')
+    expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '执行过程' }))
     const overview = await screen.findByRole('button', { name: '打开作品概览' })
-    expect(review.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(files.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
@@ -1352,6 +1469,10 @@ describe('TaskDetailPage', () => {
       is_deliverable: true,
       created_at: '2026-07-15T03:00:00Z',
     }])
+    vi.mocked(api.seednoteAnalytics.getByTask).mockResolvedValue({
+      tracking: { status: 'unresolved', run_count: 0 },
+      series: [],
+    })
 
     render(<TaskDetailPage />)
 
@@ -1519,7 +1640,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(api.projects.list).not.toHaveBeenCalled()
     expect(api.billing.wallet).not.toHaveBeenCalled()
     expect(api.billing.catalog).not.toHaveBeenCalled()
@@ -1585,10 +1706,10 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    await screen.findByRole('button', { name: '克隆作品' })
+    await screen.findByRole('button', { name: '复刻作品' })
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
   })
@@ -1639,7 +1760,7 @@ describe('TaskDetailPage', () => {
 
     render(<TaskDetailPage />)
 
-    expect(await screen.findByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '查看内容分析' })).not.toBeInTheDocument()
   })
 
@@ -1890,7 +2011,7 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByRole('button', { name: '取消作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '继续执行' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '克隆作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '复刻作品' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除作品' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
     expect(api.projects.list).not.toHaveBeenCalled()
@@ -1907,7 +2028,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
@@ -1925,7 +2046,7 @@ describe('TaskDetailPage', () => {
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('button', { name: '继续执行' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '克隆作品' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复刻作品' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '删除作品' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: '已发布' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '更多作品操作' })).not.toBeInTheDocument()
@@ -2068,7 +2189,7 @@ describe('TaskDetailPage', () => {
     fireEvent.click(projectButton)
 
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('heading', { name: '创作项目信息' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: '人设详情' })).toBeInTheDocument()
     expect(within(dialog).getByText('测试创作项目')).toBeInTheDocument()
     expect(within(dialog).getByText('https://mp.weixin.qq.com/test')).toBeInTheDocument()
     expect(mockNavigate).not.toHaveBeenCalledWith('/projects')

@@ -371,8 +371,20 @@ func (s *TaskService) freezeProjectChannelConfig(ctx context.Context, projectID,
 	if s == nil || s.repo == nil || snapshot == nil {
 		return
 	}
+	values := map[string]any{}
 	if row, err := s.repo.ProjectChannelConfigs().Get(ctx, projectID, channel); err == nil && row != nil {
-		snapshot.ChannelConfig = redactFrozenConfig(row.Config.Data())
+		values = row.Config.Data()
+		snapshot.ChannelConfig = redactFrozenConfig(values)
+	}
+	if channel == model.ChannelArticle || channel == model.ChannelWechatPicture {
+		var automaticEnabled *bool
+		if value, ok := values["automatic_delivery_enabled"].(bool); ok {
+			automaticEnabled = &value
+		}
+		secret := strings.TrimSpace(mapStringValue(values, "wechat_secret"))
+		snapshot.WechatDelivery = model.ResolveWechatDeliveryDecision(
+			mapStringValue(values, "wechat_app_id"), secret != "", automaticEnabled,
+		).WithServerPublicationCapabilities()
 	}
 }
 
@@ -381,9 +393,11 @@ func (s *TaskService) freezeProjectChannelConfig(ctx context.Context, projectID,
 // instead of a long positional signature keeps call sites readable as fields are
 // added and prevents argument-order bugs.
 type CreateManualParams struct {
-	UserID           string
-	ProjectID        string
-	ExecutionProfile string
+	UserID                   string
+	ProjectID                string
+	AssistantCheckpointID    string
+	AssistantProfileRevision *int64
+	ExecutionProfile         string
 	// AgentID, Channel, and TaskKind are required explicit task identity.
 	// Project account context never supplies any of these values.
 	AgentID           string
@@ -617,6 +631,9 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 	}
 	taskType := taskTypeForIdentity(agentID, channel, taskKind)
 	effectiveReferenceImageAssetID := p.ReferenceImageAssetID
+	if p.AssistantProfileRevision != nil && projectProfileFor(project).Version != *p.AssistantProfileRevision {
+		return nil, ErrAssistantCheckpointConflict
+	}
 	taskProjectSnapshot := model.SnapshotProject(project)
 	if p.ProjectSnapshot != nil {
 		taskProjectSnapshot = *p.ProjectSnapshot
@@ -877,6 +894,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 
 		task := &model.Task{
 			ID:                       taskID,
+			AssistantCheckpointID:    assistantCheckpointIDPointer(p.AssistantCheckpointID),
 			UserID:                   p.UserID,
 			ProjectID:                p.ProjectID,
 			AgentID:                  agentID,
@@ -908,7 +926,7 @@ func (s *TaskService) CreateManual(ctx context.Context, p CreateManualParams) ([
 		if strings.TrimSpace(snapshot.Platform) == "" {
 			snapshot.Platform = project.Platform
 		}
-		if p.ProjectSnapshot == nil {
+		if p.ProjectSnapshot == nil || !p.PreserveFrozenConfig {
 			s.freezeProjectChannelConfig(ctx, project.ID, channel, &snapshot)
 		}
 		task.SetProjectSnapshot(snapshot)
@@ -1009,6 +1027,9 @@ func (s *TaskService) persistTasksWithFixedAdmission(ctx context.Context, tasks 
 		}
 		if project.Status != model.ProjectStatusActive || project.DeletingAt != nil {
 			return fmt.Errorf("project is not active")
+		}
+		if manualAdmission != nil && manualAdmission.AssistantProfileRevision != nil && projectProfileFor(project).Version != *manualAdmission.AssistantProfileRevision {
+			return ErrAssistantCheckpointConflict
 		}
 		for _, task := range tasks {
 			if task.ProjectID != project.ID || task.UserID != project.UserID {

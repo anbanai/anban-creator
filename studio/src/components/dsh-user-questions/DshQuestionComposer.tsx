@@ -94,7 +94,7 @@ export function DshQuestionComposer({
   const [index, setIndex] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [minimized, setMinimized] = useState(false)
+  const [minimized, setMinimized] = useState(submitted)
   const [submittedState, setSubmittedState] = useState(submitted)
 
   useEffect(() => {
@@ -107,6 +107,7 @@ export function DshQuestionComposer({
         skipped: answer !== undefined && answer.selected.length === 0 && !answer.custom,
       }
     }))
+    setMinimized(true)
   }, [answers, questions, submitted])
 
   if (questions.length === 0) return null
@@ -147,6 +148,7 @@ export function DshQuestionComposer({
     try {
       await onSubmit(buildAnswer(values))
       setSubmittedState(true)
+      setMinimized(true)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '答案发送失败，请重试。')
     } finally {

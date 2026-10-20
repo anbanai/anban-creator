@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,7 +38,7 @@ func (f ContainerRuntimeFactory) CleanupOrphans(ctx context.Context) error {
 	if docker == "" {
 		docker = "docker"
 	}
-	list := exec.CommandContext(ctx, docker, "ps", "-aq", "--filter", "label=com.anban.runtime=dsh-interactive", "--filter", "label=com.anban.server_instance="+strings.TrimSpace(f.ServerInstanceID))
+	list := exec.CommandContext(ctx, docker, "ps", "-aq", "--filter", "label=com.anban.runtime=dsh-interactive")
 	output, err := list.Output()
 	if err != nil {
 		return fmt.Errorf("list orphaned DSH containers: %w", err)
@@ -58,6 +59,10 @@ func (f ContainerRuntimeFactory) Start(ctx context.Context, sessionID, agentID, 
 }
 
 func (f ContainerRuntimeFactory) StartSession(ctx context.Context, spec InteractiveRuntimeSpec, emit func(string, any)) (Runtime, error) {
+	patchPath, err := interactivePresetPatchPath(spec.AgentPackID)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(f.Config.Image) == "" || strings.TrimSpace(f.Config.Network) == "" {
 		return nil, fmt.Errorf("interactive container image and network are required")
 	}
@@ -76,14 +81,29 @@ func (f ContainerRuntimeFactory) StartSession(ctx context.Context, spec Interact
 		return nil, err
 	}
 	name := "anban-dsh-" + safeContainerPart(spec.SessionID)
+	contextDir := ""
+	contextCleanup := func() {}
+	if strings.TrimSpace(spec.InitialContext) != "" {
+		contextDir, err = os.MkdirTemp("", "anban-dsh-context-")
+		if err != nil {
+			return nil, fmt.Errorf("create DSH initial context directory: %w", err)
+		}
+		contextPath := filepath.Join(contextDir, "initial-context")
+		if err := os.WriteFile(contextPath, []byte(spec.InitialContext), 0o644); err != nil {
+			_ = os.RemoveAll(contextDir)
+			return nil, fmt.Errorf("write DSH initial context: %w", err)
+		}
+		contextCleanup = func() { _ = os.RemoveAll(contextDir) }
+	}
 	args := []string{"run", "--rm", "--init", "-i", "--name", name,
 		"--label", "com.anban.runtime=dsh-interactive",
 		"--label", "com.anban.session_id=" + spec.SessionID,
+		"--label", "com.anban.preset_id=" + spec.AgentPackID,
 		"--label", "com.anban.server_instance=" + strings.TrimSpace(f.ServerInstanceID),
 		"--network", f.Config.Network,
 		"--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
 		"--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-		"--tmpfs", "/workspace/project/.claude/agent-memory/project-creator:rw,noexec,nosuid,size=16m",
+		"--tmpfs", "/workspace/project/.claude/agent-memory/" + spec.AgentPackID + ":rw,noexec,nosuid,size=16m",
 		"--workdir", "/workspace/project",
 		"--memory", strconv.FormatInt(f.Config.MemoryMB, 10) + "m",
 		"--cpus", strconv.FormatInt(f.Config.CPUCores, 10),
@@ -92,9 +112,16 @@ func (f ContainerRuntimeFactory) StartSession(ctx context.Context, spec Interact
 		"-e", "ANBAN_DSH_BRIDGE_SESSION_ID",
 		"-e", "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN",
 		"-e", "ANBAN_DSH_BRIDGE_HOME=/tmp/dsh-home",
-		"-e", "ANBAN_DSH_BRIDGE_PATCH=/app/harness/dsh/project-creator.patch.yml",
+		"-e", "ANBAN_DSH_BRIDGE_PRESET_ID=" + spec.AgentPackID,
+		"-e", "ANBAN_DSH_BRIDGE_PATCH=" + patchPath,
 		"-e", "ANBAN_DSH_BRIDGE_MCP_URL",
 		"-e", "ANBAN_DSH_BRIDGE_PROVIDER_API_KEY",
+	}
+	if contextDir != "" {
+		args = append(args,
+			"--mount", "type=bind,source="+filepath.Join(contextDir, "initial-context")+",destination=/tmp/anban-dsh-initial-context,readonly",
+			"-e", "ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE=/tmp/anban-dsh-initial-context",
+		)
 	}
 	if strings.TrimSpace(f.Config.ProjectMemoryVolume) != "" && strings.TrimSpace(spec.ProjectID) != "" {
 		args = append(args, "--mount", "type=volume,source="+f.Config.ProjectMemoryVolume+",destination="+f.Config.ProjectMemoryMount+",volume-subpath=projects/"+safeContainerPart(spec.ProjectID)+",readonly")
@@ -107,7 +134,40 @@ func (f ContainerRuntimeFactory) StartSession(ctx context.Context, spec Interact
 	if f.Config.TimeoutSec > 0 {
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(f.Config.TimeoutSec)*time.Second)
 	}
-	return f.startCommand(ctx, cancel, docker, args, spec, emit)
+	runtime, startErr := f.startCommand(ctx, cancel, docker, args, spec, emit, contextCleanup)
+	if startErr != nil {
+		contextCleanup()
+	}
+	return runtime, startErr
+}
+
+func interactivePresetPatchPath(presetID string) (string, error) {
+	switch presetID {
+	case "project-creator", "creation-planner", "postmortem-review":
+		return "/app/harness/dsh/" + presetID + ".patch.yml", nil
+	default:
+		return "", fmt.Errorf("unsupported interactive DSH preset %q", strings.TrimSpace(presetID))
+	}
+}
+
+func assistantPresetAllowed(presetID string) bool {
+	switch strings.TrimSpace(presetID) {
+	case "project-creator", "creation-planner", "postmortem-review":
+		return true
+	default:
+		return false
+	}
+}
+
+func interactiveExecPresetPatchPath(configuredPatch, presetID string) (string, error) {
+	if !assistantPresetAllowed(presetID) {
+		return "", fmt.Errorf("unsupported interactive DSH preset %q", strings.TrimSpace(presetID))
+	}
+	configuredPatch = strings.TrimSpace(configuredPatch)
+	if configuredPatch == "" || filepath.Base(configuredPatch) != "project-creator.patch.yml" {
+		return "", errors.New("dsh.dsh_patch must name project-creator.patch.yml for the process executor")
+	}
+	return filepath.Join(filepath.Dir(configuredPatch), presetID+".patch.yml"), nil
 }
 
 func resolveInteractiveImage(ctx context.Context, docker, image string) (string, error) {
@@ -126,7 +186,7 @@ func resolveInteractiveImage(ctx context.Context, docker, image string) (string,
 	return resolved, nil
 }
 
-func (f ContainerRuntimeFactory) startCommand(ctx context.Context, cancel context.CancelFunc, docker string, args []string, spec InteractiveRuntimeSpec, emit func(string, any)) (Runtime, error) {
+func (f ContainerRuntimeFactory) startCommand(ctx context.Context, cancel context.CancelFunc, docker string, args []string, spec InteractiveRuntimeSpec, emit func(string, any), contextCleanup func()) (Runtime, error) {
 	cmd := exec.CommandContext(ctx, docker, args...)
 	cmd.Env = append(os.Environ(),
 		"ANBAN_DSH_BRIDGE_SESSION_ID="+spec.SessionID,
@@ -156,7 +216,7 @@ func (f ContainerRuntimeFactory) startCommand(ctx context.Context, cancel contex
 	}
 	// Route values and the initial context are injected by the deployment
 	// secret/config layer; never log the resulting command or environment.
-	return startContainerExecRuntime(cmd, stdin, stdout, stderr, emit, []string{spec.RuntimeToken, f.APIKey}, cancel), nil
+	return startContainerExecRuntime(cmd, stdin, stdout, stderr, emit, []string{spec.RuntimeToken, f.APIKey}, cancel, contextCleanup), nil
 }
 
 func dshFirstNonEmpty(values ...string) string {
@@ -181,7 +241,7 @@ func safeContainerPart(value string) string {
 	return b.String()
 }
 
-func startContainerExecRuntime(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser, emit func(string, any), redactions []string, cancel context.CancelFunc) Runtime {
+func startContainerExecRuntime(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, stderr io.ReadCloser, emit func(string, any), redactions []string, cancel context.CancelFunc, contextCleanup func()) Runtime {
 	if emit == nil {
 		emit = func(string, any) {}
 	}
@@ -189,6 +249,9 @@ func startContainerExecRuntime(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Re
 		_ = stdin.Close()
 		if cancel != nil {
 			cancel()
+		}
+		if contextCleanup != nil {
+			contextCleanup()
 		}
 	}, redactions: redactions}
 	stderrTail := &interactiveTailBuffer{limit: 16 * 1024}

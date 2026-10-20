@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
 
 	"github.com/anbanai/anban-creator/server/model"
 	"github.com/anbanai/anban-creator/server/repository"
+	"github.com/anbanai/anban-creator/server/storage"
 	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -305,6 +307,76 @@ func TestContentMetadataServiceUsesDisplayNamesForPictureAndPackRoles(t *testing
 	}
 	if labels["content_type"] != "公众号贴图" || labels["artifact_role"] != "内容" {
 		t.Fatalf("server tag display names = %#v", labels)
+	}
+}
+
+func TestContentMetadataServiceAcceptsCanonicalCompletionMetadataFromWechatPictureAgent(t *testing.T) {
+	_, db, svc, task, execution := newContentMetadataFixture(t, "content-metadata-wechat-picture-agent", model.TaskTypeWechatPicture)
+	metadata := []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","task_id":"` + task.ID + `","execution_id":"` + execution.ID + `","task_type":"wechat-picture","tagging_status":"succeeded","subjects":[{"artifact_role":"content","tags":[{"dimension":"domain","value":"茶文化","evidence":[{"source_file":"output/content.md","line_start":1,"line_end":21,"quote":"吃蟹配什么茶？老茶客只认这三杯","evidence_kind":"explicit"}]},{"dimension":"audience","value":"都市银发茶文化爱好者","evidence":[{"source_file":"output/topic-analysis.md","line_start":66,"line_end":66,"quote":"都市银发女性为主，高净值，重传统，家里常备茶具，也愿意为一场蟹宴花心思。","evidence_kind":"explicit"}]}],"omitted_dimensions":["funnel_stage","presentation_device"]}],"feedback":{"scores":{"completeness":8}}}`)
+	report, err := svc.Submit(context.Background(), ContentMetadataInput{TaskID: task.ID, ExecutionID: execution.ID, RawMetadata: metadata})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if report.TaggingStatus != model.ContentMetadataSucceeded {
+		t.Fatalf("tagging status = %q, want succeeded", report.TaggingStatus)
+	}
+	var tags []model.ContentTagAssignment
+	if err := db.Where("report_id = ?", report.ID).Find(&tags).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != 6 {
+		t.Fatalf("tag count = %d, want semantic and server-owned tags", len(tags))
+	}
+	for _, tag := range tags {
+		if tag.ArtifactRole != "content" {
+			t.Fatalf("artifact role = %q, want content", tag.ArtifactRole)
+		}
+	}
+}
+
+func TestContentMetadataServiceRecomputesHistoricalArtifactWithoutReport(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:content-metadata-historical?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Task{}, &model.TaskExecution{}, &model.TaskFile{}, &model.ContentMetadataReport{}, &model.ContentTagAssignment{}, &model.ContentTagVocabulary{}, &model.AgentFeedback{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	task := &model.Task{ID: "historical-task", UserID: "user-1", ProjectID: "project-1", Type: model.TaskTypeWechatPicture, Status: model.TaskStatusCompleted}
+	if err := repo.Tasks().Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	execution := contentMetadataTestExecution("historical-execution", task.ID, "content")
+	if err := repo.TaskExecutions().Create(context.Background(), execution); err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"schema_version":"2.0","taxonomy_version":"2.0","status":"succeeded","subjects":[{"artifact_role":"content","tags":[{"dimension":"domain","value":"茶文化","evidence":[{"source_file":"output/content.md","line_start":1,"line_end":1,"quote":"茶","evidence_kind":"explicit"}]}],"omitted_dimensions":["audience","funnel_stage","presentation_device"]}]}`)
+	const objectKey = "users/user-1/tasks/historical-task/output/content-tags.json"
+	if _, err := store.Upload(context.Background(), objectKey, bytes.NewReader(raw), "application/json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.TaskFiles().Create(context.Background(), &model.TaskFile{TaskID: task.ID, ExecutionID: execution.ID, State: model.TaskFileStateDelivered, Role: model.FileRoleContentTags, FilePath: "output/content-tags.json", FileName: "content-tags.json", MimeType: "application/json", FileSize: int64(len(raw)), ContentHash: "historical-hash", OSSKey: objectKey, StorageProvider: store.Name()}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewContentMetadataService(repo, nil, store)
+	report, err := svc.RecomputeTags(context.Background(), task.UserID, task.ID, execution.ID)
+	if err != nil {
+		t.Fatalf("RecomputeTags: %v", err)
+	}
+	if report.TaggingStatus != model.ContentMetadataSucceeded {
+		t.Fatalf("tagging status = %q, want succeeded", report.TaggingStatus)
+	}
+	var tags []model.ContentTagAssignment
+	if err := db.Where("report_id = ?", report.ID).Find(&tags).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != 5 {
+		t.Fatalf("tag count = %d, want semantic and server-owned tags", len(tags))
 	}
 }
 

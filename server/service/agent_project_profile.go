@@ -149,6 +149,16 @@ func (s *AgentProjectProfileService) Get(ctx context.Context, req AgentProjectPr
 		"visual_style_source": style.VisualStyleSource, "writer_source": style.WriterSource,
 		"author_source": style.AuthorSource, "theme_source": style.ThemeSource,
 	}
+	if task != nil && (taskUsesChannel(task, model.ChannelArticle) || taskUsesChannel(task, model.ChannelWechatPicture)) {
+		decision := task.ProjectSnapshot.Data().WechatDelivery
+		if decision.Mode == "" {
+			// Historical tasks predate the frozen decision. Fail closed so an old
+			// task cannot trigger a new WeChat side effect without admission data.
+			disabled := false
+			decision = model.ResolveWechatDeliveryDecision("", false, &disabled).WithServerPublicationCapabilities()
+		}
+		profile["wechat_delivery"] = decision
+	}
 	// Server-applied profiles are usable during refreshes. Their source labels
 	// remain intact so inferred content cannot be treated as verified facts.
 	if projectProfile.IsConfirmed() {

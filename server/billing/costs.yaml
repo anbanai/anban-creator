@@ -102,6 +102,73 @@ models:
     operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
     effective_at: "2026-07-29T00:00:00+08:00"
 
+  # TokenPlayer routes use the corresponding Moonshot model prices.
+  tokenplayer_anthropic/kimi-k3:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "20.00"
+    cache_read_input: "2.00"
+    cache_creation_input: "20.00"
+    output: "100.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  tokenplayer_anthropic/kimi-k2.7-code:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "6.50"
+    cache_read_input: "1.30"
+    cache_creation_input: "6.50"
+    output: "27.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  tokenplayer_anthropic/kimi-k2.7-code-highspeed:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "13.00"
+    cache_read_input: "2.60"
+    cache_creation_input: "13.00"
+    output: "54.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  tokenplayer_openai/kimi-k3:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "20.00"
+    cache_read_input: "2.00"
+    cache_creation_input: "20.00"
+    output: "100.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  tokenplayer_openai/kimi-k2.7-code:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "6.50"
+    cache_read_input: "1.30"
+    cache_creation_input: "6.50"
+    output: "27.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
+  tokenplayer_openai/kimi-k2.7-code-highspeed:
+    pricing_type: "token"
+    currency: "CNY"
+    unit: 1000000
+    input: "13.00"
+    cache_read_input: "2.60"
+    cache_creation_input: "13.00"
+    output: "54.00"
+    operator_evidence: "https://platform.moonshot.cn/docs/pricing/chat"
+    effective_at: "2026-07-29T00:00:00+08:00"
+
   zhipu/glm-5.2:
     pricing_type: "token"
     currency: "CNY"

@@ -11,7 +11,6 @@ import {
   PlugZap,
   BarChart3,
   Flame,
-  MessageCircle,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -24,8 +23,7 @@ export interface NavItem {
 
 export const mvpNavItems: NavItem[] = [
   { to: '/', label: 'AI助手', icon: Sparkles, end: true },
-  { to: '/projects/new/interview', label: '新手引导', icon: MessageCircle, end: true },
-  { to: '/projects', label: '项目', icon: Rss },
+  { to: '/projects', label: '人设', icon: Rss },
   { to: '/tasks', label: '作品', icon: ListChecks },
   { to: '/plans', label: '排期', icon: CalendarRange },
   { to: '/billing', label: '钱包', icon: Coins },
@@ -36,9 +34,9 @@ export const mvpNavItems: NavItem[] = [
 ]
 
 export const workspaceNavItems: NavItem[] = [
-  ...mvpNavItems.slice(0, 5),
+  ...mvpNavItems.slice(0, 4),
   { to: '/timeline', label: '时间线', icon: CalendarDays, adminOnly: true },
-  ...mvpNavItems.slice(5),
+  ...mvpNavItems.slice(4),
 ]
 
 export const adminNavItems: NavItem[] = [

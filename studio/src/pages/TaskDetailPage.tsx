@@ -3,7 +3,7 @@ import { useSubmitLock } from '@/hooks/useSubmitLock'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, BarChart3, Ban, FolderOpen, Loader2, MessageSquare, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowLeft, BarChart3, Ban, Copy, FolderOpen, Loader2, MessageSquare, Trash2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink } from '@/components/ui/breadcrumb'
 import QueryErrorState from '@/components/QueryErrorState'
@@ -19,9 +19,11 @@ import { StatusPill } from '@/components/workspace'
 import SeednoteAnalyticsPanel from '@/components/tasks/SeednoteAnalyticsPanel'
 import WechatAnalyticsPanel from '@/components/tasks/WechatAnalyticsPanel'
 import ChannelsAnalyticsPanel from '@/components/tasks/ChannelsAnalyticsPanel'
-import { TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
+import { CompletionSummary, TaskExecutionRail } from '@/components/tasks/TaskExecutionRail'
+import { TaskDeliverablesPanel } from '@/components/tasks/TaskDeliverablesPanel'
 import { TaskContextSummary } from '@/components/tasks/TaskContextSummary'
 import { TaskDetailsSheet, type TaskDetailsTab } from '@/components/tasks/TaskDetailsSheet'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { TaskFormDialog } from '@/components/tasks/TaskFormDialog'
 import { ImageCapabilityDisplay } from '@/components/ImageCapabilityDisplay'
 import { useImageCapabilities } from '@/hooks/useImageCapabilities'
@@ -33,6 +35,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { taskStatusLabel, platformDisplayName } from '@/lib/labels'
 import { shouldApplyLifecycleRevision, shouldStreamTaskLifecycle } from '@/lib/task-lifecycle'
+import { normalizeProjectProfile } from '@/lib/project-profile'
+import { supportsProfileLab } from '@/lib/project-capabilities'
 import TaskFeedbackCard from '@/components/tasks/TaskFeedbackCard'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
 import { AgentIconStack, agentDisplayName } from '@/components/agent-prompt/AgentIconStack'
@@ -143,6 +147,36 @@ function ResumeTaskDialog({
 const MAX_SSE_LOGS = 500
 const TERMINAL_SSE_EVENTS = new Set(['done', 'completed', 'failed', 'cancelled'])
 
+const profileDimensionLabels: Record<string, string> = {
+  identity: '定位',
+  style: '风格',
+  audience: '受众',
+  platforms: '平台',
+  preferences: '偏好与红线',
+  memory: '经验记忆',
+}
+
+const profileStatusLabels: Record<string, string> = {
+  not_started: '尚未建立',
+  queued: '等待分析',
+  running: '分析中',
+  ready: '已就绪',
+  failed: '分析失败',
+}
+
+function profileDimensionSummary(content: Record<string, unknown>) {
+  const preferredKeys = ['summary', 'description', 'positioning', 'tone', 'audience', 'content']
+  for (const key of preferredKeys) {
+    const value = content[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  const values = Object.values(content)
+    .filter((value): value is string | number | boolean => ['string', 'number', 'boolean'].includes(typeof value))
+    .map(String)
+    .filter(Boolean)
+  return values.slice(0, 2).join(' · ') || '尚未补充'
+}
+
 function appendLog(prev: string[], entry: string): string[] {
   const next = [...prev, entry]
   return next.length > MAX_SSE_LOGS ? next.slice(-MAX_SSE_LOGS) : next
@@ -214,6 +248,7 @@ export default function TaskDetailPage() {
   const [cloneSourceTask, setCloneSourceTask] = useState<Task | null>(null)
   const [showTaskDetails, setShowTaskDetails] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
+  const [manualExecutionProcess, setManualExecutionProcess] = useState<{ taskId: string; open: boolean } | null>(null)
   const [taskDetailsTab, setTaskDetailsTab] = useState<TaskDetailsTab>('overview')
   const [autoScrollLogs, setAutoScrollLogs] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
@@ -263,7 +298,23 @@ export default function TaskDetailPage() {
 
   const deliveredFiles = files?.filter((file) => file.state === 'delivered') ?? []
   const deliverableFiles = deliveredFiles.filter((file) => file.is_deliverable === true)
+  const hasDeliverableResult = files?.some((file) => (
+    (file.state === 'delivered' || file.state === 'retained') && file.is_deliverable === true
+  )) ?? false
   const hasPreservedDelivery = task?.status === 'failed' && deliverableFiles.length > 0
+  const hasPendingServerPublication = task?.lifecycle?.stages.some((stage) => (
+    stage.source === 'server'
+      && stage.kind === 'publication'
+      && (stage.state === 'pending' || stage.state === 'blocked')
+  )) ?? false
+  const defaultExecutionProcessOpen = task?.status !== 'completed'
+    || filesLoading
+    || (files !== undefined && !hasDeliverableResult)
+    || filesError
+    || hasPendingServerPublication
+  const showExecutionProcess = task && manualExecutionProcess?.taskId === task.id
+    ? manualExecutionProcess.open
+    : defaultExecutionProcessOpen
 
   // Resolve project info for the task
   const { data: projectDetail } = useQuery({
@@ -272,6 +323,13 @@ export default function TaskDetailPage() {
     enabled: !!task?.project_id,
   })
   const project = projectDetail?.project
+  const projectProfileQuery = useQuery({
+    queryKey: ['project-profile', project?.id],
+    queryFn: () => api.projects.getAccountProfile(project!.id),
+    enabled: showProjectDialog && Boolean(project?.id) && Boolean(project && supportsProfileLab(project)),
+    staleTime: 30_000,
+  })
+  const projectProfile = normalizeProjectProfile(projectProfileQuery.data ?? project?.profile)
 
   const MAX_PERSISTED_LOGS = 500
   const persistedLogs = (task?.progress_log
@@ -288,6 +346,23 @@ export default function TaskDetailPage() {
   const displayLifecycle = liveLifecycle && liveLifecycle.revision > persistedLifecycleRevision
     ? liveLifecycle
     : task?.lifecycle
+  const executionStages = displayLifecycle?.stages ?? []
+  const summaryStage = executionStages.find((stage) => ['active', 'blocked', 'failed', 'cancelled'].includes(stage.state))
+    ?? executionStages.find((stage) => stage.state === 'pending')
+    ?? [...executionStages].reverse().find((stage) => stage.kind === 'work')
+    ?? executionStages[executionStages.length - 1]
+  const nextExecutionStep = task?.status === 'completed'
+    ? '检查交付结果'
+    : task?.status === 'failed'
+      ? '查看原因并按需恢复'
+      : task?.status === 'cancelled'
+        ? '按需重新开始'
+        : task?.status === 'pending'
+          ? '等待开始'
+          : executionStages.find((stage) => stage.state === 'pending')?.title ?? '持续查看进度'
+  const executionSummary = task
+    ? `阶段：${summaryStage?.title ?? (task.status === 'pending' ? '等待开始' : '执行计划')} · 状态：${taskStatusLabel[task.status] || task.status} · 下一步：${nextExecutionStep}`
+    : ''
   const streamLifecycle = task ? shouldStreamTaskLifecycle(task) : false
   const cancelMutation = useMutation({
     mutationFn: (taskId: string) => api.tasks.cancel(taskId),
@@ -604,10 +679,10 @@ export default function TaskDetailPage() {
             )}
             {project && (
               <Tooltip>
-                <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent" aria-label={`查看项目：${project.name}`} onClick={() => setShowProjectDialog(true)} />}>
+                <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-md" className="hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent" aria-label={`查看人设详情：${project.name}`} onClick={() => setShowProjectDialog(true)} />}>
                   <FolderOpen className="size-4" aria-hidden="true" />
                 </TooltipTrigger>
-                <TooltipContent>查看项目</TooltipContent>
+                <TooltipContent>查看人设详情</TooltipContent>
               </Tooltip>
             )}
           </div>
@@ -676,14 +751,14 @@ export default function TaskDetailPage() {
                     variant="ghost"
                     size="icon-md"
                     className="hover:bg-transparent dark:hover:bg-transparent focus-visible:bg-transparent"
-                    aria-label={task.type === 'hypit' ? '再次改编' : '克隆作品'}
+                    aria-label={task.type === 'hypit' ? '再次改编' : '复刻作品'}
                     onClick={openCloneDialog}
                   />
                 }
               >
-                <RefreshCw className="size-4" aria-hidden="true" />
+                <Copy className="size-4" aria-hidden="true" />
               </TooltipTrigger>
-              <TooltipContent>{task.type === 'hypit' ? '再次改编' : '克隆作品'}</TooltipContent>
+              <TooltipContent>{task.type === 'hypit' ? '再次改编' : '复刻作品'}</TooltipContent>
             </Tooltip>
           ) : null}
           {canClone ? (
@@ -709,6 +784,32 @@ export default function TaskDetailPage() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
+          <TaskDeliverablesPanel
+            taskId={task.id}
+            taskStatus={task.status}
+            files={files ?? []}
+            taskType={task.type}
+            filesLoading={filesLoading}
+            filesError={filesError}
+            onRetryFiles={() => void refetchFiles()}
+          />
+          {(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') && (
+            <CompletionSummary workflow={task.workflow_status} outcome={task.outcome} />
+          )}
+
+          <Collapsible
+            open={showExecutionProcess}
+            onOpenChange={(open) => setManualExecutionProcess({ taskId: task.id, open })}
+          >
+            <div className="rounded-lg border border-border/70 bg-card">
+              <CollapsibleTrigger aria-label="执行过程" className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm font-semibold text-foreground hover:bg-muted/30 sm:px-5">
+                <span className="min-w-0 space-y-0.5">
+                  <span className="block">执行过程</span>
+                  <span className="block break-words text-xs font-normal leading-relaxed text-muted-foreground">{executionSummary}</span>
+                </span>
+                <span className="shrink-0 text-xs font-normal text-muted-foreground">{showExecutionProcess ? '收起' : '展开查看'}</span>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="border-t border-border/70 p-0">
           <TaskExecutionRail
             key={task.id}
             taskId={task.id}
@@ -725,7 +826,12 @@ export default function TaskDetailPage() {
             filesLoading={filesLoading}
             filesError={filesError}
             onRetryFiles={() => void refetchFiles()}
+            showCompletionSummary={false}
+            showFiles={false}
           />
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
 
           {task.type === 'wechat-article' && task.status === 'completed' && project && (
             <WechatAnalyticsPanel taskId={task.id} />
@@ -816,12 +922,17 @@ export default function TaskDetailPage() {
         <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>
           <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
-              <DialogTitle>创作项目信息</DialogTitle>
+              <DialogTitle>人设详情</DialogTitle>
               <DialogDescription>
-                展示当前作品关联的创作项目实时配置，用于对照本次继承的参数。
+                展示当前作品关联的人设实时配置，用于对照本次继承的参数。
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-[70vh] overflow-y-auto pr-1">
+              {snapshot ? (
+                <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+                  当前作品使用的是创建时冻结配置；下方人设信息是实时配置，可能与作品快照不同。
+                </div>
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">创作项目身份</p>
@@ -896,6 +1007,49 @@ export default function TaskDetailPage() {
                   </div>
                 </div>
               )}
+              {project.profile_setup?.platform_accounts?.length ? (
+                <section aria-label="账号信息" className="mt-4 border-t border-border pt-4">
+                  <p className="text-xs text-muted-foreground">账号信息</p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {project.profile_setup.platform_accounts.map((account, index) => (
+                      <div key={`${account.platform}-${account.profile_url}-${index}`} className="min-w-0 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-sm">
+                        <p className="font-medium text-foreground">{platformDisplayName(account.platform)}</p>
+                        <p className="mt-1 break-all text-muted-foreground">{account.account_name || account.profile_url || '待补充'}</p>
+                        {account.account_name && account.profile_url ? <p className="mt-1 break-all text-xs text-muted-foreground">{account.profile_url}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+              <section aria-label="项目画像" className="mt-4 border-t border-border pt-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground">画像资料</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {projectProfileQuery.isFetching ? '正在读取画像' : projectProfile ? `${profileStatusLabels[projectProfile.initialization_status] || '未标记'} · v${projectProfile.version}` : '暂无画像资料'}
+                    </p>
+                  </div>
+                  {projectProfile && <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">{projectProfile.status === 'confirmed' ? '已确认' : '草稿'}</span>}
+                </div>
+                {projectProfileQuery.isError ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                    <span>画像资料加载失败</span>
+                    <Button type="button" variant="outline" size="sm" onClick={() => void projectProfileQuery.refetch()}>重试</Button>
+                  </div>
+                ) : projectProfile ? (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {Object.entries(projectProfile.dimensions).map(([name, dimension]) => (
+                      <div key={name} className="min-w-0 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+                        <p className="text-xs font-medium text-muted-foreground">{profileDimensionLabels[name] || name}</p>
+                        <p className="mt-1 line-clamp-3 text-sm text-foreground">{profileDimensionSummary(dimension.content)}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : !projectProfileQuery.isFetching ? (
+                  <p className="mt-3 text-sm text-muted-foreground">当前人设还没有画像资料。</p>
+                ) : null}
+                {projectProfile?.last_error ? <p className="mt-2 text-xs text-destructive">{projectProfile.last_error}</p> : null}
+              </section>
             </div>
           </DialogContent>
         </Dialog>

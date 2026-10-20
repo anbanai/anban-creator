@@ -196,7 +196,11 @@ func newPublicationFixture(t *testing.T) *publicationFixture {
 	if err := repo.Projects().Create(ctx, &model.Project{ID: f.projectID, UserID: f.userID, Platform: model.PlatformWechat, Name: "WeChat", Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Tasks().Create(ctx, &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusRunning, CurrentExecutionID: &f.executionID}); err != nil {
+	task := &model.Task{ID: f.taskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusRunning, CurrentExecutionID: &f.executionID}
+	task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, MayUploadMaterial: true,
+	}})
+	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
@@ -1869,6 +1873,27 @@ func TestManualModeAllowsExplicitFormalPublish(t *testing.T) {
 	}
 }
 
+func TestUserAssistedModeRejectsFormalPublishWithoutEnqueue(t *testing.T) {
+	f := newPublicationFixture(t)
+	task, err := f.repo.Tasks().FindByID(context.Background(), f.taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted}})
+	if err := f.repo.Tasks().Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Publish(context.Background(), f.userID, f.taskID); !errors.Is(err, ErrWechatDeliveryModeUserAssisted) {
+		t.Fatalf("Publish error = %v, want user-assisted mode refusal", err)
+	}
+	if f.api.submitCalls != 0 {
+		t.Fatalf("provider submit calls = %d, want 0", f.api.submitCalls)
+	}
+	if enqueuer := f.svc.enqueuer.(*recordingWechatPublicationEnqueuer); len(enqueuer.immediate) != 0 || len(enqueuer.delayed) != 0 {
+		t.Fatalf("enqueued tasks = %#v/%#v, want none", enqueuer.immediate, enqueuer.delayed)
+	}
+}
+
 func TestAPIConfirmedModeAutomaticallyPublishesAfterDraftCreation(t *testing.T) {
 	f := newPublicationFixture(t)
 	f.api.addResponse = &appwechat.DraftAddResponse{MediaID: "auto-draft"}
@@ -1994,6 +2019,44 @@ func TestBindManualPublicationCompletesDraftWithoutCallingProvider(t *testing.T)
 	bound, err = f.svc.BindManualPublication(context.Background(), f.userID, f.taskID, "")
 	if err != nil || bound.Status != model.WechatPublicationStatusPublished || bound.ArticleURL != "" {
 		t.Fatalf("empty URL manual bind = %#v, %v", bound, err)
+	}
+}
+
+func TestSkipPublicationStopsFollowupAndCanBeRestored(t *testing.T) {
+	f := newPublicationFixture(t)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusAwaitingManual
+	publication.ManualPublishRequired = true
+	publication.WechatStatusCode = 48001
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+
+	skipped, err := f.svc.Skip(context.Background(), f.userID, f.taskID)
+	if err != nil || skipped.Status != "skipped" || !skipped.ManualPublishRequired || skipped.NextCheckAt != nil {
+		t.Fatalf("Skip = %#v, %v", skipped, err)
+	}
+	if f.api.submitCalls != 0 {
+		t.Fatalf("skip submitted publication %d times", f.api.submitCalls)
+	}
+
+	restored, err := f.svc.RestoreSkipped(context.Background(), f.userID, f.taskID)
+	if err != nil || restored.Status != model.WechatPublicationStatusAwaitingManual || !restored.ManualPublishRequired {
+		t.Fatalf("RestoreSkipped = %#v, %v", restored, err)
+	}
+}
+
+func TestSkipPublicationRejectsSubmissionEvidence(t *testing.T) {
+	f := newPublicationFixture(t)
+	publication := f.seedDrafted(t)
+	publication.Status = model.WechatPublicationStatusAwaitingManual
+	publication.SubmitAttemptedAt = &f.now
+	if err := f.repo.WechatPublications().Update(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+
+	if skipped, err := f.svc.Skip(context.Background(), f.userID, f.taskID); !errors.Is(err, ErrWechatPublicationConflict) || skipped.Status != model.WechatPublicationStatusAwaitingManual {
+		t.Fatalf("Skip with submission evidence = %#v, %v", skipped, err)
 	}
 }
 
@@ -2885,7 +2948,11 @@ func TestWechatPublicationRecoverDueDispatchesDatabaseBackedWork(t *testing.T) {
 	}
 
 	manualTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: manualTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}); err != nil {
+	manualTask := &model.Task{ID: manualTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}
+	manualTask.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, MayUploadMaterial: true,
+	}})
+	if err := f.repo.Tasks().Create(context.Background(), manualTask); err != nil {
 		t.Fatal(err)
 	}
 	manual := &model.WechatPublication{
@@ -3312,7 +3379,11 @@ func TestManualReconcileBatchesProjectAndUsesOnlyHighConfidenceMatches(t *testin
 	f := newPublicationFixture(t)
 	first := f.seedDrafted(t)
 	secondTaskID := uuid.NewString()
-	if err := f.repo.Tasks().Create(context.Background(), &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}); err != nil {
+	secondTask := &model.Task{ID: secondTaskID, UserID: f.userID, ProjectID: f.projectID, Type: model.TaskTypeWechatArticle, AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, Status: model.TaskStatusCompleted}
+	secondTask.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, MayUploadMaterial: true,
+	}})
+	if err := f.repo.Tasks().Create(context.Background(), secondTask); err != nil {
 		t.Fatal(err)
 	}
 	created := f.now.Add(-time.Hour)

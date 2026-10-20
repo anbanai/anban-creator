@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { ProjectIdentity, type ProjectIdentityProject } from '@/components/agent-prompt/ProjectIdentity'
 
 type Credentials = { appID: string; secret: string }
@@ -29,14 +30,18 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange }: Props 
   const [saved, setSaved] = useState(draft)
   const [secretConfigured, setSecretConfigured] = useState(config.secret_configured)
   const [credentialsConflict, setCredentialsConflict] = useState(config.credentials_conflict)
+  const [automaticDeliveryEnabled, setAutomaticDeliveryEnabled] = useState(config.automatic_delivery_enabled === true)
+  const [savedAutomaticDeliveryEnabled, setSavedAutomaticDeliveryEnabled] = useState(config.automatic_delivery_enabled === true)
   const accountChanged = draft.appID.trim() !== saved.appID.trim()
   const requiresSecret = !secretConfigured || credentialsConflict || accountChanged
   const canSave = Boolean(draft.appID.trim()) && (!requiresSecret || Boolean(draft.secret.trim()))
+    || (!draft.appID.trim() && automaticDeliveryEnabled !== savedAutomaticDeliveryEnabled)
   const credentialsReady = Boolean(draft.appID.trim()) && secretConfigured && !credentialsConflict && !accountChanged
   const save = useMutation({
     mutationFn: (credentials: Credentials) => api.projects.upsertWechatPlatformConfig(project.id, {
-      app_id: credentials.appID.trim(),
+      ...(credentials.appID.trim() ? { app_id: credentials.appID.trim() } : {}),
       ...(credentials.secret.trim() ? { secret: credentials.secret.trim() } : {}),
+      automatic_delivery_enabled: automaticDeliveryEnabled,
     }),
     onSuccess: (result, credentials) => {
       void queryClient.invalidateQueries({ queryKey: ['project-wechat-platform-config', project.id], refetchType: 'none' })
@@ -47,12 +52,14 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange }: Props 
       setSaved(clean)
       setSecretConfigured(result.secret_configured)
       setCredentialsConflict(result.credentials_conflict)
+      setAutomaticDeliveryEnabled(result.automatic_delivery_enabled === true)
+      setSavedAutomaticDeliveryEnabled(result.automatic_delivery_enabled === true)
     },
     onError: (error) => {
       if (active.current) toast.error(getApiErrorMessage(error, '自动发布设置保存失败，请重试'))
     },
   })
-  const dirty = draft.appID !== saved.appID || draft.secret !== saved.secret
+  const dirty = draft.appID !== saved.appID || draft.secret !== saved.secret || automaticDeliveryEnabled !== savedAutomaticDeliveryEnabled
   useEffect(() => { onStateChange(dirty, save.isPending) }, [dirty, save.isPending, onStateChange])
   function update(value: Partial<Credentials>) {
     setDraft((current) => ({ ...current, ...value }))
@@ -80,6 +87,10 @@ function ChannelConfigEditor({ project, config, onClose, onStateChange }: Props 
         <Label htmlFor="channel-app-id">微信 AppID</Label>
         <Input id="channel-app-id" value={draft.appID} required placeholder="wx..." disabled={save.isPending} onChange={(event) => update({ appID: event.target.value })} />
       </div>
+      <label className="flex items-center justify-between gap-4 border-t pt-4 text-sm">
+        <span><span className="block font-medium">允许自动交付</span><span className="mt-1 block text-xs text-muted-foreground">关闭后，生成的文章需要复制到公众号后台完成草稿。</span></span>
+        <Switch checked={automaticDeliveryEnabled} onCheckedChange={setAutomaticDeliveryEnabled} aria-label="允许自动交付" disabled={save.isPending} />
+      </label>
       <div className="space-y-2">
         <Label htmlFor="channel-secret">微信 AppSecret</Label>
         <Input id="channel-secret" type="password" autoComplete="new-password" value={draft.secret} placeholder={requiresSecret ? '请输入 AppSecret' : '留空则保持现有密钥'} required={requiresSecret} aria-describedby="channel-secret-help" disabled={save.isPending} onChange={(event) => update({ secret: event.target.value })} />

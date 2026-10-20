@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const WechatPublicationStatusMigration = "20261004_wechat_publication_status_constraint.sql"
+const WechatPublicationStatusMigration = "20261019_wechat_publication_skipped.sql"
 
 var publicationInClause = regexp.MustCompile("(?i)^statusin\\((.*)\\)$")
 var publicationStatusLiteral = regexp.MustCompile(`^(?:_[a-zA-Z0-9]+)?'([a-z_]+)'$`)
@@ -57,7 +57,7 @@ func currentPublicationStatusClause(clause string) bool {
 		}
 		actual = append(actual, m[1])
 	}
-	expected := []string{model.WechatPublicationStatusDrafting, model.WechatPublicationStatusDrafted, model.WechatPublicationStatusAwaitingManual, model.WechatPublicationStatusAmbiguous, model.WechatPublicationStatusPublishing, model.WechatPublicationStatusPublished, model.WechatPublicationStatusNeedsSelection, model.WechatPublicationStatusPublishFailed, model.WechatPublicationStatusUnsupported}
+	expected := []string{model.WechatPublicationStatusDrafting, model.WechatPublicationStatusDrafted, model.WechatPublicationStatusAwaitingManual, model.WechatPublicationStatusAmbiguous, model.WechatPublicationStatusPublishing, model.WechatPublicationStatusPublished, model.WechatPublicationStatusNeedsSelection, model.WechatPublicationStatusPublishFailed, model.WechatPublicationStatusUnsupported, model.WechatPublicationStatusSkipped}
 	sort.Strings(actual)
 	sort.Strings(expected)
 	return strings.Join(actual, ",") == strings.Join(expected, ",")

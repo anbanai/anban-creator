@@ -23,6 +23,7 @@ func makeCompletedPublicationRecoveryFixture(t *testing.T, action string) (*Task
 	t.Helper()
 	svc, repo, task, execution := setupCloudCompletionTest(t, false)
 	enqueuer := svc.enqueuer.(*mockEnqueuer)
+	setAutomaticWechatDeliverySnapshot(task)
 	now := task.CreatedAt
 	if _, err := repo.TaskExecutions().Transition(context.Background(), execution.ID,
 		[]string{model.TaskExecutionRunning}, model.TaskExecutionSucceeded,
@@ -377,6 +378,7 @@ func TestRecoverWechatPublicationDoesNotCreateAdditionalTaskCharge(t *testing.T)
 		t.Fatalf("CreateManual = %#v, %v", tasks, err)
 	}
 	task := tasks[0]
+	setAutomaticWechatDeliverySnapshot(task)
 	execution := &model.TaskExecution{
 		ID: uuid.NewString(), TaskID: task.ID, Attempt: 1, Target: "test",
 		Status: model.TaskExecutionSucceeded, Purpose: model.TaskExecutionPurposePrimary,

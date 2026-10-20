@@ -20,6 +20,7 @@ const (
 	WechatPublicationStatusNeedsSelection    = "needs_selection"
 	WechatPublicationStatusPublishFailed     = "publish_failed"
 	WechatPublicationStatusUnsupported       = "unsupported"
+	WechatPublicationStatusSkipped           = "skipped"
 )
 
 func IsWechatPublicationSource(value string) bool {
@@ -31,7 +32,7 @@ func IsWechatPublicationStatus(value string) bool {
 	for _, status := range []string{
 		WechatPublicationStatusDrafting, WechatPublicationStatusDrafted, WechatPublicationStatusAwaitingManual, WechatPublicationStatusPublishSubmitting,
 		WechatPublicationStatusPublishing, WechatPublicationStatusPublished, WechatPublicationStatusNeedsSelection,
-		WechatPublicationStatusPublishFailed, WechatPublicationStatusUnsupported,
+		WechatPublicationStatusPublishFailed, WechatPublicationStatusUnsupported, WechatPublicationStatusSkipped,
 	} {
 		if value == status {
 			return true
@@ -62,7 +63,7 @@ type WechatPublication struct {
 	DraftCoverCropPercentList datatypes.JSON `gorm:"type:json" json:"draft_cover_crop_percent_list,omitempty"`
 
 	Source                  string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_source,source IN ('anban_api','wechat_console')" json:"source"`
-	Status                  string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_status,status IN ('drafting','drafted','awaiting_manual_publish','ambiguous','publishing','published','needs_selection','publish_failed','unsupported')" json:"status"`
+	Status                  string `gorm:"type:varchar(32);index;not null;check:chk_wechat_publication_status,status IN ('drafting','drafted','awaiting_manual_publish','ambiguous','publishing','published','needs_selection','publish_failed','unsupported','skipped')" json:"status"`
 	PublishID               string `gorm:"type:varchar(191);not null;default:'';index" json:"publish_id,omitempty"`
 	MsgDataID               string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_data_id,omitempty"`
 	MsgID                   string `gorm:"type:varchar(191);not null;default:'';index" json:"msg_id,omitempty"`

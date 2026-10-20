@@ -215,10 +215,16 @@ func (c DshConfig) Validate() error {
 			errs = append(errs, "dsh.timeout_sec must be positive for kubernetes executor")
 		}
 		errs = append(errs, validateKubernetesResourceConfig("dsh.resources", c.Resources)...)
-		for _, name := range []string{"cpu", "memory"} {
-			if _, requestSet := c.Resources.Requests[name]; !requestSet {
-				if _, limitSet := c.Resources.Limits[name]; !limitSet {
-					errs = append(errs, fmt.Sprintf("dsh.resources must define %s in requests or limits for kubernetes executor", name))
+		for _, group := range []struct {
+			name   string
+			values map[string]string
+		}{
+			{name: "requests", values: c.Resources.Requests},
+			{name: "limits", values: c.Resources.Limits},
+		} {
+			for _, name := range []string{"cpu", "memory"} {
+				if _, ok := group.values[name]; !ok {
+					errs = append(errs, fmt.Sprintf("dsh.resources.%s.%s is required for kubernetes executor", group.name, name))
 				}
 			}
 		}
@@ -1052,6 +1058,17 @@ func (c *KubernetesConfig) UnmarshalYAML(value *yaml.Node) error {
 type KubernetesResourceConfig struct {
 	Requests map[string]string `yaml:"requests"`
 	Limits   map[string]string `yaml:"limits"`
+}
+
+func (c *KubernetesResourceConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateYAMLMappingFields(value, "kubernetes resources", map[string]bool{
+		"requests": true,
+		"limits":   true,
+	}); err != nil {
+		return err
+	}
+	type plain KubernetesResourceConfig
+	return value.Decode((*plain)(c))
 }
 
 // ResourcesForTask returns a copy of the default resource contract overlaid by

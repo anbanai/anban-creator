@@ -10,8 +10,8 @@ const project = { id: 'shared-project', name: '共享品牌' }
 
 describe('ProjectChannelConfigDialog', () => {
   beforeEach(() => {
-    vi.spyOn(api.projects, 'getWechatPlatformConfig').mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: 'wx-shared', secret_configured: true, credentials_conflict: false })
-    vi.spyOn(api.projects, 'upsertWechatPlatformConfig').mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: 'wx-updated', secret_configured: true, credentials_conflict: false })
+    vi.spyOn(api.projects, 'getWechatPlatformConfig').mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: 'wx-shared', secret_configured: true, automatic_delivery_enabled: true, credentials_conflict: false })
+    vi.spyOn(api.projects, 'upsertWechatPlatformConfig').mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: 'wx-updated', secret_configured: true, automatic_delivery_enabled: true, credentials_conflict: false })
   })
 
   it('shows one WeChat platform and saves shared credentials for both content channels', async () => {
@@ -25,12 +25,12 @@ describe('ProjectChannelConfigDialog', () => {
     expect(screen.getByLabelText('微信 AppSecret')).toBeRequired()
     fireEvent.change(screen.getByLabelText('微信 AppSecret'), { target: { value: 'secret-updated' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(api.projects.upsertWechatPlatformConfig).toHaveBeenCalledWith(project.id, { app_id: 'wx-updated', secret: 'secret-updated' }))
+    await waitFor(() => expect(api.projects.upsertWechatPlatformConfig).toHaveBeenCalledWith(project.id, { app_id: 'wx-updated', secret: 'secret-updated', automatic_delivery_enabled: true }))
     expect(api.projects.upsertWechatPlatformConfig).toHaveBeenCalledTimes(1)
   })
 
   it('requires a fresh secret when legacy WeChat channel credentials conflict', async () => {
-    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: '', secret_configured: true, credentials_conflict: true })
+    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: '', secret_configured: true, automatic_delivery_enabled: true, credentials_conflict: true })
     render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
     await screen.findByLabelText('微信 AppID')
     expect(screen.getByLabelText('微信 AppSecret')).toBeRequired()
@@ -51,7 +51,7 @@ describe('ProjectChannelConfigDialog', () => {
   })
 
   it('can configure an empty project and retry a failed save without creating a project', async () => {
-    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: '', secret_configured: false, credentials_conflict: false })
+    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: '', secret_configured: false, automatic_delivery_enabled: true, credentials_conflict: false })
     vi.mocked(api.projects.upsertWechatPlatformConfig).mockRejectedValueOnce(new Error('temporary failure'))
     const onClose = vi.fn()
     render(<ProjectChannelConfigDialog project={project} onClose={onClose} />)
@@ -71,21 +71,29 @@ describe('ProjectChannelConfigDialog', () => {
     expect(onClose).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /^关闭$/ }))
     expect(onClose).toHaveBeenCalledTimes(1)
-    expect(api.projects.upsertWechatPlatformConfig).toHaveBeenLastCalledWith(project.id, { app_id: 'wx-new', secret: 'test-secret' })
+    expect(api.projects.upsertWechatPlatformConfig).toHaveBeenLastCalledWith(project.id, { app_id: 'wx-new', secret: 'test-secret', automatic_delivery_enabled: true })
+  })
+
+  it('keeps automatic delivery off when legacy configuration omits the switch', async () => {
+    vi.mocked(api.projects.getWechatPlatformConfig).mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: 'wx-shared', secret_configured: true, credentials_conflict: false } as Awaited<ReturnType<typeof api.projects.getWechatPlatformConfig>>)
+    vi.mocked(api.projects.upsertWechatPlatformConfig).mockResolvedValue({ project_id: project.id, platform: 'wechat', app_id: 'wx-shared', secret_configured: true, automatic_delivery_enabled: false, credentials_conflict: false })
+    render(<ProjectChannelConfigDialog project={project} onClose={vi.fn()} />)
+    await screen.findByDisplayValue('wx-shared')
+    expect(screen.getByLabelText('允许自动交付')).not.toBeChecked()
   })
 
   it('waits for a fresh read before editing cached credentials', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    client.setQueryData(['project-wechat-platform-config', project.id], { project_id: project.id, platform: 'wechat', app_id: 'wx-stale', secret_configured: true, credentials_conflict: false })
+    client.setQueryData(['project-wechat-platform-config', project.id], { project_id: project.id, platform: 'wechat', app_id: 'wx-stale', secret_configured: true, automatic_delivery_enabled: true, credentials_conflict: false })
     let resolveRead!: (value: Awaited<ReturnType<typeof api.projects.getWechatPlatformConfig>>) => void
     vi.mocked(api.projects.getWechatPlatformConfig).mockReturnValueOnce(new Promise((resolve) => { resolveRead = resolve }))
     render(<QueryClientProvider client={client}><ProjectChannelConfigDialog project={project} onClose={vi.fn()} /></QueryClientProvider>)
     expect(screen.queryByLabelText('微信 AppID')).not.toBeInTheDocument()
-    await act(async () => resolveRead({ project_id: project.id, platform: 'wechat', app_id: 'wx-fresh', secret_configured: true, credentials_conflict: false }))
+    await act(async () => resolveRead({ project_id: project.id, platform: 'wechat', app_id: 'wx-fresh', secret_configured: true, automatic_delivery_enabled: true, credentials_conflict: false }))
     await screen.findByDisplayValue('wx-fresh')
     fireEvent.change(screen.getByLabelText('微信 AppSecret'), { target: { value: 'test-secret' } })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(api.projects.upsertWechatPlatformConfig).toHaveBeenCalledWith(project.id, { app_id: 'wx-fresh', secret: 'test-secret' }))
+    await waitFor(() => expect(api.projects.upsertWechatPlatformConfig).toHaveBeenCalledWith(project.id, { app_id: 'wx-fresh', secret: 'test-secret', automatic_delivery_enabled: true }))
     client.clear()
   })
 

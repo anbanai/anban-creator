@@ -37,6 +37,10 @@ export function shouldStreamTaskLifecycle(task: Pick<Task, 'status' | 'lifecycle
 
 export function taskStageSummary(task: Pick<Task, 'status' | 'lifecycle'>): { title: string; state?: TaskLifecycleStage['state'] } {
   const stages = Array.isArray(task.lifecycle?.stages) ? task.lifecycle.stages : []
+  const publicationStage = stages.find((stage) => stage.kind === 'publication')
+  if (task.status === 'completed' && (publicationStage?.state === 'pending' || publicationStage?.state === 'skipped')) {
+    return { title: '作品已完成', state: 'complete' }
+  }
   if (task.status === 'failed' || task.status === 'cancelled') {
     const terminalState = task.status === 'failed' ? 'failed' : 'cancelled'
     const recoveryStage = stages.find((stage) => stage.kind === 'work' && stage.state === terminalState)

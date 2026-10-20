@@ -19,7 +19,7 @@ func registerContentMetadataTools(server *mcp.Server) {
 			"metadata": map[string]any{"type": "string", "description": "JSON completion-metadata payload"},
 		}, "required": []any{"task_id", "metadata"}},
 	}, contentMetadataSubmitHandler)
-	server.AddTool(&mcp.Tool{Name: "recompute_content_tags", Description: "Recompute only content tags from the stored Hook snapshot.", InputSchema: recomputeSchema()}, contentMetadataRecomputeTagsHandler)
+	server.AddTool(&mcp.Tool{Name: "recompute_content_tags", Description: "Recompute only content tags from the stored completion metadata or content-tags artifact.", InputSchema: recomputeSchema()}, contentMetadataRecomputeTagsHandler)
 	server.AddTool(&mcp.Tool{Name: "recompute_agent_feedback", Description: "Recompute only agent feedback from the stored Hook snapshot.", InputSchema: recomputeSchema()}, contentMetadataRecomputeFeedbackHandler)
 	server.AddTool(&mcp.Tool{Name: "get_completion_metadata_status", Description: "Get completion metadata status for one task execution.", InputSchema: recomputeSchema()}, contentMetadataStatusHandler)
 }

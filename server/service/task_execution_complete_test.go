@@ -33,6 +33,13 @@ func setupCloudCompletionTest(t *testing.T, withArtifact bool, startedOverride .
 	return svc, repo, task, execution
 }
 
+func setAutomaticWechatDeliverySnapshot(task *model.Task) {
+	task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true,
+		AppIDConfigured: true, SecretConfigured: true, MayUploadMaterial: true,
+	}})
+}
+
 func TestBuildCloudTaskOutcomeUsesAgentReviewForWechatPicture(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, task, execution := setupCloudCompletionTest(t, false)
@@ -121,6 +128,7 @@ func setupCloudCompletionTestWithDB(t *testing.T, withArtifact bool, startedOver
 		Status: model.TaskStatusRunning, ImageCapabilityKey: "standard", ExecutionProfile: profile.ID,
 		AgentProfileSnapshot: snapshot, AgentProfileFingerprint: fingerprint,
 	}
+	setAutomaticWechatDeliverySnapshot(task)
 	visualsDisabled := false
 	task.ArticleWithCover = &visualsDisabled
 	task.ArticleWithContentImages = &visualsDisabled
@@ -945,7 +953,10 @@ func TestCompleteCloudExecutionPublishesReadyArticleExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	withoutContentImages := false
 	task.ArticleWithContentImages = &withoutContentImages
-	task.SetProjectSnapshot(model.ProjectSnapshot{Author: "Frozen Author", Platform: model.PlatformWechat})
+	task.SetProjectSnapshot(model.ProjectSnapshot{Author: "Frozen Author", Platform: model.PlatformWechat, WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true,
+		AppIDConfigured: true, SecretConfigured: true, MayUploadMaterial: true,
+	}})
 	if err := repo.Tasks().Update(ctx, task); err != nil {
 		t.Fatal(err)
 	}

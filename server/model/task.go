@@ -173,6 +173,7 @@ type ProjectSnapshot struct {
 	HypitDefaults                 HypitDefaults            `json:"hypit_defaults,omitempty"`
 	MontageDefaults               MontageDefaults          `json:"montage_defaults,omitempty"`
 	ChannelConfig                 map[string]any           `json:"channel_config,omitempty"`
+	WechatDelivery                WechatDeliveryDecision   `json:"wechat_delivery,omitempty"`
 	Profile                       ProjectProfile           `json:"profile,omitempty"`
 }
 
@@ -181,6 +182,7 @@ type Task struct {
 	ID        string  `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID    string  `gorm:"type:char(36);index:idx_user_status,priority:1;index:idx_user_created,priority:1;not null" json:"user_id"`
 	ProjectID string  `gorm:"type:char(36);index" json:"project_id"`
+	AssistantCheckpointID *string `gorm:"type:char(36);uniqueIndex" json:"-"`
 	PlanID    *string `gorm:"type:char(36);index" json:"plan_id,omitempty"`
 	// New identity fields. Type is legacy storage used only by the migration and
 	// old read models; new admission and runtime code use AgentID/Channel/TaskKind.
@@ -333,7 +335,7 @@ func (s ProjectSnapshot) HasData() bool {
 		strings.TrimSpace(s.Writer) != "" ||
 		strings.TrimSpace(s.Theme) != "" ||
 		strings.TrimSpace(s.Author) != "" ||
-		s.Profile.SchemaVersion != 0 || len(s.ChannelConfig) > 0
+		s.Profile.SchemaVersion != 0 || len(s.ChannelConfig) > 0 || s.WechatDelivery.Mode != ""
 }
 
 func (t *Task) SetImageCapabilitySnapshot(snapshot ImageCapabilitySnapshot) {

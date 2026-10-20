@@ -908,12 +908,23 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 	if err := repo.Projects().Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		config := &model.ProjectChannelConfig{ID: uuid.NewString(), ProjectID: project.ID, Channel: channel}
+		config.Config = datatypes.NewJSONType(map[string]any{
+			"wechat_app_id": "wx-task-snapshot", "wechat_secret": "secret-task-snapshot", "automatic_delivery_enabled": true,
+		})
+		if err := repo.ProjectChannelConfigs().Upsert(ctx, config); err != nil {
+			t.Fatal(err)
+		}
+	}
 
+	projectSnapshot := model.SnapshotProject(project)
 	tasks, err := svc.CreateManual(ctx, CreateManualParams{AgentID: model.AgentIDArticle, Channel: model.ChannelArticle, TaskKind: model.TaskKindContentGeneration, ExecutionProfile: "effective",
-		UserID:    userID,
-		ProjectID: project.ID,
-		Prompt:    "topic",
-		Quantity:  1,
+		UserID:          userID,
+		ProjectID:       project.ID,
+		Prompt:          "topic",
+		Quantity:        1,
+		ProjectSnapshot: &projectSnapshot,
 	})
 	if err != nil {
 		t.Fatalf("CreateManual: %v", err)
@@ -929,6 +940,18 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 	if err := repo.Projects().Update(ctx, project); err != nil {
 		t.Fatalf("update project: %v", err)
 	}
+	for _, channel := range []string{model.ChannelArticle, model.ChannelWechatPicture} {
+		config, err := repo.ProjectChannelConfigs().Get(ctx, project.ID, channel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := config.Config.Data()
+		values["automatic_delivery_enabled"] = false
+		config.Config = datatypes.NewJSONType(values)
+		if err := repo.ProjectChannelConfigs().Upsert(ctx, config); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	found, err := repo.Tasks().FindByID(ctx, tasks[0].ID)
 	if err != nil {
@@ -938,6 +961,17 @@ func TestTaskService_CreateManualSnapshotsProjectConfig(t *testing.T) {
 	if snap.ProjectName != "旧项目名" || snap.Instructions != "旧定位" ||
 		snap.VisualStyle != "旧视觉" || snap.Author != "旧署名" {
 		t.Fatalf("snapshot = %+v, want original project values", snap)
+	}
+	if snap.WechatDelivery.Mode != model.WechatDeliveryModeAutomatic || !snap.WechatDelivery.SecretConfigured ||
+		snap.WechatDelivery.MayCreateDraft || snap.WechatDelivery.MayFormallyPublish {
+		t.Fatalf("WeChat delivery decision = %+v, want frozen automatic upload-only access", snap.WechatDelivery)
+	}
+	encodedSnapshot, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encodedSnapshot), "secret-task-snapshot") {
+		t.Fatal("frozen project snapshot leaked the WeChat secret")
 	}
 	if found.ImageRatio != "4:3" {
 		t.Fatalf("task image ratio = %q, want inherited project ratio 4:3", found.ImageRatio)

@@ -23,6 +23,7 @@ export interface WechatPlatformConfig {
   app_id: string
   secret_configured: boolean
   credentials_conflict: boolean
+  automatic_delivery_enabled: boolean
 }
 
 export interface Project {

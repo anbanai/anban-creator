@@ -88,7 +88,7 @@ export const projectsApi = {
   getWechatPlatformConfig: (id: string) =>
     unwrap<WechatPlatformConfig>(http.get(`/projects/${id}/platform-configs/wechat`)),
 
-  upsertWechatPlatformConfig: (id: string, data: { app_id: string; secret?: string }) =>
+  upsertWechatPlatformConfig: (id: string, data: { app_id?: string; secret?: string; automatic_delivery_enabled?: boolean }) =>
     unwrap<WechatPlatformConfig>(http.put(`/projects/${id}/platform-configs/wechat`, data)),
 
   platformConfigs: () =>

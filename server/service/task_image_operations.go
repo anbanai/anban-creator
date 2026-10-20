@@ -126,6 +126,17 @@ func NewTaskImageOperationsService(tasks *TaskService, images taskImageOperation
 	}
 }
 
+func wechatDeliveryDecision(task *model.Task) model.WechatDeliveryDecision {
+	if task == nil {
+		return model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted}
+	}
+	decision := task.ProjectSnapshot.Data().WechatDelivery
+	if decision.Mode == "" && (task.Channel == model.ChannelArticle || task.Channel == model.ChannelWechatPicture || task.Type == model.TaskTypeWechatArticle || task.Type == model.TaskTypeWechatPicture) {
+		return model.WechatDeliveryDecision{Mode: model.WechatDeliveryModeUserAssisted, ReasonCodes: []string{model.WechatDeliveryReasonCapabilityMissing}}
+	}
+	return decision
+}
+
 func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskImageRequest) (*UploadImageResult, error) {
 	if req.ProjectID == "" {
 		return nil, ErrTaskImageOperationProjectRequired
@@ -138,6 +149,14 @@ func (s *TaskImageOperationsService) Upload(ctx context.Context, req UploadTaskI
 	}
 	if err := s.validateTask(ctx, req.UserID, req.TaskID, req.ProjectID); err != nil {
 		return nil, err
+	}
+	task, err := s.tasks.GetByID(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	decision := wechatDeliveryDecision(task)
+	if decision.IsUserAssisted() || !decision.MayUploadMaterial {
+		return nil, ErrWechatDeliveryModeUserAssisted
 	}
 	taskFile, filePath, cleanup, err := s.resolveUploadPath(ctx, req)
 	if err != nil {

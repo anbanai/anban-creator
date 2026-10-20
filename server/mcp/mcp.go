@@ -248,12 +248,17 @@ func newTokenVerifier(apiKeySvc *service.APIKeyService, staticKey string, execut
 		// identity in MCP context.
 		if interactiveSvc != nil {
 			if sessionID, userID, expiresAt, err := interactiveSvc.ResolveRuntimeSession(token); err == nil {
+				modeID, modeErr := interactiveSvc.AssistantRuntimeMode(userID, sessionID)
+				if modeErr != nil {
+					return nil, modeErr
+				}
 				return &mcpauth.TokenInfo{
 					UserID:     userID,
 					Scopes:     []string{"mcp", "interactive"},
 					Expiration: expiresAt,
 					Extra: map[string]any{
 						"interactive_session_id": sessionID,
+						"assistant_mode_id":      modeID,
 					},
 				}, nil
 			}
@@ -360,6 +365,7 @@ func executionScopeMiddleware(next http.Handler, authorizer ExecutionAccessAutho
 // and task-bound capabilities remain execution-scoped and are therefore
 // intentionally excluded from this list.
 var interactiveMCPTools = map[string]struct{}{
+	"stage_assistant_draft":       {},
 	"stage_project_creator_draft": {},
 	"list_projects":               {},
 	"get_project":                 {},
@@ -403,6 +409,11 @@ func interactiveScopeMiddleware(next http.Handler) http.Handler {
 		}
 		for _, request := range requests {
 			if request.Method == "tools/call" {
+				modeID, _ := info.Extra["assistant_mode_id"].(string)
+				if (modeID == service.AssistantModeCreation || modeID == service.AssistantModeReview) && strings.TrimSpace(request.Params.Name) != "stage_assistant_draft" {
+					http.Error(w, "Assistant runtime credential cannot read outside its frozen context", http.StatusForbidden)
+					return
+				}
 				if _, allowed := interactiveMCPTools[strings.TrimSpace(request.Params.Name)]; allowed {
 					continue
 				}
@@ -470,6 +481,7 @@ var executionToolScopes = map[string]executionToolScope{
 	"get_completion_metadata_status": {RequireTaskID: true, AllowExecutionTarget: true},
 	"create_draft":                   {Denied: true},
 	"stage_project_creator_draft":    {Denied: true},
+	"stage_assistant_draft":          {Denied: true},
 	"generate_image":                 {RequireProjectID: true, RequireTaskID: true},
 	"crop_image":                     {RequireTaskID: true},
 	"upload_image":                   {RequireProjectID: true, RequireTaskID: true},

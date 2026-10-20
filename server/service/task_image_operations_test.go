@@ -215,6 +215,10 @@ func newTaskImageOperationsCropFixture(t *testing.T) *taskImageOperationsCropFix
 		ID: uuid.NewString(), UserID: userID, ProjectID: projectID,
 		Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning,
 	}
+	task.Channel = model.ChannelArticle
+	task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true, MayUploadMaterial: true,
+	}})
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +250,41 @@ func newTaskImageOperationsCropFixture(t *testing.T) *taskImageOperationsCropFix
 	return &taskImageOperationsCropFixture{
 		service: NewTaskImageOperationsService(tasks, nil, nil, nil, TaskImageOperationsConfig{}, &logger),
 		tasks:   tasks, repo: repo, store: store, task: task, userID: userID, executionID: executionID,
+	}
+}
+
+func TestTaskImageUploadRejectsUserAssistedTaskBeforeProviderCall(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	f.service.images = &fakeTaskImageOperationsImage{}
+	f.task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeUserAssisted, ReasonCodes: []string{model.WechatDeliveryReasonMissingAppSecret},
+	}})
+	if err := f.repo.Tasks().Update(context.Background(), f.task); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID, FilePath: "output/source-a.png",
+	})
+	if !errors.Is(err, ErrWechatDeliveryModeUserAssisted) {
+		t.Fatalf("Upload error = %v, want user-assisted mode refusal", err)
+	}
+}
+
+func TestTaskImageUploadRejectsSnapshotWithoutMaterialCapability(t *testing.T) {
+	f := newTaskImageOperationsCropFixture(t)
+	f.service.images = &fakeTaskImageOperationsImage{}
+	f.task.SetProjectSnapshot(model.ProjectSnapshot{WechatDelivery: model.WechatDeliveryDecision{
+		Mode: model.WechatDeliveryModeAutomatic, AutomaticEnabled: true, AppIDConfigured: true, SecretConfigured: true,
+		MayUploadMaterial: false,
+	}})
+	if err := f.repo.Tasks().Update(context.Background(), f.task); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.service.Upload(context.Background(), UploadTaskImageRequest{
+		UserID: f.userID, ExecutionID: f.executionID, ProjectID: f.task.ProjectID, TaskID: f.task.ID, FilePath: "output/source-a.png",
+	})
+	if !errors.Is(err, ErrWechatDeliveryModeUserAssisted) {
+		t.Fatalf("Upload error = %v, want capability refusal", err)
 	}
 }
 
@@ -846,6 +885,7 @@ func TestTaskImageOperationsRejectHostRuntimePathsAndRecordRemoteAnalysisCost(t 
 	projectID := createTestProject(t, repo, userID, model.PlatformWechat)
 	taskID := "task-image-operations-task"
 	task := &model.Task{ID: taskID, UserID: userID, ProjectID: projectID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusRunning}
+	setAutomaticWechatDeliverySnapshot(task)
 	if err := repo.Tasks().Create(ctx, task); err != nil {
 		t.Fatal(err)
 	}

@@ -59,7 +59,7 @@ func TestSidecarMonitorLogsFailureTransitionsAndSummaries(t *testing.T) {
 		var healthErr error
 		var healthMu sync.Mutex
 		monitor := NewSidecarMonitor(SidecarMonitorConfig{
-			Name: "test-sidecar", InitialBackoff: 30 * time.Second, MaxBackoff: 30 * time.Second,
+			Name: "integration", InitialBackoff: 30 * time.Second, MaxBackoff: 30 * time.Second,
 			HealthyInterval: 30 * time.Second,
 			HealthCheck: func(context.Context) error {
 				healthMu.Lock()
@@ -104,7 +104,7 @@ func TestSidecarMonitorLogsFailureTransitionsAndSummaries(t *testing.T) {
 				t.Fatalf("%s: got %d logs, want %d: %#v", step.name, len(entries), step.logs, entries)
 			}
 			entry := entries[len(entries)-1]
-			if entry.Level != step.level || entry.Sidecar != "test-sidecar" || entry.SuppressedFailures != step.suppressed {
+			if entry.Level != step.level || entry.Sidecar != "integration" || entry.SuppressedFailures != step.suppressed {
 				t.Fatalf("%s: unexpected event: %#v", step.name, entry)
 			}
 			if step.err != nil && entry.Error != step.err.Error() {
@@ -164,7 +164,7 @@ func TestSidecarMonitorConfiguredFailureLogInterval(t *testing.T) {
 		var buf sidecarLogBuffer
 		logger := zerolog.New(&buf)
 		monitor := NewSidecarMonitor(SidecarMonitorConfig{
-			Name: "test-sidecar", InitialBackoff: 30 * time.Second, MaxBackoff: 30 * time.Second,
+			Name: "integration", InitialBackoff: 30 * time.Second, MaxBackoff: 30 * time.Second,
 			FailureLogInterval: 90 * time.Second,
 			HealthCheck:        func(context.Context) error { return errors.New("offline") },
 		}, &logger)
@@ -244,7 +244,7 @@ func TestSidecarMonitorRunReturnsImmediatelyAndBecomesReadyAfterRetry(t *testing
 	var attempts atomic.Int32
 	logger := zerolog.Nop()
 	monitor := NewSidecarMonitor(SidecarMonitorConfig{
-		Name:            "test-sidecar",
+		Name:            "integration",
 		InitialBackoff:  5 * time.Millisecond,
 		MaxBackoff:      5 * time.Millisecond,
 		HealthyInterval: time.Hour,

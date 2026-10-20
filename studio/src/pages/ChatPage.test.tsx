@@ -1,6 +1,6 @@
 import { act, fireEvent, render as renderWithoutProviders, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ChatPage from './ChatPage'
 import { createTestQueryClient } from '@/test/test-utils'
@@ -14,15 +14,27 @@ const interactiveMocks = vi.hoisted(() => ({
   commit: vi.fn(),
   close: vi.fn(),
 }))
+const assistantMocks = vi.hoisted(() => ({
+  bootstrap: vi.fn(),
+  latestCheckpoint: vi.fn(),
+  works: vi.fn(),
+  createSession: vi.fn(),
+  message: vi.fn(),
+  answer: vi.fn(),
+  checkpoint: vi.fn(),
+  commit: vi.fn(),
+  close: vi.fn(),
+}))
 const streamMock = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({ userId: 'test-user' }))
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ token: 'test-token' }),
+  useAuth: () => ({ token: 'test-token', user: { id: authState.userId } }),
 }))
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
-  return { ...actual, api: { ...actual.api, interactive: interactiveMocks } }
+  return { ...actual, api: { ...actual.api, interactive: interactiveMocks, assistant: assistantMocks } }
 })
 
 vi.mock('@/lib/interactive-events', async () => {
@@ -50,7 +62,7 @@ function holdStream(events: InteractiveStreamEvent[], signal?: AbortSignal) {
   })()
 }
 
-function renderChat(path = '/projects/create') {
+function renderPage(path: string) {
   const queryClient = createTestQueryClient()
   return renderWithoutProviders(
     <QueryClientProvider client={queryClient}>
@@ -63,6 +75,14 @@ function renderChat(path = '/projects/create') {
   )
 }
 
+function renderChat(path = '/projects/create') {
+  const [pathname, search = ''] = path.split('?')
+  const params = new URLSearchParams(search)
+  params.set('assistant_session', '1')
+  params.set('mode', params.get('mode') ?? 'profile')
+  return renderPage(`${pathname}?${params.toString()}`)
+}
+
 function RouteLocation() {
   const location = useLocation()
   return <output aria-hidden="true" data-testid="route-location">{location.pathname}{location.search}</output>
@@ -71,18 +91,84 @@ function RouteLocation() {
 describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authState.userId = 'test-user'
     sessionStorage.clear()
+    localStorage.clear()
     interactiveMocks.agents.mockResolvedValue([agent])
     interactiveMocks.createSession.mockResolvedValue({ id: 'session-1', agent_id: agent.id, status: 'running' })
     interactiveMocks.message.mockResolvedValue({})
     interactiveMocks.answer.mockResolvedValue({})
     interactiveMocks.commit.mockResolvedValue({ project: { id: 'project-1' } })
     interactiveMocks.close.mockResolvedValue({})
+    assistantMocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划并创建作品任务', available: false, disabledReason: '先完成画像初始化' },
+        { id: 'review', displayName: '复盘模式', description: '分析已有作品', available: false, disabledReason: '先完成一件作品' },
+      ],
+      projects: [],
+    })
+    assistantMocks.createSession.mockImplementation((request: { mode_id: string; project_id?: string }, key?: string) => interactiveMocks.createSession(
+      request.mode_id === 'profile' ? 'project-creator' : request.mode_id,
+      request.mode_id === 'profile' ? request.project_id ? 'update-project-profile' : 'create-project' : request.mode_id,
+      request.project_id,
+      key,
+    ))
+    assistantMocks.message.mockImplementation((...args) => interactiveMocks.message(...args))
+    assistantMocks.answer.mockImplementation((...args) => interactiveMocks.answer(...args))
+    assistantMocks.latestCheckpoint.mockResolvedValue(null)
+    assistantMocks.works.mockResolvedValue({ items: [], has_more: false })
+    assistantMocks.checkpoint.mockResolvedValue({ id: 'checkpoint-1', payload_digest: 'saved-payload-digest', summary: '已保存的结构化草稿', status: 'draft', updatedAt: '' })
+    assistantMocks.commit.mockImplementation((sessionId: string, payload: Record<string, unknown>) => interactiveMocks.commit(
+      sessionId,
+      payload.confirmation_token,
+      payload.idempotency_key,
+      payload.memory_append,
+    ))
+    assistantMocks.close.mockImplementation((...args) => interactiveMocks.close(...args))
     streamMock.mockImplementation((sessionId: string, token: string, signal?: AbortSignal) => {
       void sessionId
       void token
       return holdStream([], signal)
     })
+  })
+
+  it('loads the Assistant bootstrap without creating a runtime session', async () => {
+    renderPage('/chat')
+
+    await waitFor(() => expect(assistantMocks.bootstrap).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('heading', { name: '开始为「新画像」建立创作画像' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /创作模式/ })).toHaveTextContent('先完成画像初始化')
+    expect(screen.getByRole('button', { name: /复盘模式/ })).toHaveTextContent('先完成一件作品')
+    expect(assistantMocks.bootstrap).toHaveBeenCalledTimes(1)
+    expect(assistantMocks.createSession).not.toHaveBeenCalled()
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+    expect(streamMock).not.toHaveBeenCalled()
+  })
+
+  it('offers only checkpoints that match the selected project scope', async () => {
+    assistantMocks.bootstrap.mockResolvedValueOnce({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划并创建作品任务', available: true },
+        { id: 'review', displayName: '复盘模式', description: '分析已有作品', available: false, disabledReason: '先完成一件作品' },
+      ],
+      projects: [
+        { id: 'project-a', name: '画像 A', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] },
+        { id: 'project-b', name: '画像 B', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] },
+      ],
+    })
+    assistantMocks.latestCheckpoint.mockImplementation(async (scope: { project_id?: string }) => scope.project_id === 'project-a'
+      ? { id: 'checkpoint-project-a', summary: '画像 A 草稿', status: 'draft', updatedAt: '' } : null)
+    renderPage('/chat?mode=creation&project_id=project-a')
+
+    expect(await screen.findByRole('button', { name: '继续草稿' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: '选择画像' }), { target: { value: 'project-b' } })
+
+    expect(screen.queryByRole('button', { name: '继续草稿' })).not.toBeInTheDocument()
   })
 
   afterEach(() => {
@@ -94,6 +180,82 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'create-project', undefined, expect.any(String)))
     expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
+  })
+
+  it('keeps the chat page inside the available app height', async () => {
+    renderChat('/projects/create')
+
+    await screen.findByRole('textbox', { name: '发送消息' })
+    const page = screen.getByTestId('chat-page')
+    expect(page.className).toContain('min-h-0')
+    expect(page.className).not.toContain('100dvh')
+  })
+
+  it('preserves history position and offers a jump when a message arrives above the bottom', async () => {
+    let release!: () => void
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
+      yield { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '历史消息' }) }
+      await new Promise<void>((resolve) => {
+        release = resolve
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      yield { id: '2', event: 'assistant.message', data: JSON.stringify({ text: '新消息' }) }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+    renderChat('/projects/create')
+
+    await screen.findByText('历史消息')
+    const scrollRegion = await screen.findByTestId('chat-scroll-region')
+    Object.defineProperties(scrollRegion, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    fireEvent.scroll(scrollRegion)
+    release()
+
+    expect(await screen.findByText('新消息')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /有 1 条新消息/ })).toBeInTheDocument()
+    expect(scrollRegion.scrollTop).toBe(0)
+  })
+
+  it('follows new messages when the reader is already near the bottom', async () => {
+    let release!: () => void
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
+      yield { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '第一条' }) }
+      await new Promise<void>((resolve) => {
+        release = resolve
+        signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      yield { id: '2', event: 'assistant.message', data: JSON.stringify({ text: '第二条' }) }
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    })())
+    renderChat('/projects/create')
+
+    await screen.findByText('第一条')
+    const scrollRegion = await screen.findByTestId('chat-scroll-region')
+    const scrollTo = vi.fn()
+    Object.defineProperties(scrollRegion, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 410 },
+      scrollTo: { configurable: true, value: scrollTo },
+    })
+    fireEvent.scroll(scrollRegion)
+    release()
+
+    await screen.findByText('第二条')
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 500, behavior: 'smooth' }))
+    expect(screen.queryByRole('button', { name: /有 1 条新消息/ })).not.toBeInTheDocument()
+  })
+
+  it('lets the reader mute and restore new-message sounds', async () => {
+    renderChat('/projects/create')
+
+    const soundButton = await screen.findByRole('button', { name: '关闭新消息声音' })
+    fireEvent.click(soundButton)
+    expect(screen.getByRole('button', { name: '开启新消息声音' })).toBeInTheDocument()
+    expect(localStorage.getItem('anban:chat:new-message-sound')).toBe('off')
   })
 
   it('asks before cancelling and preserves saved conversation material', async () => {
@@ -110,14 +272,192 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认取消对话' }))
 
     await waitFor(() => expect(interactiveMocks.close).toHaveBeenCalledWith('session-1'))
+    expect(assistantMocks.checkpoint).toHaveBeenCalledWith('session-1', expect.objectContaining({ status: 'draft' }))
+    expect(assistantMocks.checkpoint.mock.invocationCallOrder[0]).toBeLessThan(assistantMocks.close.mock.invocationCallOrder[0]!)
     expect(screen.getByText('已整理的项目方向')).toBeInTheDocument()
     expect(screen.getByText('对话已取消')).toBeInTheDocument()
     expect(screen.getByText('已取消')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '恢复本地材料' })).toBeInTheDocument()
-    const saved = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+    expect(screen.getByRole('button', { name: '恢复已保存草稿' })).toBeInTheDocument()
+    const saved = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')
     expect(saved.sessionId).toBeUndefined()
     expect(saved.terminalState).toBe('closed')
     expect(saved.messages).toEqual([expect.objectContaining({ text: '已整理的项目方向' })])
+  })
+
+  it('keeps an Assistant session open when its cancellation checkpoint cannot be saved', async () => {
+    assistantMocks.checkpoint.mockRejectedValueOnce(new Error('checkpoint unavailable'))
+    renderChat('/projects/create')
+
+    fireEvent.click(await screen.findByRole('button', { name: '取消对话' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认取消对话' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('checkpoint unavailable')
+    expect(assistantMocks.close).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '继续对话' }))
+    expect(screen.getByRole('button', { name: '取消对话' })).toBeInTheDocument()
+  })
+
+  it('saves and closes the current session before returning to the selected mode without starting it', async () => {
+    assistantMocks.bootstrap.mockResolvedValueOnce({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划并创建作品任务', available: true },
+        { id: 'review', displayName: '复盘模式', description: '分析已有作品', available: false, disabledReason: '先完成一件作品' },
+      ],
+      projects: [],
+    })
+    renderChat('/projects/create')
+
+    await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: /画像模式/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /创作模式/ }))
+
+    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/chat?mode=creation'))
+    expect(assistantMocks.checkpoint).toHaveBeenCalledWith('session-1', expect.objectContaining({ status: 'draft' }))
+    expect(assistantMocks.checkpoint.mock.invocationCallOrder[0]).toBeLessThan(assistantMocks.close.mock.invocationCallOrder[0]!)
+    expect(assistantMocks.createSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers the saved creation checkpoint after switching back to its scope', async () => {
+    assistantMocks.bootstrap.mockResolvedValue({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划并创建作品任务', available: true },
+        { id: 'review', displayName: '复盘模式', description: '分析已有作品', available: false },
+      ],
+      projects: [{ id: 'project-1', name: '画像 A', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    assistantMocks.checkpoint.mockImplementation(async () => {
+      const saved = { id: 'creation-checkpoint', summary: '创作计划草稿', status: 'draft', updatedAt: '' }
+      assistantMocks.latestCheckpoint.mockImplementation(async (scope: { mode_id: string }) => scope.mode_id === 'creation' ? saved : null)
+      return saved
+    })
+    renderChat('/chat?mode=creation&project_id=project-1')
+    fireEvent.click(await screen.findByRole('button', { name: /创作模式/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /画像模式/ }))
+    await screen.findByRole('heading', { name: /建立创作画像/ })
+    fireEvent.click(screen.getByRole('button', { name: /创作模式/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '继续草稿' }))
+    await waitFor(() => expect(assistantMocks.createSession).toHaveBeenLastCalledWith({ mode_id: 'creation', project_id: 'project-1', checkpoint_id: 'creation-checkpoint' }, expect.any(String)))
+  })
+
+  it('does not rewrite a committed checkpoint when switching modes', async () => {
+    assistantMocks.bootstrap.mockResolvedValueOnce({
+      defaultModeId: 'creation',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划并创建作品任务', available: true },
+        { id: 'review', displayName: '复盘模式', description: '分析已有作品', available: false, disabledReason: '先完成一件作品' },
+      ],
+      projects: [{ id: 'project-1', name: '画像 A', platform: 'wechat', profileRevision: 1, profileReady: true, works: [] }],
+    })
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'draft.ready', data: JSON.stringify({ draft: { ready: true, fields: { goal: '春季新品发布' } } }) },
+    ], signal))
+    renderChat('/chat?mode=creation&project_id=project-1')
+
+    fireEvent.click(await screen.findByRole('button', { name: '确认并创建作品任务' }))
+    await waitFor(() => expect(assistantMocks.commit).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: /创作模式/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /画像模式/ }))
+
+    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/chat?mode=profile&project_id=project-1'))
+    expect(assistantMocks.checkpoint).toHaveBeenCalledTimes(1)
+    expect(assistantMocks.close).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { mode: 'creation', payload: { plan: { goal: '春季新品发布' } }, text: '春季新品发布', label: '创作目标', button: '确认并创建作品任务' },
+    { mode: 'review', payload: { review: { summary: '增加真实案例' } }, text: '增加真实案例', label: '复盘摘要', button: '确认复盘建议' },
+  ])('displays and commits exactly the saved $mode draft digest', async ({ mode, payload, text, label, button }) => {
+    assistantMocks.bootstrap.mockResolvedValue({ defaultModeId: mode, projects: [], modes: [{ id: mode, displayName: mode === 'creation' ? '创作模式' : '复盘模式', available: true }] })
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, payload } }) },
+    ], signal))
+    renderChat(`/chat?mode=${mode}&project_id=project-1${mode === 'review' ? '&content_id=work-1' : ''}`)
+    await screen.findByRole('button', { name: button })
+    expect(screen.getAllByText(label)).toHaveLength(2)
+    expect(screen.getAllByText(text)).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: button }))
+    await waitFor(() => expect(assistantMocks.commit).toHaveBeenCalledWith('session-1', {
+      checkpoint_id: 'checkpoint-1', checkpoint_digest: 'saved-payload-digest', idempotency_key: expect.any(String),
+    }))
+    expect(assistantMocks.checkpoint).toHaveBeenCalledWith('session-1', expect.objectContaining({ payload, status: 'ready' }))
+  })
+
+  it('requires fresh confirmation when the draft changes while its checkpoint is saving', async () => {
+    let resolveCheckpoint!: (value: unknown) => void
+    let stageNextDraft!: () => void
+    const nextDraft = new Promise<void>((resolve) => { stageNextDraft = resolve })
+    assistantMocks.bootstrap.mockResolvedValue({ defaultModeId: 'creation', projects: [], modes: [{ id: 'creation', displayName: '创作模式', available: true }] })
+    assistantMocks.checkpoint.mockImplementationOnce(() => new Promise((resolve) => { resolveCheckpoint = resolve }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
+      yield { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, payload: { plan: { goal: '用户看到的计划 A' } } } }) }
+      await nextDraft
+      yield { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 2, ready: true, payload: { plan: { goal: '随后生成的计划 B' } } } }) }
+      yield* holdStream([], signal)
+    })())
+    renderChat('/chat?mode=creation&project_id=project-1')
+    fireEvent.click(await screen.findByRole('button', { name: '确认并创建作品任务' }))
+    expect(assistantMocks.checkpoint).toHaveBeenCalledWith('session-1', expect.objectContaining({ payload: { plan: { goal: '用户看到的计划 A' } } }))
+    await act(async () => stageNextDraft())
+    await waitFor(() => expect(screen.getAllByText('随后生成的计划 B')).toHaveLength(2))
+    await act(async () => resolveCheckpoint({ id: 'checkpoint-1', payload_digest: 'plan-a-digest' }))
+    expect(await screen.findByText('草稿已更新，请阅读最新内容后重新确认。')).toBeInTheDocument()
+    expect(assistantMocks.commit).not.toHaveBeenCalled()
+  })
+
+  it('does not commit a checkpoint whose version digest is missing', async () => {
+    assistantMocks.bootstrap.mockResolvedValue({ defaultModeId: 'creation', projects: [], modes: [{ id: 'creation', displayName: '创作模式', available: true }] })
+    assistantMocks.checkpoint.mockResolvedValueOnce({ id: 'checkpoint-1' })
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'draft.ready', data: JSON.stringify({ draft: { ready: true, payload: { plan: { goal: '新品发布' } } } }) },
+    ], signal))
+    renderChat('/chat?mode=creation&project_id=project-1')
+    fireEvent.click(await screen.findByRole('button', { name: '确认并创建作品任务' }))
+    expect(await screen.findByText('草稿确认信息未就绪，请重新保存后再确认。')).toBeInTheDocument()
+    expect(assistantMocks.commit).not.toHaveBeenCalled()
+  })
+
+  it('shows the created work task and prevents confirming the same plan again', async () => {
+    assistantMocks.bootstrap.mockResolvedValue({ defaultModeId: 'creation', projects: [], modes: [{ id: 'creation', displayName: '创作模式', available: true }] })
+    assistantMocks.commit.mockResolvedValueOnce({ mode_id: 'creation', status: 'committed', task: { id: 'created-task' } })
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'draft.ready', data: JSON.stringify({ draft: { ready: true, payload: { plan: { goal: '新品发布' } } } }) },
+    ], signal))
+    renderChat('/chat?mode=creation&project_id=project-1')
+    fireEvent.click(await screen.findByRole('button', { name: '确认并创建作品任务' }))
+    expect(await screen.findByText('作品任务已创建，可以查看创作进度。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认并创建作品任务' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看作品任务' }))
+    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/tasks/created-task'))
+    expect(assistantMocks.commit).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks mode switching while an Assistant commit is in progress', async () => {
+    assistantMocks.bootstrap.mockResolvedValueOnce({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划并创建作品任务', available: true },
+        { id: 'review', displayName: '复盘模式', description: '分析已有作品', available: false, disabledReason: '先完成一件作品' },
+      ],
+      projects: [],
+    })
+    let resolveCommit!: (value: unknown) => void
+    assistantMocks.commit.mockImplementationOnce(() => new Promise((resolve) => { resolveCommit = resolve }))
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'draft.ready', data: JSON.stringify({ draft: { ready: true, confirmation_token: 'profile-token', project: { name: '测试画像', platform: 'wechat' } } }) },
+    ], signal))
+    renderChat('/projects/create')
+
+    fireEvent.click(await screen.findByRole('button', { name: '确认创建创作项目' }))
+    await waitFor(() => expect(assistantMocks.commit).toHaveBeenCalledTimes(1))
+
+    expect(screen.getByRole('button', { name: /画像模式/ })).toBeDisabled()
+    resolveCommit({})
   })
 
   it('preserves a submitted message when cancellation races its SSE event', async () => {
@@ -141,7 +481,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(interactiveMocks.close).toHaveBeenCalledWith('session-1'))
 
     await waitFor(() => {
-      const saved = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+      const saved = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')
       expect(saved.sessionId).toBeUndefined()
       expect(saved.messages).toEqual(expect.arrayContaining([
         expect.objectContaining({ role: 'user', text: '刚提交但尚未同步的消息' }),
@@ -166,7 +506,7 @@ describe('ChatPage', () => {
     resolveAnswer({})
 
     await waitFor(() => {
-      const saved = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+      const saved = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')
       expect(saved.questionBatches).toEqual(expect.arrayContaining([
         expect.objectContaining({ callId: 'call-1', answers: [expect.objectContaining({ id: 'platform', selected: ['公众号'] })] }),
       ]))
@@ -190,17 +530,17 @@ describe('ChatPage', () => {
     expect(screen.getByText('对话已取消')).toBeInTheDocument()
   })
 
-  it('pins a selected Agent in the route so a bare chat can resume after refresh', async () => {
-    renderChat('/chat')
+  it('uses the Assistant mode route without exposing an Agent id', async () => {
+    renderPage('/chat')
 
-    fireEvent.click(await screen.findByRole('button', { name: /画像模式/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /开始对话/ }))
 
-    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'create-project', undefined, expect.any(String)))
-    expect(screen.getByTestId('route-location')).toHaveTextContent('/chat?agent=project-creator&intent=create-project')
+    await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
+    expect(screen.getByTestId('route-location')).toHaveTextContent('/chat?assistant_session=1&mode=profile')
   })
 
   it('resumes a persisted session from its last SSE event without creating a new runtime', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     renderChat('/projects/create')
 
     await waitFor(() => expect(streamMock).toHaveBeenCalledWith(
@@ -212,116 +552,81 @@ describe('ChatPage', () => {
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
   })
 
-  it('keeps local portrait material after a missing runtime and restores it into a fresh session', async () => {
-    const storageKey = 'anban:interactive-session:project-creator:create-project:new'
+  it('recovers a lost runtime from the server checkpoint without replaying browser messages', async () => {
+    const storageKey = 'anban:assistant-session:test-user:profile:new:none'
     sessionStorage.setItem(storageKey, JSON.stringify({
-      sessionId: 'expired-runtime',
-      lastEventId: '18',
-      createIdempotencyKey: 'expired-create-key',
-      messages: [
-        { id: 'message-1', role: 'user', text: '我想通过公众号获客' },
-        { id: 'message-2', role: 'assistant', text: '保存下来的历史内容' },
-      ],
-      questionBatches: [{
-        callId: 'call-goal',
-        questions: [{ id: 'goal', question: '你的主要目标是什么？' }],
-        answers: [{ id: 'goal', selected: ['获客'], custom: '' }],
-      },
-      // This batch was opened immediately before the runtime disappeared and
-      // has no answer yet. Recovery must carry the question and its choices.
-      {
-        callId: 'call-platform',
-        questions: [{
-          id: 'platform',
-          question: '你主要发布什么平台？',
-          options: [{ label: '公众号' }, { label: '小红书' }],
-        }],
-      }],
-      timeline: [
-        { kind: 'message', message: { id: 'message-1', role: 'user', text: '我想通过公众号获客' } },
-        { kind: 'message', message: { id: 'message-2', role: 'assistant', text: '保存下来的历史内容' } },
-        { kind: 'question', callId: 'call-goal' },
-        { kind: 'draft', id: 'draft' },
-      ],
-      draft: {
-        revision: 3,
-        ready: true,
-        project: { name: '获客公众号', platform: 'wechat', instructions: '帮助潜在客户了解服务' },
-        profile: { dimensions: { identity: { content: { summary: '面向潜在客户' } } } },
-      },
+      sessionId: 'expired-runtime', lastEventId: '18', createIdempotencyKey: 'expired-create-key',
+      messages: [{ id: 'message-1', role: 'user', text: '浏览器里的逐字聊天记录' }],
+      draft: { revision: 3, ready: true, project: { name: '获客公众号' } },
     }))
+    assistantMocks.latestCheckpoint.mockResolvedValue({ id: 'server-checkpoint', summary: '已保存的画像方向', status: 'draft', updatedAt: '' })
     streamMock.mockImplementationOnce(() => { throw new Error('SSE connection failed: 410') })
-
     renderChat('/projects/create')
 
-    expect(await screen.findByText('保存下来的历史内容')).toBeInTheDocument()
-    expect(await screen.findByText('原会话已失效，本地材料仍已保留')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '恢复本地材料' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '重新开始创建' })).toBeInTheDocument()
-    expect(screen.getByText('获客公众号')).toBeInTheDocument()
-    expect(screen.getAllByText('保存草稿需要重新确认')).toHaveLength(2)
-    expect(screen.getByRole('button', { name: '等待重新确认' })).toBeDisabled()
-    expect(interactiveMocks.close).not.toHaveBeenCalled()
-    await waitFor(() => {
-      const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')
-      expect(saved).not.toHaveProperty('sessionId')
-      expect(saved.messages).toHaveLength(2)
-      expect(saved.draft.project.name).toBe('获客公众号')
-    })
+    expect(await screen.findByText('原运行时已失效，正在检查服务端保存的结构化草稿')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '恢复已保存草稿' }))
 
-    interactiveMocks.message.mockRejectedValueOnce(new Error('410 interactive runtime is still starting'))
-    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
-      options?.onConnected?.()
-      return holdStream([{
-        id: '1',
-        event: 'session.snapshot',
-        data: JSON.stringify({
-          status: 'running',
-          busy: false,
-          questions: [],
-          draft: {
-            revision: 0,
-            project: { name: '', platform: '' },
-            profile: {},
-            progress: {},
-            missing_fields: [],
-            inferred_fields: [],
-            ready: false,
-          },
-        }),
-      }], signal)
-    })
+    await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile', checkpoint_id: 'server-checkpoint' }, expect.any(String)))
+    expect(assistantMocks.createSession.mock.calls[0]?.[1]).not.toBe('expired-create-key')
+    expect(assistantMocks.message).not.toHaveBeenCalled()
+    expect(assistantMocks.answer).not.toHaveBeenCalled()
+    expect(assistantMocks.close).not.toHaveBeenCalled()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: '恢复本地材料' }))
+  it('never resumes another work or user session from browser storage', async () => {
+    sessionStorage.setItem('anban:assistant-session:test-user:review:project-1:work-a', JSON.stringify({ sessionId: 'work-a-session' }))
+    sessionStorage.setItem('anban:assistant-session:other-user:review:project-1:work-b', JSON.stringify({ sessionId: 'other-user-session' }))
+    assistantMocks.bootstrap.mockResolvedValue({ defaultModeId: 'review', projects: [], modes: [{ id: 'review', displayName: '复盘模式', available: true }] })
+    renderChat('/chat?mode=review&project_id=project-1&content_id=work-b')
+    await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'review', project_id: 'project-1', content_id: 'work-b' }, expect.any(String)))
+    expect(streamMock.mock.calls.every((call) => call[0] === 'session-1')).toBe(true)
+  })
 
-    await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledTimes(1))
-    const [, , , freshCreateKey] = interactiveMocks.createSession.mock.calls[0] as [string, string, string | undefined, string]
-    expect(freshCreateKey).not.toBe('expired-create-key')
-    await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledTimes(2), { timeout: 3000 })
-    expect(interactiveMocks.message).toHaveBeenLastCalledWith('session-1', expect.stringContaining('我想通过公众号获客'))
-    await waitFor(() => {
-      const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')
-      expect(saved.draft.project.name).toBe('获客公众号')
-    })
-    const recoveryPrompt = interactiveMocks.message.mock.calls[0]?.[1] as string
-    expect(recoveryPrompt).toContain('保存下来的历史内容')
-    expect(recoveryPrompt).toContain('获客公众号')
-    expect(recoveryPrompt).toContain('获客')
-    expect(recoveryPrompt).toContain('你主要发布什么平台？')
-    expect(recoveryPrompt).toContain('公众号')
-    expect(recoveryPrompt).toContain('小红书')
-    expect(recoveryPrompt).toContain('需要重新确认')
+  it('clears the visible conversation when navigating directly to another work', async () => {
+    const queryClient = createTestQueryClient()
+    function WorkSwitcher() {
+      const navigate = useNavigate()
+      return <><button onClick={() => navigate('/chat?assistant_session=1&mode=review&project_id=project-1&content_id=work-b')}>打开作品 B</button><ChatPage /></>
+    }
+    assistantMocks.bootstrap.mockResolvedValue({ defaultModeId: 'review', projects: [], modes: [{ id: 'review', displayName: '复盘模式', available: true }] })
+    assistantMocks.createSession.mockResolvedValueOnce({ id: 'work-a-session' }).mockResolvedValueOnce({ id: 'work-b-session' })
+    streamMock.mockImplementation((sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'assistant.message', data: JSON.stringify({ text: sessionId === 'work-a-session' ? '作品 A 的私有讨论' : '作品 B 的新讨论' }) },
+    ], signal))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderWithoutProviders(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/chat?assistant_session=1&mode=review&project_id=project-1&content_id=work-a']}><WorkSwitcher /></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByText('作品 A 的私有讨论')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '打开作品 B' }))
+    expect(await screen.findByText('作品 B 的新讨论')).toBeInTheDocument()
+    expect(screen.queryByText('作品 A 的私有讨论')).not.toBeInTheDocument()
+    expect(assistantMocks.createSession).toHaveBeenLastCalledWith({ mode_id: 'review', project_id: 'project-1', content_id: 'work-b' }, expect.any(String))
+  })
+
+  it('clears the visible conversation when the signed-in user changes', async () => {
+    const queryClient = createTestQueryClient()
+    assistantMocks.createSession.mockResolvedValueOnce({ id: 'first-user-session' }).mockResolvedValueOnce({ id: 'second-user-session' })
+    streamMock.mockImplementation((sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'assistant.message', data: JSON.stringify({ text: sessionId === 'first-user-session' ? '第一位用户的私有讨论' : '第二位用户的新讨论' }) },
+    ], signal))
+    const tree = () => <QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/chat?assistant_session=1&mode=profile']}><ChatPage /></MemoryRouter></QueryClientProvider>
+    const view = renderWithoutProviders(tree())
+    expect(await screen.findByText('第一位用户的私有讨论')).toBeInTheDocument()
+    authState.userId = 'second-user'
+    view.rerender(tree())
+    expect(await screen.findByText('第二位用户的新讨论')).toBeInTheDocument()
+    expect(screen.queryByText('第一位用户的私有讨论')).not.toBeInTheDocument()
+    expect(sessionStorage.getItem('anban:assistant-session:second-user:profile:new:none')).toContain('second-user-session')
   })
 
   it('keeps a transient stream failure reconnectable without labeling the session as lost', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock.mockImplementationOnce(() => { throw new Error('SSE connection failed: 503') })
 
     renderChat('/projects/create')
 
     expect(await screen.findByRole('button', { name: '重新连接' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '恢复本地材料' })).not.toBeInTheDocument()
-    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').sessionId).toBe('session-1')
+    expect(screen.queryByRole('button', { name: '恢复已保存草稿' })).not.toBeInTheDocument()
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').sessionId).toBe('session-1')
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
     expect(interactiveMocks.close).not.toHaveBeenCalled()
   })
@@ -353,7 +658,7 @@ describe('ChatPage', () => {
   })
 
   it('does not enable a resumed session from SSE connectivity alone', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
       options?.onConnected?.()
       return holdStream([], signal)
@@ -366,7 +671,7 @@ describe('ChatPage', () => {
   })
 
   it('restores an idle session from its authoritative SSE snapshot', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
       options?.onConnected?.()
       return holdStream([{ event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: false, questions: [] }) }], signal)
@@ -393,7 +698,7 @@ describe('ChatPage', () => {
   })
 
   it('rebuilds a legacy session timeline in event order after refresh', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '3',
       messages: [
@@ -418,7 +723,7 @@ describe('ChatPage', () => {
   })
 
   it('orders legacy timeline items using message and question event IDs', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '3',
       messages: [
@@ -447,7 +752,7 @@ describe('ChatPage', () => {
   })
 
   it('hydrates legacy messages without duplicating UUID-backed cache entries', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '1',
       messages: [{ id: 'legacy-message-uuid', role: 'assistant', text: '缓存里的历史消息' }],
@@ -460,12 +765,12 @@ describe('ChatPage', () => {
     renderChat('/projects/create')
 
     await screen.findByText('缓存里的历史消息')
-    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').messages).toHaveLength(1))
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').messages).toHaveLength(1))
     expect(screen.getAllByText('缓存里的历史消息', { exact: true })).toHaveLength(1)
   })
 
   it('merges messages into an older partial timeline and replays its history', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '3',
       messages: [{ id: '1', role: 'assistant', text: '缓存里的消息' }],
@@ -484,7 +789,7 @@ describe('ChatPage', () => {
   })
 
   it('restores the visible message history after a refresh', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '4',
       messages: [{ id: 'message-1', role: 'assistant', text: '刷新前的消息' }],
@@ -497,7 +802,7 @@ describe('ChatPage', () => {
     renderChat('/projects/create')
 
     expect(await screen.findByText('刷新前的消息')).toBeInTheDocument()
-    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').messages).toEqual([
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').messages).toEqual([
       { id: 'message-1', role: 'assistant', text: '刷新前的消息' },
     ])
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
@@ -511,18 +816,18 @@ describe('ChatPage', () => {
     renderChat()
 
     await screen.findByText('需要保留的消息')
-    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').messages).toEqual([
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').messages).toEqual([
       { id: '5', role: 'assistant', text: '需要保留的消息' },
     ]))
   })
 
   it('does not advance the persisted event cursor before the event projection is stored', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     let cursorAtReceipt: string | undefined
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onEvent?: (event: InteractiveStreamEvent) => void }) => (async function* () {
       const event = { id: '5', event: 'assistant.message', data: JSON.stringify({ text: '游标原子消息' }) }
       options?.onEvent?.(event)
-      cursorAtReceipt = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').lastEventId
+      cursorAtReceipt = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').lastEventId
       yield event
       await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
     })())
@@ -532,14 +837,14 @@ describe('ChatPage', () => {
     expect(await screen.findByText('游标原子消息')).toBeInTheDocument()
     expect(cursorAtReceipt).toBe('4')
     await waitFor(() => {
-      const persisted = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+      const persisted = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')
       expect(persisted.lastEventId).toBe('5')
       expect(persisted.timeline).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'message', message: expect.objectContaining({ id: '5', text: '游标原子消息' }) })]))
     })
   })
 
   it('replays a ready draft event after refresh without persisting its confirmation token', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '10',
       draftReadyEventId: '9',
@@ -555,11 +860,11 @@ describe('ChatPage', () => {
     const commit = await screen.findByRole('button', { name: '确认创建创作项目' })
     await waitFor(() => expect(streamMock.mock.calls[0]?.[3]).toEqual(expect.objectContaining({ lastEventId: '8' })))
     expect(commit).toBeEnabled()
-    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')).not.toHaveProperty('confirmation_token')
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')).not.toHaveProperty('confirmation_token')
   })
 
   it('restores a ready draft and its confirmation credential from a compacted-history snapshot', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '40',
       draftReadyEventId: '9',
@@ -589,8 +894,8 @@ describe('ChatPage', () => {
     expect(commit.compareDocumentPosition(laterMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(commit)
     await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledWith('session-1', 'snapshot-secret', expect.any(String), undefined))
-    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/projects?onboarding=project-1'))
-    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')).not.toHaveProperty('confirmation_token')
+    await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/chat?mode=creation&project_id=project-1'))
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')).not.toHaveProperty('confirmation_token')
   })
 
   it('shows live agent activity while a turn is running', async () => {
@@ -689,7 +994,7 @@ describe('ChatPage', () => {
     expect(content.indexOf('Agent 本轮开始处理')).toBeLessThan(content.indexOf('Agent 正在执行：get project profile'))
     expect(content.indexOf('Agent 正在执行：get project profile')).toBeLessThan(content.indexOf('Agent 正在执行：update project profile'))
     expect(content.indexOf('Agent 正在执行：update project profile')).toBeLessThan(content.indexOf('Agent 本轮已完成'))
-    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').timeline).toEqual(expect.arrayContaining([
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').timeline).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'activity', eventId: 1, status: 'completed' }),
       expect.objectContaining({ kind: 'activity', eventId: 2, status: 'completed' }),
       expect.objectContaining({ kind: 'activity', eventId: 3, status: 'completed' }),
@@ -751,7 +1056,7 @@ describe('ChatPage', () => {
   })
 
   it('clears a stale running activity from a resumed session snapshot', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '4',
       timeline: [{ kind: 'activity', id: 'activity-3', eventId: 3, status: 'running', text: 'Agent 正在执行：get project profile' }],
@@ -767,7 +1072,7 @@ describe('ChatPage', () => {
   })
 
   it('reconciles an idle snapshot as ready and completes stale activity', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({
       sessionId: 'session-1',
       lastEventId: '4',
       timeline: [{ kind: 'activity', id: 'activity-3', eventId: 3, status: 'running', text: 'Agent 正在执行：get project profile' }],
@@ -812,7 +1117,7 @@ describe('ChatPage', () => {
     expect(content).toContain('Agent 正在等待你的回答')
     expect(content.indexOf('Agent 正在等待你的回答')).toBeLessThan(content.indexOf('Agent 正在工作…'))
     await waitFor(() => {
-      const timeline = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').timeline
+      const timeline = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').timeline
       expect(timeline).toEqual(expect.arrayContaining([
         expect.objectContaining({ text: 'Agent 正在等待你的回答', status: 'completed' }),
         expect.objectContaining({ text: 'Agent 正在工作…', status: 'running' }),
@@ -829,7 +1134,7 @@ describe('ChatPage', () => {
     renderChat('/projects/create')
 
     await waitFor(() => {
-      const timeline = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').timeline
+      const timeline = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').timeline
       expect(timeline.filter((item: { kind: string; status?: string }) => item.kind === 'activity' && (item.status === 'started' || item.status === 'running'))).toHaveLength(1)
     })
   })
@@ -843,7 +1148,7 @@ describe('ChatPage', () => {
 
     await screen.findByText('创作主题是什么？')
     await waitFor(() => {
-      const timeline = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').timeline
+      const timeline = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').timeline
       expect(timeline.filter((item: { kind: string; status?: string }) => item.kind === 'activity' && item.status === 'waiting')).toHaveLength(1)
     })
   })
@@ -879,7 +1184,8 @@ describe('ChatPage', () => {
     expect(streamMock).not.toHaveBeenCalled()
   })
 
-  it('offers saved-material recovery when a ready draft receives a terminal runtime event', async () => {
+  it('offers server checkpoint recovery when a ready draft receives a terminal runtime event', async () => {
+    assistantMocks.latestCheckpoint.mockResolvedValue({ id: 'terminal-checkpoint', summary: '已完成画像', status: 'ready', updatedAt: '' })
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { id: '1', event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, project: { name: '已完成画像' } } }) },
       { id: '2', event: 'session.error', data: JSON.stringify({ message: '运行失败' }) },
@@ -888,15 +1194,15 @@ describe('ChatPage', () => {
     renderChat('/projects/create')
 
     expect(await screen.findByText('已完成画像')).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '恢复本地材料' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '恢复已保存草稿' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新开始创建' })).toBeInTheDocument()
-    const saved = JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')
+    const saved = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')
     expect(saved).not.toHaveProperty('sessionId')
     expect(saved.draftNeedsReconfirmation).toBe(true)
   })
 
   it('keeps the composer disabled when a resumed session snapshot is busy', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
       options?.onConnected?.()
       return holdStream([{ event: 'session.snapshot', data: JSON.stringify({ status: 'running', busy: true, questions: [] }) }], signal)
@@ -910,7 +1216,7 @@ describe('ChatPage', () => {
   })
 
   it('restores pending questions from a resumed session snapshot', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal, options?: { onConnected?: () => void }) => {
       options?.onConnected?.()
       return holdStream([{
@@ -928,7 +1234,7 @@ describe('ChatPage', () => {
   })
 
   it('keeps the session and offers reconnection after the SSE retry budget is exhausted', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock
       .mockImplementationOnce(() => { throw new Error('SSE connection failed after 7 attempts') })
       .mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
@@ -938,7 +1244,7 @@ describe('ChatPage', () => {
 
     const reconnect = await screen.findByRole('button', { name: '重新连接' })
     expect(interactiveMocks.close).not.toHaveBeenCalled()
-    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').sessionId).toBe('session-1')
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').sessionId).toBe('session-1')
 
     fireEvent.click(reconnect)
     await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
@@ -947,12 +1253,12 @@ describe('ChatPage', () => {
   })
 
   it('keeps a retryable session resumable after a refresh', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '4' }))
     streamMock.mockImplementationOnce(() => { throw new Error('SSE connection failed after 7 attempts') })
     const first = renderChat('/projects/create')
 
     await screen.findByRole('button', { name: '重新连接' })
-    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}')).not.toHaveProperty('terminalState')
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')).not.toHaveProperty('terminalState')
     first.unmount()
 
     streamMock.mockClear()
@@ -966,7 +1272,7 @@ describe('ChatPage', () => {
   })
 
   it('keeps a resumed composer disabled when the persisted session was mid-turn', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '7', turnActive: true }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '7', turnActive: true }))
     let release: (() => void) | undefined
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => (async function* () {
       yield { event: 'session.ready', data: JSON.stringify({ session_id: 'session-1' }) }
@@ -1049,7 +1355,7 @@ describe('ChatPage', () => {
   })
 
   it('persists an idle status as the terminal turn state even without an event id', async () => {
-    sessionStorage.setItem('anban:interactive-session:project-creator:create-project:new', JSON.stringify({ sessionId: 'session-1', lastEventId: '7', turnActive: true }))
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1', lastEventId: '7', turnActive: true }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal: AbortSignal | undefined, options: { onEvent?: (event: InteractiveStreamEvent) => void }) => (async function* () {
       const event = { event: 'session.status', data: JSON.stringify({ status: 'idle' }) }
       options.onEvent?.(event)
@@ -1059,7 +1365,7 @@ describe('ChatPage', () => {
     renderChat()
 
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
-    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').turnActive).toBe(false))
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').turnActive).toBe(false))
     expect(composer).toBeEnabled()
   })
 
@@ -1083,7 +1389,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '提交回答' })).toBeInTheDocument())
     expect(screen.getByText('answer failed')).toBeInTheDocument()
     expect(screen.queryByText('会话需要重新开始')).not.toBeInTheDocument()
-    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').turnActive).toBe(false)
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').turnActive).toBe(false)
   })
 
   it('clears the persisted turn lock when a message enqueue fails', async () => {
@@ -1098,7 +1404,7 @@ describe('ChatPage', () => {
     await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledWith('session-1', '发送失败的消息'))
     await waitFor(() => expect(screen.getByText('message failed')).toBeInTheDocument())
     expect(composer).toBeEnabled()
-    expect(JSON.parse(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new') ?? '{}').turnActive).toBe(false)
+    expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').turnActive).toBe(false)
   })
 
   it('clears a single-select option when the user enters custom text', async () => {
@@ -1226,18 +1532,21 @@ describe('ChatPage', () => {
     expect(screen.getByText('主要受众为一二线城市白领')).toBeInTheDocument()
   })
 
-  it('returns to the existing project after confirming a profile update', async () => {
+  it('commits a profile update with staged memory using only the Assistant commit contract', async () => {
     interactiveMocks.commit.mockResolvedValueOnce({})
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 2, ready: true, confirmation_token: 'secret-token', memory_append: '补充：春茶系列将在四月上线。', project: { name: '茶品牌', platform: 'wechat' } } }) },
     ], signal))
-    renderChat('/chat?agent=project-creator&intent=update-project-profile&project_id=project-9')
+    renderChat('/chat?mode=profile&project_id=project-9')
 
+    expect(await screen.findByText('将追加到项目记忆的内容')).toBeInTheDocument()
+    expect(screen.getByText('补充：春茶系列将在四月上线。')).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: '确认更新画像' }))
     await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledTimes(1))
+    expect(assistantMocks.commit).toHaveBeenCalledWith('session-1', {
+      confirmation_token: 'secret-token', idempotency_key: expect.any(String),
+    })
     await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent('/projects?edit=project-9'))
-    expect(screen.getByText('将追加到项目记忆的内容')).toBeInTheDocument()
-    expect(screen.getByText('补充：春茶系列将在四月上线。')).toBeInTheDocument()
   })
 
   it('keeps a replayed ready draft visible while waiting for its confirmation credential', async () => {
@@ -1272,7 +1581,7 @@ describe('ChatPage', () => {
 
     await waitFor(() => expect(screen.getByText('network error')).toBeInTheDocument())
     expect(interactiveMocks.close).not.toHaveBeenCalledWith('session-1')
-    expect(sessionStorage.getItem('anban:interactive-session:project-creator:create-project:new')).toContain('session-1')
+    expect(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none')).toContain('session-1')
     expect(screen.queryByText('会话需要重新开始')).not.toBeInTheDocument()
   })
 

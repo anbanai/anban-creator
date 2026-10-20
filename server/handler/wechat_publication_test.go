@@ -49,12 +49,23 @@ func (f *fakeWechatPublicationService) Select(_ context.Context, userID, taskID,
 	return f.publication, f.err
 }
 
+func (f *fakeWechatPublicationService) Skip(_ context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	f.method, f.userID, f.taskID = "skip", userID, taskID
+	return f.publication, f.err
+}
+func (f *fakeWechatPublicationService) RestoreSkipped(_ context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	f.method, f.userID, f.taskID = "restore-skipped", userID, taskID
+	return f.publication, f.err
+}
+
 func publicationHandlerApp(fake WechatPublicationActions) *fiber.App {
 	logger := zerolog.New(io.Discard)
 	h := NewWechatPublicationHandler(fake, &logger)
 	app := fiber.New()
 	app.Use(func(c fiber.Ctx) error { c.Locals("user_id", c.Get("X-User-ID")); return c.Next() })
 	app.Get("/tasks/:id/wechat-publication", h.Get)
+	app.Post("/tasks/:id/wechat-publication/skip", h.Skip)
+	app.Post("/tasks/:id/wechat-publication/restore", h.RestoreSkipped)
 	app.Post("/tasks/:id/wechat-publication/publish", h.Publish)
 	app.Post("/tasks/:id/wechat-publication/retry-publish", h.RetryPublish)
 	app.Post("/tasks/:id/wechat-publication/reconcile", h.Reconcile)
@@ -99,6 +110,37 @@ func TestWechatPublicationHandlerActionsAreThinAndArticleIDOnly(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusBadRequest || fake.method != "" {
 		t.Fatalf("URL-only selection status=%d call=%q", resp.StatusCode, fake.method)
+	}
+}
+
+func TestWechatPublicationHandlerExposesSkipAction(t *testing.T) {
+	taskID, userID := uuid.NewString(), uuid.NewString()
+	fake := &fakeWechatPublicationService{publication: &model.WechatPublication{TaskID: taskID, Status: "skipped"}}
+	app := publicationHandlerApp(fake)
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/wechat-publication/skip", nil)
+	req.Header.Set("X-User-ID", userID)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || fake.method != "skip" || fake.userID != userID || fake.taskID != taskID {
+		t.Fatalf("status=%d service call=%#v", resp.StatusCode, fake)
+	}
+}
+
+func TestWechatPublicationHandlerExposesRestoreAction(t *testing.T) {
+	taskID, userID := uuid.NewString(), uuid.NewString()
+	fake := &fakeWechatPublicationService{publication: &model.WechatPublication{TaskID: taskID, Status: "drafted"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/wechat-publication/restore", nil)
+	req.Header.Set("X-User-ID", userID)
+	resp, err := publicationHandlerApp(fake).Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || fake.method != "restore-skipped" || fake.userID != userID || fake.taskID != taskID {
+		t.Fatalf("status=%d service call=%#v", resp.StatusCode, fake)
 	}
 }
 

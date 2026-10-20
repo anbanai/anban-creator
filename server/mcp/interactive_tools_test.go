@@ -11,7 +11,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/anbanai/anban-creator/server/model"
+	"github.com/anbanai/anban-creator/server/repository"
 	"github.com/anbanai/anban-creator/server/service"
+	"github.com/google/uuid"
+	"gorm.io/datatypes"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type interactiveMCPRuntime struct{}
@@ -21,6 +26,28 @@ func (interactiveMCPRuntime) Close() error                               { retur
 
 type interactiveMCPFactory struct {
 	tokens chan string
+}
+
+func newAssistantMCPProject(t *testing.T, userID, name string) (repository.Repository, *model.Project) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Project{}, &model.Task{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AnalyticsState{}, &model.FeedbackLease{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := repository.New(db)
+	project := &model.Project{ID: uuid.NewString(), UserID: userID, Platform: model.PlatformWechat, Name: name, Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(model.NewProjectProfile())}
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	return repo, project
 }
 
 func (f *interactiveMCPFactory) Start(_ context.Context, _ string, _ string, token string, _ func(string, any)) (service.Runtime, error) {
@@ -135,6 +162,74 @@ func TestStageProjectCreatorDraftToolSchema(t *testing.T) {
 		return
 	}
 	t.Fatal("stage_project_creator_draft tool not registered")
+}
+
+func TestStageAssistantDraftToolSchema(t *testing.T) {
+	tools := listRegisteredTools(t, registerInteractiveTools)
+	for _, tool := range tools {
+		if tool.Name != "stage_assistant_draft" {
+			continue
+		}
+		schema, ok := tool.InputSchema.(map[string]any)
+		if !ok || schema["additionalProperties"] != false {
+			t.Fatalf("assistant draft schema = %#v, want closed object", tool.InputSchema)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok || properties["payload"].(map[string]any)["type"] != "object" || properties["ready"].(map[string]any)["type"] != "boolean" {
+			t.Fatalf("assistant draft properties = %#v", schema["properties"])
+		}
+		return
+	}
+	t.Fatal("stage_assistant_draft tool not registered")
+}
+
+func TestStageAssistantDraftUsesProtectedSessionMode(t *testing.T) {
+	repo, project := newAssistantMCPProject(t, "user-1", "创作画像")
+	factory := &interactiveMCPFactory{tokens: make(chan string, 2)}
+	svc := service.NewInteractiveServiceWithRuntimeAndAgents(repo, factory, []service.InteractiveAgent{
+		{ID: "creation-planner", Available: true, Intents: []string{"plan-creation"}},
+		{ID: "project-creator", Available: true, Intents: []string{"create-project"}},
+	})
+	svc.SetEnabled(true)
+	session, err := svc.CreateSession(context.Background(), "user-1", "creation-planner", "plan-creation", project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := session.ID
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	payload := map[string]any{"plan": map[string]any{
+		"goal": "发布新品", "content_type": "公众号文章", "target_audience": "潜在客户", "angle": "真实使用问题",
+		"outline": []string{"问题", "方案"}, "style_constraints": "具体", "asset_plan": "产品图",
+		"acceptance_criteria": "事实准确", "cost_estimate": "低", "execution_options": []string{"生成完整初稿"},
+	}}
+	result, err := stageAssistantDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", sessionID), interactiveMCPRequest(t, map[string]any{
+		"name": "新品计划", "payload": payload, "ready": true,
+	}))
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("stage assistant draft = %#v, %v", result, err)
+	}
+	if session.Draft.Name != "新品计划" || !session.Draft.Ready {
+		t.Fatalf("staged assistant draft = %#v", session.Draft)
+	}
+	if err := svc.Close("user-1", session.ID); err != nil {
+		t.Fatalf("close creation session before mode check: %v", err)
+	}
+
+	profileSession, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project", project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoofed, err := stageAssistantDraftHandler(withMCPInteractiveIdentity(context.Background(), "user-1", profileSession.ID), interactiveMCPRequest(t, map[string]any{
+		"mode_id": "creation", "agent_id": "creation-planner", "payload": payload, "ready": true,
+	}))
+	if err != nil || spoofed == nil || !spoofed.IsError || !strings.Contains(toolResultText(spoofed), `unknown assistant draft field "mode_id"`) {
+		t.Fatalf("spoofed mode staging = %#v, %v, want server-owned profile mode rejection", spoofed, err)
+	}
+	if profileSession.Draft.Ready {
+		t.Fatalf("spoofed request altered profile mode draft: %#v", profileSession.Draft)
+	}
 }
 
 func TestStageProjectCreatorDraftReturnsValidationCause(t *testing.T) {
@@ -374,6 +469,45 @@ func TestInteractiveRuntimeCredentialCanStageOwnDraftOverMCP(t *testing.T) {
 	}
 	if sess.Draft.Project.Name != input.Project.Name || !sess.Draft.Ready {
 		t.Fatalf("staged draft = %#v, want ready project draft", sess.Draft)
+	}
+}
+
+func TestInteractiveRuntimeCredentialCanStageAssistantDraftOverMCP(t *testing.T) {
+	repo, project := newAssistantMCPProject(t, "user-1", "创作画像")
+	factory := &interactiveMCPFactory{tokens: make(chan string, 1)}
+	svc := service.NewInteractiveServiceWithRuntimeAndAgents(repo, factory, []service.InteractiveAgent{{ID: "creation-planner", Available: true, Intents: []string{"plan-creation"}}})
+	svc.SetEnabled(true)
+	session, err := svc.CreateSession(context.Background(), "user-1", "creation-planner", "plan-creation", project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := svcs
+	svcs = &Services{InteractiveSvc: svc}
+	t.Cleanup(func() { svcs = old })
+	var runtimeToken string
+	select {
+	case runtimeToken = <-factory.tokens:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime token")
+	}
+	handler := NewMCPHandler(nil, "", nil, WithInteractiveAuthentication(svc))
+	sessionID := initializeMCPExecutionSession(t, handler, runtimeToken)
+	for _, tool := range []string{"list_projects", "get_project", "list_drafts"} {
+		rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, tool, `{"project_id":"foreign-project"}`)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s status=%d; frozen-context token must not read user-wide data", tool, rec.Code)
+		}
+	}
+	args, err := json.Marshal(map[string]any{"payload": map[string]any{"plan": map[string]any{"goal": "目标"}}, "ready": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := callMCPToolForScopeTest(handler, runtimeToken, sessionID, "stage_assistant_draft", string(args))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `\"staged\":true`) {
+		t.Fatalf("interactive assistant draft status/body = %d/%s", rec.Code, rec.Body.String())
+	}
+	if session.Draft.Name != "创作计划" || session.Draft.Fields["goal"] != "目标" {
+		t.Fatalf("staged assistant draft = %#v", session.Draft)
 	}
 }
 

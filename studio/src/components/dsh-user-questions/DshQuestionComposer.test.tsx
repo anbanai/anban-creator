@@ -102,10 +102,33 @@ describe('DshQuestionComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
 
     await waitFor(() => expect(screen.getByText('已回答')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '展开问题卡片' }))
     expect(screen.getByText('克制')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '上一题' }))
     expect(screen.getByRole('heading', { name: '主要发布在哪个平台？' })).toBeInTheDocument()
     expect(screen.getByText(/^微信公众号/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '提交回答' })).not.toBeInTheDocument()
+  })
+
+  it('collapses an already submitted batch by default', () => {
+    render(<DshQuestionComposer questions={[questions[0]]} answers={[{ id: 'platform', selected: ['微信公众号 (推荐)'] }]} submitted onSubmit={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: '展开问题卡片' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('微信公众号 (推荐)')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '展开问题卡片' }))
+    expect(screen.getByText('微信公众号 (推荐)')).toBeInTheDocument()
+  })
+
+  it('collapses a batch after submitting its answers', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(<DshQuestionComposer questions={[questions[0]]} onSubmit={onSubmit} />)
+
+    fireEvent.click(screen.getByRole('radio', { name: '微信公众号' }))
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: '展开问题卡片' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '提交回答' })).not.toBeInTheDocument()
   })
 

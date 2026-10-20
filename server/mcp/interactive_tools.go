@@ -13,6 +13,20 @@ import (
 
 func registerInteractiveTools(server *mcp.Server) {
 	server.AddTool(&mcp.Tool{
+		Name:        "stage_assistant_draft",
+		Description: "Stage a structured creation plan or postmortem review draft for the authenticated Assistant session. The Server selects the schema from the session mode.",
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"name":    map[string]any{"type": "string", "maxLength": 200},
+				"payload": map[string]any{"type": "object", "additionalProperties": true},
+				"ready":   map[string]any{"type": "boolean"},
+			},
+			"required": []any{"payload", "ready"},
+		},
+	}, stageAssistantDraftHandler)
+	server.AddTool(&mcp.Tool{
 		Name:        "stage_project_creator_draft",
 		Description: "Stage a validated Project Creator draft from the authenticated interactive runtime.",
 		InputSchema: map[string]any{
@@ -36,6 +50,47 @@ func registerInteractiveTools(server *mcp.Server) {
 			"required": []any{"project", "profile", "progress", "ready", "missing_fields", "inferred_fields"},
 		},
 	}, stageProjectCreatorDraftHandler)
+}
+
+func stageAssistantDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if svcs == nil || svcs.InteractiveSvc == nil {
+		return errorResult("interactive service not available"), nil
+	}
+	identity, ok := getMCPInteractiveIdentity(ctx)
+	if !ok {
+		return errorResult("interactive runtime identity is required"), nil
+	}
+	if req == nil || req.Params == nil {
+		return errorResult("payload and ready are required"), nil
+	}
+	args := parseArgs(req.Params.Arguments)
+	// Mode and Agent selection are Server-owned. Prefer this explicit error
+	// when a caller attempts to smuggle mode metadata alongside other fields so
+	// the contract remains deterministic despite Go map iteration order.
+	if _, exists := args["mode_id"]; exists {
+		return errorResult(`unknown assistant draft field "mode_id"`), nil
+	}
+	for key := range args {
+		if key != "name" && key != "payload" && key != "ready" {
+			return errorResult(fmt.Sprintf("unknown assistant draft field %q", key)), nil
+		}
+	}
+	var input service.AssistantDraftStageInput
+	if raw, exists := args["name"]; exists && raw != nil {
+		if err := decodeInteractiveArgumentStrict(args, "name", &input.Name); err != nil {
+			return errorResult(fmt.Sprintf("name is invalid: %v", err)), nil
+		}
+	}
+	if err := decodeInteractiveArgumentStrict(args, "payload", &input.Payload); err != nil {
+		return errorResult(fmt.Sprintf("payload is invalid: %v", err)), nil
+	}
+	if err := decodeInteractiveArgumentStrict(args, "ready", &input.Ready); err != nil {
+		return errorResult(fmt.Sprintf("ready is invalid: %v", err)), nil
+	}
+	if err := svcs.InteractiveSvc.StageAssistantDraftForSessionContext(ctx, identity.SessionID, input); err != nil {
+		return errorResult(fmt.Sprintf("stage assistant draft: %v", err)), nil
+	}
+	return textResult(map[string]any{"staged": true, "session_id": identity.SessionID, "ready": input.Ready})
 }
 
 func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -78,7 +133,7 @@ func stageProjectCreatorDraftHandler(ctx context.Context, req *mcp.CallToolReque
 		}
 	}
 
-	if err := svcs.InteractiveSvc.StageDraftForSession(identity.SessionID, input); err != nil {
+	if err := svcs.InteractiveSvc.StageDraftForSessionContext(ctx, identity.SessionID, input); err != nil {
 		return errorResult(fmt.Sprintf("stage project creator draft: %v", err)), nil
 	}
 	return textResult(map[string]any{"staged": true, "session_id": identity.SessionID, "ready": input.Ready})

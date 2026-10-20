@@ -8,6 +8,7 @@ export type WechatPublicationStatus =
   | 'needs_selection'
   | 'publish_failed'
   | 'unsupported'
+  | 'skipped'
 
 export interface WechatPublicationCandidate {
   article_id: string

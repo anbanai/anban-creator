@@ -53,6 +53,7 @@ type Services struct {
 	ChannelsAnalyticsHandler            *handler.ChannelsAnalyticsHandler
 	AgentHandler                        *handler.AgentHandler
 	InteractiveHandler                  *handler.InteractiveHandler
+	AssistantHandler                    *handler.AssistantHandler
 	AgentProfileHandler                 *handler.AgentProfileHandler
 	AgentPackHandler                    *handler.AgentPackHandler
 	BillingHandler                      *handler.BillingHandler
@@ -245,6 +246,19 @@ func NewRouter(svc *Services) *fiber.App {
 		interactive.Post("/sessions/:id/commit", svc.InteractiveHandler.Commit)
 		interactive.Delete("/sessions/:id", svc.InteractiveHandler.Delete)
 	}
+	if svc.AssistantHandler != nil {
+		assistant := apiV1.Group("/assistant")
+		assistant.Get("/bootstrap", svc.AssistantHandler.Bootstrap)
+		assistant.Get("/projects/:projectId/works", svc.AssistantHandler.Works)
+		assistant.Get("/checkpoint", svc.AssistantHandler.LatestCheckpoint)
+		assistant.Post("/sessions", svc.AssistantHandler.Create)
+		assistant.Get("/sessions/:id/events", svc.AssistantHandler.Events)
+		assistant.Post("/sessions/:id/messages", svc.AssistantHandler.Message)
+		assistant.Post("/sessions/:id/questions/:callId/answers", svc.AssistantHandler.Answers)
+		assistant.Post("/sessions/:id/checkpoint", svc.AssistantHandler.Checkpoint)
+		assistant.Post("/sessions/:id/commit", svc.AssistantHandler.Commit)
+		assistant.Delete("/sessions/:id", svc.AssistantHandler.Delete)
+	}
 	if h := svc.PortraitOnboardingHandler; h != nil {
 		apiV1.Get("/onboarding/capabilities", h.Capabilities)
 		apiV1.Post("/onboarding/chat", h.Chat)
@@ -426,6 +440,8 @@ func NewRouter(svc *Services) *fiber.App {
 		apiV1.Post("/tasks/:id/wechat-publication/recover", svc.WechatPublicationHandler.Recover)
 		apiV1.Post("/tasks/:id/wechat-publication/select", svc.WechatPublicationHandler.Select)
 		apiV1.Post("/tasks/:id/wechat-publication/manual-bind", svc.WechatPublicationHandler.ManualBind)
+		apiV1.Post("/tasks/:id/wechat-publication/skip", svc.WechatPublicationHandler.Skip)
+		apiV1.Post("/tasks/:id/wechat-publication/restore", svc.WechatPublicationHandler.RestoreSkipped)
 	}
 	if svc.WechatAnalyticsImportHandler != nil {
 		apiV1.Get("/wechat-analytics/imports/:batchId", svc.WechatAnalyticsImportHandler.GlobalDetail)

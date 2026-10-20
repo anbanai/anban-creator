@@ -27,6 +27,7 @@ import (
 )
 
 var (
+	ErrWechatDeliveryModeUserAssisted        = errors.New("wechat_delivery_mode_user_assisted: WeChat delivery is disabled for this task")
 	ErrWechatPublicationNotFound             = errors.New("WeChat publication not found")
 	ErrWechatPublicationForbidden            = errors.New("WeChat publication does not belong to user")
 	ErrWechatPublicationProjectMismatch      = errors.New("WeChat publication task and project do not match")
@@ -441,6 +442,60 @@ func (s *WechatPublicationService) BindManualPublication(ctx context.Context, us
 	return publication, nil
 }
 
+func (s *WechatPublicationService) Skip(ctx context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	defer s.syncTaskLifecycle(ctx, taskID)
+	if _, _, err := s.ownedTaskProject(ctx, userID, taskID); err != nil {
+		return nil, err
+	}
+	publication, err := s.repo.WechatPublications().FindByTaskID(ctx, taskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWechatPublicationNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if publication.DraftMediaID == "" || hasWechatSubmissionEvidence(publication) {
+		return publication, ErrWechatPublicationConflict
+	}
+	won, err := s.repo.WechatPublications().TransitionToSkipped(ctx, publication.ID, publication.Status, publication.UpdatedAt)
+	if err != nil {
+		return publication, err
+	}
+	if !won {
+		return publication, ErrWechatPublicationConflict
+	}
+	return s.repo.WechatPublications().FindByID(ctx, publication.ID)
+}
+
+func (s *WechatPublicationService) RestoreSkipped(ctx context.Context, userID, taskID string) (*model.WechatPublication, error) {
+	defer s.syncTaskLifecycle(ctx, taskID)
+	if _, _, err := s.ownedTaskProject(ctx, userID, taskID); err != nil {
+		return nil, err
+	}
+	publication, err := s.repo.WechatPublications().FindByTaskID(ctx, taskID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrWechatPublicationNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if publication.Status != model.WechatPublicationStatusSkipped {
+		return publication, ErrWechatPublicationConflict
+	}
+	targetStatus := model.WechatPublicationStatusDrafted
+	if publication.ManualPublishRequired {
+		targetStatus = model.WechatPublicationStatusAwaitingManual
+	}
+	won, err := s.repo.WechatPublications().TransitionFromSkipped(ctx, publication.ID, publication.UpdatedAt, targetStatus)
+	if err != nil {
+		return publication, err
+	}
+	if !won {
+		return publication, ErrWechatPublicationConflict
+	}
+	return s.repo.WechatPublications().FindByID(ctx, publication.ID)
+}
+
 func normalizeManualWechatURL(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
@@ -816,6 +871,9 @@ func (s *WechatPublicationService) CreateDraft(ctx context.Context, userID, task
 	if err != nil {
 		return nil, err
 	}
+	if wechatDeliveryDecision(task).IsUserAssisted() {
+		return nil, ErrWechatDeliveryModeUserAssisted
+	}
 	if project.ID != projectID {
 		return nil, ErrWechatPublicationProjectMismatch
 	}
@@ -1178,6 +1236,9 @@ func (s *WechatPublicationService) CreateDraftInteractive(ctx context.Context, u
 	task, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if wechatDeliveryDecision(task).IsUserAssisted() {
+		return nil, ErrWechatDeliveryModeUserAssisted
 	}
 	if project.ID != strings.TrimSpace(projectID) {
 		return nil, ErrWechatPublicationProjectMismatch
@@ -1584,9 +1645,12 @@ func listAllWechatPublishes(ctx context.Context, api WechatPublicationAPI) ([]pu
 
 func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID string) (*model.WechatPublication, error) {
 	defer s.syncTaskLifecycle(ctx, taskID)
-	_, project, err := s.ownedTaskProject(ctx, userID, taskID)
+	task, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if wechatDeliveryDecision(task).IsUserAssisted() {
+		return nil, ErrWechatDeliveryModeUserAssisted
 	}
 	if s.enqueuer == nil {
 		return nil, ErrWechatPublicationSchedulerUnavailable
@@ -1598,7 +1662,7 @@ func (s *WechatPublicationService) Publish(ctx context.Context, userID, taskID s
 	if err != nil {
 		return nil, err
 	}
-	if publication.Status == model.WechatPublicationStatusPublished || publication.Status == model.WechatPublicationStatusUnsupported || publication.Status == model.WechatPublicationStatusAwaitingManual {
+	if publication.Status == model.WechatPublicationStatusPublished || publication.Status == model.WechatPublicationStatusUnsupported || publication.Status == model.WechatPublicationStatusAwaitingManual || publication.Status == model.WechatPublicationStatusSkipped {
 		return publication, nil
 	}
 	deniedCode, denied, err := s.cachedDeniedFormalPublishCode(ctx, project.ID)
@@ -1845,9 +1909,12 @@ func (s *WechatPublicationService) handleFormalPublishProviderError(ctx context.
 // again.
 func (s *WechatPublicationService) RetryPublish(ctx context.Context, userID, taskID string) (*model.WechatPublication, error) {
 	defer s.syncTaskLifecycle(ctx, taskID)
-	_, _, err := s.ownedTaskProject(ctx, userID, taskID)
+	task, _, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if wechatDeliveryDecision(task).IsUserAssisted() {
+		return nil, ErrWechatDeliveryModeUserAssisted
 	}
 	if s.enqueuer == nil {
 		return nil, ErrWechatPublicationSchedulerUnavailable
@@ -1917,6 +1984,13 @@ func (s *WechatPublicationService) Poll(ctx context.Context, publicationID strin
 	publication, err := s.repo.WechatPublications().FindByID(ctx, publicationID)
 	if err != nil {
 		return nil, err
+	}
+	task, taskErr := s.repo.Tasks().FindByID(ctx, publication.TaskID)
+	if taskErr != nil {
+		return publication, taskErr
+	}
+	if wechatDeliveryDecision(task).IsUserAssisted() {
+		return publication, ErrWechatDeliveryModeUserAssisted
 	}
 	defer s.syncTaskLifecycle(ctx, publication.TaskID)
 	if publication.Status == model.WechatPublicationStatusPublishSubmitting && publication.PublishID == "" {
@@ -2085,6 +2159,9 @@ func (s *WechatPublicationService) ProcessPoll(ctx context.Context, publicationI
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil
 	}
+	if errors.Is(err, ErrWechatDeliveryModeUserAssisted) {
+		return nil
+	}
 	if errors.Is(err, ErrWechatPublicationPending) || errors.Is(err, ErrWechatPublicationConflict) {
 		return nil
 	}
@@ -2211,9 +2288,12 @@ func publishedArticles(response *appwechat.FreePublishBatchGetResponse) []publis
 
 func (s *WechatPublicationService) Reconcile(ctx context.Context, userID, taskID string) error {
 	defer s.syncTaskLifecycle(ctx, taskID)
-	_, project, err := s.ownedTaskProject(ctx, userID, taskID)
+	task, project, err := s.ownedTaskProject(ctx, userID, taskID)
 	if err != nil {
 		return err
+	}
+	if wechatDeliveryDecision(task).IsUserAssisted() {
+		return ErrWechatDeliveryModeUserAssisted
 	}
 	publication, err := s.repo.WechatPublications().FindByTaskID(ctx, taskID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -2272,6 +2352,24 @@ func (s *WechatPublicationService) reconcileProject(ctx context.Context, project
 	pending, err := s.repo.WechatPublications().FindPendingByProject(ctx, project.ID)
 	if err != nil || len(pending) == 0 {
 		return err
+	}
+	eligible := pending[:0]
+	for _, publication := range pending {
+		if publication == nil {
+			continue
+		}
+		task, taskErr := s.repo.Tasks().FindByID(ctx, publication.TaskID)
+		if taskErr != nil {
+			return taskErr
+		}
+		if wechatDeliveryDecision(task).IsUserAssisted() {
+			continue
+		}
+		eligible = append(eligible, publication)
+	}
+	pending = eligible
+	if len(pending) == 0 {
+		return nil
 	}
 	pending, err = s.fallbackDraftsForCachedDeniedFormalPublish(ctx, project.ID, pending)
 	if err != nil || len(pending) == 0 {
@@ -2696,6 +2794,16 @@ func (s *WechatPublicationService) RecoverDue(ctx context.Context, limit int) er
 	}
 	reconciles := make(map[string]bool)
 	for _, publication := range publications {
+		task, taskErr := s.repo.Tasks().FindByID(ctx, publication.TaskID)
+		if errors.Is(taskErr, gorm.ErrRecordNotFound) {
+			continue
+		}
+		if taskErr != nil {
+			return taskErr
+		}
+		if wechatDeliveryDecision(task).IsUserAssisted() {
+			continue
+		}
 		isPoll := publication.Status == model.WechatPublicationStatusPublishing && publication.PublishID != ""
 		if !isPoll && reconciles[publication.ProjectID] {
 			continue
