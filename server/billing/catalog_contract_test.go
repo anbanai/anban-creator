@@ -106,6 +106,11 @@ func TestProviderCostCatalogV4(t *testing.T) {
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": {pricingType: "output_pixel_tier", currency: "CNY"},
 		"wangcai_openai/gpt-image-2-t":                  {pricingType: "openai_image_usage", currency: "USD"},
 	}
+	for _, provider := range []string{"tokenplayer_anthropic", "tokenplayer_openai"} {
+		for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
+			want[provider+"/"+model] = want["moonshot/"+model]
+		}
+	}
 	bundle := loadProductionBundle(t)
 	if bundle.Costs.CurrencyRates["CNY"] != 1_000_000 || bundle.Costs.CurrencyRates["USD"] != 7_200_000 || len(bundle.Costs.CurrencyRates) != 2 {
 		t.Fatalf("currency rates = %#v, want only CNY=1.00 and USD=7.20", bundle.Costs.CurrencyRates)
@@ -372,6 +377,11 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 		"volcengine_ark/doubao-seedream-5-0-pro-260628": "pricing-snapshot:volcengine-ark:seedream-output-pixel-prices:2026-07-13",
 		"wangcai_openai/gpt-image-2-t":                  "pricing-snapshot:wangcai-openai:gpt-image-2-t-usage-prices:2026-07-13",
 	}
+	for _, provider := range []string{"tokenplayer_anthropic", "tokenplayer_openai"} {
+		for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"} {
+			wantEvidence[provider+"/"+model] = wantEvidence["moonshot/"+model]
+		}
+	}
 	newEffectiveAt := time.Date(2026, time.July, 29, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	deepSeekV4ProEffectiveAt := time.Date(2026, time.August, 16, 16, 0, 0, 0, time.UTC)
 	legacyEffectiveAt := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
@@ -387,7 +397,7 @@ func initialCatalogMetadataContractError(bundle *Bundle) error {
 			return fmt.Errorf("models.%s.operator_evidence = %q, want %q", modelID, model.OperatorEvidence, evidence)
 		}
 		wantEffectiveAt := legacyEffectiveAt
-		if strings.HasPrefix(modelID, "deepseek/") || strings.HasPrefix(modelID, "moonshot/") || strings.HasPrefix(modelID, "zhipu/") {
+		if strings.HasPrefix(modelID, "deepseek/") || strings.HasPrefix(modelID, "moonshot/") || strings.HasPrefix(modelID, "tokenplayer_") || strings.HasPrefix(modelID, "zhipu/") {
 			wantEffectiveAt = newEffectiveAt
 		}
 		if modelID == "deepseek/deepseek-v4-pro" {
