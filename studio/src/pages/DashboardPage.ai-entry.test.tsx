@@ -741,7 +741,7 @@ describe('DashboardPage AI entry', () => {
     expect(await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号创作项目')
     const prompt = await screen.findByPlaceholderText('描述你想创作的内容、目标和素材要求...')
     expect(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号')
-    expect(screen.queryByRole('link', { name: /新建作品/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '创作' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /管理创作项目配置/ })).not.toBeInTheDocument()
     expect(screen.queryByText('今日创作态势')).not.toBeInTheDocument()
@@ -889,7 +889,7 @@ describe('DashboardPage AI entry', () => {
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '首页创作项目选择' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /新建作品/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '创作' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
 
     fireEvent.click(await screen.findByRole('combobox', { name: '创作项目：公众号创作项目' }))
@@ -934,7 +934,7 @@ describe('DashboardPage AI entry', () => {
 
     expect(await screen.findByRole('heading', { name: '今天想创作什么？' })).toBeInTheDocument()
     expect(await screen.findByRole('combobox', { name: '创作项目：电商创作项目' })).toHaveTextContent('电商创作项目')
-    expect(screen.queryByRole('link', { name: /新建作品/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '创作' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /安排自动排期/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /管理创作项目配置/ })).not.toBeInTheDocument()
   })

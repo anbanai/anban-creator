@@ -342,7 +342,7 @@ export default function TimelinePage() {
           icon={Calendar}
           title="没有排期内容"
           description="创建排期或作品后，这里会按时间线展示执行情况。"
-          action={{ label: '新建作品', onClick: () => navigate('/tasks?create=true') }}
+          action={{ label: '创作', onClick: () => navigate('/tasks?create=true') }}
           secondaryAction={{ label: '新建排期', onClick: () => navigate('/plans') }}
         />
       ) : (

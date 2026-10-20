@@ -315,13 +315,13 @@ describe('TaskFormDialog', () => {
 
     renderDialog()
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(dialog).toBeInTheDocument()
   })
 
   it('automatically supplies the configured portrait and leaves cover usage optional by default', async () => {
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByText('勾选后使用创作项目人物与标题设计封面')).toBeInTheDocument()
     expect(dialog.querySelector('[data-agent-id="wechat-article"]')).toBeInTheDocument()
     await openTaskParameters(dialog)
@@ -337,7 +337,7 @@ describe('TaskFormDialog', () => {
 
   it('submits the required project portrait option for an article task', async () => {
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     await openTaskParameters(dialog)
     fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
     fireEvent.change(within(dialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), { target: { value: '写文章' } })
@@ -352,7 +352,7 @@ describe('TaskFormDialog', () => {
       publicUrl: '', previewUrl: 'https://cdn.example/task-portrait.png', contentType: 'image/png', size: 20,
     })
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     await openTaskParameters(dialog)
     fireEvent.change(within(dialog).getByLabelText('人物参考图文件'), {
       target: { files: [new File(['portrait'], 'task-portrait.png', { type: 'image/png' })] },
@@ -372,7 +372,7 @@ describe('TaskFormDialog', () => {
   it.each(['wechat', 'seednote', 'montage', 'hypit'] as const)('offers an unselected portrait cover for %s tasks', async (platform) => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, platform }])
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByRole('switch', { name: '人物封面' })).not.toBeChecked()
     fireEvent.click(within(dialog).getByRole('switch', { name: '人物封面' }))
     expect(within(dialog).getByRole('switch', { name: '人物封面' })).toBeChecked()
@@ -380,7 +380,7 @@ describe('TaskFormDialog', () => {
 
   it('clears portrait cover usage when the selected reference is removed', async () => {
     renderDialog({ initialProjectId: fixtures.articleProject.id })
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
     fireEvent.click(portraitSwitch)
     expect(portraitSwitch).toBeChecked()
@@ -393,7 +393,7 @@ describe('TaskFormDialog', () => {
 
   it.each([fixtures.seednoteProject, fixtures.montageProject])('submits the selected portrait cover for a $platform task', async (project) => {
     renderDialog({ initialProjectId: project.id })
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     const portraitSwitch = await within(dialog).findByRole('switch', { name: '人物封面' })
     expect(portraitSwitch).not.toBeChecked()
     fireEvent.click(portraitSwitch)
@@ -429,7 +429,7 @@ describe('TaskFormDialog', () => {
   it('shows the missing project portrait without requiring one', async () => {
     vi.mocked(api.projects.list).mockResolvedValueOnce([{ ...fixtures.articleProject, portrait_reference_image: null }])
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByText('创作项目尚未设置人物参考图')).toBeInTheDocument()
     await openTaskParameters(dialog)
     expect(within(dialog).getByRole('switch', { name: '人物封面' })).toHaveAttribute('aria-disabled', 'true')
@@ -437,7 +437,7 @@ describe('TaskFormDialog', () => {
 
   it('在作品创建和克隆时用模板覆盖非空 Prompt 且保留附件', async () => {
     const createView = renderDialog({ initialProjectId: fixtures.seednoteProject.id })
-    const createDialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const createDialog = await screen.findByRole('dialog', { name: '创作' })
     const createPrompt = within(createDialog).getByPlaceholderText('描述创作目标、内容要求和素材使用方式...')
     fireEvent.change(createPrompt, { target: { value: '已有创建要求' } })
     fireEvent.click(await within(createDialog).findByRole('button', { name: /清透说明书/ }))
@@ -469,7 +469,7 @@ describe('TaskFormDialog', () => {
 
   it('shows configuration-driven off-peak windows and current task prices', async () => {
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByText('当前选择为高峰时段 · 预计 4800 积分/次')).toBeInTheDocument()
     expect(within(dialog).getByText('Asia/Shanghai 低峰：00:00–09:00、12:00–14:00、18:00–24:00；低峰价格为高峰会员价的 80%')).toBeInTheDocument()
     expect(within(dialog).getByText('高峰 4800 积分 · 低峰 3840 积分 · 低峰可节省 960 积分')).toBeInTheDocument()
@@ -477,7 +477,7 @@ describe('TaskFormDialog', () => {
 
   it('explains the ecommerce task inputs that decide scope, cost and output', async () => {
     renderDialog({ initialProjectId: fixtures.ecommerceProject.id, initialType: 'ecommerce' })
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
 
     expect(within(dialog).getByText('写清目标、素材用法和不能出现的表达；未填写的部分按创作项目默认值执行。')).toBeInTheDocument()
     expect(await within(dialog).findByText('按开启的模块生成交付物，图片生成与理解按实际用量单独计费。')).toBeInTheDocument()
@@ -490,7 +490,7 @@ describe('TaskFormDialog', () => {
   it('creates viral analysis using a neutral shared project', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{ ...fixtures.seednoteProject, platform: '' }])
     renderDialog({ initialProjectId: undefined, initialType: 'viral_analysis' })
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
 
     const projectControl = within(dialog).getByRole('combobox', { name: /^创作项目/ })
     await waitFor(() => expect(projectControl).toBeEnabled())
@@ -617,7 +617,7 @@ describe('TaskFormDialog', () => {
   it('renders create mode with the shared operational controls and no static type panel', async () => {
     renderDialog()
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     const composer = dialog.querySelector<HTMLElement>('[data-slot="agent-prompt-input"]')
     expect(composer).toBeInTheDocument()
     const parametersControl = await within(composer!).findByRole('button', { name: /^创作参数：/ })
@@ -662,7 +662,7 @@ describe('TaskFormDialog', () => {
 
     renderDialog()
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await findImageSettings(dialog, '16:9 · 目录默认能力')).toBeInTheDocument()
   })
 
@@ -677,7 +677,7 @@ describe('TaskFormDialog', () => {
 
     renderDialog()
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     await findImageSettings(dialog, '16:9 · 目录默认能力')
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '创建一篇品牌文章' },
@@ -692,7 +692,7 @@ describe('TaskFormDialog', () => {
   it('uses the selected project platform when initial type and project disagree', async () => {
     renderDialog({ initialType: 'seednote' })
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     const projectControl = await within(dialog).findByRole('combobox', { name: '创作项目：公众号创作项目' })
     expect(projectControl).toHaveTextContent('公众号创作项目')
     expect(await findImageSettings(dialog, '16:9 · 标准图像')).toBeInTheDocument()
@@ -848,7 +848,7 @@ describe('TaskFormDialog', () => {
     vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('capability unavailable'))
     renderDialog()
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByText('图像能力暂时无法加载，请稍后重试。')).toBeInTheDocument()
     const failedParameters = await openTaskParameters(dialog)
     for (const button of within(within(failedParameters).getByRole('group', { name: '图片比例' })).getAllByRole('button')) {
@@ -862,7 +862,7 @@ describe('TaskFormDialog', () => {
     vi.mocked(api.imageCapabilities.list).mockReturnValueOnce(capabilitiesRequest.promise)
     renderDialog()
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByText('正在加载图像能力，请稍候。')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
 
@@ -901,7 +901,7 @@ describe('TaskFormDialog', () => {
 
   it('submits explicit auto instead of falling back to the project default ratio', async () => {
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     const imageSettings = await findImageSettings(dialog, '16:9 · 标准图像')
     fireEvent.click(imageSettings)
     fireEvent.click(within(await screen.findByRole('group', { name: '图片比例' })).getByRole('button', { name: '智能适配' }))
@@ -917,7 +917,7 @@ describe('TaskFormDialog', () => {
 
   it('submits create mode and reports the submitted quantity', async () => {
     const { onCreated } = renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     await waitFor(() => expect(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号创作项目'))
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '创建一篇品牌文章' },
@@ -941,7 +941,7 @@ describe('TaskFormDialog', () => {
 
   it('keeps supported task quantities up to five and clamps authoritative task types to one', async () => {
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     const selectProject = async (name: RegExp) => {
       fireEvent.click(await within(dialog).findByRole('combobox', { name: /^创作项目：/ }))
       fireEvent.click(await screen.findByRole('option', { name }))
@@ -981,7 +981,7 @@ describe('TaskFormDialog', () => {
     vi.mocked(api.montageCapabilities.list).mockRejectedValueOnce(new Error('catalog unavailable'))
     renderDialog({ initialProjectId: fixtures.montageProject.id, initialType: 'montage' })
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     expect(await within(dialog).findByText('视频类型加载失败，暂时无法创建视频')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
   })
@@ -1122,7 +1122,7 @@ describe('TaskFormDialog', () => {
 
   it('asks for confirmation before closing a dirty form', async () => {
     renderDialog()
-    await screen.findByRole('dialog', { name: '新建作品' })
+    await screen.findByRole('dialog', { name: '创作' })
     await waitFor(() => expect(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号创作项目'))
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '尚未提交的内容' },
@@ -1260,7 +1260,7 @@ describe('task creation type selection', () => {
   it.each([false, true])('uses valid output ratios with a different project platform (change project: %s)', async (changeProject) => {
     useAgentPacksMock.mockReturnValue({ data: mockAgentPackCatalog })
     renderDialog({ initialProjectId: changeProject ? undefined : fixtures.articleProject.id, initialType: 'wechat-article' })
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     fireEvent.click(await within(dialog).findByRole('button', { name: '种草笔记' }))
     if (changeProject) {
       fireEvent.click(within(dialog).getByRole('combobox', { name: /^创作项目：/ }))
@@ -1282,7 +1282,7 @@ describe('task creation type selection', () => {
   it('keeps an explicitly chosen output when changing the project context', async () => {
     useAgentPacksMock.mockReturnValue({ data: mockAgentPackCatalog })
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     fireEvent.click(await within(dialog).findByRole('button', { name: '公众号贴图' }))
     fireEvent.click(within(dialog).getByRole('combobox', { name: /^创作项目：/ }))
     fireEvent.click(await screen.findByRole('option', { name: /种草创作项目/ }))
@@ -1293,7 +1293,7 @@ describe('task creation type selection', () => {
   it('applies matching project defaults after an explicit type choice', async () => {
     useAgentPacksMock.mockReturnValue({ data: mockAgentPackCatalog })
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     fireEvent.click(await within(dialog).findByRole('button', { name: '种草笔记' }))
     fireEvent.click(within(dialog).getByRole('combobox', { name: /^创作项目：/ }))
     fireEvent.click(await screen.findByRole('option', { name: /种草创作项目/ }))
@@ -1302,7 +1302,7 @@ describe('task creation type selection', () => {
 
   it('requires a project before a new task can be submitted', async () => {
     renderDialog({ initialProjectId: undefined })
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Agent prompt' }), { target: { value: '新品介绍' } })
     expect(within(dialog).getByRole('button', { name: '创建' })).toBeDisabled()
   })
@@ -1312,7 +1312,7 @@ describe('task creation type selection', () => {
     const catalog = await api.billing.catalog()
     vi.mocked(api.billing.catalog).mockResolvedValue({ ...catalog, skus: [...catalog.skus, { id: 'task.wechat_picture.effective', operation: 'task.wechat_picture', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'picture_artifacts_verified' }] })
     renderDialog()
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     const picker = await within(dialog).findByRole('group', { name: '创作类型' })
     expect(within(dialog).queryByRole('combobox', { name: '执行 Agent' })).not.toBeInTheDocument()
     fireEvent.click(within(picker).getByRole('button', { name: '公众号贴图' }))
@@ -1327,7 +1327,7 @@ describe('task creation type selection', () => {
     const catalog = await api.billing.catalog()
     vi.mocked(api.billing.catalog).mockResolvedValue({ ...catalog, skus: [...catalog.skus, { id: 'task.wechat_picture.effective', operation: 'task.wechat_picture', execution_profile: 'effective', charge_policy: 'task_admission', price_credits: 4000, delivery: 'picture_artifacts_verified' }] })
     renderDialog({ initialType: 'wechat-picture' })
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     const mode = await within(dialog).findByRole('group', { name: '图片数量模式' })
 
     expect(within(mode).getByRole('button', { name: '智能张数' })).toHaveAttribute('aria-pressed', 'true')

@@ -206,7 +206,7 @@ export default function TasksPage() {
     if (projects.length > 0) return
 
     setModalOpen(false)
-    toast.error('请先创建一个创作项目，再开始新建作品。')
+    toast.error('请先创建一个创作项目，再开始创作。')
     navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
   }, [projects.length, projectsLoading, modalOpen, navigate, createIntent.type, createIntent.intent])
 
@@ -393,7 +393,7 @@ export default function TasksPage() {
       return
     }
     if (projects.length === 0) {
-      toast.error('请先创建一个创作项目，再开始新建作品。')
+      toast.error('请先创建一个创作项目，再开始创作。')
       navigate(projectsReturnHref({ type: createIntent.type ?? 'seednote', intent: createIntent.intent ?? 'new' }))
       return
     }
@@ -473,7 +473,7 @@ export default function TasksPage() {
       >
         <Button className="min-h-11" onClick={openCreate}>
           <Plus className="h-4 w-4" />
-          新建作品
+          创作
         </Button>
       </PageHeader>
 
@@ -589,7 +589,7 @@ export default function TasksPage() {
             !planFilter && !searchFilter.trim() && !projectFilter && statusFilter === 'all'
               ? projects.length === 0
                 ? { label: '去创建创作项目', onClick: () => navigate('/projects') }
-                : { label: '新建作品', onClick: openCreate }
+                : { label: '创作', onClick: openCreate }
               : undefined
           }
         />
