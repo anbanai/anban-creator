@@ -786,15 +786,17 @@ export default function TaskDetailPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-start">
         <div className="min-w-0 space-y-6">
           {task.asset_id && <ContentLineagePanel assetID={task.asset_id} runID={task.reuse_run_id} taskID={task.id} />}
-          <TaskDeliverablesPanel
-            taskId={task.id}
-            taskStatus={task.status}
-            files={files ?? []}
-            taskType={task.type}
-            filesLoading={filesLoading}
-            filesError={filesError}
-            onRetryFiles={() => void refetchFiles()}
-          />
+          {task.status !== 'pending' && task.status !== 'running' && (
+            <TaskDeliverablesPanel
+              taskId={task.id}
+              taskStatus={task.status}
+              files={files ?? []}
+              taskType={task.type}
+              filesLoading={filesLoading}
+              filesError={filesError}
+              onRetryFiles={() => void refetchFiles()}
+            />
+          )}
           {(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') && (
             <CompletionSummary workflow={task.workflow_status} outcome={task.outcome} />
           )}

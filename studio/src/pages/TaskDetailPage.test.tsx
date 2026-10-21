@@ -358,11 +358,26 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByRole('button', { name: '完成创作，已完成' })).toBeInTheDocument()
   })
 
-  it('opens execution process by default while work is running', async () => {
-    mockTask(taskWith({ status: 'running' }))
+  it.each(['pending', 'running'] as const)('shows only execution content while work is %s', async (status) => {
+    mockTask(taskWith({ status }))
     render(<TaskDetailPage />)
 
     expect(await screen.findByRole('button', { name: '执行过程' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByRole('region', { name: '交付结果' })).not.toBeInTheDocument()
+  })
+
+  it('keeps delivered files visible when a task is cancelled', async () => {
+    mockTask(taskWith({ status: 'cancelled' }))
+    vi.mocked(api.tasks.files).mockResolvedValue([{
+      id: 'cancelled-delivery', task_id: 'task-1', state: 'delivered', role: 'output',
+      file_name: 'cancelled-output.md', mime_type: 'text/markdown', file_size: 128,
+      url: '/cancelled-output.md', is_deliverable: true, created_at: '2026-09-20T00:54:05Z',
+    }])
+
+    render(<TaskDetailPage />)
+
+    expect(await screen.findByRole('region', { name: '交付结果' })).toBeInTheDocument()
+    expect(await screen.findByTitle('cancelled-output.md')).toBeInTheDocument()
   })
 
   it('opens execution process when a completed task has only stage files', async () => {
@@ -569,6 +584,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByText('创作进度')).not.toBeInTheDocument()
     expect(screen.queryByText('当前阶段')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '作品结果' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '交付结果' })).not.toBeInTheDocument()
     expect(screen.queryByText('作品配置')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '执行动态' })).not.toBeInTheDocument()
     expect(screen.queryByText('未生成素材使用结论，仅展示作品输入。')).not.toBeInTheDocument()
