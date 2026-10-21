@@ -506,7 +506,7 @@ func TestInteractiveRuntimeCredentialCanStageAssistantDraftOverMCP(t *testing.T)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `\"staged\":true`) {
 		t.Fatalf("interactive assistant draft status/body = %d/%s", rec.Code, rec.Body.String())
 	}
-	if session.Draft.Name != "创作计划" || session.Draft.Fields["goal"] != "目标" {
+	if session.Draft.Name != "创作需求" || session.Draft.Fields["goal"] != "目标" {
 		t.Fatalf("staged assistant draft = %#v", session.Draft)
 	}
 }
