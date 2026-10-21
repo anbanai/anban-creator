@@ -47,12 +47,28 @@ describe('AssistantHome', () => {
     const creationSelect = await screen.findByRole('combobox', { name: '选择画像' })
     await waitFor(() => expect(within(creationSelect).getByRole('option', { name: '已确认画像' })).toBeInTheDocument())
     expect(within(creationSelect).queryByRole('option', { name: '未确认画像' })).not.toBeInTheDocument()
+    expect(screen.getByText('创作和复盘模式只显示已确认的人设；未显示的人设请先在画像模式完成确认。')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /复盘模式/ }))
     const reviewSelect = screen.getByRole('combobox', { name: '选择画像' })
     expect(within(reviewSelect).getByRole('option', { name: '已确认画像' })).toBeInTheDocument()
     expect(within(reviewSelect).queryByRole('option', { name: '未确认画像' })).not.toBeInTheDocument()
     await waitFor(() => expect(assistantMocks.works).toHaveBeenCalledWith('ready-project', undefined, 25))
+  })
+
+  it('uses the new persona wording in every mode heading', async () => {
+    renderPage()
+
+    expect(await screen.findByRole('heading', { name: '为「已确认画像人设」制定新的创作计划' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /画像模式/ }))
+    expect(screen.getByRole('heading', { name: '开始为「新人设」建立画像' })).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: '选择画像' }), { target: { value: 'ready-project' } })
+    expect(screen.getByRole('heading', { name: '开始为「已确认画像人设」建立画像' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /创作模式/ }))
+    expect(screen.getByRole('heading', { name: '为「已确认画像人设」制定新的创作计划' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /复盘模式/ }))
+    expect(screen.getByRole('heading', { name: '复盘「已确认画像人设」的作品' })).toBeInTheDocument()
   })
 
   it('loads review works in pages and exposes more results on demand', async () => {

@@ -138,7 +138,7 @@ describe('ChatPage', () => {
     renderPage('/chat')
 
     await waitFor(() => expect(assistantMocks.bootstrap).toHaveBeenCalledTimes(1))
-    expect(await screen.findByRole('heading', { name: '开始为「新画像」建立创作画像' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '开始为「新人设」建立画像' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /创作模式/ })).toHaveTextContent('先完成画像初始化')
     expect(screen.getByRole('button', { name: /复盘模式/ })).toHaveTextContent('先完成一件作品')
@@ -360,7 +360,7 @@ describe('ChatPage', () => {
     renderChat('/chat?mode=creation&project_id=project-1')
     fireEvent.click(await screen.findByRole('button', { name: /创作模式/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: /画像模式/ }))
-    await screen.findByRole('heading', { name: /建立创作画像/ })
+    await screen.findByRole('heading', { name: /建立画像/ })
     fireEvent.click(screen.getByRole('button', { name: /创作模式/ }))
     fireEvent.click(await screen.findByRole('button', { name: '继续草稿' }))
     await waitFor(() => expect(assistantMocks.createSession).toHaveBeenLastCalledWith({ mode_id: 'creation', project_id: 'project-1', checkpoint_id: 'creation-checkpoint' }, expect.any(String)))

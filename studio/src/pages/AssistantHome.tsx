@@ -13,10 +13,16 @@ function isAssistantModeID(value: string | null): value is AssistantModeID {
   return value === 'profile' || value === 'creation' || value === 'review'
 }
 
-function titleForMode(modeId: AssistantModeID, projectName: string, contentTitle: string) {
-  if (modeId === 'profile') return `开始为「${projectName}」建立创作画像`
-  if (modeId === 'creation') return `为「${projectName}」制定新的创作计划`
-  return `复盘「${projectName}」的作品${contentTitle ? `：${contentTitle}` : ''}`
+function personaLabel(projectName?: string) {
+  const name = projectName?.trim()
+  if (!name) return '新人设'
+  return name.endsWith('人设') ? name : `${name}人设`
+}
+
+function titleForMode(modeId: AssistantModeID, personaName: string, contentTitle: string) {
+  if (modeId === 'profile') return `开始为「${personaName}」建立画像`
+  if (modeId === 'creation') return `为「${personaName}」制定新的创作计划`
+  return `复盘「${personaName}」的作品${contentTitle ? `：${contentTitle}` : ''}`
 }
 
 export default function AssistantHome() {
@@ -36,6 +42,7 @@ export default function AssistantHome() {
   const mode = bootstrap?.modes.find((candidate) => candidate.id === modeId)
   const projects = bootstrap?.projects ?? []
   const selectableProjects = modeId === 'profile' ? projects : projects.filter((project) => project.profileReady)
+  const hiddenUnconfirmedProjectCount = modeId === 'profile' ? 0 : projects.length - selectableProjects.length
   const selectedProject = selectableProjects.find((project) => project.id === selectedProjectId)
     ?? (modeId !== 'profile' && selectableProjects.length === 1 ? selectableProjects[0] : undefined)
   const worksQuery = useInfiniteQuery({
@@ -48,7 +55,7 @@ export default function AssistantHome() {
   })
   const works = worksQuery.data?.pages.flatMap((page) => page.items) ?? []
   const content = works.find((work) => work.id === selectedContentId) ?? (modeId === 'review' && works.length === 1 ? works[0] : undefined)
-  const heading = titleForMode(modeId, selectedProject?.name ?? (modeId === 'profile' ? '新画像' : '你的画像'), content?.title ?? '')
+  const heading = titleForMode(modeId, personaLabel(selectedProject?.name), content?.title ?? '')
   const canStart = Boolean(mode?.available)
     && (modeId === 'profile' || Boolean(selectedProject))
     && (modeId !== 'review' || Boolean(content))
@@ -158,6 +165,7 @@ export default function AssistantHome() {
 
             {!mode?.available && mode?.disabledReason && <p className="mt-4 max-w-xl text-sm text-muted-foreground">{mode.disabledReason}</p>}
             {modeId !== 'profile' && !selectedProject && mode?.available && <p className="mt-4 text-sm text-muted-foreground">先选择一个画像，再开始当前模式。</p>}
+            {hiddenUnconfirmedProjectCount > 0 && mode?.available && <p className="mt-4 max-w-xl text-sm text-muted-foreground">创作和复盘模式只显示已确认的人设；未显示的人设请先在画像模式完成确认。</p>}
             {modeId === 'review' && selectedProject && works.length === 0 && mode?.available && !worksQuery.isLoading && !worksQuery.isError && <p className="mt-4 text-sm text-muted-foreground">这个画像下还没有可复盘的已完成作品。</p>}
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
