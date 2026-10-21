@@ -13,7 +13,6 @@ describe('navigation IA', () => {
   it('defines the MVP navigation in approved order', () => {
     expect(mvpNavItems.map((item) => item.label)).toEqual([
       'AI助手',
-      '新手引导',
       '画像库',
       '人设',
       '作品',
@@ -30,7 +29,6 @@ describe('navigation IA', () => {
     expect(mvpNavItems.map((item) => item.to)).not.toContain('/usage')
     expect(workspaceNavItems.map((item) => item.to)).toEqual([
       '/',
-      '/projects/new/interview',
       '/portraits',
       '/projects',
       '/tasks',
@@ -57,7 +55,6 @@ describe('navigation IA', () => {
   it('filters the combined navigation by administrator access', () => {
     expect(allNavItems.map((item) => item.to)).toEqual([
       '/',
-      '/projects/new/interview',
       '/portraits',
       '/projects',
       '/tasks',

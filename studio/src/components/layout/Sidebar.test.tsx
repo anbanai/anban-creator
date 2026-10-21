@@ -77,7 +77,6 @@ describe('Sidebar', () => {
     const navigation = within(screen.getByRole('navigation', { name: '主导航' }))
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([
       'AI助手',
-      '新手引导',
       '画像库',
       '人设',
       '作品',
