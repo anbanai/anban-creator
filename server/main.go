@@ -913,7 +913,6 @@ func main() {
 			InteractiveSvc: interactiveSvc,
 			SearchSvc:      searchSvc,
 			FetchSvc:       fetchSvc,
-			ImageSearchSvc: service.NewImageSearchService(false, nil),
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)

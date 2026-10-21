@@ -96,7 +96,7 @@ func TestSearchWebHandlerRejectsProviderOverrideAndInvalidInput(t *testing.T) {
 	}
 }
 
-func TestFetchAndImageSearchHandlersRejectWrongStringTypes(t *testing.T) {
+func TestFetchHandlerRejectsWrongStringTypes(t *testing.T) {
 	old := svcs
 	svcs = nil
 	t.Cleanup(func() { svcs = old })
@@ -107,8 +107,6 @@ func TestFetchAndImageSearchHandlersRejectWrongStringTypes(t *testing.T) {
 		args    map[string]any
 	}{
 		{name: "fetch url", handler: fetchWebPageHandler, args: map[string]any{"url": 42}},
-		{name: "image query", handler: searchImagesHandler, args: map[string]any{"query": 42}},
-		{name: "image url", handler: searchImagesHandler, args: map[string]any{"image_url": 42}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := tc.handler(ctx, searchToolRequest(t, tc.args))
@@ -169,8 +167,11 @@ func TestSearchWebSchemaExposesSitesConstraint(t *testing.T) {
 
 func TestSearchCapabilityToolsExposeProviderNeutralContracts(t *testing.T) {
 	tools := listRegisteredTools(t, registerSearchTools)
-	want := map[string]bool{"search_web": false, "fetch_web_page": false, "search_images": false}
+	want := map[string]bool{"search_web": false, "fetch_web_page": false}
 	for _, tool := range tools {
+		if tool.Name == "search_images" {
+			t.Fatal("unimplemented search_images tool must not be registered")
+		}
 		if _, ok := want[tool.Name]; !ok {
 			continue
 		}

@@ -90,35 +90,6 @@ type PageFetchProvider interface {
 	Fetch(context.Context, PageFetchRequest) (*PageFetchResponse, error)
 }
 
-type ImageSearchImagesRequest struct {
-	Query    string
-	ImageURL string
-	Limit    int
-	Sites    []string
-}
-
-type ImageSearchResult struct {
-	Title            string         `json:"title,omitempty"`
-	ImageURL         string         `json:"image_url"`
-	SourceURL        string         `json:"source_url,omitempty"`
-	Domain           string         `json:"domain,omitempty"`
-	CitationID       string         `json:"citation_id,omitempty"`
-	FetchedAt        string         `json:"fetched_at,omitempty"`
-	ProviderMetadata map[string]any `json:"provider_metadata,omitempty"`
-}
-
-type ImageSearchResponse struct {
-	Provider          string              `json:"provider"`
-	ProviderRequestID string              `json:"provider_request_id,omitempty"`
-	Query             string              `json:"query,omitempty"`
-	Results           []ImageSearchResult `json:"results"`
-	FetchedAt         time.Time           `json:"fetched_at"`
-}
-
-type ImageSearchProvider interface {
-	SearchImages(context.Context, ImageSearchImagesRequest) (*ImageSearchResponse, error)
-}
-
 type DoubaoSearchProvider struct {
 	client        *http.Client
 	endpoint      string

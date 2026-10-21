@@ -59,7 +59,6 @@ var reviewedMCPHandlerCapabilities = map[string]string{
 	"listSearchReceiptsHandler":               "svcs.TaskSvc.ListSearchReceipts",
 	"searchWebHandler":                        "svcs.SearchSvc.Search",
 	"fetchWebPageHandler":                     "svcs.FetchSvc.Fetch",
-	"searchImagesHandler":                     "svcs.ImageSearchSvc.SearchImages",
 	"stageProjectCreatorDraftHandler":         "svcs.InteractiveSvc.StageDraftForSessionContext",
 	"stageAssistantDraftHandler":              "svcs.InteractiveSvc.StageAssistantDraftForSessionContext",
 	"submitProfileResultHandler":              "svcs.ProjectSvc.ApplyAgentProfileResult",

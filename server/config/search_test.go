@@ -120,24 +120,9 @@ func TestSearchConfigValidationUsesCapabilityRoutes(t *testing.T) {
 	}
 }
 
-func TestSearchConfigValidationDoesNotRequireDisabledImageProvider(t *testing.T) {
-	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Search = SearchConfig{Images: SearchCapabilityConfig{Enabled: false, Provider: "doubao"}}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("disabled image search rejected: %v", err)
-	}
-}
-
-func TestSearchConfigValidationRejectsUnimplementedImageSearch(t *testing.T) {
-	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Search = SearchConfig{Images: SearchCapabilityConfig{Enabled: true, Provider: "doubao"}}
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "search.images is not available") {
-		t.Fatalf("enabled image search validation error = %v", err)
+func TestSearchConfigIgnoresRetiredImageSearchRoute(t *testing.T) {
+	body := strings.Replace(validClaudeConfigYAML, "claude:\n", "search:\n  images:\n    enabled: true\n    provider: doubao\nclaude:\n", 1)
+	if _, err := loadClaudeConfigYAML(t, body); err != nil {
+		t.Fatalf("retired search.images config should not prevent startup: %v", err)
 	}
 }

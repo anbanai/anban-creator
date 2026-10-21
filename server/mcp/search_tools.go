@@ -24,10 +24,6 @@ func registerSearchTools(server *mcp.Server) {
 		Name: "fetch_web_page", Description: "Fetch one public HTTP(S) page through the Server-configured page-fetch provider and return Markdown content.",
 		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"url": map[string]any{"type": "string", "format": "uri", "minLength": 1, "maxLength": 4096}}, "required": []any{"url"}},
 	}, fetchWebPageHandler)
-	server.AddTool(&mcp.Tool{
-		Name: "search_images", Description: "Search images by text or find visually similar images when the Server has enabled an official image-search provider.",
-		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"query": map[string]any{"type": "string", "minLength": 1, "maxLength": 2000}, "image_url": map[string]any{"type": "string", "format": "uri", "maxLength": 4096}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50}, "sites": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20}}},
-	}, searchImagesHandler)
 }
 
 func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -134,57 +130,8 @@ func fetchWebPageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	return textResult(result)
 }
 
-func searchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if req == nil || req.Params == nil {
-		return errorResult("search_images request parameters are required"), nil
-	}
-	if failure := requireMCPExecutionIdentity(ctx, "search_images", "", "", ""); failure != nil {
-		return failure, nil
-	}
-	identity, _ := getMCPExecutionIdentity(ctx)
-	if strings.TrimSpace(identity.UserID) == "" {
-		return errorResult(`{"code":"execution_identity_required","message":"search_images requires an execution-scoped credential"}`), nil
-	}
-	args := parseArgs(req.Params.Arguments)
-	if hasProviderOverride(args) {
-		return errorResult(`{"code":"provider_selection_forbidden","message":"image search provider is controlled by Server configuration"}`), nil
-	}
-	queryRaw, queryPresent, queryOK := stringArgument(args, "query")
-	imageRaw, imagePresent, imageOK := stringArgument(args, "image_url")
-	if (queryPresent && !queryOK) || (imagePresent && !imageOK) {
-		return errorResult(`{"code":"invalid_request","message":"query and image_url must be strings"}`), nil
-	}
-	query := strings.TrimSpace(queryRaw)
-	imageURL := strings.TrimSpace(imageRaw)
-	if (query == "") == (imageURL == "") {
-		return errorResult(`{"code":"invalid_request","message":"exactly one of query or image_url is required"}`), nil
-	}
-	if len([]rune(query)) > 2000 || len([]rune(imageURL)) > 4096 {
-		return errorResult(`{"code":"invalid_request","message":"query or image_url exceeds the allowed length"}`), nil
-	}
-	if svcs == nil || svcs.ImageSearchSvc == nil {
-		return errorResult(`{"code":"provider_unavailable","message":"image search provider is not configured"}`), nil
-	}
-	limit, err := optionalLimitArg(args)
-	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"limit must be an integer between 1 and 50"}`), nil
-	}
-	sites, err := parseSearchStringArray(args, "sites")
-	if err != nil {
-		return errorResult(`{"code":"invalid_request","message":"sites must be a string array of non-empty strings"}`), nil
-	}
-	if len(sites) > 20 {
-		return errorResult(`{"code":"invalid_request","message":"sites supports at most 20 entries"}`), nil
-	}
-	result, err := svcs.ImageSearchSvc.SearchImages(ctx, service.ImageSearchImagesRequest{Query: query, ImageURL: imageURL, Limit: limit, Sites: sites})
-	if err != nil {
-		return errorResult(searchErrorJSON(searchErrorCode(err, "image_search_failed"), safeCapabilityError(err))), nil
-	}
-	return textResult(result)
-}
-
 func searchErrorCode(err error, fallback string) string {
-	if errors.Is(err, service.ErrSearchProviderUnavailable) || errors.Is(err, service.ErrPageFetchUnavailable) || errors.Is(err, service.ErrImageSearchUnavailable) {
+	if errors.Is(err, service.ErrSearchProviderUnavailable) || errors.Is(err, service.ErrPageFetchUnavailable) {
 		return "provider_unavailable"
 	}
 	return fallback

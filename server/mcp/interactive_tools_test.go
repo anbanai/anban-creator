@@ -413,7 +413,6 @@ func TestInteractiveRuntimeCredentialCanCallReadOnlyMCPTools(t *testing.T) {
 	}{
 		{name: "search_web", args: `{"query":"anban"}`},
 		{name: "fetch_web_page", args: `{"url":"https://example.com"}`},
-		{name: "search_images", args: `{"query":"anban"}`},
 	} {
 		search := callMCPToolForScopeTest(handler, runtimeToken, sessionID, forbidden.name, forbidden.args)
 		if search.Code != http.StatusForbidden {
