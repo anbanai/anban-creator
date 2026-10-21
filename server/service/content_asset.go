@@ -301,7 +301,7 @@ func (s *ContentAssetService) Ingest(ctx context.Context, p IngestContentAssetPa
 			}
 			switch evidence.SourceType {
 			case model.ContentAssetEvidencePublished:
-				projectID, err := service.validateLinkedContent(ctx, LinkContentAssetParams{UserID: p.UserID, ContentKind: evidence.SourceKind, ContentID: evidence.SourceID, ProjectID: evidence.ProjectID})
+				projectID, platform, err := service.validateLinkedContent(ctx, LinkContentAssetParams{UserID: p.UserID, ContentKind: evidence.SourceKind, ContentID: evidence.SourceID, ProjectID: evidence.ProjectID})
 				if err != nil {
 					return fmt.Errorf("validate internal evidence: %w", err)
 				}
@@ -309,7 +309,7 @@ func (s *ContentAssetService) Ingest(ctx context.Context, p IngestContentAssetPa
 				if err != nil || project.UserID != p.UserID {
 					return fmt.Errorf("evidence project does not belong to user")
 				}
-				evidence.ProjectID, evidence.Platform = projectID, project.Platform
+				evidence.ProjectID, evidence.Platform = projectID, platform
 			case model.ContentAssetEvidenceExternal, model.ContentAssetEvidenceImported:
 				evidence.ProjectID = ""
 			default:
@@ -463,7 +463,7 @@ func (s *ContentAssetService) LinkContent(ctx context.Context, p LinkContentAsse
 	if p.ContentKind == "" || p.ContentID == "" {
 		return nil, fmt.Errorf("content_kind and content_id are required")
 	}
-	contentProjectID, err := s.validateLinkedContent(ctx, p)
+	contentProjectID, contentPlatform, err := s.validateLinkedContent(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -473,6 +473,9 @@ func (s *ContentAssetService) LinkContent(ctx context.Context, p LinkContentAsse
 	if projectID == "" {
 		projectID = contentProjectID
 	}
+	if suppliedPlatform := strings.TrimSpace(p.Platform); suppliedPlatform != "" && suppliedPlatform != contentPlatform {
+		return nil, fmt.Errorf("content platform %q does not match project platform %q", suppliedPlatform, contentPlatform)
+	}
 	relation := p.Relation
 	if relation == "" {
 		relation = model.ContentAssetLinkDerivative
@@ -480,7 +483,7 @@ func (s *ContentAssetService) LinkContent(ctx context.Context, p LinkContentAsse
 	if existing, err := s.repo.ContentAssets().FindLink(ctx, p.UserID, p.AssetID, p.ContentKind, p.ContentID, relation); err == nil {
 		return existing, nil
 	}
-	link := &model.ContentAssetLink{ID: uuid.NewString(), AssetID: p.AssetID, UserID: p.UserID, ProjectID: projectID, ContentKind: p.ContentKind, ContentID: p.ContentID, Platform: p.Platform, Relation: relation, Angle: p.Angle}
+	link := &model.ContentAssetLink{ID: uuid.NewString(), AssetID: p.AssetID, UserID: p.UserID, ProjectID: projectID, ContentKind: p.ContentKind, ContentID: p.ContentID, Platform: contentPlatform, Relation: relation, Angle: p.Angle}
 	if err := s.repo.ContentAssets().CreateLink(ctx, link); err != nil {
 		return nil, fmt.Errorf("link content asset: %w", err)
 	}
@@ -575,35 +578,43 @@ func validContentAssetLifecycle(value string) bool {
 	}
 }
 
-func (s *ContentAssetService) validateLinkedContent(ctx context.Context, p LinkContentAssetParams) (string, error) {
+func (s *ContentAssetService) validateLinkedContent(ctx context.Context, p LinkContentAssetParams) (string, string, error) {
 	switch p.ContentKind {
 	case "task", "video_task":
 		task, err := s.repo.Tasks().FindByID(ctx, p.ContentID)
 		if err != nil || task.UserID != p.UserID {
-			return "", fmt.Errorf("task does not belong to user")
+			return "", "", fmt.Errorf("task does not belong to user")
 		}
 		project, err := s.repo.Projects().FindByID(ctx, task.ProjectID)
 		if err != nil || project.UserID != p.UserID {
-			return "", fmt.Errorf("task project does not belong to user")
+			return "", "", fmt.Errorf("task project does not belong to user")
 		}
-		return task.ProjectID, nil
+		return task.ProjectID, project.Platform, nil
 	case "wechat_publication":
 		publication, err := s.repo.WechatPublications().FindByID(ctx, p.ContentID)
 		if err != nil || publication.UserID != p.UserID {
-			return "", fmt.Errorf("publication does not belong to user")
+			return "", "", fmt.Errorf("publication does not belong to user")
 		}
-		return publication.ProjectID, nil
+		project, err := s.repo.Projects().FindByID(ctx, publication.ProjectID)
+		if err != nil || project.UserID != p.UserID {
+			return "", "", fmt.Errorf("publication project does not belong to user")
+		}
+		return publication.ProjectID, project.Platform, nil
 	case "seednote_post":
 		if strings.TrimSpace(p.ProjectID) == "" {
-			return "", fmt.Errorf("project_id is required for seednote posts")
+			return "", "", fmt.Errorf("project_id is required for seednote posts")
 		}
 		post, err := s.repo.SeednotePosts().FindByID(ctx, p.ProjectID, p.ContentID)
 		if err != nil || post.UserID != p.UserID {
-			return "", fmt.Errorf("seednote post does not belong to user")
+			return "", "", fmt.Errorf("seednote post does not belong to user")
 		}
-		return post.ProjectID, nil
+		project, err := s.repo.Projects().FindByID(ctx, post.ProjectID)
+		if err != nil || project.UserID != p.UserID {
+			return "", "", fmt.Errorf("seednote post project does not belong to user")
+		}
+		return post.ProjectID, project.Platform, nil
 	default:
-		return "", fmt.Errorf("unsupported content_kind %q", p.ContentKind)
+		return "", "", fmt.Errorf("unsupported content_kind %q", p.ContentKind)
 	}
 }
 

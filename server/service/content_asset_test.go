@@ -564,6 +564,42 @@ func TestContentAssetServiceReturnsPersistedLinkOnDuplicate(t *testing.T) {
 	if err != nil || first.ID != second.ID {
 		t.Fatalf("links = %q %q, err=%v", first.ID, second.ID, err)
 	}
+	if first.Platform != model.PlatformWechat {
+		t.Fatalf("link platform = %q, want project platform %q", first.Platform, model.PlatformWechat)
+	}
+}
+
+func TestContentAssetServiceRejectsCallerPlatformMismatch(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := model.AutoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	ctx := context.Background()
+	if err := repo.Projects().Create(ctx, &model.Project{ID: "project-platform", UserID: "user-platform", Platform: model.PlatformWechat, Name: "公众号"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Tasks().Create(ctx, &model.Task{ID: "task-platform", UserID: "user-platform", ProjectID: "project-platform", Type: model.TaskTypeWechatArticle, Status: model.TaskStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	asset, err := NewContentAssetService(repo).Create(ctx, CreateContentAssetParams{UserID: "user-platform", Title: "平台身份"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewContentAssetService(repo)
+	if _, err := svc.LinkContent(ctx, LinkContentAssetParams{UserID: "user-platform", AssetID: asset.ID, ContentKind: "task", ContentID: "task-platform", Platform: model.PlatformSeednote}); err == nil {
+		t.Fatal("caller-supplied platform mismatch must be rejected")
+	}
+	link, err := svc.LinkContent(ctx, LinkContentAssetParams{UserID: "user-platform", AssetID: asset.ID, ContentKind: "task", ContentID: "task-platform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link.Platform != model.PlatformWechat {
+		t.Fatalf("derived platform = %q, want %q", link.Platform, model.PlatformWechat)
+	}
 }
 
 func TestContentAssetServiceValidatesAutopilotPolicyBounds(t *testing.T) {

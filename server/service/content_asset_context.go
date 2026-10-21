@@ -145,7 +145,7 @@ func (s *ContentAssetService) GetLineageByContent(ctx context.Context, userID, p
 	if strings.TrimSpace(contentKind) == "" || strings.TrimSpace(contentID) == "" {
 		return nil, fmt.Errorf("content identity is required")
 	}
-	resolvedProject, err := s.validateLinkedContent(ctx, LinkContentAssetParams{UserID: userID, ProjectID: projectID, ContentKind: contentKind, ContentID: contentID})
+	resolvedProject, _, err := s.validateLinkedContent(ctx, LinkContentAssetParams{UserID: userID, ProjectID: projectID, ContentKind: contentKind, ContentID: contentID})
 	if err != nil {
 		return nil, err
 	}
