@@ -1,8 +1,9 @@
 import { useEffect, useState, type ChangeEvent, type KeyboardEvent } from 'react'
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, Loader2, SkipForward } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, FileText, Loader2, Maximize2, SkipForward } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 export interface DshQuestionOption {
   label: string
@@ -18,6 +19,11 @@ export interface DshQuestion {
   options?: DshQuestionOption[]
   multiSelect?: boolean
   multi_select?: boolean
+  intent?: {
+    kind: 'plan-review'
+    approve: string
+    callId?: string
+  }
 }
 
 export interface DshQuestionAnswerItem {
@@ -36,7 +42,7 @@ interface DraftAnswer {
   skipped: boolean
 }
 
-const MAX_CUSTOM_ANSWER_RUNES = 2000
+const MAX_CUSTOM_ANSWER_RUNES = 20000
 
 function runeLength(value: string) {
   return Array.from(value).length
@@ -96,6 +102,7 @@ export function DshQuestionComposer({
   const [error, setError] = useState<string | null>(null)
   const [minimized, setMinimized] = useState(submitted)
   const [submittedState, setSubmittedState] = useState(submitted)
+  const [expandedEditor, setExpandedEditor] = useState(false)
 
   useEffect(() => {
     if (!submitted || answers.length === 0) return
@@ -128,7 +135,7 @@ export function DshQuestionComposer({
     answers: questions.map((item, itemIndex) => {
       const value = values[itemIndex]
       if (value.skipped) return { id: item.id, selected: [] }
-      const custom = value.custom.trim()
+      const custom = value.custom
       return {
         id: item.id,
         selected: custom !== '' && !(item.multiSelect ?? item.multi_select ?? false) ? [] : value.selected,
@@ -210,6 +217,18 @@ export function DshQuestionComposer({
     continueFlow()
   }
 
+  const planReview = question.intent?.kind === 'plan-review'
+  const customLabel = question.header ? `${question.header}补充说明` : '问题补充说明'
+  const editor = (
+    <Textarea
+      value={draft.custom} onChange={updateCustom} onKeyDown={continueFromCustom}
+      disabled={interactionDisabled} aria-label={customLabel}
+      placeholder={question.options?.length ? '输入自定义答案，支持粘贴长文档' : '输入你的答案，支持粘贴长文档'}
+      rows={question.options?.length ? 4 : 8}
+      className="min-h-28 max-h-[min(45dvh,520px)] resize-y text-sm leading-6"
+    />
+  )
+
   return (
     <section className="mx-auto w-full max-w-[760px] overflow-hidden rounded-lg border border-border bg-card shadow-sm" aria-busy={busy}>
       <header className="flex items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-5">
@@ -252,7 +271,14 @@ export function DshQuestionComposer({
         <>
           {disabled && <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground sm:px-5">会话已结束，重新开始后才能继续回答。</p>}
           <div className="max-h-[min(52dvh,420px)] space-y-3 overflow-y-auto px-3 pb-3 sm:px-4">
-            {question.detail && <div className="px-2 text-sm leading-6 text-muted-foreground"><Streamdown>{question.detail}</Streamdown></div>}
+            {planReview && (
+              <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                <div className="mb-2 flex items-center gap-2 text-xs font-medium text-primary"><FileText className="size-4" />计划审阅</div>
+                <div className="max-h-64 overflow-y-auto rounded border border-border/70 bg-background/70 px-3 py-2 text-sm leading-6"><Streamdown>{question.detail ?? ''}</Streamdown></div>
+                <p className="mt-2 text-xs text-muted-foreground">请阅读计划后选择是否执行。</p>
+              </div>
+            )}
+            {question.detail && !planReview && <div className="px-2 text-sm leading-6 text-muted-foreground"><Streamdown>{question.detail}</Streamdown></div>}
             {question.options && question.options.length > 0 && (
               <div className="space-y-1" role={multi ? 'group' : 'radiogroup'} aria-label={question.question}>
                 {question.options.map((option, optionIndex) => {
@@ -288,13 +314,11 @@ export function DshQuestionComposer({
                       ? <span aria-hidden="true" className={`mt-0.5 size-4 shrink-0 rounded-[4px] border ${draft.custom ? 'border-primary bg-primary' : 'border-input'}`} />
                       : <span aria-hidden="true" className="grid size-5 shrink-0 place-items-center rounded-[4px] bg-muted text-muted-foreground"><CircleHelp className="size-3" /></span>}
                     <div className="min-w-0 flex-1">
-                      <Textarea
-                        value={draft.custom} onChange={updateCustom} onKeyDown={continueFromCustom}
-                        disabled={interactionDisabled} aria-label={question.header ? `${question.header}补充说明` : '问题补充说明'}
-                        placeholder="输入自定义答案" rows={1}
-                        className="field-sizing-content min-h-6 max-h-36 resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
-                      />
-                      <span className="sr-only">{runeLength(draft.custom)} / {MAX_CUSTOM_ANSWER_RUNES} 个字符</span>
+                      {editor}
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <span className="text-xs tabular-nums text-muted-foreground">{runeLength(draft.custom)} / {MAX_CUSTOM_ANSWER_RUNES}</span>
+                        <Button type="button" variant="ghost" size="sm" disabled={interactionDisabled} onClick={() => setExpandedEditor(true)}><Maximize2 />展开编辑</Button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -302,13 +326,11 @@ export function DshQuestionComposer({
             )}
             {(!question.options || question.options.length === 0) && (
               <div className="min-w-0 flex-1">
-                <Textarea
-                  value={draft.custom} onChange={updateCustom} onKeyDown={continueFromCustom}
-                  disabled={interactionDisabled} aria-label={question.header ? `${question.header}补充说明` : '问题补充说明'}
-                  placeholder="输入你的答案" rows={1}
-                  className="field-sizing-content min-h-16 max-h-36 resize-y"
-                />
-                <span className="sr-only">{runeLength(draft.custom)} / {MAX_CUSTOM_ANSWER_RUNES} 个字符</span>
+                {editor}
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-xs tabular-nums text-muted-foreground">{runeLength(draft.custom)} / {MAX_CUSTOM_ANSWER_RUNES}</span>
+                  <Button type="button" variant="outline" size="sm" disabled={interactionDisabled} onClick={() => setExpandedEditor(true)}><Maximize2 />展开编辑</Button>
+                </div>
               </div>
             )}
           </div>
@@ -328,6 +350,20 @@ export function DshQuestionComposer({
           </footer>
         </>
       )}
+
+      <Dialog open={expandedEditor} onOpenChange={setExpandedEditor}>
+        <DialogContent className="flex max-h-[92dvh] flex-col gap-3 sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{question.header ? `${question.header}：长文本回答` : '长文本回答'}</DialogTitle>
+            <DialogDescription>可以直接粘贴整篇文档，内容会保留在当前问题中。</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1">{editor}</div>
+          <div className="text-right text-xs tabular-nums text-muted-foreground">{runeLength(draft.custom)} / {MAX_CUSTOM_ANSWER_RUNES} 个字符</div>
+          <DialogFooter>
+            <Button type="button" onClick={() => setExpandedEditor(false)}>完成编辑</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }

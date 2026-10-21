@@ -455,6 +455,9 @@ function parseQuestion(value: unknown): DshQuestion | null {
     options,
     multiSelect: typeof value.multiSelect === 'boolean' ? value.multiSelect : undefined,
     multi_select: typeof value.multi_select === 'boolean' ? value.multi_select : undefined,
+    intent: isRecord(value.intent) && value.intent.kind === 'plan-review'
+      ? { kind: 'plan-review', approve: stringValue(value.intent.approve) ?? '', callId: stringValue(value.intent.callId) }
+      : undefined,
   }
 }
 

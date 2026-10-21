@@ -62,12 +62,18 @@ type InteractiveEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type InteractiveQuestion struct {
-	ID          string              `json:"id"`
-	Question    string              `json:"question"`
-	Header      string              `json:"header,omitempty"`
-	Detail      string              `json:"detail,omitempty"`
-	Options     []InteractiveOption `json:"options,omitempty"`
-	MultiSelect bool                `json:"multiSelect,omitempty"`
+	ID          string                     `json:"id"`
+	Question    string                     `json:"question"`
+	Header      string                     `json:"header,omitempty"`
+	Detail      string                     `json:"detail,omitempty"`
+	Options     []InteractiveOption        `json:"options,omitempty"`
+	MultiSelect bool                       `json:"multiSelect,omitempty"`
+	Intent      *InteractiveQuestionIntent `json:"intent,omitempty"`
+}
+type InteractiveQuestionIntent struct {
+	Kind    string `json:"kind"`
+	Approve string `json:"approve,omitempty"`
+	CallID  string `json:"callId,omitempty"`
 }
 type InteractiveOption struct {
 	Label       string `json:"label"`
@@ -1989,7 +1995,7 @@ func (s *InteractiveService) Answer(ctx context.Context, uid, id, callID string,
 			sess.mu.Unlock()
 			return ErrInteractiveDraftInvalid
 		}
-		if len([]rune(a.Custom)) > 2000 {
+		if len([]rune(a.Custom)) > 20000 {
 			sess.mu.Unlock()
 			return ErrInteractiveDraftInvalid
 		}

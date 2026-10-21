@@ -1184,7 +1184,10 @@ func TestInteractiveEventsIncludeCurrentSessionSnapshotAfterReplayCursor(t *test
 	sess.pendingCall = "call-1"
 	sess.pendingQuestions = map[string]InteractiveQuestion{
 		"q-2": {ID: "q-2", Question: "Second question"},
-		"q-1": {ID: "q-1", Question: "First question"},
+		"q-1": {
+			ID: "q-1", Question: "First question",
+			Intent: &InteractiveQuestionIntent{Kind: "plan-review", Approve: "执行计划", CallID: "plan-call"},
+		},
 	}
 	svc := newInteractiveTestService(sess)
 	svc.emit(sess, "turn.end", map[string]any{"turn": 1})
@@ -1204,6 +1207,9 @@ func TestInteractiveEventsIncludeCurrentSessionSnapshotAfterReplayCursor(t *test
 	questions, ok := data["questions"].([]InteractiveQuestion)
 	if !ok || len(questions) != 2 || questions[0].ID != "q-1" || questions[1].ID != "q-2" {
 		t.Fatalf("snapshot questions = %#v, want sorted pending questions", data["questions"])
+	}
+	if questions[0].Intent == nil || questions[0].Intent.Kind != "plan-review" || questions[0].Intent.Approve != "执行计划" || questions[0].Intent.CallID != "plan-call" {
+		t.Fatalf("snapshot question intent = %#v, want plan-review intent", questions[0].Intent)
 	}
 }
 
@@ -1269,6 +1275,43 @@ func TestInteractiveAnswerAllowsCustomTextWithMultiSelect(t *testing.T) {
 	}
 	if sess.pendingCall != "" {
 		t.Fatalf("pending call = %q, want cleared after accepted answer", sess.pendingCall)
+	}
+}
+
+func TestInteractiveAnswerAllowsLongCustomText(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.runtime = &interactiveTestRuntime{}
+	sess.pendingCall = "call-1"
+	sess.pendingQuestions = map[string]InteractiveQuestion{
+		"q-1": {ID: "q-1", Question: "参考文档"},
+	}
+	svc := newInteractiveTestService(sess)
+	longText := strings.Repeat("参考内容\n", 2500)
+	if len([]rune(longText)) <= 2000 {
+		t.Fatalf("test fixture must exceed the legacy limit: %d", len([]rune(longText)))
+	}
+	if len([]rune(longText)) > 20000 {
+		t.Fatalf("test fixture must fit the new limit: %d", len([]rune(longText)))
+	}
+	if err := svc.Answer(context.Background(), sess.UserID, sess.ID, "call-1", []InteractiveAnswer{{ID: "q-1", Custom: longText}}); err != nil {
+		t.Fatalf("Answer() error = %v, want long custom text accepted", err)
+	}
+}
+
+func TestInteractiveAnswerRejectsCustomTextOverLongLimit(t *testing.T) {
+	sess := newInteractiveTestSession()
+	sess.runtime = &interactiveTestRuntime{}
+	sess.pendingCall = "call-1"
+	sess.pendingQuestions = map[string]InteractiveQuestion{
+		"q-1": {ID: "q-1", Question: "参考文档"},
+	}
+	svc := newInteractiveTestService(sess)
+	tooLong := strings.Repeat("参考内容", 5001)
+	if len([]rune(tooLong)) <= 20000 {
+		t.Fatalf("test fixture must exceed the new limit: %d", len([]rune(tooLong)))
+	}
+	if err := svc.Answer(context.Background(), sess.UserID, sess.ID, "call-1", []InteractiveAnswer{{ID: "q-1", Custom: tooLong}}); !errors.Is(err, ErrInteractiveDraftInvalid) {
+		t.Fatalf("Answer() error = %v, want ErrInteractiveDraftInvalid", err)
 	}
 }
 

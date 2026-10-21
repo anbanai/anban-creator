@@ -132,18 +132,50 @@ describe('DshQuestionComposer', () => {
     expect(screen.queryByRole('button', { name: '提交回答' })).not.toBeInTheDocument()
   })
 
-  it('limits custom answers to the server rune limit before submitting', async () => {
+  it('limits custom answers to the 20000 rune server limit before submitting', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(<DshQuestionComposer questions={[{ id: 'details', question: '请补充说明' }]} onSubmit={onSubmit} />)
 
-    const custom = '😀'.repeat(2001)
+    const custom = '😀'.repeat(20001)
     fireEvent.change(screen.getByRole('textbox', { name: '问题补充说明' }), { target: { value: custom } })
 
-    expect(screen.getByText('自定义答案最多 2000 个字符，超出部分已截断。')).toBeInTheDocument()
+    expect(screen.getByText('自定义答案最多 20000 个字符，超出部分已截断。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
-      answers: [{ id: 'details', selected: [], custom: '😀'.repeat(2000) }],
+      answers: [{ id: 'details', selected: [], custom: '😀'.repeat(20000) }],
     }))
+  })
+
+  it('keeps long document answers editable and submits up to 20000 characters', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(<DshQuestionComposer questions={[{ id: 'details', question: '请粘贴参考文档' }]} onSubmit={onSubmit} />)
+
+    const custom = '参考内容\n'.repeat(3000)
+    const textbox = screen.getByRole('textbox', { name: '问题补充说明' })
+    fireEvent.change(textbox, { target: { value: custom } })
+
+    expect(textbox).toHaveValue(custom)
+    expect(screen.getByText(`${Array.from(custom).length} / 20000`)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
+      answers: [{ id: 'details', selected: [], custom }],
+    }))
+  })
+
+  it('renders plan review questions with a readable review panel', () => {
+    render(<DshQuestionComposer questions={[{
+      id: 'plan',
+      header: '执行计划',
+      question: '确认执行这个计划吗？',
+      detail: '先整理素材，再生成草稿。',
+      intent: { kind: 'plan-review', approve: '执行计划' },
+      options: [{ label: '执行计划' }, { label: '需要调整' }],
+    }]} onSubmit={vi.fn()} />)
+
+    expect(screen.getByText('计划审阅')).toBeInTheDocument()
+    expect(screen.getAllByText('先整理素材，再生成草稿。')).toHaveLength(1)
+    expect(screen.getByRole('radio', { name: '执行计划' })).toBeInTheDocument()
   })
 })
