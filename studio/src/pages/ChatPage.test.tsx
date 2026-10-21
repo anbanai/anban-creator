@@ -1539,9 +1539,9 @@ describe('ChatPage', () => {
           revision: 1,
           ready: true,
           confirmation_token: 'secret-token',
-          project: { name: '茶品牌', platform: 'wechat', instructions: '面向年轻消费者的茶品牌' },
+          project: { name: '茶品牌', platform: 'wechat', instructions: '## 定位\n面向年轻消费者的茶品牌' },
           profile: { dimensions: {
-            identity: { content: { brand: '山岚茶作' } },
+            identity: { content: { brand: '**山岚茶作**' } },
             style: { content: { tone: '克制、清新' } },
             audience: { content: { age: '25-35 岁' } },
             platforms: { content: { primary: '微信公众号' } },
@@ -1556,7 +1556,11 @@ describe('ChatPage', () => {
     renderChat()
 
     await screen.findByRole('button', { name: '确认创建创作项目' })
-    expect(screen.getByText(/brand: 山岚茶作/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '定位' })).toBeInTheDocument()
+    expect(screen.getByText('山岚茶作')).toBeInTheDocument()
+    expect(screen.queryByText('**山岚茶作**')).not.toBeInTheDocument()
+    expect(screen.getByText('公众号')).toBeInTheDocument()
+    expect(screen.queryByText('wechat')).not.toBeInTheDocument()
     expect(screen.getByText(/tone: 克制、清新/)).toBeInTheDocument()
     expect(screen.getByText(/age: 25-35 岁/)).toBeInTheDocument()
     expect(screen.getByText(/primary: 微信公众号/)).toBeInTheDocument()
