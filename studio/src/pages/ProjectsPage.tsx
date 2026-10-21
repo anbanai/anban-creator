@@ -164,9 +164,10 @@ export default function ProjectsPage() {
   )
 
   const filteredProjects = useMemo(() => {
-    if (!searchFilter.trim()) return visibleProjects
+    const sortArchivedLast = (items: Project[]) => [...items].sort((a, b) => Number(a.status === 'archived') - Number(b.status === 'archived'))
+    if (!searchFilter.trim()) return sortArchivedLast(visibleProjects)
     const q = searchFilter.toLowerCase()
-    return visibleProjects.filter((project) => {
+    return sortArchivedLast(visibleProjects.filter((project) => {
       const accounts = (project.profile_setup?.platform_accounts ?? []).map((account) => account.account_name ?? '').join(' ')
       const searchable = [
         project.name,
@@ -177,7 +178,7 @@ export default function ProjectsPage() {
         accounts,
       ].filter(Boolean).join(' ').toLowerCase()
       return searchable.includes(q)
-    })
+    }))
   }, [searchFilter, visibleProjects])
 
   const { data: projectStats = {} } = useQuery({

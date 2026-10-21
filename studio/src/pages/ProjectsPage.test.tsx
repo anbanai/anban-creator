@@ -204,6 +204,25 @@ describe('ProjectsPage', () => {
     vi.restoreAllMocks()
   })
 
+  it('places archived projects after active projects in the all-projects view', async () => {
+    const archivedProject = { ...projectWithReference, id: 'archived-project', name: '已归档项目', status: 'archived' as const }
+    const activeProject = { ...projectWithReference, id: 'active-project', name: '活跃项目', status: 'active' as const }
+    vi.mocked(api.projects.list).mockResolvedValue([archivedProject, activeProject])
+    vi.mocked(api.projects.stats).mockResolvedValue({
+      'archived-project': { total_tasks: 0, completed_tasks: 0, failed_tasks: 0, running_tasks: 0, pending_tasks: 0, unused_topics: 0, success_rate: 0, last_activity_at: '' },
+      'active-project': { total_tasks: 0, completed_tasks: 0, failed_tasks: 0, running_tasks: 0, pending_tasks: 0, unused_topics: 0, success_rate: 0, last_activity_at: '' },
+    })
+
+    render(<ProjectsPage />)
+
+    await screen.findByText('活跃项目')
+    const identities = Array.from(document.querySelectorAll<HTMLElement>('[data-slot="project-identity"]'))
+    expect(identities.map((identity) => identity.getAttribute('aria-label'))).toEqual([
+      '活跃项目，公众号文章，测试，测试定位',
+      '已归档项目，公众号文章，测试，测试定位',
+    ])
+  })
+
   it('requires a nonblank project name before creating a shared project', async () => {
     window.history.pushState({}, '', '/projects?create=true')
     render(<ProjectsPage />)
