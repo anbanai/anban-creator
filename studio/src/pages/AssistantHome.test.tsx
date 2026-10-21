@@ -12,6 +12,10 @@ vi.mock('@/lib/api', async () => {
   return { ...actual, api: { ...actual.api, assistant: assistantMocks } }
 })
 
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 'test-user' } }),
+}))
+
 function renderPage() {
   const queryClient = createTestQueryClient()
   return render(
@@ -54,6 +58,17 @@ describe('AssistantHome', () => {
     expect(within(reviewSelect).getByRole('option', { name: '已确认画像' })).toBeInTheDocument()
     expect(within(reviewSelect).queryByRole('option', { name: '未确认画像' })).not.toBeInTheDocument()
     await waitFor(() => expect(assistantMocks.works).toHaveBeenCalledWith('ready-project', undefined, 25))
+  })
+
+  it('uses one composer to select a mode and send the first message without a second start step', async () => {
+    renderPage()
+
+    expect(await screen.findByRole('textbox', { name: '发送消息' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /开始对话/ })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '发送消息' }), { target: { value: '帮我制定一个公众号选题计划' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(sessionStorage.getItem('anban:assistant-message-handoff:test-user:creation:ready-project:')).toContain('公众号选题计划'))
   })
 
   it('uses the new persona wording in every mode heading', async () => {
