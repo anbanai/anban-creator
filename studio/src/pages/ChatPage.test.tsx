@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ChatPage from './ChatPage'
 import { createTestQueryClient } from '@/test/test-utils'
 import type { InteractiveStreamEvent } from '@/lib/interactive-events'
+import { assistantMessageHandoffKey, saveAssistantMessageHandoff } from '@/lib/assistant-message-handoff'
 
 const interactiveMocks = vi.hoisted(() => ({
   agents: vi.fn(),
@@ -146,6 +147,15 @@ describe('ChatPage', () => {
     expect(assistantMocks.createSession).not.toHaveBeenCalled()
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
     expect(streamMock).not.toHaveBeenCalled()
+  })
+
+  it('sends the single-page composer message after creating the scoped runtime session', async () => {
+    saveAssistantMessageHandoff(assistantMessageHandoffKey('test-user', 'profile'), '我想建立一个面向职场读者的画像')
+    renderPage('/chat?assistant_session=1&mode=profile')
+
+    await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
+    await waitFor(() => expect(assistantMocks.message).toHaveBeenCalledWith('session-1', '我想建立一个面向职场读者的画像'))
+    expect(sessionStorage.getItem('anban:assistant-message-handoff:test-user:profile::')).toBeNull()
   })
 
   it('sends a one-time portrait idea into the scoped creation session', async () => {
@@ -556,7 +566,8 @@ describe('ChatPage', () => {
   it('uses the Assistant mode route without exposing an Agent id', async () => {
     renderPage('/chat')
 
-    fireEvent.click(await screen.findByRole('button', { name: /开始对话/ }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '建立我的画像' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
     expect(screen.getByTestId('route-location')).toHaveTextContent('/chat?assistant_session=1&mode=profile')
