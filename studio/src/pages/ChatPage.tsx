@@ -83,6 +83,34 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function apiErrorCode(error: unknown): string | undefined {
+  if (!isRecord(error) || !isRecord(error.response) || !isRecord(error.response.data)) return undefined
+  return stringValue(error.response.data.error_code)
+}
+
+function chatRequestErrorMessage(error: unknown): string {
+  switch (apiErrorCode(error)) {
+    case 'interactive_session_busy':
+      return '上一条消息仍在处理中，当前输入没有发送成功，请稍后重试。'
+    case 'interactive_question_pending':
+      return '请先完成当前问题卡，再继续发送消息。'
+    case 'interactive_idempotency_conflict':
+      return '请求标识与之前的请求内容不一致。你的输入已保留，请重新连接后再试。'
+    case 'project_profile_revision_conflict':
+      return '画像已在其他位置更新。你的输入已保留，请重新读取最新画像后继续。'
+    case 'assistant_checkpoint_conflict':
+      return '会话草稿已在其他位置更新。你的输入已保留，请重新连接并检查最新进度后继续。'
+    case 'assistant_mode_unavailable':
+      return '当前会话模式暂不可用。你的输入已保留，请返回后重新进入该功能。'
+    case 'interactive_confirmation_stale':
+      return '确认信息已过期，请重新阅读当前草稿后再确认。'
+    case 'interactive_session_closed':
+      return '当前会话已结束，项目尚未确认保存。你可以恢复已保留的材料后继续。'
+    default:
+      return error instanceof Error ? error.message : '消息发送失败，请重试。'
+  }
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
@@ -1233,7 +1261,8 @@ function ChatConversation() {
         setRunState('error')
         return
       }
-      const terminal = /^SSE connection failed: (401|404|410)$/.test(message) || message === '会话历史已失效，请重新开始创建'
+      const responseStatus = isRecord(error) && isRecord(error.response) ? error.response.status : undefined
+      const terminal = /^SSE connection failed: (401|404|410)$/.test(message) || responseStatus === 410 || message === '会话历史已失效，请重新开始创建'
       if (terminal) {
         if (/^SSE connection failed: (404|410)$/.test(message) || message === '会话历史已失效，请重新开始创建') {
           preserveLocalMaterialAfterLostSession(assistantSession ? '原运行时已失效，正在检查服务端保存的结构化草稿' : '原会话已失效，本地材料仍已保留')
@@ -1262,8 +1291,7 @@ function ChatConversation() {
   }, [connectStream])
 
   const recoverSavedDraft = useCallback(() => {
-    if (assistantSession) {
-      if (!assistantRecoveryCheckpoint) return
+    if (assistantSession && assistantRecoveryCheckpoint) {
       setCheckpointRecoveryPending(true)
       resetConversation(false)
       setRecoveryAvailable(true)
@@ -1330,7 +1358,7 @@ function ChatConversation() {
       await connectStream(session.id, generation)
     }).catch((error) => {
       if (disposedRef.current || generation !== runGenerationRef.current) return
-      setStreamError(error instanceof Error ? error.message : `无法启动创作${isProjectUpdate ? '更新' : '创建'}会话`)
+      setStreamError(chatRequestErrorMessage(error))
       setRunState('error')
     })
     startPromiseRef.current = { key, promise }
@@ -1497,7 +1525,20 @@ function ChatConversation() {
       setTurnActive(false)
       const failed = readPersistedInteractiveSession(sessionStorageKey)
       persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: failed?.lastEventId, turnActive: false })
-      setStreamError(error instanceof Error ? error.message : '消息发送失败')
+      setComposer(text)
+      const errorCode = apiErrorCode(error)
+      if (errorCode === 'interactive_session_closed' || (isRecord(error) && isRecord(error.response) && error.response.status === 410)) {
+        const failedMessage = { id: pendingSubmission.message.id, role: 'user' as const, text }
+        const nextMessages = [...messagesRef.current.filter((message) => message.id !== failedMessage.id), failedMessage]
+        messagesRef.current = nextMessages
+        setMessages(nextMessages)
+        const nextTimeline = upsertTimeline(timelineRef.current, { kind: 'message', message: failedMessage }, (item) => item.kind === 'message' && item.message.id === failedMessage.id)
+        timelineRef.current = nextTimeline
+        setTimeline(nextTimeline)
+        preserveLocalMaterialAfterLostSession('原会话已结束，当前输入和本地材料已保留，可恢复后继续。', 'error', 'expired')
+      } else {
+        setStreamError(chatRequestErrorMessage(error))
+      }
     } finally {
       if (pendingSubmissionRef.current === pendingSubmission) {
         if (pendingSubmission.status === 'failed') pendingSubmissionRef.current = null
@@ -1584,7 +1625,15 @@ function ChatConversation() {
         }
       }
     } catch (error) {
-      setCommitError(error instanceof Error ? error.message : `创作项目${isProjectUpdate ? '更新' : '创建'}失败，请重试。`)
+      if (apiErrorCode(error) === 'project_profile_revision_conflict') {
+        const message = '画像版本已在其他位置更新，本次草稿未保存。当前草稿和对话材料已保留；恢复后请基于最新画像重新核对。'
+        void closeSessionWithCheckpoint(sessionId).catch(() => undefined)
+        if (assistantSession) void queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
+        preserveLocalMaterialAfterLostSession(message, 'error', 'expired')
+        setCommitError(message)
+      } else {
+        setCommitError(chatRequestErrorMessage(error))
+      }
     } finally {
       setCommitting(false)
     }
@@ -1673,9 +1722,8 @@ function ChatConversation() {
   const emptyRegistry = assistantSession
     ? !bootstrapQuery.isLoading && (bootstrapQuery.isError || selectableAgents.length === 0)
     : !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
-  const canRecoverSavedDraft = recoveryAvailable && (assistantSession
-    ? Boolean(assistantRecoveryCheckpoint)
-    : hasSavedMaterial(readPersistedInteractiveSession(sessionStorageKey)))
+  const hasLocalRecoveryMaterial = hasSavedMaterial(readPersistedInteractiveSession(sessionStorageKey))
+  const canRecoverSavedDraft = recoveryAvailable && (Boolean(assistantRecoveryCheckpoint) || hasLocalRecoveryMaterial)
   const canCancelConversation = !committed && !committing && (Boolean(sessionId) || runState === 'starting')
 
   return (
@@ -1776,7 +1824,7 @@ function ChatConversation() {
                 if (!draft?.ready || committed) return null
                 return <ConfirmCard key="draft-card" draft={draft} mode={assistantSession ? assistantModeId : 'profile'} isProjectUpdate={isProjectUpdate} needsReconfirmation={draftNeedsReconfirmation} canCommit={!turnActive && !sendingMessage && pendingQuestions.length === 0 && !draftNeedsReconfirmation && (assistantSession && assistantModeId !== 'profile' ? draft.ready === true : Boolean(confirmationTokenRef.current))} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await sendAssistantMessage(sessionId, '继续编辑当前草稿').catch(() => undefined) }} />
               })}
-              {streamError && <Alert variant={streamError.startsWith('对话已取消') ? 'default' : 'destructive'}>{streamError.startsWith('对话已取消') ? <Ban className="size-4" /> : <AlertTriangle className="size-4" />}<AlertTitle>{streamError.startsWith('对话已取消') ? '对话已取消' : canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>{assistantSession ? '将从服务端保存的结构化草稿继续。' : '本地保存的消息、问答和草稿仍然保留。'}</p><p>{assistantSession ? '新对话会沿用草稿摘要，逐字聊天不会回放。' : '旧 runtime 上下文不会恢复。'}</p><p>保存草稿需要重新确认</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />{assistantSession ? '恢复已保存草稿' : '恢复本地材料'}</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
+              {streamError && <Alert variant={streamError.startsWith('对话已取消') ? 'default' : 'destructive'}>{streamError.startsWith('对话已取消') ? <Ban className="size-4" /> : <AlertTriangle className="size-4" />}<AlertTitle>{streamError.startsWith('对话已取消') ? '对话已取消' : canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>{assistantSession && assistantRecoveryCheckpoint ? '将从服务端保存的结构化草稿继续。' : '本地保存的消息、问答和草稿仍然保留。'}</p><p>{assistantSession && assistantRecoveryCheckpoint ? '新对话会沿用草稿摘要，逐字聊天不会回放。' : '新对话会携带最近对话材料摘要；旧 runtime 上下文不会恢复。'}</p><p>恢复后仍需阅读并重新确认画像草稿</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />{assistantSession && assistantRecoveryCheckpoint ? '恢复已保存草稿' : '恢复本地材料'}</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{assistantSession && assistantModeId === 'review' ? '复盘已确认，待数据验证' : assistantSession && assistantModeId === 'creation' ? '创作计划已确认' : isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>{assistantSession && assistantModeId === 'review' ? '这条建议会在后续独立数据分析验证后，才更新六维画像。' : assistantSession && assistantModeId === 'creation' ? '作品任务已创建，可以查看创作进度。' : '正在打开创作项目详情。'}{createdTaskId && <Button className="mt-3" size="sm" onClick={() => navigate(`/tasks/${encodeURIComponent(createdTaskId)}`)}>查看作品任务<ArrowRight className="size-4" /></Button>}</AlertDescription></Alert>}
             </div>
             {newMessageCount > 0 && <Button type="button" variant="secondary" size="sm" className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 shadow-md" onClick={() => scrollToLatest()}><ChevronDown className="size-4" />有 {newMessageCount} 条新消息</Button>}
