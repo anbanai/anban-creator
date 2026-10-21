@@ -328,7 +328,7 @@ export function buildNextBestActions(signals: CommandCenterSignals): NextBestAct
   if (signals.readiness.projectsReady) {
     actions.push({
       id: 'create-task',
-      label: signals.tasks.length === 0 ? '创建首个作品' : '新建作品',
+      label: signals.tasks.length === 0 ? '创建首个作品' : '创作',
       description: defaultProject ? `使用「${defaultProject.name}」继续产出` : '开始新的内容创作',
       href: createTaskHref({ type: defaultProject?.platform === 'wechat' ? 'wechat-article' : defaultProject?.platform || undefined, projectId: defaultProject?.id, intent: 'new' }),
       kind: 'running',

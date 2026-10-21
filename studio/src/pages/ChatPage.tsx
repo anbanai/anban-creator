@@ -1558,11 +1558,13 @@ function ChatConversation() {
       const id = result.project?.id ?? (isProjectUpdate ? projectId : undefined)
       if (assistantSession) await queryClient.invalidateQueries({ queryKey: ['assistant-bootstrap'] })
       if (!assistantSession || assistantModeId === 'profile') {
-          if (assistantSession && assistantModeId === 'profile' && id && !isProjectUpdate) {
-            navigate(`/chat?mode=creation&project_id=${encodeURIComponent(id)}`)
-          } else {
-            navigate(id ? isProjectUpdate ? `/projects?edit=${encodeURIComponent(id)}` : `/projects?onboarding=${encodeURIComponent(id)}` : '/projects')
-          }
+        if (assistantSession && assistantModeId === 'profile' && id && !isProjectUpdate) {
+          navigate(`/chat?mode=creation&project_id=${encodeURIComponent(id)}`)
+        } else if (id && params.get('return_to') === 'portraits') {
+          navigate(`/portraits/${encodeURIComponent(id)}`)
+        } else {
+          navigate(id ? isProjectUpdate ? `/projects?edit=${encodeURIComponent(id)}` : `/projects?onboarding=${encodeURIComponent(id)}` : '/projects')
+        }
       }
     } catch (error) {
       setCommitError(error instanceof Error ? error.message : `创作项目${isProjectUpdate ? '更新' : '创建'}失败，请重试。`)

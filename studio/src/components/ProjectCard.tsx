@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { portraitStatus } from '@/lib/portrait-library'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, ListChecks, Pause, Play, RefreshCw, RotateCcw, SquarePen } from 'lucide-react'
@@ -18,13 +19,7 @@ import { MetricStrip, ProgressRing, StatusPill } from '@/components/workspace'
 import { supportsProfileLab } from '@/lib/project-capabilities'
 
 function profileStatusLabel(project: Project) {
-  switch (project.profile?.initialization_status) {
-    case 'queued':
-    case 'running': return '画像分析中'
-    case 'failed': return '画像分析失败'
-    case 'ready': return `画像已应用 · v${project.profile.version}`
-    default: return '画像待配置'
-  }
+  return project.profile?.initialization_status === 'ready' ? `画像已应用 · v${project.profile.version}` : portraitStatus(project.profile)
 }
 
 interface ProjectCardProps {
@@ -125,7 +120,8 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
       </div>
       <div className="mt-auto pt-4">
         {supportsProfileLab(project) && (
-          <div className="mb-3 flex justify-end border-b border-border pb-3 text-xs">
+          <div className="mb-3 flex items-center justify-between gap-2 border-b border-border pb-3 text-xs">
+            <Link to={`/portraits/${project.id}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">查看与修改画像</Link>
             <span data-profile-status={project.profile?.initialization_status ?? 'not_started'} className="shrink-0 text-muted-foreground">
               {profileStatusLabel(project)}
             </span>

@@ -203,7 +203,7 @@ function renderTasksPage(initialPath = '/tasks', cachedProjects?: Project[]) {
 describe('TasksPage unified prompt composer', () => {
   it('renders the shared composer with project context in the create dialog', async () => {
     renderTasksPage()
-    fireEvent.click(await screen.findByRole('button', { name: '新建作品' }))
+    fireEvent.click(await screen.findByRole('button', { name: '创作' }))
     const dialog = await screen.findByRole('dialog')
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '创作项目：未选择' })).toBeInTheDocument()
@@ -220,7 +220,7 @@ describe('TasksPage unified prompt composer', () => {
     vi.mocked(api.tasks.create).mockResolvedValue({ ...fixtures.failedTask, id: 'montage-task', type: 'montage', project_id: montageProject.id } as Task)
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
-    await screen.findByRole('dialog', { name: '新建作品' })
+    await screen.findByRole('dialog', { name: '创作' })
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '将访谈素材剪成 30 秒竖版短片' },
     })
@@ -243,7 +243,7 @@ describe('TasksPage unified prompt composer', () => {
     } as Task)
     renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
-    await screen.findByRole('dialog', { name: '新建作品' })
+    await screen.findByRole('dialog', { name: '创作' })
     await waitFor(() => expect(screen.getByRole('combobox', { name: '创作项目：公众号创作项目' })).toHaveTextContent('公众号创作项目'))
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
@@ -259,10 +259,10 @@ describe('TasksPage unified prompt composer', () => {
     renderTasksPage(`/tasks?create=true&type=wechat-article&project_id=${newProject.id}&intent=new`, [olderProject])
 
     await waitFor(() => expect(api.projects.list).toHaveBeenCalled())
-    expect(screen.queryByRole('dialog', { name: '新建作品' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '创作' })).not.toBeInTheDocument()
     await act(async () => resolveProjects([newProject]))
 
-    const dialog = await screen.findByRole('dialog', { name: '新建作品' })
+    const dialog = await screen.findByRole('dialog', { name: '创作' })
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: `创作项目：${newProject.name}` })).toBeInTheDocument())
   })
 
@@ -277,7 +277,7 @@ describe('TasksPage unified prompt composer', () => {
     }))
     renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
-    await screen.findByRole('dialog', { name: '新建作品' })
+    await screen.findByRole('dialog', { name: '创作' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['brief'], 'brief.pdf', { type: 'application/pdf' })] },
     })
@@ -656,7 +656,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     vi.mocked(api.billing.wallet).mockResolvedValueOnce({ paid: 7000, promotional: 0, debt: 0, balance: 7000 })
     renderTasksPage('/tasks?create=true&type=wechat-article&project_id=project-1&intent=new')
 
-    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '创作' })).toBeInTheDocument()
     expect(await screen.findByText(/固定创作价：6,000 × 1 =/)).toBeInTheDocument()
     expect(screen.getByText(/余额：7,000 →/)).toBeInTheDocument()
     expect(screen.getByText('1,000')).toBeInTheDocument()
@@ -694,7 +694,7 @@ describe('TasksPage URL-driven recovery filters', () => {
     renderTasksPage('/tasks?create=true&type=ecommerce&project_id=project-ecommerce&intent=new')
 
     await waitFor(() => expect(api.projects.list).toHaveBeenCalled())
-    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '创作' })).toBeInTheDocument()
     expect(await screen.findByText(/固定创作价：3,000 × 1 =/)).toBeInTheDocument()
     expect(screen.queryByText(/模块套餐预估/)).not.toBeInTheDocument()
     expect(screen.getByText(/成功交付的图片、视频等增值操作/)).toBeInTheDocument()
@@ -827,7 +827,7 @@ describe('TasksPage Seednote reference materials', () => {
 
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '创作' })).toBeInTheDocument()
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
     await screen.findByRole('button', { name: '预览 product.png' })
@@ -857,7 +857,7 @@ describe('TasksPage Seednote reference materials', () => {
 
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
-    await screen.findByRole('dialog', { name: '新建作品' })
+    await screen.findByRole('dialog', { name: '创作' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['reference'], 'task-reference.png', { type: 'image/png' })] },
     })
@@ -908,7 +908,7 @@ describe('TasksPage Seednote reference materials', () => {
     })
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
-    await screen.findByRole('dialog', { name: '新建作品' })
+    await screen.findByRole('dialog', { name: '创作' })
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['reference'], 'expired-task.png', { type: 'image/png' })] },
     })
@@ -917,7 +917,7 @@ describe('TasksPage Seednote reference materials', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() => expect(errorMock).toHaveBeenCalledWith('参考图会话已过期，请重新上传'))
-    expect(screen.getByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '创作' })).toBeInTheDocument()
     expect(preview).toBeInTheDocument()
     const payload = vi.mocked(api.tasks.create).mock.calls[0][0]
     expect(payload.input_attachments).toEqual([expect.objectContaining({
@@ -937,7 +937,7 @@ describe('TasksPage Seednote reference materials', () => {
     uploadToOSSMock.mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve }))
     renderTasksPage(`/tasks?create=true&type=seednote&project_id=${seednoteProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '创作' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('选择附件文件'), {
       target: { files: [new File(['pending'], 'pending.png', { type: 'image/png' })] },
     })
@@ -969,7 +969,7 @@ describe('TasksPage Seednote reference materials', () => {
 
     renderTasksPage(`/tasks?create=true&type=ecommerce&project_id=${ecommerceProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '创作' })).toBeInTheDocument()
     expect(await screen.findByText('添加产品图')).toBeInTheDocument()
     expect(document.querySelector('[data-slot="agent-prompt-input"]')).toBeInTheDocument()
   })
@@ -1014,7 +1014,7 @@ describe('TasksPage Montage creation', () => {
   it('inherits project defaults and submits the complete Montage input', async () => {
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '创作' })).toBeInTheDocument()
     expect(await screen.findByRole('radio', { name: /电影感制作/ })).toBeChecked()
     expect(screen.getByLabelText('目标时长（秒）')).toHaveValue(45)
     fireEvent.click(screen.getByRole('button', { name: /更多创作要求/ }))
@@ -1067,7 +1067,7 @@ describe('TasksPage Montage creation', () => {
   it('blocks Montage creation while source assets are uploading', async () => {
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '创作' })).toBeInTheDocument()
     await waitFor(() => expect(referenceMaterialInputHarness.props?.uploadPurpose).toBe('montage_asset'))
 
     act(() => {
@@ -1081,7 +1081,7 @@ describe('TasksPage Montage creation', () => {
     vi.mocked(api.imageCapabilities.list).mockRejectedValueOnce(new Error('image capabilities unavailable'))
     renderTasksPage(`/tasks?create=true&type=montage&project_id=${montageProject.id}&intent=new`)
 
-    expect(await screen.findByRole('dialog', { name: '新建作品' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '创作' })).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('描述创作目标、内容要求和素材使用方式...'), {
       target: { value: '不依赖图像能力的 Montage 视频' },
     })

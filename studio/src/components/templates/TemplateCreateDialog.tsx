@@ -195,7 +195,7 @@ export function TemplateCreateDialog({ open, onOpenChange, template }: TemplateC
                 : undefined}
               onAnalysisAction={refreshCurrent}
             />
-            <p className="text-[0.8rem] text-muted-foreground">这是模板的核心：应用时这段 Prompt 会作为提示词预填到新建作品里。</p>
+            <p className="text-[0.8rem] text-muted-foreground">这是模板的核心：应用时这段 Prompt 会作为提示词预填到创作表单里。</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-md border border-border px-3 py-2">

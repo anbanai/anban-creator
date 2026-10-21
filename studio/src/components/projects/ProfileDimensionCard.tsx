@@ -14,6 +14,7 @@ const fieldLabels: Record<string, string> = {
   boundaries: '边界', compliance: '合规要求', collaboration: '合作方式',
   platform: '平台', account_name: '账号名', profile_url: '主页链接',
   facts: '已有事实', hypotheses: '待验证想法', notes: '补充说明',
+  original_certainty: '信息来源性质', certainty: '确定程度',
 }
 
 function ContentValue({ value, label, editing, disabled, onChange }: {
@@ -21,7 +22,7 @@ function ContentValue({ value, label, editing, disabled, onChange }: {
 }) {
   if (typeof value === 'string') return editing
     ? <Textarea aria-label={label} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="min-h-20" />
-    : <p className="whitespace-pre-wrap break-words text-sm leading-6">{value || '尚未填写'}</p>
+    : <p className="whitespace-pre-wrap break-words text-sm leading-6">{value === 'stated' ? '来自本人表述' : value === 'inferred' ? '推断，待确认' : value || '尚未填写'}</p>
   if (Array.isArray(value)) return value.length ? <ul className="space-y-2 border-l pl-3">
     {value.map((item, index) => <li key={index}><ContentValue value={item} label={`${label} ${index + 1}`} editing={editing} disabled={disabled} onChange={(next) => onChange(value.map((previous, i) => i === index ? next : previous))} /></li>)}
   </ul> : <p className="text-sm text-muted-foreground">暂无记录</p>

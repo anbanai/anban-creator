@@ -6,6 +6,7 @@ import { Brain, FileText, ImageOff, Loader2, LockKeyhole, MessageSquareText, Pen
 
 import { projectsApi } from '@/lib/api/projects'
 import { normalizeProjectProfile } from '@/lib/project-profile'
+import { portraitStatus } from '@/lib/portrait-library'
 import { getApiErrorMessage } from '@/lib/http-client'
 import type { ProfileDimension, Project, ProjectProfile } from '@/types'
 import { supportsProfileLab } from '@/lib/project-capabilities'
@@ -362,7 +363,7 @@ export function ProjectMemoryDialog({ projectId, projectName, project, open, onO
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 pb-4">
                 <div className="min-w-0">
             <p className={`text-sm font-medium ${analysisFailed ? 'text-destructive' : analysisRunning ? 'text-sky-700' : 'text-foreground'}`} role={analysisRunning ? 'status' : undefined}>
-                    {analysisRunning ? '画像分析中' : analysisFailed ? '画像分析失败' : profile?.initialization_status === 'ready' ? `画像已应用 · v${profile.version}` : '画像待配置'}
+                    {analysisRunning ? '画像分析中' : analysisFailed ? '画像分析失败' : profile?.initialization_status === 'ready' ? `画像已应用 · v${profile.version}` : portraitStatus(profile)}
                   </p>
                   {profile?.last_error && analysisFailed && <p className="mt-1 text-xs text-destructive">{profile.last_error}</p>}
                 </div>

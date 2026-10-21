@@ -656,7 +656,7 @@ export function TaskFormDialog({
       <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !isSubmitting) requestClose() }}>
         <DialogContent closeButtonDisabled={isSubmitting} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
           <DialogHeader className="shrink-0 border-b border-border px-4 py-3">
-            <DialogTitle>{mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆作品') : '新建作品'}</DialogTitle>
+            <DialogTitle>{mode === 'clone' ? (watchedType === 'hypit' ? '再次改编' : '克隆作品') : '创作'}</DialogTitle>
             <DialogDescription>
               {mode === 'clone'
                 ? '编辑完整配置并创建一份新作品。'

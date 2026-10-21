@@ -12,7 +12,7 @@ async function sample() {
 describe('conversation portrait preview', () => {
   it('starts blank and grows several facets from one message without claiming confirmation', async () => {
     render(<PortraitOnboardingPreview />)
-    const portrait = screen.getByRole('complementary', { name: '正在形成的 IP 画像' })
+    const portrait = screen.getByRole('complementary', { name: '正在形成的身份画像' })
     expect(within(portrait).getByText('还没认识的你')).toBeInTheDocument()
     expect(screen.queryByText(/小林/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /确认画像/ })).not.toBeInTheDocument()
@@ -39,7 +39,7 @@ describe('conversation portrait preview', () => {
   it('allows an optional facet to stay empty, allows immediate creation and ongoing correction', async () => {
     render(<PortraitOnboardingPreview />)
     await sample(); await sample(); await sample()
-    const portrait = screen.getByRole('complementary', { name: '正在形成的 IP 画像' })
+    const portrait = screen.getByRole('complementary', { name: '正在形成的身份画像' })
     expect(within(portrait).getByText('聊到时，再慢慢补充')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '开始创作' })).toBeEnabled()
     await sample()
