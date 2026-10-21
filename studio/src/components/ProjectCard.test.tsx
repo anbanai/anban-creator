@@ -142,7 +142,8 @@ describe('ProjectCard', () => {
   it('does not show a precise completion percentage when a project has no tasks', () => {
     render(<ProjectCard project={project()} stats={{ ...stats, total_tasks: 0, completed_tasks: 0, failed_tasks: 0 }} />)
 
-    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar', { name: '作品完成率：0%' })).not.toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: '公众号创作项目画像完善度' })).toBeInTheDocument()
     expect(screen.getByText('暂无作品')).toBeInTheDocument()
   })
 

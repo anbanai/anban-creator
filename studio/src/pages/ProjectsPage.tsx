@@ -36,8 +36,9 @@ import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannel
 import { useAuth } from '@/contexts/AuthContext'
 import { MetricStrip } from '@/components/workspace'
 import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
-import { profileLabAgents, projectAgentIDs } from '@/lib/project-capabilities'
+import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
+import { portraitProgress, portraitSummary } from '@/lib/portrait-library'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
@@ -165,7 +166,18 @@ export default function ProjectsPage() {
   const filteredProjects = useMemo(() => {
     if (!searchFilter.trim()) return visibleProjects
     const q = searchFilter.toLowerCase()
-    return visibleProjects.filter((ch) => ch.name.toLowerCase().includes(q))
+    return visibleProjects.filter((project) => {
+      const accounts = (project.profile_setup?.platform_accounts ?? []).map((account) => account.account_name ?? '').join(' ')
+      const searchable = [
+        project.name,
+        project.instructions,
+        project.positioning,
+        project.keywords,
+        supportsProfileLab(project) ? portraitSummary(project) : '',
+        accounts,
+      ].filter(Boolean).join(' ').toLowerCase()
+      return searchable.includes(q)
+    })
   }, [searchFilter, visibleProjects])
 
   const { data: projectStats = {} } = useQuery({
@@ -182,8 +194,12 @@ export default function ProjectsPage() {
     const tasks = stats.reduce((sum, item) => sum + item.total_tasks, 0)
     const completed = stats.reduce((sum, item) => sum + item.completed_tasks, 0)
     const running = stats.reduce((sum, item) => sum + item.running_tasks, 0)
+    const profileProjects = visibleProjects.filter(supportsProfileLab)
+    const completeProfiles = profileProjects.filter((project) => portraitProgress(project.profile).percent >= 100).length
     return {
       projects: visibleProjects.length,
+      profileProjects: profileProjects.length,
+      completeProfiles,
       tasks,
       completed,
       running,
@@ -427,8 +443,7 @@ export default function ProjectsPage() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   return (
     <div className="space-y-6">
-      <PageHeader title="人设" description="组织品牌与账号定位、素材和风格，为持续创作与复盘提供上下文。">
-        <Button variant="outline" onClick={() => navigate('/portraits')}>画像库</Button>
+      <PageHeader title="人设" description="每个创作项目都对应一份画像。画像会沉淀定位、表达风格、受众、平台、偏好和记忆，后续创作与复盘都会以它为上下文。">
         <Button variant="outline" aria-label="使用表单创建" onClick={openCreate}>
           <FilePlus2 className="h-4 w-4" />
           表单创建
@@ -442,9 +457,10 @@ export default function ProjectsPage() {
       <MetricStrip
         label="项目概览"
         metrics={[
-          { label: '项目', value: projectOverview.projects },
+          { label: '人设', value: projectOverview.projects, detail: projectOverview.profileProjects ? `${projectOverview.profileProjects} 份画像` : '创建人设后自动拥有画像' },
+          { label: '画像完善', value: projectOverview.profileProjects ? `${projectOverview.completeProfiles}/${projectOverview.profileProjects}` : '—', detail: '六维资料已补齐' },
           { label: '作品', value: projectOverview.tasks, detail: projectOverview.running ? `${projectOverview.running} 个运行中` : undefined },
-          { label: '完成率', value: projectOverview.completion, detail: projectOverview.completed ? `${projectOverview.completed} 个已完成` : '暂无作品' },
+          { label: '作品完成率', value: projectOverview.completion, detail: projectOverview.completed ? `${projectOverview.completed} 个已完成` : '暂无作品' },
         ]}
       />
 
@@ -496,8 +512,8 @@ export default function ProjectsPage() {
       ) : filteredProjects.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有项目' : statusFilter === 'active' ? '没有活跃项目' : '没有已归档项目') : '未找到匹配的项目'}
-          description={!visibleProjects.length ? '创建项目后即可开始创作。' : '换个关键词试试'}
+          title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有人设' : statusFilter === 'active' ? '没有活跃人设' : '没有已归档人设') : '未找到匹配的人设'}
+          description={!visibleProjects.length ? '创建人设后，定位、风格和画像会一起沉淀，后续创作可以直接复用。' : '换个名称、定位或平台账号试试'}
           action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '智能创建项目', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
         />
       ) : (

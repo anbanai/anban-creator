@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { portraitStatus } from '@/lib/portrait-library'
+import { accountPlatformLabels, portraitProgress, portraitStatus, portraitSummary, updatePortraitHref } from '@/lib/portrait-library'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, ListChecks, Pause, Play, RefreshCw, RotateCcw, SquarePen } from 'lucide-react'
@@ -53,6 +53,9 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
   const feedbackEnabled = platform === '' || platform === 'wechat' || platform === 'seednote'
   const editLabel = '编辑项目'
+  const profileProgress = portraitProgress(project.profile)
+  const profileSummary = portraitSummary(project)
+  const profileAccounts = (project.profile_setup?.platform_accounts ?? []).map((account) => `${accountPlatformLabels[account.platform] ?? account.platform}${account.account_name ? ` · ${account.account_name}` : ''}`)
   const feedbackQuery = useQuery({
     queryKey: ['project-feedback', project.id],
     queryFn: ({ signal }) => api.projects.feedback(project.id, signal),
@@ -120,12 +123,30 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
       </div>
       <div className="mt-auto pt-4">
         {supportsProfileLab(project) && (
-          <div className="mb-3 flex items-center justify-between gap-2 border-b border-border pb-3 text-xs">
-            <Link to={`/portraits/${project.id}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">查看与修改画像</Link>
-            <span data-profile-status={project.profile?.initialization_status ?? 'not_started'} className="shrink-0 text-muted-foreground">
-              {profileStatusLabel(project)}
-            </span>
-          </div>
+          <section className="mb-3 border-y border-border py-3" aria-label={`人设画像：${project.name}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">画像</p>
+                  <span data-profile-status={project.profile?.initialization_status ?? 'not_started'} className="text-xs text-muted-foreground">
+                    {profileStatusLabel(project)}
+                  </span>
+                </div>
+                <p className="mt-1 line-clamp-2 text-sm leading-5 text-foreground">{profileSummary}</p>
+              </div>
+              <span className="shrink-0 text-xs font-medium text-muted-foreground">{profileProgress.count}/6 项</span>
+            </div>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`${project.name}画像完善度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={profileProgress.percent}>
+              <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${profileProgress.percent}%` }} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="min-w-0 truncate text-muted-foreground">{profileAccounts.length ? profileAccounts.join(' / ') : '尚未添加平台账号'}</span>
+              <div className="flex shrink-0 items-center gap-3">
+                <Link to={`/portraits/${project.id}`} className="font-medium text-primary hover:underline">查看画像</Link>
+                {onUpdateProfile && <Link to={updatePortraitHref(project.id)} className="text-muted-foreground hover:text-foreground">继续访谈</Link>}
+              </div>
+            </div>
+          </section>
         )}
         {stats && (
           <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border pt-3">
