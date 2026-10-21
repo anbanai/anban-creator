@@ -66,7 +66,7 @@ export default function AuthLayout({
           <div className="text-xs font-semibold tracking-widest text-amber-700 dark:text-amber-400">
             ✦ Anban Studio
           </div>
-          <div className="mt-2 text-2xl font-black text-amber-900 dark:text-amber-100">内容生成操作系统</div>
+          <div className="mt-2 text-2xl font-black text-amber-900 dark:text-amber-100">内容智能创作系统</div>
         </div>
 
         {/* Form header */}

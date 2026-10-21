@@ -34,11 +34,10 @@ import { createPlanHref, createTaskHref, parseCreationIntent, projectCreatedRetu
 import { referenceSelectionFromValue } from '@/lib/reference-image'
 import { ProjectChannelConfigDialog } from '@/components/projects/ProjectChannelConfigDialog'
 import { useAuth } from '@/contexts/AuthContext'
-import { MetricStrip } from '@/components/workspace'
 import { CreationTypePicker } from '@/components/tasks/CreationTypePicker'
 import { profileLabAgents, projectAgentIDs, supportsProfileLab } from '@/lib/project-capabilities'
 import { getProjectCreationDefaults } from '@/lib/studio-ux'
-import { portraitProgress, portraitSummary } from '@/lib/portrait-library'
+import { portraitSummary } from '@/lib/portrait-library'
 
 const adminOnlyPlatforms = new Set<ProjectPlatform>(['moments', 'ecommerce', 'hypit'])
 
@@ -189,24 +188,6 @@ export default function ProjectsPage() {
     },
     enabled: visibleProjects.length > 0,
   })
-
-  const projectOverview = useMemo(() => {
-    const stats = visibleProjects.map((project) => projectStats[project.id]).filter(Boolean)
-    const tasks = stats.reduce((sum, item) => sum + item.total_tasks, 0)
-    const completed = stats.reduce((sum, item) => sum + item.completed_tasks, 0)
-    const running = stats.reduce((sum, item) => sum + item.running_tasks, 0)
-    const profileProjects = visibleProjects.filter(supportsProfileLab)
-    const completeProfiles = profileProjects.filter((project) => portraitProgress(project.profile).percent >= 100).length
-    return {
-      projects: visibleProjects.length,
-      profileProjects: profileProjects.length,
-      completeProfiles,
-      tasks,
-      completed,
-      running,
-      completion: tasks > 0 ? `${Math.round((completed / tasks) * 100)}%` : '—',
-    }
-  }, [projectStats, visibleProjects])
 
   const editingProjectQuery = useQuery({
     queryKey: queryKeys.projects.detail(editingProject?.id ?? ''),
@@ -454,16 +435,6 @@ export default function ProjectsPage() {
           AI 创建
         </Button>
       </PageHeader>
-
-      <MetricStrip
-        label="项目概览"
-        metrics={[
-          { label: '人设', value: projectOverview.projects, detail: projectOverview.profileProjects ? `${projectOverview.profileProjects} 份画像` : '创建人设后自动拥有画像' },
-          { label: '画像完善', value: projectOverview.profileProjects ? `${projectOverview.completeProfiles}/${projectOverview.profileProjects}` : '—', detail: '六维资料已补齐' },
-          { label: '作品', value: projectOverview.tasks, detail: projectOverview.running ? `${projectOverview.running} 个运行中` : undefined },
-          { label: '作品完成率', value: projectOverview.completion, detail: projectOverview.completed ? `${projectOverview.completed} 个已完成` : '暂无作品' },
-        ]}
-      />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <ToggleGroup

@@ -1,21 +1,15 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { accountPlatformLabels, portraitProgress, portraitStatus, portraitSummary, updatePortraitHref } from '@/lib/portrait-library'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { Archive, Settings2, Brain, CalendarClock, ChevronDown, ChevronUp, Database, Lightbulb, ListChecks, Pause, Play, RefreshCw, RotateCcw, SquarePen } from 'lucide-react'
+import { Archive, Settings2, Brain, Lightbulb, ListChecks, RotateCcw, SquarePen } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
-import { api } from '@/lib/api'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TopicPoolDialog } from '@/components/TopicPoolDialog'
 import { ProjectMemoryDialog } from '@/components/projects/ProjectMemoryDialog'
 import { ImageAnalysisBadge } from '@/components/image-analysis/ImageAnalysisBadge'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { ProjectIdentity } from '@/components/agent-prompt/ProjectIdentity'
-import { MetricStrip, ProgressRing, StatusPill } from '@/components/workspace'
+import { StatusPill } from '@/components/workspace'
 import { supportsProfileLab } from '@/lib/project-capabilities'
 
 function profileStatusLabel(project: Project) {
@@ -37,76 +31,15 @@ interface ProjectCardProps {
 export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannelConfig, archiving, restoring, onArchive, onRestore }: ProjectCardProps) {
   const [topicPoolOpen, setTopicPoolOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
-  const [monthlyRerunOpen, setMonthlyRerunOpen] = useState(false)
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
-  const [periodStart, setPeriodStart] = useState('')
-  const [periodEnd, setPeriodEnd] = useState('')
-  const queryClient = useQueryClient()
-  const platform = project.platform
   const isArchived = project.status === 'archived'
   const unusedTopics = stats?.unused_topics
-  const completionRate = stats && stats.total_tasks > 0
-    ? Math.round((stats.completed_tasks / stats.total_tasks) * 100)
-    : null
   const cardTone = isArchived
     ? 'border-border/60 bg-muted/30'
     : 'border-border bg-card hover:border-foreground/20 hover:shadow-sm'
-  const feedbackEnabled = platform === '' || platform === 'wechat' || platform === 'seednote'
   const editLabel = '编辑项目'
   const profileProgress = portraitProgress(project.profile)
   const profileSummary = portraitSummary(project)
   const profileAccounts = (project.profile_setup?.platform_accounts ?? []).map((account) => `${accountPlatformLabels[account.platform] ?? account.platform}${account.account_name ? ` · ${account.account_name}` : ''}`)
-  const feedbackQuery = useQuery({
-    queryKey: ['project-feedback', project.id],
-    queryFn: ({ signal }) => api.projects.feedback(project.id, signal),
-    enabled: feedbackEnabled && feedbackOpen,
-    staleTime: 60_000,
-    retry: false,
-  })
-  const feedbackStateMutation = useMutation({
-    mutationFn: (paused: boolean) => api.projects.setFeedbackPaused(project.id, paused),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['project-feedback', project.id] })
-      toast.success('反馈调度状态已更新')
-    },
-    onError: () => toast.error('更新反馈调度状态失败'),
-  })
-  const rerunMutation = useMutation({
-    mutationFn: (cadence: 'daily' | 'weekly' | 'monthly') => api.projects.rerunFeedback(
-      project.id,
-      cadence,
-      cadence === 'monthly' ? { start: periodStart, end: periodEnd } : undefined,
-    ),
-    onSuccess: (result) => {
-      setMonthlyRerunOpen(false)
-      void queryClient.invalidateQueries({ queryKey: ['project-feedback', project.id] })
-      toast.success(`已检查反馈队列：创建 ${result.created}，跳过 ${result.skipped}`)
-    },
-    onError: () => toast.error('反馈重跑失败'),
-  })
-  const insightMutation = useMutation({
-    mutationFn: ({ id, action }: { id: string; action: 'confirm' | 'validate' }) => action === 'confirm'
-      ? api.projects.confirmFeedbackInsight(id)
-      : api.projects.validateFeedbackInsight(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['project-feedback', project.id] })
-      toast.success('归因状态已更新')
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : ''
-      toast.error(message.includes('version') || message.includes('conflict') ? '画像已变化，请重新读取最新画像后重试' : '归因状态更新失败')
-    },
-  })
-  const formatTime = (value?: string | null) => value
-    ? new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-    : '未运行'
-  const runRerun = (cadence: 'daily' | 'weekly' | 'monthly') => {
-    if (cadence === 'monthly') {
-      setMonthlyRerunOpen(true)
-      return
-    }
-    rerunMutation.mutate(cadence)
-  }
 
   return (
     <div className={`flex h-full flex-col rounded-lg border p-4 transition-[border-color,box-shadow] ${cardTone}`}>
@@ -121,7 +54,7 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
           <ImageAnalysisBadge analysis={project.image_analysis} />
         </div>
       </div>
-      <div className="mt-auto pt-4">
+      <div className="pt-4">
         {supportsProfileLab(project) && (
           <section className="mb-3 border-y border-border py-3" aria-label={`人设画像：${project.name}`}>
             <div className="flex items-start justify-between gap-3">
@@ -147,126 +80,6 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
               </div>
             </div>
           </section>
-        )}
-        {stats && (
-          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border pt-3">
-            {completionRate === null ? (
-              <div className="flex size-16 items-center justify-center rounded-full border border-dashed border-border text-center text-[11px] leading-tight text-muted-foreground">
-                暂无作品
-              </div>
-            ) : (
-              <ProgressRing value={completionRate} label="作品完成率" size={64} />
-            )}
-            <div className="min-w-0 space-y-2">
-              <MetricStrip
-                testId="project-overview-strip"
-                metrics={[
-                  { label: '作品', value: stats.total_tasks },
-                  { label: '已完成', value: stats.completed_tasks },
-                  { label: '失败', value: stats.failed_tasks },
-                ]}
-              />
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="项目活动">
-                {stats.running_tasks > 0 && <span>{stats.running_tasks} 个运行中</span>}
-                {stats.pending_tasks > 0 && <span>{stats.pending_tasks} 个待执行</span>}
-              </div>
-            </div>
-          </div>
-        )}
-        {feedbackEnabled && (
-          <div className="mt-3 border-t border-border pt-3">
-            {!feedbackOpen ? (
-              <Button variant="ghost" size="xs" className="min-h-11" onClick={() => setFeedbackOpen(true)} aria-label="查看反馈闭环">
-                <Database />反馈闭环<ChevronDown />
-              </Button>
-            ) : (
-              <>
-                <Button variant="ghost" size="xs" className="min-h-11" onClick={() => setFeedbackOpen(false)} aria-expanded="true">
-                  <Database />反馈闭环<ChevronUp />
-                </Button>
-                {feedbackQuery.isPending ? (
-                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><Database className="h-3.5 w-3.5" />加载反馈状态…</div>
-                ) : feedbackQuery.isError ? (
-                  <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span>反馈状态暂不可用</span>
-                    <Button variant="ghost" size="xs" className="min-h-11" onClick={() => void feedbackQuery.refetch()} aria-label="重新加载反馈状态"><RefreshCw />重试</Button>
-                  </div>
-                ) : feedbackQuery.data ? (
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 font-medium text-foreground"><Database className="h-3.5 w-3.5" />反馈闭环</span>
-                      <Badge variant={feedbackQuery.data.feedback_paused ? 'outline' : 'secondary'}>
-                        {feedbackQuery.data.feedback_paused ? '已暂停' : `数据 rev ${feedbackQuery.data.analytics.revision}`}
-                      </Badge>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-muted-foreground">
-                      <span>内容 {feedbackQuery.data.analytics.content_count}</span>
-                      <span>观测 {feedbackQuery.data.analytics.valid_observation_count}</span>
-                      <span>队列中 {feedbackQuery.data.queue.counts.queued + feedbackQuery.data.queue.counts.running}</span>
-                      <span>已完成 {feedbackQuery.data.queue.counts.succeeded}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 text-muted-foreground">
-                      <span>策略 {feedbackQuery.data.strategy.status === 'active' ? `rev ${feedbackQuery.data.strategy.revision}` : '暂无'}</span>
-                      <span>上次 {formatTime(feedbackQuery.data.queue.last_success_at)}</span>
-                    </div>
-                    {feedbackQuery.data.queue.latest_skip && (
-                      <p className="truncate text-muted-foreground" title={feedbackQuery.data.queue.latest_skip.reason}>最近跳过：{feedbackQuery.data.queue.latest_skip.reason}</p>
-                    )}
-                    {(feedbackQuery.data.insights ?? []).length > 0 && (
-                      <div className="space-y-2 border-t pt-2">
-                        <span className="font-medium text-foreground">内容归因</span>
-                        {(feedbackQuery.data.insights ?? []).map((insight) => {
-                          let evidence: Record<string, unknown> = {}
-                          try { evidence = JSON.parse(insight.evidence) as Record<string, unknown> } catch { /* Keep the summary visible if evidence is malformed. */ }
-                          return (
-                            <div key={insight.id} className="space-y-1 border-l-2 pl-2">
-                              <div className="flex flex-wrap items-center gap-1">
-                                <Badge variant="outline">{String(evidence.direction ?? '复盘')}</Badge>
-                                <Badge variant="secondary">{insight.promotion_status}</Badge>
-                                <span className="text-muted-foreground">rev {insight.analytics_revision} · 置信度 {insight.confidence}</span>
-                              </div>
-                              <p className="text-foreground">{insight.summary}</p>
-                              <p className="text-muted-foreground">证据覆盖：{String(evidence.sample_count ?? '—')} 条 · {String(evidence.metric ?? '指标未知')} · {insight.limitations}</p>
-                              {typeof evidence.analysis === 'object' && evidence.analysis !== null && (() => {
-                                const analysis = evidence.analysis as Record<string, unknown>
-                                const recommendations = analysis.dimension_recommendations as Record<string, { reason?: string; evidence?: string[]; updates?: Record<string, unknown> }> | undefined
-                                if (!recommendations) return null
-                                return <div className="space-y-1 text-muted-foreground">{Object.entries(recommendations).map(([dimension, recommendation]) => <p key={dimension}><span className="font-medium text-foreground">{dimension}</span>：{recommendation.reason ?? '建议'} · {Object.entries(recommendation.updates ?? {}).map(([key, value]) => `${key}=${String(value)}`).join('，')}</p>)}</div>
-                              })()}
-                              {insight.promotion_status === 'candidate' && <Button size="xs" variant="ghost" disabled={insightMutation.isPending} onClick={() => insightMutation.mutate({ id: insight.id, action: 'confirm' })}>确认</Button>}
-                              {insight.promotion_status === 'confirmed' && <Button size="xs" variant="ghost" disabled={insightMutation.isPending} onClick={() => insightMutation.mutate({ id: insight.id, action: 'validate' })}>验证并应用</Button>}
-                              {insight.promotion_status === 'validated' && <Button size="xs" variant="ghost" disabled={insightMutation.isPending} onClick={() => insightMutation.mutate({ id: insight.id, action: 'validate' })}>重试应用</Button>}
-                              {insight.promotion_status === 'promoted' && <span className="text-emerald-700">已应用到画像</span>}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                    {(feedbackQuery.data.attribution_jobs ?? []).some((job) => job.status === 'skipped') && (
-                      <div className="border-t pt-2 text-muted-foreground">
-                        {(feedbackQuery.data.attribution_jobs ?? []).filter((job) => job.status === 'skipped').slice(0, 2).map((job) => <p key={job.id}>{job.skip_reason === 'sample_too_small' ? '样本不足，等待至少 10 条成熟内容' : job.skip_reason === 'no_mature_content' ? '观察窗尚未成熟' : `归因跳过：${job.skip_reason ?? '数据不足'}`}</p>)}
-                      </div>
-                    )}
-                    <div className="flex flex-wrap gap-1">
-                      <Button variant="ghost" size="xs" className="min-h-11" disabled={feedbackStateMutation.isPending} onClick={() => feedbackStateMutation.mutate(!feedbackQuery.data!.feedback_paused)}>
-                        {feedbackQuery.data.feedback_paused ? <Play /> : <Pause />}
-                        {feedbackQuery.data.feedback_paused ? '恢复' : '暂停'}
-                      </Button>
-                      <Button variant="ghost" size="xs" className="min-h-11" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('daily')} title={`下次日周期：${formatTime(feedbackQuery.data.next_runs.daily)}`}>
-                        <RefreshCw />日
-                      </Button>
-                      <Button variant="ghost" size="xs" className="min-h-11" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('weekly')} title={`下次周周期：${formatTime(feedbackQuery.data.next_runs.weekly)}`}>
-                        <CalendarClock />周
-                      </Button>
-                      <Button variant="ghost" size="xs" className="min-h-11" disabled={rerunMutation.isPending || feedbackQuery.data.feedback_paused} onClick={() => runRerun('monthly')} title={`下次月周期：${formatTime(feedbackQuery.data.next_runs.monthly)}`}>
-                        <CalendarClock />月
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
         )}
         <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`项目操作：${project.name}`}>
           {onEdit && (
@@ -313,31 +126,16 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
               <TooltipContent>恢复</TooltipContent>
             </Tooltip>
           )}
+          <Tooltip>
+            <TooltipTrigger render={<Link to={`/tasks?project_id=${encodeURIComponent(project.id)}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} aria-label={`查看作品：${project.name}`} />}>
+              <ListChecks />
+            </TooltipTrigger>
+            <TooltipContent>查看作品</TooltipContent>
+          </Tooltip>
         </div>
-        <Link
-            to={`/tasks?project_id=${encodeURIComponent(project.id)}`}
-            className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            aria-label={`查看作品：${project.name}`}
-          >
-            <ListChecks className="size-3.5" aria-hidden="true" />
-            查看全部作品
-        </Link>
       </div>
       <TopicPoolDialog project={project} open={topicPoolOpen} onOpenChange={setTopicPoolOpen} />
       <ProjectMemoryDialog projectId={project.id} projectName={project.name} project={project} open={memoryOpen} onOpenChange={setMemoryOpen} onUpdateProfile={onUpdateProfile ? () => onUpdateProfile(project) : undefined} />
-      <Dialog open={monthlyRerunOpen} onOpenChange={setMonthlyRerunOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>重跑月度反馈</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="space-y-1 text-sm"><span>开始日期</span><Input type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} /></label>
-            <label className="space-y-1 text-sm"><span>结束日期</span><Input type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} /></label>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMonthlyRerunOpen(false)}>取消</Button>
-            <Button disabled={!periodStart || !periodEnd || rerunMutation.isPending} onClick={() => rerunMutation.mutate('monthly')}>检查并排队</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

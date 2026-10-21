@@ -73,6 +73,7 @@ describe('Sidebar', () => {
     renderSidebar()
 
     expect(screen.getByText('Anban Studio')).toBeInTheDocument()
+    expect(screen.getByText('内容智能创作系统')).toBeInTheDocument()
 
     const navigation = within(screen.getByRole('navigation', { name: '主导航' }))
     expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual([

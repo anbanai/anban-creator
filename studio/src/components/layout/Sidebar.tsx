@@ -55,7 +55,7 @@ export default function Sidebar() {
           <>
             <div className="min-w-0 flex-1">
               <p className="text-xl font-semibold tracking-tight">Anban Studio</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">内容生成操作系统</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">内容智能创作系统</p>
             </div>
             {mobile ? (
               <SheetClose render={<Button variant="ghost" size="icon" aria-label="关闭菜单" />}><X /></SheetClose>
