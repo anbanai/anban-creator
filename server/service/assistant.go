@@ -25,10 +25,12 @@ const (
 )
 
 var (
-	ErrAssistantModeUnavailable    = errors.New("assistant mode is unavailable")
-	ErrAssistantCheckpointInvalid  = errors.New("assistant checkpoint is invalid")
-	ErrAssistantCheckpointNotFound = errors.New("assistant checkpoint not found")
-	ErrAssistantCheckpointConflict = errors.New("assistant checkpoint scope does not match session")
+	ErrAssistantModeUnavailable          = errors.New("assistant mode is unavailable")
+	ErrAssistantCheckpointInvalid        = errors.New("assistant checkpoint is invalid")
+	ErrAssistantCreationInputsMissing    = errors.New("assistant creation request is missing required inputs")
+	ErrAssistantCreationAssetUnavailable = errors.New("assistant creation request references an unavailable asset")
+	ErrAssistantCheckpointNotFound       = errors.New("assistant checkpoint not found")
+	ErrAssistantCheckpointConflict       = errors.New("assistant checkpoint scope does not match session")
 )
 
 type AssistantMode struct {
@@ -140,7 +142,7 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 	out := &AssistantBootstrap{
 		Modes: []AssistantMode{
 			{ID: AssistantModeProfile, DisplayName: "画像模式", Description: "建立或更新一个画像", Available: true},
-			{ID: AssistantModeCreation, DisplayName: "创作模式", Description: "围绕画像制定创作计划并创建作品任务"},
+			{ID: AssistantModeCreation, DisplayName: "创作模式", Description: "围绕本次目标澄清需求，确认后创建作品任务"},
 			{ID: AssistantModeReview, DisplayName: "复盘模式", Description: "分析已有作品并形成画像改进建议"},
 		},
 		Projects: make([]AssistantProject, 0, len(projects)),
@@ -160,7 +162,7 @@ func (s *InteractiveService) AssistantBootstrap(ctx context.Context, userID stri
 		out.Modes[1].Available = true
 	} else {
 		out.DefaultModeID = AssistantModeProfile
-		out.Modes[1].DisabledReason = "先完成画像初始化，之后即可制定创作计划"
+		out.Modes[1].DisabledReason = "先完成画像初始化，之后即可澄清创作需求"
 	}
 	hasCompletedWork, err := s.repo.Tasks().HasCompletedWorkInProjects(ctx, userID, confirmedProjectIDs)
 	if err != nil {
@@ -665,7 +667,7 @@ func (s *InteractiveService) StageAssistantDraftForSessionContext(ctx context.Co
 		}
 	}
 	if name == "" {
-		name = map[string]string{AssistantModeCreation: "创作计划", AssistantModeReview: "复盘结论"}[modeID]
+		name = map[string]string{AssistantModeCreation: "创作需求", AssistantModeReview: "复盘结论"}[modeID]
 	}
 
 	sess.mu.Lock()

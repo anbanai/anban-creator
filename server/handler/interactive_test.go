@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +15,36 @@ import (
 	"github.com/anbanai/anban-creator/server/service"
 	"github.com/gofiber/fiber/v3"
 )
+
+func TestInteractiveHandlerMapsAssistantErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "mode unavailable", err: service.ErrAssistantModeUnavailable, want: fiber.StatusConflict},
+		{name: "checkpoint missing", err: service.ErrAssistantCheckpointNotFound, want: fiber.StatusNotFound},
+		{name: "checkpoint conflict", err: service.ErrAssistantCheckpointConflict, want: fiber.StatusConflict},
+		{name: "checkpoint invalid", err: service.ErrAssistantCheckpointInvalid, want: fiber.StatusBadRequest},
+		{name: "creation input missing", err: service.ErrAssistantCreationInputsMissing, want: fiber.StatusBadRequest},
+		{name: "creation asset unavailable", err: service.ErrAssistantCreationAssetUnavailable, want: fiber.StatusBadRequest},
+		{name: "runtime context too large", err: service.ErrAssistantRuntimeContextTooLarge, want: fiber.StatusRequestEntityTooLarge},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := fiber.New()
+			app.Get("/", func(c fiber.Ctx) error { return interactiveError(c, errors.Join(test.err, errors.New("detail"))) })
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != test.want {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, test.want)
+			}
+		})
+	}
+}
 
 type handlerInteractiveRuntime struct{}
 

@@ -1303,10 +1303,10 @@
     },
     {
       "id": "creation-planner",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "kind": "managed",
       "display_name": "创作模式",
-      "description": "通过持续对话制定可执行的作品计划，并在用户确认后交给 Server 创建正式创作任务。",
+      "description": "通过持续对话澄清本次作品需求，并在用户确认后交给 Server 创建正式创作任务。",
       "agent": {
         "name": "creation-planner",
         "skills": [
@@ -1334,10 +1334,10 @@
         "plugin"
       ],
       "features": [
-        "interactive-creation-planning"
+        "interactive-creation-clarification"
       ],
       "ui": {},
-      "digest": "899f1024142e2598f204fb766d0905d15d3a2511d33b761785a149e7f761cd08"
+      "digest": "3dab7ca60febe3f176afbb0f1f8cffe97204e85d6f7bbed170eb13c8d5541789"
     },
     {
       "id": "feedback-analysis",
