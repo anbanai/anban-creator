@@ -355,77 +355,83 @@ func (s *ContentAssetService) ListRecommendations(ctx context.Context, userID st
 	if limit <= 0 || limit > 50 {
 		limit = 5
 	}
-	assets, _, err := s.repo.ContentAssets().List(ctx, userID, "", "", 0, 100)
-	if err != nil {
-		return nil, fmt.Errorf("list content asset recommendations: %w", err)
-	}
 	items := make([]*ContentAssetRecommendation, 0, limit)
-	for _, asset := range assets {
-		if asset == nil || (asset.Status != model.ContentAssetStatusResearched && asset.Status != model.ContentAssetStatusValidated && asset.Status != model.ContentAssetStatusReady && asset.Status != model.ContentAssetStatusInProgress) {
-			continue
+	const pageSize = 100
+	for offset := 0; ; offset += pageSize {
+		assets, total, err := s.repo.ContentAssets().List(ctx, userID, "", "", offset, pageSize)
+		if err != nil {
+			return nil, fmt.Errorf("list content asset recommendations: %w", err)
 		}
-		scores, scoreErr := s.repo.ContentAssets().ListScoreSnapshots(ctx, userID, asset.ID)
-		if scoreErr != nil {
-			return nil, fmt.Errorf("list score snapshots for asset %s: %w", asset.ID, scoreErr)
-		}
-		var score *model.ContentAssetScoreSnapshot
-		seenTarget := map[string]bool{}
-		for _, candidate := range scores {
-			if candidate == nil || (candidate.Status != "scored" && candidate.Status != "exploratory") {
+		for _, asset := range assets {
+			if asset == nil || (asset.Status != model.ContentAssetStatusResearched && asset.Status != model.ContentAssetStatusValidated && asset.Status != model.ContentAssetStatusReady && asset.Status != model.ContentAssetStatusInProgress) {
 				continue
 			}
-			project, projectErr := s.repo.Projects().FindByID(ctx, candidate.ProjectID)
-			if projectErr != nil || project.UserID != userID || project.Platform != candidate.Platform {
-				continue
+			scores, scoreErr := s.repo.ContentAssets().ListScoreSnapshots(ctx, userID, asset.ID)
+			if scoreErr != nil {
+				return nil, fmt.Errorf("list score snapshots for asset %s: %w", asset.ID, scoreErr)
 			}
-			family, familyErr := model.AnalyticsMetricFamilyForPlatform(project.Platform)
-			if familyErr == nil {
-				state, stateErr := s.repo.Analytics().WithMetricFamily(family).State(ctx, project.ID)
-				if stateErr != nil || state == nil || state.Status != "ready" || state.Revision != candidate.AnalyticsRevision {
+			var score *model.ContentAssetScoreSnapshot
+			seenTarget := map[string]bool{}
+			for _, candidate := range scores {
+				if candidate == nil || (candidate.Status != "scored" && candidate.Status != "exploratory") {
 					continue
 				}
+				project, projectErr := s.repo.Projects().FindByID(ctx, candidate.ProjectID)
+				if projectErr != nil || project.UserID != userID || project.Platform != candidate.Platform {
+					continue
+				}
+				family, familyErr := model.AnalyticsMetricFamilyForPlatform(project.Platform)
+				if familyErr == nil {
+					state, stateErr := s.repo.Analytics().WithMetricFamily(family).State(ctx, project.ID)
+					if stateErr != nil || state == nil || state.Status != "ready" || state.Revision != candidate.AnalyticsRevision {
+						continue
+					}
+				}
+				key := candidate.ProjectID + ":" + candidate.Platform
+				if seenTarget[key] {
+					continue
+				}
+				seenTarget[key] = true
+				// Snapshots are newest-first. Select the current revision per target
+				// first, then compare only normalized local scores across targets.
+				if score == nil || candidate.Score > score.Score || (candidate.Score == score.Score && candidate.CreatedAt.After(score.CreatedAt)) {
+					score = candidate
+				}
 			}
-			key := candidate.ProjectID + ":" + candidate.Platform
-			if seenTarget[key] {
-				continue
+			run, runErr := s.repo.ContentAssets().FindLatestReuseRun(ctx, userID, asset.ID)
+			if runErr != nil && !errors.Is(runErr, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("find latest reuse run for asset %s: %w", asset.ID, runErr)
 			}
-			seenTarget[key] = true
-			// Snapshots are newest-first. Select the current revision per target
-			// first, then compare only normalized local scores across targets.
-			if score == nil || candidate.Score > score.Score || (candidate.Score == score.Score && candidate.CreatedAt.After(score.CreatedAt)) {
-				score = candidate
+			item := &ContentAssetRecommendation{Asset: asset, Score: score, Run: run}
+			if score != nil {
+				item.RecommendedPlatform = score.Platform
+				item.EvidenceAsOf = score.DataAsOf
+				var snapshot struct {
+					RecommendationReason string `json:"recommendation_reason"`
+					EstimatedCostCredits int64  `json:"estimated_cost_credits"`
+				}
+				if json.Unmarshal(score.Snapshot, &snapshot) == nil {
+					item.RecommendationReason = snapshot.RecommendationReason
+					item.EstimatedCostCredits = snapshot.EstimatedCostCredits
+				}
 			}
+			if run != nil {
+				item.AutomationStatus = run.Status
+				item.AutomationStage = run.Stage
+				if run.BudgetReserved > 0 {
+					item.EstimatedCostCredits = run.BudgetReserved
+				} else if run.CostCredits > 0 {
+					item.EstimatedCostCredits = run.CostCredits
+				}
+			}
+			if item.RecommendationReason == "" {
+				item.RecommendationReason = "已验证选题，可继续评估跨平台复用"
+			}
+			items = append(items, item)
 		}
-		run, runErr := s.repo.ContentAssets().FindLatestReuseRun(ctx, userID, asset.ID)
-		if runErr != nil && !errors.Is(runErr, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("find latest reuse run for asset %s: %w", asset.ID, runErr)
+		if len(items) >= limit || len(assets) == 0 || int64(offset+len(assets)) >= total {
+			break
 		}
-		item := &ContentAssetRecommendation{Asset: asset, Score: score, Run: run}
-		if score != nil {
-			item.RecommendedPlatform = score.Platform
-			item.EvidenceAsOf = score.DataAsOf
-			var snapshot struct {
-				RecommendationReason string `json:"recommendation_reason"`
-				EstimatedCostCredits int64  `json:"estimated_cost_credits"`
-			}
-			if json.Unmarshal(score.Snapshot, &snapshot) == nil {
-				item.RecommendationReason = snapshot.RecommendationReason
-				item.EstimatedCostCredits = snapshot.EstimatedCostCredits
-			}
-		}
-		if run != nil {
-			item.AutomationStatus = run.Status
-			item.AutomationStage = run.Stage
-			if run.BudgetReserved > 0 {
-				item.EstimatedCostCredits = run.BudgetReserved
-			} else if run.CostCredits > 0 {
-				item.EstimatedCostCredits = run.CostCredits
-			}
-		}
-		if item.RecommendationReason == "" {
-			item.RecommendationReason = "已验证选题，可继续评估跨平台复用"
-		}
-		items = append(items, item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		left, right := items[i].Score, items[j].Score
@@ -853,19 +859,18 @@ func (s *ContentAssetService) ProcessReuseRun(ctx context.Context, runID string)
 	// by creating a full platform task before its accepted inputs exist.
 	if stage, stageErr := s.repo.ContentAssets().FindReuseStage(ctx, run.ID, run.Stage); stageErr == nil {
 		if reuseStageTaskID(stage) == "" {
-			if !s.contentReusePlanningEnabled(run) || run.Stage != model.ContentReuseStageResearch {
+			if !s.contentReusePlanningEnabled(run) || stage.Status != model.ContentStageQueued {
 				return nil
 			}
-			input := map[string]any{
-				"schema_version":     "1.0",
-				"task_kind":          model.TaskTypeContentResearch,
-				"candidates":         []map[string]any{{"asset_id": run.AssetID, "title": assetTitleForRun(ctx, s.repo, run)}},
-				"accepted_artifacts": []any{},
+			taskKind := contentReuseStageTaskKind(stage.Stage, run)
+			if taskKind == "" {
+				return nil
 			}
-			if _, ensureErr := s.EnsureReuseStage(ctx, run.UserID, run.ID, model.ContentReuseStageResearch, input); ensureErr != nil {
-				return ensureErr
+			input := map[string]any{}
+			if err := json.Unmarshal(stage.InputSnapshot, &input); err != nil {
+				return fmt.Errorf("decode frozen planning stage input: %w", err)
 			}
-			tasks, createErr := s.CreatePlanningStageTask(ctx, run.UserID, run.ID, stage.ID, model.TaskTypeContentResearch, input)
+			tasks, createErr := s.CreatePlanningStageTask(ctx, run.UserID, run.ID, stage.ID, taskKind, input)
 			if createErr != nil {
 				return createErr
 			}
@@ -882,6 +887,9 @@ func (s *ContentAssetService) ProcessReuseRun(ctx context.Context, runID string)
 		}
 		if stage.Status == model.ContentStageCompleted && stage.Stage == model.ContentReuseStageRender {
 			return s.finalizeRenderedReuseTask(ctx, stageTask)
+		}
+		if stage.Status == model.ContentStageCompleted {
+			return s.advancePlanningStage(ctx, run.UserID, stage.ID)
 		}
 		if stageTask.Status == model.TaskStatusPending {
 			if err := s.taskSvc.EnqueueExecution(ctx, stageTask, nil); err != nil {
@@ -1254,6 +1262,16 @@ func (s *ContentAssetService) finalizeReuseStageTask(ctx context.Context, task *
 	if task.Status != model.TaskStatusCompleted && task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled {
 		return nil
 	}
+	currentStage, err := s.repo.ContentAssets().FindReuseStageByID(ctx, task.ReuseStageID)
+	if err != nil {
+		return err
+	}
+	// Task finalization can be retried after the stage transition committed.
+	// Treat the durable terminal stage as the source of truth and avoid trying
+	// to transition it from running a second time.
+	if currentStage.Status != model.ContentStageRunning {
+		return nil
+	}
 	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, executionID)
 	if err != nil {
 		return err
@@ -1284,6 +1302,22 @@ func (s *ContentAssetService) finalizeReuseStageTask(ctx context.Context, task *
 			return s.finalizeRenderedReuseTask(ctx, task)
 		}
 		return s.advancePlanningStage(ctx, task.UserID, task.ReuseStageID)
+	}
+	run, err := s.repo.ContentAssets().FindReuseRunByID(ctx, task.ReuseRunID)
+	if err != nil {
+		return err
+	}
+	if run.Status == model.ContentReuseRunStatusRunning || run.Status == model.ContentReuseRunStatusQueued {
+		stage, stageErr := s.repo.ContentAssets().FindReuseStageByID(ctx, task.ReuseStageID)
+		if stageErr != nil {
+			return stageErr
+		}
+		run.Status = model.ContentReuseRunStatusFailed
+		run.Stage = stage.Stage
+		run.BudgetReserved = 0
+		run.ErrorCode = "stage_" + status
+		run.ErrorMessage = strings.TrimSpace(reason)
+		return s.repo.ContentAssets().UpdateReuseRun(ctx, run)
 	}
 	return nil
 }
@@ -1473,8 +1507,7 @@ func (s *ContentAssetService) advanceProductionStages(ctx context.Context, userI
 		return fmt.Errorf("content production stage is not owned")
 	}
 	if !isVideoProductionPlatform(run.TargetPlatform) {
-		run.Stage = model.ContentReuseStageReview
-		return s.repo.ContentAssets().UpdateReuseRun(ctx, run)
+		return s.admitFinalPlatformReuseTask(ctx, run)
 	}
 	var scriptArtifacts []ContentStageArtifact
 	if len(scriptStage.ArtifactRefs) == 0 || json.Unmarshal(scriptStage.ArtifactRefs, &scriptArtifacts) != nil || len(scriptArtifacts) == 0 {
@@ -1582,6 +1615,99 @@ func (s *ContentAssetService) advanceProductionStages(ctx context.Context, userI
 		if err := s.taskSvc.EnqueueExecution(ctx, task, nil); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// admitFinalPlatformReuseTask resumes the ordinary platform Agent after the
+// planning-only stages. Planning must never publish or replace this task; it
+// only supplies accepted evidence and a frozen brief for the final Agent.
+func (s *ContentAssetService) admitFinalPlatformReuseTask(ctx context.Context, run *model.ContentReuseRun) error {
+	asset, err := s.repo.ContentAssets().FindByID(ctx, run.UserID, run.AssetID)
+	if err != nil {
+		return s.failReuseRun(ctx, run, "asset_not_found", err)
+	}
+	project, err := s.repo.Projects().FindByID(ctx, run.TargetProjectID)
+	if err != nil || project.UserID != run.UserID {
+		if err == nil {
+			err = fmt.Errorf("target project does not belong to user")
+		}
+		return s.failReuseRun(ctx, run, "project_not_found", err)
+	}
+	agentID, channel, taskKind, ok := contentReuseIdentity(project.Platform)
+	if !ok {
+		return s.failReuseRun(ctx, run, "unsupported_platform", fmt.Errorf("unsupported target platform %q", project.Platform))
+	}
+	run.Stage = model.ContentReuseStageReview
+	if err := s.repo.ContentAssets().UpdateReuseRun(ctx, run); err != nil {
+		return s.failReuseRun(ctx, run, "stage_persistence_failed", err)
+	}
+	params := CreateManualParams{
+		UserID: run.UserID, ProjectID: run.TargetProjectID, ExecutionProfile: "effective",
+		AgentID: agentID, Channel: channel, TaskKind: taskKind,
+		Prompt:         fmt.Sprintf("跨平台复用运行。选题资产：%s。核心问题：%s。受众：%s。语义核心：%s。目标平台：%s。请使用已验收的 content-planning 研究、验证和脚本产物，生成该平台独立表达版本；不得越过 Server readiness 或自行发布。复用运行 ID：%s。", asset.Title, asset.CoreQuestion, asset.Audience, asset.SemanticKernel, run.TargetPlatform, run.ID),
+		ContentAssetID: run.AssetID, SourceContentRef: strings.Trim(strings.Join([]string{run.SourceContentKind, run.SourceContentID}, ":"), ":"), ReuseRunID: run.ID,
+	}
+	if project.Platform == model.PlatformMontage {
+		params.MontageInput = &model.MontageInput{Brief: fmt.Sprintf("围绕选题资产“%s”制作平台化视频。核心问题：%s。受众：%s。", asset.Title, asset.CoreQuestion, asset.Audience)}
+	}
+	policy := model.NewContentAutopilotPolicy(run.UserID)
+	if len(run.PolicySnapshot) > 0 && string(run.PolicySnapshot) != "null" {
+		if err := json.Unmarshal(run.PolicySnapshot, policy); err != nil {
+			return s.failReuseRun(ctx, run, "policy_load_failed", err)
+		}
+	} else if policy, err = s.repo.ContentAssets().GetPolicy(ctx, run.UserID); err != nil {
+		return s.failReuseRun(ctx, run, "policy_load_failed", err)
+	}
+	if policy.Enabled {
+		if policy.DailyBudgetCredits <= 0 || policy.MaxRunCostCredits <= 0 {
+			return s.failReuseRun(ctx, run, "budget_not_configured", fmt.Errorf("autopilot daily and per-run budgets must be positive"))
+		}
+		if s.billingCatalogSvc == nil {
+			return s.failReuseRun(ctx, run, "billing_unavailable", fmt.Errorf("content autopilot billing is unavailable"))
+		}
+		billingType := contentReuseBillingTaskType(project.Platform)
+		if billingType == "" {
+			return s.failReuseRun(ctx, run, "unsupported_billing_platform", fmt.Errorf("billing is not configured for target platform %q", project.Platform))
+		}
+		fingerprint := billingFingerprint("content-reuse-task", run.ID, billingType, "effective")
+		quote, quoteErr := s.billingCatalogSvc.CreateTaskQuote(ctx, TaskQuoteRequest{UserID: run.UserID, TaskType: billingType, ExecutionProfile: "effective", RequestFingerprint: fingerprint, IdempotencyScope: "content-reuse-quote", IdempotencyKey: fmt.Sprintf("%s:v%d", run.ID, run.Version)})
+		if quoteErr != nil {
+			return s.failReuseRun(ctx, run, "billing_quote_failed", quoteErr)
+		}
+		if quote.PriceCredits > policy.MaxRunCostCredits {
+			return s.failReuseRun(ctx, run, "run_cost_exceeded", fmt.Errorf("quoted cost %d exceeds per-run limit %d", quote.PriceCredits, policy.MaxRunCostCredits))
+		}
+		reserved, reserveErr := s.repo.ContentAssets().ReserveReuseRunBudget(ctx, run.ID, quote.PriceCredits, policy.DailyBudgetCredits, time.Now().UTC())
+		if reserveErr != nil {
+			return s.failReuseRun(ctx, run, "budget_reservation_failed", reserveErr)
+		}
+		if !reserved {
+			return s.failReuseRun(ctx, run, "daily_budget_exceeded", fmt.Errorf("daily autopilot budget is exhausted"))
+		}
+		run, err = s.repo.ContentAssets().FindReuseRunByID(ctx, run.ID)
+		if err != nil {
+			return err
+		}
+		if run.Status != model.ContentReuseRunStatusRunning {
+			return nil
+		}
+		run.BudgetReserved = quote.PriceCredits
+		run.BillingQuoteID, run.BillingFingerprint = quote.ID, fingerprint
+		params.BillingQuoteID, params.BillingRequestFingerprint = quote.ID, fingerprint
+		if err := s.repo.ContentAssets().UpdateReuseRun(ctx, run); err != nil {
+			return s.failReuseRun(ctx, run, "budget_persistence_failed", err)
+		}
+	}
+	tasks, err := s.taskSvc.CreateManual(ctx, params)
+	if err != nil {
+		if existing, findErr := s.repo.Tasks().FindByReuseRun(ctx, run.UserID, run.ID); findErr == nil {
+			return s.FinalizeReuseTask(ctx, existing)
+		}
+		return s.failReuseRun(ctx, run, "task_creation_failed", err)
+	}
+	for _, task := range tasks {
+		_, _ = s.LinkContent(ctx, LinkContentAssetParams{UserID: run.UserID, AssetID: run.AssetID, ProjectID: run.TargetProjectID, ContentKind: "task", ContentID: task.ID, Platform: run.TargetPlatform, Relation: model.ContentAssetLinkDerivative, Angle: run.TargetPlatform})
 	}
 	return nil
 }
