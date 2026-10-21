@@ -28,7 +28,10 @@ DSH Web Shell and couple Studio to its runtime.
 - all answers in a batch are submitted together;
 - skip, paging, Markdown details, read-only answered state, and retry behavior
   follow DSH semantics.
-- custom answers follow the Server's 2,000 Unicode code-point limit; expired,
+- `intent.kind = "plan-review"` renders the plan detail in a dedicated review
+  panel while preserving the same answer contract.
+- custom answers follow the Server's 20,000 Unicode code-point limit and can be
+  opened in an expanded editor for long document pastes; expired,
   closed, or unavailable sessions disable unanswered cards with a restart hint.
 - answered batches remain in the conversation when the Agent opens later batches.
 
