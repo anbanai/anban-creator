@@ -40,6 +40,7 @@ import type {
 import type { AssistantModeID } from '@/lib/api/assistant'
 import { streamInteractiveSession } from '@/lib/interactive-events'
 import { clearPortraitCreationHandoff, readPortraitCreationHandoff } from '@/lib/portrait-project-handoff'
+import { assistantMessageHandoffKey, clearAssistantMessageHandoff, readAssistantMessageHandoff } from '@/lib/assistant-message-handoff'
 import { useAuth } from '@/contexts/AuthContext'
 import { DshQuestionComposer, type DshQuestion, type DshQuestionAnswer, type DshQuestionOption } from '@/components/dsh-user-questions/DshQuestionComposer'
 import AssistantHome from './AssistantHome'
@@ -568,6 +569,7 @@ function ChatConversation() {
   const recoveryPromptRef = useRef<string | null>(null)
   const recoveryMessagePromiseRef = useRef<Promise<void> | null>(null)
   const portraitHandoffIdeaRef = useRef<string | null>(null)
+  const initialAssistantMessageSentRef = useRef(false)
   const recoveryDraftRef = useRef<InteractiveDraft | null>(null)
   const sendingMessageRef = useRef(false)
   const pendingSubmissionRef = useRef<PendingSubmission | null>(null)
@@ -1455,8 +1457,8 @@ function ChatConversation() {
     }
   }, [activeAgent, agentsQuery.isLoading, assistantSession, bootstrapQuery.isLoading, selectedAgent])
 
-  const sendMessage = async () => {
-    const text = composer.trim()
+  const sendMessage = async (messageOverride?: string) => {
+    const text = (messageOverride ?? composer).trim()
     if (!text || !sessionId || pendingQuestions.length > 0 || runState === 'starting' || committing || turnActive || sendingMessageRef.current) return
     sendingMessageRef.current = true
     setSendingMessage(true)
@@ -1483,9 +1485,13 @@ function ChatConversation() {
         clearPortraitCreationHandoff(projectId)
         portraitHandoffIdeaRef.current = null
       }
+      if (assistantSession && initialAssistantMessageSentRef.current) {
+        clearAssistantMessageHandoff(assistantMessageHandoffKey(user?.id ?? 'signed-out', assistantModeId ?? 'profile', projectId, contentId))
+      }
       if (pendingSubmissionRef.current === pendingSubmission) pendingSubmission.status = 'accepted'
     } catch (error) {
       if (sessionRef.current !== sessionId) return
+      if (assistantSession && initialAssistantMessageSentRef.current) initialAssistantMessageSentRef.current = false
       if (pendingSubmissionRef.current === pendingSubmission && pendingSubmission.status === 'pending') pendingSubmission.status = 'failed'
       setTurnActive(false)
       const failed = readPersistedInteractiveSession(sessionStorageKey)
@@ -1499,6 +1505,16 @@ function ChatConversation() {
       }
     }
   }
+
+  useEffect(() => {
+    if (!assistantSession || !sessionId || initialAssistantMessageSentRef.current || pendingQuestions.length > 0) return
+    const key = assistantMessageHandoffKey(user?.id ?? 'signed-out', assistantModeId ?? 'profile', projectId, contentId)
+    const initialMessage = readAssistantMessageHandoff(key)
+    if (!initialMessage) return
+    initialAssistantMessageSentRef.current = true
+    setComposer(initialMessage)
+    void sendMessage(initialMessage)
+  }, [assistantModeId, assistantSession, contentId, pendingQuestions.length, projectId, sessionId, user?.id])
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer) => {
     if (batch.answers) return
