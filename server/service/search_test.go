@@ -62,6 +62,7 @@ func newSearchBillingFixture(t *testing.T) (repository.Repository, *gorm.DB, *Bi
 	bundle.Products.SKUs = append(bundle.Products.SKUs,
 		billing.SKUConfig{ID: "mcp.search_web", Operation: "mcp.search_web", ChargePolicy: "standalone_operation", PriceCredits: 0, Route: "search.web", Delivery: "search_results"},
 		billing.SKUConfig{ID: "mcp.fetch_web_page", Operation: "mcp.fetch_web_page", ChargePolicy: "standalone_operation", PriceCredits: 0, Route: "search.fetch", Delivery: "fetched_page"},
+		billing.SKUConfig{ID: "mcp.search_images", Operation: "mcp.search_images", ChargePolicy: "standalone_operation", PriceCredits: 0, Route: "search.images", Delivery: "image_results"},
 	)
 	if err := repo.Users().Create(context.Background(), &model.User{ID: billingWalletUserID, Email: "search@example.com", Password: "fixture", InviteCode: "SEARCH01"}); err != nil {
 		t.Fatal(err)

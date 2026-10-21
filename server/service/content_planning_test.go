@@ -206,6 +206,9 @@ func TestContentPlanningReceiptScopeAndCapabilities(t *testing.T) {
 	if err := svc.ValidateAgentExecutionToolAccess(ctx, task.UserID, task.ProjectID, task.ID, execution.ID, "search_web"); err != nil {
 		t.Fatal(err)
 	}
+	if err := svc.ValidateAgentExecutionToolAccess(ctx, task.UserID, task.ProjectID, task.ID, execution.ID, "search_images"); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.ValidateAgentExecutionToolAccess(ctx, task.UserID, task.ProjectID, task.ID, "stale", "search_web"); err == nil {
 		t.Fatal("stale execution accepted")
 	}

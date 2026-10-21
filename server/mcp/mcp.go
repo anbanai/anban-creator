@@ -511,6 +511,7 @@ var executionToolScopes = map[string]executionToolScope{
 	"list_resources":       {},
 	"get_resource":         {},
 	"search_web":           {},
+	"search_images":        {},
 	"list_search_receipts": {},
 	"fetch_web_page":       {},
 }

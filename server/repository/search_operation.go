@@ -87,7 +87,7 @@ func (r *searchOperationRepository) MarkSucceeded(ctx context.Context, id, attem
 		return errors.New("search operation response snapshot must be valid JSON")
 	}
 	result := r.db.WithContext(ctx).Model(&model.SearchOperation{}).
-		Where("id = ? AND attempt_id = ? AND status = ?", id, attemptID, model.SearchOperationRunning).
+		Where("id = ? AND attempt_id = ? AND status IN ?", id, attemptID, []model.SearchOperationStatus{model.SearchOperationRunning, model.SearchOperationCostPending}).
 		Updates(map[string]any{"status": model.SearchOperationSucceeded, "provider_request_id": providerRequestID, "response_snapshot": response, "error_code": "", "lease_expires_at": nil, "updated_at": now})
 	if result.Error != nil {
 		return result.Error
@@ -98,9 +98,41 @@ func (r *searchOperationRepository) MarkSucceeded(ctx context.Context, id, attem
 	return errors.New("search operation claim was lost before completion")
 }
 
-func (r *searchOperationRepository) MarkFailed(ctx context.Context, id, attemptID, errorCode string, now time.Time) error {
+func (r *searchOperationRepository) MarkCostPending(ctx context.Context, id, attemptID, providerRequestID string, response []byte, now time.Time) error {
+	if len(response) == 0 || !jsonValid(response) {
+		return errors.New("search operation response snapshot must be valid JSON")
+	}
 	result := r.db.WithContext(ctx).Model(&model.SearchOperation{}).
 		Where("id = ? AND attempt_id = ? AND status = ?", id, attemptID, model.SearchOperationRunning).
+		Updates(map[string]any{"status": model.SearchOperationCostPending, "provider_request_id": providerRequestID, "response_snapshot": response, "error_code": model.SearchOperationErrorProviderCostPending, "lease_expires_at": nil, "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	return errors.New("search operation claim was lost before provider cost was recorded")
+}
+
+func (r *searchOperationRepository) MarkProviderErrorCostPending(ctx context.Context, id, attemptID string, response []byte, now time.Time) error {
+	if len(response) == 0 || !jsonValid(response) {
+		return errors.New("search operation provider error snapshot must be valid JSON")
+	}
+	result := r.db.WithContext(ctx).Model(&model.SearchOperation{}).
+		Where("id = ? AND attempt_id = ? AND status = ?", id, attemptID, model.SearchOperationRunning).
+		Updates(map[string]any{"status": model.SearchOperationCostPending, "provider_request_id": "", "response_snapshot": response, "error_code": model.SearchOperationErrorProviderErrorCostPending, "lease_expires_at": nil, "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	return errors.New("search operation claim was lost before provider failure cost was recorded")
+}
+
+func (r *searchOperationRepository) MarkFailed(ctx context.Context, id, attemptID, errorCode string, now time.Time) error {
+	result := r.db.WithContext(ctx).Model(&model.SearchOperation{}).
+		Where("id = ? AND attempt_id = ? AND status IN ?", id, attemptID, []model.SearchOperationStatus{model.SearchOperationRunning, model.SearchOperationCostPending}).
 		Updates(map[string]any{"status": model.SearchOperationFailed, "error_code": errorCode, "lease_expires_at": nil, "updated_at": now})
 	return result.Error
 }

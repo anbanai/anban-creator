@@ -167,11 +167,8 @@ func TestSearchWebSchemaExposesSitesConstraint(t *testing.T) {
 
 func TestSearchCapabilityToolsExposeProviderNeutralContracts(t *testing.T) {
 	tools := listRegisteredTools(t, registerSearchTools)
-	want := map[string]bool{"search_web": false, "fetch_web_page": false}
+	want := map[string]bool{"search_web": false, "fetch_web_page": false, "search_images": false}
 	for _, tool := range tools {
-		if tool.Name == "search_images" {
-			t.Fatal("unimplemented search_images tool must not be registered")
-		}
 		if _, ok := want[tool.Name]; !ok {
 			continue
 		}
@@ -188,6 +185,77 @@ func TestSearchCapabilityToolsExposeProviderNeutralContracts(t *testing.T) {
 			t.Fatalf("%s tool not registered", name)
 		}
 	}
+}
+
+func TestSearchImagesHandlerRequiresQueryAndExecutionIdentity(t *testing.T) {
+	old := svcs
+	svcs = nil
+	t.Cleanup(func() { svcs = old })
+	ctx := withMCPExecutionIdentity(context.Background(), "user-1", "project-1", "task-1", "execution-1")
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "missing input", args: map[string]any{}},
+		{name: "unsupported visual input", args: map[string]any{"image_url": "https://images.example.com/cat.jpg"}},
+		{name: "unsupported visual parameter", args: map[string]any{"query": "cats", "image_url": "https://images.example.com/cat.jpg"}},
+		{name: "over provider result cap", args: map[string]any{"query": "cats", "limit": float64(6)}},
+		{name: "provider override", args: map[string]any{"query": "cats", "provider": "other"}},
+		{name: "unsupported filter", args: map[string]any{"query": "cats", "domains": []string{"example.com"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := searchImagesHandler(ctx, searchToolRequest(t, tc.args))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result == nil || !result.IsError || !strings.Contains(toolResultText(result), "invalid_request") && tc.name != "provider override" {
+				t.Fatalf("result = %#v", result)
+			}
+			if tc.name == "provider override" && !strings.Contains(toolResultText(result), "provider_selection_forbidden") {
+				t.Fatalf("provider override result = %s", toolResultText(result))
+			}
+		})
+	}
+	valid, err := searchImagesHandler(ctx, searchToolRequest(t, map[string]any{"query": "cats", "limit": 2}))
+	if err != nil || valid == nil || !valid.IsError || !strings.Contains(toolResultText(valid), "provider_unavailable") {
+		t.Fatalf("valid input without configured service = %#v, %v", valid, err)
+	}
+	missing, err := searchImagesHandler(context.Background(), searchToolRequest(t, map[string]any{"query": "cats"}))
+	if err != nil || missing == nil || !missing.IsError || !strings.Contains(toolResultText(missing), "execution_identity_required") {
+		t.Fatalf("missing execution identity = %#v, %v", missing, err)
+	}
+}
+
+func TestSearchImagesSchemaRequiresDocumentedQueryInput(t *testing.T) {
+	for _, tool := range listRegisteredTools(t, registerSearchTools) {
+		if tool.Name != "search_images" {
+			continue
+		}
+		schema := tool.InputSchema.(map[string]any)
+		if schema["additionalProperties"] != false {
+			t.Fatal("search_images schema must reject provider-specific properties")
+		}
+		properties := schema["properties"].(map[string]any)
+		for _, name := range []string{"query", "limit"} {
+			if _, ok := properties[name]; !ok {
+				t.Fatalf("search_images schema is missing %q", name)
+			}
+		}
+		if _, ok := properties["image_url"]; ok {
+			t.Fatal("search_images schema must not expose undocumented visual-search input")
+		}
+		for _, forbidden := range []string{"provider", "model", "endpoint", "api_key", "base_url", "domains"} {
+			if _, ok := properties[forbidden]; ok {
+				t.Fatalf("search_images schema exposes unsupported field %q", forbidden)
+			}
+		}
+		required := schema["required"].([]any)
+		if len(required) != 1 || required[0] != "query" {
+			t.Fatalf("search_images must require exactly query, got %#v", required)
+		}
+		return
+	}
+	t.Fatal("search_images tool not registered")
 }
 
 func TestSearchWebHandlerPreservesDefaultsAndExplicitFilters(t *testing.T) {

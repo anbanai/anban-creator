@@ -623,6 +623,8 @@ type SearchOperationRepository interface {
 	ListSucceeded(ctx context.Context, userID, projectID, taskID, executionID string) ([]*model.SearchOperation, error)
 	FindByFingerprint(ctx context.Context, fingerprint string) (*model.SearchOperation, error)
 	Claim(ctx context.Context, candidate *model.SearchOperation, now time.Time, lease time.Duration) (*model.SearchOperation, bool, error)
+	MarkCostPending(ctx context.Context, id, attemptID, providerRequestID string, response []byte, now time.Time) error
+	MarkProviderErrorCostPending(ctx context.Context, id, attemptID string, response []byte, now time.Time) error
 	MarkSucceeded(ctx context.Context, id, attemptID, providerRequestID string, response []byte, now time.Time) error
 	MarkFailed(ctx context.Context, id, attemptID, errorCode string, now time.Time) error
 }

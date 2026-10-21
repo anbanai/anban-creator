@@ -309,13 +309,14 @@ type TrendsConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
 }
 
-// SearchConfig controls Server-owned web search providers. Credentials are
+// SearchConfig controls Server-owned search capabilities. Credentials are
 // intentionally kept in server configuration and are never exposed to Agents.
 type SearchConfig struct {
-	// Web and Fetch are capability routes. Provider credentials live in
+	// Capability routes select Server-owned providers. Credentials live in
 	// Providers and are never exposed to MCP callers.
 	Web       SearchCapabilityConfig `yaml:"web"`
 	Fetch     SearchCapabilityConfig `yaml:"fetch"`
+	Images    SearchCapabilityConfig `yaml:"images"`
 	Providers SearchProvidersConfig  `yaml:"providers"`
 }
 
@@ -2072,6 +2073,7 @@ func (c *Config) Validate() error {
 	}
 	validateProvider("web", c.Search.Web, map[string]bool{"deepseek": true, "doubao_custom": true, "doubao_global": true})
 	validateProvider("fetch", c.Search.Fetch, map[string]bool{"deepseek": true})
+	validateProvider("images", c.Search.Images, map[string]bool{"doubao": true})
 	if c.Search.Web.Enabled {
 		switch strings.ToLower(strings.TrimSpace(c.Search.Web.Provider)) {
 		case "deepseek":
@@ -2116,6 +2118,15 @@ func (c *Config) Validate() error {
 		}
 		if c.Search.Providers.DeepSeek.Timeout <= 0 {
 			errs = append(errs, "search.providers.deepseek.timeout must be positive when fetch is enabled")
+		}
+	}
+	if c.Search.Images.Enabled {
+		validateSearchURL("search.providers.doubao.global_endpoint", c.Search.Providers.Doubao.GlobalEndpoint, true)
+		if strings.TrimSpace(c.Search.Providers.Doubao.APIKey) == "" {
+			errs = append(errs, "search.providers.doubao.api_key is required when image search is enabled")
+		}
+		if c.Search.Providers.Doubao.Timeout <= 0 {
+			errs = append(errs, "search.providers.doubao.timeout must be positive when image search is enabled")
 		}
 	}
 	if err := c.Claude.Validate(); err != nil {

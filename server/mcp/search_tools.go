@@ -24,6 +24,17 @@ func registerSearchTools(server *mcp.Server) {
 		Name: "fetch_web_page", Description: "Fetch one public HTTP(S) page through the Server-configured page-fetch provider and return Markdown content.",
 		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"url": map[string]any{"type": "string", "format": "uri", "minLength": 1, "maxLength": 4096}}, "required": []any{"url"}},
 	}, fetchWebPageHandler)
+	server.AddTool(&mcp.Tool{
+		Name: "search_images", Description: "Search for public images using a text query. Provider selection and credentials are controlled by the Server.",
+		InputSchema: map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string", "minLength": 1, "maxLength": 100},
+				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 5},
+			},
+			"required": []any{"query"},
+		},
+	}, searchImagesHandler)
 }
 
 func searchWebHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -126,6 +137,61 @@ func fetchWebPageHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Ca
 	result, err := svcs.FetchSvc.Fetch(ctx, service.FetchOperationRequest{UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID, Request: service.PageFetchRequest{URL: urlValue}})
 	if err != nil {
 		return errorResult(searchErrorJSON(searchErrorCode(err, "fetch_failed"), safeCapabilityError(err))), nil
+	}
+	return textResult(result)
+}
+
+func searchImagesHandler(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if req == nil || req.Params == nil {
+		return errorResult("search_images request parameters are required"), nil
+	}
+	if failure := requireMCPExecutionIdentity(ctx, "search_images", "", "", ""); failure != nil {
+		return failure, nil
+	}
+	identity, _ := getMCPExecutionIdentity(ctx)
+	if strings.TrimSpace(identity.UserID) == "" {
+		return errorResult(`{"code":"execution_identity_required","message":"search_images requires an execution-scoped credential"}`), nil
+	}
+	args := parseArgs(req.Params.Arguments)
+	if hasProviderOverride(args) {
+		return errorResult(`{"code":"provider_selection_forbidden","message":"image search provider is controlled by Server configuration"}`), nil
+	}
+	for key := range args {
+		if key != "query" && key != "limit" {
+			return errorResult(`{"code":"invalid_request","message":"unsupported image search parameter"}`), nil
+		}
+	}
+	queryValue, queryPresent, queryOK := stringArgument(args, "query")
+	query := strings.TrimSpace(queryValue)
+	if !queryPresent || !queryOK || query == "" {
+		return errorResult(`{"code":"invalid_request","message":"query must be a non-empty string"}`), nil
+	}
+	if len([]rune(query)) > 100 {
+		return errorResult(`{"code":"invalid_request","message":"query exceeds the 100-character limit"}`), nil
+	}
+	limit := 0
+	if raw, present := args["limit"]; present {
+		value, ok := raw.(float64)
+		if !ok || value != float64(int(value)) || value < 1 || value > 5 {
+			return errorResult(`{"code":"invalid_request","message":"limit must be an integer between 1 and 5"}`), nil
+		}
+		limit = int(value)
+	}
+	if svcs == nil || svcs.ImageSearchSvc == nil {
+		return errorResult(`{"code":"provider_unavailable","message":"image search provider is not configured"}`), nil
+	}
+	result, err := svcs.ImageSearchSvc.SearchImages(ctx, service.ImageSearchOperationRequest{
+		UserID: identity.UserID, ProjectID: identity.ProjectID, TaskID: identity.TaskID, ExecutionID: identity.ExecutionID,
+		Request: service.ImageSearchRequest{Query: query, Limit: limit},
+	})
+	if err != nil {
+		code := searchErrorCode(err, "image_search_failed")
+		if errors.Is(err, service.ErrInvalidImageSearchRequest) {
+			code = "invalid_request"
+		} else if errors.Is(err, service.ErrImageSearchAccountingPending) {
+			code = "accounting_pending"
+		}
+		return errorResult(searchErrorJSON(code, safeCapabilityError(err))), nil
 	}
 	return textResult(result)
 }

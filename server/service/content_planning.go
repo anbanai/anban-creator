@@ -226,7 +226,7 @@ func (s *TaskService) ValidateAgentExecutionToolAccess(ctx context.Context, user
 	switch tool {
 	case "get_task", "get_project_profile", "list_task_files", "set_task_progress_plan", "update_task_progress", "submit_completion_metadata", "get_completion_metadata_status", "list_resources", "get_resource", "score_article", "cancel_task":
 		return nil
-	case "search_web", "fetch_web_page", "list_search_receipts":
+	case "search_web", "search_images", "fetch_web_page", "list_search_receipts":
 		if task.Type == model.TaskTypeContentResearch {
 			return nil
 		}

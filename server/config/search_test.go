@@ -120,9 +120,66 @@ func TestSearchConfigValidationUsesCapabilityRoutes(t *testing.T) {
 	}
 }
 
-func TestSearchConfigIgnoresRetiredImageSearchRoute(t *testing.T) {
-	body := strings.Replace(validClaudeConfigYAML, "claude:\n", "search:\n  images:\n    enabled: true\n    provider: doubao\nclaude:\n", 1)
-	if _, err := loadClaudeConfigYAML(t, body); err != nil {
-		t.Fatalf("retired search.images config should not prevent startup: %v", err)
+func TestSearchImageConfigValidationRequiresDoubaoGlobalCredentials(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Search = SearchConfig{Images: SearchCapabilityConfig{Enabled: true, Provider: "doubao"}}
+	err = cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "search.providers.doubao.api_key") {
+		t.Fatalf("image config validation error = %v, want Doubao API key requirement", err)
+	}
+
+	cfg.Search.Providers.Doubao = SearchDoubaoConfig{
+		APIKey: "secret", GlobalEndpoint: "https://open.feedcoopapi.com/search_api/global_search", Timeout: time.Second, MaxResults: 10,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid Doubao image search config rejected: %v", err)
+	}
+}
+
+func TestSearchImageConfigRejectsUnsupportedProvider(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Search.Images = SearchCapabilityConfig{Enabled: true, Provider: "doubao_custom"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), `search.images.provider "doubao_custom" is unsupported`) {
+		t.Fatalf("image provider validation error = %v", err)
+	}
+}
+
+func TestSearchImageConfigUsesProviderImageSearchMaximum(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Search = SearchConfig{
+		Images: SearchCapabilityConfig{Enabled: true, Provider: "doubao"},
+		Providers: SearchProvidersConfig{Doubao: SearchDoubaoConfig{
+			APIKey: "secret", GlobalEndpoint: "https://open.feedcoopapi.com/search_api/global_search", Timeout: time.Second, MaxResults: 21,
+		}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("image search must use its provider maximum independently from web max_results: %v", err)
+	}
+}
+
+func TestSearchImageConfigDoesNotConstrainDoubaoCustomWebLimit(t *testing.T) {
+	cfg, err := loadClaudeConfigYAML(t, validClaudeConfigYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Search = SearchConfig{
+		Web:    SearchCapabilityConfig{Enabled: true, Provider: "doubao_custom"},
+		Images: SearchCapabilityConfig{Enabled: true, Provider: "doubao"},
+		Providers: SearchProvidersConfig{Doubao: SearchDoubaoConfig{
+			APIKey: "secret", CustomEndpoint: "https://open.feedcoopapi.com/search_api/web_search",
+			GlobalEndpoint: "https://open.feedcoopapi.com/search_api/global_search", Timeout: time.Second, MaxResults: 30,
+		}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid Custom web + Global image search config rejected: %v", err)
 	}
 }

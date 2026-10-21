@@ -77,6 +77,9 @@ search:
   fetch:
     enabled: ${ANBAN_SEARCH_FETCH_ENABLED:-false}
     provider: "${ANBAN_SEARCH_FETCH_PROVIDER:-deepseek}"
+  images:
+    enabled: ${ANBAN_SEARCH_IMAGES_ENABLED:-false}
+    provider: "${ANBAN_SEARCH_IMAGES_PROVIDER:-doubao}"
   providers:
     deepseek:
       api_key: "${ANBAN_DEEPSEEK_SEARCH_API_KEY:-}"

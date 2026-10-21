@@ -855,6 +855,7 @@ func main() {
 		var contentRenderSvc *service.ContentRenderService
 		var searchSvc *service.SearchService
 		var fetchSvc *service.FetchService
+		var imageSearchSvc *service.ImageSearchService
 
 		if store != nil {
 			imageSvc = service.NewImageService(defaultImageAPI, store, repo, log)
@@ -881,6 +882,9 @@ func main() {
 		}
 		if cfg.Search.Fetch.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Search.Fetch.Provider), "deepseek") {
 			fetchSvc = service.NewFetchService(&cfg.Search, service.NewDeepSeekFetchProvider(cfg.Search.Providers.DeepSeek), fixedBilling.Catalog, fixedBilling.Wallet, fixedBilling.Cost, repo.SearchOperations(), log)
+		}
+		if cfg.Search.Images.Enabled && strings.EqualFold(strings.TrimSpace(cfg.Search.Images.Provider), "doubao") {
+			imageSearchSvc = service.NewImageSearchService(&cfg.Search, service.NewDoubaoGlobalImageSearchProvider(cfg.Search.Providers.Doubao), fixedBilling.Catalog, fixedBilling.Wallet, fixedBilling.Cost, repo.SearchOperations(), log)
 		}
 		mcp.SetServices(&mcp.Services{
 			ProjectSvc:             projectSvc,
@@ -913,6 +917,7 @@ func main() {
 			InteractiveSvc: interactiveSvc,
 			SearchSvc:      searchSvc,
 			FetchSvc:       fetchSvc,
+			ImageSearchSvc: imageSearchSvc,
 		})
 		mcp.SetBillingServices(imageCapabilityResolver, cfg)
 		mcp.SetLogger(log)
@@ -920,6 +925,7 @@ func main() {
 		log.Info().
 			Bool("mcp_static_key_set", cfg.MCP.APIKey != "").
 			Bool("image_tools", imageSvc != nil).
+			Bool("search_images", imageSearchSvc != nil).
 			Bool("image_understanding", imageUnderstandingClient != nil).
 			Bool("video_understanding", videoUnderstandingClient != nil).
 			Bool("content_render_tools", contentRenderSvc != nil).

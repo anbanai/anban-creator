@@ -64,6 +64,7 @@ type Services struct {
 	InteractiveSvc         *service.InteractiveService
 	SearchSvc              *service.SearchService
 	FetchSvc               *service.FetchService
+	ImageSearchSvc         *service.ImageSearchService
 }
 
 // RegisterTools registers all MCP tools on the server.

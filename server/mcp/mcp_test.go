@@ -330,8 +330,12 @@ func TestMCPHandlerExecutionTokenEnforcesToolCallScope(t *testing.T) {
 	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), "provider_unavailable") {
 		t.Fatalf("search_web scope did not reach MCP dispatch: %d: %s", search.Code, search.Body.String())
 	}
-	if authorizer.calls != 4 {
-		t.Fatalf("current-execution authorizer calls = %d, want 4", authorizer.calls)
+	images := callMCPToolForScopeTest(handler, token, sessionID, "search_images", `{"query":"anban"}`)
+	if images.Code != http.StatusOK || !strings.Contains(images.Body.String(), "provider_unavailable") {
+		t.Fatalf("search_images scope did not reach MCP dispatch: %d: %s", images.Code, images.Body.String())
+	}
+	if authorizer.calls != 5 {
+		t.Fatalf("current-execution authorizer calls = %d, want 5", authorizer.calls)
 	}
 }
 
@@ -525,7 +529,7 @@ func TestMCPHandlerToolsList(t *testing.T) {
 			}
 		}
 	}
-	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "create_draft", "analyze_video", "search_web", "fetch_web_page"} {
+	for _, expected := range []string{"list_projects", "list_project_titles", "finalize_task_title", "generate_image", "upload_image", "create_draft", "analyze_video", "search_web", "fetch_web_page", "search_images"} {
 		if !toolNames[expected] {
 			t.Errorf("expected tool %q not found in tools/list response", expected)
 		}
@@ -533,7 +537,7 @@ func TestMCPHandlerToolsList(t *testing.T) {
 	for _, removed := range []string{
 		"get_credit_balance", "write_article", "research_topics", "optimize_seo",
 		"generate_outline", "archive_workspace", "register_rendered_image",
-		"save_template", "list_templates", "get_template", "publish_draft", "search_images",
+		"save_template", "list_templates", "get_template", "publish_draft",
 	} {
 		if toolNames[removed] {
 			t.Errorf("unexpected removed tool %q found in tools/list response", removed)

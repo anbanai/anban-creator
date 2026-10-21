@@ -11,14 +11,18 @@ import (
 type SearchOperationStatus string
 
 const (
-	SearchOperationRunning   SearchOperationStatus = "running"
-	SearchOperationSucceeded SearchOperationStatus = "succeeded"
-	SearchOperationFailed    SearchOperationStatus = "failed"
+	SearchOperationRunning     SearchOperationStatus = "running"
+	SearchOperationCostPending SearchOperationStatus = "cost_pending"
+	SearchOperationSucceeded   SearchOperationStatus = "succeeded"
+	SearchOperationFailed      SearchOperationStatus = "failed"
+
+	SearchOperationErrorProviderCostPending      = "provider_cost_pending"
+	SearchOperationErrorProviderErrorCostPending = "provider_error_cost_pending"
 )
 
 // SearchOperation is the durable idempotency record for one execution-scoped
-// search capability call. The operation namespace distinguishes web search
-// from page fetch and future image search calls. The response snapshot lets a
+// search capability call. The operation namespace distinguishes web search,
+// page fetch, and image search calls. The response snapshot lets a
 // lost MCP response be replayed without invoking the upstream provider again.
 type SearchOperation struct {
 	ID                 string                `gorm:"type:char(36);primaryKey" json:"id"`
@@ -62,12 +66,12 @@ func (o SearchOperation) Validate() error {
 		return fmt.Errorf("search operation request fingerprint must be a SHA-256 digest")
 	}
 	switch o.Status {
-	case SearchOperationRunning, SearchOperationSucceeded, SearchOperationFailed:
+	case SearchOperationRunning, SearchOperationCostPending, SearchOperationSucceeded, SearchOperationFailed:
 	default:
 		return fmt.Errorf("unsupported search operation status %q", o.Status)
 	}
-	if o.Status == SearchOperationSucceeded && len(o.ResponseSnapshot) == 0 {
-		return fmt.Errorf("succeeded search operation requires a response snapshot")
+	if (o.Status == SearchOperationCostPending || o.Status == SearchOperationSucceeded) && len(o.ResponseSnapshot) == 0 {
+		return fmt.Errorf("completed provider search operation requires a response snapshot")
 	}
 	return nil
 }
