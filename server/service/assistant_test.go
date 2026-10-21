@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +27,7 @@ func newAssistantTestRepo(t *testing.T) repository.Repository {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.Project{}, &model.Task{}, &model.TaskFile{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}, &model.AnalyticsRawPayload{}, &model.AnalyticsBucket{}, &model.AnalyticsIdempotency{}, &model.FeedbackJob{}, &model.FeedbackLease{}, &model.FeedbackInsight{}); err != nil {
+	if err := db.AutoMigrate(&model.Project{}, &model.Task{}, &model.TaskFile{}, &model.Asset{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AnalyticsState{}, &model.AnalyticsContent{}, &model.AnalyticsObservation{}, &model.AnalyticsRawPayload{}, &model.AnalyticsBucket{}, &model.AnalyticsIdempotency{}, &model.FeedbackJob{}, &model.FeedbackLease{}, &model.FeedbackInsight{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -489,10 +492,126 @@ func TestAssistantDraftStagingIsModeScopedAndProducesConfirmableDraftEvents(t *t
 	}
 }
 
-func TestCreationPlanRequiresExecutionOptions(t *testing.T) {
-	payload := []byte(`{"goal":"目标","content_type":"公众号文章","target_audience":"新客户","angle":"使用场景","outline":["问题"],"style_constraints":"具体","asset_plan":"无","acceptance_criteria":"事实准确","cost_estimate":"低"}`)
-	if _, _, err := decodeAssistantCreationPlan(payload); !errors.Is(err, ErrAssistantCheckpointInvalid) {
-		t.Fatalf("decode plan without execution options error = %v, want invalid checkpoint", err)
+func TestCreationRequestNeedsOnlyGoalAndContentType(t *testing.T) {
+	payload := []byte(`{"goal":"介绍新茶","content_type":"wechat-article","expected_result":"让读者了解冲泡方法","requirements":[],"constraints":[],"assets":[],"missing_inputs":[],"agent_decisions":["标题和文章结构"]}`)
+	request, canonical, err := decodeAssistantCreationPlan(payload)
+	if err != nil {
+		t.Fatalf("decode request without production details: %v", err)
+	}
+	if request.Goal != "介绍新茶" || request.ContentType != "wechat-article" || len(canonical) == 0 {
+		t.Fatalf("decoded request = %#v, canonical=%s", request, canonical)
+	}
+	request, _, err = decodeAssistantCreationPlan([]byte(`{"goal":"介绍新茶","content_type":"wechat-article","assets":["参考链接：https://example.com/source"]}`))
+	if err != nil || len(request.Assets) != 1 || request.Assets[0].Type != "text" || request.Assets[0].Text != "参考链接：https://example.com/source" {
+		t.Fatalf("decode string asset = %#v, %v", request.Assets, err)
+	}
+
+	for _, invalid := range []string{
+		`{"content_type":"video"}`,
+		`{"goal":"做视频"}`,
+		`{"goal":"做视频","content_type":"video","unexpected":true}`,
+	} {
+		if _, _, err := decodeAssistantCreationPlan([]byte(invalid)); !errors.Is(err, ErrAssistantCheckpointInvalid) {
+			t.Errorf("decode %s error = %v, want invalid checkpoint", invalid, err)
+		}
+	}
+}
+
+func TestAssistantCreationIdentityRoutesByProjectPlatformAndContentType(t *testing.T) {
+	tests := []struct {
+		name        string
+		platform    string
+		contentType string
+		agentID     string
+		taskType    string
+		taskKind    string
+		wantErr     bool
+	}{
+		{"wechat article", model.PlatformWechat, "wechat-article", model.AgentIDArticle, model.TaskTypeWechatArticle, model.TaskKindContentGeneration, false},
+		{"wechat picture", model.PlatformWechat, "wechat-picture", model.AgentIDWechatPicture, model.TaskTypeWechatPicture, model.TaskKindContentGeneration, false},
+		{"seednote", model.PlatformSeednote, "seednote", model.AgentIDSeednote, model.PlatformSeednote, model.TaskKindContentGeneration, false},
+		{"video", model.PlatformMontage, "video", model.AgentIDMontage, model.PlatformMontage, model.PlatformMontage, false},
+		{"cross platform", model.PlatformWechat, "video", "", "", "", true},
+		{"unknown type", model.PlatformWechat, "unknown", "", "", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			project := &model.Project{Platform: tt.platform}
+			pack, taskType, taskKind, err := assistantCreationIdentity(project, tt.contentType)
+			if tt.wantErr {
+				if !errors.Is(err, ErrAssistantModeUnavailable) {
+					t.Fatalf("identity error = %v, want unavailable", err)
+				}
+				return
+			}
+			if err != nil || pack.Agent.Name != tt.agentID || taskType != tt.taskType || taskKind != tt.taskKind {
+				t.Fatalf("identity = %q/%q/%q, %v", pack.Agent.Name, taskType, taskKind, err)
+			}
+		})
+	}
+}
+
+func TestEveryAssistantCreationTypeHasBusinessReference(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() could not locate assistant_test.go")
+	}
+	referencesDir := filepath.Join(filepath.Dir(sourceFile), "../../harness/skills/creation-planning/references")
+	skillPath := filepath.Join(referencesDir, "..", "SKILL.md")
+	skillContents, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read creation-planning Skill %s: %v", skillPath, err)
+	}
+	for _, route := range assistantCreationTypeRoutes {
+		t.Run(route.canonicalType, func(t *testing.T) {
+			path := filepath.Join(referencesDir, route.canonicalType+".md")
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("creation type %q needs business reference %s: %v", route.canonicalType, path, err)
+			}
+			for _, section := range []string{"需要明确", "追问边界", "交接标准"} {
+				if !strings.Contains(string(contents), section) {
+					t.Errorf("business reference %s is missing section %q", path, section)
+				}
+			}
+			if !strings.Contains(string(skillContents), "references/"+route.canonicalType+".md") {
+				t.Errorf("creation-planning Skill does not link business reference %s", path)
+			}
+		})
+	}
+}
+
+func TestAssistantCreationCommitRejectsMissingRequiredInputs(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	checkpoint := &model.AssistantCheckpoint{Payload: json.RawMessage(`{"plan":{"goal":"做视频","content_type":"video","missing_inputs":["用户需要先上传视频"]}}`)}
+	_, err := commitAssistantCreation(context.Background(), "user-1", checkpoint, &TaskService{}, repo)
+	if !errors.Is(err, ErrAssistantCreationInputsMissing) {
+		t.Fatalf("commit error = %v, want missing-input error", err)
+	}
+}
+
+func TestAssistantCreationAttachmentsFreezeOwnedAssetsAndRejectUnavailableAssets(t *testing.T) {
+	repo := newAssistantTestRepo(t)
+	asset := &model.Asset{ID: uuid.NewString(), UserID: "user-1", Purpose: DirectUploadPurposeAIEntryAttachment, StorageKey: "assets/user-1/reference.png", FileName: "reference.png", ContentType: "image/png", Size: 1024, ETag: "etag"}
+	if err := repo.Assets().Create(context.Background(), asset); err != nil {
+		t.Fatal(err)
+	}
+	attachments, err := assistantCreationAttachments(context.Background(), "user-1", []assistantCreationAsset{{AssetID: asset.ID, FileName: "forged.png", MimeType: "image/jpeg"}}, repo)
+	if err != nil {
+		t.Fatalf("assistantCreationAttachments() error = %v", err)
+	}
+	if len(attachments) != 1 || attachments[0].AssetID != asset.ID || attachments[0].FileName != asset.FileName || attachments[0].ContentType != asset.ContentType || attachments[0].Type != "image" {
+		t.Fatalf("attachments = %#v, want trusted owned asset metadata", attachments)
+	}
+	_, err = assistantCreationAttachments(context.Background(), "user-2", []assistantCreationAsset{{AssetID: asset.ID}}, repo)
+	if !errors.Is(err, ErrAssistantCreationAssetUnavailable) {
+		t.Fatalf("foreign asset error = %v, want unavailable asset", err)
+	}
+	attachments, err = assistantCreationAttachments(context.Background(), "user-1", []assistantCreationAsset{
+		{Type: "reference", URL: "https://example.com/source.mp4"},
+	}, repo)
+	if err != nil || len(attachments) != 1 || attachments[0].URL == "" {
+		t.Fatalf("URL-only assets = %#v, %v; want URL reference preserved", attachments, err)
 	}
 }
 

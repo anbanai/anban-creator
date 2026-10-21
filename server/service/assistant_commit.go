@@ -1,9 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -252,16 +255,49 @@ func validateAssistantCommitScope(ctx context.Context, repo repository.Repositor
 }
 
 type assistantCreationPlan struct {
-	Goal               string   `json:"goal"`
-	ContentType        string   `json:"content_type"`
-	TargetAudience     string   `json:"target_audience"`
-	Angle              string   `json:"angle"`
-	Outline            []string `json:"outline"`
-	StyleConstraints   string   `json:"style_constraints"`
-	AssetPlan          string   `json:"asset_plan"`
-	AcceptanceCriteria string   `json:"acceptance_criteria"`
-	CostEstimate       string   `json:"cost_estimate"`
-	ExecutionOptions   []string `json:"execution_options"`
+	Goal               string                   `json:"goal"`
+	ContentType        string                   `json:"content_type"`
+	ExpectedResult     string                   `json:"expected_result,omitempty"`
+	Requirements       []string                 `json:"requirements,omitempty"`
+	Constraints        []string                 `json:"constraints,omitempty"`
+	Assets             []assistantCreationAsset `json:"assets,omitempty"`
+	MissingInputs      []string                 `json:"missing_inputs,omitempty"`
+	AgentDecisions     []string                 `json:"agent_decisions,omitempty"`
+	TargetAudience     string                   `json:"target_audience,omitempty"`
+	Angle              string                   `json:"angle,omitempty"`
+	Outline            []string                 `json:"outline,omitempty"`
+	StyleConstraints   string                   `json:"style_constraints,omitempty"`
+	AssetPlan          string                   `json:"asset_plan,omitempty"`
+	AcceptanceCriteria string                   `json:"acceptance_criteria,omitempty"`
+	CostEstimate       string                   `json:"cost_estimate,omitempty"`
+	ExecutionOptions   []string                 `json:"execution_options,omitempty"`
+}
+
+type assistantCreationAsset struct {
+	Type       string `json:"type,omitempty"`
+	AssetID    string `json:"asset_id,omitempty"`
+	URL        string `json:"url,omitempty"`
+	TaskFileID string `json:"task_file_id,omitempty"`
+	Text       string `json:"text,omitempty"`
+	FileName   string `json:"file_name,omitempty"`
+	MimeType   string `json:"mime_type,omitempty"`
+	FileSize   int64  `json:"file_size,omitempty"`
+}
+
+func (asset *assistantCreationAsset) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return err
+		}
+		asset.Type = "text"
+		asset.Text = text
+		return nil
+	}
+	type creationAsset assistantCreationAsset
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode((*creationAsset)(asset))
 }
 
 func decodeAssistantCreationPlan(payload []byte) (assistantCreationPlan, []byte, error) {
@@ -279,21 +315,23 @@ func decodeAssistantCreationPlan(payload []byte) (assistantCreationPlan, []byte,
 	if err := decoder.Decode(&plan); err != nil {
 		return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
 	}
-	if strings.TrimSpace(plan.Goal) == "" || strings.TrimSpace(plan.ContentType) == "" || strings.TrimSpace(plan.TargetAudience) == "" || strings.TrimSpace(plan.Angle) == "" || len(plan.Outline) == 0 || strings.TrimSpace(plan.StyleConstraints) == "" || strings.TrimSpace(plan.AssetPlan) == "" || strings.TrimSpace(plan.AcceptanceCriteria) == "" || strings.TrimSpace(plan.CostEstimate) == "" || len(plan.ExecutionOptions) == 0 {
+	if strings.TrimSpace(plan.Goal) == "" || strings.TrimSpace(plan.ContentType) == "" {
 		return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
 	}
-	for _, point := range plan.Outline {
-		if strings.TrimSpace(point) == "" {
-			return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
+	for _, list := range [][]string{plan.Requirements, plan.Constraints, plan.MissingInputs, plan.AgentDecisions, plan.Outline, plan.ExecutionOptions} {
+		for _, value := range list {
+			if strings.TrimSpace(value) == "" {
+				return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
+			}
 		}
 	}
-	for _, option := range plan.ExecutionOptions {
-		if strings.TrimSpace(option) == "" {
+	for _, asset := range plan.Assets {
+		if asset.FileSize < 0 {
 			return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
 		}
 	}
 	canonical, err := json.Marshal(plan)
-	if err != nil || len(canonical) > 3800 {
+	if err != nil || len(plan.Assets) > 5 || len(canonical) > 24<<10 {
 		return assistantCreationPlan{}, nil, ErrAssistantCheckpointInvalid
 	}
 	return plan, canonical, nil
@@ -336,11 +374,14 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 	if tasks == nil {
 		return AssistantCommitResult{}, ErrInteractivePersistence
 	}
-	_, planJSON, err := decodeAssistantCreationPlan(checkpoint.Payload)
+	plan, planJSON, err := decodeAssistantCreationPlan(checkpoint.Payload)
 	if err != nil {
 		return AssistantCommitResult{}, err
 	}
-	prompt := "请严格按照以下经用户确认的创作计划完成内容创作。计划是本任务的冻结输入；遇到缺失信息时先按计划约束处理。\n\n" + string(planJSON)
+	if len(plan.MissingInputs) > 0 {
+		return AssistantCommitResult{}, ErrAssistantCreationInputsMissing
+	}
+	prompt := "请根据以下经用户确认的本次创作需求完成内容创作。项目画像和平台信息由 Server 作为独立冻结上下文提供。用户未指定的内容生产细节由你根据能力和上下文决定；不得超出明确的要求、限制或素材范围。\n\n" + string(planJSON)
 	project, err := tasks.ResolveTaskCreationProject(ctx, userID, checkpoint.ProjectID)
 	if err != nil {
 		return AssistantCommitResult{}, err
@@ -353,36 +394,33 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 	} else if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
 		return AssistantCommitResult{}, errors.Join(ErrInteractivePersistence, lookupErr)
 	}
-	var selected agentpack.Manifest
-	for _, agentID := range project.AgentIDs {
-		pack, ok := agentpack.Default().ForAgent(agentID)
-		if ok && pack.SupportsPlan() && model.ProjectAllowsAgent(project, agentID) {
-			selected = pack
-			break
-		}
+	selected, taskType, taskKind, err := assistantCreationIdentity(project, plan.ContentType)
+	if err != nil {
+		return AssistantCommitResult{}, err
 	}
-	if selected.ID == "" {
-		for _, agentID := range model.DefaultProjectAgentIDs(project.Platform) {
-			pack, ok := agentpack.Default().ForAgent(agentID)
-			if ok && pack.SupportsPlan() && model.ProjectAllowsAgent(project, agentID) {
-				selected = pack
-				break
-			}
-		}
-	}
-	if selected.ID == "" {
-		return AssistantCommitResult{}, ErrAssistantModeUnavailable
-	}
-	if len(planJSON)+128 > 5000 || !utf8.Valid(planJSON) {
+	if len(planJSON)+128 > 24<<10 || !utf8.Valid(planJSON) {
 		return AssistantCommitResult{}, ErrAssistantCheckpointInvalid
 	}
 
-	created, err := tasks.CreateManual(ctx, CreateManualParams{
+	params := CreateManualParams{
 		UserID: userID, ProjectID: checkpoint.ProjectID, ExecutionProfile: "effective",
-		AgentID: selected.Agent.Name, Channel: selected.Channel, TaskKind: selected.PlanTaskKind,
-		RequestedTaskType:     taskTypeForIdentity(selected.Agent.Name, selected.Channel, selected.PlanTaskKind),
+		AgentID: selected.Agent.Name, Channel: selected.Channel, TaskKind: taskKind,
+		RequestedTaskType:     taskType,
 		AssistantCheckpointID: checkpoint.ID, AssistantProfileRevision: &checkpoint.BaseProfileRevision, Prompt: prompt, Quantity: 1,
-	})
+	}
+	inputAttachments, err := assistantCreationAttachments(ctx, userID, plan.Assets, repo)
+	if err != nil {
+		return AssistantCommitResult{}, err
+	}
+	params.InputAttachments = inputAttachments
+	if selected.Agent.Name == model.AgentIDMontage {
+		assets := make([]model.MontageAsset, 0, len(plan.Assets))
+		for _, asset := range plan.Assets {
+			assets = append(assets, model.MontageAsset{Type: asset.Type, URL: asset.URL, TaskFileID: asset.TaskFileID, Text: asset.Text, FileName: asset.FileName, MimeType: asset.MimeType, FileSize: asset.FileSize})
+		}
+		params.MontageInput = &model.MontageInput{Brief: prompt, SourceAssets: assets}
+	}
+	created, err := tasks.CreateManual(ctx, params)
 	if err != nil {
 		if existing, lookupErr := repo.Tasks().FindByAssistantCheckpointID(ctx, userID, checkpoint.ID); lookupErr == nil {
 			if existing.ProjectID != checkpoint.ProjectID || existing.Prompt != prompt {
@@ -396,6 +434,79 @@ func commitAssistantCreation(ctx context.Context, userID string, checkpoint *mod
 		return AssistantCommitResult{}, ErrInteractivePersistence
 	}
 	return assistantTaskCommitResult(created[0]), nil
+}
+
+func assistantCreationAttachments(ctx context.Context, userID string, assets []assistantCreationAsset, repo repository.Repository) ([]model.EntryAttachment, error) {
+	attachments := make([]model.EntryAttachment, 0, len(assets))
+	for _, asset := range assets {
+		attachment := model.EntryAttachment{
+			AssetID: strings.TrimSpace(asset.AssetID), Type: strings.TrimSpace(asset.Type), URL: strings.TrimSpace(asset.URL),
+			Text: asset.Text, FileName: strings.TrimSpace(asset.FileName), ContentType: strings.TrimSpace(asset.MimeType),
+			Size: asset.FileSize,
+		}
+		if attachment.AssetID != "" {
+			owned, err := NewReferenceAssetService(repo, nil, nil).RequireOwnedAttachment(ctx, userID, attachment.AssetID, []string{DirectUploadPurposeAIEntryAttachment, DirectUploadPurposeTaskReference})
+			if err != nil {
+				return nil, fmt.Errorf("%w: 素材不可访问，请重新上传或移除该素材", ErrAssistantCreationAssetUnavailable)
+			}
+			attachment.Type = ClassifyDirectUploadFile(owned.ContentType, strings.ToLower(filepath.Ext(strings.TrimSpace(owned.FileName))))
+			attachment.FileName = owned.FileName
+			attachment.ContentType = owned.ContentType
+			attachment.Size = owned.Size
+			attachment.URL = ""
+		}
+		if attachment.AssetID != "" || attachment.URL != "" || attachment.Text != "" {
+			attachments = append(attachments, attachment)
+		}
+	}
+	return attachments, nil
+}
+
+func assistantCreationIdentity(project *model.Project, contentType string) (agentpack.Manifest, string, string, error) {
+	requestedType := strings.ToLower(strings.TrimSpace(contentType))
+	var route *assistantCreationTypeRoute
+	for i := range assistantCreationTypeRoutes {
+		for _, alias := range assistantCreationTypeRoutes[i].aliases {
+			if requestedType == alias {
+				route = &assistantCreationTypeRoutes[i]
+				break
+			}
+		}
+		if route != nil {
+			break
+		}
+	}
+	if route == nil || project == nil || project.Platform != route.projectPlatform || !model.ProjectAllowsAgent(project, route.agentID) {
+		return agentpack.Manifest{}, "", "", ErrAssistantModeUnavailable
+	}
+	pack, ok := agentpack.Default().ForAgent(route.agentID)
+	if !ok {
+		return agentpack.Manifest{}, "", "", ErrAssistantModeUnavailable
+	}
+	taskKind := model.TaskKindContentGeneration
+	if !pack.SupportsTaskKind(taskKind) {
+		if pack.SupportsTaskKind(route.taskType) {
+			taskKind = route.taskType
+		} else {
+			return agentpack.Manifest{}, "", "", ErrAssistantModeUnavailable
+		}
+	}
+	return pack, route.taskType, taskKind, nil
+}
+
+type assistantCreationTypeRoute struct {
+	canonicalType   string
+	aliases         []string
+	agentID         string
+	taskType        string
+	projectPlatform string
+}
+
+var assistantCreationTypeRoutes = []assistantCreationTypeRoute{
+	{canonicalType: "video", aliases: []string{"video", "montage", "视频", "视频生成"}, agentID: model.AgentIDMontage, taskType: model.PlatformMontage, projectPlatform: model.PlatformMontage},
+	{canonicalType: "seednote", aliases: []string{"seednote", "seednote-note", "种草笔记", "小红书种草笔记"}, agentID: model.AgentIDSeednote, taskType: model.PlatformSeednote, projectPlatform: model.PlatformSeednote},
+	{canonicalType: "wechat-article", aliases: []string{"wechat-article", "wechat_article", "公众号文章", "公众号图文文章"}, agentID: model.AgentIDArticle, taskType: model.TaskTypeWechatArticle, projectPlatform: model.PlatformWechat},
+	{canonicalType: "wechat-picture", aliases: []string{"wechat-picture", "wechat_picture", "公众号图片消息"}, agentID: model.AgentIDWechatPicture, taskType: model.TaskTypeWechatPicture, projectPlatform: model.PlatformWechat},
 }
 
 func assistantTaskCommitResult(task *model.Task) AssistantCommitResult {
