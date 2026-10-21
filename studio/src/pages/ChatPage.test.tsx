@@ -1438,7 +1438,59 @@ describe('ChatPage', () => {
     await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledWith('session-1', '发送失败的消息'))
     await waitFor(() => expect(screen.getByText('message failed')).toBeInTheDocument())
     expect(composer).toBeEnabled()
+    expect(composer).toHaveValue('发送失败的消息')
     expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').turnActive).toBe(false)
+  })
+
+  it('explains a busy-session conflict and restores the unsent message', async () => {
+    interactiveMocks.message.mockRejectedValueOnce({
+      message: 'Request failed with status code 409',
+      response: { status: 409, data: { code: 40900, error_code: 'interactive_session_busy', msg: 'a question batch is pending' } },
+    })
+    renderChat()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toBeEnabled())
+    fireEvent.change(composer, { target: { value: '我的补充说明' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText('上一条消息仍在处理中，当前输入没有发送成功，请稍后重试。')).toBeInTheDocument()
+    expect(composer).toHaveValue('我的补充说明')
+    expect(screen.queryByText('会话需要重新开始')).not.toBeInTheDocument()
+  })
+
+  it('describes checkpoint conflicts as session state conflicts, not profile updates', async () => {
+    assistantMocks.message.mockRejectedValueOnce({
+      message: 'Request failed with status code 409',
+      response: { status: 409, data: { code: 40900, error_code: 'assistant_checkpoint_conflict', msg: 'assistant checkpoint changed' } },
+    })
+    renderChat()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toBeEnabled())
+    fireEvent.change(composer, { target: { value: '继续补充画像' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText('会话草稿已在其他位置更新。你的输入已保留，请重新连接并检查最新进度后继续。')).toBeInTheDocument()
+    expect(composer).toHaveValue('继续补充画像')
+    expect(screen.queryByText(/画像已在其他位置更新/)).not.toBeInTheDocument()
+  })
+
+  it('offers recovery when a message is rejected because the session has closed', async () => {
+    assistantMocks.message.mockRejectedValueOnce({
+      message: 'Request failed with status code 410',
+      response: { status: 410, data: { code: 41000, error_code: 'interactive_session_closed', msg: 'interactive session is closed' } },
+    })
+    renderChat()
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toBeEnabled())
+    fireEvent.change(composer, { target: { value: '画像更新说明' } })
+    fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter' })
+
+    expect(await screen.findByText('原会话已失效')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /恢复.*草稿|恢复本地材料/ })).toBeInTheDocument()
+    expect(composer).toHaveValue('画像更新说明')
   })
 
   it('clears a single-select option when the user enters custom text', async () => {
@@ -1584,6 +1636,24 @@ describe('ChatPage', () => {
       confirmation_token: 'secret-token', idempotency_key: expect.any(String),
     })
     await waitFor(() => expect(screen.getByTestId('route-location')).toHaveTextContent(destination))
+  })
+
+  it('preserves a profile draft and offers recovery when confirmation hits a revision conflict', async () => {
+    interactiveMocks.commit.mockRejectedValueOnce({
+      message: 'Request failed with status code 409',
+      response: { status: 409, data: { code: 40900, error_code: 'project_profile_revision_conflict', msg: 'profile revision changed' } },
+    })
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 2, ready: true, confirmation_token: 'stale-token', project: { name: '茶品牌', platform: 'wechat' } } }) },
+    ], signal))
+    renderChat('/chat?agent=project-creator&intent=update-project-profile&project_id=project-9')
+
+    fireEvent.click(await screen.findByRole('button', { name: '确认更新画像' }))
+
+    expect(await screen.findAllByText(/画像版本已在其他位置更新/)).not.toHaveLength(0)
+    expect(await screen.findByRole('button', { name: /恢复.*草稿|恢复本地材料/ })).toBeInTheDocument()
+    expect(screen.getByText('已保存的画像草稿')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '等待重新确认' })).toBeDisabled()
   })
 
   it('keeps a replayed ready draft visible while waiting for its confirmation credential', async () => {

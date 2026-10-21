@@ -34,4 +34,9 @@ func TestProfileAgentsMarkdownReferencesAllSixDimensions(t *testing.T) {
 	if !strings.Contains(content, "preferences.md") || !strings.Contains(content, "硬约束") {
 		t.Fatalf("AGENTS.md is missing preference rule: %s", content)
 	}
+	for _, want := range []string{"只用于候选排序", "不得无限期沿用", "当前任务的明确要求优先"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("AGENTS.md is missing profile preference rule %q: %s", want, content)
+		}
+	}
 }

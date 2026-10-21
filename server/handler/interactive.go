@@ -219,22 +219,30 @@ func interactiveError(c fiber.Ctx, err error) error {
 		return Error(c, 400, err.Error())
 	case errors.Is(err, service.ErrAssistantCreationInputsMissing), errors.Is(err, service.ErrAssistantCreationAssetUnavailable):
 		return Error(c, 400, err.Error())
-	case errors.Is(err, service.ErrAssistantModeUnavailable), errors.Is(err, service.ErrAssistantCheckpointConflict):
-		return Error(c, 409, err.Error())
+	case errors.Is(err, service.ErrAssistantModeUnavailable):
+		return ErrorWithCode(c, 409, "assistant_mode_unavailable", err.Error())
+	case errors.Is(err, service.ErrAssistantCheckpointConflict):
+		return ErrorWithCode(c, 409, "assistant_checkpoint_conflict", err.Error())
 	case errors.Is(err, service.ErrAssistantRuntimeContextTooLarge):
 		return Error(c, 413, err.Error())
 	case errors.Is(err, service.ErrInteractiveSessionNotFound):
 		return Error(c, 404, err.Error())
 	case errors.Is(err, service.ErrInteractiveSessionOwner):
 		return Forbidden(c, err.Error())
-	case errors.Is(err, service.ErrInteractivePending), errors.Is(err, service.ErrInteractiveBusy), errors.Is(err, service.ErrInteractiveToken), errors.Is(err, service.ErrInteractiveIdempotency):
-		return Error(c, 409, err.Error())
+	case errors.Is(err, service.ErrInteractivePending):
+		return ErrorWithCode(c, 409, "interactive_question_pending", err.Error())
+	case errors.Is(err, service.ErrInteractiveBusy):
+		return ErrorWithCode(c, 409, "interactive_session_busy", err.Error())
+	case errors.Is(err, service.ErrInteractiveToken):
+		return ErrorWithCode(c, 409, "interactive_confirmation_stale", err.Error())
+	case errors.Is(err, service.ErrInteractiveIdempotency):
+		return ErrorWithCode(c, 409, "interactive_idempotency_conflict", err.Error())
 	case errors.Is(err, service.ErrInteractiveSessionClosed):
-		return Error(c, 410, err.Error())
+		return ErrorWithCode(c, 410, "interactive_session_closed", err.Error())
 	case errors.Is(err, service.ErrInteractiveEventGap):
-		return Error(c, 409, err.Error())
+		return ErrorWithCode(c, 409, "interactive_event_gap", err.Error())
 	case errors.Is(err, service.ErrProjectProfileVersionConflict), errors.Is(err, service.ErrProjectMemoryConflict):
-		return Error(c, 409, err.Error())
+		return ErrorWithCode(c, 409, "project_profile_revision_conflict", err.Error())
 	case errors.Is(err, service.ErrInteractiveAgent):
 		return Error(c, 503, err.Error())
 	case errors.Is(err, service.ErrInteractivePersistence):

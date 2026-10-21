@@ -3,6 +3,7 @@ package handler
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -43,6 +44,59 @@ func TestInteractiveHandlerMapsAssistantErrors(t *testing.T) {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, test.want)
 			}
 		})
+	}
+}
+
+func TestInteractiveErrorIncludesStableConflictCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "busy", err: service.ErrInteractiveBusy, want: "interactive_session_busy"},
+		{name: "pending question", err: service.ErrInteractivePending, want: "interactive_question_pending"},
+		{name: "mode unavailable", err: service.ErrAssistantModeUnavailable, want: "assistant_mode_unavailable"},
+		{name: "checkpoint conflict", err: service.ErrAssistantCheckpointConflict, want: "assistant_checkpoint_conflict"},
+		{name: "event gap", err: service.ErrInteractiveEventGap, want: "interactive_event_gap"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := fiber.New()
+			app.Post("/", func(c fiber.Ctx) error { return interactiveError(c, test.err) })
+			resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			var body struct {
+				ErrorCode string `json:"error_code"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != fiber.StatusConflict || body.ErrorCode != test.want {
+				t.Fatalf("status/error_code = %d/%q, want %d/%q", resp.StatusCode, body.ErrorCode, fiber.StatusConflict, test.want)
+			}
+		})
+	}
+}
+
+func TestInteractiveClosedErrorIncludesStableCode(t *testing.T) {
+	app := fiber.New()
+	app.Post("/", func(c fiber.Ctx) error { return interactiveError(c, service.ErrInteractiveSessionClosed) })
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusGone || body.ErrorCode != "interactive_session_closed" {
+		t.Fatalf("status/error_code = %d/%q, want %d/%q", resp.StatusCode, body.ErrorCode, fiber.StatusGone, "interactive_session_closed")
 	}
 }
 

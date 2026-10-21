@@ -86,13 +86,15 @@ func ProfileAgentsMarkdown() string {
 | profile/style.md | 语言、结构、视觉和表达风格 |
 | profile/audience.md | 受众、需求和表达深度 |
 | profile/platforms.md | 平台格式和适配规则 |
-| profile/preferences.md | 偏好、禁用项和合规红线，属于硬约束 |
+| profile/preferences.md | 内容偏好、形式偏好，以及明确的禁用项和合规红线 |
 | profile/memory.md | 已验证经验和复盘结论 |
 
 ## 读取规则
 
 - 生成内容前必须读取六个文件。
-- profile/preferences.md 的约束优先级最高。
+- 明确的禁用项和合规红线是硬约束；普通主题或形式偏好只用于候选排序，不得作为排除条件。
+- 一次性或首批内容方向属于有范围的活动偏好，只在其确认的范围内生效；范围结束或需要延长时重新评估，不得无限期沿用。
+- 只有用户明确确认的长期定位才作为持续定位。当前任务的明确要求优先于一般偏好。
 - [待补充] 和 [推断待确认] 不能当作事实。
 - 画像文件不属于 Agent 自动记忆，不要写入 .claude/agent-memory/*/MEMORY.md。
 - 数据不足时保留缺失字段，不得编造结论。
