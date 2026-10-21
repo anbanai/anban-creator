@@ -1267,9 +1267,29 @@ func (s *ContentAssetService) finalizeReuseStageTask(ctx context.Context, task *
 		return err
 	}
 	// Task finalization can be retried after the stage transition committed.
-	// Treat the durable terminal stage as the source of truth and avoid trying
-	// to transition it from running a second time.
+	// Continue the durable workflow from that terminal checkpoint instead of
+	// trying to transition the stage from running a second time.
 	if currentStage.Status != model.ContentStageRunning {
+		if currentStage.Status == model.ContentStageCompleted {
+			if currentStage.Stage == model.ContentReuseStageRender {
+				return s.finalizeRenderedReuseTask(ctx, task)
+			}
+			return s.advancePlanningStage(ctx, task.UserID, currentStage.ID)
+		}
+		if (currentStage.Status == model.ContentStageFailed || currentStage.Status == model.ContentStagePaused) && (task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled) {
+			run, runErr := s.repo.ContentAssets().FindReuseRunByID(ctx, task.ReuseRunID)
+			if runErr != nil {
+				return runErr
+			}
+			if run.Status == model.ContentReuseRunStatusRunning || run.Status == model.ContentReuseRunStatusQueued {
+				run.Status = model.ContentReuseRunStatusFailed
+				run.Stage = currentStage.Stage
+				run.BudgetReserved = 0
+				run.ErrorCode = "stage_" + currentStage.Status
+				run.ErrorMessage = strings.TrimSpace(currentStage.ErrorMessage)
+				return s.repo.ContentAssets().UpdateReuseRun(ctx, run)
+			}
+		}
 		return nil
 	}
 	files, err := s.repo.TaskFiles().FindByExecutionID(ctx, executionID)
@@ -1623,6 +1643,15 @@ func (s *ContentAssetService) advanceProductionStages(ctx context.Context, userI
 // planning-only stages. Planning must never publish or replace this task; it
 // only supplies accepted evidence and a frozen brief for the final Agent.
 func (s *ContentAssetService) admitFinalPlatformReuseTask(ctx context.Context, run *model.ContentReuseRun) error {
+	if existing, findErr := s.repo.Tasks().FindByReuseRun(ctx, run.UserID, run.ID); findErr == nil {
+		run.Stage = model.ContentReuseStageReview
+		if updateErr := s.repo.ContentAssets().UpdateReuseRun(ctx, run); updateErr != nil {
+			return updateErr
+		}
+		return s.FinalizeReuseTask(ctx, existing)
+	} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return findErr
+	}
 	asset, err := s.repo.ContentAssets().FindByID(ctx, run.UserID, run.AssetID)
 	if err != nil {
 		return s.failReuseRun(ctx, run, "asset_not_found", err)
@@ -1638,15 +1667,26 @@ func (s *ContentAssetService) admitFinalPlatformReuseTask(ctx context.Context, r
 	if !ok {
 		return s.failReuseRun(ctx, run, "unsupported_platform", fmt.Errorf("unsupported target platform %q", project.Platform))
 	}
-	run.Stage = model.ContentReuseStageReview
-	if err := s.repo.ContentAssets().UpdateReuseRun(ctx, run); err != nil {
-		return s.failReuseRun(ctx, run, "stage_persistence_failed", err)
+	planningRefs := make([]map[string]any, 0, 12)
+	for _, stageName := range []string{model.ContentReuseStageResearch, model.ContentReuseStageScoring, model.ContentReuseStageProduce} {
+		stage, stageErr := s.repo.ContentAssets().FindReuseStage(ctx, run.ID, stageName)
+		if stageErr != nil {
+			if errors.Is(stageErr, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return stageErr
+		}
+		var refs []map[string]any
+		if len(stage.ArtifactRefs) > 0 && json.Unmarshal(stage.ArtifactRefs, &refs) == nil {
+			planningRefs = append(planningRefs, refs...)
+		}
 	}
 	params := CreateManualParams{
 		UserID: run.UserID, ProjectID: run.TargetProjectID, ExecutionProfile: "effective",
 		AgentID: agentID, Channel: channel, TaskKind: taskKind,
 		Prompt:         fmt.Sprintf("跨平台复用运行。选题资产：%s。核心问题：%s。受众：%s。语义核心：%s。目标平台：%s。请使用已验收的 content-planning 研究、验证和脚本产物，生成该平台独立表达版本；不得越过 Server readiness 或自行发布。复用运行 ID：%s。", asset.Title, asset.CoreQuestion, asset.Audience, asset.SemanticKernel, run.TargetPlatform, run.ID),
 		ContentAssetID: run.AssetID, SourceContentRef: strings.Trim(strings.Join([]string{run.SourceContentKind, run.SourceContentID}, ":"), ":"), ReuseRunID: run.ID,
+		AgentInput: map[string]any{"schema_version": "1.0", "reuse_run_id": run.ID, "accepted_artifacts": planningRefs, "target_requirements": map[string]any{"platform": run.TargetPlatform}},
 	}
 	if project.Platform == model.PlatformMontage {
 		params.MontageInput = &model.MontageInput{Brief: fmt.Sprintf("围绕选题资产“%s”制作平台化视频。核心问题：%s。受众：%s。", asset.Title, asset.CoreQuestion, asset.Audience)}
@@ -1708,6 +1748,10 @@ func (s *ContentAssetService) admitFinalPlatformReuseTask(ctx context.Context, r
 	}
 	for _, task := range tasks {
 		_, _ = s.LinkContent(ctx, LinkContentAssetParams{UserID: run.UserID, AssetID: run.AssetID, ProjectID: run.TargetProjectID, ContentKind: "task", ContentID: task.ID, Platform: run.TargetPlatform, Relation: model.ContentAssetLinkDerivative, Angle: run.TargetPlatform})
+	}
+	run.Stage = model.ContentReuseStageReview
+	if err := s.repo.ContentAssets().UpdateReuseRun(ctx, run); err != nil {
+		return s.failReuseRun(ctx, run, "stage_persistence_failed", err)
 	}
 	return nil
 }
