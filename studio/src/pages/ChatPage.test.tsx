@@ -156,6 +156,34 @@ describe('ChatPage', () => {
     await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
     await waitFor(() => expect(assistantMocks.message).toHaveBeenCalledWith('session-1', '我想建立一个面向职场读者的画像'))
     expect(sessionStorage.getItem('anban:assistant-message-handoff:test-user:profile::')).toBeNull()
+    expect(screen.getByText('AI 助手')).toBeInTheDocument()
+    expect(screen.getByTestId('chat-scroll-region')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeInTheDocument()
+    expect(screen.queryByText('六个维度逐步收集')).not.toBeInTheDocument()
+  })
+
+  it('keeps mode switching in the assistant workspace when the target mode needs more context', async () => {
+    assistantMocks.bootstrap.mockResolvedValueOnce({
+      defaultModeId: 'profile',
+      modes: [
+        { id: 'profile', displayName: '画像模式', description: '建立或更新一个画像', available: true },
+        { id: 'creation', displayName: '创作模式', description: '制定计划并创建作品任务', available: false, disabledReason: '先完成画像初始化' },
+        { id: 'review', displayName: '复盘模式', description: '分析已有作品', available: false, disabledReason: '先完成一件作品' },
+      ],
+      projects: [],
+    })
+    renderPage('/chat?assistant_session=1&mode=profile')
+
+    await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
+    fireEvent.click(await screen.findByRole('button', { name: /画像模式/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /创作模式/ }))
+
+    await waitFor(() => expect(assistantMocks.close).toHaveBeenCalledWith('session-1'))
+    await waitFor(() => expect(screen.getByRole('button', { name: /创作模式/ })).toBeInTheDocument())
+    expect(screen.getByText('AI 助手')).toBeInTheDocument()
+    expect(screen.getByTestId('route-location')).toHaveTextContent('/chat?assistant_session=1&mode=creation')
+    expect(screen.getByTestId('chat-page')).toBeInTheDocument()
+    expect(await screen.findByText('先完成画像初始化')).toBeInTheDocument()
   })
 
   it('sends a one-time portrait idea into the scoped creation session', async () => {
