@@ -497,13 +497,6 @@ function useNavigationWarning(when: boolean, committedRef: MutableRefObject<bool
   }, [committedRef, message, navigator, when])
 }
 
-function dimensionStatus(value?: string) {
-  if (value === 'confirmed') return { label: '已确认', className: 'text-emerald-600 dark:text-emerald-400' }
-  if (value === 'pending_confirmation') return { label: '待确认', className: 'text-amber-600 dark:text-amber-400' }
-  if (value === 'collected') return { label: '已收集', className: 'text-primary' }
-  return { label: '待开始', className: 'text-muted-foreground' }
-}
-
 function assistantCheckpointPayload(draft: InteractiveDraft, mode: AssistantModeID): Record<string, unknown> {
   if (mode !== 'profile') {
     if (draft.payload && isRecord(draft.payload)) return draft.payload
@@ -759,7 +752,7 @@ function ChatConversation() {
   })
   const agents = agentsQuery.data ?? []
   const selectableAgents: InteractiveAgent[] = assistantSession
-    ? (bootstrapQuery.data?.modes ?? []).map((mode) => ({ id: mode.id, display_name: mode.displayName, description: mode.description, available: mode.available }))
+    ? (bootstrapQuery.data?.modes ?? []).map((mode) => ({ id: mode.id, display_name: mode.displayName, description: mode.description, available: true }))
     : agents.filter((agent) => agent.available !== false)
   const activeAgent = selectableAgents.find((agent) => agent.id === selectedAgent)
   const pendingQuestions = questionBatches.filter((batch) => !batch.answers)
@@ -1449,10 +1442,6 @@ function ChatConversation() {
   const selectAgent = async (agent: InteractiveAgent) => {
     if (committing || cancelling || agent.id === selectedAgent) return
     if (assistantSession) {
-      if (!agent.available) {
-        setModeSwitchError(bootstrapQuery.data?.modes.find((mode) => mode.id === agent.id)?.disabledReason ?? '该模式当前不可用。')
-        return
-      }
       setModeSwitchError(null)
       if (sessionId) {
         try {
@@ -1467,9 +1456,9 @@ function ChatConversation() {
       resetConversation(false)
         setModeMenuOpen(false)
       startPromiseRef.current = null
-        const nextParams = new URLSearchParams({ mode: agent.id })
+      const nextParams = new URLSearchParams({ assistant_session: '1', mode: agent.id })
       const mode = agent.id as AssistantModeID
-      const nextProjectId = projectId ?? bootstrapQuery.data?.projects[0]?.id
+      const nextProjectId = projectId ?? bootstrapQuery.data?.projects.find((project) => project.profileReady)?.id
       if (nextProjectId && (mode !== 'profile' || projectId)) nextParams.set('project_id', nextProjectId)
       if (mode === 'review' && nextProjectId) {
         const nextProject = bootstrapQuery.data?.projects.find((project) => project.id === nextProjectId)
@@ -1814,7 +1803,16 @@ function ChatConversation() {
         </div>
       </header>
 
-      {modeSwitchError && <Alert variant="destructive"><AlertTriangle className="size-4" /><AlertDescription>{modeSwitchError}</AlertDescription></Alert>}
+      {(modeSwitchError || (assistantSession && assistantMode?.available === false && !sessionId)) && <Alert variant={modeSwitchError ? 'destructive' : 'default'}><AlertTriangle className="size-4" /><AlertDescription>{modeSwitchError ?? assistantMode?.disabledReason ?? '当前模式还缺少必要的画像或作品上下文。'}</AlertDescription></Alert>}
+
+      {assistantSession && assistantRecoveryCheckpoint && !checkpointId && !sessionId && runState === 'idle' && messages.length === 0 && !draft && <Alert>
+        <RotateCcw className="size-4" />
+        <AlertTitle>发现已保存的草稿</AlertTitle>
+        <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+          <span>{assistantRecoveryCheckpoint.summary}</span>
+          <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />继续草稿</Button>
+        </AlertDescription>
+      </Alert>}
 
       {isProjectUpdate && (
         <Alert className="border-primary/25 bg-primary/[0.035]">
@@ -1839,9 +1837,8 @@ function ChatConversation() {
           </div>
         </section>
       ) : (
-        <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <section className="relative flex min-h-0 flex-col rounded-xl border border-border bg-card">
-            <div ref={scrollRegionRef} data-testid="chat-scroll-region" onScroll={handleScroll} className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6" aria-live="polite">
+        <section className="relative flex min-h-0 flex-1 flex-col">
+            <div ref={scrollRegionRef} data-testid="chat-scroll-region" onScroll={handleScroll} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-2 py-4 sm:px-8 sm:py-6" aria-live="polite">
               {timeline.map((item) => {
                 if (item.kind === 'message') {
                   const { message } = item
@@ -1865,13 +1862,11 @@ function ChatConversation() {
               {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{assistantSession && assistantModeId === 'review' ? '复盘已确认，待数据验证' : assistantSession && assistantModeId === 'creation' ? '创作计划已确认' : isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>{assistantSession && assistantModeId === 'review' ? '这条建议会在后续独立数据分析验证后，才更新六维画像。' : assistantSession && assistantModeId === 'creation' ? '作品任务已创建，可以查看创作进度。' : '正在打开创作项目详情。'}{createdTaskId && <Button className="mt-3" size="sm" onClick={() => navigate(`/tasks/${encodeURIComponent(createdTaskId)}`)}>查看作品任务<ArrowRight className="size-4" /></Button>}</AlertDescription></Alert>}
             </div>
             {newMessageCount > 0 && <Button type="button" variant="secondary" size="sm" className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 shadow-md" onClick={() => scrollToLatest()}><ChevronDown className="size-4" />有 {newMessageCount} 条新消息</Button>}
-            <div className="border-t border-border p-3 sm:p-4">
+            <div className="sticky bottom-0 border-t border-border bg-background/95 px-1 py-3 backdrop-blur sm:px-4 sm:py-4">
               {liveStatus && <div role="status" className="mb-3 flex min-h-9 items-center gap-2 border-b border-border/60 pb-3 text-sm text-muted-foreground">{liveStatusLabel === '等待中' ? <MessageSquare className="size-4 shrink-0 text-muted-foreground" /> : <Loader2 className="size-4 shrink-0 animate-spin text-primary" />}<span className="min-w-0 flex-1 break-words">{liveStatus}</span><span className="shrink-0 text-xs">{liveStatusLabel}</span></div>}
               <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => { const value = event.target.value; if (portraitHandoffIdeaRef.current && !value.includes(portraitHandoffIdeaRef.current) && projectId) { clearPortraitCreationHandoff(projectId); portraitHandoffIdeaRef.current = null }; setComposer(value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : awaitingConfirmation ? '请先确认上面的草稿' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '说说你现在想做什么…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
             </div>
-          </section>
-          <ProgressRail draft={draft} mode={assistantSession ? assistantModeId : 'profile'} />
-        </div>
+        </section>
       )}
       <AlertDialog open={cancelDialogOpen} onOpenChange={(open) => { if (!cancelling) setCancelDialogOpen(open) }}>
         <AlertDialogContent>
@@ -1899,14 +1894,6 @@ export default function ChatPage() {
   if (params.get('assistant_session') !== '1') return <AssistantHome />
   const scope = assistantSessionStorageKey(user?.id ?? 'signed-out', params.get('mode') ?? 'profile', params.get('project_id') || undefined, params.get('content_id') || undefined)
   return <ChatConversation key={`${scope}:${params.get('checkpoint_id') ?? ''}`} />
-}
-
-function ProgressRail({ draft, mode = 'profile' }: { draft: InteractiveDraft | null; mode?: AssistantModeID }) {
-  if (mode !== 'profile') {
-    const label = mode === 'creation' ? '创作计划' : '复盘结论'
-    return <aside className="order-first rounded-lg border border-border bg-card p-4 lg:order-last"><p className="text-sm font-semibold">{label}</p><p className="mt-1 text-xs text-muted-foreground">{draft?.ready ? '等待确认' : '随对话持续整理'}</p><div className="mt-4"><AssistantDraftSummary draft={draft} mode={mode} compact /></div>{mode === 'review' && <p className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">确认后进入独立数据验证，不会立即修改画像。</p>}</aside>
-  }
-  return <aside className="order-first overflow-x-auto rounded-lg border border-border bg-card p-4 lg:order-last lg:overflow-visible"><div className="flex min-w-max gap-5 lg:min-w-0 lg:flex-col lg:gap-4"><div className="min-w-48 lg:min-w-0"><p className="text-sm font-semibold">创作画像</p><p className="mt-1 text-xs text-muted-foreground">六个维度逐步收集</p></div>{DIMENSIONS.map(([key, label]) => { const status = dimensionStatus(draft?.progress?.[key]); return <div key={key} className="min-w-28 border-l border-border pl-3 lg:min-w-0 lg:border-l-0 lg:border-t lg:pl-0 lg:pt-3"><div className="flex items-center justify-between gap-2"><span className="text-sm">{label}</span><span className={`text-xs ${status.className}`}>{status.label}</span></div><div className="mt-2 h-1 overflow-hidden rounded-full bg-muted"><div className={`h-full transition-all ${status.label === '待开始' ? 'w-0' : status.label === '已确认' ? 'w-full bg-emerald-500' : 'w-2/3 bg-primary'}`} /></div></div> })}</div></aside>
 }
 
 function ConfirmCard({ draft, mode = 'profile', isProjectUpdate, needsReconfirmation = false, canCommit, committing, error, onCommit, onContinue }: { draft: InteractiveDraft; mode?: AssistantModeID; isProjectUpdate: boolean; needsReconfirmation?: boolean; canCommit: boolean; committing: boolean; error: string | null; onCommit: () => void; onContinue: () => void }) {
