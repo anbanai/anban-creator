@@ -167,6 +167,7 @@ type InteractiveSession struct {
 	committing                  bool
 	runtimeStarted              bool
 	initialPromptSent           bool
+	queuedPrompt                string
 	runtimeExitPending          bool
 	runtimeExitData             any
 	runtime                     Runtime
@@ -1010,21 +1011,22 @@ func (s *InteractiveService) startRuntime(ctx context.Context, sess *Interactive
 	pendingExitData := sess.runtimeExitData
 	sess.runtimeExitPending = false
 	sess.runtimeExitData = nil
-	sess.mu.Unlock()
-	s.logRuntimeFields("info", sess.ID, "interactive runtime initialized", nil, identityFields)
-	sess.mu.Lock()
-	openingAlreadySent := sess.initialPromptSent
-	sess.mu.Unlock()
-	if opening := interactiveOpeningPrompt(sess.Intent); opening != "" && !openingAlreadySent {
-		sess.mu.Lock()
-		if !sess.Closed {
+	opening := sess.queuedPrompt
+	sess.queuedPrompt = ""
+	openingCommandSeq := sess.activeCommand
+	if opening == "" && !sess.initialPromptSent {
+		opening = interactiveOpeningPrompt(sess.Intent)
+		if opening != "" && !sess.Closed {
 			sess.busy = true
 			sess.commandSequence++
 			sess.activeCommand = sess.commandSequence
 			sess.activeCommandAt = time.Now()
+			openingCommandSeq = sess.activeCommand
 		}
-		openingCommandSeq := sess.activeCommand
-		sess.mu.Unlock()
+	}
+	sess.mu.Unlock()
+	s.logRuntimeFields("info", sess.ID, "interactive runtime initialized", nil, identityFields)
+	if opening != "" {
 		if e = rt.Command(ctx, "session/prompt", map[string]any{
 			"sessionId":     sess.ID,
 			"contentBlocks": []map[string]string{{"type": "text", "text": opening}},
@@ -1920,15 +1922,14 @@ func (s *InteractiveService) Message(ctx context.Context, uid, id, text string) 
 	sess.activeCommand = commandSeq
 	sess.activeCommandAt = time.Now()
 	rt := sess.runtime
-	sess.mu.Unlock()
-	if rt == nil {
-		sess.mu.Lock()
-		sess.busy = false
-		sess.activeCommand = 0
-		sess.activeCommandAt = time.Time{}
+	runtimeStarted := sess.runtimeStarted
+	if rt == nil || !runtimeStarted {
+		sess.queuedPrompt = text
 		sess.mu.Unlock()
-		return ErrInteractiveSessionClosed
+		s.emit(sess, "user.message", map[string]string{"text": text})
+		return nil
 	}
+	sess.mu.Unlock()
 	s.emit(sess, "user.message", map[string]string{"text": text})
 	e = rt.Command(ctx, "session/prompt", map[string]any{
 		"sessionId":     sess.ID,

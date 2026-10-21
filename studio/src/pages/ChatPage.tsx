@@ -521,7 +521,13 @@ function ChatConversation() {
   const [selectedAgent, setSelectedAgent] = useState(assistantModeId ?? (requestedAgent || (location.pathname === '/projects/create' ? 'project-creator' : '')))
   const sessionStorageKey = assistantSessionStorageKey(user?.id ?? 'signed-out', assistantModeId ?? selectedAgent, projectId, contentId)
   const [persistedSessionKey] = useState(sessionStorageKey)
-  const [persistedSession] = useState(() => readPersistedInteractiveSession(sessionStorageKey))
+  const [persistedSession] = useState(() => {
+    if (checkpointId) {
+      clearPersistedInteractiveSession(sessionStorageKey)
+      return null
+    }
+    return readPersistedInteractiveSession(sessionStorageKey)
+  })
   const [sessionId, setSessionId] = useState<string | null>(persistedSession?.terminalState ? null : persistedSession?.sessionId ?? null)
   const [runState, setRunState] = useState<RunState>(persistedSession?.terminalState ?? 'idle')
   const [lastEventId, setLastEventId] = useState(persistedSession?.lastEventId)
@@ -557,7 +563,7 @@ function ChatConversation() {
   const idempotencyKeyRef = useRef(crypto.randomUUID())
   const createIdempotencyKeyRef = useRef(persistedSession?.createIdempotencyKey ?? crypto.randomUUID())
   const sessionRef = useRef<string | null>(persistedSession?.terminalState ? null : persistedSession?.sessionId ?? null)
-  const startPromiseRef = useRef<{ key: string; promise: Promise<void> } | null>(null)
+  const startPromiseRef = useRef<{ key: string; promise: Promise<string | null> } | null>(null)
   const abandonedStartKeysRef = useRef(new Set<string>())
   const runGenerationRef = useRef(0)
   const streamAbortRef = useRef<AbortController | null>(null)
@@ -750,13 +756,13 @@ function ChatConversation() {
     : api.interactive.answer(id, callId, answers), [assistantSession])
 
   useEffect(() => {
-    if (!assistantSession || assistantModeId !== 'creation' || !projectId || !sessionId || composer.trim()) return
+    if (!assistantSession || assistantModeId !== 'creation' || !projectId || composer.trim()) return
     if (portraitHandoffIdeaRef.current) return
     const idea = readPortraitCreationHandoff(projectId)
     if (!idea) return
     portraitHandoffIdeaRef.current = idea
     setComposer(`这是我刚完成画像初始化后的一次性创作意向。请基于项目画像先与我核对并制定创作计划，不要直接创建作品任务。\n\n本次创作意向：${idea}`)
-  }, [assistantModeId, assistantSession, composer, projectId, sessionId])
+  }, [assistantModeId, assistantSession, composer, projectId])
 
   const persistAssistantCheckpoint = useCallback((id: string, status: 'draft' | 'ready' = 'draft', currentDraft = draftRef.current) => {
     if (!assistantSession || !assistantModeId) return Promise.resolve(null)
@@ -1147,6 +1153,7 @@ function ChatConversation() {
           setDraft(next)
         }
         if (event.event === 'draft.ready') {
+          setTurnActive(false)
           setDraftReadyEventId(event.id)
           draftReadyEventIdRef.current = event.id
           updateTimelineNow((items) => upsertTimeline(items, { kind: 'draft', id: 'draft', eventId }, (item) => item.kind === 'draft'))
@@ -1295,7 +1302,7 @@ function ChatConversation() {
     setRestartNonce((value) => value + 1)
   }, [assistantRecoveryCheckpoint, assistantSession, location.pathname, location.search, navigate, resetConversation, sessionStorageKey])
 
-  const startSession = useCallback((agent: InteractiveAgent) => {
+  const startSession = useCallback((agent: InteractiveAgent): Promise<string | null> => {
     const key = `${agent.id}:${intent}:${projectId ?? ''}:${restartNonce}`
     if (startPromiseRef.current?.key === key) return startPromiseRef.current.promise
     const createRequestKey = createIdempotencyKeyRef.current
@@ -1319,18 +1326,19 @@ function ChatConversation() {
         } else {
           persistInteractiveSession(sessionStorageKey, { sessionId: session.id })
         }
-        return
+        return null
       }
       sessionRef.current = session.id
       persistInteractiveSession(sessionStorageKey, { sessionId: session.id })
       setSessionProject({ id: session.project_id ?? projectId, name: session.project_name })
       setSessionId(session.id)
       setRunState((session.status as RunState) || 'running')
-      await connectStream(session.id, generation)
+      return session.id
     }).catch((error) => {
-      if (disposedRef.current || generation !== runGenerationRef.current) return
+      if (disposedRef.current || generation !== runGenerationRef.current) return null
       setStreamError(error instanceof Error ? error.message : `无法启动创作${isProjectUpdate ? '更新' : '创建'}会话`)
       setRunState('error')
+      return null
     })
     startPromiseRef.current = { key, promise }
     return promise
@@ -1349,10 +1357,11 @@ function ChatConversation() {
   }, [connectStream, persistedSession, persistedSessionKey, sessionStorageKey, token])
 
   useEffect(() => {
-    const loading = assistantSession ? bootstrapQuery.isLoading : agentsQuery.isLoading
-    if (committedRef.current || !selectedAgent || loading || !activeAgent || sessionId || recoveryAvailable || ['starting', 'error', 'expired', 'closed'].includes(runState)) return
-    void startSession(activeAgent)
-  }, [activeAgent, agentsQuery.isLoading, assistantSession, bootstrapQuery.isLoading, recoveryAvailable, runState, selectedAgent, sessionId, startSession])
+    if (!assistantSession || !checkpointId || !activeAgent || sessionId || recoveryAvailable || ['starting', 'error', 'expired', 'closed'].includes(runState)) return
+    void startSession(activeAgent).then((id) => {
+      if (id) void connectStream(id, runGenerationRef.current)
+    })
+  }, [activeAgent, assistantSession, checkpointId, connectStream, recoveryAvailable, runState, sessionId, startSession])
 
   useEffect(() => {
     if (!checkpointRecoveryPending || !checkpointId) return
@@ -1459,28 +1468,42 @@ function ChatConversation() {
 
   const sendMessage = async (messageOverride?: string) => {
     const text = (messageOverride ?? composer).trim()
-    if (!text || !sessionId || pendingQuestions.length > 0 || runState === 'starting' || committing || turnActive || sendingMessageRef.current) return
+    if (!text || pendingQuestions.length > 0 || draftRef.current?.ready || runState === 'starting' || committing || turnActive || sendingMessageRef.current) return
     sendingMessageRef.current = true
     setSendingMessage(true)
-    setComposer('')
-    hasInputRef.current = true
-    const pendingSubmission: PendingSubmission = {
-      kind: 'message',
-      sessionId,
-      message: { id: crypto.randomUUID(), role: 'user', text },
-      status: 'pending',
-    }
-    pendingSubmissionRef.current = pendingSubmission
-    recoveryDraftRef.current = null
-    confirmationTokenRef.current = null
-    setDraft((value) => value ? { ...value, ready: false } : value)
-    setCommitError(null)
-    setTurnActive(true)
-    const persisted = readPersistedInteractiveSession(sessionStorageKey)
-    persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: persisted?.lastEventId, turnActive: true })
+    let activeSessionId = sessionRef.current
+    let pendingSubmission: PendingSubmission | null = null
     try {
-      await sendAssistantMessage(sessionId, text)
-      if (sessionRef.current !== sessionId) return
+      if (!activeSessionId) {
+        const agentForStart = activeAgent ?? (selectedAgent ? {
+          id: selectedAgent,
+          display_name: selectedAgent,
+          description: '',
+          available: true,
+        } : undefined)
+        if (!agentForStart || recoveryAvailable || runState !== 'idle') return
+        activeSessionId = await startSession(agentForStart)
+        if (!activeSessionId) return
+      }
+      setComposer('')
+      hasInputRef.current = true
+      pendingSubmission = {
+        kind: 'message',
+        sessionId: activeSessionId,
+        message: { id: crypto.randomUUID(), role: 'user', text },
+        status: 'pending',
+      }
+      pendingSubmissionRef.current = pendingSubmission
+      recoveryDraftRef.current = null
+      confirmationTokenRef.current = null
+      setDraft((value) => value ? { ...value, ready: false } : value)
+      setCommitError(null)
+      setTurnActive(true)
+      const persisted = readPersistedInteractiveSession(sessionStorageKey)
+      persistInteractiveSession(sessionStorageKey, { sessionId: activeSessionId, lastEventId: persisted?.lastEventId, turnActive: true })
+      await sendAssistantMessage(activeSessionId, text)
+      void connectStream(activeSessionId, runGenerationRef.current)
+      if (sessionRef.current !== activeSessionId) return
       if (portraitHandoffIdeaRef.current && projectId && text.includes(portraitHandoffIdeaRef.current)) {
         clearPortraitCreationHandoff(projectId)
         portraitHandoffIdeaRef.current = null
@@ -1488,18 +1511,19 @@ function ChatConversation() {
       if (assistantSession) {
         clearAssistantMessageHandoff(assistantMessageHandoffKey(user?.id ?? 'signed-out', assistantModeId ?? 'profile', projectId, contentId))
       }
-      if (pendingSubmissionRef.current === pendingSubmission) pendingSubmission.status = 'accepted'
+      if (pendingSubmissionRef.current === pendingSubmission && pendingSubmission) pendingSubmission.status = 'accepted'
     } catch (error) {
-      if (sessionRef.current !== sessionId) return
-      if (assistantSession && initialAssistantMessageSentRef.current) initialAssistantMessageSentRef.current = false
-      if (pendingSubmissionRef.current === pendingSubmission && pendingSubmission.status === 'pending') pendingSubmission.status = 'failed'
+      if (!activeSessionId || sessionRef.current !== activeSessionId) return
+      if (pendingSubmissionRef.current === pendingSubmission && pendingSubmission?.status === 'pending') pendingSubmission.status = 'failed'
       setTurnActive(false)
       const failed = readPersistedInteractiveSession(sessionStorageKey)
-      persistInteractiveSession(sessionStorageKey, { sessionId, lastEventId: failed?.lastEventId, turnActive: false })
+      persistInteractiveSession(sessionStorageKey, { sessionId: activeSessionId, lastEventId: failed?.lastEventId, turnActive: false })
+      setComposer(text)
+      setRunState('running')
       setStreamError(error instanceof Error ? error.message : '消息发送失败')
     } finally {
-      if (pendingSubmissionRef.current === pendingSubmission) {
-        if (pendingSubmission.status === 'failed') pendingSubmissionRef.current = null
+      if (!pendingSubmission || pendingSubmissionRef.current === pendingSubmission) {
+        if (pendingSubmission?.status === 'failed') pendingSubmissionRef.current = null
         sendingMessageRef.current = false
         setSendingMessage(false)
       }
@@ -1507,14 +1531,14 @@ function ChatConversation() {
   }
 
   useEffect(() => {
-    if (!assistantSession || !sessionId || initialAssistantMessageSentRef.current || pendingQuestions.length > 0) return
+    if (!assistantSession || initialAssistantMessageSentRef.current || pendingQuestions.length > 0 || composer.trim()) return
     const key = assistantMessageHandoffKey(user?.id ?? 'signed-out', assistantModeId ?? 'profile', projectId, contentId)
     const initialMessage = readAssistantMessageHandoff(key)
     if (!initialMessage) return
     initialAssistantMessageSentRef.current = true
     setComposer(initialMessage)
-    void sendMessage(initialMessage)
-  }, [assistantModeId, assistantSession, contentId, pendingQuestions.length, projectId, sessionId, user?.id])
+    if (params.get('handoff') === '1') void sendMessage(initialMessage)
+  }, [assistantModeId, assistantSession, composer, contentId, params, pendingQuestions.length, projectId, sendMessage, user?.id])
 
   const submitAnswers = async (batch: QuestionBatch, answer: DshQuestionAnswer) => {
     if (batch.answers) return
@@ -1659,16 +1683,26 @@ function ChatConversation() {
     setCancelling(false)
   }
 
-  const canCompose = Boolean(sessionId) && pendingQuestions.length === 0 && runState !== 'starting' && runState !== 'error' && !committing && !committed && !sendingMessage && !turnActive
+  const awaitingConfirmation = Boolean(draft?.ready && !committed)
+  const canCompose = Boolean(selectedAgent && !recoveryAvailable)
+    && pendingQuestions.length === 0
+    && !awaitingConfirmation
+    && (sessionId ? runState !== 'starting' && runState !== 'error' : runState === 'idle')
+    && !committing
+    && !committed
+    && !sendingMessage
+    && !turnActive
   const currentActivity = [...timeline].reverse().find((item): item is Extract<TimelineItem, { kind: 'activity' }> => item.kind === 'activity' && (item.status === 'started' || item.status === 'running'))
-  const liveStatus = runState === 'starting'
+  const liveStatus = awaitingConfirmation
+    ? '请先确认上面的草稿'
+    : runState === 'starting'
     ? messages.length === 0 ? '正在准备对话…' : '正在恢复会话…'
     : runState === 'waiting_answer'
       ? 'Agent 正在等待你的回答'
       : turnActive
         ? currentActivity?.text ?? 'Agent 正在工作…'
         : null
-  const liveStatusLabel = runState === 'starting' ? '准备中' : runState === 'waiting_answer' ? '等待中' : '进行中'
+  const liveStatusLabel = awaitingConfirmation ? '等待确认' : runState === 'starting' ? '准备中' : runState === 'waiting_answer' ? '等待中' : '进行中'
   const emptyRegistry = assistantSession
     ? !bootstrapQuery.isLoading && (bootstrapQuery.isError || selectableAgents.length === 0)
     : !agentsQuery.isLoading && (agentsQuery.isError || selectableAgents.length === 0)
@@ -1689,7 +1723,7 @@ function ChatConversation() {
         </div>
         <div className="relative flex items-center gap-2">
           <Badge variant={runState === 'error' || runState === 'expired' ? 'destructive' : runState === 'closed' ? 'secondary' : 'outline'}>
-            {runState === 'starting' ? '正在启动' : runState === 'waiting_answer' ? '等待回答' : runState === 'running' ? '进行中' : runState === 'error' ? '连接异常' : runState === 'expired' ? '已过期' : runState === 'closed' ? '已取消' : '准备就绪'}
+            {awaitingConfirmation ? '等待确认' : runState === 'starting' ? '正在启动' : runState === 'waiting_answer' ? '等待回答' : runState === 'running' ? '进行中' : runState === 'error' ? '连接异常' : runState === 'expired' ? '已过期' : runState === 'closed' ? '已取消' : '准备就绪'}
           </Badge>
           <Button
             variant="ghost"
@@ -1781,7 +1815,7 @@ function ChatConversation() {
             {newMessageCount > 0 && <Button type="button" variant="secondary" size="sm" className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 shadow-md" onClick={() => scrollToLatest()}><ChevronDown className="size-4" />有 {newMessageCount} 条新消息</Button>}
             <div className="border-t border-border p-3 sm:p-4">
               {liveStatus && <div role="status" className="mb-3 flex min-h-9 items-center gap-2 border-b border-border/60 pb-3 text-sm text-muted-foreground">{liveStatusLabel === '等待中' ? <MessageSquare className="size-4 shrink-0 text-muted-foreground" /> : <Loader2 className="size-4 shrink-0 animate-spin text-primary" />}<span className="min-w-0 flex-1 break-words">{liveStatus}</span><span className="shrink-0 text-xs">{liveStatusLabel}</span></div>}
-              <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => { const value = event.target.value; if (portraitHandoffIdeaRef.current && !value.includes(portraitHandoffIdeaRef.current) && projectId) { clearPortraitCreationHandoff(projectId); portraitHandoffIdeaRef.current = null }; setComposer(value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '补充你的创作项目想法…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
+              <div className="flex items-end gap-2 rounded-xl border border-input bg-background p-2 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"><Textarea value={composer} onChange={(event) => { const value = event.target.value; if (portraitHandoffIdeaRef.current && !value.includes(portraitHandoffIdeaRef.current) && projectId) { clearPortraitCreationHandoff(projectId); portraitHandoffIdeaRef.current = null }; setComposer(value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!canCompose} placeholder={pendingQuestions.length > 0 ? '请先完成上面的回答' : awaitingConfirmation ? '请先确认上面的草稿' : runState === 'error' && sessionId ? '连接已中断，请先重新连接' : canCompose ? '说说你现在想做什么…' : '正在准备会话…'} aria-label="发送消息" className="min-h-10 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0" /><Button size="icon-md" onClick={() => void sendMessage()} disabled={!canCompose || !composer.trim()} aria-label="发送消息" title="发送消息"><Send className="size-4" /></Button></div>
             </div>
           </section>
           <ProgressRail draft={draft} mode={assistantSession ? assistantModeId : 'profile'} />

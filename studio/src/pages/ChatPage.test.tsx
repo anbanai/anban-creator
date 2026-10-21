@@ -76,12 +76,31 @@ function renderPage(path: string) {
   )
 }
 
-function renderChat(path = '/projects/create') {
+function renderChat(path = '/projects/create', options: { initialMessage?: string | false } = {}) {
   const [pathname, search = ''] = path.split('?')
   const params = new URLSearchParams(search)
   params.set('assistant_session', '1')
   params.set('mode', params.get('mode') ?? 'profile')
-  return renderPage(`${pathname}?${params.toString()}`)
+  const view = renderPage(`${pathname}?${params.toString()}`)
+  const mode = params.get('mode') ?? 'profile'
+  const project = params.get('project_id') ?? 'new'
+  const content = params.get('content_id') ?? 'none'
+  const sessionKey = `anban:assistant-session:${authState.userId}:${mode}:${project}:${content}`
+  let hasResumableSession = false
+  try {
+    hasResumableSession = Boolean(JSON.parse(sessionStorage.getItem(sessionKey) ?? '{}').sessionId)
+  } catch {
+    hasResumableSession = false
+  }
+  if (options.initialMessage !== false && !hasResumableSession) {
+    const initialMessage = options.initialMessage ?? '测试首条消息'
+    void screen.findByRole('textbox', { name: '发送消息' }).then(async (composer) => {
+      await waitFor(() => expect(composer).toBeEnabled())
+      fireEvent.change(composer, { target: { value: initialMessage } })
+      fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    }).catch(() => undefined)
+  }
+  return view
 }
 
 function RouteLocation() {
@@ -153,6 +172,9 @@ describe('ChatPage', () => {
     saveAssistantMessageHandoff(assistantMessageHandoffKey('test-user', 'profile'), '我想建立一个面向职场读者的画像')
     renderPage('/chat?assistant_session=1&mode=profile')
 
+    expect(await screen.findByRole('textbox', { name: '发送消息' })).toHaveValue('我想建立一个面向职场读者的画像')
+    expect(assistantMocks.createSession).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
     await waitFor(() => expect(assistantMocks.message).toHaveBeenCalledWith('session-1', '我想建立一个面向职场读者的画像'))
     expect(sessionStorage.getItem('anban:assistant-message-handoff:test-user:profile::')).toBeNull()
@@ -170,7 +192,7 @@ describe('ChatPage', () => {
     })
     sessionStorage.setItem('anban:portrait-creation-handoff:project-1', JSON.stringify({ idea: '写周末插花指南' }))
 
-    renderChat('/chat?mode=creation&project_id=project-1')
+    renderChat('/chat?mode=creation&project_id=project-1', { initialMessage: false })
 
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     await waitFor(() => expect((composer as HTMLTextAreaElement).value).toContain('写周末插花指南'))
@@ -208,15 +230,49 @@ describe('ChatPage', () => {
     vi.useRealTimers()
   })
 
-  it('defaults the project creation route to 画像模式 and starts a session', async () => {
-    renderChat('/projects/create')
+  it('keeps the first message available before starting a runtime session', async () => {
+    renderChat('/projects/create', { initialMessage: false })
 
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    expect(composer).toBeEnabled()
+    expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+    fireEvent.change(composer, { target: { value: '我想先建立一个面向职场读者的画像' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'create-project', undefined, expect.any(String)))
+    await waitFor(() => expect(interactiveMocks.message).toHaveBeenCalledWith('session-1', '我想先建立一个面向职场读者的画像'))
     expect(screen.getByRole('button', { name: /画像模式/ })).toBeInTheDocument()
   })
 
+  it('locks the composer while a ready profile draft waits for confirmation', async () => {
+    streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
+      {
+        id: '1',
+        event: 'draft.ready',
+        data: JSON.stringify({
+          draft: {
+            ready: true,
+            confirmation_token: 'profile-confirmation',
+            project: { name: '职场画像', platform: 'wechat', instructions: '面向职场读者' },
+            profile: { dimensions: { identity: { content: { topic: '职场成长' } } } },
+          },
+          ready: true,
+        }),
+      },
+    ], signal))
+    renderChat('/projects/create', { initialMessage: false })
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '我想建立一个面向职场读者的画像' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(assistantMocks.message).toHaveBeenCalled())
+    await screen.findByRole('button', { name: '确认创建创作项目' })
+    expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+  })
+
   it('keeps the chat page inside the available app height', async () => {
-    renderChat('/projects/create')
+    renderChat('/projects/create', { initialMessage: false })
 
     await screen.findByRole('textbox', { name: '发送消息' })
     const page = screen.getByTestId('chat-page')
@@ -314,7 +370,7 @@ describe('ChatPage', () => {
     const saved = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')
     expect(saved.sessionId).toBeUndefined()
     expect(saved.terminalState).toBe('closed')
-    expect(saved.messages).toEqual([expect.objectContaining({ text: '已整理的项目方向' })])
+    expect(saved.messages).toEqual(expect.arrayContaining([expect.objectContaining({ text: '已整理的项目方向' })]))
   })
 
   it('keeps an Assistant session open when its cancellation checkpoint cannot be saved', async () => {
@@ -499,7 +555,7 @@ describe('ChatPage', () => {
     interactiveMocks.message.mockImplementationOnce(() => new Promise((resolve) => {
       resolveMessage = (value) => { messageResolved = true; resolve(value) }
     }))
-    renderChat('/projects/create')
+    renderChat('/projects/create', { initialMessage: false })
 
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     await waitFor(() => expect(composer).toBeEnabled())
@@ -566,7 +622,10 @@ describe('ChatPage', () => {
   it('uses the Assistant mode route without exposing an Agent id', async () => {
     renderPage('/chat')
 
-    fireEvent.change(await screen.findByRole('textbox', { name: '发送消息' }), { target: { value: '建立我的画像' } })
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(composer).toBeEnabled())
+    fireEvent.change(composer, { target: { value: '建立我的画像' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile' }, expect.any(String)))
@@ -584,6 +643,15 @@ describe('ChatPage', () => {
       expect.objectContaining({ lastEventId: '4' }),
     ))
     expect(interactiveMocks.createSession).not.toHaveBeenCalled()
+  })
+
+  it('starts a checkpoint session instead of reconnecting the scoped browser session', async () => {
+    sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'stale-session', lastEventId: '9' }))
+    renderChat('/chat?mode=profile&checkpoint_id=profile-checkpoint', { initialMessage: false })
+
+    await waitFor(() => expect(assistantMocks.createSession).toHaveBeenCalledWith({ mode_id: 'profile', checkpoint_id: 'profile-checkpoint' }, expect.any(String)))
+    expect(streamMock).toHaveBeenCalledWith('session-1', 'test-token', expect.any(AbortSignal), expect.any(Object))
+    expect(streamMock).not.toHaveBeenCalledWith('stale-session', expect.anything(), expect.anything(), expect.anything())
   })
 
   it('recovers a lost runtime from the server checkpoint without replaying browser messages', async () => {
@@ -629,8 +697,16 @@ describe('ChatPage', () => {
     ], signal))
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderWithoutProviders(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/chat?assistant_session=1&mode=review&project_id=project-1&content_id=work-a']}><WorkSwitcher /></MemoryRouter></QueryClientProvider>)
+    const firstComposer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(firstComposer).toBeEnabled())
+    fireEvent.change(firstComposer, { target: { value: '讨论作品 A' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByText('作品 A 的私有讨论')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '打开作品 B' }))
+    const secondComposer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(secondComposer).toBeEnabled())
+    fireEvent.change(secondComposer, { target: { value: '讨论作品 B' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByText('作品 B 的新讨论')).toBeInTheDocument()
     expect(screen.queryByText('作品 A 的私有讨论')).not.toBeInTheDocument()
     expect(assistantMocks.createSession).toHaveBeenLastCalledWith({ mode_id: 'review', project_id: 'project-1', content_id: 'work-b' }, expect.any(String))
@@ -644,9 +720,17 @@ describe('ChatPage', () => {
     ], signal))
     const tree = () => <QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/chat?assistant_session=1&mode=profile']}><ChatPage /></MemoryRouter></QueryClientProvider>
     const view = renderWithoutProviders(tree())
+    const firstComposer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(firstComposer).toBeEnabled())
+    fireEvent.change(firstComposer, { target: { value: '建立第一位用户的画像' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByText('第一位用户的私有讨论')).toBeInTheDocument()
     authState.userId = 'second-user'
     view.rerender(tree())
+    const secondComposer = await screen.findByRole('textbox', { name: '发送消息' })
+    await waitFor(() => expect(secondComposer).toBeEnabled())
+    fireEvent.change(secondComposer, { target: { value: '建立第二位用户的画像' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByText('第二位用户的新讨论')).toBeInTheDocument()
     expect(screen.queryByText('第一位用户的私有讨论')).not.toBeInTheDocument()
     expect(sessionStorage.getItem('anban:assistant-session:second-user:profile:new:none')).toContain('second-user-session')
@@ -1343,8 +1427,11 @@ describe('ChatPage', () => {
 
   it('starts an existing project update session with its project context', async () => {
     interactiveMocks.createSession.mockResolvedValueOnce({ id: 'session-1', agent_id: agent.id, intent: 'update-project-profile', project_id: 'project-9', project_name: '茶品牌', status: 'running' })
-    renderChat('/chat?agent=project-creator&intent=update-project-profile&project_id=project-9')
+    renderChat('/chat?mode=profile&project_id=project-9', { initialMessage: false })
 
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    fireEvent.change(composer, { target: { value: '更新这个项目的画像' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'update-project-profile', 'project-9', expect.any(String)))
     expect(await screen.findByText('更新现有项目画像')).toBeInTheDocument()
     expect(screen.getByText(/茶品牌/)).toBeInTheDocument()
@@ -1353,7 +1440,7 @@ describe('ChatPage', () => {
   it('allows only one user message request while the previous message is in flight', async () => {
     let resolveMessage: (() => void) | undefined
     interactiveMocks.message.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveMessage = () => resolve() }))
-    renderChat()
+    renderChat(undefined, { initialMessage: false })
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     await waitFor(() => expect(composer).toBeEnabled())
 
@@ -1377,7 +1464,7 @@ describe('ChatPage', () => {
       yield { event: 'turn.start', data: JSON.stringify({ turn: 1 }) }
       await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
     })())
-    renderChat()
+    renderChat(undefined, { initialMessage: false })
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     await waitFor(() => expect(composer).toBeEnabled())
 
@@ -1396,7 +1483,7 @@ describe('ChatPage', () => {
       yield event
       await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
     })())
-    renderChat()
+    renderChat(undefined, { initialMessage: false })
 
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     await waitFor(() => expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}').turnActive).toBe(false))
@@ -1428,7 +1515,7 @@ describe('ChatPage', () => {
 
   it('clears the persisted turn lock when a message enqueue fails', async () => {
     interactiveMocks.message.mockRejectedValueOnce(new Error('message failed'))
-    renderChat()
+    renderChat(undefined, { initialMessage: false })
 
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
     await waitFor(() => expect(composer).toBeEnabled())
@@ -1600,7 +1687,7 @@ describe('ChatPage', () => {
   it('prevents unload while the session is active and preserves it after unmount', async () => {
     const { unmount } = renderChat()
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.getByText('进行中')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('进行中'))
     const event = new Event('beforeunload', { cancelable: true })
     const preventDefault = vi.spyOn(event, 'preventDefault')
     window.dispatchEvent(event)

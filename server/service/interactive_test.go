@@ -31,6 +31,7 @@ type interactiveTestRuntime struct {
 type interactiveRecordingRuntime struct {
 	mu      sync.Mutex
 	methods []string
+	args    []any
 }
 
 type interactiveAsyncRuntime struct {
@@ -65,9 +66,10 @@ func (r *interactiveBlockingRuntime) Command(_ context.Context, _ string, _ any)
 }
 func (*interactiveBlockingRuntime) Close() error { return nil }
 
-func (r *interactiveRecordingRuntime) Command(_ context.Context, method string, _ any) error {
+func (r *interactiveRecordingRuntime) Command(_ context.Context, method string, data any) error {
 	r.mu.Lock()
 	r.methods = append(r.methods, method)
+	r.args = append(r.args, data)
 	r.mu.Unlock()
 	return nil
 }
@@ -76,6 +78,18 @@ func (*interactiveRecordingRuntime) Close() error { return nil }
 type interactiveRecordingRuntimeFactory struct{ runtime *interactiveRecordingRuntime }
 
 func (f interactiveRecordingRuntimeFactory) Start(_ context.Context, _ string, _ string, _ string, _ func(string, any)) (Runtime, error) {
+	return f.runtime, nil
+}
+
+type interactiveDelayedRuntimeFactory struct {
+	runtime *interactiveRecordingRuntime
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f interactiveDelayedRuntimeFactory) Start(_ context.Context, _ string, _ string, _ string, _ func(string, any)) (Runtime, error) {
+	close(f.started)
+	<-f.release
 	return f.runtime, nil
 }
 
@@ -223,6 +237,7 @@ func newInteractiveTestSession() *InteractiveSession {
 		ExpiresAt:        time.Now().Add(time.Minute),
 		watchers:         map[*interactiveWatcher]struct{}{},
 		pendingQuestions: map[string]InteractiveQuestion{},
+		runtimeStarted:   true,
 	}
 }
 
@@ -860,6 +875,61 @@ func TestInteractiveRuntimeSendsSystemOpeningPromptOnce(t *testing.T) {
 	if len(runtime.methods) != 2 {
 		t.Fatalf("runtime methods = %#v, want one opening prompt", runtime.methods)
 	}
+}
+
+func TestInteractiveMessageQueuesUntilRuntimeStarts(t *testing.T) {
+	runtime := &interactiveRecordingRuntime{}
+	factory := interactiveDelayedRuntimeFactory{
+		runtime: runtime,
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := NewInteractiveServiceWithRuntimeAndAgents(nil, factory, []InteractiveAgent{{
+		ID: "project-creator", DisplayName: "Project Creator", Available: true, Intents: []string{"create-project"},
+	}})
+	svc.SetEnabled(true)
+	sess, err := svc.CreateSession(context.Background(), "user-1", "project-creator", "create-project")
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close("user-1", sess.ID) })
+
+	select {
+	case <-factory.started:
+	case <-time.After(time.Second):
+		t.Fatal("runtime factory did not start")
+	}
+	if err := svc.Message(context.Background(), "user-1", sess.ID, "先说我的创作方向"); err != nil {
+		t.Fatalf("Message() while runtime starts = %v", err)
+	}
+	sess.mu.Lock()
+	queued := sess.queuedPrompt
+	busy := sess.busy
+	sess.mu.Unlock()
+	if queued != "先说我的创作方向" || !busy {
+		t.Fatalf("queued prompt = %q, busy = %v, want queued message and busy session", queued, busy)
+	}
+
+	close(factory.release)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		methods := append([]string(nil), runtime.methods...)
+		args := append([]any(nil), runtime.args...)
+		runtime.mu.Unlock()
+		if len(methods) >= 2 {
+			if !reflect.DeepEqual(methods[:2], []string{"session/start", "session/prompt"}) {
+				t.Fatalf("runtime methods = %#v, want session/start then queued prompt", methods)
+			}
+			prompt, ok := args[1].(map[string]any)
+			if !ok || !reflect.DeepEqual(prompt["contentBlocks"], []map[string]string{{"type": "text", "text": "先说我的创作方向"}}) {
+				t.Fatalf("queued prompt payload = %#v", args[1])
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("runtime methods = %#v, want session/start then queued prompt", runtime.methods)
 }
 
 func TestInteractiveRuntimeStartFailureIsReplayableOverSSE(t *testing.T) {

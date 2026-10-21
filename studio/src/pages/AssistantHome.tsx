@@ -85,7 +85,7 @@ export default function AssistantHome() {
     if (!canSend || !message) return
     const key = assistantMessageHandoffKey(user?.id ?? 'signed-out', modeId, selectedProject?.id, modeId === 'review' ? content?.id : undefined)
     saveAssistantMessageHandoff(key, message)
-    const query = new URLSearchParams({ assistant_session: '1', mode: modeId })
+    const query = new URLSearchParams({ assistant_session: '1', mode: modeId, handoff: '1' })
     if (selectedProject) query.set('project_id', selectedProject.id)
     if (modeId === 'review' && content) query.set('content_id', content.id)
     navigate(`/chat?${query.toString()}`)
