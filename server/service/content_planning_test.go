@@ -198,7 +198,7 @@ func TestContentPlanningReceiptScopeAndCapabilities(t *testing.T) {
 	if err != nil || len(receipts) != 1 {
 		t.Fatalf("scoped receipts=%v err=%v", receipts, err)
 	}
-	for _, tool := range []string{"generate_image", "analyze_video", "upload_image", "create_draft", "submit_profile_result", "claim_topic", "search_images"} {
+	for _, tool := range []string{"generate_image", "analyze_video", "upload_image", "create_draft", "submit_profile_result", "claim_topic"} {
 		if err := svc.ValidateAgentExecutionToolAccess(ctx, task.UserID, task.ProjectID, task.ID, execution.ID, tool); !errors.Is(err, ErrTaskCapabilityAccessDenied) {
 			t.Fatalf("paid/mutating tool %s: %v", tool, err)
 		}

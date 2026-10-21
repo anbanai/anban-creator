@@ -306,9 +306,3 @@ skus:
     price_credits: 0
     route: "search.fetch"
     delivery: "fetched_page"
-  - id: "mcp.search_images"
-    operation: "mcp.search_images"
-    charge_policy: "standalone_operation"
-    price_credits: 0
-    route: "search.images"
-    delivery: "image_search_results"

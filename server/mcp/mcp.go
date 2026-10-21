@@ -513,7 +513,6 @@ var executionToolScopes = map[string]executionToolScope{
 	"search_web":           {},
 	"list_search_receipts": {},
 	"fetch_web_page":       {},
-	"search_images":        {},
 }
 
 func validateExecutionToolScope(toolName string, arguments map[string]any, projectID, taskID, executionID string) error {

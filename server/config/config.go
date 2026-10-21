@@ -312,11 +312,10 @@ type TrendsConfig struct {
 // SearchConfig controls Server-owned web search providers. Credentials are
 // intentionally kept in server configuration and are never exposed to Agents.
 type SearchConfig struct {
-	// Web, Fetch and Images are capability routes. Provider credentials live in
+	// Web and Fetch are capability routes. Provider credentials live in
 	// Providers and are never exposed to MCP callers.
 	Web       SearchCapabilityConfig `yaml:"web"`
 	Fetch     SearchCapabilityConfig `yaml:"fetch"`
-	Images    SearchCapabilityConfig `yaml:"images"`
 	Providers SearchProvidersConfig  `yaml:"providers"`
 }
 
@@ -1351,7 +1350,6 @@ func expandEnvVars(data []byte) []byte {
 func (c *Config) applyDefaults() {
 	c.Search.Web.Provider = strings.ToLower(strings.TrimSpace(c.Search.Web.Provider))
 	c.Search.Fetch.Provider = strings.ToLower(strings.TrimSpace(c.Search.Fetch.Provider))
-	c.Search.Images.Provider = strings.ToLower(strings.TrimSpace(c.Search.Images.Provider))
 	if c.Search.Providers.Doubao.CustomEndpoint == "" {
 		c.Search.Providers.Doubao.CustomEndpoint = "https://open.feedcoopapi.com/search_api/web_search"
 	}
@@ -2074,10 +2072,6 @@ func (c *Config) Validate() error {
 	}
 	validateProvider("web", c.Search.Web, map[string]bool{"deepseek": true, "doubao_custom": true, "doubao_global": true})
 	validateProvider("fetch", c.Search.Fetch, map[string]bool{"deepseek": true})
-	validateProvider("images", c.Search.Images, map[string]bool{"doubao": true})
-	if c.Search.Images.Enabled {
-		errs = append(errs, "search.images is not available until the official Doubao image-search contract is implemented")
-	}
 	if c.Search.Web.Enabled {
 		switch strings.ToLower(strings.TrimSpace(c.Search.Web.Provider)) {
 		case "deepseek":
