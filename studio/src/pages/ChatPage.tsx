@@ -1485,7 +1485,7 @@ function ChatConversation() {
         clearPortraitCreationHandoff(projectId)
         portraitHandoffIdeaRef.current = null
       }
-      if (assistantSession && initialAssistantMessageSentRef.current) {
+      if (assistantSession) {
         clearAssistantMessageHandoff(assistantMessageHandoffKey(user?.id ?? 'signed-out', assistantModeId ?? 'profile', projectId, contentId))
       }
       if (pendingSubmissionRef.current === pendingSubmission) pendingSubmission.status = 'accepted'
