@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { getApiErrorMessage } from '@/lib/http-client'
-import { savePortraitCreationHandoff } from '@/lib/portrait-project-handoff'
 import { portraitKey, savePortraitProject, type PortraitReceipt } from '@/lib/portrait-online-save'
 import type { PortraitCandidate, PortraitChatMessage } from '@/lib/portrait-chat-contract'
 
@@ -54,8 +53,7 @@ export default function PortraitDelivery({ candidate, messages, sessionId, produ
   }
   function enterCreationMode() {
     if (!receipt?.projectId || receipt.portraitKey !== key || !['saved', 'task_created'].includes(receipt.phase)) return
-    savePortraitCreationHandoff(receipt.projectId, idea)
-    navigate(`/chat?assistant_session=1&mode=creation&project_id=${encodeURIComponent(receipt.projectId)}`)
+    navigate('/', { state: { modeId: 'creation', projectId: receipt.projectId, initialMessage: idea.trim() } })
   }
   const saved=receipt?.portraitKey===key && receipt?.profileVersion!==undefined && ['saved','task_created'].includes(receipt.phase)
   const canSave = receipt && receipt.phase !== 'task_creating' && (receipt.portraitKey === key || receipt.phase === 'new' || ['saved','task_created'].includes(receipt.phase))

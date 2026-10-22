@@ -16,6 +16,31 @@ const (
 	AssistantCheckpointAbandoned = "abandoned"
 )
 
+// AssistantWorkspace is the durable Server-owned shell for the unified
+// Assistant page. Conversation transcripts remain runtime/client material;
+// this row only records ownership, the active mode, and the three logical
+// session identities that belong to one workspace.
+type AssistantWorkspace struct {
+	ID                 string     `gorm:"type:char(36);primaryKey" json:"id"`
+	UserID             string     `gorm:"type:char(36);index;not null;uniqueIndex:idx_assistant_workspace_idempotency,priority:1" json:"user_id"`
+	IdempotencyKeyHash *string    `gorm:"type:char(64);uniqueIndex:idx_assistant_workspace_idempotency,priority:2" json:"-"`
+	RequestFingerprint string     `gorm:"type:char(64);not null;default:''" json:"-"`
+	ProjectID          string     `gorm:"type:char(36);index;not null;default:''" json:"project_id,omitempty"`
+	ContentID          string     `gorm:"type:char(36);index;not null;default:''" json:"content_id,omitempty"`
+	ModeID             string     `gorm:"type:varchar(20);not null" json:"mode_id"`
+	RuntimeID          string     `gorm:"type:varchar(128);not null;default:''" json:"runtime_id,omitempty"`
+	RuntimeStatus      string     `gorm:"type:varchar(24);not null;default:'starting'" json:"runtime_status"`
+	ProfileSessionID   string     `gorm:"type:char(36);not null;default:''" json:"profile_session_id,omitempty"`
+	CreationSessionID  string     `gorm:"type:char(36);not null;default:''" json:"creation_session_id,omitempty"`
+	ReviewSessionID    string     `gorm:"type:char(36);not null;default:''" json:"review_session_id,omitempty"`
+	ExpiresAt          time.Time  `gorm:"index;not null" json:"expires_at"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	ClosedAt           *time.Time `json:"closed_at,omitempty"`
+}
+
+func (AssistantWorkspace) TableName() string { return "assistant_workspaces" }
+
 // AssistantCheckpoint is a Server-owned recovery point for an interactive
 // Assistant session. It stores structured work only, never a chat transcript.
 type AssistantCheckpoint struct {
@@ -49,6 +74,7 @@ func (AssistantCheckpoint) TableName() string { return "assistant_checkpoints" }
 type AssistantSession struct {
 	ID                    string     `gorm:"type:char(36);primaryKey" json:"id"`
 	UserID                string     `gorm:"type:char(36);index:idx_assistant_session_scope,priority:1;not null" json:"user_id"`
+	WorkspaceID           string     `gorm:"type:char(36);index;not null;default:''" json:"workspace_id,omitempty"`
 	ModeID                string     `gorm:"type:varchar(20);index:idx_assistant_session_scope,priority:2;not null" json:"mode_id"`
 	ProjectID             string     `gorm:"type:char(36);index:idx_assistant_session_scope,priority:3;not null;default:''" json:"project_id,omitempty"`
 	ContentID             string     `gorm:"type:char(36);index:idx_assistant_session_scope,priority:4;not null;default:''" json:"content_id,omitempty"`

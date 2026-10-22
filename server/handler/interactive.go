@@ -54,11 +54,22 @@ func (h *InteractiveHandler) Events(c fiber.Ctx) error {
 	if uid == "" {
 		return Error(c, 401, "unauthorized")
 	}
+	return h.EventsForSession(c, uid, c.Params("id"))
+}
+
+// EventsForSession is shared by legacy session routes and the Workspace SSE
+// route. The caller resolves the Server-owned session identity first.
+func (h *InteractiveHandler) EventsForSession(c fiber.Ctx, uid, sessionID string) error {
 	after := uint64(0)
 	if raw := c.Get("Last-Event-ID"); raw != "" {
 		after, _ = strconv.ParseUint(raw, 10, 64)
 	}
-	sessionID := c.Params("id")
+	// Workspace clients persist cursors across reloads. A Server restart can
+	// replace the logical session while keeping the Workspace ID, in which
+	// case the old cursor belongs to a different event history.
+	if expected := strings.TrimSpace(c.Get("X-Assistant-Session-ID")); expected != "" && expected != sessionID {
+		after = 0
+	}
 	if err := h.svc.TouchSession(uid, sessionID); err != nil {
 		return interactiveError(c, err)
 	}
@@ -82,6 +93,7 @@ func (h *InteractiveHandler) Events(c fiber.Ctx) error {
 		heartbeat := time.NewTicker(heartbeatInterval)
 		defer heartbeat.Stop()
 		for _, ev := range history {
+			ev = addWorkspaceEventScope(c, ev, sessionID)
 			if err := writeInteractiveEvent(w, ev); err != nil {
 				return
 			}
@@ -103,12 +115,32 @@ func (h *InteractiveHandler) Events(c fiber.Ctx) error {
 				if !ok {
 					return
 				}
+				ev = addWorkspaceEventScope(c, ev, sessionID)
 				if err := writeInteractiveEvent(w, ev); err != nil {
 					return
 				}
 			}
 		}
 	})
+}
+
+func addWorkspaceEventScope(c fiber.Ctx, ev service.InteractiveEvent, sessionID string) service.InteractiveEvent {
+	modeID, _ := c.Locals("assistant_workspace_mode").(string)
+	if modeID == "" {
+		return ev
+	}
+	data, ok := ev.Data.(map[string]any)
+	if !ok {
+		data = map[string]any{"value": ev.Data}
+	}
+	copyData := make(map[string]any, len(data)+2)
+	for key, value := range data {
+		copyData[key] = value
+	}
+	copyData["mode_id"] = modeID
+	copyData["session_id"] = sessionID
+	ev.Data = copyData
+	return ev
 }
 func writeInteractiveEvent(w *bufio.Writer, ev service.InteractiveEvent) error {
 	b, err := json.Marshal(ev.Data)
@@ -223,6 +255,12 @@ func interactiveError(c fiber.Ctx, err error) error {
 		return ErrorWithCode(c, 409, "assistant_mode_unavailable", err.Error())
 	case errors.Is(err, service.ErrAssistantCheckpointConflict):
 		return ErrorWithCode(c, 409, "assistant_checkpoint_conflict", err.Error())
+	case errors.Is(err, service.ErrAssistantWorkspaceBusy):
+		return Error(c, 409, err.Error())
+	case errors.Is(err, service.ErrAssistantWorkspaceModeMismatch):
+		return Error(c, 409, err.Error())
+	case errors.Is(err, service.ErrAssistantWorkspaceNotFound):
+		return Error(c, 404, err.Error())
 	case errors.Is(err, service.ErrAssistantRuntimeContextTooLarge):
 		return Error(c, 413, err.Error())
 	case errors.Is(err, service.ErrInteractiveSessionNotFound):

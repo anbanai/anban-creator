@@ -15,9 +15,9 @@ import (
 	srvconfig "github.com/anbanai/anban-creator/server/config"
 )
 
-// ContainerRuntimeFactory starts one short-lived DSH workload per interactive
-// session. The Server process owns the Docker CLI connection; the DSH workload
-// never receives the Docker socket.
+// ContainerRuntimeFactory starts one short-lived DSH workload per Assistant
+// Workspace. The Server process owns the Docker CLI connection; the DSH
+// workload never receives the Docker socket.
 type ContainerRuntimeFactory struct {
 	Config            srvconfig.DshConfig
 	ProjectMemoryRoot string
@@ -62,6 +62,12 @@ func (f ContainerRuntimeFactory) StartSession(ctx context.Context, spec Interact
 	patchPath, err := interactivePresetPatchPath(spec.AgentPackID)
 	if err != nil {
 		return nil, err
+	}
+	for _, presetID := range spec.PresetIDs {
+		_, pathErr := interactivePresetPatchPath(presetID)
+		if pathErr != nil {
+			return nil, pathErr
+		}
 	}
 	if strings.TrimSpace(f.Config.Image) == "" || strings.TrimSpace(f.Config.Network) == "" {
 		return nil, fmt.Errorf("interactive container image and network are required")
@@ -110,6 +116,9 @@ func (f ContainerRuntimeFactory) StartSession(ctx context.Context, spec Interact
 		"--pids-limit", strconv.FormatInt(f.Config.PidsLimit, 10),
 		"-e", "HOME=/tmp/dsh-home", "-e", "DSH_HOME=/tmp/dsh-home",
 		"-e", "ANBAN_DSH_BRIDGE_SESSION_ID",
+		"-e", "ANBAN_DSH_BRIDGE_WORKSPACE_ID",
+		"-e", "ANBAN_DSH_BRIDGE_PRESETS",
+		"-e", "ANBAN_DSH_BRIDGE_PATCHES",
 		"-e", "ANBAN_DSH_BRIDGE_RUNTIME_TOKEN",
 		"-e", "ANBAN_DSH_BRIDGE_HOME=/tmp/dsh-home",
 		"-e", "ANBAN_DSH_BRIDGE_PRESET_ID=" + spec.AgentPackID,
@@ -190,6 +199,9 @@ func (f ContainerRuntimeFactory) startCommand(ctx context.Context, cancel contex
 	cmd := exec.CommandContext(ctx, docker, args...)
 	cmd.Env = append(os.Environ(),
 		"ANBAN_DSH_BRIDGE_SESSION_ID="+spec.SessionID,
+		"ANBAN_DSH_BRIDGE_WORKSPACE_ID="+spec.WorkspaceID,
+		"ANBAN_DSH_BRIDGE_PRESETS="+strings.Join(spec.PresetIDs, ","),
+		"ANBAN_DSH_BRIDGE_PATCHES="+strings.Join(patchesForSpec(spec), ","),
 		"ANBAN_DSH_BRIDGE_RUNTIME_TOKEN="+spec.RuntimeToken,
 		"ANBAN_DSH_BRIDGE_MCP_URL="+strings.TrimRight(dshFirstNonEmpty(f.MCPURL, f.Config.ServerURL+"/mcp"), "/"),
 		"ANBAN_DSH_BRIDGE_PROVIDER_API_KEY="+f.APIKey,
@@ -217,6 +229,30 @@ func (f ContainerRuntimeFactory) startCommand(ctx context.Context, cancel contex
 	// Route values and the initial context are injected by the deployment
 	// secret/config layer; never log the resulting command or environment.
 	return startContainerExecRuntime(cmd, stdin, stdout, stderr, emit, []string{spec.RuntimeToken, f.APIKey}, cancel, contextCleanup), nil
+}
+
+func patchesForSpec(spec InteractiveRuntimeSpec) []string {
+	patches := []string{}
+	for _, presetID := range spec.PresetIDs {
+		if path, err := interactivePresetPatchPath(presetID); err == nil {
+			patches = appendInteractiveUniqueString(patches, path)
+		}
+	}
+	if len(patches) == 0 {
+		if path, err := interactivePresetPatchPath(spec.AgentPackID); err == nil {
+			patches = append(patches, path)
+		}
+	}
+	return patches
+}
+
+func appendInteractiveUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func dshFirstNonEmpty(values ...string) string {

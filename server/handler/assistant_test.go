@@ -41,7 +41,7 @@ func newAssistantHandlerTestRepo(t *testing.T) repository.Repository {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.Project{}, &model.Task{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AnalyticsState{}); err != nil {
+	if err := db.AutoMigrate(&model.Project{}, &model.Task{}, &model.AssistantCheckpoint{}, &model.AssistantSession{}, &model.AssistantSessionLease{}, &model.AssistantWorkspace{}, &model.AnalyticsState{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -62,7 +62,53 @@ func newAssistantHandlerTestApp(h *AssistantHandler) *fiber.App {
 	app.Get("/assistant/projects/:projectId/works", h.Works)
 	app.Get("/assistant/checkpoint", h.LatestCheckpoint)
 	app.Post("/assistant/sessions", h.Create)
+	app.Post("/assistant/workspaces", h.WorkspaceCreate)
+	app.Post("/assistant/workspaces/:id/mode", h.WorkspaceMode)
+	app.Post("/assistant/workspaces/:id/messages", h.WorkspaceMessage)
 	return app
+}
+
+func TestAssistantWorkspaceRoutesCarryModeInBody(t *testing.T) {
+	repo := newAssistantHandlerTestRepo(t)
+	project := &model.Project{ID: uuid.NewString(), UserID: "user-1", Platform: "wechat", Name: "画像", Status: model.ProjectStatusActive, Profile: datatypes.NewJSONType(model.NewProjectProfile())}
+	profile := model.NewProjectProfile()
+	profile.Status = model.ProfileStatusConfirmed
+	profile.InitializationStatus = model.ProfileInitializationReady
+	profile.Version = 1
+	project.Profile = datatypes.NewJSONType(profile)
+	if err := repo.Projects().Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.NewInteractiveServiceWithRuntime(repo, &assistantHandlerRuntimeFactory{})
+	svc.SetEnabled(true)
+	app := newAssistantHandlerTestApp(NewAssistantHandler(svc, nil, repo))
+	createReq, err := app.Test(httptest.NewRequest(http.MethodPost, "/assistant/workspaces", strings.NewReader(`{"mode_id":"creation","project_id":"`+project.ID+`"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createReq.StatusCode != http.StatusOK {
+		t.Fatalf("workspace create status = %d", createReq.StatusCode)
+	}
+	var envelope struct {
+		Data service.AssistantWorkspaceView `json:"data"`
+	}
+	if err := json.NewDecoder(createReq.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	modeReq, err := app.Test(httptest.NewRequest(http.MethodPost, "/assistant/workspaces/"+envelope.Data.ID+"/mode", strings.NewReader(`{"mode_id":"profile"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modeReq.StatusCode != http.StatusOK {
+		t.Fatalf("workspace mode status = %d", modeReq.StatusCode)
+	}
+	messageReq, err := app.Test(httptest.NewRequest(http.MethodPost, "/assistant/workspaces/"+envelope.Data.ID+"/messages", strings.NewReader(`{"mode_id":"creation","text":"wrong mode"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageReq.StatusCode != http.StatusConflict {
+		t.Fatalf("workspace mode mismatch status = %d, want 409", messageReq.StatusCode)
+	}
 }
 
 func TestAssistantBootstrapDoesNotStartRuntime(t *testing.T) {

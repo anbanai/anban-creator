@@ -16,6 +16,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&AssistantCheckpoint{},
 		&AssistantSession{},
 		&AssistantSessionLease{},
+		&AssistantWorkspace{},
 		&ProjectChannelConfig{},
 		&Plan{},
 		&PlanEntry{},

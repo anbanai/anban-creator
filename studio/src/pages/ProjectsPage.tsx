@@ -316,11 +316,11 @@ export default function ProjectsPage() {
   }
 
   function openCreator() {
-    navigate('/chat?mode=profile')
+    navigate('/', { state: { modeId: 'profile' } })
   }
 
   function openProfileCreator(project: Project) {
-    navigate(`/chat?mode=profile&project_id=${encodeURIComponent(project.id)}`)
+    navigate('/', { state: { modeId: 'profile', projectId: project.id } })
   }
 
   useEffect(() => {

@@ -264,6 +264,14 @@ func NewRouter(svc *Services) *fiber.App {
 		assistant.Post("/sessions/:id/checkpoint", svc.AssistantHandler.Checkpoint)
 		assistant.Post("/sessions/:id/commit", svc.AssistantHandler.Commit)
 		assistant.Delete("/sessions/:id", svc.AssistantHandler.Delete)
+		assistant.Post("/workspaces", svc.AssistantHandler.WorkspaceCreate)
+		assistant.Post("/workspaces/:id/mode", svc.AssistantHandler.WorkspaceMode)
+		assistant.Get("/workspaces/:id/events", svc.AssistantHandler.WorkspaceEvents)
+		assistant.Post("/workspaces/:id/messages", svc.AssistantHandler.WorkspaceMessage)
+		assistant.Post("/workspaces/:id/questions/:callId/answers", svc.AssistantHandler.WorkspaceAnswers)
+		assistant.Post("/workspaces/:id/checkpoint", svc.AssistantHandler.WorkspaceCheckpoint)
+		assistant.Post("/workspaces/:id/commit", svc.AssistantHandler.WorkspaceCommit)
+		assistant.Delete("/workspaces/:id", svc.AssistantHandler.WorkspaceDelete)
 	}
 	if h := svc.PortraitOnboardingHandler; h != nil {
 		apiV1.Get("/onboarding/capabilities", h.Capabilities)

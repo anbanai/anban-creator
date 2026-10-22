@@ -151,6 +151,7 @@ type InteractiveStageInput struct {
 
 type InteractiveSession struct {
 	ID, UserID, AgentID, Intent string
+	WorkspaceID                 string
 	ModeID, ContentID           string
 	CheckpointID                string
 	BaseContentRevision         int64
@@ -213,8 +214,10 @@ type RuntimeFactoryWithContext interface {
 // or image names.
 type InteractiveRuntimeSpec struct {
 	SessionID        string
+	WorkspaceID      string
 	ProjectID        string
 	AgentPackID      string
+	PresetIDs        []string
 	ServerInstanceID string
 	RuntimeToken     string
 	InitialContext   string
@@ -222,6 +225,20 @@ type InteractiveRuntimeSpec struct {
 
 type RuntimeFactoryWithSession interface {
 	StartSession(context.Context, InteractiveRuntimeSpec, func(string, any)) (Runtime, error)
+}
+
+// interactiveWorkspaceRuntime is the process-local owner for one DSH Pod.
+// Logical Assistant sessions keep their own lifecycle and event history, while
+// this object owns the shared Bridge process and its runtime credential.
+type interactiveWorkspaceRuntime struct {
+	runtime         Runtime
+	tokenHash       string
+	cancel          context.CancelFunc
+	sessions        map[string]struct{}
+	activeSessionID string
+	starting        bool
+	ready           chan struct{}
+	startErr        error
 }
 
 type InteractiveMemoryStore interface {
@@ -251,8 +268,10 @@ type InteractiveService struct {
 	memory            InteractiveMemoryStore
 	logger            *zerolog.Logger
 	receiptMu         sync.Mutex
+	workspaceCreateMu sync.Mutex
 	createIdempotency map[string]*interactiveCreateReservation
 	serverInstanceID  string
+	workspaceRuntimes map[string]*interactiveWorkspaceRuntime
 }
 
 type interactiveCreateReservation struct {
@@ -324,6 +343,7 @@ func NewInteractiveServiceWithRuntimeAndAgents(repo repository.Repository, facto
 		ttl: 30 * time.Minute, idleTimeout: 30 * time.Minute, maxHistory: 256, agents: append([]InteractiveAgent(nil), agents...),
 		maxSessions: 32, maxPerUser: 2, tombstoneTTL: 5 * time.Minute,
 		createIdempotency: map[string]*interactiveCreateReservation{},
+		workspaceRuntimes: map[string]*interactiveWorkspaceRuntime{},
 	}
 }
 
@@ -859,11 +879,64 @@ func (s *InteractiveService) createSessionWithOptions(ctx context.Context, userI
 		return nil, err
 	}
 	runtimeCtx, cancel := context.WithCancel(context.Background())
+	if options.workspaceID != "" {
+		// Workspace runtimes own their lifetime separately. The per-session
+		// context is retained only for legacy sessions.
+		cancel()
+		runtimeCtx = context.Background()
+		cancel = nil
+	}
 	expiresAt := now.Add(s.ttl)
 	if idleExpiry := now.Add(s.idleTimeout); idleExpiry.Before(expiresAt) {
 		expiresAt = idleExpiry
 	}
-	sess := &InteractiveSession{ID: uuid.NewString(), UserID: userID, AgentID: agentID, Intent: intent, ModeID: options.modeID, ContentID: options.contentID, CheckpointID: options.checkpointID, BaseContentRevision: options.baseContentRevision, BaseAnalyticsRevision: options.baseAnalyticsRevision, ProjectID: projectID, ProfileVersion: profileVersion, initialContext: initialContext, memoryExpected: memoryExpected, CreatedAt: now, ExpiresAt: expiresAt, Status: "starting", watchers: map[*interactiveWatcher]struct{}{}, pendingQuestions: map[string]InteractiveQuestion{}, runtimeTokenHash: confirmationHash(runtimeToken), cancel: cancel}
+	sess := &InteractiveSession{ID: uuid.NewString(), UserID: userID, WorkspaceID: options.workspaceID, AgentID: agentID, Intent: intent, ModeID: options.modeID, ContentID: options.contentID, CheckpointID: options.checkpointID, BaseContentRevision: options.baseContentRevision, BaseAnalyticsRevision: options.baseAnalyticsRevision, ProjectID: projectID, ProfileVersion: profileVersion, initialContext: initialContext, memoryExpected: memoryExpected, CreatedAt: now, ExpiresAt: expiresAt, Status: "starting", watchers: map[*interactiveWatcher]struct{}{}, pendingQuestions: map[string]InteractiveQuestion{}, runtimeTokenHash: confirmationHash(runtimeToken), cancel: cancel}
+	durableTotal, durableUser := 0, 0
+	if options.modeID != "" {
+		if s.repo == nil || s.repo.AssistantSessions() == nil || s.repo.AssistantWorkspaces() == nil {
+			if cancel != nil {
+				cancel()
+			}
+			return nil, ErrInteractivePersistence
+		}
+		if err := s.repo.AssistantSessions().ReapExpired(ctx, now.UTC()); err != nil {
+			if cancel != nil {
+				cancel()
+			}
+			return nil, errors.Join(ErrInteractivePersistence, err)
+		}
+		workspaceCount, countErr := s.repo.AssistantWorkspaces().CountActive(ctx, userID, now.UTC())
+		if countErr != nil {
+			if cancel != nil {
+				cancel()
+			}
+			return nil, errors.Join(ErrInteractivePersistence, countErr)
+		}
+		standaloneCount, countErr := s.repo.AssistantSessions().CountActiveStandaloneByUser(ctx, userID, now.UTC())
+		if countErr != nil {
+			if cancel != nil {
+				cancel()
+			}
+			return nil, errors.Join(ErrInteractivePersistence, countErr)
+		}
+		allWorkspaceCount, countErr := s.repo.AssistantWorkspaces().CountActiveAll(ctx, now.UTC())
+		if countErr != nil {
+			if cancel != nil {
+				cancel()
+			}
+			return nil, errors.Join(ErrInteractivePersistence, countErr)
+		}
+		if options.workspaceNew {
+			if workspaceCount > 0 {
+				workspaceCount--
+			}
+			if allWorkspaceCount > 0 {
+				allWorkspaceCount--
+			}
+		}
+		durableUser = int(workspaceCount + standaloneCount)
+		durableTotal = int(allWorkspaceCount + standaloneCount)
+	}
 	if s.repo != nil && s.repo.FeedbackLoop() != nil && (projectID != "" || options.modeID != "") && options.modeID == "" {
 		scope := "interactive-project:" + projectID
 		won, leaseErr := s.repo.FeedbackLoop().AcquireFeedbackLease(ctx, scope, sess.ID, now.UTC(), s.ttl)
@@ -880,16 +953,43 @@ func (s *InteractiveService) createSessionWithOptions(ctx context.Context, userI
 	}
 	s.mu.Lock()
 	s.pruneTombstonesLocked(time.Now())
+	if sess.WorkspaceID != "" {
+		if runtime := s.workspaceRuntimes[sess.WorkspaceID]; runtime != nil && runtime.tokenHash != "" {
+			// All logical sessions in one Workspace authenticate through the
+			// single Bridge token. ResolveRuntimeSession selects the active mode.
+			sess.runtimeTokenHash = runtime.tokenHash
+		}
+	}
 	activeTotal, activeUser := 0, 0
+	activeUserWorkspaces := map[string]struct{}{}
+	activeUserStandalone := 0
 	for _, existing := range s.sessions {
 		existing.mu.Lock()
 		if !existing.Closed {
 			activeTotal++
 			if existing.UserID == userID {
-				activeUser++
+				if existing.WorkspaceID != "" {
+					activeUserWorkspaces[existing.WorkspaceID] = struct{}{}
+				} else {
+					activeUserStandalone++
+				}
 			}
 		}
 		existing.mu.Unlock()
+	}
+	activeUser = activeUserStandalone + len(activeUserWorkspaces)
+	if durableUser > activeUser {
+		activeUser = durableUser
+	}
+	if durableTotal > activeTotal {
+		activeTotal = durableTotal
+	}
+	if sess.WorkspaceID != "" {
+		if _, exists := activeUserWorkspaces[sess.WorkspaceID]; exists {
+			// All three logical mode sessions in one Workspace share one user
+			// session quota unit.
+			activeUser--
+		}
 	}
 	if (s.maxSessions > 0 && activeTotal >= s.maxSessions) || (s.maxPerUser > 0 && activeUser >= s.maxPerUser) {
 		s.mu.Unlock()
@@ -899,17 +999,9 @@ func (s *InteractiveService) createSessionWithOptions(ctx context.Context, userI
 	s.sessions[sess.ID] = sess
 	s.mu.Unlock()
 	if options.modeID != "" {
-		if s.repo == nil || s.repo.AssistantSessions() == nil {
-			s.removeUnstartedSession(sess)
-			return nil, ErrInteractivePersistence
-		}
-		if err := s.repo.AssistantSessions().ReapExpired(ctx, now.UTC()); err != nil {
-			s.removeUnstartedSession(sess)
-			return nil, errors.Join(ErrInteractivePersistence, err)
-		}
 		scope := assistantLeaseScope(userID, options.modeID, projectID, options.contentID)
 		sessionRow := &model.AssistantSession{
-			ID: sess.ID, UserID: userID, ModeID: options.modeID, ProjectID: projectID, ContentID: options.contentID,
+			ID: sess.ID, UserID: userID, WorkspaceID: options.workspaceID, ModeID: options.modeID, ProjectID: projectID, ContentID: options.contentID,
 			Status: "starting", CheckpointID: options.checkpointID, BaseProfileRevision: profileVersion,
 			BaseContentRevision: options.baseContentRevision, BaseAnalyticsRevision: options.baseAnalyticsRevision,
 			ExpiresAt: expiresAt.UTC(), CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
@@ -938,7 +1030,11 @@ func (s *InteractiveService) createSessionWithOptions(ctx context.Context, userI
 	sess.mu.Lock()
 	s.scheduleExpiryLocked(sess)
 	sess.mu.Unlock()
-	go s.startRuntime(runtimeCtx, sess, runtimeToken)
+	if sess.WorkspaceID != "" {
+		go s.startRuntime(context.Background(), sess, runtimeToken)
+	} else {
+		go s.startRuntime(runtimeCtx, sess, runtimeToken)
+	}
 	return sess, nil
 }
 
@@ -972,13 +1068,311 @@ func assistantStringValue(value *string) string {
 	return *value
 }
 func (s *InteractiveService) startRuntime(ctx context.Context, sess *InteractiveSession, runtimeToken string) {
+	if sess.WorkspaceID != "" {
+		s.startWorkspaceRuntime(ctx, sess, runtimeToken)
+		return
+	}
+	s.startStandaloneRuntime(ctx, sess, runtimeToken)
+}
+
+func (s *InteractiveService) startWorkspaceRuntime(ctx context.Context, sess *InteractiveSession, runtimeToken string) {
+	if sess == nil || strings.TrimSpace(sess.WorkspaceID) == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.workspaceRuntimes == nil {
+		s.workspaceRuntimes = map[string]*interactiveWorkspaceRuntime{}
+	}
+	shared := s.workspaceRuntimes[sess.WorkspaceID]
+	if shared != nil && shared.runtime == nil && shared.starting {
+		ready := shared.ready
+		s.mu.Unlock()
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return
+		}
+		s.mu.Lock()
+		shared = s.workspaceRuntimes[sess.WorkspaceID]
+		if shared == nil {
+			s.mu.Unlock()
+			s.startWorkspaceRuntime(ctx, sess, runtimeToken)
+			return
+		}
+		if shared.startErr != nil || shared.runtime == nil {
+			err := shared.startErr
+			s.mu.Unlock()
+			if err != nil {
+				s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": err.Error()})
+				s.closeSession(sess.ID, false)
+			}
+			return
+		}
+		shared.sessions[sess.ID] = struct{}{}
+		sess.mu.Lock()
+		if sess.Closed {
+			sess.mu.Unlock()
+			s.mu.Unlock()
+			return
+		}
+		sess.runtime = shared.runtime
+		sess.runtimeTokenHash = shared.tokenHash
+		sess.mu.Unlock()
+		rt := shared.runtime
+		s.mu.Unlock()
+		s.initializeRuntimeSession(ctx, sess, rt)
+		return
+	}
+	if shared != nil && shared.runtime != nil {
+		sess.mu.Lock()
+		if sess.Closed {
+			sess.mu.Unlock()
+			s.mu.Unlock()
+			return
+		}
+		sess.runtime = shared.runtime
+		sess.runtimeTokenHash = shared.tokenHash
+		sess.mu.Unlock()
+		if shared.sessions == nil {
+			shared.sessions = map[string]struct{}{}
+		}
+		shared.sessions[sess.ID] = struct{}{}
+		rt := shared.runtime
+		s.mu.Unlock()
+		s.initializeRuntimeSession(ctx, sess, rt)
+		return
+	}
+	s.mu.Unlock()
+
+	identityFields := map[string]any{"agent_id": sess.AgentID, "intent": sess.Intent, "mode_id": sess.ModeID, "workspace_id": sess.WorkspaceID}
+	s.logRuntimeFields("info", sess.ID, "interactive workspace runtime starting", nil, identityFields)
+	emit := func(k string, d any) { s.routeWorkspaceRuntimeEvent(sess.WorkspaceID, sess.ID, k, d) }
+	runtimeCtx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	if existing := s.workspaceRuntimes[sess.WorkspaceID]; existing == nil {
+		shared = &interactiveWorkspaceRuntime{
+			tokenHash: confirmationHash(runtimeToken), cancel: cancel,
+			sessions: map[string]struct{}{sess.ID: {}}, activeSessionID: sess.ID,
+			starting: true, ready: make(chan struct{}),
+		}
+		s.workspaceRuntimes[sess.WorkspaceID] = shared
+		sess.mu.Lock()
+		sess.runtimeTokenHash = shared.tokenHash
+		sess.mu.Unlock()
+	} else {
+		s.mu.Unlock()
+		cancel()
+		s.startWorkspaceRuntime(ctx, sess, runtimeToken)
+		return
+	}
+	s.mu.Unlock()
+	var rt Runtime
+	var err error
+	if factory, ok := s.factory.(RuntimeFactoryWithSession); ok {
+		rt, err = factory.StartSession(runtimeCtx, InteractiveRuntimeSpec{
+			SessionID: sess.ID, WorkspaceID: sess.WorkspaceID, ProjectID: sess.ProjectID,
+			AgentPackID:  sess.AgentID,
+			PresetIDs:    []string{"project-creator", "creation-planner", "postmortem-review"},
+			RuntimeToken: runtimeToken, InitialContext: sess.initialContext,
+		}, emit)
+	} else if _, ok := s.factory.(RuntimeFactoryWithContext); ok {
+		// Older factories cannot multiplex sessions. Keep the explicit failure
+		// visible instead of silently creating one Pod per mode.
+		err = errors.New("interactive workspace runtime requires a session-capable runtime factory")
+	} else {
+		err = errors.New("interactive workspace runtime requires a session-capable runtime factory")
+	}
+	if err != nil {
+		cancel()
+		s.mu.Lock()
+		if current := s.workspaceRuntimes[sess.WorkspaceID]; current == shared {
+			current.startErr = err
+			delete(s.workspaceRuntimes, sess.WorkspaceID)
+			close(current.ready)
+		}
+		s.mu.Unlock()
+		s.logRuntimeFields("error", sess.ID, "interactive workspace runtime failed to start", err, identityFields)
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive runtime failed to start: %v", err)})
+		s.closeSession(sess.ID, false)
+		return
+	}
+	if rt == nil {
+		cancel()
+		err = errors.New("interactive workspace runtime factory returned nil runtime")
+		s.mu.Lock()
+		if current := s.workspaceRuntimes[sess.WorkspaceID]; current == shared {
+			current.startErr = err
+			delete(s.workspaceRuntimes, sess.WorkspaceID)
+			close(current.ready)
+		}
+		s.mu.Unlock()
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": err.Error()})
+		s.closeSession(sess.ID, false)
+		return
+	}
+	s.mu.Lock()
+	if current := s.workspaceRuntimes[sess.WorkspaceID]; current != shared {
+		s.mu.Unlock()
+		cancel()
+		_ = rt.Close()
+		return
+	}
+	sess.mu.Lock()
+	if sess.Closed {
+		sess.mu.Unlock()
+		s.mu.Unlock()
+		cancel()
+		_ = rt.Close()
+		return
+	}
+	shared.runtime = rt
+	shared.starting = false
+	sess.runtime = rt
+	sess.runtimeTokenHash = shared.tokenHash
+	close(shared.ready)
+	sess.mu.Unlock()
+	s.mu.Unlock()
+	s.persistWorkspaceRuntimeStatus(sess.WorkspaceID, "running")
+	s.initializeRuntimeSession(ctx, sess, rt)
+}
+
+// initializeRuntimeSession starts one logical DSH session inside an already
+// running Bridge. It is intentionally separate from Pod startup so mode
+// switching never rebinds an existing session's preset.
+func (s *InteractiveService) initializeRuntimeSession(ctx context.Context, sess *InteractiveSession, rt Runtime) {
+	if sess == nil || rt == nil {
+		return
+	}
+	if err := rt.Command(ctx, "session/start", map[string]any{"sessionId": sess.ID, "presetId": sess.AgentID, "initialContext": sess.initialContext}); err != nil {
+		s.logRuntimeFields("error", sess.ID, "interactive runtime failed to initialize", err, map[string]any{"mode_id": sess.ModeID, "workspace_id": sess.WorkspaceID})
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive runtime failed to initialize: %v", err)})
+		return
+	}
+	sess.mu.Lock()
+	if sess.Closed {
+		sess.mu.Unlock()
+		return
+	}
+	sess.runtimeStarted = true
+	sess.Status = "running"
+	sess.mu.Unlock()
+	s.persistAssistantSessionStatus(sess, "running")
+	s.persistWorkspaceRuntimeStatus(sess.WorkspaceID, "running")
+	opening := interactiveOpeningPrompt(sess.Intent)
+	if opening == "" {
+		return
+	}
+	sess.mu.Lock()
+	if sess.initialPromptSent || sess.Closed {
+		sess.mu.Unlock()
+		return
+	}
+	sess.busy = true
+	sess.commandSequence++
+	sess.activeCommand = sess.commandSequence
+	sess.activeCommandAt = time.Now()
+	commandSeq := sess.activeCommand
+	sess.mu.Unlock()
+	if err := rt.Command(ctx, "session/prompt", map[string]any{"sessionId": sess.ID, "contentBlocks": []map[string]string{{"type": "text", "text": opening}}}); err != nil {
+		sess.mu.Lock()
+		sess.busy = false
+		sess.activeCommand = 0
+		sess.activeCommandAt = time.Time{}
+		sess.mu.Unlock()
+		s.runtimeEvent(sess.ID, "session.error", map[string]any{"status": "runtime_failed", "message": fmt.Sprintf("interactive opening prompt failed: %v", err)})
+		return
+	}
+	sess.mu.Lock()
+	sess.initialPromptSent = true
+	sess.mu.Unlock()
+	s.logRuntimeFields("info", sess.ID, "interactive opening prompt sent", nil, map[string]any{"command": "session/prompt", "command_seq": commandSeq})
+}
+
+func workspaceRuntimeSessionID(data any) string {
+	fields, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	value, _ := fields["session_id"].(string)
+	return strings.TrimSpace(value)
+}
+
+// routeWorkspaceRuntimeEvent demultiplexes Bridge notifications by the DSH
+// session id embedded in each event. Lifecycle heartbeats and process exits
+// apply to the whole shared runtime.
+func (s *InteractiveService) routeWorkspaceRuntimeEvent(workspaceID, defaultSessionID, typ string, data any) {
+	s.mu.RLock()
+	shared := s.workspaceRuntimes[workspaceID]
+	ids := make([]string, 0)
+	active := defaultSessionID
+	if shared != nil {
+		ids = make([]string, 0, len(shared.sessions))
+		for id := range shared.sessions {
+			ids = append(ids, id)
+		}
+		if shared.activeSessionID != "" {
+			active = shared.activeSessionID
+		}
+	}
+	s.mu.RUnlock()
+	if len(ids) == 0 {
+		if defaultSessionID != "" {
+			s.runtimeEvent(defaultSessionID, typ, data)
+		}
+		return
+	}
+	if typ == "session.heartbeat" {
+		for _, id := range ids {
+			s.renewSession(id)
+		}
+		return
+	}
+	if typ == "runtime.exit" {
+		for _, id := range ids {
+			s.runtimeEvent(id, typ, data)
+		}
+		return
+	}
+	target := workspaceRuntimeSessionID(data)
+	if target == "" {
+		target = active
+	}
+	for _, id := range ids {
+		if id == target {
+			s.runtimeEvent(id, typ, data)
+			return
+		}
+	}
+}
+
+func (s *InteractiveService) setWorkspaceRuntimeActive(workspaceID, sessionID string) {
+	if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	s.mu.Lock()
+	if runtime := s.workspaceRuntimes[workspaceID]; runtime != nil {
+		runtime.activeSessionID = sessionID
+	}
+	s.mu.Unlock()
+}
+
+func (s *InteractiveService) persistWorkspaceRuntimeStatus(workspaceID, status string) {
+	if strings.TrimSpace(workspaceID) == "" || s.repo == nil || s.repo.AssistantWorkspaces() == nil {
+		return
+	}
+	if err := s.repo.AssistantWorkspaces().SetRuntimeStatus(context.Background(), workspaceID, status, time.Now().UTC()); err != nil {
+		s.logRuntimeFields("warn", workspaceID, "failed to persist assistant workspace runtime status", err, map[string]any{"runtime_status": status})
+	}
+}
+
+func (s *InteractiveService) startStandaloneRuntime(ctx context.Context, sess *InteractiveSession, runtimeToken string) {
 	identityFields := map[string]any{"agent_id": sess.AgentID, "intent": sess.Intent, "mode_id": sess.ModeID}
 	s.logRuntimeFields("info", sess.ID, "interactive runtime starting", nil, identityFields)
 	emit := func(k string, d any) { s.runtimeEvent(sess.ID, k, d) }
 	var rt Runtime
 	var e error
 	if factory, ok := s.factory.(RuntimeFactoryWithSession); ok {
-		rt, e = factory.StartSession(ctx, InteractiveRuntimeSpec{SessionID: sess.ID, ProjectID: sess.ProjectID, AgentPackID: sess.AgentID, RuntimeToken: runtimeToken, InitialContext: sess.initialContext}, emit)
+		rt, e = factory.StartSession(ctx, InteractiveRuntimeSpec{SessionID: sess.ID, WorkspaceID: sess.WorkspaceID, ProjectID: sess.ProjectID, AgentPackID: sess.AgentID, PresetIDs: []string{"project-creator", "creation-planner", "postmortem-review"}, RuntimeToken: runtimeToken, InitialContext: sess.initialContext}, emit)
 	} else if factory, ok := s.factory.(RuntimeFactoryWithContext); ok {
 		rt, e = factory.StartWithContext(ctx, sess.ID, sess.AgentID, runtimeToken, sess.initialContext, emit)
 	} else {
@@ -1313,6 +1707,7 @@ func (s *InteractiveService) closeSessionAtDeadline(id string, generation uint64
 	sess.runtime = nil
 	cancel := sess.cancel
 	sess.cancel = nil
+	workspaceID := sess.WorkspaceID
 	leaseScope := sess.leaseScope
 	sess.leaseScope = ""
 	// Do not retain generated content or a confirmation token after the lease
@@ -1340,6 +1735,26 @@ func (s *InteractiveService) closeSessionAtDeadline(id string, generation uint64
 	}
 	status := sess.Status
 	sess.mu.Unlock()
+	// A Workspace owns one Bridge for all of its logical mode sessions. Closing
+	// one mode must not tear down the Pod used by the other modes. Remove the
+	// logical session first, then close the shared runtime only when no modes
+	// remain.
+	var sharedRuntime Runtime
+	var sharedCancel context.CancelFunc
+	sharedRuntimeClosed := false
+	if workspaceID != "" {
+		s.mu.Lock()
+		if shared := s.workspaceRuntimes[workspaceID]; shared != nil {
+			delete(shared.sessions, id)
+			if len(shared.sessions) == 0 {
+				sharedRuntime = shared.runtime
+				sharedCancel = shared.cancel
+				sharedRuntimeClosed = true
+				delete(s.workspaceRuntimes, workspaceID)
+			}
+		}
+		s.mu.Unlock()
+	}
 	if sess.ModeID != "" && s.repo != nil && s.repo.AssistantSessions() != nil {
 		if !shouldEmitExpired && status != "error" && status != "committed" {
 			status = "closed"
@@ -1353,11 +1768,23 @@ func (s *InteractiveService) closeSessionAtDeadline(id string, generation uint64
 	if sess.ModeID != "" {
 		s.logRuntimeFields("info", sess.ID, "assistant session closed", nil, map[string]any{"mode_id": sess.ModeID, "status": status, "lease_release_attempted": true})
 	}
-	if rt != nil {
-		_ = rt.Close()
-	}
-	if cancel != nil {
-		cancel()
+	if workspaceID != "" {
+		if sharedRuntime != nil {
+			_ = sharedRuntime.Close()
+		}
+		if sharedCancel != nil {
+			sharedCancel()
+		}
+		if sharedRuntimeClosed {
+			s.persistWorkspaceRuntimeStatus(workspaceID, "closed")
+		}
+	} else {
+		if rt != nil {
+			_ = rt.Close()
+		}
+		if cancel != nil {
+			cancel()
+		}
 	}
 	s.closeWatchers(sess)
 	s.scheduleTombstoneCollection(id, sess)
@@ -1793,10 +2220,17 @@ func (s *InteractiveService) ResolveRuntimeSession(runtimeToken string) (string,
 	now := time.Now()
 	s.mu.RLock()
 	sessions := make([]*InteractiveSession, 0, len(s.sessions))
+	workspaceActive := map[string]string{}
+	for workspaceID, runtime := range s.workspaceRuntimes {
+		if runtime != nil && runtime.tokenHash != "" && runtime.activeSessionID != "" {
+			workspaceActive[workspaceID] = runtime.activeSessionID
+		}
+	}
 	for _, sess := range s.sessions {
 		sessions = append(sessions, sess)
 	}
 	s.mu.RUnlock()
+	var fallback *InteractiveSession
 	for _, sess := range sessions {
 		sess.mu.Lock()
 		closed := sess.Closed
@@ -1805,8 +2239,22 @@ func (s *InteractiveService) ResolveRuntimeSession(runtimeToken string) (string,
 		id, userID, expiresAt := sess.ID, sess.UserID, sess.ExpiresAt
 		sess.mu.Unlock()
 		if !closed && !expired && hash != "" && confirmationMatches(runtimeToken, hash) {
-			return id, userID, expiresAt, nil
+			if sess.WorkspaceID == "" {
+				return id, userID, expiresAt, nil
+			}
+			if workspaceActive[sess.WorkspaceID] == id {
+				return id, userID, expiresAt, nil
+			}
+			if fallback == nil {
+				fallback = sess
+			}
 		}
+	}
+	if fallback != nil {
+		fallback.mu.Lock()
+		id, userID, expiresAt := fallback.ID, fallback.UserID, fallback.ExpiresAt
+		fallback.mu.Unlock()
+		return id, userID, expiresAt, nil
 	}
 	return "", "", time.Time{}, ErrInteractiveToken
 }
@@ -2624,7 +3072,7 @@ type ExecRuntimeFactory struct {
 }
 
 func (f ExecRuntimeFactory) Start(ctx context.Context, sessionID, _ string, runtimeToken string, emit func(string, any)) (Runtime, error) {
-	return f.start(ctx, sessionID, "project-creator", runtimeToken, "", emit)
+	return f.start(ctx, sessionID, "project-creator", runtimeToken, "", "", nil, nil, emit)
 }
 
 func (f ExecRuntimeFactory) StartWithContext(ctx context.Context, sessionID, presetID string, runtimeToken, initialContext string, emit func(string, any)) (Runtime, error) {
@@ -2633,19 +3081,35 @@ func (f ExecRuntimeFactory) StartWithContext(ctx context.Context, sessionID, pre
 		return nil, err
 	}
 	f.DSHPatch = patch
-	return f.start(ctx, sessionID, presetID, runtimeToken, initialContext, emit)
+	return f.start(ctx, sessionID, presetID, runtimeToken, initialContext, "", nil, nil, emit)
 }
 
 func (f ExecRuntimeFactory) StartSession(ctx context.Context, spec InteractiveRuntimeSpec, emit func(string, any)) (Runtime, error) {
-	patch, err := interactiveExecPresetPatchPath(f.DSHPatch, spec.AgentPackID)
+	basePatch := f.DSHPatch
+	patch, err := interactiveExecPresetPatchPath(basePatch, spec.AgentPackID)
 	if err != nil {
 		return nil, err
 	}
 	f.DSHPatch = patch
-	return f.start(ctx, spec.SessionID, spec.AgentPackID, spec.RuntimeToken, spec.InitialContext, emit)
+	if strings.TrimSpace(spec.WorkspaceID) == "" {
+		return f.start(ctx, spec.SessionID, spec.AgentPackID, spec.RuntimeToken, spec.InitialContext, "", nil, nil, emit)
+	}
+	presetIDs := append([]string(nil), spec.PresetIDs...)
+	if len(presetIDs) == 0 {
+		presetIDs = []string{"project-creator", "creation-planner", "postmortem-review"}
+	}
+	patches := make([]string, 0, len(presetIDs))
+	for _, presetID := range presetIDs {
+		presetPatch, patchErr := interactiveExecPresetPatchPath(basePatch, presetID)
+		if patchErr != nil {
+			return nil, patchErr
+		}
+		patches = appendInteractiveUniqueString(patches, presetPatch)
+	}
+	return f.start(ctx, spec.SessionID, spec.AgentPackID, spec.RuntimeToken, spec.InitialContext, spec.WorkspaceID, presetIDs, patches, emit)
 }
 
-func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, presetID, runtimeToken, initialContext string, emit func(string, any)) (Runtime, error) {
+func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, presetID, runtimeToken, initialContext, workspaceID string, presetIDs, patches []string, emit func(string, any)) (Runtime, error) {
 	if strings.TrimSpace(f.Command) == "" {
 		return nil, ErrInteractiveAgent
 	}
@@ -2682,10 +3146,13 @@ func (f ExecRuntimeFactory) start(ctx context.Context, sessionID, presetID, runt
 	cmd.Env = dshBridgeRuntimeEnvironment(dshHome, f.APIKey)
 	cmd.Env = append(cmd.Env,
 		"ANBAN_DSH_BRIDGE_SESSION_ID="+sessionID,
+		"ANBAN_DSH_BRIDGE_WORKSPACE_ID="+workspaceID,
+		"ANBAN_DSH_BRIDGE_PRESETS="+strings.Join(presetIDs, ","),
 		"ANBAN_DSH_BRIDGE_PRESET_ID="+presetID,
 		"ANBAN_DSH_BRIDGE_RUNTIME_TOKEN="+runtimeToken,
 		"ANBAN_DSH_BRIDGE_HOME="+dshHome,
 		"ANBAN_DSH_BRIDGE_PATCH="+f.DSHPatch,
+		"ANBAN_DSH_BRIDGE_PATCHES="+strings.Join(patches, ","),
 		"ANBAN_DSH_BRIDGE_INITIAL_CONTEXT_FILE="+initialContextFile,
 		"ANBAN_DSH_BRIDGE_MCP_URL="+f.MCPURL,
 	)
