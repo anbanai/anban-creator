@@ -59,7 +59,7 @@ describe('TaskRuntimeContext', () => {
     expect(screen.getByText('7 / 8 个')).toBeInTheDocument()
     expect(screen.getAllByText('点击查看详情')).toHaveLength(2)
     expect(screen.getByText('模型和 MCP 正常')).toBeInTheDocument()
-    expect(screen.getByText('创作项目已更新，作品仍使用冻结版本')).toBeInTheDocument()
+    expect(screen.getByText('人设已更新，作品仍使用冻结版本')).toBeInTheDocument()
   })
 
   it('opens a detail sheet with safe technical identifiers only', () => {

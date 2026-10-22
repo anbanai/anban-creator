@@ -76,10 +76,10 @@ export default function IlinkBindingSection() {
     setSavingProject(true)
     try {
       await api.ilink.setDefaultProject(projectId)
-      toast.success('默认创作项目已更新')
+      toast.success('默认人设已更新')
       queryClient.invalidateQueries({ queryKey: ['ilink-status'] })
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '设置默认创作项目失败')
+      toast.error(err instanceof Error ? err.message : '设置默认人设失败')
     } finally {
       setSavingProject(false)
     }
@@ -127,8 +127,8 @@ export default function IlinkBindingSection() {
           <>
             {bindCode ? <BindCodePanel bindCode={bindCode.bind_code} onCopy={handleCopy} /> : null}
             <div className="space-y-1.5">
-              <p className="text-xs font-medium text-foreground">默认创作项目</p>
-              <p className="text-xs text-muted-foreground">通过微信创建作品时使用此创作项目。</p>
+              <p className="text-xs font-medium text-foreground">默认人设</p>
+              <p className="text-xs text-muted-foreground">通过微信创建作品时使用此人设。</p>
               <DefaultProjectSelect
                 value={status?.default_project_id ?? ''}
                 disabled={savingProject}
@@ -202,7 +202,7 @@ function DefaultProjectSelect({
   return (
     <NativeSelect value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
       <NativeSelectOption value="" disabled>
-        {isLoading ? '加载中...' : '选择默认创作项目'}
+        {isLoading ? '加载中...' : '选择默认人设'}
       </NativeSelectOption>
       {projects?.map((p) => (
         <NativeSelectOption key={p.id} value={p.id}>

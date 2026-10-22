@@ -325,8 +325,8 @@ export default function PlansPage() {
         return
       }
       const message = projectsQuery.isError
-        ? getApiErrorMessage(projectsQuery.error, '加载创作项目失败，请刷新后重试')
-        : '未找到对应的创作项目，请返回项目页重试'
+        ? getApiErrorMessage(projectsQuery.error, '加载人设失败，请刷新后重试')
+        : '未找到对应的人设，请返回人设页重试'
       toast.error(message)
       setSearchParams({}, { replace: true })
       return
@@ -421,7 +421,7 @@ export default function PlansPage() {
               <div className="min-w-0 flex-1">
                 <h2 className="truncate text-sm font-semibold text-foreground">{plan.prompt || plan.title || '定时排期'}</h2>
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  {project ? <ProjectIdentity project={project} compact showAgents={false} /> : <span>未命名创作项目</span>}
+                  {project ? <ProjectIdentity project={project} compact showAgents={false} /> : <span>未命名人设</span>}
                   <span aria-hidden="true">·</span>
                   <span>{outputIDs.length} 种输出</span>
                 </div>
@@ -548,10 +548,10 @@ export default function PlansPage() {
           projects={projects}
           value={projectFilter || null}
           allowNoProject
-          noProjectLabel="全部创作项目"
+          noProjectLabel="全部人设"
           loading={projectsLoading}
           onValueChange={(id) => { setProjectFilter(id ?? ''); setPage(1) }}
-          ariaLabel="筛选创作项目"
+          ariaLabel="筛选人设"
           compact
         />
         <Input value={searchFilter} onChange={(event) => setSearchFilter(event.target.value)} placeholder="搜索排期" className="min-h-11 w-full sm:w-64" />
@@ -611,7 +611,7 @@ export default function PlansPage() {
                   disabled={isSubmitting}
                   leadingTools={(
                     <div className="flex min-w-0 flex-wrap items-center gap-1">
-                      {editingPlan ? <ProjectContextControl mode="readonly" project={selectedProject ?? null} compact /> : <ProjectContextControl mode="select" projects={projects} value={watchedProjectID || null} onValueChange={changeProject} loading={projectsLoading} disabled={isSubmitting} allowNoProject={false} placeholder="选择创作项目" ariaLabel="创作项目" compact />}
+                      {editingPlan ? <ProjectContextControl mode="readonly" project={selectedProject ?? null} compact /> : <ProjectContextControl mode="select" projects={projects} value={watchedProjectID || null} onValueChange={changeProject} loading={projectsLoading} disabled={isSubmitting} allowNoProject={false} placeholder="选择人设" ariaLabel="人设" compact />}
                       <TaskComposerParameters
                         execution={{ profiles: executionProfileOptions, value: watchedExecutionProfile as AgentExecutionProfileID | '', onChange: (value) => form.setValue('execution_profile', value, { shouldDirty: true, shouldValidate: true }), loading: executionProfilesQuery.isLoading, disabled: isSubmitting || executionProfilesQuery.isError }}
                         image={{ ratios: sharedImageRatios, ratio: watchedImageRatio, onRatioChange: (value) => form.setValue('image_ratio', value, { shouldDirty: true }), capabilities: imageCapabilities, capabilityKey: effectiveImageCapability, onCapabilityChange: (value) => form.setValue('image_capability_key', value, { shouldDirty: true, shouldValidate: true }), loading: imageCapabilitiesLoading, disabled: isSubmitting || imageCapabilitiesError }}
@@ -621,7 +621,7 @@ export default function PlansPage() {
                   )}
                   status={<span className="hidden text-xs text-muted-foreground sm:inline">每次创作均使用</span>}
                 />
-                <p className="text-xs text-muted-foreground">创作项目提供定位、关键词、视觉风格和作者设置；附件会用于每次创作。</p>
+                <p className="text-xs text-muted-foreground">人设提供定位、关键词、视觉风格和作者设置；附件会用于每次创作。</p>
                 {form.formState.errors.prompt ? <p role="alert" className="text-sm text-destructive">{form.formState.errors.prompt.message}</p> : null}
                 {attachmentUploading || attachmentFailed ? <p role="status" className="text-xs text-destructive">{attachmentUploading ? '素材上传中，请稍候。' : '素材上传失败，请重试或移除后保存。'}</p> : null}
               </section>

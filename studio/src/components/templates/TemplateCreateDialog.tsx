@@ -170,7 +170,7 @@ export function TemplateCreateDialog({ open, onOpenChange, template }: TemplateC
                 <SelectTrigger id="template-category" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>{SEEDNOTE_TEMPLATE_CATEGORIES.map((value) => <SelectItem key={value} value={value} label={value}>{value}</SelectItem>)}</SelectContent>
               </Select>
-              <p className="text-[0.8rem] text-muted-foreground">决定模板出现在哪个行业分组，也决定它能否被其他创作项目使用。</p>
+              <p className="text-[0.8rem] text-muted-foreground">决定模板出现在哪个行业分组，也决定它能否被其他人设使用。</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="template-sort-order">排序</Label>

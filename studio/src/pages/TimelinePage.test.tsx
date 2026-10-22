@@ -57,7 +57,7 @@ describe('TimelinePage filters', () => {
         title: '多 Agent 作品',
         status: 'pending',
         project_id: 'multi-agent-project',
-        project_name: '多 Agent 创作项目',
+        project_name: '多 Agent 人设',
         platform: 'wechat',
         agent_ids: ['montage', 'seednote', 'hypit'],
         scheduled_at: '2026-09-24T09:00:00Z',

@@ -242,7 +242,7 @@ export default function ProjectsPage() {
       const returnHref = createdProjectReturnHrefRef.current
       const shouldConfigureWechat = usesWechatPublishing(data.agent_ids ?? created.project.agent_ids ?? [])
       const hasExplicitCreationType = Boolean(createIntent.type)
-      toast.success(created.project.image_analysis ? '项目已创建，正在后台识别视觉风格' : '项目创建成功')
+      toast.success(created.project.image_analysis ? '人设已创建，正在后台识别视觉风格' : '人设创建成功')
       if (!returnHref && shouldConfigureWechat && hasExplicitCreationType) {
         pendingChannelProjectRef.current = created.project
         pendingOnboardingAfterChannelRef.current = created.project
@@ -256,7 +256,7 @@ export default function ProjectsPage() {
       finishProjectSave()
     },
     onError: (err, { sessionID }) => {
-      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建项目失败，请重试'))
+      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '创建人设失败，请重试'))
     },
   })
 
@@ -269,35 +269,35 @@ export default function ProjectsPage() {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
       if (sessionID !== formSessionRef.current) return
-      toast.success('项目更新成功')
+      toast.success('人设更新成功')
       finishProjectSave()
     },
     onError: (err, { sessionID }) => {
-      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '更新项目失败，请重试'))
+      if (sessionID === formSessionRef.current) toast.error(getApiErrorMessage(err, '更新人设失败，请重试'))
     },
   })
 
   const archiveMutation = useMutation({
     mutationFn: (id: string) => api.projects.archive(id),
     onSuccess: () => {
-      toast.success('项目已归档')
+      toast.success('人设已归档')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: () => {
-      toast.error('归档项目失败，请重试')
+      toast.error('归档人设失败，请重试')
     },
   })
 
   const restoreMutation = useMutation({
     mutationFn: (id: string) => api.projects.restore(id),
     onSuccess: () => {
-      toast.success('项目已恢复')
+      toast.success('人设已恢复')
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       queryClient.invalidateQueries({ queryKey: ['project-stats'] })
     },
     onError: () => {
-      toast.error('恢复项目失败，请重试')
+      toast.error('恢复人设失败，请重试')
     },
   })
 
@@ -425,12 +425,12 @@ export default function ProjectsPage() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending
   return (
     <div className="space-y-6">
-      <PageHeader title="人设" description="每个创作项目都对应一份画像。画像会沉淀定位、表达风格、受众、平台、偏好和记忆，后续创作与复盘都会以它为上下文。">
+      <PageHeader title="人设" description="每个人设都对应一份画像。画像会沉淀定位、表达风格、受众、平台、偏好和记忆，后续创作与复盘都会以它为上下文。">
         <Button variant="outline" aria-label="使用表单创建" onClick={openCreate}>
           <FilePlus2 className="h-4 w-4" />
           表单创建
         </Button>
-        <Button aria-label="智能创建项目" onClick={openCreator}>
+        <Button aria-label="智能创建人设" onClick={openCreator}>
           <Bot className="h-4 w-4" />
           AI 创建
         </Button>
@@ -443,7 +443,7 @@ export default function ProjectsPage() {
           variant="outline"
           size="sm"
           spacing={0}
-          aria-label="项目状态"
+          aria-label="人设状态"
         >
           {statusTabs.map((tab) => (
             <ToggleGroupItem key={tab.value} value={tab.value}>
@@ -455,7 +455,7 @@ export default function ProjectsPage() {
         <SearchInput
           value={searchFilter}
           onChange={setSearchFilter}
-          placeholder="搜索项目"
+          placeholder="搜索人设"
           className="w-full sm:w-64"
         />
       </div>
@@ -486,7 +486,7 @@ export default function ProjectsPage() {
           icon={Inbox}
           title={!visibleProjects.length ? (statusFilter === 'all' ? '还没有人设' : statusFilter === 'active' ? '没有活跃人设' : '没有已归档人设') : '未找到匹配的人设'}
           description={!visibleProjects.length ? '创建人设后，定位、风格和画像会一起沉淀，后续创作可以直接复用。' : '换个名称、定位或平台账号试试'}
-          action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '智能创建项目', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
+          action={!visibleProjects.length && statusFilter === 'all' && !searchFilter ? { label: '智能创建人设', onClick: openCreator } : { label: '清空筛选', onClick: () => { setSearchFilter(''); setStatusFilter('all') } }}
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
@@ -511,13 +511,13 @@ export default function ProjectsPage() {
       <Dialog open={modalOpen} onOpenChange={(v) => { if (!v) closeModal() }}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{editingProject ? '编辑项目' : '新建项目'}</DialogTitle>
+            <DialogTitle>{editingProject ? '编辑人设' : '新建人设'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
             <form id="project-form" onSubmit={handleProjectSubmit} className="max-h-[72vh] space-y-4 overflow-y-auto p-1">
               <FormField control={form.control} name="name" render={({ field }) => (
                 <FormItem className="flex items-center gap-3 space-y-0">
-                  <FormLabel className="w-20 shrink-0 text-right">项目名称</FormLabel>
+                  <FormLabel className="w-20 shrink-0 text-right">人设名称</FormLabel>
                   <FormControl>
                     <Input className="flex-1 min-w-0" placeholder="例如 我的科技博客" {...field} />
                   </FormControl>
@@ -529,8 +529,8 @@ export default function ProjectsPage() {
                 <FormItem className="rounded-lg border border-border bg-muted/20 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <FormLabel>项目类型</FormLabel>
-                      <FormDescription className="mt-1">可多选。项目会只展示并支持已选择的创作类型。</FormDescription>
+                      <FormLabel>人设类型</FormLabel>
+                      <FormDescription className="mt-1">可多选。人设会只展示并支持已选择的创作类型。</FormDescription>
                     </div>
                     <span className="rounded-full bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">{field.value?.length ?? 0} 种已选</span>
                   </div>
@@ -570,8 +570,8 @@ export default function ProjectsPage() {
               <FormField control={form.control} name="instructions" render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center gap-1">
-                    <FormLabel className="w-auto">项目定位</FormLabel>
-                    <FieldHint>每次创作都会参考这些要求，保持项目定位与表达风格一致。</FieldHint>
+                    <FormLabel className="w-auto">人设定位</FormLabel>
+                    <FieldHint>每次创作都会参考这些要求，保持人设定位与表达风格一致。</FieldHint>
                   </div>
                   <FormControl>
                     <Textarea
@@ -675,8 +675,8 @@ export default function ProjectsPage() {
       <Dialog open={Boolean(onboardingProject)} onOpenChange={(open) => { if (!open) setOnboardingProject(null) }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>开始使用这个项目</DialogTitle>
-            <p className="text-sm text-muted-foreground">项目画像已经保存。你可以马上生成第一篇作品，也可以先制定一套账号内容计划。</p>
+            <DialogTitle>开始使用这个人设</DialogTitle>
+            <p className="text-sm text-muted-foreground">人设画像已经保存。你可以马上生成第一篇作品，也可以先制定一套账号内容计划。</p>
           </DialogHeader>
           {onboardingProject && (() => {
             const { type } = getProjectCreationDefaults(onboardingProject)
@@ -700,7 +700,7 @@ export default function ProjectsPage() {
                   <span><span className="block font-medium">制定账号内容计划</span><span className="mt-1 block text-sm text-muted-foreground">按固定节奏生成作品，排期提交后才会生效。</span></span>
                 </Link>
                 <div className="flex justify-end">
-                  <Button type="button" variant="ghost" onClick={() => setOnboardingProject(null)}>先去项目页</Button>
+                  <Button type="button" variant="ghost" onClick={() => setOnboardingProject(null)}>先去人设页</Button>
                 </div>
               </div>
             )

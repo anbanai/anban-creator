@@ -14,7 +14,7 @@ function project(overrides: Partial<Project> = {}): Project {
     id: 'project-1',
     user_id: 'user-1',
     platform: 'wechat',
-    name: '公众号创作项目',
+    name: '公众号人设',
     avatar_url: '',
     profile_url: '',
     keywords: '',
@@ -61,8 +61,8 @@ describe('studio business UX helpers', () => {
       }),
     ).toMatchObject({
       id: 'no-project',
-      message: '先创建一个创作项目，再开始创作。',
-      actionLabel: '创建创作项目',
+      message: '先创建一个人设，再开始创作。',
+      actionLabel: '创建人设',
       actionHref: '/projects?return_to=%2Ftasks&create=true&type=seednote&intent=new',
       blocking: true,
     })

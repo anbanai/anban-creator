@@ -196,7 +196,7 @@ describe('command center rules', () => {
     expect(signals.readiness.publishingReady).toBe(true)
     expect(signals.readiness.checks.projects.status).toBe('ready')
     expect(signals.readiness.checks.apiKeys.status).toBe('unknown')
-    expect(signals.readiness.checks.publishing.description).toBe('1 个创作项目已配置公众号发布流程')
+    expect(signals.readiness.checks.publishing.description).toBe('1 个人设已配置公众号发布流程')
   })
 
   it('places setup review before generic creation when platform keys are not ready', () => {

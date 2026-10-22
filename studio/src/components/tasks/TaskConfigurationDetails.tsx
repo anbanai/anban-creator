@@ -147,9 +147,9 @@ export function TaskConfigurationDetails({ task, project }: TaskConfigurationDet
         </>
       ) : null}
       <section aria-labelledby="task-project-snapshot" className="flex flex-col gap-3">
-        <h3 id="task-project-snapshot" className="text-sm font-semibold">创作项目快照</h3>
+        <h3 id="task-project-snapshot" className="text-sm font-semibold">人设快照</h3>
         <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-          <Detail label="创作项目" value={projectIdentity ? <ProjectIdentity project={projectIdentity} compact /> : projectName} />
+          <Detail label="人设" value={projectIdentity ? <ProjectIdentity project={projectIdentity} compact /> : projectName} />
           <Detail label="内容类型" value={contentTypeDisplayName(task.type)} />
           <Detail label="视觉风格" value={visualStyle} wide />
           <Detail label={ratioLabel} value={task.type === 'hypit' ? task.hypit_input?.preferences?.aspect_ratio || '跟随参考视频' : imageRatio} />

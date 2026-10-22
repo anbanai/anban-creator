@@ -55,7 +55,7 @@ export default function PortraitOnboarding({ initialConversation, initialSession
     try {
       const provider = await transport.capabilities(controller.signal)
       if (controller.signal.aborted) return
-      setConnection(provider.configured ? { configured: true, model: provider.model } : { configured: false, error: production ? '访谈服务暂未开放，可以先从项目页创建。' : '请启用本机对话服务并填写 DeepSeek 配置。' })
+      setConnection(provider.configured ? { configured: true, model: provider.model } : { configured: false, error: production ? '访谈服务暂未开放，可以先从人设页创建。' : '请启用本机对话服务并填写 DeepSeek 配置。' })
       setLocalVoice(provider.speech_available)
 
     } catch {
@@ -130,7 +130,7 @@ export default function PortraitOnboarding({ initialConversation, initialSession
   const ready = isPortraitReadyForCreation(candidate)
 
   return <div className="portrait-preview">
-    <div className="portrait-preview-bar"><span>{production ? '认识你 · 整理画像 · 开始创作' : `真实对话 · DeepSeek${connection.model ? ` / ${connection.model}` : ''}`}</span><span>{production ? '画像随对话更新；点击保存才会写入项目。' : '本机新界面 · 确认后可保存项目并生成作品'}</span></div>
+    <div className="portrait-preview-bar"><span>{production ? '认识你 · 整理画像 · 开始创作' : `真实对话 · DeepSeek${connection.model ? ` / ${connection.model}` : ''}`}</span><span>{production ? '画像随对话更新；点击保存才会写入人设。' : '本机新界面 · 确认后可保存人设并生成作品'}</span></div>
     <nav className="portrait-preview-nav" aria-label="画像访谈导航"><strong>Anban <span>让好内容，从认识你开始</span></strong><button onClick={() => setResetPrompt(true)}>从空白重新开始</button></nav>
     {!connection.configured && <div className="portrait-reset" role="status"><span>{checking ? '正在连接…' : connection.error || (production ? '正在准备访谈服务…' : '填写本机 DeepSeek 配置后，即可开始真实对话。')}</span><button disabled={checking || busy} onClick={() => void refreshConfiguration()}>重新连接</button></div>}
     {resetPrompt && <div className="portrait-reset" role="alert"><span>重新开始会清空本次对话、画像和未发送文字。</span><button onClick={() => setResetPrompt(false)}>继续当前对话</button><button onClick={reset}>清空并重新开始</button></div>}
@@ -140,7 +140,7 @@ export default function PortraitOnboarding({ initialConversation, initialSession
       <p>{candidate?.summary || '还没有完整的画像也没关系，先说说这次想创作什么。'}</p>
       <p>面向：{candidate?.facets.audience?.text || '待补充'}<br />发布平台：{candidate?.facets.platforms?.text || '可在下方选择'}</p>
       {onlineDelivery && candidate ? <Suspense fallback={<p>正在连接交付流程…</p>}><OnlinePortraitDelivery candidate={candidate} messages={messages} sessionId={sessionId} production={production} initialIdea={creationIdeaInput} onIdeaChange={setCreationIdeaInput} /></Suspense>
-        : <p>这份简报来自刚才的真实对话。本机预览已完成画像整理；作品生成和正式项目保存尚未接入，没有创建或发布作品。</p>}
+        : <p>这份简报来自刚才的真实对话。本机预览已完成画像整理；作品生成和正式人设保存尚未接入，没有创建或发布作品。</p>}
       <button className="portrait-primary" onClick={() => setCreating(false)}><ArrowLeft size={15} />回到对话继续调整</button>
     </section> : <PortraitConversation key={epoch} messages={messages} draft={draft} name={candidate?.name ?? undefined} summary={candidate?.summary ?? undefined}
       creationIdea={candidate?.creationIdea?.text} localVoice={!production && localVoice} transcribe={production && localVoice ? transport.transcribe : undefined} initialInput={recoveredInput} busy={busy} error={error} ready={ready}

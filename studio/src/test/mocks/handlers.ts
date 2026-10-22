@@ -161,7 +161,7 @@ export const mockProjects: Project[] = [
     id: 'ch-1',
     user_id: '1',
     platform: 'wechat',
-    name: '测试创作项目',
+    name: '测试人设',
     avatar_url: '',
     profile_url: 'https://mp.weixin.qq.com/test',
     instructions: '测试定位',

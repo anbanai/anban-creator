@@ -108,7 +108,7 @@ function projectGroups(
 ): ProjectContextGroup[] {
   const result: ProjectContextGroup[] = []
   if (allowNoProject) result.push({ value: '上下文', items: [noProjectItem] })
-  if (projects.length) result.push({ value: '创作项目', items: projects.map((project) => ({ ...project, kind: 'project' })) })
+  if (projects.length) result.push({ value: '人设', items: projects.map((project) => ({ ...project, kind: 'project' })) })
   return result
 }
 
@@ -117,13 +117,13 @@ function SelectProjectContext({
   value,
   onValueChange,
   allowNoProject = false,
-  noProjectLabel = '不使用创作项目',
+  noProjectLabel = '不使用人设',
   createProjectHref,
   loading = false,
   disabled = false,
-  placeholder = '选择创作项目...',
+  placeholder = '选择人设...',
   compact = false,
-  ariaLabel = '创作项目上下文',
+  ariaLabel = '人设上下文',
   showAgents = true,
 }: ProjectContextSelectProps) {
   const noProjectItem = useMemo<NoProjectItem>(() => ({
@@ -201,7 +201,7 @@ function SelectProjectContext({
             {loading ? (
               <span className="flex items-center gap-1.5">
                 <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
-                加载创作项目...
+                加载人设...
               </span>
             ) : selected?.kind === 'project' ? (
               <ProjectIdentity
@@ -213,8 +213,8 @@ function SelectProjectContext({
           </span>
         </ComboboxTrigger>
         <ComboboxContent className="w-[min(36rem,calc(100vw-2rem))] min-w-0">
-          <ComboboxInput showTrigger={false} placeholder="搜索创作项目..." />
-          <ComboboxEmpty className="min-h-20 items-center">没有可用创作项目</ComboboxEmpty>
+          <ComboboxInput showTrigger={false} placeholder="搜索人设..." />
+          <ComboboxEmpty className="min-h-20 items-center">没有可用人设</ComboboxEmpty>
           <ComboboxList className="grid grid-cols-1 px-2 pb-2 pt-1 sm:grid-cols-2 sm:gap-x-2 sm:gap-y-1">
             {(group: ProjectContextGroup) => (
               <ComboboxGroup
@@ -253,7 +253,7 @@ function SelectProjectContext({
                 )}
               >
                 <PlusIcon data-icon="inline-start" />
-                新建创作项目
+                新建人设
               </Link>
             </>
           ) : null}
@@ -263,7 +263,7 @@ function SelectProjectContext({
         <span id={selectionDescriptionId} className="sr-only">{selectionDescription}</span>
       ) : null}
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-        {loading ? '正在加载创作项目' : ''}
+        {loading ? '正在加载人设' : ''}
       </span>
     </div>
   )
@@ -285,7 +285,7 @@ export function ProjectContextControl(props: ProjectContextControlProps) {
             compact={props.compact}
             showAgents={props.showAgents}
           />
-        ) : props.noProjectLabel ?? '未关联创作项目'}
+        ) : props.noProjectLabel ?? '未关联人设'}
       </div>
     )
   }

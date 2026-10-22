@@ -31,7 +31,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   window.history.replaceState(null, '', '/content-analytics?account=wechat&from=2026-09-01&to=2026-09-30')
-  vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: '', name: '共享创作项目', agent_ids: ['wechat'] }] as Awaited<ReturnType<typeof api.projects.list>>)
+  vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: '', name: '共享人设', agent_ids: ['wechat'] }] as Awaited<ReturnType<typeof api.projects.list>>)
   vi.mocked(contentAnalyticsApi.overview).mockResolvedValue(overview)
   vi.mocked(contentAnalyticsApi.contents).mockImplementation(async (_project, params) => {
     const items = [article, picture].filter(item => !params.content_type || item.content_type === params.content_type)

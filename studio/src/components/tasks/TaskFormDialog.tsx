@@ -460,15 +460,15 @@ export function TaskFormDialog({
     && !executionProfilesQuery.isLoading
     && selectedExecutionProfile?.available !== true
   const creationBlocker = mode === 'clone' && projectsLoading
-    ? { message: '正在加载可用创作项目，请稍候。', href: '' }
+    ? { message: '正在加载可用人设，请稍候。', href: '' }
     : mode === 'clone' && !selectedProject
-      ? { message: '源作品所属创作项目不可用，请选择一个有效创作项目。', href: '' }
+      ? { message: '源作品所属人设不可用，请选择一个有效人设。', href: '' }
       : !selectedProject
-        ? { message: '先选择一个创作项目。', href: '' }
+        ? { message: '先选择一个人设。', href: '' }
         : !hasProjectOutputs
-          ? { message: '当前创作项目未配置可用输出方式，请先完善项目设置。', href: '/projects' }
+          ? { message: '当前人设未配置可用输出方式，请先完善人设设置。', href: '/projects' }
         : !selectedTypeSupported
-          ? { message: '当前输出方式与创作项目不匹配，请重新选择。', href: '' }
+          ? { message: '当前输出方式与人设不匹配，请重新选择。', href: '' }
         : executionProfilesQuery.isError
           ? { message: '执行配置暂时无法加载，请稍后重试。', href: '' }
           : !watchedExecutionProfile
@@ -499,14 +499,14 @@ export function TaskFormDialog({
       allowNoProject={false}
       loading={projectsLoading}
       disabled={isSubmitting}
-      placeholder="选择创作项目"
+      placeholder="选择人设"
       createProjectHref={projectsReturnHref({ type: isViralAnalysisTask ? 'seednote' : watchedType, intent: 'new' })}
       onValueChange={changeProject}
       ariaLabel={selectedProject
-        ? `创作项目：${selectedProject.name}`
+        ? `人设：${selectedProject.name}`
         : projectsLoading
-          ? '创作项目：加载中'
-          : '创作项目：未选择'}
+          ? '人设：加载中'
+          : '人设：未选择'}
       compact={false}
     />
   )
@@ -550,7 +550,7 @@ export function TaskFormDialog({
     <section className="space-y-2 rounded-xl border border-border/80 bg-muted/20 p-3">
       <div>
         <h3 className="text-sm font-semibold">输出方式</h3>
-        <p className="mt-1 text-xs text-muted-foreground">仅显示这个创作项目已配置的能力。</p>
+        <p className="mt-1 text-xs text-muted-foreground">仅显示这个人设已配置的能力。</p>
       </div>
       <CreationTypePicker
         options={taskTypeOptions.map((option) => ({ id: option.value, label: option.label }))}
@@ -582,9 +582,9 @@ export function TaskFormDialog({
     <section className="rounded-xl border border-border/80 bg-muted/20 p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold">创作项目</h3>
+          <h3 className="text-sm font-semibold">人设</h3>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            先选项目，定位、风格和可用输出会自动带入。
+            先选人设，定位、风格和可用输出会自动带入。
           </p>
         </div>
         <div className="w-full sm:w-[min(22rem,46%)]">{projectControl}</div>
@@ -593,15 +593,15 @@ export function TaskFormDialog({
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/70 pt-3 text-xs text-muted-foreground">
           <ProjectIdentity project={selectedProject} compact showAgents={false} className="font-medium" />
           <span>可用输出：{taskTypeOptions.map((option) => option.label).join('、') || (hasProjectOutputs ? '加载中' : '未配置')}</span>
-          {!hasProjectOutputs ? <p role="alert" className="basis-full text-sm font-medium text-destructive">当前创作项目未配置可用输出方式，请先完善项目设置。</p> : null}
+          {!hasProjectOutputs ? <p role="alert" className="basis-full text-sm font-medium text-destructive">当前人设未配置可用输出方式，请先完善人设设置。</p> : null}
         </div>
       ) : (
         <div className="mt-3 border-t border-border/70 pt-3">
           <p className="text-xs text-amber-700 dark:text-amber-300">
-            {projectsLoading ? '正在加载可用创作项目，请稍候。' : '选择项目后才能开始配置创作内容。'}
+            {projectsLoading ? '正在加载可用人设，请稍候。' : '选择人设后才能开始配置创作内容。'}
           </p>
           {mode === 'clone' && !projectsLoading ? (
-            <p role="alert" className="mt-2 text-sm font-medium text-destructive">源作品所属创作项目不可用，请选择一个有效创作项目。</p>
+            <p role="alert" className="mt-2 text-sm font-medium text-destructive">源作品所属人设不可用，请选择一个有效人设。</p>
           ) : null}
         </div>
       )}
@@ -681,9 +681,9 @@ export function TaskFormDialog({
                     </span>
                   </summary>
                   <div className="mt-2 space-y-1 border-t border-border pt-2 text-muted-foreground">
-                    <p>{isMontageTask ? `创作项目定位：${selectedProject.instructions || selectedProject.positioning || '—'}` : `视觉风格：${selectedProject.visual_style || '—'}`}</p>
+                    <p>{isMontageTask ? `人设定位：${selectedProject.instructions || selectedProject.positioning || '—'}` : `视觉风格：${selectedProject.visual_style || '—'}`}</p>
                     {watchedType === 'wechat-article' ? <p>署名：{selectedProject.author || '—'} · 写作风格：{selectedProject.writer || '—'} · 排版：{selectedProject.theme || '默认'}</p> : null}
-                    <p>创建后创作项目再修改，不会影响这个作品。</p>
+                    <p>创建后人设再修改，不会影响这个作品。</p>
                   </div>
                 </details>
               ) : null}
@@ -692,13 +692,13 @@ export function TaskFormDialog({
                 <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center">
                   <p className="text-sm font-medium">
                     {selectedProject
-                      ? hasProjectOutputs && !selectedTypeSupported ? '当前输出方式与创作项目不匹配' : '当前项目暂无可用输出方式'
-                      : '先选择创作项目'}
+                      ? hasProjectOutputs && !selectedTypeSupported ? '当前输出方式与人设不匹配' : '当前人设暂无可用输出方式'
+                      : '先选择人设'}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {selectedProject && hasProjectOutputs && !selectedTypeSupported
-                      ? '请在上方选择这个项目支持的输出方式。'
-                      : '项目会决定可用的输出方式、默认风格和执行配置。'}
+                      ? '请在上方选择这个人设支持的输出方式。'
+                      : '人设会决定可用的输出方式、默认风格和执行配置。'}
                   </p>
                 </div>
               ) : <>
@@ -710,7 +710,7 @@ export function TaskFormDialog({
 
               {watchedType !== 'hypit' && <div className="pt-1">
                 <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">目标/提示词</p>
-                <p className="mb-2 text-xs text-muted-foreground">写清目标、素材用法和不能出现的表达；未填写的部分按创作项目默认值执行。</p>
+                <p className="mb-2 text-xs text-muted-foreground">写清目标、素材用法和不能出现的表达；未填写的部分按人设默认值执行。</p>
                 {!isViralAnalysisTask ? (
                   <SeednoteTemplateGallery
                     platform={selectedProject?.platform || undefined}

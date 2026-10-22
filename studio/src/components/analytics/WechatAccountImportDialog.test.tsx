@@ -9,7 +9,7 @@ import WechatAccountImportDialog from './WechatAccountImportDialog'
 vi.mock('@/lib/direct-upload', () => ({ uploadToOSS: vi.fn() }))
 vi.mock('@/lib/api/wechat-account-analytics-import', () => ({ wechatAccountAnalyticsImportApi: { preview: vi.fn(), import: vi.fn() } }))
 
-const project = { id: 'wechat-1', name: '公众号项目', platform: 'wechat' } as Project
+const project = { id: 'wechat-1', name: '公众号人设', platform: 'wechat' } as Project
 
 describe('公众号账号导入类型切换', () => {
   beforeEach(() => {

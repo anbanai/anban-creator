@@ -244,7 +244,7 @@ function formatDateTime(value?: string | null) {
 
 function friendlyTrackingError(error: string) {
   if (!error) return ''
-  if (error.includes('profile URL')) return '创作项目主页链接缺失，请检查创作项目配置'
+  if (error.includes('profile URL')) return '人设主页链接缺失，请检查人设配置'
   if (error.includes('fetch')) return '公开页面暂时无法访问，系统会继续重试'
   if (error.includes('matched')) return '尚未从主页识别到对应笔记'
   return '公开数据采集暂时异常，系统会继续重试'

@@ -151,7 +151,7 @@ describe('TemplateCreateDialog', () => {
     renderDialog()
 
     expect(screen.getByText('仅用于列表识别和搜索，不会写进生成内容。')).toBeInTheDocument()
-    expect(screen.getByText('决定模板出现在哪个行业分组，也决定它能否被其他创作项目使用。')).toBeInTheDocument()
+    expect(screen.getByText('决定模板出现在哪个行业分组，也决定它能否被其他人设使用。')).toBeInTheDocument()
     expect(screen.getByText('数值越大越靠前。')).toBeInTheDocument()
     expect(screen.getByText('这是模板的核心：应用时这段 Prompt 会作为提示词预填到创作表单里。')).toBeInTheDocument()
     expect(screen.getByText('开启后其他用户也能在模板库里看到并使用这个模板。')).toBeInTheDocument()

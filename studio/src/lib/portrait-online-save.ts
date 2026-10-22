@@ -30,17 +30,17 @@ export async function savePortraitProject(
       // Explicitly saving a later conversation may update only the version we own.
       // The existing Server confirmation API performs the final compare-and-swap.
       const latest = await client.getAccountProfile(receipt.projectId)
-      if (latest.version !== receipt.profileVersion) throw new Error('线上画像已有新版本，请到项目中核对，暂不覆盖。')
+      if (latest.version !== receipt.profileVersion) throw new Error('线上画像已有新版本，请到人设中核对，暂不覆盖。')
       save({ portraitKey: portraitKey(candidate), phase: 'project_created', baseRevision: latest.version, profileVersion: undefined })
     } else {
-      throw new Error('上次保存或生成结果尚未确认，请先到项目或任务中核对，暂不覆盖。')
+      throw new Error('上次保存或生成结果尚未确认，请先到人设或任务中核对，暂不覆盖。')
     }
   }
   if (!receipt.projectId) {
-    if (receipt.phase !== 'new') throw new Error('上次创建结果尚未确认，请到项目列表核对，暂不重复创建。')
+    if (receipt.phase !== 'new') throw new Error('上次创建结果尚未确认，请到人设列表核对，暂不重复创建。')
     save({ phase:'creating' })
     const response = await client.create(prepared.project)
-    if (!response.project?.id) throw new Error('未收到项目编号，请到项目列表核对创建结果。')
+    if (!response.project?.id) throw new Error('未收到人设编号，请到人设列表核对创建结果。')
     save({ projectId:response.project.id, phase:'project_created' })
   }
   const current = await client.getAccountProfile(receipt.projectId!)
@@ -57,11 +57,11 @@ export async function savePortraitProject(
     save({phase:receipt.taskId ? 'task_created' : 'saved',profileVersion:current.version})
     return receipt
   }
-  if (receipt.profileVersion !== undefined || (receipt.baseRevision !== undefined && current.version !== receipt.baseRevision)) throw new Error('线上画像已有新版本，请到项目中核对，暂不覆盖。')
-  if (receipt.baseRevision === undefined && current.version !== 0) throw new Error('该项目已有画像，请到项目中核对，暂不覆盖。')
+  if (receipt.profileVersion !== undefined || (receipt.baseRevision !== undefined && current.version !== receipt.baseRevision)) throw new Error('线上画像已有新版本，请到人设中核对，暂不覆盖。')
+  if (receipt.baseRevision === undefined && current.version !== 0) throw new Error('该人设已有画像，请到人设中核对，暂不覆盖。')
   save({phase:'saving',baseRevision:current.version})
   const confirmed = await client.confirmAccountProfile(receipt.projectId!, next)
-  if (confirmed.status !== 'confirmed' || confirmed.version <= current.version) throw new Error('服务端尚未确认保存结果，请检查项目后重试。')
+  if (confirmed.status !== 'confirmed' || confirmed.version <= current.version) throw new Error('服务端尚未确认保存结果，请检查人设后重试。')
   save({phase:receipt.taskId ? 'task_created' : 'saved',profileVersion:confirmed.version})
   return receipt
 }

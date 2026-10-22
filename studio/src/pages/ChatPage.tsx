@@ -105,7 +105,7 @@ function chatRequestErrorMessage(error: unknown): string {
     case 'interactive_confirmation_stale':
       return '确认信息已过期，请重新阅读当前草稿后再确认。'
     case 'interactive_session_closed':
-      return '当前会话已结束，项目尚未确认保存。你可以恢复已保留的材料后继续。'
+      return '当前会话已结束，人设尚未确认保存。你可以恢复已保留的材料后继续。'
     default:
       return error instanceof Error ? error.message : '消息发送失败，请重试。'
   }
@@ -279,7 +279,7 @@ function recoveryPrompt(session: PersistedInteractiveSession | null): string {
     memory_append: session.draft.memory_append,
   }) : ''
   const prompt = [
-    '这是一次从浏览器本地保存材料恢复的新创作项目画像会话。原 runtime 上下文已经失效，下面内容只能作为用户提供的草稿，不能视为服务端已确认的结果。',
+    '这是一次从浏览器本地保存材料恢复的新人设画像会话。原 runtime 上下文已经失效，下面内容只能作为用户提供的草稿，不能视为服务端已确认的结果。',
     '请先告诉用户已恢复哪些内容，再让用户补充或确认；完成后重新生成一个需要重新确认的新草稿。不要假装恢复了原会话，也不要直接沿用旧确认凭据。',
     messages ? `保存的历史消息：\n${messages}` : '',
     answers ? `保存的问答：\n${answers}` : '',
@@ -291,7 +291,7 @@ function recoveryPrompt(session: PersistedInteractiveSession | null): string {
 }
 
 function displayInteractiveMessage(text: string): string {
-  return text.startsWith('这是一次从浏览器本地保存材料恢复的新创作项目画像会话。')
+  return text.startsWith('这是一次从浏览器本地保存材料恢复的新人设画像会话。')
     ? '我已带入上次保存的画像材料，请根据这些内容继续并重新确认。'
     : text
 }
@@ -772,7 +772,7 @@ function ChatConversation() {
   const assistantRecoveryCheckpoint = assistantSession ? assistantCheckpointQuery.data : undefined
   const dirty = Boolean(sessionId && !committed)
 
-  useNavigationWarning(dirty, committedRef, isProjectUpdate ? '当前项目画像更新尚未完成，离开后将丢失，确定离开吗？' : '当前创作项目创建尚未完成，离开后将丢失，确定离开吗？')
+  useNavigationWarning(dirty, committedRef, isProjectUpdate ? '当前人设画像更新尚未完成，离开后将丢失，确定离开吗？' : '当前人设创建尚未完成，离开后将丢失，确定离开吗？')
 
   const closeAssistantSession = useCallback((id: string) => assistantSession ? api.assistant.close(id) : api.interactive.close(id), [assistantSession])
   const sendAssistantMessage = useCallback((id: string, text: string) => assistantSession ? api.assistant.message(id, text) : api.interactive.message(id, text), [assistantSession])
@@ -786,7 +786,7 @@ function ChatConversation() {
     const idea = readPortraitCreationHandoff(projectId)
     if (!idea) return
     portraitHandoffIdeaRef.current = idea
-    setComposer(`这是我刚完成画像初始化后的一次性创作意向。请基于项目画像先与我核对并制定创作计划，不要直接创建作品任务。\n\n本次创作意向：${idea}`)
+    setComposer(`这是我刚完成画像初始化后的一次性创作意向。请基于人设画像先与我核对并制定创作计划，不要直接创建作品任务。\n\n本次创作意向：${idea}`)
   }, [assistantModeId, assistantSession, composer, projectId])
 
   const persistAssistantCheckpoint = useCallback((id: string, status: 'draft' | 'ready' = 'draft', currentDraft = draftRef.current) => {
@@ -1139,7 +1139,7 @@ function ChatConversation() {
             }
           }))
           if (lostSession) {
-            preserveLocalMaterialAfterLostSession('创作会话已失效，项目尚未创建', 'error')
+            preserveLocalMaterialAfterLostSession('创作会话已失效，人设尚未创建', 'error')
           }
         }
         break
@@ -1817,16 +1817,16 @@ function ChatConversation() {
       {isProjectUpdate && (
         <Alert className="border-primary/25 bg-primary/[0.035]">
           <SquarePen className="size-4" />
-          <AlertTitle>更新现有项目画像</AlertTitle>
+          <AlertTitle>更新现有人设画像</AlertTitle>
           <AlertDescription>
-            正在更新 {sessionProject?.name || (projectId ? `项目 ${projectId}` : '当前创作项目')}，确认后会保存画像变更。
+            正在更新 {sessionProject?.name || (projectId ? `人设 ${projectId}` : '当前人设')}，确认后会保存画像变更。
           </AlertDescription>
         </Alert>
       )}
 
       {emptyRegistry ? (
         <Card className="mx-auto mt-16 w-full max-w-xl">
-          <CardHeader><CardTitle>创作项目创建 Agent 暂不可用</CardTitle><CardDescription>当前没有可用的交互式 Agent，可以继续使用已有的创作项目表单。</CardDescription></CardHeader>
+          <CardHeader><CardTitle>人设创建 Agent 暂不可用</CardTitle><CardDescription>当前没有可用的交互式 Agent，可以继续使用已有的人设表单。</CardDescription></CardHeader>
           <CardContent><Button onClick={() => navigate('/projects?create=true')}><SquarePen className="size-4" />使用表单创建</Button></CardContent>
         </Card>
       ) : !selectedAgent ? (
@@ -1859,7 +1859,7 @@ function ChatConversation() {
                 return <ConfirmCard key="draft-card" draft={draft} mode={assistantSession ? assistantModeId : 'profile'} isProjectUpdate={isProjectUpdate} needsReconfirmation={draftNeedsReconfirmation} canCommit={!turnActive && !sendingMessage && pendingQuestions.length === 0 && !draftNeedsReconfirmation && (assistantSession && assistantModeId !== 'profile' ? draft.ready === true : Boolean(confirmationTokenRef.current))} committing={committing} error={commitError} onCommit={() => void commitProject()} onContinue={async () => { if (!sessionId) return; confirmationTokenRef.current = null; setDraft((value) => value ? { ...value, ready: false } : value); setTimeline((items) => items.filter((entry) => entry.kind !== 'draft')); await sendAssistantMessage(sessionId, '继续编辑当前草稿').catch(() => undefined) }} />
               })}
               {streamError && <Alert variant={streamError.startsWith('对话已取消') ? 'default' : 'destructive'}>{streamError.startsWith('对话已取消') ? <Ban className="size-4" /> : <AlertTriangle className="size-4" />}<AlertTitle>{streamError.startsWith('对话已取消') ? '对话已取消' : canRecoverSavedDraft ? '原会话已失效' : runState === 'error' || runState === 'expired' || runState === 'closed' ? sessionId ? '连接已中断' : '会话需要重新开始' : '连接异常'}</AlertTitle><AlertDescription className="space-y-3"><p>{streamError}</p>{canRecoverSavedDraft && <div className="space-y-1 text-sm"><p>{assistantSession && assistantRecoveryCheckpoint ? '将从服务端保存的结构化草稿继续。' : '本地保存的消息、问答和草稿仍然保留。'}</p><p>{assistantSession && assistantRecoveryCheckpoint ? '新对话会沿用草稿摘要，逐字聊天不会回放。' : '新对话会携带最近对话材料摘要；旧 runtime 上下文不会恢复。'}</p><p>恢复后仍需阅读并重新确认画像草稿</p></div>}<div className="flex flex-wrap items-center gap-3">{canRecoverSavedDraft && <Button size="sm" onClick={recoverSavedDraft}><RotateCcw className="size-4" />{assistantSession && assistantRecoveryCheckpoint ? '恢复已保存草稿' : '恢复本地材料'}</Button>}{runState === 'error' && sessionId && <Button size="sm" variant="outline" onClick={reconnectSession}><RotateCcw className="size-4" />重新连接</Button>}{(runState === 'error' || runState === 'expired' || runState === 'closed') && !sessionId && <Button size="sm" variant="outline" onClick={() => { resetConversation(); startPromiseRef.current = null; setRestartNonce((value) => value + 1) }}><RotateCcw className="size-4" />重新开始{isProjectUpdate ? '更新' : '创建'}</Button>}</div></AlertDescription></Alert>}
-              {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{assistantSession && assistantModeId === 'review' ? '复盘已确认，待数据验证' : assistantSession && assistantModeId === 'creation' ? '创作计划已确认' : isProjectUpdate ? '创作项目画像已更新' : '创作项目已创建'}</AlertTitle><AlertDescription>{assistantSession && assistantModeId === 'review' ? '这条建议会在后续独立数据分析验证后，才更新六维画像。' : assistantSession && assistantModeId === 'creation' ? '作品任务已创建，可以查看创作进度。' : '正在打开创作项目详情。'}{createdTaskId && <Button className="mt-3" size="sm" onClick={() => navigate(`/tasks/${encodeURIComponent(createdTaskId)}`)}>查看作品任务<ArrowRight className="size-4" /></Button>}</AlertDescription></Alert>}
+              {committed && <Alert><Check className="size-4 text-emerald-600" /><AlertTitle>{assistantSession && assistantModeId === 'review' ? '复盘已确认，待数据验证' : assistantSession && assistantModeId === 'creation' ? '创作计划已确认' : isProjectUpdate ? '人设画像已更新' : '人设已创建'}</AlertTitle><AlertDescription>{assistantSession && assistantModeId === 'review' ? '这条建议会在后续独立数据分析验证后，才更新六维画像。' : assistantSession && assistantModeId === 'creation' ? '作品任务已创建，可以查看创作进度。' : '正在打开人设详情。'}{createdTaskId && <Button className="mt-3" size="sm" onClick={() => navigate(`/tasks/${encodeURIComponent(createdTaskId)}`)}>查看作品任务<ArrowRight className="size-4" /></Button>}</AlertDescription></Alert>}
             </div>
             {newMessageCount > 0 && <Button type="button" variant="secondary" size="sm" className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 shadow-md" onClick={() => scrollToLatest()}><ChevronDown className="size-4" />有 {newMessageCount} 条新消息</Button>}
             <div className="sticky bottom-0 border-t border-border bg-background/95 px-1 py-3 backdrop-blur sm:px-4 sm:py-4">
@@ -1903,7 +1903,7 @@ function ConfirmCard({ draft, mode = 'profile', isProjectUpdate, needsReconfirma
   }
   const project = draft.project ?? {}
   const dimensions = isRecord(draft.profile?.dimensions) ? draft.profile.dimensions : {}
-  return <Card className="border-emerald-500/30 bg-emerald-500/[0.035]"><CardHeader><CardTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />{needsReconfirmation ? '已保存的画像草稿' : isProjectUpdate ? '确认更新创作项目画像' : '确认创作项目画像'}</CardTitle><CardDescription>{needsReconfirmation ? '这是本地保留的旧草稿，仅供参考。旧会话确认凭据不会恢复，请先由 Agent 核对并重新生成草稿。' : isProjectUpdate ? '信息已整理完成，确认后会更新现有项目画像并保存变更。' : '信息已整理完成，确认后会创建创作项目并保存六维画像。'}</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 rounded-lg border border-border bg-background/70 p-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">创作项目名称</span><p className="font-medium">{String(project.name ?? draft.name ?? '未命名创作项目')}</p></div><div><span className="text-xs text-muted-foreground">平台</span><p className="font-medium">{platformDisplayName(typeof project.platform === 'string' ? project.platform : undefined, '待设定')}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">定位</span><Streamdown className="prose prose-sm mt-1 max-w-none break-words dark:prose-invert">{String(project.instructions ?? project.description ?? '已收集')}</Streamdown></div></div><div><p className="text-xs font-medium text-muted-foreground">六维画像摘要</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{DIMENSIONS.map(([key, label]) => <div key={key} className="rounded-lg border border-border bg-background/60 p-3"><p className="text-xs text-muted-foreground">{label}</p><Streamdown className="prose prose-sm mt-1 max-w-none break-words dark:prose-invert">{summarizeDimension(dimensions[key])}</Streamdown></div>)}</div></div>{(draft.missing_fields?.length || draft.inferred_fields?.length) ? <div className="grid gap-3 sm:grid-cols-2"><div><p className="text-xs font-medium text-muted-foreground">待补充字段</p><p className="mt-1 text-sm leading-5">{draft.missing_fields?.length ? draft.missing_fields.join('、') : '暂无'}</p></div><div><p className="text-xs font-medium text-muted-foreground">推断字段</p><p className="mt-1 text-sm leading-5">{draft.inferred_fields?.length ? draft.inferred_fields.join('、') : '暂无'}</p></div></div> : null}{draft.memory_append && <div className="rounded-lg border border-border bg-background/70 p-3"><p className="text-xs font-medium text-muted-foreground">将追加到项目记忆的内容</p><Streamdown className="prose prose-sm mt-1 max-w-none break-words dark:prose-invert">{draft.memory_append}</Streamdown></div>}{needsReconfirmation ? <p className="text-sm text-amber-700 dark:text-amber-400">保存草稿需要重新确认</p> : !canCommit && <p className="text-sm text-muted-foreground">确认凭据尚未就绪，请等待会话继续同步。</p>}{error && <p className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button onClick={onCommit} disabled={committing || !canCommit}>{committing && <Loader2 className="size-4 animate-spin" />}{needsReconfirmation ? '等待重新确认' : `确认${isProjectUpdate ? '更新画像' : '创建创作项目'}`}</Button><Button variant="outline" onClick={onContinue} disabled={committing}><SquarePen className="size-4" />继续编辑</Button></div></CardContent></Card>
+  return <Card className="border-emerald-500/30 bg-emerald-500/[0.035]"><CardHeader><CardTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />{needsReconfirmation ? '已保存的画像草稿' : isProjectUpdate ? '确认更新人设画像' : '确认人设画像'}</CardTitle><CardDescription>{needsReconfirmation ? '这是本地保留的旧草稿，仅供参考。旧会话确认凭据不会恢复，请先由 Agent 核对并重新生成草稿。' : isProjectUpdate ? '信息已整理完成，确认后会更新现有人设画像并保存变更。' : '信息已整理完成，确认后会创建人设并保存六维画像。'}</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid gap-2 rounded-lg border border-border bg-background/70 p-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-muted-foreground">人设名称</span><p className="font-medium">{String(project.name ?? draft.name ?? '未命名人设')}</p></div><div><span className="text-xs text-muted-foreground">平台</span><p className="font-medium">{platformDisplayName(typeof project.platform === 'string' ? project.platform : undefined, '待设定')}</p></div><div className="sm:col-span-2"><span className="text-xs text-muted-foreground">定位</span><Streamdown className="prose prose-sm mt-1 max-w-none break-words dark:prose-invert">{String(project.instructions ?? project.description ?? '已收集')}</Streamdown></div></div><div><p className="text-xs font-medium text-muted-foreground">六维画像摘要</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{DIMENSIONS.map(([key, label]) => <div key={key} className="rounded-lg border border-border bg-background/60 p-3"><p className="text-xs text-muted-foreground">{label}</p><Streamdown className="prose prose-sm mt-1 max-w-none break-words dark:prose-invert">{summarizeDimension(dimensions[key])}</Streamdown></div>)}</div></div>{(draft.missing_fields?.length || draft.inferred_fields?.length) ? <div className="grid gap-3 sm:grid-cols-2"><div><p className="text-xs font-medium text-muted-foreground">待补充字段</p><p className="mt-1 text-sm leading-5">{draft.missing_fields?.length ? draft.missing_fields.join('、') : '暂无'}</p></div><div><p className="text-xs font-medium text-muted-foreground">推断字段</p><p className="mt-1 text-sm leading-5">{draft.inferred_fields?.length ? draft.inferred_fields.join('、') : '暂无'}</p></div></div> : null}{draft.memory_append && <div className="rounded-lg border border-border bg-background/70 p-3"><p className="text-xs font-medium text-muted-foreground">将追加到人设记忆的内容</p><Streamdown className="prose prose-sm mt-1 max-w-none break-words dark:prose-invert">{draft.memory_append}</Streamdown></div>}{needsReconfirmation ? <p className="text-sm text-amber-700 dark:text-amber-400">保存草稿需要重新确认</p> : !canCommit && <p className="text-sm text-muted-foreground">确认凭据尚未就绪，请等待会话继续同步。</p>}{error && <p className="text-sm text-destructive">{error}</p>}<div className="flex flex-wrap gap-2"><Button onClick={onCommit} disabled={committing || !canCommit}>{committing && <Loader2 className="size-4 animate-spin" />}{needsReconfirmation ? '等待重新确认' : `确认${isProjectUpdate ? '更新画像' : '创建人设'}`}</Button><Button variant="outline" onClick={onContinue} disabled={committing}><SquarePen className="size-4" />继续编辑</Button></div></CardContent></Card>
 }
 
 function summarizeDimension(value: unknown): string {

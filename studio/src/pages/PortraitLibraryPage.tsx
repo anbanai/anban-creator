@@ -35,6 +35,6 @@ export default function PortraitLibraryPage() {
         <div className="mt-auto flex flex-wrap gap-3 border-t pt-4 text-sm"><Link className="inline-flex min-h-10 items-center gap-1 font-medium text-primary" to={`/portraits/${project.id}`}>查看与修改<ArrowRight className="size-4" /></Link><Link className="inline-flex min-h-10 items-center text-muted-foreground hover:text-foreground" to={updatePortraitHref(project.id)}>继续访谈</Link></div>
       </article>
     })}</div>}
-    <p className="text-xs leading-5 text-muted-foreground">现有项目的画像已经列在这里，无需重新录入。归档只表示暂停使用，画像仍会保留。</p>
+    <p className="text-xs leading-5 text-muted-foreground">现有人设的画像已经列在这里，无需重新录入。归档只表示暂停使用，画像仍会保留。</p>
   </section>
 }

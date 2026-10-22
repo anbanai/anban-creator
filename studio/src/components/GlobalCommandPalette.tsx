@@ -22,7 +22,7 @@ import { useAuth } from '@/contexts/AuthContext'
 
 const shortcutMap: Record<string, string> = {
   '首页': 'g d',
-  '创作项目': 'g c',
+  '人设': 'g c',
   '排期': 'g p',
   '作品': 'g t',
   '时间线': 'g l',
@@ -160,7 +160,7 @@ export default function GlobalCommandPalette() {
           </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => navigate(projectsReturnHref({ type: 'seednote', intent: 'new' })))}>
             <FolderPlus className="mr-2 h-4 w-4" />
-            新建创作项目
+            新建人设
           </CommandItem>
         </CommandGroup>
 

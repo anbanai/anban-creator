@@ -46,7 +46,7 @@ vi.mock('@/lib/interactive-events', async () => {
 const agent = {
   id: 'project-creator',
   display_name: '画像模式',
-  description: '创建创作项目',
+  description: '创建人设',
   available: true,
 }
 
@@ -267,7 +267,7 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => expect(assistantMocks.message).toHaveBeenCalled())
-    await screen.findByRole('button', { name: '确认创建创作项目' })
+    await screen.findByRole('button', { name: '确认创建人设' })
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
   })
@@ -350,11 +350,11 @@ describe('ChatPage', () => {
 
   it('asks before cancelling and preserves saved conversation material', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
-      { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '已整理的项目方向' }) },
+      { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '已整理的人设方向' }) },
     ], signal))
     renderChat('/projects/create')
 
-    expect(await screen.findByText('已整理的项目方向')).toBeInTheDocument()
+    expect(await screen.findByText('已整理的人设方向')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消对话' }))
 
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Agent 会立即停止')
@@ -364,14 +364,14 @@ describe('ChatPage', () => {
     await waitFor(() => expect(interactiveMocks.close).toHaveBeenCalledWith('session-1'))
     expect(assistantMocks.checkpoint).toHaveBeenCalledWith('session-1', expect.objectContaining({ status: 'draft' }))
     expect(assistantMocks.checkpoint.mock.invocationCallOrder[0]).toBeLessThan(assistantMocks.close.mock.invocationCallOrder[0]!)
-    expect(screen.getByText('已整理的项目方向')).toBeInTheDocument()
+    expect(screen.getByText('已整理的人设方向')).toBeInTheDocument()
     expect(screen.getByText('对话已取消')).toBeInTheDocument()
     expect(screen.getByText('已取消')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复已保存草稿' })).toBeInTheDocument()
     const saved = JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')
     expect(saved.sessionId).toBeUndefined()
     expect(saved.terminalState).toBe('closed')
-    expect(saved.messages).toEqual(expect.arrayContaining([expect.objectContaining({ text: '已整理的项目方向' })]))
+    expect(saved.messages).toEqual(expect.arrayContaining([expect.objectContaining({ text: '已整理的人设方向' })]))
   })
 
   it('keeps an Assistant session open when its cancellation checkpoint cannot be saved', async () => {
@@ -545,7 +545,7 @@ describe('ChatPage', () => {
     ], signal))
     renderChat('/projects/create')
 
-    fireEvent.click(await screen.findByRole('button', { name: '确认创建创作项目' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认创建人设' }))
     await waitFor(() => expect(assistantMocks.commit).toHaveBeenCalledTimes(1))
 
     expect(screen.getByRole('button', { name: /画像模式/ })).toBeDisabled()
@@ -896,11 +896,11 @@ describe('ChatPage', () => {
       lastEventId: '3',
       messages: [{ id: '1', role: 'assistant', text: '缓存里的消息' }],
       timeline: [{ kind: 'draft', id: 'draft' }],
-      draft: { revision: 1, ready: true, project: { name: '创作项目' } },
+      draft: { revision: 1, ready: true, project: { name: '人设' } },
     }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { id: '1', event: 'assistant.message', data: JSON.stringify({ text: '缓存里的消息' }) },
-      { id: '2', event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, project: { name: '创作项目' } } }) },
+      { id: '2', event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, project: { name: '人设' } } }) },
     ], signal))
 
     renderChat()
@@ -969,16 +969,16 @@ describe('ChatPage', () => {
       sessionId: 'session-1',
       lastEventId: '10',
       draftReadyEventId: '9',
-      draft: { revision: 1, ready: true, project: { name: '测试项目', platform: 'wechat' } },
+      draft: { revision: 1, ready: true, project: { name: '测试人设', platform: 'wechat' } },
       timeline: [{ kind: 'draft', id: 'draft' }],
     }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
-      { id: '9', event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, confirmation_token: 'secret-token', project: { name: '测试项目', platform: 'wechat' } } }) },
+      { id: '9', event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, confirmation_token: 'secret-token', project: { name: '测试人设', platform: 'wechat' } } }) },
     ], signal))
 
     renderChat('/projects/create')
 
-    const commit = await screen.findByRole('button', { name: '确认创建创作项目' })
+    const commit = await screen.findByRole('button', { name: '确认创建人设' })
     await waitFor(() => expect(streamMock.mock.calls[0]?.[3]).toEqual(expect.objectContaining({ lastEventId: '8' })))
     expect(commit).toBeEnabled()
     expect(JSON.parse(sessionStorage.getItem('anban:assistant-session:test-user:profile:new:none') ?? '{}')).not.toHaveProperty('confirmation_token')
@@ -989,7 +989,7 @@ describe('ChatPage', () => {
       sessionId: 'session-1',
       lastEventId: '40',
       draftReadyEventId: '9',
-      draft: { revision: 1, ready: true, project: { name: '恢复项目', platform: 'wechat' } },
+      draft: { revision: 1, ready: true, project: { name: '恢复人设', platform: 'wechat' } },
       timeline: [{ kind: 'draft', id: 'draft', eventId: 9 }],
     }))
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
@@ -1001,7 +1001,7 @@ describe('ChatPage', () => {
           busy: false,
           questions: [],
           draft_event_id: 9,
-          draft: { revision: 1, ready: true, confirmation_token: 'snapshot-secret', project: { name: '恢复项目', platform: 'wechat' } },
+          draft: { revision: 1, ready: true, confirmation_token: 'snapshot-secret', project: { name: '恢复人设', platform: 'wechat' } },
         }),
       },
       { id: '42', event: 'assistant.message', data: JSON.stringify({ text: '草稿之后的新消息' }) },
@@ -1009,7 +1009,7 @@ describe('ChatPage', () => {
 
     renderChat('/projects/create')
 
-    const commit = await screen.findByRole('button', { name: '确认创建创作项目' })
+    const commit = await screen.findByRole('button', { name: '确认创建人设' })
     expect(commit).toBeEnabled()
     const laterMessage = await screen.findByText('草稿之后的新消息')
     expect(commit.compareDocumentPosition(laterMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -1050,7 +1050,7 @@ describe('ChatPage', () => {
     renderChat()
 
     expect(await screen.findByText('画像草稿暂存失败')).toBeInTheDocument()
-    expect(screen.getByText('创作会话已失效，项目尚未创建')).toBeInTheDocument()
+    expect(screen.getByText('创作会话已失效，人设尚未创建')).toBeInTheDocument()
     expect(screen.queryByText('Agent 正在执行：stage project creator draft')).not.toBeInTheDocument()
   })
 
@@ -1433,10 +1433,10 @@ describe('ChatPage', () => {
     renderChat('/chat?mode=profile&project_id=project-9', { initialMessage: false })
 
     const composer = await screen.findByRole('textbox', { name: '发送消息' })
-    fireEvent.change(composer, { target: { value: '更新这个项目的画像' } })
+    fireEvent.change(composer, { target: { value: '更新这个人设的画像' } })
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(interactiveMocks.createSession).toHaveBeenCalledWith('project-creator', 'update-project-profile', 'project-9', expect.any(String)))
-    expect(await screen.findByText('更新现有项目画像')).toBeInTheDocument()
+    expect(await screen.findByText('更新现有人设画像')).toBeInTheDocument()
     expect(screen.getByText(/茶品牌/)).toBeInTheDocument()
   })
 
@@ -1658,17 +1658,17 @@ describe('ChatPage', () => {
       .mockResolvedValueOnce({ project: { id: 'project-1' } })
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
       { event: 'ready', data: '{}' },
-      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, confirmation_token: 'secret-token', project: { name: '测试项目', platform: 'wechat', instructions: '定位' } } }) },
+      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, confirmation_token: 'secret-token', project: { name: '测试人设', platform: 'wechat', instructions: '定位' } } }) },
     ], signal))
     sessionStorage.setItem('anban:assistant-session:test-user:profile:new:none', JSON.stringify({ sessionId: 'session-1' }))
     renderChat(undefined, { initialMessage: false })
 
-    const commit = await screen.findByRole('button', { name: '确认创建创作项目' })
+    const commit = await screen.findByRole('button', { name: '确认创建人设' })
     expect(screen.queryByText('secret-token')).not.toBeInTheDocument()
     fireEvent.click(commit)
     await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledTimes(1))
     expect(screen.getByText('commit failed')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '确认创建创作项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认创建人设' }))
     await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledTimes(2))
     expect(interactiveMocks.commit.mock.calls[1][1]).toBe('secret-token')
     expect(interactiveMocks.commit.mock.calls[1][2]).toBe(interactiveMocks.commit.mock.calls[0][2])
@@ -1698,7 +1698,7 @@ describe('ChatPage', () => {
     ], signal))
     renderChat()
 
-    await screen.findByRole('button', { name: '确认创建创作项目' })
+    await screen.findByRole('button', { name: '确认创建人设' })
     expect(screen.getByRole('heading', { name: '定位' })).toBeInTheDocument()
     expect(screen.getByText('山岚茶作')).toBeInTheDocument()
     expect(screen.queryByText('**山岚茶作**')).not.toBeInTheDocument()
@@ -1724,7 +1724,7 @@ describe('ChatPage', () => {
     sessionStorage.setItem('anban:assistant-session:test-user:profile:project-9:none', JSON.stringify({ sessionId: 'session-1' }))
     renderChat(`/chat?agent=project-creator&intent=update-project-profile&project_id=project-9${returnQuery}`, { initialMessage: false })
 
-    expect(await screen.findByText('将追加到项目记忆的内容')).toBeInTheDocument()
+    expect(await screen.findByText('将追加到人设记忆的内容')).toBeInTheDocument()
     expect(screen.getByText('补充：春茶系列将在四月上线。')).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: '确认更新画像' }))
     await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledTimes(1))
@@ -1755,12 +1755,12 @@ describe('ChatPage', () => {
 
   it('keeps a replayed ready draft visible while waiting for its confirmation credential', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
-      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, project: { name: '测试项目', platform: 'wechat' } } }) },
+      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, project: { name: '测试人设', platform: 'wechat' } } }) },
     ], signal))
     renderChat()
 
     await waitFor(() => expect(screen.getByText('确认凭据尚未就绪，请等待会话继续同步。')).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: '确认创建创作项目' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '确认创建人设' })).toBeDisabled()
     expect(interactiveMocks.close).not.toHaveBeenCalledWith('session-1')
   })
 
@@ -1791,11 +1791,11 @@ describe('ChatPage', () => {
 
   it('does not close a committed session during navigation', async () => {
     streamMock.mockImplementationOnce((_sessionId: string, _token: string, signal?: AbortSignal) => holdStream([
-      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, confirmation_token: 'secret-token', project: { name: '测试项目', platform: 'wechat' } } }) },
+      { event: 'draft.ready', data: JSON.stringify({ draft: { revision: 1, ready: true, confirmation_token: 'secret-token', project: { name: '测试人设', platform: 'wechat' } } }) },
     ], signal))
     const { unmount } = renderChat()
-    await screen.findByRole('button', { name: '确认创建创作项目' })
-    fireEvent.click(screen.getByRole('button', { name: '确认创建创作项目' }))
+    await screen.findByRole('button', { name: '确认创建人设' })
+    fireEvent.click(screen.getByRole('button', { name: '确认创建人设' }))
     await waitFor(() => expect(interactiveMocks.commit).toHaveBeenCalledTimes(1))
     interactiveMocks.close.mockClear()
     unmount()

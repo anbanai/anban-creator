@@ -221,7 +221,7 @@ export default function BillingPage() {
             <Table>
                 <TableHeader>
                   <TableRow className="text-xs text-muted-foreground hover:bg-transparent">
-                    <TableHead className="px-4">计费创作项目</TableHead>
+                    <TableHead className="px-4">计费人设</TableHead>
                     <TableHead className="px-4">钱包影响</TableHead>
                     <TableHead className="min-w-80 px-4">金额说明</TableHead>
                     <TableHead className="min-w-72 px-4">关联作品 / 操作</TableHead>

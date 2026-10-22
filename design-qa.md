@@ -68,3 +68,22 @@ final result: blocked
 - Investigate the repeated React script-tag console diagnostic separately; it did not produce a page error or affect this screen.
 
 final result: passed
+
+## Persona Selector Redesign QA
+
+### Target
+
+- Source visual truth: `/var/folders/c4/50vh622s75782gcbmt8yrhv00000gn/T/codex-clipboard-0e626695-554d-4525-b5a0-37eb7bcf25c1.png` (2048 × 1156 px; selector open, content type labels visible, keyword tags on a separate row).
+- Target state: Studio content analytics page with the persona selector open.
+
+### Verification
+
+- Component tests verify that content types render as accessible icons without visible labels and keyword tags share their row.
+- Visible Studio terminology uses “人设”; API and internal project identifiers retain their existing names.
+- Automated browser capture was unavailable, so rendered visual comparison and responsive inspection remain unverified.
+
+### Findings
+
+- No actionable issues found in the implementation review or automated tests. Visual verification remains blocked pending a matching authenticated capture.
+
+final result: blocked

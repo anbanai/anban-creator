@@ -49,7 +49,7 @@ describe('server analytics queries', () => {
   })
 
   it('separates cumulative content imports from account-day imports for WeChat', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号人设', agent_ids: ['wechat-article'] } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat')
     render(<ContentAnalyticsPage />)
 
@@ -58,7 +58,7 @@ describe('server analytics queries', () => {
   })
 
   it('shows cumulative content totals alongside account daily analytics', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号人设', agent_ids: ['wechat-article'] } as Project])
     vi.mocked(contentAnalyticsApi.overview).mockResolvedValue({
       ...summary,
       metric_basis: 'cumulative',
@@ -78,10 +78,10 @@ describe('server analytics queries', () => {
   })
 
   it('switches analytics data with the project Agent icons', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'shared', platform: '', name: '通用创作项目', agent_ids: ['seednote', 'wechat-article'] } as Project])
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'shared', platform: '', name: '通用人设', agent_ids: ['seednote', 'wechat-article'] } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=shared&platform=seednote')
     render(<ContentAnalyticsPage />)
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选创作项目' })).toHaveTextContent('通用创作项目'))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选人设' })).toHaveTextContent('通用人设'))
     await waitFor(() => expect(contentAnalyticsApi.overview).toHaveBeenCalledWith('shared', expect.objectContaining({ platform: 'seednote' }), expect.any(AbortSignal)))
     fireEvent.click(screen.getByRole('button', { name: '选择公众号文章' }))
     await waitFor(() => expect(contentAnalyticsApi.overview).toHaveBeenLastCalledWith('shared', expect.objectContaining({ platform: 'wechat', content_type: 'wechat-article' }), expect.any(AbortSignal)))
@@ -91,7 +91,7 @@ describe('server analytics queries', () => {
   })
 
   it('keeps account totals account-wide while source trends use their own filter', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号人设', agent_ids: ['wechat-article'] } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat&account_source=search')
     render(<ContentAnalyticsPage />)
 
@@ -102,7 +102,7 @@ describe('server analytics queries', () => {
   })
 
   it('opens the imported account date range when it is outside the selected period', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号人设', agent_ids: ['wechat-article'] } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat&from=2026-09-19&to=2026-10-18&preset=30d')
     render(<ContentAnalyticsPage />)
 
@@ -119,7 +119,7 @@ describe('server analytics queries', () => {
   })
 
   it('keeps the selected period when imported account dates overlap it', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号人设', agent_ids: ['wechat-article'] } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat&from=2026-08-15&to=2026-09-15&preset=custom')
     render(<ContentAnalyticsPage />)
 
@@ -161,7 +161,7 @@ describe('server analytics queries', () => {
     window.history.replaceState(null, '', '/content-analytics?account=matrix')
     render(<ContentAnalyticsPage />)
 
-    const projectSelector = await screen.findByRole('combobox', { name: '筛选创作项目' })
+    const projectSelector = await screen.findByRole('combobox', { name: '筛选人设' })
     await waitFor(() => expect(projectSelector).toHaveTextContent('内容矩阵'))
     expect(projectSelector.querySelectorAll('[data-slot="agent-icon"]')).toHaveLength(3)
     expect(screen.getByRole('group', { name: '选择分析 Agent' }).querySelectorAll('button')).toHaveLength(3)
@@ -241,13 +241,13 @@ describe('server analytics queries', () => {
 
   it('does not invent analytics Agents for projects that only use unsupported Agents', async () => {
     vi.mocked(api.projects.list).mockResolvedValue([{
-      id: 'video', platform: 'montage', name: '视频创作项目', agent_ids: ['montage', 'hypit'],
+      id: 'video', platform: 'montage', name: '视频人设', agent_ids: ['montage', 'hypit'],
     } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=video')
     render(<ContentAnalyticsPage />)
 
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选创作项目' })).toHaveTextContent('视频创作项目'))
-    expect(await screen.findByText('该创作项目没有可用的内容分析 Agent。')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '筛选人设' })).toHaveTextContent('视频人设'))
+    expect(await screen.findByText('该人设没有可用的内容分析 Agent。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /选择公众号|选择种草笔记/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导入分析数据' })).toBeDisabled()
     expect(contentAnalyticsApi.overview).not.toHaveBeenCalled()
@@ -256,7 +256,7 @@ describe('server analytics queries', () => {
   it('uses the shared compact project selector and removes redundant date controls', async () => {
     render(<ContentAnalyticsPage />)
 
-    const projectSelector = await screen.findByRole('combobox', { name: '筛选创作项目' })
+    const projectSelector = await screen.findByRole('combobox', { name: '筛选人设' })
     await waitFor(() => expect(projectSelector).toHaveTextContent('生活笔记'))
     expect(projectSelector).not.toHaveClass('border-border')
     expect(projectSelector.querySelector('[data-slot="avatar"]')).toBeInTheDocument()
@@ -404,7 +404,7 @@ describe('server analytics queries', () => {
   })
 
   it('does not use the pre-import revision when refreshing content after an import', async () => {
-    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号项目', agent_ids: ['wechat-article'] } as Project])
+    vi.mocked(api.projects.list).mockResolvedValue([{ id: 'wechat', platform: 'wechat', name: '公众号人设', agent_ids: ['wechat-article'] } as Project])
     window.history.replaceState(null, '', '/content-analytics?account=wechat&platform=wechat')
     vi.mocked(contentAnalyticsApi.overview)
       .mockResolvedValueOnce({ ...summary, revision: 4, coverage: { contents: 1 } })

@@ -132,7 +132,7 @@ export function ProjectChannelConfigDialog({ project, onClose }: Props) {
           <DialogTitle>配置自动发布</DialogTitle>
           <DialogDescription className="space-y-2">
             <ProjectIdentity project={project} compact showAgents={false} className="max-w-full" />
-            <span className="block">管理此项目的公众号自动发布账号。</span>
+            <span className="block">管理此人设的公众号自动发布账号。</span>
           </DialogDescription>
         </DialogHeader>
         {configs.isPending || (!configs.isFetchedAfterMount && !configs.isError) ? <p role="status">正在加载自动发布设置…</p> : configs.isError ? (

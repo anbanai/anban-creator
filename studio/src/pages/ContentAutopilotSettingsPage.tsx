@@ -63,9 +63,9 @@ export default function ContentAutopilotSettingsPage() {
         </div>
       </section>
       <section className="space-y-3 border-b border-border pb-5">
-        <h2 className="text-sm font-semibold">自动生产项目与平台</h2>
+        <h2 className="text-sm font-semibold">自动生产人设与平台</h2>
         <div className="grid gap-5 sm:grid-cols-2">
-          <fieldset className="space-y-2"><legend className="mb-2 text-sm text-muted-foreground">项目</legend>{(projects.data ?? []).map(project => <label key={project.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.project_ids?.includes(project.id) ?? false} onChange={event => update({ project_ids: toggle(form.project_ids ?? [], project.id, event.target.checked) })} /><span>{project.name} · {project.platform}</span></label>)}</fieldset>
+          <fieldset className="space-y-2"><legend className="mb-2 text-sm text-muted-foreground">人设</legend>{(projects.data ?? []).map(project => <label key={project.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.project_ids?.includes(project.id) ?? false} onChange={event => update({ project_ids: toggle(form.project_ids ?? [], project.id, event.target.checked) })} /><span>{project.name} · {project.platform}</span></label>)}</fieldset>
           <fieldset className="space-y-2"><legend className="mb-2 text-sm text-muted-foreground">平台</legend>{platforms.map(platform => <label key={platform.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.platforms?.includes(platform.id) ?? false} onChange={event => update({ platforms: toggle(form.platforms ?? [], platform.id, event.target.checked) })} /><span>{platform.label}</span></label>)}</fieldset>
         </div>
         <fieldset className="grid gap-3 sm:grid-cols-2"><legend className="mb-2 text-sm text-muted-foreground">各平台最低推荐分</legend>{platforms.map(platform => <label key={platform.id} className="flex items-center justify-between gap-3 text-sm"><span>{platform.label}</span><Input aria-label={`${platform.label}最低推荐分`} type="number" min="0" max="100" className="w-24" value={form.platform_min_recommendation_scores?.[platform.id] ?? ''} onChange={event => update({ platform_min_recommendation_scores: { ...form.platform_min_recommendation_scores, [platform.id]: Number(event.target.value) } })} /></label>)}</fieldset>

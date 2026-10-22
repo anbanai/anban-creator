@@ -63,12 +63,12 @@ function PortraitDetail({ projectId }: { projectId: string }) {
   }
   if (projectQuery.isPending) return <p className="p-8" role="status">正在读取创作身份…</p>
   if (!project || projectQuery.isError) return <div className="space-y-3 p-8" role="alert"><p>无法读取这个创作身份，请确认账号和访问权限。</p><Button onClick={() => void projectQuery.refetch()}>重试</Button><Link to="/projects">返回人设</Link></div>
-  if (!supportsProfileLab(project)) return <div className="p-8"><p>该项目使用专属创作设置。</p><Link to="/projects">前往项目管理</Link></div>
+  if (!supportsProfileLab(project)) return <div className="p-8"><p>该人设使用专属创作设置。</p><Link to="/projects">前往人设管理</Link></div>
   const progress = portraitProgress(profile)
   return <section className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
     <Link className="inline-flex min-h-10 items-center gap-2 text-sm text-muted-foreground" to="/projects"><ArrowLeft className="size-4" />返回人设</Link>
     <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="mb-2 text-sm text-muted-foreground">创作身份{project.status === 'archived' ? ' · 已归档' : ''}</p><h1 className="text-2xl font-semibold">{project.name}</h1><p className="mt-2 text-sm text-muted-foreground">同一份画像用于该身份的不同平台账号。修改后会用于后续创作，已有作品不会被改写。</p></div><div className="flex flex-wrap gap-2"><Link className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 text-sm" to={updatePortraitHref(projectId)}><MessageCircle className="size-4" />继续访谈</Link>{project.status !== 'archived' && <Link className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm text-primary-foreground" to={createTaskHref({ projectId })}>用此画像创作</Link>}</div></header>
-    {project.status === 'archived' && <p className="rounded-lg bg-muted p-3 text-sm">画像仍可查看和修改；如需继续创作，请先到项目页恢复该项目。<Link className="ml-2 underline" to="/projects">前往项目</Link></p>}
+    {project.status === 'archived' && <p className="rounded-lg bg-muted p-3 text-sm">画像仍可查看和修改；如需继续创作，请先到人设页恢复该人设。<Link className="ml-2 underline" to="/projects">前往人设</Link></p>}
     {dirty && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">有未保存的修改，请保存对应资料后再离开或继续访谈。</p>}
     {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
     <section className="rounded-xl border bg-card p-5 md:p-6" aria-label="身份画像">

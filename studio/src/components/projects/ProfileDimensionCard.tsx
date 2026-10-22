@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 
 const fieldLabels: Record<string, string> = {
   name: '名称', summary: '概述', description: '说明', positioning: '定位',
-  project_name: '项目名称', brand: '品牌', business: '业务', role: '身份',
+  project_name: '人设名称', brand: '品牌', business: '业务', role: '身份',
   audience: '目标读者', target_audience: '目标读者', goals: '目标',
   direction: '内容方向', differentiation: '特色与优势', value_proposition: '提供的价值',
   tone: '表达语气', voice: '表达风格', style: '风格', preferences: '偏好',

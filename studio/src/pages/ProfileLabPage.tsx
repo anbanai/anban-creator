@@ -281,13 +281,13 @@ function ProfileLabPage() {
     mutationFn: ({ payload }: { payload: CreateProjectRequest; viewKey: string }) => api.projects.create(payload),
     onSuccess: ({ project: created }, { payload, viewKey }) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
-      toast.success(payload.profile_setup?.analyze === false ? '项目已创建' : '项目已创建，画像分析将在后台运行')
+      toast.success(payload.profile_setup?.analyze === false ? '人设已创建' : '人设已创建，画像分析将在后台运行')
       if (!mountedRef.current || currentLocationRef.current !== viewKey || creationViewKey.current !== viewKey) return
       if (returnTo) {
         navigate(projectCreatedReturnHref({ returnTo, projectId: created.id, type: creationIntent.type, intent: creationIntent.intent }))
       } else navigate(`/projects/${created.id}/profile-lab`, { replace: true })
     },
-    onError: (error) => setFormError(getApiErrorMessage(error, '创建项目失败，请重试')),
+    onError: (error) => setFormError(getApiErrorMessage(error, '创建人设失败，请重试')),
   })
 
   const saveProjectMutation = useMutation({
@@ -296,12 +296,12 @@ function ProfileLabPage() {
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
       await queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(id) })
       if (activeProjectID.current !== id) return
-      toast.success('项目设置已保存')
+      toast.success('人设设置已保存')
       if (analyze && priorProfile && priorProfile.initialization_status !== 'queued' && priorProfile.initialization_status !== 'running') {
         analysisMutation.mutate({ id, retry: priorProfile.initialization_status === 'failed', revision: priorProfile.version })
       }
     },
-    onError: (error, { id }) => { if (activeProjectID.current === id) setFormError(getApiErrorMessage(error, '项目保存失败，请重试')) },
+    onError: (error, { id }) => { if (activeProjectID.current === id) setFormError(getApiErrorMessage(error, '人设保存失败，请重试')) },
   })
 
   function setAnswer(group: Group, key: string, value: string) {
@@ -319,7 +319,7 @@ function ProfileLabPage() {
     setFormError('')
     if (step === 0) {
       if (!name.trim()) {
-        setFormError('请填写项目名称')
+        setFormError('请填写人设名称')
         document.getElementById('project-name')?.focus()
         return false
       }
@@ -421,26 +421,26 @@ function ProfileLabPage() {
     setNewValues((current) => ({ ...current, [key]: '' }))
   }
 
-  const projectLoadingError = projectQuery.isError ? getApiErrorMessage(projectQuery.error, '项目资料加载失败') : ''
+  const projectLoadingError = projectQuery.isError ? getApiErrorMessage(projectQuery.error, '人设资料加载失败') : ''
   const status = profileStatus(profile)
   const StatusIcon = status.icon
   const analysisRunning = profile?.initialization_status === 'queued' || profile?.initialization_status === 'running'
 
   if (busy) return <div role="status" className="p-8 text-sm text-muted-foreground">正在加载 Profile Lab…</div>
   if (projectLoadingError) return <div role="alert" className="space-y-3 p-8 text-sm"><p>{projectLoadingError}</p><Button variant="outline" onClick={() => void projectQuery.refetch()}>重试</Button></div>
-  if (project && !supportsProfileLab(project)) return <section className="space-y-3 p-8" aria-labelledby="profile-lab-title"><h1 id="profile-lab-title" className="text-xl font-semibold">该项目使用专属创作设置</h1><p className="text-sm text-muted-foreground">电商与朋友圈项目请在项目页编辑基本设置。</p><Link className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted" to="/projects"><ArrowLeft className="size-4" />返回项目</Link></section>
+  if (project && !supportsProfileLab(project)) return <section className="space-y-3 p-8" aria-labelledby="profile-lab-title"><h1 id="profile-lab-title" className="text-xl font-semibold">该人设使用专属创作设置</h1><p className="text-sm text-muted-foreground">电商与朋友圈人设请在人设页编辑基本设置。</p><Link className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted" to="/projects"><ArrowLeft className="size-4" />返回人设</Link></section>
 
   return (
     <section aria-labelledby="profile-lab-title" className="mx-auto w-full max-w-[1720px] space-y-6 px-4 py-5 md:px-6 lg:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
         <div className="min-w-0">
-          <Link to="/projects" className="mb-3 inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" />项目</Link>
+          <Link to="/projects" className="mb-3 inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" />人设</Link>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="font-mono text-xs uppercase text-muted-foreground">PROFILE LAB / {isEditing ? 'EDIT' : 'NEW'}</span>
             <span className="h-px w-8 bg-border" />
-            <h1 id="profile-lab-title" className="text-2xl font-semibold">{isEditing ? name || project?.name : '新建项目'}</h1>
+            <h1 id="profile-lab-title" className="text-2xl font-semibold">{isEditing ? name || project?.name : '新建人设'}</h1>
           </div>
-          {isEditing && project?.updated_at && <p className="mt-1 text-xs text-muted-foreground">项目更新于 {new Date(project.updated_at).toLocaleDateString('zh-CN')}</p>}
+          {isEditing && project?.updated_at && <p className="mt-1 text-xs text-muted-foreground">人设更新于 {new Date(project.updated_at).toLocaleDateString('zh-CN')}</p>}
         </div>
         {isEditing && (
           <div className={`inline-flex min-h-11 items-center gap-2 border-l-2 pl-3 text-sm ${status.tone}`} aria-live="polite">
@@ -494,10 +494,10 @@ function ProfileLabPage() {
           {currentStep === 0 && <section id="project-basics" tabIndex={-1} className="scroll-mt-6 border-b border-border pb-5">
             <div className="mb-4 flex items-baseline justify-between gap-3"><h2 className="text-lg font-semibold">基础信息与账号</h2><span className="text-xs text-muted-foreground">可稍后补充</span></div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="space-y-1.5 text-sm sm:col-span-2"><span>项目名称 <span className="text-destructive">*</span></span><Input id="project-name" aria-label="项目名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：城市慢行观察" maxLength={80} /></label>
+              <label className="space-y-1.5 text-sm sm:col-span-2"><span>人设名称 <span className="text-destructive">*</span></span><Input id="project-name" aria-label="人设名称" value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：城市慢行观察" maxLength={80} /></label>
               <label className="space-y-1.5 text-sm"><span>关键词</span><Input aria-label="关键词" value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="用逗号分隔" /></label>
               <label className="space-y-1.5 text-sm"><span>账号状态</span><select aria-label="账号状态" value={setup.account_status} onChange={(event) => setSetup((current) => ({ ...current, account_status: event.target.value as ProjectProfileSetup['account_status'] }))} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="new">筹备中 / 暂无账号</option><option value="existing">已有账号</option></select></label>
-              <label className="space-y-1.5 text-sm sm:col-span-2"><span>项目定位</span><Textarea aria-label="项目定位" value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="这项内容希望长期服务什么方向？" rows={2} /></label>
+              <label className="space-y-1.5 text-sm sm:col-span-2"><span>人设定位</span><Textarea aria-label="人设定位" value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="这项内容希望长期服务什么方向？" rows={2} /></label>
             </div>
           </section>}
 
@@ -506,7 +506,7 @@ function ProfileLabPage() {
             <ProfileAccountFields accounts={setup.platform_accounts} onChange={(accounts) => setSetup((current) => ({ ...current, platform_accounts: accounts }))} />
             <details className="border-t border-border pt-4"><summary className="cursor-pointer text-sm font-medium">更多资料（可选）</summary><div className="mt-4 space-y-4">
               <label className="block space-y-1.5 text-sm"><span>内容样本</span><Textarea aria-label="内容样本" value={setup.samples.join('\n')} onChange={(event) => setSetup((current) => ({ ...current, samples: event.target.value.split('\n') }))} placeholder="每行一个公开链接、标题或内容片段" rows={4} /></label>
-              <section aria-label="视觉参考与风格" className="space-y-2"><h3 className="text-sm font-medium">视觉参考与风格</h3><div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]"><ReferenceAssetUpload value={referenceImage} onChange={(value) => { setReferenceImage(value); setReferenceImageDirty(true) }} purpose="project_reference" ariaLabel="项目参考图文件" onUploadingChange={setReferenceUploading} /><label className="space-y-1.5 text-sm"><span>视觉风格描述</span><Textarea aria-label="视觉风格描述" value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} placeholder="例如：自然光、低饱和、留白充足" rows={4} maxLength={4000} /></label></div><p className="text-xs text-muted-foreground">这些资料会帮助创作任务保持一致。</p></section>
+              <section aria-label="视觉参考与风格" className="space-y-2"><h3 className="text-sm font-medium">视觉参考与风格</h3><div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]"><ReferenceAssetUpload value={referenceImage} onChange={(value) => { setReferenceImage(value); setReferenceImageDirty(true) }} purpose="project_reference" ariaLabel="人设参考图文件" onUploadingChange={setReferenceUploading} /><label className="space-y-1.5 text-sm"><span>视觉风格描述</span><Textarea aria-label="视觉风格描述" value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} placeholder="例如：自然光、低饱和、留白充足" rows={4} maxLength={4000} /></label></div><p className="text-xs text-muted-foreground">这些资料会帮助创作任务保持一致。</p></section>
             </div></details>
           </section>}
 
@@ -545,10 +545,10 @@ function ProfileLabPage() {
           <div className="space-y-3 border-b border-border pb-4">
             {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <Button type="button" variant="ghost" nativeButton={false} render={<Link to="/projects" />}><ArrowLeft />返回项目</Button>
+              <Button type="button" variant="ghost" nativeButton={false} render={<Link to="/projects" />}><ArrowLeft />返回人设</Button>
               <div className="flex items-center gap-2">
                 {currentStep > 0 && <Button type="button" variant="outline" onClick={() => goToStep(currentStep - 1)}>上一步</Button>}
-                {currentStep < steps.length - 1 ? <Button type="button" onClick={() => goToStep(currentStep + 1)}>下一步</Button> : <Button type="submit" disabled={createMutation.isPending || saveProjectMutation.isPending || analysisMutation.isPending || referenceUploading}>{(createMutation.isPending || saveProjectMutation.isPending) ? <LoaderCircle className="animate-spin" /> : <Check />}{isEditing ? '保存设置' : '创建项目'}</Button>}
+                {currentStep < steps.length - 1 ? <Button type="button" onClick={() => goToStep(currentStep + 1)}>下一步</Button> : <Button type="submit" disabled={createMutation.isPending || saveProjectMutation.isPending || analysisMutation.isPending || referenceUploading}>{(createMutation.isPending || saveProjectMutation.isPending) ? <LoaderCircle className="animate-spin" /> : <Check />}{isEditing ? '保存设置' : '创建人设'}</Button>}
               </div>
             </div>
             {currentStep === steps.length - 1 && <div className="space-y-3 pt-2">{!isEditing && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={skipAnalysis} onChange={(event) => setSkipAnalysis(event.target.checked)} className="size-4 accent-primary" aria-label="跳过画像分析" />先创建，稍后分析画像</label>}{isEditing && <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={analyzeOnSave} disabled={analysisRunning} onChange={(event) => setAnalyzeOnSave(event.target.checked)} className="size-4 accent-primary" aria-label="保存后重新分析画像" />{analysisRunning ? '分析中；保存资料后可重新分析' : '保存后重新分析画像'}</label>}</div>}
@@ -561,7 +561,7 @@ function ProfileLabPage() {
             {profile && <p className="mt-3 text-xs font-medium">{applicationLabel(profile)}</p>}
             {profileQuery.isError && <div role="alert" className="mt-3 space-y-2 text-xs text-destructive"><p>{getApiErrorMessage(profileQuery.error, '画像资料加载失败，当前内容可能不是最新版本')}</p><Button variant="outline" size="sm" onClick={() => void profileQuery.refetch()} aria-label="重新加载画像">重试</Button></div>}
             {profile && profile.version > 0 && analysisRunning && <p className="mt-3 border-l-2 border-sky-600 pl-2 text-xs leading-5 text-sky-800">分析完成前，当前 v{profile.version} 继续用于创作。</p>}
-            {!profile && <p className="mt-3 text-xs leading-5 text-muted-foreground">完成项目创建后，画像会按已填写资料自动分析。也可跳过，之后再启动。</p>}
+            {!profile && <p className="mt-3 text-xs leading-5 text-muted-foreground">完成人设创建后，画像会按已填写资料自动分析。也可跳过，之后再启动。</p>}
             <ul className="mt-3 divide-y divide-border">
               {dimensions.map(([key, label]) => {
                 const dimension = profile?.dimensions[key]
