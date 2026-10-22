@@ -745,8 +745,12 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	h := NewTaskHandler(newHandlerTaskService(t, repo, nil, nil, &logger, "", nil, nil), &logger)
 	app := fiber.New()
+	admin := false
 	app.Get("/tasks/:id/files", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
+		if admin {
+			c.Locals("user", &model.User{ID: userID, IsAdmin: true})
+		}
 		return h.GetFiles(c)
 	})
 
@@ -761,14 +765,26 @@ func TestGetFilesReturnsPublishedAndCollectedFiles(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Data) != 2 || body.Data[0].State != model.TaskFileStateDelivered || body.Data[1].State != model.TaskFileStateRetained {
+	if len(body.Data) != 1 || body.Data[0].State != model.TaskFileStateDelivered {
 		t.Fatalf("files = %#v", body.Data)
 	}
 	if !body.Data[0].IsDeliverable || body.Data[0].DownloadURL == "" || body.Data[0].PreviewURL == "" {
 		t.Fatalf("published delivery metadata = %+v", body.Data[0])
 	}
-	if body.Data[1].IsDeliverable || body.Data[1].DownloadURL == "" || body.Data[1].URL != "" || body.Data[1].PreviewURL == "" {
-		t.Fatalf("collected process metadata = %+v", body.Data[1])
+	admin = true
+	adminResp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adminResp.Body.Close()
+	var adminBody struct {
+		Data []model.TaskFile `json:"data"`
+	}
+	if err := json.NewDecoder(adminResp.Body).Decode(&adminBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(adminBody.Data) != 2 || adminBody.Data[1].IsDeliverable || adminBody.Data[1].DownloadURL != "" || adminBody.Data[1].URL != "" || adminBody.Data[1].PreviewURL == "" {
+		t.Fatalf("admin process metadata = %#v", adminBody.Data)
 	}
 }
 
@@ -802,12 +818,19 @@ func TestProcessTaskFileCanBePreviewedButNotDownloaded(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	h := NewTaskHandler(newHandlerTaskService(t, repo, nil, store, &logger, "", nil, nil), &logger)
 	app := fiber.New()
+	admin := false
 	app.Get("/tasks/:id/files/:fileId/download", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
+		if admin {
+			c.Locals("user", &model.User{ID: userID, IsAdmin: true})
+		}
 		return h.DownloadFile(c)
 	})
 	app.Get("/tasks/:id/files/:fileId/preview", func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
+		if admin {
+			c.Locals("user", &model.User{ID: userID, IsAdmin: true})
+		}
 		return h.PreviewFile(c)
 	})
 
@@ -825,10 +848,27 @@ func TestProcessTaskFileCanBePreviewedButNotDownloaded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = previewResp.Body.Close()
+	if previewResp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("ordinary process preview status = %d, want 403", previewResp.StatusCode)
+	}
+	admin = true
+	previewResp, err = app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files/"+fileID+"/preview", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer previewResp.Body.Close()
 	previewBody, _ := io.ReadAll(previewResp.Body)
 	if previewResp.StatusCode != fiber.StatusOK || string(previewBody) != "<main>internal review</main>" {
 		t.Fatalf("process preview = status %d body=%q, want authenticated preview", previewResp.StatusCode, previewBody)
+	}
+	downloadResp, err = app.Test(httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/files/"+fileID+"/download", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer downloadResp.Body.Close()
+	if downloadResp.StatusCode != fiber.StatusForbidden {
+		t.Fatalf("admin process download status = %d, want 403", downloadResp.StatusCode)
 	}
 	if got := previewResp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)

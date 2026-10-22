@@ -142,6 +142,7 @@ export interface TaskExecutionRailProps {
   showFailureSummary?: boolean
   showCompletionSummary?: boolean
   showFiles?: boolean
+  resultMode?: boolean
 }
 
 export function TaskExecutionRail({
@@ -161,9 +162,11 @@ export function TaskExecutionRail({
   showFailureSummary = true,
   showCompletionSummary = true,
   showFiles = true,
+  resultMode = false,
 }: TaskExecutionRailProps) {
   const queryClient = useQueryClient()
   const stages = lifecycle?.stages ?? []
+  const visibleStages = resultMode ? stages.filter((stage) => stage.source === 'server') : stages
   const [confirmPublish, setConfirmPublish] = useState(false)
   const [confirmManualPublished, setConfirmManualPublished] = useState(false)
   const [confirmSkipPublication, setConfirmSkipPublication] = useState(false)
@@ -174,10 +177,10 @@ export function TaskExecutionRail({
     .map((stage) => `${stage.id}:${stage.state}:${stage.latest_update ?? ''}`)
     .join('|')
   const previousPublicationStageSignature = useRef(publicationStageSignature)
-  const lastWorkStageId = [...stages].reverse().find((stage) => stage.kind === 'work')?.id
+  const lastWorkStageId = resultMode ? undefined : [...stages].reverse().find((stage) => stage.kind === 'work')?.id
   const infrastructureFailure = status === 'failed' && ['artifact_upload_failed', 'artifact_manifest_failed'].includes(outcome?.diagnostic?.code ?? '')
-  const currentIndex = infrastructureFailure ? -1 : currentStageIndex(stages, status)
-  const currentStage = stages[currentIndex]
+  const currentIndex = infrastructureFailure ? -1 : currentStageIndex(visibleStages, status)
+  const currentStage = visibleStages[currentIndex]
   const failure = taskFailurePresentation({ error_message: errorMessage, outcome })
 
   const groupedFiles = useMemo(() => groupTaskStageFiles(files, lifecycle, workflow), [files, lifecycle, workflow])
@@ -313,11 +316,11 @@ export function TaskExecutionRail({
   }
 
   return (
-    <section className="rounded-xl border border-border/70 bg-card py-4 sm:py-5" aria-labelledby="task-execution-heading">
+    <section className={cn(!resultMode && 'rounded-xl border border-border/70 bg-card py-4 sm:py-5')} aria-labelledby="task-execution-heading">
       <div className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</div>
-      {heading}
-      <ol className="mx-4 mt-5 sm:mx-5" aria-label="执行阶段">
-        {stages.map((stage, index) => {
+      {resultMode ? <RailHeading onOpenLogs={onOpenLogs} taskId={taskId} files={files} stages={visibleStages} showFiles={false} showLogs={false} title="交付处理" /> : heading}
+      <ol className={cn(!resultMode && 'mx-4 mt-5 sm:mx-5')} aria-label={resultMode ? '交付处理' : '执行阶段'}>
+        {visibleStages.map((stage, index) => {
           const unconfirmed = infrastructureFailure && stage.source === 'agent' && (stage.state === 'active' || stage.state === 'pending')
           const waitingForManualWechatPublish = status === 'completed'
             && stage.kind === 'publication'
@@ -474,23 +477,25 @@ export function TaskExecutionRail({
   )
 }
 
-function RailHeading({ onOpenLogs, taskId, files, stages, showFiles }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[]; showFiles: boolean }) {
+function RailHeading({ onOpenLogs, taskId, files, stages, showFiles, showLogs = true, title = '执行进展' }: { onOpenLogs: () => void; taskId: string; files: TaskFile[]; stages: TaskLifecycleStage[]; showFiles: boolean; showLogs?: boolean; title?: string }) {
   const completed = stages.filter((stage) => stage.state === 'complete').length
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 pb-4 sm:px-5">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 id="task-execution-heading" className="text-sm font-semibold text-foreground">执行进展</h2>
+        <h2 id="task-execution-heading" className="text-sm font-semibold text-foreground">
+          {title === '执行进展' ? <button type="button" aria-label="执行过程" className="cursor-default text-left">{title}</button> : title}
+        </h2>
         {stages.length > 0 && <span className="text-xs text-muted-foreground">{completed} / {stages.length} 环节完成</span>}
         {showFiles && files.length > 0 && <span className="text-xs text-muted-foreground">{files.length} 个产物</span>}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         {showFiles ? <TaskFileDownloads taskId={taskId} files={files} /> : null}
-        <Tooltip>
+        {showLogs ? <Tooltip>
           <TooltipTrigger render={<Button size="icon-md" variant="ghost" className="hover:bg-transparent dark:hover:bg-transparent aria-expanded:bg-transparent focus-visible:border-transparent focus-visible:bg-transparent" onClick={onOpenLogs} aria-label="查看完整日志" />}>
             <ScrollText className="size-4" />
           </TooltipTrigger>
           <TooltipContent>查看完整日志</TooltipContent>
-        </Tooltip>
+        </Tooltip> : null}
       </div>
     </div>
   )

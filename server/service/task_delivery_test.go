@@ -133,8 +133,10 @@ func TestTaskService_DownloadZipWithUnreadableDeliveryReturnsDeliveryError(t *te
 func TestTaskService_DeliveryAndRetainedZipContainOnlyTheirOwnState(t *testing.T) {
 	svc, repo := setupTaskServiceWithEnqueuer(t)
 	store := &fakeTaskStorage{name: "oss", files: map[string][]byte{
-		"tasks/task-state-zip/delivered.md": []byte("delivered"),
-		"tasks/task-state-zip/retained.txt": []byte("retained"),
+		"tasks/task-state-zip/delivered.md":           []byte("delivered"),
+		"tasks/task-state-zip/retained.txt":           []byte("retained"),
+		"tasks/task-state-zip/internal.txt":           []byte("internal"),
+		"tasks/task-state-zip/internal-delivered.txt": []byte("internal delivered"),
 	}}
 	svc.store = store
 	ctx := context.Background()
@@ -145,7 +147,7 @@ func TestTaskService_DeliveryAndRetainedZipContainOnlyTheirOwnState(t *testing.T
 	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
 		ID: executionID, TaskID: taskID, Attempt: 1, Status: model.TaskExecutionSucceeded,
 		AgentPackID: "wechat-article", AgentPackVersion: "1.0.4", AgentPackDigest: "digest",
-		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"article","path":"output/delivered.md","mime_type":"text/markdown"}]`),
+		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"article","path":"output/delivered.md","mime_type":"text/markdown"},{"role":"supporting","path":"output/retained.txt","mime_type":"text/plain"}]`),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -157,12 +159,14 @@ func TestTaskService_DeliveryAndRetainedZipContainOnlyTheirOwnState(t *testing.T
 	}
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
 		{ID: "delivered", TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: model.FileRoleMarkdown, FilePath: "output/delivered.md", FileName: "delivered.md", MimeType: "text/markdown", OSSKey: "tasks/task-state-zip/delivered.md", StorageProvider: store.Name()},
-		{ID: "retained", TaskID: taskID, ExecutionID: "failed-execution", State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/retained.txt", FileName: "retained.txt", MimeType: "text/plain", OSSKey: "tasks/task-state-zip/retained.txt", StorageProvider: store.Name()},
+		{ID: "internal-delivered", TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateDelivered, Role: model.FileRoleOther, FilePath: "output/internal-delivered.txt", FileName: "internal-delivered.txt", MimeType: "text/plain", OSSKey: "tasks/task-state-zip/internal-delivered.txt", StorageProvider: store.Name()},
+		{ID: "retained", TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/retained.txt", FileName: "retained.txt", MimeType: "text/plain", OSSKey: "tasks/task-state-zip/retained.txt", StorageProvider: store.Name()},
+		{ID: "internal-retained", TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/internal.txt", FileName: "internal.txt", MimeType: "text/plain", OSSKey: "tasks/task-state-zip/internal.txt", StorageProvider: store.Name()},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	assertZipEntries := func(stream io.ReadCloser, want string, forbidden string) {
+	assertZipEntries := func(stream io.ReadCloser, want string, forbidden ...string) {
 		t.Helper()
 		defer stream.Close()
 		body, err := io.ReadAll(stream)
@@ -177,8 +181,13 @@ func TestTaskService_DeliveryAndRetainedZipContainOnlyTheirOwnState(t *testing.T
 		for _, file := range archive.File {
 			names = append(names, file.Name)
 		}
-		if !slices.Contains(names, want) || slices.Contains(names, forbidden) {
-			t.Fatalf("zip entries = %v, want %q without %q", names, want, forbidden)
+		if !slices.Contains(names, want) {
+			t.Fatalf("zip entries = %v, want %q", names, want)
+		}
+		for _, name := range forbidden {
+			if slices.Contains(names, name) {
+				t.Fatalf("zip entries = %v, must not contain %q", names, name)
+			}
 		}
 	}
 
@@ -186,12 +195,12 @@ func TestTaskService_DeliveryAndRetainedZipContainOnlyTheirOwnState(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertZipEntries(delivered, "delivered.md", "retained.txt")
+	assertZipEntries(delivered, "delivered.md", "retained.txt", "internal-delivered.txt", "internal.txt")
 	retained, _, err := svc.DownloadRetainedZip(ctx, taskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertZipEntries(retained, "retained.txt", "delivered.md")
+	assertZipEntries(retained, "retained.txt", "delivered.md", "internal.txt")
 }
 
 func TestTaskService_RetainedZipFailsWhenAnyArtifactIsUnavailable(t *testing.T) {
@@ -205,9 +214,17 @@ func TestTaskService_RetainedZipFailsWhenAnyArtifactIsUnavailable(t *testing.T) 
 	if err := repo.Tasks().Create(ctx, &model.Task{ID: taskID, Type: model.TaskTypeWechatArticle, Status: model.TaskStatusFailed}); err != nil {
 		t.Fatal(err)
 	}
+	executionID := "failed"
+	if err := repo.TaskExecutions().Create(ctx, &model.TaskExecution{
+		ID: executionID, TaskID: taskID, Attempt: 1, Status: model.TaskExecutionFailed,
+		AgentPackID: "wechat-article", AgentPackVersion: "1.0.4", AgentPackDigest: "digest",
+		AgentPackDeliveryContract: datatypes.JSON(`[{"role":"supporting","path":"output/available.txt","mime_type":"text/plain"},{"role":"supporting","path":"output/missing.txt","mime_type":"text/plain"}]`),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.TaskFiles().BatchCreate(ctx, []*model.TaskFile{
-		{ID: "available", TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/available.txt", FileName: "available.txt", MimeType: "text/plain", OSSKey: "tasks/task-retained-incomplete/available.txt", StorageProvider: store.Name()},
-		{ID: "missing", TaskID: taskID, ExecutionID: "failed", State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/missing.txt", FileName: "missing.txt", MimeType: "text/plain", OSSKey: "tasks/task-retained-incomplete/missing.txt", StorageProvider: store.Name()},
+		{ID: "available", TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/available.txt", FileName: "available.txt", MimeType: "text/plain", OSSKey: "tasks/task-retained-incomplete/available.txt", StorageProvider: store.Name()},
+		{ID: "missing", TaskID: taskID, ExecutionID: executionID, State: model.TaskFileStateRetained, Role: model.FileRoleOther, FilePath: "output/missing.txt", FileName: "missing.txt", MimeType: "text/plain", OSSKey: "tasks/task-retained-incomplete/missing.txt", StorageProvider: store.Name()},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +367,7 @@ func TestTaskFileDeliveryMetadataUsesFrozenContractAndState(t *testing.T) {
 	if got[1].IsDeliverable || got[1].DownloadURL != "" || got[1].PreviewURL == "" || got[1].URL != "" || got[1].MediaID != "" || got[1].WechatURL != "" {
 		t.Fatalf("review metadata = %+v", got[1])
 	}
-	if got[2].IsDeliverable || got[2].DownloadURL == "" || got[2].URL != "" {
+	if got[2].IsDeliverable || got[2].DownloadURL != "" || got[2].URL != "" {
 		t.Fatalf("collected metadata = %+v", got[2])
 	}
 }
