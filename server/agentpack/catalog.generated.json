@@ -2086,7 +2086,7 @@
         "interactive-postmortem-review"
       ],
       "ui": {},
-      "digest": "f03b4537158ab401661ebe25f35c98fc676622a1663b6be4f0b2948bfbfa3178"
+      "digest": "b4f10f5f955ca9b46b37ea0fd66854c992cc4f311e28b740dfc06c95f4f13049"
     },
     {
       "id": "profile-analysis",
@@ -2801,7 +2801,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "746840e26f80e643ebabb38544b1e535adc5cec2592ef4d7697fb7ec696dd6bb"
+      "digest": "6008eb3b5a2b7b8ef014e009ddaf42cad7cad8658684987108c9885075d368df"
     },
     {
       "id": "wechat-article",
