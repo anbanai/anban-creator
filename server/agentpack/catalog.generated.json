@@ -2,7 +2,7 @@
   "packs": [
     {
       "id": "ecommerce",
-      "version": "2.0.4",
+      "version": "2.0.5",
       "kind": "plugin",
       "display_name": "电商素材",
       "description": "基于产品图片生成完整电商文案和视觉素材包。",
@@ -159,7 +159,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "52fc5babc8b992317f3edc2029633aa82364eeeee198eb897b4369d2c2c1560e"
+      "digest": "25cbfddf1bfad9bb8d7cb3e79797e6a0010a7817909d66e23e299eb51422f0df"
     },
     {
       "id": "content-planning",
@@ -2536,7 +2536,7 @@
       "id": "seednote",
       "channel": "seednote",
       "plan_task_kind": "content_generation",
-      "version": "2.0.8",
+      "version": "2.0.9",
       "kind": "managed",
       "display_name": "种草笔记",
       "description": "支持原创、复刻和爆款分析的种草笔记图文创作流程。",
@@ -2556,7 +2556,7 @@
           "content-tagging",
           "content-reuse"
         ],
-        "max_turns": 180
+        "max_turns": 240
       },
       "bindings": {
         "task_kinds": [
@@ -2789,7 +2789,7 @@
           "funnel_stage"
         ]
       },
-      "digest": "622fd6153b22910c11d7328a896b59e01965448b1d47f32e35e5df9c0144988e"
+      "digest": "3e5a5b3b7fa5260562b5b6b70157165ea458ed2ea71f8e48cba939a9dd620caf"
     },
     {
       "id": "wechat-article",
