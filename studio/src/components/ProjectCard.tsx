@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { accountPlatformLabels, portraitProgress, portraitStatus, portraitSummary, updatePortraitHref } from '@/lib/portrait-library'
-import { Archive, Settings2, Brain, Lightbulb, ListChecks, RotateCcw, SquarePen } from 'lucide-react'
+import { portraitProgress, portraitStatus, portraitSummary } from '@/lib/portrait-library'
+import { Archive, Settings2, Brain, Lightbulb, ListChecks, RotateCcw, SquarePen, ScanFace } from 'lucide-react'
 import type { Project, ProjectStats } from '@/types'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -39,14 +39,13 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
   const editLabel = '编辑人设'
   const profileProgress = portraitProgress(project.profile)
   const profileSummary = portraitSummary(project)
-  const profileAccounts = (project.profile_setup?.platform_accounts ?? []).map((account) => `${accountPlatformLabels[account.platform] ?? account.platform}${account.account_name ? ` · ${account.account_name}` : ''}`)
 
   return (
     <div className={`flex h-full flex-col rounded-lg border p-4 transition-[border-color,box-shadow] ${cardTone}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <h3 className="min-w-0 flex-1">
-            <ProjectIdentity project={project} />
+            <ProjectIdentity project={project} showCapabilityLabels />
           </h3>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -54,9 +53,9 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
           <ImageAnalysisBadge analysis={project.image_analysis} />
         </div>
       </div>
-      <div className="pt-4">
+      <div className="flex flex-1 flex-col pt-4">
         {supportsProfileLab(project) && (
-          <section className="mb-3 border-y border-border py-3" aria-label={`人设画像：${project.name}`}>
+          <section className="mb-3 border-t border-border py-3" aria-label={`人设画像：${project.name}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -72,16 +71,17 @@ export function ProjectCard({ project, stats, onEdit, onUpdateProfile, onChannel
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`${project.name}画像完善度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={profileProgress.percent}>
               <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${profileProgress.percent}%` }} />
             </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="min-w-0 truncate text-muted-foreground">{profileAccounts.length ? profileAccounts.join(' / ') : '尚未添加平台账号'}</span>
-              <div className="flex shrink-0 items-center gap-3">
-                <Link to={`/portraits/${project.id}`} className="font-medium text-primary hover:underline">查看画像</Link>
-                {onUpdateProfile && <Link to={updatePortraitHref(project.id)} className="text-muted-foreground hover:text-foreground">继续访谈</Link>}
-              </div>
-            </div>
           </section>
         )}
-        <div className="mt-2 flex flex-wrap justify-end gap-1" aria-label={`人设操作：${project.name}`}>
+        <div className="mt-auto flex flex-wrap justify-end gap-1 border-t border-border pt-3" aria-label={`人设操作：${project.name}`}>
+          {supportsProfileLab(project) && (
+            <Tooltip>
+              <TooltipTrigger render={<Link to={`/portraits/${project.id}`} className={buttonVariants({ variant: 'ghost', size: 'icon-md' })} aria-label={`查看画像：${project.name}`} />}>
+                <ScanFace />
+              </TooltipTrigger>
+              <TooltipContent>查看画像</TooltipContent>
+            </Tooltip>
+          )}
           {onEdit && (
             <Tooltip>
               <TooltipTrigger render={<Button variant="ghost" size="icon-md" onClick={() => onEdit(project)} aria-label={`${editLabel}：${project.name}`} />}>

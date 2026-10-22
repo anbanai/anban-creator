@@ -129,12 +129,26 @@ describe('ProjectCard', () => {
   })
 
   it('keeps the card focused on profile content without task statistics', () => {
-    render(<ProjectCard project={project()} stats={{ ...stats, total_tasks: 0, completed_tasks: 0, failed_tasks: 0 }} />)
+    render(<ProjectCard project={project({ keywords: '茶知识, 茶文化' })} stats={{ ...stats, total_tasks: 0, completed_tasks: 0, failed_tasks: 0 }} />)
 
     expect(screen.getByRole('progressbar', { name: '公众号人设画像完善度' })).toBeInTheDocument()
     expect(screen.queryByTestId('project-overview-strip')).not.toBeInTheDocument()
     expect(screen.queryByText('暂无作品')).not.toBeInTheDocument()
     expect(screen.queryByText('反馈闭环')).not.toBeInTheDocument()
+    expect(screen.queryByText('尚未添加平台账号')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '继续访谈' })).not.toBeInTheDocument()
+
+    const identity = document.querySelector('[data-slot="project-identity"]') as HTMLElement
+    const typeAndTags = identity.querySelector('[data-slot="project-capabilities"]')?.parentElement
+    const contentType = typeAndTags?.querySelector('[data-agent-id="wechat-article"]')!
+    const keywords = typeAndTags?.querySelector('[data-slot="project-identity-keywords"]')!
+    expect(contentType).toHaveAttribute('aria-label', '公众号文章')
+    expect(contentType?.compareDocumentPosition(keywords!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(keywords).toHaveTextContent('茶知识茶文化')
+
+    const portraitLink = screen.getByRole('link', { name: '查看画像：公众号人设' })
+    expect(portraitLink).toHaveAttribute('href', '/portraits/project-1')
+    expect(portraitLink.closest('[aria-label="人设操作：公众号人设"]')).toContainElement(portraitLink)
   })
 
   it('shows common actions directly and opens the topic pool', async () => {

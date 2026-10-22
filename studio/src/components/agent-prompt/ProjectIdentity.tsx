@@ -137,6 +137,40 @@ export function ProjectIdentity({
   ].filter(Boolean).join('，')
   const palette = identityPalettes[stableIdentityIndex(project.id)]
   const fallbackIcon = <FolderKanban aria-hidden="true" className={cn(compact ? 'size-3.5' : 'size-4', palette.foreground)} />
+  const capabilityRow = showAgents ? (
+    <span data-slot="project-capabilities" className="flex min-w-0 items-center">
+      <AgentIconStack
+        agentIds={agentIds}
+        compact={compact}
+        maxVisible={3}
+        className="max-w-full"
+      />
+    </span>
+  ) : null
+  const condensedDetails = showCapabilityLabels
+  const keywordRow = !compact && keywordTags.length ? (
+    <span
+      data-slot="project-identity-keywords"
+      aria-label="关键词"
+      className={cn('flex min-w-0 items-center gap-1', condensedDetails ? 'overflow-hidden' : 'flex-wrap pt-0.5')}
+    >
+      <span className="sr-only">关键词：</span>
+      {keywordTags.map((tag) => (
+        <Badge key={tag} variant="secondary" className={cn('truncate', condensedDetails ? 'max-w-20 shrink px-1.5 text-[10px]' : 'max-w-36')}>
+          {tag}
+        </Badge>
+      ))}
+      {hiddenKeywordCount > 0 ? (
+        <Badge
+          variant="outline"
+          title={`其余关键词：${keywords.slice(keywordTags.length).join('、')}`}
+          className={cn('shrink-0', condensedDetails && 'px-1.5 text-[10px]')}
+        >
+          +{hiddenKeywordCount}
+        </Badge>
+      ) : null}
+    </span>
+  ) : null
   return (
     <span
       data-slot="project-identity"
@@ -169,56 +203,17 @@ export function ProjectIdentity({
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
         </span>
-        {showAgents && showCapabilityLabels ? (
-          <span data-slot="project-identity-details" className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
-            <AgentIconStack
-              agentIds={agentIds}
-              compact
-              maxVisible={3}
-              className="shrink-0"
-            />
-            {keywordTags.length ? (
-              <span data-slot="project-identity-keywords" aria-label="关键词" className="flex min-w-0 items-center gap-1 overflow-hidden">
-                <span className="sr-only">关键词：</span>
-                {keywordTags.map((tag) => <Badge key={tag} variant="secondary" className="max-w-20 shrink truncate px-1.5 text-[10px]">{tag}</Badge>)}
-                {hiddenKeywordCount > 0 ? (
-                  <Badge
-                    variant="outline"
-                    title={`其余关键词：${keywords.slice(keywordTags.length).join('、')}`}
-                    className="shrink-0 px-1.5 text-[10px]"
-                  >
-                    +{hiddenKeywordCount}
-                  </Badge>
-                ) : null}
-              </span>
-            ) : null}
+        {condensedDetails ? (
+          <span data-slot="project-identity-details" className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {capabilityRow}
+            {keywordRow}
           </span>
-        ) : null}
-        {showAgents && !showCapabilityLabels ? (
-          <span data-slot="project-capabilities" className="flex min-w-0 items-center">
-            <AgentIconStack
-              agentIds={agentIds}
-              compact={compact}
-              maxVisible={3}
-              className="max-w-full"
-            />
-          </span>
-        ) : null}
-        {!compact && !showCapabilityLabels && keywordTags.length ? (
-          <span data-slot="project-identity-keywords" aria-label="关键词" className="flex min-w-0 flex-wrap items-center gap-1 pt-0.5">
-            <span className="sr-only">关键词：</span>
-            {keywordTags.map((tag) => <Badge key={tag} variant="secondary" className="max-w-36 truncate">{tag}</Badge>)}
-            {hiddenKeywordCount > 0 ? (
-              <Badge
-                variant="outline"
-                title={`其余关键词：${keywords.slice(keywordTags.length).join('、')}`}
-                className="shrink-0"
-              >
-                +{hiddenKeywordCount}
-              </Badge>
-            ) : null}
-          </span>
-        ) : null}
+        ) : (
+          <>
+            {capabilityRow}
+            {keywordRow}
+          </>
+        )}
         {!compact && description ? (
           <span
             data-slot="project-identity-description"
