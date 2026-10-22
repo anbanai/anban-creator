@@ -20,7 +20,7 @@ describe('portrait library', () => {
     expect(within(card).getByText('已归档')).toBeInTheDocument()
     expect(within(card).getByText('已保存 · 可继续完善')).toBeInTheDocument()
     expect(within(card).getByRole('link', { name: '查看与修改' })).toHaveAttribute('href', '/portraits/owner')
-    expect(within(card).getByRole('link', { name: '继续访谈' })).toHaveAttribute('href', '/chat?agent=project-creator&intent=update-project-profile&project_id=owner&return_to=portraits')
+    expect(within(card).getByRole('link', { name: '继续访谈' })).toHaveAttribute('href', '/')
     fireEvent.change(screen.getByLabelText('搜索创作身份'), { target: { value: '销售' } })
     expect(screen.queryByRole('article', { name: '创作身份：钢厂老板' })).not.toBeInTheDocument()
     expect(screen.getByRole('article', { name: '创作身份：钢厂销售' })).toBeInTheDocument()

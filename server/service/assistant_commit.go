@@ -59,9 +59,18 @@ func (s *InteractiveService) CommitAssistant(ctx context.Context, userID, sessio
 	}
 	sess, sessionErr := s.getOwned(userID, sessionID)
 	if (sessionErr == nil && (sess.ModeID == "" || sess.ModeID == AssistantModeProfile)) || (sessionErr != nil && req.CheckpointID == "") {
+		workspaceID := ""
+		if sessionErr == nil {
+			workspaceID = sess.WorkspaceID
+		}
 		result, err := s.Commit(ctx, userID, sessionID, InteractiveCommitRequest{ConfirmationToken: req.ConfirmationToken, IdempotencyKey: key})
 		if err != nil {
 			return AssistantCommitResult{}, err
+		}
+		if result.Project != nil {
+			if err := s.updateAssistantWorkspaceProject(ctx, userID, workspaceID, result.Project.ID); err != nil {
+				return AssistantCommitResult{}, err
+			}
 		}
 		return AssistantCommitResult{ModeID: AssistantModeProfile, Status: "committed", Project: result.Project, Profile: &result.Profile}, nil
 	}

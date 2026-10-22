@@ -23,7 +23,7 @@ const confirmed = { ...portraitToProjectProfile(candidate, current), status: 'co
 
 function Location() {
   const location = useLocation()
-  return <output data-testid="location">{location.pathname}{location.search}</output>
+  return <output data-testid="location">{location.pathname}{location.search}:{JSON.stringify(location.state)}</output>
 }
 
 function renderDelivery(value = candidate) {
@@ -46,15 +46,15 @@ async function save() {
 }
 
 describe('online portrait delivery', () => {
-  it('saves stable portrait data and hands a one-time idea to creation mode', async () => {
+  it('saves stable portrait data and opens the unified workspace in creation mode', async () => {
     renderDelivery()
     await save()
 
     fireEvent.click(screen.getByRole('button', { name: '进入创作模式' }))
 
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/chat?assistant_session=1&mode=creation&project_id=p-1'))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/:{"modeId":"creation","projectId":"p-1","initialMessage":"我做花艺，面向上班族，用公众号分享；第一篇讲周末插花。"}'))
     expect(api.projects.confirmAccountProfile).toHaveBeenCalledWith('p-1', expect.not.objectContaining({ creationIdea: expect.anything() }))
-    expect(sessionStorage.getItem('anban:portrait-creation-handoff:p-1')).toContain('第一篇讲周末插花')
+    expect(sessionStorage.getItem('anban:portrait-creation-handoff:p-1')).toBeNull()
     expect(api.tasks.create).not.toHaveBeenCalled()
   })
 
@@ -68,8 +68,9 @@ describe('online portrait delivery', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '这次想创作什么' }), { target: { value: '给养花新手写一篇插花指南' } })
     fireEvent.click(screen.getByRole('button', { name: '进入创作模式' }))
 
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('mode=creation'))
-    expect(sessionStorage.getItem('anban:portrait-creation-handoff:p-1')).toContain('给养花新手写一篇插花指南')
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('"modeId":"creation"'))
+    expect(screen.getByTestId('location')).toHaveTextContent('"initialMessage":"给养花新手写一篇插花指南"')
+    expect(sessionStorage.getItem('anban:portrait-creation-handoff:p-1')).toBeNull()
     expect(api.tasks.create).not.toHaveBeenCalled()
   })
 

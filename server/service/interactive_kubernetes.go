@@ -28,9 +28,9 @@ import (
 
 const dshDiagnosticRetentionAnnotation = "anban.ai/dsh-diagnostic-retain-until"
 
-// KubernetesRuntimeFactory runs one non-restarting Job per interactive
-// session. The Job's dsh container is the Bridge process; the Server owns one
-// authenticated attach stream and the browser never talks to Kubernetes.
+// KubernetesRuntimeFactory runs one non-restarting Job per Assistant
+// Workspace. The Job's dsh container is the Bridge process; the Server owns
+// one authenticated attach stream and the browser never talks to Kubernetes.
 type KubernetesRuntimeFactory struct {
 	Config            srvconfig.DshConfig
 	ServiceAccount    string
@@ -111,6 +111,11 @@ func (f KubernetesRuntimeFactory) StartSession(ctx context.Context, spec Interac
 		_ = f.deleteSecret(context.Background(), namespace, secretName)
 		return nil, err
 	}
+	envs = append(envs,
+		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_WORKSPACE_ID", Value: spec.WorkspaceID},
+		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_PRESETS", Value: strings.Join(spec.PresetIDs, ",")},
+		corev1.EnvVar{Name: "ANBAN_DSH_BRIDGE_PATCHES", Value: strings.Join(patchesForSpec(spec), ",")},
+	)
 	job.Spec.Template.Spec.Containers[0].Env = envs
 	created, err := f.Kube.BatchV1().Jobs(namespace).Create(ctx, job, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {

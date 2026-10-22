@@ -6,8 +6,10 @@ export interface InteractiveStreamEvent extends SSEEvent {
 
 export interface InteractiveStreamOptions {
   lastEventId?: string
+  expectedSessionId?: string
   onConnected?: () => void
   onEvent?: (event: InteractiveStreamEvent) => void
+  endpoint?: string
 }
 
 const TERMINAL_EVENTS = new Set(['session.error', 'session.expired', 'session.closed', 'expired', 'closed'])
@@ -56,11 +58,12 @@ export async function* streamInteractiveSession(sessionId: string, token: string
   while (!signal?.aborted) {
     let response: Response
     try {
-      response = await fetch(`/api/v1/interactive/sessions/${encodeURIComponent(sessionId)}/events`, {
+      response = await fetch(options.endpoint ?? `/api/v1/interactive/sessions/${encodeURIComponent(sessionId)}/events`, {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'text/event-stream',
           ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
+          ...(options.expectedSessionId ? { 'X-Assistant-Session-ID': options.expectedSessionId } : {}),
         },
         signal,
       })
@@ -145,4 +148,11 @@ export async function* streamInteractiveSession(sessionId: string, token: string
     await retryOrFail(reconnects, signal)
     reconnects += 1
   }
+}
+
+export function streamAssistantWorkspace(workspaceId: string, token: string, signal?: AbortSignal, options: Omit<InteractiveStreamOptions, 'endpoint'> = {}) {
+  return streamInteractiveSession(workspaceId, token, signal, {
+    ...options,
+    endpoint: `/api/v1/assistant/workspaces/${encodeURIComponent(workspaceId)}/events`,
+  })
 }

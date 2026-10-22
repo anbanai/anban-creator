@@ -283,6 +283,33 @@ describe("DSH bridge protocol", () => {
     }
   });
 
+  test("routes three workspace sessions through one initialized DSH client", async () => {
+    process.env.ANBAN_DSH_BRIDGE_WORKSPACE_ID = "workspace-1";
+    process.env.ANBAN_DSH_BRIDGE_PRESETS = "project-creator,creation-planner,postmortem-review";
+    const calls: Array<{ method: string; params?: object }> = [];
+    let subscriptions = 0;
+    const client = {
+      start: () => undefined,
+      initialize: async () => ({ capabilities: { sessionStart: true, sessionAnswer: true } }),
+      request: async (method: string, params?: object) => { calls.push({ method, params }); return {}; },
+      subscribeSessionTree: () => { subscriptions += 1; return { next: async () => new Promise<never>(() => undefined), close: () => undefined }; },
+      close: async () => undefined,
+    };
+    const bridge = new DshBridge(() => undefined, () => client, "workspace-1");
+    await bridge.command({ method: "session/start", params: { sessionId: "profile-session", presetId: "project-creator" } });
+    await bridge.command({ method: "session/start", params: { sessionId: "creation-session", presetId: "creation-planner" } });
+    await bridge.command({ method: "session/start", params: { sessionId: "review-session", presetId: "postmortem-review" } });
+    await bridge.command({ method: "session/prompt", params: { sessionId: "creation-session", contentBlocks: [] } });
+    expect(calls.map((call) => call.params && (call.params as { sessionId?: string }).sessionId)).toEqual([
+      "profile-session", "creation-session", "review-session", "creation-session",
+    ]);
+    expect(subscriptions).toBe(3);
+    await expect(bridge.command({ method: "session/prompt", params: { sessionId: "unknown-session" } })).rejects.toThrow("started workspace session");
+    await bridge.dispose();
+    delete process.env.ANBAN_DSH_BRIDGE_WORKSPACE_ID;
+    delete process.env.ANBAN_DSH_BRIDGE_PRESETS;
+  });
+
   test("rejects an unknown Server-injected preset before initializing DSH", () => {
     expect(() => new DshBridge(() => undefined, () => {
       throw new Error("client must not be created");

@@ -46,6 +46,9 @@ export const INTERACTIVE_PRESET_ID = "project-creator";
 export const INTERACTIVE_PRESET_IDS = ["project-creator", "creation-planner", "postmortem-review"] as const;
 export type InteractivePresetId = typeof INTERACTIVE_PRESET_IDS[number];
 const DSH_BRIDGE_PRESET_ID_ENV = "ANBAN_DSH_BRIDGE_PRESET_ID";
+const DSH_BRIDGE_WORKSPACE_ID_ENV = "ANBAN_DSH_BRIDGE_WORKSPACE_ID";
+const DSH_BRIDGE_PRESETS_ENV = "ANBAN_DSH_BRIDGE_PRESETS";
+const DSH_BRIDGE_PATCHES_ENV = "ANBAN_DSH_BRIDGE_PATCHES";
 
 export function validateInteractivePresetId(value: string): InteractivePresetId {
   const presetId = value.trim();
@@ -372,6 +375,8 @@ export function mapHarnessNotification(notification: HarnessNotification, rootSe
 export class DshBridge {
   private client: InteractiveRuntimeClient | undefined;
   private subscription: { next(): Promise<HarnessNotification>; close(): void } | undefined;
+  private readonly subscriptions = new Map<string, { next(): Promise<HarnessNotification>; close(): void }>();
+  private readonly sessions = new Map<string, InteractivePresetId>();
   private runtimeReady: Promise<void> | undefined;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private closeTask: Promise<void> | undefined;
@@ -379,6 +384,8 @@ export class DshBridge {
   private closed = false;
   private readonly route: InteractiveRouteConfig;
   private readonly presetId: string;
+  private readonly workspaceId: string;
+  private readonly allowedPresets: readonly InteractivePresetId[];
 
   constructor(
     private readonly write: (event: StableBridgeEvent) => void,
@@ -389,6 +396,11 @@ export class DshBridge {
   ) {
     this.presetId = presetId.trim();
     validateInteractivePresetId(this.presetId);
+    this.workspaceId = process.env[DSH_BRIDGE_WORKSPACE_ID_ENV]?.trim() ?? "";
+    const configuredPresets = (process.env[DSH_BRIDGE_PRESETS_ENV] ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+    this.allowedPresets = configuredPresets.length > 0
+      ? configuredPresets.map(validateInteractivePresetId)
+      : [this.presetId as InteractivePresetId];
     this.route = route ?? (clientFactory ? {
       provider: "deepseek-official", model: "deepseek-flash", api: "deepseek-messages",
       baseURL: "https://api.deepseek.com/anthropic",
@@ -414,12 +426,15 @@ export class DshBridge {
       const client = this.clientFactory?.() ?? (() => {
         const dshHome = process.env.ANBAN_DSH_BRIDGE_HOME?.trim();
         if (!dshHome) throw new Error("ANBAN_DSH_BRIDGE_HOME is required");
-        const patchPath = resolveInteractivePatchPath(process.env.ANBAN_DSH_BRIDGE_PATCH, process.cwd(), presetId);
+        const configuredPatches = (process.env[DSH_BRIDGE_PATCHES_ENV] ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+        const patchPaths = configuredPatches.length > 0
+          ? configuredPatches.map((path) => resolveInteractivePatchPath(path, process.cwd(), basename(path).replace(/\.patch\.yml$/, "")))
+          : [resolveInteractivePatchPath(process.env.ANBAN_DSH_BRIDGE_PATCH, process.cwd(), presetId)];
         writeDshRouteSettings(dshHome, route);
         return new HarnessClient({
           dshHome,
           profile: "sdk",
-          patches: [patchPath],
+          patches: patchPaths,
           processCwd: process.cwd(),
           env: process.env,
         });
@@ -432,9 +447,11 @@ export class DshBridge {
       client.start();
       const initializeResult = await initializeRuntimeClient(client, route);
       assertInteractiveRuntimeCapabilities(initializeResult);
-      if (!this.rootSessionId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID is required");
-      this.subscription = client.subscribeSessionTree(this.rootSessionId);
-      void this.forwardNotifications();
+      if (!this.rootSessionId && !this.workspaceId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID or ANBAN_DSH_BRIDGE_WORKSPACE_ID is required");
+      if (!this.workspaceId) {
+        this.subscription = client.subscribeSessionTree(this.rootSessionId);
+        void this.forwardNotifications(this.subscription, this.rootSessionId);
+      }
       this.write({ event: "session.status", data: { status: "starting" } });
       this.write({ event: "session.heartbeat", data: {} });
       this.heartbeatTimer = setInterval(() => {
@@ -448,13 +465,12 @@ export class DshBridge {
     return this.runtimeReady;
   }
 
-  private async forwardNotifications(): Promise<void> {
-    const subscription = this.subscription;
+  private async forwardNotifications(subscription: { next(): Promise<HarnessNotification>; close(): void }, sessionId?: string): Promise<void> {
     if (!subscription) return;
     try {
       for (;;) {
         const notification = await subscription.next();
-        for (const event of mapHarnessNotification(notification, this.rootSessionId)) this.write(this.redactEvent(event));
+        for (const event of mapHarnessNotification(notification, sessionId)) this.write(this.redactEvent(event));
       }
     } catch (error) {
       if (!this.closed) {
@@ -466,19 +482,27 @@ export class DshBridge {
   private validateCommand(command: InteractiveCommand): void {
     if (!this.rootSessionId) throw new Error("ANBAN_DSH_BRIDGE_SESSION_ID is required");
     if (command.method === "shutdown") return;
-    const configuredPreset = validateInteractivePresetId(this.presetId);
     const sessionId = command.params.sessionId;
-    if (sessionId !== this.rootSessionId) {
-      throw new Error(`${command.method} must target the configured interactive session`);
-    }
+    if (typeof sessionId !== "string" || sessionId.trim() === "") throw new Error(`${command.method} requires a session id`);
     if (command.method === "session/start") {
       if (typeof command.params.presetId !== "string") {
         throw new Error("session/start requires the configured interactive preset");
       }
       const requestedPreset = validateInteractivePresetId(command.params.presetId);
-      if (requestedPreset !== configuredPreset) {
-        throw new Error(`session/start preset ${requestedPreset} does not match configured preset ${configuredPreset}`);
+      if (this.workspaceId) {
+        if (!this.allowedPresets.includes(requestedPreset)) throw new Error(`session/start preset ${requestedPreset} is not registered in workspace`);
+        if (this.sessions.has(sessionId)) throw new Error(`session ${sessionId} has already started`);
+      } else {
+        const configuredPreset = validateInteractivePresetId(this.presetId);
+        if (sessionId !== this.rootSessionId) throw new Error(`${command.method} must target the configured interactive session`);
+        if (requestedPreset !== configuredPreset) {
+          throw new Error(`session/start preset ${requestedPreset} does not match configured preset ${configuredPreset}`);
+        }
       }
+    } else if (this.workspaceId) {
+      if (!this.sessions.has(sessionId)) throw new Error(`${command.method} must target a started workspace session`);
+    } else if (sessionId !== this.rootSessionId) {
+      throw new Error(`${command.method} must target the configured interactive session`);
     }
   }
 
@@ -491,6 +515,8 @@ export class DshBridge {
       }
       this.subscription?.close();
       this.subscription = undefined;
+      for (const subscription of this.subscriptions.values()) subscription.close();
+      this.subscriptions.clear();
       await this.client?.close();
     })();
     return this.closeTask;
@@ -511,6 +537,16 @@ export class DshBridge {
     const client = this.client;
     if (!client) throw new Error("interactive runtime is unavailable");
     const result = await client.request(command.method, command.params);
+    if (command.method === "session/start") {
+      const sessionId = String(command.params.sessionId);
+      const presetId = validateInteractivePresetId(String(command.params.presetId));
+      this.sessions.set(sessionId, presetId);
+      if (this.workspaceId) {
+        const subscription = client.subscribeSessionTree(sessionId);
+        this.subscriptions.set(sessionId, subscription);
+        void this.forwardNotifications(subscription, sessionId);
+      }
+    }
     return result;
   }
 

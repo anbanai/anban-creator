@@ -62,6 +62,18 @@ export interface AssistantCheckpointRequest {
   status: 'draft' | 'ready'
 }
 
+export interface AssistantWorkspace {
+  id: string
+  mode_id: AssistantModeID
+  project_id?: string
+  content_id?: string
+  runtime_id?: string
+  runtime_status: string
+  session_id: string
+  sessions: Partial<Record<AssistantModeID, string>>
+  expires_at: string
+}
+
 export interface AssistantCheckpoint extends AssistantCheckpointRequest {
   id: string
   payload_digest: string
@@ -114,4 +126,24 @@ export const assistantApi = {
     unwrap<InteractiveCommitResult & Record<string, unknown>>(http.post(`/assistant/sessions/${encodeURIComponent(sessionId)}/commit`, payload, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
 
   close: (sessionId: string) => http.delete(`/assistant/sessions/${encodeURIComponent(sessionId)}`),
+
+  createWorkspace: (request: { mode_id: AssistantModeID; project_id?: string; content_id?: string; checkpoint_id?: string }, idempotencyKey?: string) =>
+    unwrap<AssistantWorkspace>(http.post('/assistant/workspaces', request, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined)),
+
+  switchWorkspaceMode: (workspaceId: string, modeId: AssistantModeID, context?: { project_id?: string; content_id?: string; checkpoint_id?: string }) =>
+    unwrap<AssistantWorkspace>(http.post(`/assistant/workspaces/${encodeURIComponent(workspaceId)}/mode`, { mode_id: modeId, ...context })),
+
+  workspaceMessage: (workspaceId: string, modeId: AssistantModeID, text: string) =>
+    unwrap<unknown>(http.post(`/assistant/workspaces/${encodeURIComponent(workspaceId)}/messages`, { mode_id: modeId, text }, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
+
+  workspaceAnswer: (workspaceId: string, modeId: AssistantModeID, callId: string, answers: Array<{ id: string; selected: string[]; custom?: string }>) =>
+    unwrap<unknown>(http.post(`/assistant/workspaces/${encodeURIComponent(workspaceId)}/questions/${encodeURIComponent(callId)}/answers`, { mode_id: modeId, answers }, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
+
+  workspaceCheckpoint: (workspaceId: string, modeId: AssistantModeID, checkpoint: AssistantCheckpointRequest) =>
+    unwrap<AssistantCheckpoint>(http.post(`/assistant/workspaces/${encodeURIComponent(workspaceId)}/checkpoint`, { mode_id: modeId, ...checkpoint }, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
+
+  workspaceCommit: (workspaceId: string, modeId: AssistantModeID, payload: AssistantCommitRequest) =>
+    unwrap<InteractiveCommitResult & Record<string, unknown>>(http.post(`/assistant/workspaces/${encodeURIComponent(workspaceId)}/commit`, { mode_id: modeId, ...payload }, { timeout: ASSISTANT_COMMAND_TIMEOUT_MS })),
+
+  closeWorkspace: (workspaceId: string) => http.delete(`/assistant/workspaces/${encodeURIComponent(workspaceId)}`),
 }

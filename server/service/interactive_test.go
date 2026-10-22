@@ -79,6 +79,44 @@ func (f interactiveRecordingRuntimeFactory) Start(_ context.Context, _ string, _
 	return f.runtime, nil
 }
 
+type interactiveWorkspaceRuntimeFactory struct {
+	runtime *interactiveWorkspaceRecordingRuntime
+	spec    chan InteractiveRuntimeSpec
+}
+
+func (f *interactiveWorkspaceRuntimeFactory) Start(_ context.Context, _ string, _ string, _ string, _ func(string, any)) (Runtime, error) {
+	return nil, errors.New("workspace factory must use StartSession")
+}
+
+func (f *interactiveWorkspaceRuntimeFactory) StartSession(_ context.Context, spec InteractiveRuntimeSpec, emit func(string, any)) (Runtime, error) {
+	f.spec <- spec
+	f.runtime.mu.Lock()
+	f.runtime.emit = emit
+	f.runtime.mu.Unlock()
+	return f.runtime, nil
+}
+
+type interactiveWorkspaceRecordingRuntime struct {
+	mu         sync.Mutex
+	methods    []string
+	closeCount int
+	emit       func(string, any)
+}
+
+func (r *interactiveWorkspaceRecordingRuntime) Command(_ context.Context, method string, _ any) error {
+	r.mu.Lock()
+	r.methods = append(r.methods, method)
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *interactiveWorkspaceRecordingRuntime) Close() error {
+	r.mu.Lock()
+	r.closeCount++
+	r.mu.Unlock()
+	return nil
+}
+
 func (r *interactiveTestRuntime) Command(context.Context, string, any) error { return r.commandErr }
 func (r *interactiveTestRuntime) Close() error {
 	if r.closeCheck != nil {

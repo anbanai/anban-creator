@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useSearchParams, Link } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from 'next-themes'
 import React, { useState, Suspense } from 'react'
@@ -20,7 +20,7 @@ import { lazyWithRecovery } from '@/lib/lazy-with-recovery'
 const LoginPage = lazyWithRecovery(() => import('@/pages/LoginPage'))
 const RegisterPage = lazyWithRecovery(() => import('@/pages/RegisterPage'))
 const DashboardPage = lazyWithRecovery(() => import('@/pages/DashboardPage'))
-const AssistantHome = lazyWithRecovery(() => import('@/pages/AssistantHome'))
+const AssistantWorkspace = lazyWithRecovery(() => import('@/pages/AssistantWorkspace'))
 const TimelinePage = lazyWithRecovery(() => import('@/pages/TimelinePage'))
 const PortraitOnboardingPage = lazyWithRecovery(() => import('@/pages/PortraitOnboardingPage'))
 const PortraitLibraryPage = lazyWithRecovery(() => import('@/pages/PortraitLibraryPage'))
@@ -39,7 +39,13 @@ const ContentAssetsPage = lazyWithRecovery(() => import('@/pages/ContentAssetsPa
 const ContentAutopilotSettingsPage = lazyWithRecovery(() => import('@/pages/ContentAutopilotSettingsPage'))
 const ContentAnalyticsPage = lazyWithRecovery(() => import('@/pages/ContentAnalyticsPage'))
 const TrendsPage = lazyWithRecovery(() => import('@/pages/TrendsPage'))
-const ChatPage = lazyWithRecovery(() => import('@/pages/ChatPage'))
+
+function ChatRedirect() {
+  const [params] = useSearchParams()
+  const mode = params.get('mode')
+  const validMode = mode === 'profile' || mode === 'creation' || mode === 'review' ? mode : undefined
+  return <Navigate to="/" replace state={{ modeId: validMode, projectId: params.get('project_id') || undefined, contentId: params.get('content_id') || undefined }} />
+}
 
 function LoadingSpinner() {
   return (
@@ -142,7 +148,7 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<LazyPage component={AssistantHome} />} />
+          <Route index element={<LazyPage component={AssistantWorkspace} />} />
           <Route path="assistant" element={<Navigate to="/" replace />} />
           <Route path="dashboard" element={<LazyPage component={DashboardPage} />} />
           <Route
@@ -153,13 +159,13 @@ function AppRoutes() {
               </AdminRoute>
             )}
           />
-          <Route path="projects/new/interview" element={<Navigate to="/chat?mode=profile" replace />} />
+          <Route path="projects/new/interview" element={<Navigate to="/" replace state={{ modeId: 'profile' }} />} />
           <Route path="portraits/new" element={<LazyPage component={PortraitOnboardingPage} />} />
           <Route path="portraits" element={<LazyPage component={PortraitLibraryPage} />} />
           <Route path="portraits/:projectId" element={<LazyPage component={PortraitDetailPage} />} />
           <Route path="projects" element={<LazyPage component={ProjectsPage} />} />
-          <Route path="projects/create" element={<Navigate to="/chat?mode=profile" replace />} />
-          <Route path="chat" element={<LazyPage component={ChatPage} />} />
+          <Route path="projects/create" element={<Navigate to="/" replace state={{ modeId: 'profile' }} />} />
+          <Route path="chat" element={<ChatRedirect />} />
           <Route path="plans" element={<LazyPage component={PlansPage} />} />
           <Route path="tasks" element={<LazyPage component={TasksPage} />} />
           <Route path="tasks/:id" element={<LazyPage component={TaskDetailPage} />} />

@@ -30,5 +30,5 @@ export function portraitSummary(project: Project) {
 }
 
 export function updatePortraitHref(id: string) {
-  return `/chat?${new URLSearchParams({ agent: 'project-creator', intent: 'update-project-profile', project_id: id, return_to: 'portraits' })}`
+  return { pathname: '/', state: { modeId: 'profile' as const, projectId: id } }
 }
